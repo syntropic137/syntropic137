@@ -7,35 +7,58 @@
 
 ## Where I Left Off
 
-Completed M4 (Core Domain - E2E Vertical Slice). Implemented full end-to-end workflow creation:
+Completed M5 (Workflow Definitions & Seeding) and M8 (Docker Dev Environment):
 
-- ✅ CLI commands: `aef workflow create/list/show`
-- ✅ In-memory storage adapters (EventStore, WorkflowRepository, EventPublisher)
-- ✅ Pydantic Settings with fail-fast env validation
-- ✅ E2E tests proving full path works
-- ✅ ADRs for environment config (ADR-004) and dev environments (ADR-005)
-- ✅ Auto-generated `.env.example` via `just gen-env`
+- ✅ Workflow YAML schema with Pydantic validation
+- ✅ WorkflowSeeder service for loading YAML into system
+- ✅ CLI commands: `aef workflow seed`, `aef workflow validate`
+- ✅ Example workflows: research.yaml, implementation.yaml
+- ✅ PostgreSQL storage adapter (asyncpg)
+- ✅ Local development documentation
 
 ## What I Was About To Do
 
-**Milestone 5: Workflow Definitions & Seeding**
+**Remaining Milestones:**
 
-1. Define YAML schema for workflow definitions
-2. Create seed process to load workflows into PostgreSQL
-3. Add workflow validation and versioning
+- M6: Agent Adapters (Claude/OpenAI integration)
+- M7: CLI Application (expand commands)
+- M9: Integration Testing & Documentation
 
 ## Why This Matters
 
-With E2E vertical slice proven, we have a working system from CLI to event store. M5 enables defining reusable workflows in version-controlled YAML files.
+M5 enables workflow templates to be version-controlled in YAML and seeded into the system. M8 provides PostgreSQL storage for local development that mirrors production.
 
 ## Open Loops
 
-- [ ] Define the workflow YAML schema for seeding (M5)
-- [ ] Set up Docker dev stack with PostgreSQL (M8)
-- [ ] Implement actual PostgreSQL repository (replace in-memory for local dev)
+- [ ] Implement agent adapters for Claude and OpenAI (M6)
+- [ ] Expand CLI with workflow execution commands (M7)
+- [ ] PostgreSQL integration tests with Docker (M9)
 
 ## Dependencies
 
 - `lib/event-sourcing-platform` Python SDK ✅ (decorators merged - PR #65)
 - `lib/agentic-primitives` (available via submodule)
-- Docker for local PostgreSQL (M8)
+- Docker + PostgreSQL ✅ (docker-compose.dev.yaml ready)
+- asyncpg (optional dependency for PostgreSQL)
+
+## Current State
+
+```
+Milestone Status:
+  M1: ✅ Project Structure
+  M2: ✅ Shared Infrastructure
+  M3: ✅ VSA & First Slice
+  M4: ✅ E2E Vertical Slice
+  M5: ✅ Workflow Definitions
+  M6: ⏳ Agent Adapters
+  M7: ⏳ CLI Application
+  M8: ✅ Docker Dev Environment
+  M9: ⏳ Integration Testing
+```
+
+## Key Files
+
+- `workflows/examples/` - YAML workflow templates
+- `packages/aef-domain/src/aef_domain/contexts/workflows/seed_workflow/` - Seeder
+- `packages/aef-adapters/src/aef_adapters/storage/postgres.py` - PostgreSQL adapter
+- `docs/local-development.md` - Local dev guide
