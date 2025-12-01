@@ -2,6 +2,55 @@
 
 ---
 
+## 2025-12-01 — Workflow YAML & Docker Dev Environment
+
+### Objective
+
+Complete M5 (Workflow Definitions & Seeding) and M8 (Docker Development Environment) to enable YAML-defined workflows and local PostgreSQL development.
+
+### Where I Left Off
+
+Completed Milestones 5 and 8. Workflow YAML parsing, seeding, and PostgreSQL adapter ready.
+
+### Completed Actions
+
+1. ✅ Created workflow YAML schema with Pydantic models:
+   - `WorkflowDefinition` for parsing YAML files
+   - `PhaseYamlDefinition` with domain object conversion
+   - `RepositoryConfig` for repo context
+2. ✅ Implemented `WorkflowSeeder` service:
+   - Loads from directory or single file
+   - Dry-run mode for validation
+   - Skip existing workflows
+   - Detailed logging and reports
+3. ✅ Added CLI commands:
+   - `aef workflow seed` - Seed workflows from YAML
+   - `aef workflow validate` - Validate YAML without seeding
+4. ✅ Created example workflows:
+   - `research.yaml` - 3-phase research workflow
+   - `implementation.yaml` - 5-phase RIPER-5 workflow
+5. ✅ Implemented PostgreSQL storage adapter:
+   - `PostgresEventStore` with asyncpg
+   - `PostgresWorkflowRepository` with rehydration
+   - Lazy connection pool initialization
+6. ✅ Created local development documentation
+7. ✅ All 62 tests passing, QA checks clean
+8. ✅ Commits: `f3ea58d` (M5), `58ee3a2` (M8)
+
+### Notes / Insights
+
+- **YAML validation:** Pydantic validates on parse with clear error messages
+- **PyYAML stubs:** Added `types-pyyaml` to dev deps for mypy
+- **asyncpg optional:** PostgreSQL adapter only imported when DATABASE_URL configured
+- **Lazy imports:** `__getattr__` in storage module avoids importing asyncpg in tests
+
+### Obstacles / Open Questions
+
+- Removed old workflow YAML files with different schema
+- In-memory storage resets between CLI invocations (expected behavior for testing)
+
+---
+
 ## 2025-12-01 — E2E Vertical Slice & Environment Config
 
 ### Objective
