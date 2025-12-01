@@ -14,6 +14,8 @@ dependencies = [
     "aef-domain",
     "aef-adapters",
     "aef-shared",
+    "event-sourcing-python",
+    "grpcio>=1.60",  # Required by event-sourcing SDK
 ]
 
 [dependency-groups]
@@ -37,10 +39,9 @@ aef-cli = { workspace = true }
 aef-domain = { workspace = true }
 aef-adapters = { workspace = true }
 aef-shared = { workspace = true }
-
-# Submodule dependencies (uncomment when ready)
+# Submodule dependencies
+event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 # agentic-primitives = { path = "lib/agentic-primitives/lib/python" }
-# event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 
 [tool.ruff]
 target-version = "py312"
