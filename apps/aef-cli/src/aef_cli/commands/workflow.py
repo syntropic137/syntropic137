@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -13,6 +14,9 @@ from aef_shared.logging import get_logger
 
 logger = get_logger(__name__)
 console = Console()
+
+# Default workflows directory
+DEFAULT_WORKFLOWS_DIR = Path("workflows/examples")
 
 # Create workflow command group
 app = typer.Typer(
@@ -203,3 +207,159 @@ def show_workflow(
             console.print(f"    - {phase.get('name', 'Unknown')}")
     else:
         console.print("\n  [dim]No phases defined[/dim]")
+
+
+@app.command("seed")
+def seed_workflows(
+    directory: Annotated[
+        Path | None,
+        typer.Option(
+            "--dir",
+            "-d",
+            help="Directory containing workflow YAML files",
+        ),
+    ] = None,
+    file: Annotated[
+        Path | None,
+        typer.Option(
+            "--file",
+            "-f",
+            help="Single YAML file to seed",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Validate without creating workflows",
+        ),
+    ] = False,
+) -> None:
+    """Seed workflows from YAML definitions.
+
+    Examples:
+        # Seed all workflows from default directory
+        aef workflow seed
+
+        # Seed from a specific directory
+        aef workflow seed --dir workflows/custom
+
+        # Seed a single file
+        aef workflow seed --file workflows/examples/research.yaml
+
+        # Validate without creating (dry-run)
+        aef workflow seed --dry-run
+    """
+    from aef_adapters.storage import get_event_publisher, get_workflow_repository
+    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+        CreateWorkflowHandler,
+    )
+    from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
+
+    # Determine source
+    if file and directory:
+        console.print("[red]Cannot specify both --file and --dir[/red]")
+        raise typer.Exit(1)
+
+    # Get dependencies
+    repository = get_workflow_repository()
+    publisher = get_event_publisher()
+    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    seeder = WorkflowSeeder(handler)
+
+    if dry_run:
+        console.print("[yellow]DRY RUN MODE - No workflows will be created[/yellow]\n")
+
+    if file:
+        # Seed single file
+        if not file.exists():
+            console.print(f"[red]File not found: {file}[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"Seeding from file: [cyan]{file}[/cyan]")
+        result = asyncio.run(seeder.seed_from_file(file, dry_run=dry_run))
+
+        if result.success:
+            console.print(f"[green]✓[/green] {result.name} ({result.workflow_id})")
+        else:
+            console.print(f"[red]✗[/red] {result.name}: {result.error}")
+            raise typer.Exit(1)
+    else:
+        # Seed from directory
+        target_dir = directory or DEFAULT_WORKFLOWS_DIR
+        if not target_dir.exists():
+            console.print(f"[red]Directory not found: {target_dir}[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"Seeding from directory: [cyan]{target_dir}[/cyan]\n")
+        report = asyncio.run(seeder.seed_from_directory(target_dir, dry_run=dry_run))
+
+        # Display results
+        for result in report.results:
+            if result.success:
+                icon = "[green]✓[/green]"
+            elif result.error and "already exists" in result.error:
+                icon = "[yellow]○[/yellow]"
+            else:
+                icon = "[red]✗[/red]"
+
+            msg = f"{icon} {result.name}"
+            if result.error:
+                msg += f" [dim]({result.error})[/dim]"
+            console.print(msg)
+
+        # Summary
+        console.print()
+        console.print("[bold]Summary:[/bold]")
+        console.print(f"  Total:     {report.total}")
+        console.print(f"  Succeeded: [green]{report.succeeded}[/green]")
+        console.print(f"  Skipped:   [yellow]{report.skipped}[/yellow]")
+        console.print(f"  Failed:    [red]{report.failed}[/red]")
+
+        if report.failed > 0:
+            raise typer.Exit(1)
+
+
+@app.command("validate")
+def validate_workflow(
+    file: Annotated[
+        Path,
+        typer.Argument(help="YAML file to validate"),
+    ],
+) -> None:
+    """Validate a workflow YAML file without seeding.
+
+    Example:
+        aef workflow validate workflows/examples/research.yaml
+    """
+    from aef_domain.contexts.workflows._shared.workflow_definition import (
+        WorkflowDefinition,
+        validate_workflow_yaml,
+    )
+
+    if not file.exists():
+        console.print(f"[red]File not found: {file}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"Validating: [cyan]{file}[/cyan]\n")
+
+    content = file.read_text()
+    is_valid, error = validate_workflow_yaml(content)
+
+    if is_valid:
+        # Parse to show details
+        definition = WorkflowDefinition.from_yaml(content)
+
+        console.print("[green]✓ Valid workflow definition[/green]\n")
+        console.print(f"  [dim]ID:[/dim] {definition.id}")
+        console.print(f"  [dim]Name:[/dim] {definition.name}")
+        console.print(f"  [dim]Type:[/dim] {definition.type.value}")
+        console.print(f"  [dim]Classification:[/dim] {definition.classification.value}")
+        console.print(f"  [dim]Phases:[/dim] {len(definition.phases)}")
+
+        for phase in definition.phases:
+            console.print(f"    {phase.order}. {phase.name}")
+    else:
+        console.print("[red]✗ Invalid workflow definition[/red]")
+        console.print(f"  Error: {error}")
+        raise typer.Exit(1)

@@ -8,6 +8,7 @@ dependencies = [
     "aef-shared",
     "pydantic>=2.12.5",
     "event-sourcing-python",
+    "pyyaml>=6.0.2",
 ]
 
 [build-system]

@@ -95,6 +95,10 @@ Thumbs.db
 # Docker volumes
 docker/data/
 
+# Custom workflow definitions (local development)
+workflows/custom/*.yaml
+workflows/custom/*.yml
+
 # Local configuration overrides
 .env
 .env.local
