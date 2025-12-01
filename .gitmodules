@@ -1,0 +1,8 @@
+[submodule "lib/agentic-primitives"]
+	path = lib/agentic-primitives
+	url = https://github.com/AgentParadise/agentic-primitives.git
+	branch = main
+[submodule "lib/event-sourcing-platform"]
+	path = lib/event-sourcing-platform
+	url = https://github.com/NeuralEmpowerment/event-sourcing-platform.git
+	branch = main

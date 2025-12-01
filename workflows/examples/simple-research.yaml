@@ -1,0 +1,52 @@
+# Simple Research Workflow
+# Single-phase workflow for basic research tasks
+
+name: "simple-research"
+description: "Execute a single research phase to gather information on a topic"
+version: "1.0.0"
+
+phases:
+  - name: "research"
+    description: "Gather and synthesize information on the given topic"
+    
+    inputs:
+      - name: "topic"
+        type: "string"
+        required: true
+        description: "The topic to research"
+      
+      - name: "depth"
+        type: "string"
+        required: false
+        default: "standard"
+        description: "Research depth: 'quick', 'standard', or 'deep'"
+    
+    agent:
+      type: "claude"
+      model: "claude-sonnet-4-20250514"
+      temperature: 0.7
+      max_tokens: 4096
+    
+    prompt_template: |
+      Research the following topic thoroughly:
+      
+      Topic: {{ topic }}
+      Depth: {{ depth }}
+      
+      Provide a comprehensive summary including:
+      1. Key concepts and definitions
+      2. Current state of knowledge
+      3. Important considerations
+      4. Relevant sources or references
+    
+    outputs:
+      - name: "research_summary"
+        type: "artifact"
+        artifact_type: "markdown"
+        description: "Comprehensive research summary"
+
+deliverables:
+  - phase: "research"
+    output: "research_summary"
+    name: "Research Summary"
+

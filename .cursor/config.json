@@ -1,0 +1,9 @@
+{
+    "ai": {
+        "allowWrite": {
+            "trustedDirectories": [
+                ".mcss"
+            ]
+        }
+    }
+}

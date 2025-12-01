@@ -1,0 +1,15 @@
+[project]
+name = "aef-adapters"
+version = "0.1.0"
+description = "External integrations for Agentic Engineering Framework"
+requires-python = ">=3.12"
+
+dependencies = [
+    "aef-shared",
+    "aef-domain",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13"]
+build-backend = "uv_build"
+
