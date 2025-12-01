@@ -1,0 +1,30 @@
+# Development Docker Compose
+# Start with: just dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aef-postgres
+    environment:
+      POSTGRES_USER: aef
+      POSTGRES_PASSWORD: aef_dev_password
+      POSTGRES_DB: aef
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aef -d aef"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  default:
+    name: aef-network
+

@@ -1,0 +1,80 @@
+# VSA (Vertical Slice Architecture) Configuration
+# This file configures the VSA tool from event-sourcing-platform
+
+version: "1.0"
+project:
+  name: "agentic-engineering-framework"
+  language: "python"
+
+# Source paths for VSA validation
+paths:
+  contexts: "packages/domain/src/aef_domain/contexts"
+  shared: "packages/domain/src/aef_domain/contexts/_shared"
+  integration_events: "packages/domain/src/aef_domain/contexts/_shared/integration_events"
+
+# Bounded contexts definition
+contexts:
+  - name: "workflows"
+    description: "Workflow definitions, phases, and execution lifecycle"
+    slices:
+      - "create_workflow"
+      - "start_workflow"
+      - "start_phase"
+      - "complete_phase"
+      - "complete_workflow"
+
+  - name: "agents"
+    description: "Agent sessions, token tracking, and execution metrics"
+    slices:
+      - "start_session"
+      - "record_tokens"
+      - "complete_session"
+
+  - name: "artifacts"
+    description: "Artifact storage, metadata, and retrieval"
+    slices:
+      - "create_artifact"
+      - "update_metadata"
+
+# Integration events (cross-context communication)
+integration_events:
+  - name: "WorkflowCreated"
+    source: "workflows"
+    subscribers: ["agents"]
+  
+  - name: "PhaseStarted"
+    source: "workflows"
+    subscribers: ["agents", "artifacts"]
+  
+  - name: "PhaseCompleted"
+    source: "workflows"
+    subscribers: ["agents", "artifacts"]
+  
+  - name: "ArtifactCreated"
+    source: "artifacts"
+    subscribers: ["workflows"]
+
+# Validation rules
+rules:
+  # Each slice must have these files
+  required_files:
+    - "command.py"
+    - "handler.py"
+    - "events.py"
+  
+  # Optional files per slice
+  optional_files:
+    - "aggregate.py"
+    - "test_*.py"
+  
+  # No direct imports between contexts (use integration events)
+  no_cross_context_imports: true
+  
+  # Integration events must be in _shared/integration_events
+  integration_events_in_shared: true
+
+# Python-specific configuration
+python:
+  package_name: "aef_domain"
+  test_pattern: "test_*.py"
+

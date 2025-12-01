@@ -1,0 +1,111 @@
+# Research and Plan Workflow
+# Two-phase workflow: research then create action plan
+
+name: "research-and-plan"
+description: "Research a topic and create an actionable plan based on findings"
+version: "1.0.0"
+
+phases:
+  - name: "research"
+    description: "Gather comprehensive information on the topic"
+    
+    inputs:
+      - name: "topic"
+        type: "string"
+        required: true
+        description: "The topic to research"
+      
+      - name: "context"
+        type: "string"
+        required: false
+        description: "Additional context for the research"
+    
+    agent:
+      type: "claude"
+      model: "claude-sonnet-4-20250514"
+      temperature: 0.7
+      max_tokens: 4096
+    
+    prompt_template: |
+      Research the following topic:
+      
+      Topic: {{ topic }}
+      {% if context %}
+      Context: {{ context }}
+      {% endif %}
+      
+      Provide a detailed analysis including:
+      1. Overview and key concepts
+      2. Current best practices
+      3. Challenges and considerations
+      4. Opportunities and recommendations
+    
+    outputs:
+      - name: "research_findings"
+        type: "artifact"
+        artifact_type: "markdown"
+        description: "Detailed research findings"
+
+  - name: "plan"
+    description: "Create an actionable plan based on research findings"
+    
+    inputs:
+      - name: "research_findings"
+        type: "artifact"
+        from_phase: "research"
+        from_output: "research_findings"
+        description: "Research findings from previous phase"
+      
+      - name: "goals"
+        type: "string"
+        required: true
+        description: "Specific goals for the plan"
+      
+      - name: "constraints"
+        type: "string"
+        required: false
+        description: "Any constraints or limitations"
+    
+    agent:
+      type: "claude"
+      model: "claude-sonnet-4-20250514"
+      temperature: 0.5
+      max_tokens: 4096
+    
+    prompt_template: |
+      Based on the following research findings, create an actionable plan:
+      
+      ## Research Findings
+      {{ research_findings }}
+      
+      ## Goals
+      {{ goals }}
+      
+      {% if constraints %}
+      ## Constraints
+      {{ constraints }}
+      {% endif %}
+      
+      Create a detailed plan including:
+      1. Executive summary
+      2. Recommended approach
+      3. Step-by-step action items with priorities
+      4. Timeline and milestones
+      5. Success metrics
+      6. Risk mitigation strategies
+    
+    outputs:
+      - name: "action_plan"
+        type: "artifact"
+        artifact_type: "markdown"
+        description: "Detailed action plan"
+
+deliverables:
+  - phase: "research"
+    output: "research_findings"
+    name: "Research Findings"
+  
+  - phase: "plan"
+    output: "action_plan"
+    name: "Action Plan"
+
