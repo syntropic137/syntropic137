@@ -1,5 +1,5 @@
-"""CLI commands for Agentic Engineering Framework."""
+"""CLI command modules."""
 
-from aef_cli.commands import workflow
+from aef_cli.commands import agent, config, workflow
 
-__all__ = ["workflow"]
+__all__ = ["agent", "config", "workflow"]
