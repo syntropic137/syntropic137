@@ -83,6 +83,10 @@ seed-workflows:
 
 # --- Utility Commands ---
 
+# Generate .env.example from Settings class
+gen-env:
+    uv run python scripts/generate_env_example.py
+
 # Lock dependencies
 lock:
     uv lock
