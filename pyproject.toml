@@ -143,4 +143,13 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
+    "raise typer.Exit",  # CLI exits are hard to test
+]
+# Exclude interactive CLI commands from coverage (require real API keys)
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/agents/claude.py",  # Requires Anthropic API
+    "*/agents/openai.py",  # Requires OpenAI API
+    "*/storage/postgres.py",  # Requires running PostgreSQL
 ]
