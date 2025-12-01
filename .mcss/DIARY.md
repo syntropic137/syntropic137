@@ -2,6 +2,51 @@
 
 ---
 
+## 2025-12-01 — E2E Vertical Slice & Environment Config
+
+### Objective
+
+Complete M4 with a full end-to-end vertical slice from CLI to event store, plus establish robust environment configuration.
+
+### Where I Left Off
+
+Completed Milestone 4. E2E workflow creation working with in-memory storage. Pydantic settings system ready.
+
+### Completed Actions
+
+1. ✅ Implemented CLI commands: `aef workflow create`, `list`, `show`
+2. ✅ Created in-memory storage adapters:
+   - `InMemoryEventStore` for event persistence
+   - `InMemoryWorkflowRepository` with aggregate rehydration
+   - `InMemoryEventPublisher` for event publishing
+3. ✅ Added `__main__.py` for `python -m aef_cli` support
+4. ✅ Created E2E tests proving full path works
+5. ✅ Implemented Pydantic Settings system:
+   - Fail-fast validation on startup
+   - `SecretStr` for sensitive values (API keys)
+   - Computed properties: `is_test`, `use_in_memory_storage`
+   - Comprehensive field descriptions
+6. ✅ Created `scripts/generate_env_example.py` for auto-generating `.env.example`
+7. ✅ Added `just gen-env` command
+8. ✅ Created ADR-004 (environment configuration) and ADR-005 (dev environments)
+9. ✅ Documented in `docs/env-configuration.md`
+10. ✅ All 34 tests passing, QA checks clean
+11. ✅ Commits: `e868afe` (settings), `2097a4a` (E2E slice)
+
+### Notes / Insights
+
+- **In-memory is for TESTING ONLY:** Local dev should use Docker + PostgreSQL (M8)
+- **Pydantic-settings magic:** Automatically reads from `.env` files and validates on instantiation
+- **Aggregate rehydration:** Use `aggregate.rehydrate(events)` not manual `_apply` calls
+- **TC001 noqa required:** Pydantic needs runtime imports, can't use `TYPE_CHECKING` blocks
+
+### Obstacles / Open Questions
+
+- Docker dev stack (M8) needed before PostgreSQL repository implementation
+- Workflow YAML schema definition still pending (M5)
+
+---
+
 ## 2025-12-01 — VSA Integration & First Vertical Slice
 
 ### Objective
