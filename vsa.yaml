@@ -1,80 +1,45 @@
-# VSA (Vertical Slice Architecture) Configuration
-# This file configures the VSA tool from event-sourcing-platform
+# VSA Configuration for Agentic Engineering Framework
+# See: https://github.com/neuralempowerment/event-sourcing-platform/vsa for documentation
 
-version: "1.0"
-project:
-  name: "agentic-engineering-framework"
-  language: "python"
+version: 1
+root: ./packages/aef-domain/src/aef_domain/contexts
+language: python
 
-# Source paths for VSA validation
-paths:
-  contexts: "packages/domain/src/aef_domain/contexts"
-  shared: "packages/domain/src/aef_domain/contexts/_shared"
-  integration_events: "packages/domain/src/aef_domain/contexts/_shared/integration_events"
-
-# Bounded contexts definition
-contexts:
-  - name: "workflows"
-    description: "Workflow definitions, phases, and execution lifecycle"
-    slices:
-      - "create_workflow"
-      - "start_workflow"
-      - "start_phase"
-      - "complete_phase"
-      - "complete_workflow"
-
-  - name: "agents"
-    description: "Agent sessions, token tracking, and execution metrics"
-    slices:
-      - "start_session"
-      - "record_tokens"
-      - "complete_session"
-
-  - name: "artifacts"
-    description: "Artifact storage, metadata, and retrieval"
-    slices:
-      - "create_artifact"
-      - "update_metadata"
-
-# Integration events (cross-context communication)
-integration_events:
-  - name: "WorkflowCreated"
-    source: "workflows"
-    subscribers: ["agents"]
-  
-  - name: "PhaseStarted"
-    source: "workflows"
-    subscribers: ["agents", "artifacts"]
-  
-  - name: "PhaseCompleted"
-    source: "workflows"
-    subscribers: ["agents", "artifacts"]
-  
-  - name: "ArtifactCreated"
-    source: "artifacts"
-    subscribers: ["workflows"]
+# Event sourcing framework integration
+framework:
+  name: event-sourcing-platform
+  base_types:
+    domain_event:
+      import: "event_sourcing"
+      class: "DomainEvent"
+    aggregate:
+      import: "event_sourcing"
+      class: "AggregateRoot"
+    command_handler:
+      import: "event_sourcing"
+      class: "CommandHandler"
 
 # Validation rules
-rules:
-  # Each slice must have these files
-  required_files:
-    - "command.py"
-    - "handler.py"
-    - "events.py"
-  
-  # Optional files per slice
-  optional_files:
-    - "aggregate.py"
-    - "test_*.py"
-  
-  # No direct imports between contexts (use integration events)
-  no_cross_context_imports: true
-  
-  # Integration events must be in _shared/integration_events
-  integration_events_in_shared: true
+validation:
+  require_tests: true
+  require_integration_events_in_shared: true
+  max_nesting_depth: 3
+  allow_nested_features: true
 
-# Python-specific configuration
-python:
-  package_name: "aef_domain"
-  test_pattern: "test_*.py"
+# Pattern definitions (Python conventions)
+patterns:
+  command: "*Command"
+  event: "*Event"
+  handler: "*Handler"
+  query: "*Query"
+  integration_event: "*IntegrationEvent"
+  test: "test_*"
 
+# Context-specific configuration
+contexts:
+  workflows:
+    description: "Workflow definitions, phases, and execution lifecycle"
+  agents:
+    description: "Agent sessions, token tracking, and execution metrics"
+  artifacts:
+    description: "Artifact storage, metadata, and retrieval"
