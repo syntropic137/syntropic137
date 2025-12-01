@@ -1,35 +1,34 @@
 # CURRENT ACTIVE STATE ARTIFACT (CASA)
 
-**Project:** Agentic Engineering Framework  
+**Project:** Agentic Engineering Framework
 **Updated:** 2025-12-01
 
 ---
 
 ## Where I Left Off
 
-Completed M1 (Project Structure) and M2 (Shared Infrastructure). Committed initial monorepo with 21 passing tests and clean QA. Created mCSS documents to enable fast context switching.
+Completed M3 (VSA & First Vertical Slice). Implemented `create_workflow` vertical slice with full decorator integration from the event-sourcing Python SDK. Contributed `@event` and `@command` decorators back to the SDK (PR #65). All QA checks passing.
 
 ## What I Was About To Do
 
-**Milestone 3: VSA Tool Integration & First Vertical Slice**
+**Milestone 4: Core Domain Implementation**
 
-1. Explore the `vsa` CLI tool in `lib/event-sourcing-platform`
-2. Validate current structure passes VSA checks
-3. Implement first vertical slice (likely `WorkflowPhase` aggregate)
+1. Implement remaining aggregates using established patterns
+2. Add `WorkflowPhase` entity and lifecycle events
+3. Implement `AgentSession` and `Artifact` aggregates
+4. Set up event processors (todo pattern)
 
 ## Why This Matters
 
-VSA validation ensures our architecture is scalable and enables parallel agent development on new features. The first vertical slice proves the event sourcing pattern works end-to-end before building more aggregates.
+With the first vertical slice proven and VSA validated, we have the foundational pattern for all domain aggregates. M4 builds out the complete domain model needed for end-to-end workflow execution.
 
 ## Open Loops
 
-- [ ] What is the exact CLI interface for the `vsa` tool?
-- [ ] What is the first vertical slice? `WorkflowPhase` or `Workflow`?
-- [ ] Define the workflow YAML schema for seeding
+- [ ] Define the workflow YAML schema for seeding (M5)
+- [ ] Decide on event processor storage (in-memory vs PostgreSQL)
 
 ## Dependencies
 
-- `lib/event-sourcing-platform` Python SDK (available via submodule)
+- `lib/event-sourcing-platform` Python SDK ✅ (decorators merged - PR #65)
 - `lib/agentic-primitives` (available via submodule)
-- Docker for local PostgreSQL (not yet started)
-
+- Docker for local PostgreSQL (M8)

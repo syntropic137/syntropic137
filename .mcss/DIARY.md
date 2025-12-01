@@ -2,6 +2,55 @@
 
 ---
 
+## 2025-12-01 — VSA Integration & First Vertical Slice
+
+### Objective
+
+Integrate event-sourcing Python SDK decorators and implement the first validated vertical slice using VSA patterns.
+
+### Where I Left Off
+
+Completed Milestone 3. First vertical slice (`create_workflow`) implemented with full event sourcing decorator integration. Contributed decorators back to SDK (PR #65).
+
+### Completed Actions
+
+1. ✅ Created ADR-003: Event sourcing decorator patterns
+2. ✅ Contributed `@event` and `@command` decorators to event-sourcing-platform SDK
+3. ✅ Created PR #65 with version validation and metadata helpers
+4. ✅ Implemented `create_workflow` vertical slice:
+   - `WorkflowAggregate` with `@aggregate`, `@command_handler`, `@event_sourcing_handler`
+   - `CreateWorkflowCommand` with `@command` decorator
+   - `WorkflowCreatedEvent` with `@event("WorkflowCreated", "v1")`
+   - `CreateWorkflowHandler` application service
+   - 11 unit tests for the slice
+5. ✅ Added shared value objects: `WorkflowType`, `PhaseDefinition`, `WorkflowClassification`
+6. ✅ Configured `vsa.yaml` for workflow context
+7. ✅ Fixed Pydantic runtime import issues with `# noqa: TC001`
+8. ✅ All QA checks passing
+9. ✅ Commits: `9a11ae5` (vertical slice), `46580c6` (submodule update)
+
+### Notes / Insights
+
+- **Decorator parity:** TypeScript SDK had `@event`/`@command` but Python SDK lacked them. Contributing upstream keeps SDKs aligned.
+- **Pydantic + TYPE_CHECKING conflict:** Pydantic models need runtime type access, can't guard imports in `TYPE_CHECKING` blocks.
+- **VSA slice structure:** Each slice folder contains: Command, Event, Handler, and tests. Aggregate lives in `_shared/`.
+- **Version format:** Events support semver (`1.0.0`) or simple (`v1`) versions.
+
+### Obstacles / Open Questions
+
+- PR #65 CI failed initially due to import sorting and unused type ignores (all fixed)
+- Local env has conflicting SDK installation from another repo (doesn't affect CI)
+
+### PR #65 Merged ✅
+
+Addressed all Copilot feedback:
+- Regex patterns compiled at module level for performance
+- Event type mismatch validation with clear error messages
+- Metadata keys removed from public API (internal implementation details)
+- All CI checks passed: Python, TypeScript, Rust SDKs + event-store
+
+---
+
 ## 2025-12-01 — Initial Setup & Foundation
 
 ### Objective
@@ -36,4 +85,3 @@ Completed Milestones 1 & 2. Committed initial monorepo structure with all QA che
 - Need to decide on first vertical slice: likely `WorkflowPhase` aggregate
 
 ---
-
