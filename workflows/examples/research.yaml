@@ -1,0 +1,68 @@
+# Research Workflow
+# A simple workflow for conducting research on a topic or codebase.
+
+id: research-workflow-v1
+name: Research Workflow
+description: |
+  A structured research workflow for investigating codebases, 
+  technologies, or concepts. Produces comprehensive documentation.
+
+type: research
+classification: standard
+
+# Default repository context (can be overridden at runtime)
+repository:
+  url: https://github.com/example/repo
+  ref: main
+
+# Project association (optional)
+project_name: null
+
+phases:
+  - id: discovery
+    name: Discovery Phase
+    order: 1
+    execution_type: sequential
+    description: |
+      Initial exploration and scoping. Identify key areas of interest,
+      gather context, and define research questions.
+    input_artifacts: []
+    output_artifacts:
+      - research_scope
+      - initial_questions
+    max_tokens: 4096
+    timeout_seconds: 300
+
+  - id: deep-dive
+    name: Deep Dive Analysis
+    order: 2
+    execution_type: sequential
+    description: |
+      In-depth investigation of identified areas. Analyze code patterns,
+      documentation, and dependencies.
+    input_artifacts:
+      - research_scope
+      - initial_questions
+    output_artifacts:
+      - detailed_findings
+      - code_analysis
+    max_tokens: 8192
+    timeout_seconds: 600
+
+  - id: synthesis
+    name: Synthesis & Documentation
+    order: 3
+    execution_type: sequential
+    description: |
+      Consolidate findings into actionable documentation.
+      Produce recommendations and next steps.
+    input_artifacts:
+      - detailed_findings
+      - code_analysis
+    output_artifacts:
+      - research_summary
+      - recommendations
+      - action_items
+    max_tokens: 4096
+    timeout_seconds: 300
+

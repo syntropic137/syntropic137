@@ -1,0 +1,100 @@
+# Implementation Workflow
+# A workflow for implementing features following RIPER-5 methodology.
+
+id: implementation-workflow-v1
+name: Implementation Workflow
+description: |
+  A structured implementation workflow following RIPER-5 methodology.
+  Takes a feature from research through planning, execution, and review.
+
+type: implementation
+classification: complex
+
+repository:
+  url: https://github.com/example/repo
+  ref: main
+
+phases:
+  - id: research
+    name: Research
+    order: 1
+    execution_type: sequential
+    description: |
+      Information gathering phase. Read files, understand existing code,
+      identify patterns and dependencies. NO changes made.
+    input_artifacts:
+      - feature_request
+    output_artifacts:
+      - codebase_analysis
+      - dependency_map
+      - existing_patterns
+    max_tokens: 8192
+    timeout_seconds: 600
+
+  - id: innovate
+    name: Innovate
+    order: 2
+    execution_type: sequential
+    description: |
+      Brainstorm potential approaches. Discuss ideas, advantages,
+      and disadvantages. NO concrete planning yet.
+    input_artifacts:
+      - codebase_analysis
+      - feature_request
+    output_artifacts:
+      - approach_options
+      - trade_off_analysis
+    max_tokens: 4096
+    timeout_seconds: 300
+
+  - id: plan
+    name: Plan
+    order: 3
+    execution_type: human_in_loop
+    description: |
+      Create detailed technical specification. Define file paths,
+      changes, and implementation order. Requires human approval.
+    input_artifacts:
+      - approach_options
+      - trade_off_analysis
+    output_artifacts:
+      - implementation_plan
+      - file_change_list
+      - test_plan
+    max_tokens: 8192
+    timeout_seconds: 600
+
+  - id: execute
+    name: Execute
+    order: 4
+    execution_type: sequential
+    description: |
+      Implement the approved plan exactly. Make code changes,
+      run tests after each milestone. NO deviations from plan.
+    input_artifacts:
+      - implementation_plan
+      - file_change_list
+    output_artifacts:
+      - code_changes
+      - test_results
+      - qa_report
+    max_tokens: 16384
+    timeout_seconds: 1800
+
+  - id: review
+    name: Review
+    order: 5
+    execution_type: sequential
+    description: |
+      Validate implementation against plan. Line-by-line comparison.
+      Flag any deviations detected.
+    input_artifacts:
+      - implementation_plan
+      - code_changes
+    output_artifacts:
+      - review_report
+      - deviation_list
+      - approval_status
+    max_tokens: 4096
+    timeout_seconds: 300
+
