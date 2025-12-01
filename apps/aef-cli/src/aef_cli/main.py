@@ -3,6 +3,7 @@
 import typer
 from rich.console import Console
 
+from aef_cli.commands import workflow
 from aef_shared.logging import LogConfig, configure_logging, get_logger
 
 # Configure logging
@@ -17,15 +18,18 @@ app = typer.Typer(
 )
 console = Console()
 
+# Register subcommands
+app.add_typer(workflow.app, name="workflow")
+
 
 @app.command()
 def run(
-    workflow: str = typer.Argument(..., help="Name or ID of the workflow to execute"),
+    workflow_name: str = typer.Argument(..., help="Name or ID of the workflow to execute"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would be done"),
 ) -> None:
     """Execute a workflow."""
-    logger.info("Starting workflow", workflow=workflow, dry_run=dry_run)
-    console.print(f"[bold blue]Starting workflow:[/bold blue] {workflow}")
+    logger.info("Starting workflow", workflow=workflow_name, dry_run=dry_run)
+    console.print(f"[bold blue]Starting workflow:[/bold blue] {workflow_name}")
 
     if dry_run:
         console.print("[yellow]Dry run mode - no changes will be made[/yellow]")
