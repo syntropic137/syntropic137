@@ -145,7 +145,7 @@ export function SessionDetail() {
         />
         <MetricCard
           title="Total Cost"
-          value={`$${session.total_cost_usd.toFixed(4)}`}
+          value={`$${Number(session.total_cost_usd).toFixed(4)}`}
           icon={Coins}
           color="warning"
         />
@@ -258,4 +258,3 @@ export function SessionDetail() {
     </div>
   )
 }
-

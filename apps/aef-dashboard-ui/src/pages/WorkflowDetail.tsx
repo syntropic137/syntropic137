@@ -151,7 +151,7 @@ export function WorkflowDetail() {
           title="Total Tokens"
           value={metrics?.total_tokens.toLocaleString() ?? 0}
           icon={Zap}
-          subtitle={`$${metrics?.total_cost_usd.toFixed(4) ?? '0.00'}`}
+          subtitle={`$${Number(metrics?.total_cost_usd ?? 0).toFixed(4)}`}
         />
         <MetricCard
           title="Artifacts"
@@ -169,7 +169,7 @@ export function WorkflowDetail() {
             {workflow.phases.map((phase, idx) => {
               const Icon = phaseStatusIcons[phase.status] ?? Clock
               const phaseMetric = metrics?.phases.find(p => p.phase_id === phase.phase_id)
-              
+
               return (
                 <div key={phase.phase_id} className="flex items-center">
                   <div
@@ -198,7 +198,7 @@ export function WorkflowDetail() {
                     {phaseMetric && (
                       <div className="mt-2 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
                         <span>{phaseMetric.total_tokens.toLocaleString()} tok</span>
-                        <span>${phaseMetric.cost_usd.toFixed(4)}</span>
+                        <span>${Number(phaseMetric.cost_usd).toFixed(4)}</span>
                       </div>
                     )}
                   </div>
@@ -307,4 +307,3 @@ export function WorkflowDetail() {
     </div>
   )
 }
-

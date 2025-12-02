@@ -11,7 +11,7 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
   const start = new Date(startedAt)
   const end = completedAt ? new Date(completedAt) : new Date()
   const seconds = Math.floor((end.getTime() - start.getTime()) / 1000)
-  
+
   if (seconds < 60) return `${seconds}s`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
@@ -20,7 +20,7 @@ function formatDuration(startedAt: string | null, completedAt: string | null): s
 export function SessionList() {
   const [searchParams] = useSearchParams()
   const workflowIdFilter = searchParams.get('workflow_id') ?? ''
-  
+
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
@@ -143,7 +143,7 @@ export function SessionList() {
                       </div>
                       <div className="flex items-center gap-1">
                         <Coins className="h-3.5 w-3.5" />
-                        <span>${session.total_cost_usd.toFixed(4)}</span>
+                        <span>${Number(session.total_cost_usd).toFixed(4)}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <Clock className="h-3.5 w-3.5" />
@@ -161,4 +161,3 @@ export function SessionList() {
     </div>
   )
 }
-

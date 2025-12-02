@@ -192,4 +192,3 @@ export interface EventMessage {
 export type WorkflowStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
 export type SessionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type PhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
-

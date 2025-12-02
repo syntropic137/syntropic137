@@ -82,7 +82,7 @@ export function Dashboard() {
           title="Total Tokens"
           value={metrics?.total_tokens.toLocaleString() ?? 0}
           icon={Zap}
-          subtitle={`$${metrics?.total_cost_usd.toFixed(4) ?? '0.00'}`}
+          subtitle={`$${Number(metrics?.total_cost_usd ?? 0).toFixed(4)}`}
         />
         <MetricCard
           title="Artifacts"
@@ -273,4 +273,3 @@ export function Dashboard() {
     </div>
   )
 }
-

@@ -57,4 +57,3 @@ export function StatusBadge({ status, size = 'md', pulse = false }: StatusBadgeP
     </span>
   )
 }
-

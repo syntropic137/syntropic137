@@ -59,4 +59,3 @@ export function CardContent({ children, className, noPadding = false }: CardCont
     </div>
   )
 }
-

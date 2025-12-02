@@ -157,4 +157,3 @@ export function subscribeToEvents(
     eventSource.close()
   }
 }
-
