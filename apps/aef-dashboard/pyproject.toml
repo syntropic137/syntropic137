@@ -1,0 +1,28 @@
+[project]
+name = "aef-dashboard"
+version = "0.1.0"
+description = "Dashboard API for Agentic Engineering Framework"
+requires-python = ">=3.12"
+
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.2.0",
+    "aef-shared",
+    "aef-domain",
+    "aef-adapters",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.28.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13"]
+build-backend = "uv_build"
+
+[project.scripts]
+aef-dashboard = "aef_dashboard.main:run"

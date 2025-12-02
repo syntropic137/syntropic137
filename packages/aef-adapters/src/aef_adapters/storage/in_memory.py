@@ -161,6 +161,49 @@ class InMemoryWorkflowRepository:
 
         return aggregate
 
+    def get_all(self) -> list[WorkflowAggregate]:
+        """Get all workflows."""
+        from event_sourcing import EventEnvelope, EventMetadata
+
+        from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+            WorkflowAggregate,
+        )
+        from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+            WorkflowCreatedEvent,
+        )
+
+        # Get unique aggregate IDs
+        aggregate_ids: set[str] = set()
+        for event in self._event_store.get_all_events():
+            if event.aggregate_type == "Workflow":
+                aggregate_ids.add(event.aggregate_id)
+
+        workflows: list[WorkflowAggregate] = []
+        for agg_id in aggregate_ids:
+            stored_events = self._event_store.get_events(agg_id)
+            if not stored_events:
+                continue
+
+            aggregate = WorkflowAggregate()
+            envelopes: list[EventEnvelope[WorkflowCreatedEvent]] = []
+            for stored_event in stored_events:
+                if stored_event.event_type == "WorkflowCreated":
+                    event = WorkflowCreatedEvent(**stored_event.event_data)
+                    metadata = EventMetadata(
+                        event_id=f"evt-{stored_event.sequence}",
+                        aggregate_id=stored_event.aggregate_id,
+                        aggregate_type=stored_event.aggregate_type,
+                        aggregate_nonce=stored_event.version,
+                    )
+                    envelope = EventEnvelope(event=event, metadata=metadata)
+                    envelopes.append(envelope)
+
+            if envelopes:
+                aggregate.rehydrate(envelopes)
+                workflows.append(aggregate)
+
+        return workflows
+
 
 class InMemoryEventPublisher:
     """In-memory event publisher for testing and development.
