@@ -254,7 +254,7 @@ async def get_connection_pool() -> Any:
         raise RuntimeError(msg)
 
     try:
-        import asyncpg  # type: ignore[import-not-found]
+        import asyncpg
 
         _connection_pool = await asyncpg.create_pool(
             str(settings.database_url),

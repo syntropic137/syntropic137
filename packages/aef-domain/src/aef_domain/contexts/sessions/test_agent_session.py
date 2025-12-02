@@ -8,6 +8,7 @@ Tests cover:
 """
 
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -392,7 +393,9 @@ class TestAgentSessionAggregate:
             )
         )
 
-        assert session.status == SessionStatus.COMPLETED
+        # Status changes after command is processed (cast needed for mypy)
+        final_status = cast("SessionStatus", session.status)
+        assert final_status == SessionStatus.COMPLETED
         assert session.duration_seconds is not None
         assert session.duration_seconds > 0
 
