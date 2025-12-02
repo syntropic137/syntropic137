@@ -89,9 +89,7 @@ class TestWorkflowRunCommand:
 
     def test_run_workflow_dry_run(self, sample_workflow_id: str) -> None:
         """Test dry run shows execution plan without executing."""
-        result = runner.invoke(
-            app, ["workflow", "run", sample_workflow_id, "--dry-run"]
-        )
+        result = runner.invoke(app, ["workflow", "run", sample_workflow_id, "--dry-run"])
 
         assert result.exit_code == 0
         assert "DRY RUN MODE" in result.stdout
@@ -104,9 +102,7 @@ class TestWorkflowRunCommand:
         """Test running workflow with partial ID match."""
         # Use partial ID (sample_workflow_id fixture ensures workflow exists)
         _ = sample_workflow_id  # Mark as used
-        result = runner.invoke(
-            app, ["workflow", "run", "test-workflow-run", "--dry-run"]
-        )
+        result = runner.invoke(app, ["workflow", "run", "test-workflow-run", "--dry-run"])
 
         assert result.exit_code == 0
         assert "Test Run Workflow" in result.stdout
@@ -178,9 +174,7 @@ class TestWorkflowStatusCommand:
     def test_status_after_execution(self, sample_workflow_id: str) -> None:
         """Test status after workflow has been executed."""
         # First, run the workflow
-        runner.invoke(
-            app, ["workflow", "run", sample_workflow_id, "--input", "topic=Test"]
-        )
+        runner.invoke(app, ["workflow", "run", sample_workflow_id, "--input", "topic=Test"])
 
         # Then check status
         result = runner.invoke(app, ["workflow", "status", sample_workflow_id])
@@ -255,4 +249,3 @@ class TestInputParsing:
 
         # Should warn but continue
         assert "Warning" in result.stdout or result.exit_code == 0
-

@@ -8,6 +8,7 @@ dependencies = [
     "aef-shared",
     "aef-domain",
     "agentic-hooks[http]",
+    "event-sourcing-python[grpc]",  # Event Store SDK (ADR-007)
 ]
 
 [project.optional-dependencies]

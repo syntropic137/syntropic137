@@ -261,7 +261,12 @@ def seed_workflows(
         # Validate without creating (dry-run)
         aef workflow seed --dry-run
     """
-    from aef_adapters.storage import get_event_publisher, get_workflow_repository
+    from aef_adapters.storage import (
+        connect_event_store,
+        disconnect_event_store,
+        get_event_publisher,
+        get_workflow_repository,
+    )
     from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
@@ -272,63 +277,92 @@ def seed_workflows(
         console.print("[red]Cannot specify both --file and --dir[/red]")
         raise typer.Exit(1)
 
-    # Get dependencies
-    repository = get_workflow_repository()
-    publisher = get_event_publisher()
-    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
-    seeder = WorkflowSeeder(handler)
+    # Result container for async function
+    result_container: dict[str, Any] = {}
 
-    if dry_run:
-        console.print("[yellow]DRY RUN MODE - No workflows will be created[/yellow]\n")
+    async def _seed_workflows() -> None:
+        """Async wrapper for seeding workflows with proper connection management."""
+        # Connect to event store
+        await connect_event_store()
 
-    if file:
-        # Seed single file
-        if not file.exists():
-            console.print(f"[red]File not found: {file}[/red]")
-            raise typer.Exit(1)
+        try:
+            # Get dependencies
+            repository = get_workflow_repository()
+            publisher = get_event_publisher()
+            handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+            seeder = WorkflowSeeder(handler)
 
-        console.print(f"Seeding from file: [cyan]{file}[/cyan]")
-        result = asyncio.run(seeder.seed_from_file(file, dry_run=dry_run))
+            if dry_run:
+                console.print("[yellow]DRY RUN MODE - No workflows will be created[/yellow]\n")
 
-        if result.success:
-            console.print(f"[green]✓[/green] {result.name} ({result.workflow_id})")
-        else:
-            console.print(f"[red]✗[/red] {result.name}: {result.error}")
-            raise typer.Exit(1)
-    else:
-        # Seed from directory
-        target_dir = directory or DEFAULT_WORKFLOWS_DIR
-        if not target_dir.exists():
-            console.print(f"[red]Directory not found: {target_dir}[/red]")
-            raise typer.Exit(1)
+            if file:
+                # Seed single file
+                if not file.exists():
+                    console.print(f"[red]File not found: {file}[/red]")
+                    result_container["exit_code"] = 1
+                    return
 
-        console.print(f"Seeding from directory: [cyan]{target_dir}[/cyan]\n")
-        report = asyncio.run(seeder.seed_from_directory(target_dir, dry_run=dry_run))
+                console.print(f"Seeding from file: [cyan]{file}[/cyan]")
+                result = await seeder.seed_from_file(file, dry_run=dry_run)
 
-        # Display results
-        for result in report.results:
-            if result.success:
-                icon = "[green]✓[/green]"
-            elif result.error and "already exists" in result.error:
-                icon = "[yellow]○[/yellow]"
+                if result.success:
+                    console.print(f"[green]✓[/green] {result.name} ({result.workflow_id})")
+                    result_container["exit_code"] = 0
+                else:
+                    console.print(f"[red]✗[/red] {result.name}: {result.error}")
+                    result_container["exit_code"] = 1
             else:
-                icon = "[red]✗[/red]"
+                # Seed from directory
+                target_dir = directory or DEFAULT_WORKFLOWS_DIR
+                if not target_dir.exists():
+                    console.print(f"[red]Directory not found: {target_dir}[/red]")
+                    result_container["exit_code"] = 1
+                    return
 
-            msg = f"{icon} {result.name}"
-            if result.error:
-                msg += f" [dim]({result.error})[/dim]"
-            console.print(msg)
+                console.print(f"Seeding from directory: [cyan]{target_dir}[/cyan]\n")
+                report = await seeder.seed_from_directory(target_dir, dry_run=dry_run)
+                result_container["report"] = report
+        finally:
+            # Disconnect from event store
+            await disconnect_event_store()
 
-        # Summary
-        console.print()
-        console.print("[bold]Summary:[/bold]")
-        console.print(f"  Total:     {report.total}")
-        console.print(f"  Succeeded: [green]{report.succeeded}[/green]")
-        console.print(f"  Skipped:   [yellow]{report.skipped}[/yellow]")
-        console.print(f"  Failed:    [red]{report.failed}[/red]")
+    asyncio.run(_seed_workflows())
 
-        if report.failed > 0:
+    # Handle single file result
+    if file:
+        if result_container.get("exit_code", 0) != 0:
             raise typer.Exit(1)
+        return
+
+    # Handle directory results
+    report = result_container.get("report")
+    if report is None:
+        raise typer.Exit(1)
+
+    # Display results
+    for result in report.results:
+        if result.success:
+            icon = "[green]✓[/green]"
+        elif result.error and "already exists" in result.error:
+            icon = "[yellow]○[/yellow]"
+        else:
+            icon = "[red]✗[/red]"
+
+        msg = f"{icon} {result.name}"
+        if result.error:
+            msg += f" [dim]({result.error})[/dim]"
+        console.print(msg)
+
+    # Summary
+    console.print()
+    console.print("[bold]Summary:[/bold]")
+    console.print(f"  Total:     {report.total}")
+    console.print(f"  Succeeded: [green]{report.succeeded}[/green]")
+    console.print(f"  Skipped:   [yellow]{report.skipped}[/yellow]")
+    console.print(f"  Failed:    [red]{report.failed}[/red]")
+
+    if report.failed > 0:
+        raise typer.Exit(1)
 
 
 @app.command("validate")
@@ -398,7 +432,9 @@ def _parse_inputs(inputs: list[str] | None) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for item in inputs:
         if "=" not in item:
-            console.print(f"[yellow]Warning: Ignoring invalid input '{item}' (expected key=value)[/yellow]")
+            console.print(
+                f"[yellow]Warning: Ignoring invalid input '{item}' (expected key=value)[/yellow]"
+            )
             continue
 
         key, value = item.split("=", 1)
@@ -520,7 +556,6 @@ def run_workflow(
     # Find workflow by ID prefix
     event_store = get_event_store()
 
-
     events = event_store.get_all_events()
     matching = [
         e
@@ -547,13 +582,15 @@ def run_workflow(
 
     # Show workflow info
     console.print()
-    console.print(Panel(
-        f"[bold]{workflow_name}[/bold]\n"
-        f"[dim]ID: {full_workflow_id}[/dim]\n"
-        f"[dim]Phases: {len(phases)}[/dim]",
-        title="[cyan]Workflow Execution[/cyan]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            f"[bold]{workflow_name}[/bold]\n"
+            f"[dim]ID: {full_workflow_id}[/dim]\n"
+            f"[dim]Phases: {len(phases)}[/dim]",
+            title="[cyan]Workflow Execution[/cyan]",
+            border_style="cyan",
+        )
+    )
 
     if parsed_inputs:
         console.print("\n[bold]Inputs:[/bold]")
@@ -772,18 +809,23 @@ def workflow_status(
     workflow_data = workflow_event.event_data
 
     console.print()
-    console.print(Panel(
-        f"[bold]{workflow_data.get('name', 'Unknown')}[/bold]\n"
-        f"[dim]ID: {full_workflow_id}[/dim]\n"
-        f"[dim]Type: {workflow_data.get('workflow_type', 'Unknown')}[/dim]",
-        title="[cyan]Workflow Status[/cyan]",
-        border_style="cyan",
-    ))
+    console.print(
+        Panel(
+            f"[bold]{workflow_data.get('name', 'Unknown')}[/bold]\n"
+            f"[dim]ID: {full_workflow_id}[/dim]\n"
+            f"[dim]Type: {workflow_data.get('workflow_type', 'Unknown')}[/dim]",
+            title="[cyan]Workflow Status[/cyan]",
+            border_style="cyan",
+        )
+    )
 
     # Find related execution events
     execution_events = [
-        e for e in events
-        if e.aggregate_id == full_workflow_id and e.event_type in (
+        e
+        for e in events
+        if e.aggregate_id == full_workflow_id
+        and e.event_type
+        in (
             "WorkflowExecutionStarted",
             "PhaseStarted",
             "PhaseCompleted",
@@ -827,7 +869,9 @@ def workflow_status(
         console.print(f"\n  {status_icon} Execution: [cyan]{exec_id[:8]}...[/cyan]")
 
         # Show phases
-        phase_events = [e for e in exec_events if e.event_type in ("PhaseStarted", "PhaseCompleted")]
+        phase_events = [
+            e for e in exec_events if e.event_type in ("PhaseStarted", "PhaseCompleted")
+        ]
         if phase_events:
             phases_completed = sum(1 for e in phase_events if e.event_type == "PhaseCompleted")
             phases_started = sum(1 for e in phase_events if e.event_type == "PhaseStarted")
@@ -839,9 +883,13 @@ def workflow_status(
                 data = e.event_data
                 console.print(f"     Tokens: {_format_tokens(data.get('total_tokens', 0))}")
                 if "total_cost_usd" in data:
-                    console.print(f"     Cost: {_format_cost(Decimal(str(data['total_cost_usd'])))}")
+                    console.print(
+                        f"     Cost: {_format_cost(Decimal(str(data['total_cost_usd'])))}"
+                    )
             elif e.event_type == "WorkflowFailed":
-                console.print(f"     [red]Error: {e.event_data.get('error_message', 'Unknown')}[/red]")
+                console.print(
+                    f"     [red]Error: {e.event_data.get('error_message', 'Unknown')}[/red]"
+                )
 
     # Show sessions
     session_repo = get_session_repository()
@@ -849,7 +897,9 @@ def workflow_status(
     if sessions:
         console.print(f"\n[bold]Sessions:[/bold] {len(sessions)}")
         for session in sessions[:5]:
-            status_icon = "[green]✓[/green]" if session.status.value == "completed" else "[red]✗[/red]"
+            status_icon = (
+                "[green]✓[/green]" if session.status.value == "completed" else "[red]✗[/red]"
+            )
             console.print(f"  {status_icon} {session.id} - {session.phase_id or 'N/A'}")
 
     # Show artifacts

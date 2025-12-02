@@ -90,8 +90,6 @@ class TestCLI:
     def test_run_command_with_inputs(self) -> None:
         """Test run command with inputs."""
         workflow_id = create_test_workflow()
-        result = runner.invoke(
-            app, ["run", workflow_id, "--input", "topic=test", "--dry-run"]
-        )
+        result = runner.invoke(app, ["run", workflow_id, "--input", "topic=test", "--dry-run"])
         assert result.exit_code == 0
         assert "topic" in result.stdout

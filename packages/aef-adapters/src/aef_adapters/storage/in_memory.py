@@ -8,12 +8,15 @@ The in-memory store:
 - Does NOT persist between process restarts
 - Is NOT thread-safe
 - Should NEVER be used outside of tests
+- Will raise an error if used in non-test environments
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -29,6 +32,28 @@ if TYPE_CHECKING:
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
         WorkflowAggregate,
     )
+
+
+class InMemoryStorageError(Exception):
+    """Raised when in-memory storage is used outside of test environment."""
+
+    pass
+
+
+def _assert_test_environment() -> None:
+    """Assert that we're in a test environment.
+
+    Raises:
+        InMemoryStorageError: If not in test environment (APP_ENVIRONMENT != 'test').
+    """
+    settings = get_settings()
+    if not settings.is_test:
+        raise InMemoryStorageError(
+            "In-memory storage can ONLY be used in test environments. "
+            f"Current environment: {settings.app_environment}. "
+            "For local development, use PostgreSQL via 'just dev'. "
+            "Set APP_ENVIRONMENT=test to use in-memory storage for unit tests."
+        )
 
 
 @dataclass
@@ -56,10 +81,17 @@ class InMemoryEventStore:
 
     For local development: docker/docker-compose.dev.yaml
     For production: Real PostgreSQL event store
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
     """
 
     _events: list[StoredEvent] = field(default_factory=list)
     _sequence: int = field(default=0)
+
+    def __post_init__(self) -> None:
+        """Validate environment on initialization."""
+        _assert_test_environment()
 
     def append(
         self,
@@ -99,9 +131,13 @@ class InMemoryWorkflowRepository:
     """In-memory repository for Workflow aggregates.
 
     Implements the WorkflowRepository protocol defined in the handler.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
     """
 
     def __init__(self, event_store: InMemoryEventStore) -> None:
+        _assert_test_environment()
         self._event_store = event_store
 
     async def save(self, aggregate: WorkflowAggregate) -> None:
@@ -185,17 +221,19 @@ class InMemoryWorkflowRepository:
                 continue
 
             aggregate = WorkflowAggregate()
-            envelopes: list[EventEnvelope[WorkflowCreatedEvent]] = []
+            envelopes: list[EventEnvelope[Any]] = []
             for stored_event in stored_events:
                 if stored_event.event_type == "WorkflowCreated":
-                    event = WorkflowCreatedEvent(**stored_event.event_data)
+                    workflow_event = WorkflowCreatedEvent(**stored_event.event_data)
                     metadata = EventMetadata(
                         event_id=f"evt-{stored_event.sequence}",
                         aggregate_id=stored_event.aggregate_id,
                         aggregate_type=stored_event.aggregate_type,
                         aggregate_nonce=stored_event.version,
                     )
-                    envelope = EventEnvelope(event=event, metadata=metadata)
+                    envelope: EventEnvelope[Any] = EventEnvelope(
+                        event=workflow_event, metadata=metadata
+                    )
                     envelopes.append(envelope)
 
             if envelopes:
@@ -206,13 +244,17 @@ class InMemoryWorkflowRepository:
 
 
 class InMemoryEventPublisher:
-    """In-memory event publisher for testing and development.
+    """In-memory event publisher for testing ONLY.
 
     Implements the EventPublisher protocol. In production, this would
     publish to a message broker (e.g., RabbitMQ, Kafka).
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
     """
 
     def __init__(self) -> None:
+        _assert_test_environment()
         self._published_events: list[EventEnvelope[Any]] = []
 
     async def publish(self, events: list[EventEnvelope[Any]]) -> None:
@@ -231,10 +273,14 @@ class InMemoryEventPublisher:
 class InMemorySessionRepository:
     """In-memory repository for AgentSession aggregates.
 
-    Used for testing and local development.
+    Used for testing ONLY.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
     """
 
     def __init__(self) -> None:
+        _assert_test_environment()
         self._sessions: dict[str, AgentSessionAggregate] = {}
 
     async def save(self, aggregate: AgentSessionAggregate) -> None:
@@ -263,10 +309,14 @@ class InMemorySessionRepository:
 class InMemoryArtifactRepository:
     """In-memory repository for Artifact aggregates.
 
-    Used for testing and local development.
+    Used for testing ONLY.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
     """
 
     def __init__(self) -> None:
+        _assert_test_environment()
         self._artifacts: dict[str, ArtifactAggregate] = {}
 
     async def save(self, aggregate: ArtifactAggregate) -> None:
@@ -300,42 +350,85 @@ class InMemoryArtifactRepository:
         self._artifacts = {}
 
 
-# Global instances for simple DI (replace with proper DI in production)
-_event_store = InMemoryEventStore()
-_workflow_repository = InMemoryWorkflowRepository(_event_store)
-_event_publisher = InMemoryEventPublisher()
-_session_repository = InMemorySessionRepository()
-_artifact_repository = InMemoryArtifactRepository()
+# Lazy-loaded global instances for simple DI (test environments only)
+# These are created on first access, not at module import time
+_event_store: InMemoryEventStore | None = None
+_workflow_repository: InMemoryWorkflowRepository | None = None
+_event_publisher: InMemoryEventPublisher | None = None
+_session_repository: InMemorySessionRepository | None = None
+_artifact_repository: InMemoryArtifactRepository | None = None
 
 
 def get_event_store() -> InMemoryEventStore:
-    """Get the global in-memory event store."""
+    """Get the global in-memory event store.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _event_store
+    if _event_store is None:
+        _event_store = InMemoryEventStore()
     return _event_store
 
 
 def get_workflow_repository() -> InMemoryWorkflowRepository:
-    """Get the global in-memory workflow repository."""
+    """Get the global in-memory workflow repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _workflow_repository
+    if _workflow_repository is None:
+        _workflow_repository = InMemoryWorkflowRepository(get_event_store())
     return _workflow_repository
 
 
 def get_event_publisher() -> InMemoryEventPublisher:
-    """Get the global in-memory event publisher."""
+    """Get the global in-memory event publisher.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _event_publisher
+    if _event_publisher is None:
+        _event_publisher = InMemoryEventPublisher()
     return _event_publisher
 
 
 def get_session_repository() -> InMemorySessionRepository:
-    """Get the global in-memory session repository."""
+    """Get the global in-memory session repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _session_repository
+    if _session_repository is None:
+        _session_repository = InMemorySessionRepository()
     return _session_repository
 
 
 def get_artifact_repository() -> InMemoryArtifactRepository:
-    """Get the global in-memory artifact repository."""
+    """Get the global in-memory artifact repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _artifact_repository
+    if _artifact_repository is None:
+        _artifact_repository = InMemoryArtifactRepository()
     return _artifact_repository
 
 
 def reset_storage() -> None:
-    """Reset all storage (for testing between tests)."""
-    _event_store.clear()
-    _event_publisher.clear()
-    _session_repository.clear()
-    _artifact_repository.clear()
+    """Reset all storage (for testing between tests).
+
+    Clears all in-memory stores if they have been initialized.
+    """
+    if _event_store is not None:
+        _event_store.clear()
+    if _event_publisher is not None:
+        _event_publisher.clear()
+    if _session_repository is not None:
+        _session_repository.clear()
+    if _artifact_repository is not None:
+        _artifact_repository.clear()

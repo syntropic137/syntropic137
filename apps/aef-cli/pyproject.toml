@@ -18,4 +18,3 @@ build-backend = "uv_build"
 
 [project.scripts]
 aef = "aef_cli.main:app"
-

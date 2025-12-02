@@ -98,16 +98,29 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # EVENT STORE (gRPC)
+    # EVENT STORE (gRPC) - See ADR-007: Event Store Integration
     # =========================================================================
 
-    event_store_url: str | None = Field(
-        default=None,
+    event_store_host: str = Field(
+        default="localhost",
         description=(
-            "gRPC URL for the event store service. "
-            "Format: grpc://host:port "
-            "For local dev: grpc://localhost:50051 "
-            "Required for production. Optional in development (uses in-memory)."
+            "Event Store Server gRPC host. "
+            "For Docker: event-store (service name). "
+            "For local dev: localhost"
+        ),
+    )
+
+    event_store_port: int = Field(
+        default=50051,
+        ge=1024,
+        le=65535,
+        description="Event Store Server gRPC port.",
+    )
+
+    event_store_tenant_id: str = Field(
+        default="aef",
+        description=(
+            "Tenant ID for multi-tenant Event Store Server. Each tenant has isolated event streams."
         ),
     )
 
@@ -115,7 +128,15 @@ class Settings(BaseSettings):
         default=30,
         ge=1,
         le=300,
-        description="Timeout for event store gRPC calls in seconds.",
+        description="Timeout for Event Store gRPC calls in seconds.",
+    )
+
+    event_store_url: str | None = Field(
+        default=None,
+        description=(
+            "DEPRECATED: Use event_store_host and event_store_port instead. "
+            "Legacy gRPC URL for the event store service."
+        ),
     )
 
     # =========================================================================

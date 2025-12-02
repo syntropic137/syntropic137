@@ -39,9 +39,7 @@ def run_shortcut(
     inputs: list[str] | None = typer.Option(
         None, "--input", "-i", help="Input variables as key=value"
     ),
-    dry_run: bool = typer.Option(
-        False, "--dry-run", "-n", help="Validate without executing"
-    ),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate without executing"),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
 ) -> None:
     """Execute a workflow (shortcut for 'aef workflow run')."""

@@ -8,6 +8,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "sse-starlette>=2.2.0",
+    "asyncpg>=0.30.0",
     "aef-shared",
     "aef-domain",
     "aef-adapters",

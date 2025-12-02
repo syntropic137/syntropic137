@@ -38,6 +38,22 @@ dev-reset:
 cli *args:
     uv run --package aef-cli aef {{args}}
 
+# Start the dashboard backend (API server)
+dashboard-backend:
+    uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Start the dashboard frontend (Vite dev server)
+dashboard-frontend:
+    cd apps/aef-dashboard-ui && npm run dev
+
+# Install dashboard frontend dependencies
+dashboard-install:
+    cd apps/aef-dashboard-ui && npm install
+
+# Build dashboard frontend for production
+dashboard-build:
+    cd apps/aef-dashboard-ui && npm run build
+
 # --- Testing & Quality Assurance ---
 
 # Run all tests with coverage
@@ -82,6 +98,10 @@ seed-workflows:
     uv run --package aef-cli aef seed
 
 # --- Utility Commands ---
+
+# Validate event store by querying PostgreSQL for stored events
+validate-events:
+    uv run python scripts/validate_event_store.py
 
 # Generate .env.example from Settings class
 gen-env:

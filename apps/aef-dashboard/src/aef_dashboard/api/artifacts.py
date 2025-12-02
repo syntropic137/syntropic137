@@ -2,52 +2,24 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from fastapi import APIRouter, HTTPException, Query
 
-from aef_adapters.storage import get_artifact_repository
 from aef_dashboard.models.schemas import ArtifactResponse, ArtifactSummary
-
-if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
+from aef_dashboard.read_models import ArtifactReadModel, get_all_artifacts
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
 
-def _artifact_to_summary(artifact: ArtifactAggregate) -> ArtifactSummary:
-    """Convert an ArtifactAggregate to an ArtifactSummary."""
+def _artifact_to_summary(artifact: ArtifactReadModel) -> ArtifactSummary:
+    """Convert an ArtifactReadModel to an ArtifactSummary."""
     return ArtifactSummary(
-        id=str(artifact.id) if artifact.id else "",
+        id=artifact.id,
         workflow_id=artifact.workflow_id,
         phase_id=artifact.phase_id,
-        artifact_type=artifact.artifact_type.value if artifact.artifact_type else "other",
+        artifact_type=artifact.artifact_type,
         title=artifact.title,
         size_bytes=artifact.size_bytes,
-        created_at=None,  # Not tracked in aggregate state
-    )
-
-
-def _artifact_to_response(
-    artifact: ArtifactAggregate, include_content: bool = False
-) -> ArtifactResponse:
-    """Convert an ArtifactAggregate to an ArtifactResponse."""
-    return ArtifactResponse(
-        id=str(artifact.id) if artifact.id else "",
-        workflow_id=artifact.workflow_id,
-        phase_id=artifact.phase_id,
-        session_id=artifact.session_id,
-        artifact_type=artifact.artifact_type.value if artifact.artifact_type else "other",
-        is_primary_deliverable=artifact.is_primary_deliverable,
-        content=artifact.content if include_content else None,
-        content_type=artifact.content_type.value if artifact.content_type else "text/markdown",
-        content_hash=artifact.content_hash,
-        size_bytes=artifact.size_bytes,
-        title=artifact.title,
-        derived_from=artifact.derived_from or [],
-        created_at=None,  # Not tracked in aggregate state
-        created_by=None,  # Not tracked in aggregate state
-        metadata={},  # Not exposed via property
+        created_at=artifact.created_at,
     )
 
 
@@ -59,20 +31,19 @@ async def list_artifacts(
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> list[ArtifactSummary]:
     """List artifacts with optional filtering."""
-    repo = get_artifact_repository()
+    artifacts = await get_all_artifacts()
 
-    if workflow_id and phase_id:
-        artifacts = repo.get_by_phase(workflow_id, phase_id)
-    elif workflow_id:
-        artifacts = repo.get_by_workflow(workflow_id)
-    else:
-        artifacts = repo.get_all()
+    # Filter by workflow_id if provided
+    if workflow_id:
+        artifacts = [a for a in artifacts if a.workflow_id == workflow_id]
+
+    # Filter by phase_id if provided
+    if phase_id:
+        artifacts = [a for a in artifacts if a.phase_id == phase_id]
 
     # Filter by artifact_type if provided
     if artifact_type:
-        artifacts = [
-            a for a in artifacts if a.artifact_type and a.artifact_type.value == artifact_type
-        ]
+        artifacts = [a for a in artifacts if a.artifact_type == artifact_type]
 
     # Apply limit
     artifacts = artifacts[:limit]
@@ -83,29 +54,47 @@ async def list_artifacts(
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(
     artifact_id: str,
-    include_content: bool = Query(False, description="Include artifact content in response"),
+    include_content: bool = Query(  # noqa: ARG001 - API parameter for future use
+        False, description="Include artifact content in response"
+    ),
 ) -> ArtifactResponse:
     """Get artifact details by ID."""
-    repo = get_artifact_repository()
-    artifact = await repo.get(artifact_id)
+    artifacts = await get_all_artifacts()
+    artifact = next((a for a in artifacts if a.id == artifact_id), None)
 
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
-    return _artifact_to_response(artifact, include_content=include_content)
+    return ArtifactResponse(
+        id=artifact.id,
+        workflow_id=artifact.workflow_id,
+        phase_id=artifact.phase_id,
+        session_id=None,
+        artifact_type=artifact.artifact_type,
+        is_primary_deliverable=False,
+        content=None,  # Content not stored in read model
+        content_type="text/markdown",
+        content_hash=None,
+        size_bytes=artifact.size_bytes,
+        title=artifact.title,
+        derived_from=[],
+        created_at=artifact.created_at,
+        created_by=None,
+        metadata={},
+    )
 
 
 @router.get("/{artifact_id}/content")
 async def get_artifact_content(artifact_id: str) -> dict[str, str | None]:
     """Get artifact content only (for large artifacts)."""
-    repo = get_artifact_repository()
-    artifact = await repo.get(artifact_id)
+    artifacts = await get_all_artifacts()
+    artifact = next((a for a in artifacts if a.id == artifact_id), None)
 
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
     return {
         "artifact_id": artifact_id,
-        "content": artifact.content,
-        "content_type": artifact.content_type.value if artifact.content_type else "text/markdown",
+        "content": None,  # Content not stored in read model
+        "content_type": "text/markdown",
     }
