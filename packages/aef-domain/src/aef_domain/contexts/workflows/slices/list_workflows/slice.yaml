@@ -1,0 +1,17 @@
+name: list-workflows
+type: query
+projection: WorkflowListProjection
+handler: ListWorkflowsHandler
+query: ListWorkflowsQuery
+returns: list[WorkflowSummary]
+
+subscribes_to:
+  - WorkflowCreatedEvent
+  - PhaseStartedEvent
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+
+description: >
+  Query slice for listing workflows with optional filtering.
+  Maintains an optimized read model for efficient list queries.
+

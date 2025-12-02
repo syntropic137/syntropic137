@@ -1,0 +1,12 @@
+name: get-workflow-detail
+type: query
+projection: WorkflowDetailProjection
+subscribes_to:
+  - WorkflowCreatedEvent
+  - WorkflowExecutionStartedEvent
+  - PhaseStartedEvent
+  - PhaseCompletedEvent
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+returns: WorkflowDetail | None
+

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -43,8 +44,8 @@ class WorkflowDetail:
     description: str | None
     """Optional description of the workflow."""
 
-    phases: list[PhaseDetail] = field(default_factory=list)
-    """List of phases in the workflow."""
+    phases: list[PhaseDetail | dict[str, Any]] = field(default_factory=list)
+    """List of phases in the workflow (can be PhaseDetail or dict)."""
 
     created_at: datetime | None = None
     """When the workflow was created."""
@@ -91,6 +92,21 @@ class WorkflowDetail:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
+
+        def phase_to_dict(p: PhaseDetail | dict) -> dict:
+            """Convert a phase to dict, handling both PhaseDetail and dict inputs."""
+            if isinstance(p, dict):
+                return p
+            return {
+                "id": p.id,
+                "name": p.name,
+                "agent_type": p.agent_type,
+                "status": p.status,
+                "started_at": p.started_at.isoformat() if p.started_at else None,
+                "completed_at": (p.completed_at.isoformat() if p.completed_at else None),
+                "error_message": p.error_message,
+            }
+
         return {
             "id": self.id,
             "name": self.name,
@@ -98,18 +114,7 @@ class WorkflowDetail:
             "classification": self.classification,
             "status": self.status,
             "description": self.description,
-            "phases": [
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "agent_type": p.agent_type,
-                    "status": p.status,
-                    "started_at": p.started_at.isoformat() if p.started_at else None,
-                    "completed_at": (p.completed_at.isoformat() if p.completed_at else None),
-                    "error_message": p.error_message,
-                }
-                for p in self.phases
-            ],
+            "phases": [phase_to_dict(p) for p in self.phases],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": (self.completed_at.isoformat() if self.completed_at else None),

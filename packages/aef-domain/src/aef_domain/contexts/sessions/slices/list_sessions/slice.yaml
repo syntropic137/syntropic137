@@ -1,0 +1,9 @@
+name: list-sessions
+type: query
+projection: SessionListProjection
+subscribes_to:
+  - SessionStartedEvent
+  - OperationRecordedEvent
+  - SessionCompletedEvent
+returns: list[SessionSummary]
+
