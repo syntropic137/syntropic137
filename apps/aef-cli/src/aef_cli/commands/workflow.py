@@ -148,15 +148,55 @@ def create_workflow(
 @app.command("list")
 def list_workflows() -> None:
     """List all workflows in the system."""
-    from aef_adapters.storage import get_event_store
+    import asyncio
 
-    event_store = get_event_store()
-    events = event_store.get_all_events()
+    from aef_adapters.storage import (
+        connect_event_store,
+        disconnect_event_store,
+        get_event_store_client,
+        get_workflow_repository,
+    )
+    from aef_shared.settings import get_settings
 
-    # Filter for WorkflowCreated events
-    workflow_events = [e for e in events if e.event_type == "WorkflowCreated"]
+    settings = get_settings()
 
-    if not workflow_events:
+    # For test environment, use in-memory repository (sync API)
+    if settings.is_test:
+        repo = get_workflow_repository()
+        workflows_data = [
+            {
+                "id": w.id,
+                "name": w.name,
+                "workflow_type": w._workflow_type.value,
+                "status": w._status.value,
+            }
+            for w in repo.get_all()
+        ]
+    else:
+        # For dev/prod, read from event store (async API)
+        async def _get_workflows() -> list[dict]:
+            await connect_event_store()
+            try:
+                client = get_event_store_client()
+                events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
+                workflow_events = [
+                    e for e in events if e.event.event_type == "WorkflowCreated"
+                ]
+                return [
+                    {
+                        "id": e.metadata.aggregate_id,
+                        "name": e.event.model_dump().get("name", "Unknown"),
+                        "workflow_type": e.event.model_dump().get("workflow_type", "Unknown"),
+                        "status": "pending",  # Default status
+                    }
+                    for e in workflow_events
+                ]
+            finally:
+                await disconnect_event_store()
+
+        workflows_data = asyncio.run(_get_workflows())
+
+    if not workflows_data:
         console.print("[dim]No workflows found. Create one with:[/dim]")
         console.print('  [cyan]aef workflow create "My Workflow"[/cyan]')
         return
@@ -168,13 +208,12 @@ def list_workflows() -> None:
     table.add_column("Type", style="green")
     table.add_column("Status", style="yellow")
 
-    for event in workflow_events:
-        data = event.event_data
+    for wf in workflows_data:
         table.add_row(
-            event.aggregate_id[:8] + "...",
-            data.get("name", "Unknown"),
-            data.get("workflow_type", "Unknown"),
-            data.get("status", "created"),
+            wf["id"][:8] + "...",
+            wf["name"],
+            wf["workflow_type"],
+            wf["status"],
         )
 
     console.print(table)
@@ -185,33 +224,81 @@ def show_workflow(
     workflow_id: Annotated[str, typer.Argument(help="Workflow ID (partial match supported)")],
 ) -> None:
     """Show details of a specific workflow."""
-    from aef_adapters.storage import get_event_store
+    import asyncio
 
-    event_store = get_event_store()
-    events = event_store.get_all_events()
+    from aef_adapters.storage import (
+        connect_event_store,
+        disconnect_event_store,
+        get_event_store_client,
+        get_workflow_repository,
+    )
+    from aef_shared.settings import get_settings
 
-    # Find matching workflow
-    matching = [
-        e
-        for e in events
-        if e.event_type == "WorkflowCreated" and e.aggregate_id.startswith(workflow_id)
-    ]
+    settings = get_settings()
 
-    if not matching:
+    # For test environment, use in-memory repository (sync API)
+    if settings.is_test:
+        repo = get_workflow_repository()
+        workflows = repo.get_all()
+        matching = [w for w in workflows if w.id.startswith(workflow_id)]
+
+        if not matching:
+            console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
+            raise typer.Exit(1)
+
+        workflow = matching[0]
+        workflow_data = {
+            "id": workflow.id,
+            "name": workflow.name,
+            "workflow_type": workflow._workflow_type.value,
+            "status": workflow._status.value,
+            "classification": workflow._classification.value,
+            "phases": [{"name": p.name} for p in workflow._phases],
+        }
+    else:
+        # For dev/prod, read from event store (async API)
+        async def _get_workflow() -> dict | None:
+            await connect_event_store()
+            try:
+                client = get_event_store_client()
+                events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
+                matching = [
+                    e
+                    for e in events
+                    if e.event.event_type == "WorkflowCreated"
+                    and e.metadata.aggregate_id.startswith(workflow_id)
+                ]
+
+                if not matching:
+                    return None
+
+                event = matching[0]
+                data = event.event.model_dump()
+                return {
+                    "id": event.metadata.aggregate_id,
+                    "name": data.get("name", "Unknown"),
+                    "workflow_type": data.get("workflow_type", "Unknown"),
+                    "status": "pending",
+                    "classification": data.get("classification", "Unknown"),
+                    "phases": data.get("phases", []),
+                }
+            finally:
+                await disconnect_event_store()
+
+        workflow_data = asyncio.run(_get_workflow())
+
+    if workflow_data is None:
         console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
         raise typer.Exit(1)
 
-    event = matching[0]
-    data = event.event_data
-
     console.print("\n[bold]Workflow Details[/bold]")
-    console.print(f"  [dim]ID:[/dim] {event.aggregate_id}")
-    console.print(f"  [dim]Name:[/dim] [cyan]{data.get('name')}[/cyan]")
-    console.print(f"  [dim]Type:[/dim] {data.get('workflow_type')}")
-    console.print(f"  [dim]Status:[/dim] {data.get('status')}")
-    console.print(f"  [dim]Description:[/dim] {data.get('description')}")
+    console.print(f"  [dim]ID:[/dim] {workflow_data['id']}")
+    console.print(f"  [dim]Name:[/dim] [cyan]{workflow_data['name']}[/cyan]")
+    console.print(f"  [dim]Type:[/dim] {workflow_data['workflow_type']}")
+    console.print(f"  [dim]Status:[/dim] {workflow_data['status']}")
+    console.print(f"  [dim]Classification:[/dim] {workflow_data['classification']}")
 
-    phases = data.get("phases", [])
+    phases = workflow_data.get("phases", [])
     if phases:
         console.print(f"\n  [bold]Phases ({len(phases)}):[/bold]")
         for phase in phases:
