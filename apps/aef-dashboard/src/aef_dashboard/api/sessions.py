@@ -3,28 +3,36 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
 
+from aef_adapters.projections import get_projection_manager
 from aef_dashboard.models.schemas import (
     SessionResponse,
     SessionSummary,
 )
-from aef_dashboard.read_models import SessionReadModel, get_all_sessions
+from aef_domain.contexts.sessions.domain.queries import ListSessionsQuery
+from aef_domain.contexts.sessions.slices.list_sessions import ListSessionsHandler
+
+if TYPE_CHECKING:
+    from aef_domain.contexts.sessions.domain.read_models import (
+        SessionSummary as DomainSessionSummary,
+    )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-def _session_to_summary(session: SessionReadModel) -> SessionSummary:
-    """Convert a SessionReadModel to a SessionSummary."""
+def _domain_session_to_api(session: DomainSessionSummary) -> SessionSummary:
+    """Convert domain SessionSummary to API SessionSummary."""
     return SessionSummary(
         id=session.id,
         workflow_id=session.workflow_id,
-        phase_id=session.phase_id,
+        phase_id=None,  # Not tracked in current domain model
         status=session.status,
-        agent_provider=session.agent_provider,
+        agent_provider=session.agent_type,
         total_tokens=session.total_tokens,
-        total_cost_usd=Decimal(str(session.total_cost_usd)),
+        total_cost_usd=session.total_cost_usd,
         started_at=session.started_at,
         completed_at=session.completed_at,
     )
@@ -37,26 +45,32 @@ async def list_sessions(
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> list[SessionSummary]:
     """List agent sessions with optional filtering."""
-    sessions = await get_all_sessions()
+    # Get projection manager and create handler
+    manager = get_projection_manager()
+    handler = ListSessionsHandler(manager.session_list)
 
-    # Filter by workflow_id if provided
-    if workflow_id:
-        sessions = [s for s in sessions if s.workflow_id == workflow_id]
+    # Build and execute query
+    query = ListSessionsQuery(
+        workflow_id=workflow_id,
+        status_filter=status,
+        limit=limit,
+    )
+    sessions = await handler.handle(query)
 
-    # Filter by status if provided
-    if status:
-        sessions = [s for s in sessions if s.status == status]
-
-    # Apply limit
-    sessions = sessions[:limit]
-
-    return [_session_to_summary(s) for s in sessions]
+    return [_domain_session_to_api(s) for s in sessions]
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session(session_id: str) -> SessionResponse:
     """Get session details by ID."""
-    sessions = await get_all_sessions()
+    # Get projection manager and create handler
+    manager = get_projection_manager()
+    handler = ListSessionsHandler(manager.session_list)
+
+    # Query all sessions and find the matching one
+    # TODO: Add a GetSessionDetailQuery for direct lookup
+    query = ListSessionsQuery(limit=10000)
+    sessions = await handler.handle(query)
     session = next((s for s in sessions if s.id == session_id), None)
 
     if session is None:
@@ -65,9 +79,9 @@ async def get_session(session_id: str) -> SessionResponse:
     return SessionResponse(
         id=session.id,
         workflow_id=session.workflow_id,
-        phase_id=session.phase_id,
+        phase_id=None,
         milestone_id=None,
-        agent_provider=session.agent_provider,
+        agent_provider=session.agent_type,
         agent_model=None,
         status=session.status,
         input_tokens=0,

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, HTTPException, Query
 
+from aef_adapters.projections import get_projection_manager
 from aef_dashboard.models.schemas import (
     ExecutionHistoryResponse,
     PhaseInfo,
@@ -11,48 +14,59 @@ from aef_dashboard.models.schemas import (
     WorkflowResponse,
     WorkflowSummary,
 )
-from aef_dashboard.read_models import (
-    WorkflowReadModel,
-    get_all_workflows,
-    get_workflow_by_id,
+from aef_domain.contexts.workflows.domain.queries import (
+    GetWorkflowDetailQuery,
+    ListWorkflowsQuery,
 )
+from aef_domain.contexts.workflows.slices.get_workflow_detail import (
+    GetWorkflowDetailHandler,
+)
+from aef_domain.contexts.workflows.slices.list_workflows import ListWorkflowsHandler
+
+if TYPE_CHECKING:
+    from aef_domain.contexts.workflows.domain.read_models import (
+        WorkflowDetail,
+    )
+    from aef_domain.contexts.workflows.domain.read_models import (
+        WorkflowSummary as DomainWorkflowSummary,
+    )
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
-def _workflow_to_summary(workflow: WorkflowReadModel) -> WorkflowSummary:
-    """Convert a WorkflowReadModel to a WorkflowSummary."""
+def _domain_summary_to_api(summary: DomainWorkflowSummary) -> WorkflowSummary:
+    """Convert domain WorkflowSummary to API WorkflowSummary."""
     return WorkflowSummary(
-        id=workflow.id,
-        name=workflow.name,
-        workflow_type=workflow.workflow_type,
-        status=workflow.status,
-        phase_count=len(workflow.phases),
-        created_at=workflow.created_at,
+        id=summary.id,
+        name=summary.name,
+        workflow_type=summary.workflow_type,
+        status=summary.status,
+        phase_count=summary.phase_count,
+        created_at=summary.created_at,
     )
 
 
-def _workflow_to_response(workflow: WorkflowReadModel) -> WorkflowResponse:
-    """Convert a WorkflowReadModel to a WorkflowResponse."""
+def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
+    """Convert domain WorkflowDetail to API WorkflowResponse."""
     phases = [
         PhaseInfo(
-            phase_id=p.get("phase_id", f"phase-{i}"),
-            name=p.get("name", f"Phase {i}"),
-            order=p.get("order", i),
-            description=p.get("description"),
+            phase_id=p.get("id", f"phase-{i}") if isinstance(p, dict) else p.id,
+            name=p.get("name", f"Phase {i}") if isinstance(p, dict) else p.name,
+            order=i,
+            description=p.get("description") if isinstance(p, dict) else None,
         )
-        for i, p in enumerate(workflow.phases, 1)
+        for i, p in enumerate(detail.phases, 1)
     ]
 
     return WorkflowResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        workflow_type=workflow.workflow_type,
-        classification=workflow.classification,
-        status=workflow.status,
+        id=detail.id,
+        name=detail.name,
+        description=detail.description,
+        workflow_type=detail.workflow_type,
+        classification=detail.classification,
+        status=detail.status,
         phases=phases,
-        created_at=workflow.created_at,
+        created_at=detail.created_at,
         updated_at=None,
         metadata={},
     )
@@ -65,21 +79,26 @@ async def list_workflows(
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ) -> WorkflowListResponse:
     """List all workflows with optional filtering."""
-    all_workflows = await get_all_workflows()
+    # Get projection manager and create handler
+    manager = get_projection_manager()
+    handler = ListWorkflowsHandler(manager.workflow_list)
 
-    # Filter by status if provided
-    if status:
-        all_workflows = [w for w in all_workflows if w.status == status]
+    # Build and execute query
+    offset = (page - 1) * page_size
+    query = ListWorkflowsQuery(
+        status_filter=status,
+        limit=page_size,
+        offset=offset,
+    )
+    summaries = await handler.handle(query)
 
-    total = len(all_workflows)
-
-    # Apply pagination
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated = all_workflows[start:end]
+    # Get total count (without pagination) for proper pagination info
+    total_query = ListWorkflowsQuery(status_filter=status, limit=10000, offset=0)
+    all_summaries = await handler.handle(total_query)
+    total = len(all_summaries)
 
     return WorkflowListResponse(
-        workflows=[_workflow_to_summary(w) for w in paginated],
+        workflows=[_domain_summary_to_api(s) for s in summaries],
         total=total,
         page=page,
         page_size=page_size,
@@ -89,26 +108,38 @@ async def list_workflows(
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
 async def get_workflow(workflow_id: str) -> WorkflowResponse:
     """Get workflow details by ID."""
-    workflow = await get_workflow_by_id(workflow_id)
+    # Get projection manager and create handler
+    manager = get_projection_manager()
+    handler = GetWorkflowDetailHandler(manager.workflow_detail)
 
-    if workflow is None:
+    # Execute query
+    query = GetWorkflowDetailQuery(workflow_id=workflow_id)
+    detail = await handler.handle(query)
+
+    if detail is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    return _workflow_to_response(workflow)
+    return _domain_detail_to_api(detail)
 
 
 @router.get("/{workflow_id}/history", response_model=ExecutionHistoryResponse)
 async def get_workflow_history(workflow_id: str) -> ExecutionHistoryResponse:
     """Get execution history for a workflow."""
-    workflow = await get_workflow_by_id(workflow_id)
+    # Get projection manager and create handler
+    manager = get_projection_manager()
+    handler = GetWorkflowDetailHandler(manager.workflow_detail)
 
-    if workflow is None:
+    # Execute query
+    query = GetWorkflowDetailQuery(workflow_id=workflow_id)
+    detail = await handler.handle(query)
+
+    if detail is None:
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    # For now, return empty history (sessions/artifacts not yet implemented)
+    # For now, return empty history (sessions/artifacts not yet implemented in history)
     return ExecutionHistoryResponse(
         workflow_id=workflow_id,
-        workflow_name=workflow.name,
+        workflow_name=detail.name,
         executions=[],
         total_executions=0,
     )

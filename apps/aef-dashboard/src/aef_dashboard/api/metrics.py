@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
+from aef_adapters.projections import get_projection_manager
 from aef_dashboard.models.schemas import MetricsResponse
-from aef_dashboard.read_models import get_metrics as get_metrics_from_db
+from aef_domain.contexts.metrics.domain.queries import GetDashboardMetricsQuery
+from aef_domain.contexts.metrics.slices.get_metrics import GetDashboardMetricsHandler
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -17,19 +19,24 @@ async def get_metrics(
     ),
 ) -> MetricsResponse:
     """Get aggregated metrics across all workflows or for a specific workflow."""
-    # Get metrics from the read model (direct PostgreSQL queries)
-    metrics = await get_metrics_from_db()
+    # Get projection manager and create handler
+    manager = get_projection_manager()
+    handler = GetDashboardMetricsHandler(manager.dashboard_metrics)
+
+    # Execute query
+    query = GetDashboardMetricsQuery()
+    metrics = await handler.handle(query)
 
     return MetricsResponse(
-        total_workflows=metrics["total_workflows"],
-        completed_workflows=metrics["completed_workflows"],
-        failed_workflows=metrics["failed_workflows"],
-        total_sessions=metrics["total_sessions"],
-        total_input_tokens=0,  # Not tracked yet
-        total_output_tokens=0,  # Not tracked yet
-        total_tokens=metrics["total_tokens"],
-        total_cost_usd=metrics["total_cost_usd"],
-        total_artifacts=metrics["total_artifacts"],
-        total_artifact_bytes=metrics["total_artifact_bytes"],
+        total_workflows=metrics.total_workflows,
+        completed_workflows=metrics.completed_workflows,
+        failed_workflows=metrics.failed_workflows,
+        total_sessions=metrics.total_sessions,
+        total_input_tokens=0,  # Not tracked separately yet
+        total_output_tokens=0,  # Not tracked separately yet
+        total_tokens=metrics.total_tokens,
+        total_cost_usd=metrics.total_cost_usd,
+        total_artifacts=metrics.total_artifacts,
+        total_artifact_bytes=0,  # Not tracked yet
         phases=[],  # Phase-level metrics not implemented yet
     )
