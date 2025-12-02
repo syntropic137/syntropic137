@@ -24,6 +24,19 @@ For Testing:
 
     mock_config = MockAgentConfig(responses=["Test response"])
     agent = MockAgent(mock_config)
+
+For Instrumented Agents (with observability):
+    from aef_adapters.agents import InstrumentedAgent, SessionContext
+    from aef_adapters.hooks import get_hook_client, ValidatorRegistry
+
+    async with get_hook_client() as client:
+        instrumented = InstrumentedAgent(
+            agent=MockAgent(),
+            hook_client=client,
+            validators=ValidatorRegistry(),
+        )
+        instrumented.set_session_context("session-123")
+        response = await instrumented.complete(messages, config)
 """
 
 from aef_adapters.agents.factory import (
@@ -31,6 +44,7 @@ from aef_adapters.agents.factory import (
     get_available_agents,
     is_agent_available,
 )
+from aef_adapters.agents.instrumented import InstrumentedAgent
 from aef_adapters.agents.mock import MockAgent, MockAgentConfig
 from aef_adapters.agents.protocol import (
     AgentAuthenticationError,
@@ -45,6 +59,7 @@ from aef_adapters.agents.protocol import (
     AgentRole,
     AgentTimeoutError,
 )
+from aef_adapters.agents.session_context import SessionContext
 
 # Lazy imports for adapters to avoid requiring their dependencies
 # Use get_agent(AgentProvider.CLAUDE) or import directly when needed
@@ -61,8 +76,10 @@ __all__ = [
     "AgentResponse",
     "AgentRole",
     "AgentTimeoutError",
+    "InstrumentedAgent",
     "MockAgent",
     "MockAgentConfig",
+    "SessionContext",
     "get_agent",
     "get_available_agents",
     "is_agent_available",

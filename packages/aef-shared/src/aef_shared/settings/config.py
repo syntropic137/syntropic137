@@ -175,6 +175,50 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
+    # HOOKS (Observability)
+    # =========================================================================
+
+    hook_backend_url: str | None = Field(
+        default=None,
+        description=(
+            "URL for hook backend service for observability events. "
+            "Format: http://host:port "
+            "For local dev: http://localhost:8080 "
+            "When not set, uses JSONL file backend at .agentic/hooks/events.jsonl"
+        ),
+    )
+
+    hook_batch_size: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description="Number of events to batch before sending to hook backend.",
+    )
+
+    hook_flush_interval_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60.0,
+        description="Max seconds to wait before flushing buffered hook events.",
+    )
+
+    # =========================================================================
+    # DASHBOARD
+    # =========================================================================
+
+    dashboard_port: int = Field(
+        default=8000,
+        ge=1024,
+        le=65535,
+        description="Port for the dashboard API server.",
+    )
+
+    dashboard_host: str = Field(
+        default="127.0.0.1",
+        description="Host to bind the dashboard API server.",
+    )
+
+    # =========================================================================
     # STORAGE (S3/Supabase for artifacts)
     # =========================================================================
 
