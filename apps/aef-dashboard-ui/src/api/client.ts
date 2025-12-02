@@ -134,10 +134,51 @@ export async function getRecentEvents(): Promise<EventMessage[]> {
 
 export function subscribeToEvents(
   onEvent: (event: EventMessage) => void,
-  onError?: (error: Event) => void
+  onError?: (error: Event) => void,
+  onConnected?: () => void
 ): () => void {
   const eventSource = new EventSource(`${API_BASE}/events/stream`)
 
+  // Handle named 'connected' event
+  eventSource.addEventListener('connected', () => {
+    console.log('SSE connected to server')
+    onConnected?.()
+  })
+
+  // Handle named 'heartbeat' event - keeps connection status alive
+  eventSource.addEventListener('heartbeat', () => {
+    onConnected?.()
+  })
+
+  // Handle all other named events (workflow_started, phase_completed, etc.)
+  const eventTypes = [
+    'workflow_started',
+    'workflow_completed',
+    'workflow_failed',
+    'phase_started',
+    'phase_completed',
+    'phase_failed',
+    'session_started',
+    'session_completed',
+    'session_failed',
+  ]
+
+  eventTypes.forEach((eventType) => {
+    eventSource.addEventListener(eventType, (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data)
+        onEvent({
+          event_type: eventType,
+          timestamp: data.timestamp || new Date().toISOString(),
+          ...data,
+        } as EventMessage)
+      } catch (e) {
+        console.error('Failed to parse event:', e)
+      }
+    })
+  })
+
+  // Handle unnamed events (fallback)
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data) as EventMessage

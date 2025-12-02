@@ -58,9 +58,9 @@ export function EventFeed() {
     const unsubscribe = subscribeToEvents(
       (event) => {
         setEvents((prev) => [...prev.slice(-49), event])
-        setIsConnected(true)
       },
-      () => setIsConnected(false)
+      () => setIsConnected(false),
+      () => setIsConnected(true) // onConnected callback
     )
 
     return unsubscribe
