@@ -1,2 +1,1 @@
 """Metrics domain layer."""
-

@@ -41,4 +41,3 @@ class ListWorkflowsHandler:
             offset=query.offset,
             order_by=query.order_by,
         )
-

@@ -24,4 +24,3 @@ class GetDashboardMetricsHandler:
         # Currently we ignore include_cost_breakdown flag
         # Future: could return additional breakdown data
         return await self.projection.get_metrics()
-

@@ -155,4 +155,3 @@ class WorkflowListProjection:
             offset=offset,
         )
         return [WorkflowSummary.from_dict(d) for d in data]
-

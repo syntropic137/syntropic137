@@ -86,9 +86,7 @@ class DashboardMetricsProjection:
         metrics = await self._get_or_create_metrics()
 
         # Add tokens from this session
-        metrics["total_tokens"] = metrics.get("total_tokens", 0) + event_data.get(
-            "total_tokens", 0
-        )
+        metrics["total_tokens"] = metrics.get("total_tokens", 0) + event_data.get("total_tokens", 0)
 
         # Add cost from this session
         existing_cost = Decimal(str(metrics.get("total_cost_usd", 0)))
@@ -107,4 +105,3 @@ class DashboardMetricsProjection:
         """Get the current dashboard metrics."""
         data = await self._get_or_create_metrics()
         return DashboardMetrics.from_dict(data)
-

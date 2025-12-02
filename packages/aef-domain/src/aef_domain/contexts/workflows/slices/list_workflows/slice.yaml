@@ -14,4 +14,3 @@ subscribes_to:
 description: >
   Query slice for listing workflows with optional filtering.
   Maintains an optimized read model for efficient list queries.
-

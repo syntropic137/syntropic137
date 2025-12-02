@@ -10,4 +10,3 @@ subscribes_to:
   - SessionCompletedEvent
   - ArtifactCreatedEvent
 returns: DashboardMetrics
-

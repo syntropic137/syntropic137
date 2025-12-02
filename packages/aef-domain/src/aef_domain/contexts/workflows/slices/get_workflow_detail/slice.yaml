@@ -9,4 +9,3 @@ subscribes_to:
   - WorkflowCompletedEvent
   - WorkflowFailedEvent
 returns: WorkflowDetail | None
-

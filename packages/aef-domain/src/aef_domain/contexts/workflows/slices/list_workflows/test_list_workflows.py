@@ -64,14 +64,10 @@ class TestWorkflowListProjection:
         assert summaries[0].phase_count == 2
 
     @pytest.mark.asyncio
-    async def test_on_phase_started_updates_status(
-        self, projection: WorkflowListProjection
-    ):
+    async def test_on_phase_started_updates_status(self, projection: WorkflowListProjection):
         """Test that PhaseStarted updates status from pending to in_progress."""
         # Create workflow first
-        await projection.on_workflow_created(
-            {"workflow_id": "wf-1", "name": "Test", "phases": []}
-        )
+        await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
 
         # Start a phase
         await projection.on_phase_started({"workflow_id": "wf-1"})
@@ -82,9 +78,7 @@ class TestWorkflowListProjection:
     @pytest.mark.asyncio
     async def test_on_workflow_completed(self, projection: WorkflowListProjection):
         """Test handling WorkflowCompleted event."""
-        await projection.on_workflow_created(
-            {"workflow_id": "wf-1", "name": "Test", "phases": []}
-        )
+        await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
         await projection.on_workflow_completed({"workflow_id": "wf-1"})
 
         summaries = await projection.get_all()
@@ -93,9 +87,7 @@ class TestWorkflowListProjection:
     @pytest.mark.asyncio
     async def test_on_workflow_failed(self, projection: WorkflowListProjection):
         """Test handling WorkflowFailed event."""
-        await projection.on_workflow_created(
-            {"workflow_id": "wf-1", "name": "Test", "phases": []}
-        )
+        await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
         await projection.on_workflow_failed({"workflow_id": "wf-1"})
 
         summaries = await projection.get_all()
@@ -191,4 +183,3 @@ class TestListWorkflowsHandler:
         results = await handler.handle(query)
 
         assert results == []
-

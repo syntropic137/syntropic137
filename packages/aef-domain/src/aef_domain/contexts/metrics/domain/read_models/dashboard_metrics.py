@@ -61,4 +61,3 @@ class DashboardMetrics:
             "total_tokens": self.total_tokens,
             "total_cost_usd": str(self.total_cost_usd),
         }
-

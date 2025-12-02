@@ -1,2 +1,1 @@
 """Artifact query slices."""
-

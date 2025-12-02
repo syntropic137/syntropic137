@@ -137,9 +137,7 @@ class ProjectionManager:
                     try:
                         await handler(event_data)
                     except Exception as e:
-                        logger.error(
-                            f"Error in projection {projection_name}.{method_name}: {e}"
-                        )
+                        logger.error(f"Error in projection {projection_name}.{method_name}: {e}")
 
     async def catch_up_all(self, events: list[dict]) -> None:
         """Catch up all projections from a list of events.
@@ -191,4 +189,3 @@ def get_projection_manager() -> ProjectionManager:
 def reset_projection_manager() -> None:
     """Reset the projection manager singleton (for testing)."""
     get_projection_manager.cache_clear()
-

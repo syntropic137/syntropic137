@@ -42,9 +42,7 @@ class TestDashboardMetricsProjection:
     """Tests for DashboardMetricsProjection."""
 
     @pytest.mark.asyncio
-    async def test_initial_metrics_are_zero(
-        self, projection: DashboardMetricsProjection
-    ):
+    async def test_initial_metrics_are_zero(self, projection: DashboardMetricsProjection):
         """Test that initial metrics are all zero."""
         metrics = await projection.get_metrics()
         assert metrics.total_workflows == 0
@@ -54,9 +52,7 @@ class TestDashboardMetricsProjection:
         assert metrics.total_artifacts == 0
 
     @pytest.mark.asyncio
-    async def test_workflow_created_increments_total(
-        self, projection: DashboardMetricsProjection
-    ):
+    async def test_workflow_created_increments_total(self, projection: DashboardMetricsProjection):
         """Test WorkflowCreated increments total_workflows."""
         await projection.on_workflow_created({"workflow_id": "wf-1"})
         await projection.on_workflow_created({"workflow_id": "wf-2"})
@@ -85,9 +81,7 @@ class TestDashboardMetricsProjection:
         assert metrics.completed_workflows == 1
 
     @pytest.mark.asyncio
-    async def test_workflow_failed_updates_counts(
-        self, projection: DashboardMetricsProjection
-    ):
+    async def test_workflow_failed_updates_counts(self, projection: DashboardMetricsProjection):
         """Test WorkflowFailed updates counts correctly."""
         await projection.on_workflow_created({"workflow_id": "wf-1"})
         await projection.on_workflow_execution_started({"workflow_id": "wf-1"})
@@ -100,9 +94,7 @@ class TestDashboardMetricsProjection:
         assert metrics.failed_workflows == 1
 
     @pytest.mark.asyncio
-    async def test_session_events_update_metrics(
-        self, projection: DashboardMetricsProjection
-    ):
+    async def test_session_events_update_metrics(self, projection: DashboardMetricsProjection):
         """Test session events update metrics."""
         await projection.on_session_started({"session_id": "s-1"})
         metrics = await projection.get_metrics()
@@ -116,9 +108,7 @@ class TestDashboardMetricsProjection:
         assert metrics.total_cost_usd == Decimal("0.05")
 
     @pytest.mark.asyncio
-    async def test_artifact_created_increments_count(
-        self, projection: DashboardMetricsProjection
-    ):
+    async def test_artifact_created_increments_count(self, projection: DashboardMetricsProjection):
         """Test ArtifactCreated increments artifact count."""
         await projection.on_artifact_created({"artifact_id": "a-1"})
         await projection.on_artifact_created({"artifact_id": "a-2"})
@@ -167,4 +157,3 @@ class TestGetDashboardMetricsHandler:
         assert result.total_workflows == 1
         assert result.total_sessions == 1
         assert result.total_artifacts == 1
-

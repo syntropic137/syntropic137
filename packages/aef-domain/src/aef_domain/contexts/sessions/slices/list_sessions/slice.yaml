@@ -6,4 +6,3 @@ subscribes_to:
   - OperationRecordedEvent
   - SessionCompletedEvent
 returns: list[SessionSummary]
-

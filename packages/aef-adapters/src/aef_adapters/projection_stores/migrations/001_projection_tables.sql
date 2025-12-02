@@ -149,4 +149,3 @@ COMMENT ON TABLE session_summaries IS 'Read model for session list views, mainta
 COMMENT ON TABLE artifact_summaries IS 'Read model for artifact list views, maintained by ArtifactListProjection';
 COMMENT ON TABLE dashboard_metrics IS 'Aggregated metrics for dashboard, maintained by DashboardMetricsProjection';
 COMMENT ON TABLE projection_states IS 'Tracks last processed event position for each projection';
-

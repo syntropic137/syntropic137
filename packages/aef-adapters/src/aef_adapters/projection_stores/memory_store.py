@@ -101,7 +101,12 @@ class InMemoryProjectionStore:
         if order_by:
             descending = order_by.startswith("-")
             field_name = order_by.lstrip("-")
-            results = sorted(results, key=lambda x: x.get(field_name, ""), reverse=descending)
+            # Handle None values by putting them at the end
+            results = sorted(
+                results,
+                key=lambda x: (x.get(field_name) is None, x.get(field_name) or ""),
+                reverse=descending,
+            )
 
         # Apply pagination
         if offset:

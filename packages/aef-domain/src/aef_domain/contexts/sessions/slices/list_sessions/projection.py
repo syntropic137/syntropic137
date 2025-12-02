@@ -77,9 +77,7 @@ class SessionListProjection:
                 "total_tokens", existing.get("total_tokens", 0)
             )
             existing["total_cost_usd"] = float(
-                Decimal(
-                    str(event_data.get("total_cost_usd", existing.get("total_cost_usd", 0)))
-                )
+                Decimal(str(event_data.get("total_cost_usd", existing.get("total_cost_usd", 0))))
             )
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 

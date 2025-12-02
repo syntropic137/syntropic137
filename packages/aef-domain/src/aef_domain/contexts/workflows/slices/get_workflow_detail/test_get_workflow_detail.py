@@ -60,9 +60,7 @@ class TestWorkflowDetailProjection:
     """Tests for WorkflowDetailProjection."""
 
     @pytest.mark.asyncio
-    async def test_handles_workflow_created(
-        self, projection: WorkflowDetailProjection
-    ):
+    async def test_handles_workflow_created(self, projection: WorkflowDetailProjection):
         """Test projection handles WorkflowCreated event."""
         event_data = {
             "workflow_id": "wf-1",
@@ -85,9 +83,7 @@ class TestWorkflowDetailProjection:
         assert len(detail.phases) == 1
 
     @pytest.mark.asyncio
-    async def test_handles_workflow_completed(
-        self, projection: WorkflowDetailProjection
-    ):
+    async def test_handles_workflow_completed(self, projection: WorkflowDetailProjection):
         """Test projection handles WorkflowCompleted event."""
         # First create the workflow
         await projection.on_workflow_created(
@@ -111,9 +107,7 @@ class TestWorkflowDetailProjection:
         assert detail.completed_at is not None
 
     @pytest.mark.asyncio
-    async def test_handles_workflow_failed(
-        self, projection: WorkflowDetailProjection
-    ):
+    async def test_handles_workflow_failed(self, projection: WorkflowDetailProjection):
         """Test projection handles WorkflowFailed event."""
         # First create the workflow
         await projection.on_workflow_created(
@@ -136,9 +130,7 @@ class TestWorkflowDetailProjection:
         assert detail.status == "failed"
 
     @pytest.mark.asyncio
-    async def test_handles_phase_started(
-        self, projection: WorkflowDetailProjection
-    ):
+    async def test_handles_phase_started(self, projection: WorkflowDetailProjection):
         """Test projection updates status on PhaseStarted."""
         # First create the workflow
         await projection.on_workflow_created(
@@ -161,9 +153,7 @@ class TestWorkflowDetailProjection:
         assert detail.status == "in_progress"
 
     @pytest.mark.asyncio
-    async def test_returns_none_for_missing_workflow(
-        self, projection: WorkflowDetailProjection
-    ):
+    async def test_returns_none_for_missing_workflow(self, projection: WorkflowDetailProjection):
         """Test projection returns None for non-existent workflow."""
         detail = await projection.get_by_id("non-existent")
         assert detail is None
@@ -198,9 +188,7 @@ class TestGetWorkflowDetailHandler:
         assert result.name == "Test Workflow"
 
     @pytest.mark.asyncio
-    async def test_handler_returns_none_for_missing(
-        self, handler: GetWorkflowDetailHandler
-    ):
+    async def test_handler_returns_none_for_missing(self, handler: GetWorkflowDetailHandler):
         """Test handler returns None for missing workflow."""
         query = GetWorkflowDetailQuery(workflow_id="non-existent")
         result = await handler.handle(query)

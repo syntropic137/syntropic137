@@ -532,7 +532,6 @@ def run_workflow(
         disconnect_event_store,
         get_artifact_repository,
         get_event_publisher,
-        get_event_store_client,
         get_session_repository,
         get_workflow_repository,
     )
@@ -558,46 +557,41 @@ def run_workflow(
     # Result container for async -> sync communication
     result_container: dict[str, Any] = {}
 
-    async def _find_workflow() -> tuple[str, dict, str, list] | None:
-        """Find workflow by ID prefix using the event store."""
-        # Connect to event store
-        await connect_event_store()
+    def _find_workflow_sync() -> tuple[str, dict, str, list] | None:
+        """Find workflow by ID prefix using the repository."""
+        repo = get_workflow_repository()
+        all_workflows = repo.get_all()
 
-        try:
-            client = get_event_store_client()
+        # Find matching workflows by ID prefix
+        matching = [w for w in all_workflows if w.id.startswith(workflow_id)]
 
-            # Read all events to find workflow
-            events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-            matching = [
-                e
-                for e in events
-                if e.event.event_type == "WorkflowCreated"
-                and e.metadata.aggregate_id.startswith(workflow_id)
-            ]
+        if not matching:
+            return None
 
-            if not matching:
-                return None
+        if len(matching) > 1:
+            result_container["multiple_matches"] = [(w.id, w.name) for w in matching[:5]]
+            return None
 
-            if len(matching) > 1:
-                result_container["multiple_matches"] = [
-                    (e.metadata.aggregate_id, e.event.model_dump().get("name", "Unknown"))
-                    for e in matching[:5]
-                ]
-                return None
+        workflow = matching[0]
+        # Convert phases to dict format
+        phases_data = [
+            {
+                "phase_id": p.phase_id,
+                "name": p.name,
+                "order": p.order,
+                "description": p.description,
+            }
+            for p in workflow._phases
+        ]
+        return (
+            workflow.id,
+            {"name": workflow.name},
+            workflow.name,
+            phases_data,
+        )
 
-            matched = matching[0]
-            event_data = matched.event.model_dump()
-            return (
-                matched.metadata.aggregate_id,
-                event_data,
-                event_data.get("name", "Unknown"),
-                event_data.get("phases", []),
-            )
-        finally:
-            await disconnect_event_store()
-
-    # Run the async workflow lookup
-    workflow_info = asyncio.run(_find_workflow())
+    # Run the sync workflow lookup
+    workflow_info = _find_workflow_sync()
 
     if workflow_info is None:
         if "multiple_matches" in result_container:
@@ -825,146 +819,57 @@ def workflow_status(
     Example:
         aef workflow status research-workflow
     """
-    from aef_adapters.storage import (
-        connect_event_store,
-        disconnect_event_store,
-        get_event_store_client,
-    )
+    from aef_adapters.storage import get_workflow_repository
 
-    # Result container for async -> sync communication
-    result_container: dict[str, Any] = {}
+    # Find workflow using repository (works for both test and prod)
+    repo = get_workflow_repository()
+    all_workflows = repo.get_all()
 
-    async def _get_workflow_status() -> None:
-        """Get workflow status with proper event store connection."""
-        await connect_event_store()
+    # Find matching workflows by ID prefix
+    matching = [w for w in all_workflows if w.id.startswith(workflow_id)]
 
-        try:
-            client = get_event_store_client()
-            events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-
-            # Find the workflow
-            workflow_events = [
-                e
-                for e in events
-                if e.event.event_type == "WorkflowCreated"
-                and e.metadata.aggregate_id.startswith(workflow_id)
-            ]
-
-            if not workflow_events:
-                result_container["error"] = f"No workflow found matching: {workflow_id}"
-                return
-
-            workflow_event = workflow_events[0]
-            full_workflow_id = workflow_event.metadata.aggregate_id
-            workflow_data = workflow_event.event.model_dump()
-
-            result_container["full_workflow_id"] = full_workflow_id
-            result_container["workflow_data"] = workflow_data
-
-            # Find related execution events
-            execution_events = [
-                e
-                for e in events
-                if e.metadata.aggregate_id == full_workflow_id
-                and e.event.event_type
-                in (
-                    "WorkflowExecutionStarted",
-                    "PhaseStarted",
-                    "PhaseCompleted",
-                    "WorkflowCompleted",
-                    "WorkflowFailed",
-                )
-            ]
-
-            result_container["execution_events"] = [
-                {
-                    "event_type": e.event.event_type,
-                    "event_data": e.event.model_dump(),
-                    "aggregate_id": e.metadata.aggregate_id,
-                }
-                for e in execution_events
-            ]
-        finally:
-            await disconnect_event_store()
-
-    asyncio.run(_get_workflow_status())
-
-    if "error" in result_container:
-        console.print(f"[red]{result_container['error']}[/red]")
+    if not matching:
+        console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
+        console.print("[dim]Use 'aef workflow list' to see available workflows[/dim]")
         raise typer.Exit(1)
 
-    full_workflow_id = result_container["full_workflow_id"]
-    workflow_data = result_container["workflow_data"]
-    execution_events = result_container["execution_events"]
+    workflow = matching[0]
+    full_workflow_id = workflow.id
+    workflow_data = {
+        "name": workflow.name,
+        "workflow_type": workflow._workflow_type.value,
+        "classification": workflow._classification.value,
+        "phases": [
+            {
+                "phase_id": p.phase_id,
+                "name": p.name,
+                "order": p.order,
+                "description": p.description,
+            }
+            for p in workflow._phases
+        ],
+    }
 
+    # Display workflow info
     console.print()
     console.print(
         Panel(
             f"[bold]{workflow_data.get('name', 'Unknown')}[/bold]\n"
             f"[dim]ID: {full_workflow_id}[/dim]\n"
-            f"[dim]Type: {workflow_data.get('workflow_type', 'Unknown')}[/dim]",
+            f"[dim]Type: {workflow_data.get('workflow_type', 'Unknown')}[/dim]\n"
+            f"[dim]Status: {workflow._status.value}[/dim]",
             title="[cyan]Workflow Status[/cyan]",
             border_style="cyan",
         )
     )
 
-    if not execution_events:
-        console.print("\n[dim]No execution history found for this workflow.[/dim]")
-        console.print(f"[dim]Run with: aef workflow run {workflow_id}[/dim]")
-        return
+    # Show phases
+    phases = workflow_data.get("phases", [])
+    if phases:
+        console.print(f"\n[bold]Phases:[/bold] {len(phases)}")
+        for phase in phases:
+            console.print(f"  • {phase['name']} ({phase['phase_id']})")
 
-    # Group by execution_id
-    executions: dict[str, list[Any]] = {}
-    for event in execution_events:
-        exec_id = event["event_data"].get("execution_id", "unknown")
-        if exec_id not in executions:
-            executions[exec_id] = []
-        executions[exec_id].append(event)
-
-    console.print(f"\n[bold]Executions:[/bold] {len(executions)}")
-
-    for exec_id, exec_events in executions.items():
-        # Determine status from events
-        status = "unknown"
-        for e in exec_events:
-            if e["event_type"] == "WorkflowCompleted":
-                status = "completed"
-            elif e["event_type"] == "WorkflowFailed":
-                status = "failed"
-            elif e["event_type"] == "WorkflowExecutionStarted" and status == "unknown":
-                status = "running"
-
-        status_icon = {
-            "completed": "[green]✓[/green]",
-            "failed": "[red]✗[/red]",
-            "running": "[yellow]⋯[/yellow]",
-        }.get(status, "[dim]?[/dim]")
-
-        console.print(f"\n  {status_icon} Execution: [cyan]{exec_id[:8]}...[/cyan]")
-
-        # Show phases
-        phase_events = [
-            e for e in exec_events if e["event_type"] in ("PhaseStarted", "PhaseCompleted")
-        ]
-        if phase_events:
-            phases_completed = sum(1 for e in phase_events if e["event_type"] == "PhaseCompleted")
-            phases_started = sum(1 for e in phase_events if e["event_type"] == "PhaseStarted")
-            console.print(f"     Phases: {phases_completed}/{phases_started}")
-
-        # Show final metrics if completed
-        for e in exec_events:
-            if e["event_type"] == "WorkflowCompleted":
-                data = e["event_data"]
-                console.print(f"     Tokens: {_format_tokens(data.get('total_tokens', 0))}")
-                if "total_cost_usd" in data:
-                    console.print(
-                        f"     Cost: {_format_cost(Decimal(str(data['total_cost_usd'])))}"
-                    )
-            elif e["event_type"] == "WorkflowFailed":
-                console.print(
-                    f"     [red]Error: {e['event_data'].get('error_message', 'Unknown')}[/red]"
-                )
-
-    # TODO: Add sessions and artifacts display once repositories
-    # are properly integrated with async event store connection
-    console.print("\n[dim]Tip: Use 'aef workflow run <id>' to execute this workflow[/dim]")
+    # Note: Execution history requires event store access
+    console.print("\n[dim]No execution history available.[/dim]")
+    console.print(f"[dim]Run with: aef workflow run {workflow_id}[/dim]")

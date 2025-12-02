@@ -13,4 +13,3 @@ class GetDashboardMetricsQuery:
 
     include_cost_breakdown: bool = False
     """Whether to include detailed cost breakdown by agent type."""
-

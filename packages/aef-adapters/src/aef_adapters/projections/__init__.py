@@ -6,4 +6,3 @@ __all__ = [
     "ProjectionManager",
     "get_projection_manager",
 ]
-

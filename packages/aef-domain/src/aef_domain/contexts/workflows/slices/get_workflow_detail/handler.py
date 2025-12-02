@@ -22,4 +22,3 @@ class GetWorkflowDetailHandler:
     async def handle(self, query: GetWorkflowDetailQuery) -> WorkflowDetail | None:
         """Handle GetWorkflowDetailQuery."""
         return await self.projection.get_by_id(query.workflow_id)
-

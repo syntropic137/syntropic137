@@ -4,4 +4,3 @@ projection: ArtifactListProjection
 subscribes_to:
   - ArtifactCreatedEvent
 returns: list[ArtifactSummary]
-
