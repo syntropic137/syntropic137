@@ -528,9 +528,11 @@ def run_workflow(
     )
     from aef_adapters.hooks import ValidatorRegistry, get_hook_client
     from aef_adapters.storage import (
+        connect_event_store,
+        disconnect_event_store,
         get_artifact_repository,
         get_event_publisher,
-        get_event_store,
+        get_event_store_client,
         get_session_repository,
         get_workflow_repository,
     )
@@ -553,32 +555,62 @@ def run_workflow(
         dry_run=dry_run,
     )
 
-    # Find workflow by ID prefix
-    event_store = get_event_store()
+    # Result container for async -> sync communication
+    result_container: dict[str, Any] = {}
 
-    events = event_store.get_all_events()
-    matching = [
-        e
-        for e in events
-        if e.event_type == "WorkflowCreated" and e.aggregate_id.startswith(workflow_id)
-    ]
+    async def _find_workflow() -> tuple[str, dict, str, list] | None:
+        """Find workflow by ID prefix using the event store."""
+        # Connect to event store
+        await connect_event_store()
 
-    if not matching:
-        console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
-        console.print("[dim]Use 'aef workflow list' to see available workflows[/dim]")
+        try:
+            client = get_event_store_client()
+
+            # Read all events to find workflow
+            events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
+            matching = [
+                e
+                for e in events
+                if e.event.event_type == "WorkflowCreated"
+                and e.metadata.aggregate_id.startswith(workflow_id)
+            ]
+
+            if not matching:
+                return None
+
+            if len(matching) > 1:
+                result_container["multiple_matches"] = [
+                    (e.metadata.aggregate_id, e.event.model_dump().get("name", "Unknown"))
+                    for e in matching[:5]
+                ]
+                return None
+
+            matched = matching[0]
+            event_data = matched.event.model_dump()
+            return (
+                matched.metadata.aggregate_id,
+                event_data,
+                event_data.get("name", "Unknown"),
+                event_data.get("phases", []),
+            )
+        finally:
+            await disconnect_event_store()
+
+    # Run the async workflow lookup
+    workflow_info = asyncio.run(_find_workflow())
+
+    if workflow_info is None:
+        if "multiple_matches" in result_container:
+            console.print(f"[yellow]Multiple workflows match '{workflow_id}':[/yellow]")
+            for wf_id, wf_name in result_container["multiple_matches"]:
+                console.print(f"  • {wf_id[:8]}... - {wf_name}")
+            console.print("[dim]Please provide a more specific ID[/dim]")
+        else:
+            console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
+            console.print("[dim]Use 'aef workflow list' to see available workflows[/dim]")
         raise typer.Exit(1)
 
-    if len(matching) > 1:
-        console.print(f"[yellow]Multiple workflows match '{workflow_id}':[/yellow]")
-        for e in matching[:5]:
-            console.print(f"  • {e.aggregate_id[:8]}... - {e.event_data.get('name')}")
-        console.print("[dim]Please provide a more specific ID[/dim]")
-        raise typer.Exit(1)
-
-    full_workflow_id = matching[0].aggregate_id
-    workflow_data = matching[0].event_data
-    workflow_name = workflow_data.get("name", "Unknown")
-    phases = workflow_data.get("phases", [])
+    full_workflow_id, _workflow_data, workflow_name, phases = workflow_info
 
     # Show workflow info
     console.print()
@@ -617,151 +649,160 @@ def run_workflow(
     console.print()
 
     async def _execute() -> None:
-        """Execute workflow asynchronously."""
-        # Get repositories
-        workflow_repo = get_workflow_repository()
-        session_repo = get_session_repository()
-        artifact_repo = get_artifact_repository()
-        publisher = get_event_publisher()
+        """Execute workflow asynchronously with proper event store connection."""
+        # Connect to event store first
+        await connect_event_store()
 
-        # Create agent factory - use mock agent for now
-        # In production, this would use get_agent() to get real agents
-        def agent_factory(provider: str) -> InstrumentedAgent:
-            """Create an instrumented agent for the given provider."""
-            # For now, use mock agent. In production:
-            # base_agent = get_agent(AgentProvider(provider))
-            mock_config = MockAgentConfig(
-                default_response=f"Mock response for {provider} agent execution. "
-                "This is a placeholder - configure real agents for production use."
-            )
-            base_agent = MockAgent(mock_config)
-            hook_client = get_hook_client()
-            validators = ValidatorRegistry()
-            return InstrumentedAgent(
-                agent=base_agent,
-                hook_client=hook_client,
-                validators=validators,
-            )
+        try:
+            # Get repositories (they use the connected event store client)
+            workflow_repo = get_workflow_repository()
+            session_repo = get_session_repository()
+            artifact_repo = get_artifact_repository()
+            publisher = get_event_publisher()
 
-        # Create engine
-        engine = WorkflowExecutionEngine(
-            workflow_repository=workflow_repo,
-            session_repository=session_repo,
-            artifact_repository=artifact_repo,
-            agent_factory=agent_factory,
-            event_publisher=publisher,
-        )
-
-        # Setup progress display
-        if not quiet:
-            progress = Progress(
-                SpinnerColumn(),
-                TextColumn("[bold blue]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TimeElapsedColumn(),
-                console=console,
-            )
-
-            with progress:
-                # Create overall task
-                overall_task = progress.add_task(
-                    f"Executing {workflow_name}",
-                    total=len(phases),
+            # Create agent factory - use mock agent for now
+            # In production, this would use get_agent() to get real agents
+            def agent_factory(provider: str) -> InstrumentedAgent:
+                """Create an instrumented agent for the given provider."""
+                # For now, use mock agent. In production:
+                # base_agent = get_agent(AgentProvider(provider))
+                mock_config = MockAgentConfig(
+                    default_response=f"Mock response for {provider} agent execution. "
+                    "This is a placeholder - configure real agents for production use."
+                )
+                base_agent = MockAgent(mock_config)
+                hook_client = get_hook_client()
+                validators = ValidatorRegistry()
+                return InstrumentedAgent(
+                    agent=base_agent,
+                    hook_client=hook_client,
+                    validators=validators,
                 )
 
-                # Execute and track progress
+            # Create engine
+            engine = WorkflowExecutionEngine(
+                workflow_repository=workflow_repo,
+                session_repository=session_repo,
+                artifact_repository=artifact_repo,
+                agent_factory=agent_factory,
+                event_publisher=publisher,
+            )
+
+            # Setup progress display
+            if not quiet:
+                progress = Progress(
+                    SpinnerColumn(),
+                    TextColumn("[bold blue]{task.description}"),
+                    BarColumn(),
+                    TaskProgressColumn(),
+                    TimeElapsedColumn(),
+                    console=console,
+                )
+
+                with progress:
+                    # Create overall task
+                    overall_task = progress.add_task(
+                        f"Executing {workflow_name}",
+                        total=len(phases),
+                    )
+
+                    # Execute and track progress
+                    try:
+                        result = await engine.execute(
+                            workflow_id=full_workflow_id,
+                            inputs=parsed_inputs,
+                        )
+
+                        # Update progress for completed phases
+                        for _phase_result in result.phase_results:
+                            progress.update(overall_task, advance=1)
+
+                    except WorkflowNotFoundError:
+                        console.print(f"[red]Workflow not found: {full_workflow_id}[/red]")
+                        raise typer.Exit(1)  # noqa: B904 - intentional exit
+
+            else:
+                # Quiet mode - just execute
                 try:
                     result = await engine.execute(
                         workflow_id=full_workflow_id,
                         inputs=parsed_inputs,
                     )
-
-                    # Update progress for completed phases
-                    for _phase_result in result.phase_results:
-                        progress.update(overall_task, advance=1)
-
                 except WorkflowNotFoundError:
                     console.print(f"[red]Workflow not found: {full_workflow_id}[/red]")
                     raise typer.Exit(1)  # noqa: B904 - intentional exit
 
-        else:
-            # Quiet mode - just execute
-            try:
-                result = await engine.execute(
-                    workflow_id=full_workflow_id,
-                    inputs=parsed_inputs,
-                )
-            except WorkflowNotFoundError:
-                console.print(f"[red]Workflow not found: {full_workflow_id}[/red]")
-                raise typer.Exit(1)  # noqa: B904 - intentional exit
+            # Display results
+            console.print()
 
-        # Display results
-        console.print()
+            if result.status == ExecutionStatus.COMPLETED:
+                console.print("[bold green]✓ Workflow completed successfully[/bold green]\n")
+            elif result.status == ExecutionStatus.FAILED:
+                console.print("[bold red]✗ Workflow failed[/bold red]\n")
+                if result.error_message:
+                    console.print(f"[red]Error: {result.error_message}[/red]\n")
+            else:
+                console.print(f"[yellow]Workflow status: {result.status.value}[/yellow]\n")
 
-        if result.status == ExecutionStatus.COMPLETED:
-            console.print("[bold green]✓ Workflow completed successfully[/bold green]\n")
-        elif result.status == ExecutionStatus.FAILED:
-            console.print("[bold red]✗ Workflow failed[/bold red]\n")
-            if result.error_message:
-                console.print(f"[red]Error: {result.error_message}[/red]\n")
-        else:
-            console.print(f"[yellow]Workflow status: {result.status.value}[/yellow]\n")
+            # Phase results table
+            if not quiet:
+                table = Table(title="Phase Results")
+                table.add_column("Phase", style="cyan")
+                table.add_column("Status")
+                table.add_column("Tokens", justify="right")
+                table.add_column("Cost", justify="right")
+                table.add_column("Artifact")
 
-        # Phase results table
-        if not quiet:
-            table = Table(title="Phase Results")
-            table.add_column("Phase", style="cyan")
-            table.add_column("Status")
-            table.add_column("Tokens", justify="right")
-            table.add_column("Cost", justify="right")
-            table.add_column("Artifact")
+                for phase_result in result.phase_results:
+                    # Find phase name from workflow data
+                    phase_name = phase_result.phase_id
+                    for p in phases:
+                        if p.get("phase_id") == phase_result.phase_id:
+                            phase_name = p.get("name", phase_result.phase_id)
+                            break
 
-            for phase_result in result.phase_results:
-                # Find phase name from workflow data
-                phase_name = phase_result.phase_id
-                for p in phases:
-                    if p.get("phase_id") == phase_result.phase_id:
-                        phase_name = p.get("name", phase_result.phase_id)
-                        break
+                    status_icon = {
+                        PhaseStatus.COMPLETED: "[green]✓[/green]",
+                        PhaseStatus.FAILED: "[red]✗[/red]",
+                        PhaseStatus.RUNNING: "[yellow]⋯[/yellow]",
+                        PhaseStatus.PENDING: "[dim]○[/dim]",
+                        PhaseStatus.SKIPPED: "[dim]-[/dim]",
+                    }.get(phase_result.status, "[dim]?[/dim]")
 
-                status_icon = {
-                    PhaseStatus.COMPLETED: "[green]✓[/green]",
-                    PhaseStatus.FAILED: "[red]✗[/red]",
-                    PhaseStatus.RUNNING: "[yellow]⋯[/yellow]",
-                    PhaseStatus.PENDING: "[dim]○[/dim]",
-                    PhaseStatus.SKIPPED: "[dim]-[/dim]",
-                }.get(phase_result.status, "[dim]?[/dim]")
+                    table.add_row(
+                        phase_name,
+                        f"{status_icon} {phase_result.status.value}",
+                        _format_tokens(phase_result.total_tokens),
+                        _format_cost(phase_result.cost_usd),
+                        phase_result.artifact_id[:8] + "..." if phase_result.artifact_id else "-",
+                    )
 
-                table.add_row(
-                    phase_name,
-                    f"{status_icon} {phase_result.status.value}",
-                    _format_tokens(phase_result.total_tokens),
-                    _format_cost(phase_result.cost_usd),
-                    phase_result.artifact_id[:8] + "..." if phase_result.artifact_id else "-",
-                )
+                console.print(table)
 
-            console.print(table)
+            # Summary metrics
+            metrics = result.metrics
+            console.print()
+            console.print("[bold]Summary:[/bold]")
+            console.print(
+                f"  Phases:   {metrics.completed_phases}/{metrics.total_phases} completed"
+            )
+            console.print(f"  Tokens:   {_format_tokens(metrics.total_tokens)}")
+            console.print(f"  Cost:     {_format_cost(metrics.total_cost_usd)}")
+            console.print(f"  Duration: {metrics.total_duration_seconds:.1f}s")
 
-        # Summary metrics
-        metrics = result.metrics
-        console.print()
-        console.print("[bold]Summary:[/bold]")
-        console.print(f"  Phases:   {metrics.completed_phases}/{metrics.total_phases} completed")
-        console.print(f"  Tokens:   {_format_tokens(metrics.total_tokens)}")
-        console.print(f"  Cost:     {_format_cost(metrics.total_cost_usd)}")
-        console.print(f"  Duration: {metrics.total_duration_seconds:.1f}s")
+            if result.artifact_ids:
+                console.print(f"\n[bold]Artifacts:[/bold] {len(result.artifact_ids)}")
+                for artifact_id in result.artifact_ids[:5]:
+                    console.print(f"  • {artifact_id}")
+                if len(result.artifact_ids) > 5:
+                    console.print(f"  [dim]... and {len(result.artifact_ids) - 5} more[/dim]")
 
-        if result.artifact_ids:
-            console.print(f"\n[bold]Artifacts:[/bold] {len(result.artifact_ids)}")
-            for artifact_id in result.artifact_ids[:5]:
-                console.print(f"  • {artifact_id}")
-            if len(result.artifact_ids) > 5:
-                console.print(f"  [dim]... and {len(result.artifact_ids) - 5} more[/dim]")
-
-        # Exit with error if failed
-        if result.status == ExecutionStatus.FAILED:
-            raise typer.Exit(1)
+            # Exit with error if failed
+            if result.status == ExecutionStatus.FAILED:
+                raise typer.Exit(1)
+        finally:
+            # Always disconnect from event store
+            await disconnect_event_store()
 
     # Run async execution
     try:
@@ -785,28 +826,76 @@ def workflow_status(
         aef workflow status research-workflow
     """
     from aef_adapters.storage import (
-        get_artifact_repository,
-        get_event_store,
-        get_session_repository,
+        connect_event_store,
+        disconnect_event_store,
+        get_event_store_client,
     )
 
-    event_store = get_event_store()
-    events = event_store.get_all_events()
+    # Result container for async -> sync communication
+    result_container: dict[str, Any] = {}
 
-    # Find the workflow
-    workflow_events = [
-        e
-        for e in events
-        if e.event_type == "WorkflowCreated" and e.aggregate_id.startswith(workflow_id)
-    ]
+    async def _get_workflow_status() -> None:
+        """Get workflow status with proper event store connection."""
+        await connect_event_store()
 
-    if not workflow_events:
-        console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
+        try:
+            client = get_event_store_client()
+            events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
+
+            # Find the workflow
+            workflow_events = [
+                e
+                for e in events
+                if e.event.event_type == "WorkflowCreated"
+                and e.metadata.aggregate_id.startswith(workflow_id)
+            ]
+
+            if not workflow_events:
+                result_container["error"] = f"No workflow found matching: {workflow_id}"
+                return
+
+            workflow_event = workflow_events[0]
+            full_workflow_id = workflow_event.metadata.aggregate_id
+            workflow_data = workflow_event.event.model_dump()
+
+            result_container["full_workflow_id"] = full_workflow_id
+            result_container["workflow_data"] = workflow_data
+
+            # Find related execution events
+            execution_events = [
+                e
+                for e in events
+                if e.metadata.aggregate_id == full_workflow_id
+                and e.event.event_type
+                in (
+                    "WorkflowExecutionStarted",
+                    "PhaseStarted",
+                    "PhaseCompleted",
+                    "WorkflowCompleted",
+                    "WorkflowFailed",
+                )
+            ]
+
+            result_container["execution_events"] = [
+                {
+                    "event_type": e.event.event_type,
+                    "event_data": e.event.model_dump(),
+                    "aggregate_id": e.metadata.aggregate_id,
+                }
+                for e in execution_events
+            ]
+        finally:
+            await disconnect_event_store()
+
+    asyncio.run(_get_workflow_status())
+
+    if "error" in result_container:
+        console.print(f"[red]{result_container['error']}[/red]")
         raise typer.Exit(1)
 
-    workflow_event = workflow_events[0]
-    full_workflow_id = workflow_event.aggregate_id
-    workflow_data = workflow_event.event_data
+    full_workflow_id = result_container["full_workflow_id"]
+    workflow_data = result_container["workflow_data"]
+    execution_events = result_container["execution_events"]
 
     console.print()
     console.print(
@@ -819,30 +908,15 @@ def workflow_status(
         )
     )
 
-    # Find related execution events
-    execution_events = [
-        e
-        for e in events
-        if e.aggregate_id == full_workflow_id
-        and e.event_type
-        in (
-            "WorkflowExecutionStarted",
-            "PhaseStarted",
-            "PhaseCompleted",
-            "WorkflowCompleted",
-            "WorkflowFailed",
-        )
-    ]
-
     if not execution_events:
         console.print("\n[dim]No execution history found for this workflow.[/dim]")
-        console.print("[dim]Run with: aef workflow run {workflow_id}[/dim]")
+        console.print(f"[dim]Run with: aef workflow run {workflow_id}[/dim]")
         return
 
     # Group by execution_id
     executions: dict[str, list[Any]] = {}
     for event in execution_events:
-        exec_id = event.event_data.get("execution_id", "unknown")
+        exec_id = event["event_data"].get("execution_id", "unknown")
         if exec_id not in executions:
             executions[exec_id] = []
         executions[exec_id].append(event)
@@ -853,11 +927,11 @@ def workflow_status(
         # Determine status from events
         status = "unknown"
         for e in exec_events:
-            if e.event_type == "WorkflowCompleted":
+            if e["event_type"] == "WorkflowCompleted":
                 status = "completed"
-            elif e.event_type == "WorkflowFailed":
+            elif e["event_type"] == "WorkflowFailed":
                 status = "failed"
-            elif e.event_type == "WorkflowExecutionStarted" and status == "unknown":
+            elif e["event_type"] == "WorkflowExecutionStarted" and status == "unknown":
                 status = "running"
 
         status_icon = {
@@ -870,42 +944,27 @@ def workflow_status(
 
         # Show phases
         phase_events = [
-            e for e in exec_events if e.event_type in ("PhaseStarted", "PhaseCompleted")
+            e for e in exec_events if e["event_type"] in ("PhaseStarted", "PhaseCompleted")
         ]
         if phase_events:
-            phases_completed = sum(1 for e in phase_events if e.event_type == "PhaseCompleted")
-            phases_started = sum(1 for e in phase_events if e.event_type == "PhaseStarted")
+            phases_completed = sum(1 for e in phase_events if e["event_type"] == "PhaseCompleted")
+            phases_started = sum(1 for e in phase_events if e["event_type"] == "PhaseStarted")
             console.print(f"     Phases: {phases_completed}/{phases_started}")
 
         # Show final metrics if completed
         for e in exec_events:
-            if e.event_type == "WorkflowCompleted":
-                data = e.event_data
+            if e["event_type"] == "WorkflowCompleted":
+                data = e["event_data"]
                 console.print(f"     Tokens: {_format_tokens(data.get('total_tokens', 0))}")
                 if "total_cost_usd" in data:
                     console.print(
                         f"     Cost: {_format_cost(Decimal(str(data['total_cost_usd'])))}"
                     )
-            elif e.event_type == "WorkflowFailed":
+            elif e["event_type"] == "WorkflowFailed":
                 console.print(
-                    f"     [red]Error: {e.event_data.get('error_message', 'Unknown')}[/red]"
+                    f"     [red]Error: {e['event_data'].get('error_message', 'Unknown')}[/red]"
                 )
 
-    # Show sessions
-    session_repo = get_session_repository()
-    sessions = session_repo.get_by_workflow(full_workflow_id)
-    if sessions:
-        console.print(f"\n[bold]Sessions:[/bold] {len(sessions)}")
-        for session in sessions[:5]:
-            status_icon = (
-                "[green]✓[/green]" if session.status.value == "completed" else "[red]✗[/red]"
-            )
-            console.print(f"  {status_icon} {session.id} - {session.phase_id or 'N/A'}")
-
-    # Show artifacts
-    artifact_repo = get_artifact_repository()
-    artifacts = artifact_repo.get_by_workflow(full_workflow_id)
-    if artifacts:
-        console.print(f"\n[bold]Artifacts:[/bold] {len(artifacts)}")
-        for artifact in artifacts[:5]:
-            console.print(f"  • {artifact.id} ({artifact.artifact_type.value})")
+    # TODO: Add sessions and artifacts display once repositories
+    # are properly integrated with async event store connection
+    console.print("\n[dim]Tip: Use 'aef workflow run <id>' to execute this workflow[/dim]")
