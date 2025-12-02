@@ -609,6 +609,7 @@ def run_workflow(
         aef workflow run research-workflow --quiet
     """
     from aef_adapters.agents import (
+        AgentProvider,
         InstrumentedAgent,
         MockAgent,
         MockAgentConfig,
@@ -619,6 +620,7 @@ def run_workflow(
         disconnect_event_store,
         get_artifact_repository,
         get_event_publisher,
+        get_event_store_client,
         get_session_repository,
         get_workflow_repository,
     )
@@ -644,10 +646,57 @@ def run_workflow(
     # Result container for async -> sync communication
     result_container: dict[str, Any] = {}
 
-    def _find_workflow_sync() -> tuple[str, dict, str, list] | None:
-        """Find workflow by ID prefix using the repository."""
-        repo = get_workflow_repository()
-        all_workflows = repo.get_all()
+    async def _find_workflow_async() -> tuple[str, dict, str, list] | None:
+        """Find workflow by ID prefix using the event store."""
+        from aef_shared.settings import get_settings
+
+        settings = get_settings()
+
+        if settings.is_test:
+            # For test environment, use in-memory repository (sync API)
+            repo = get_workflow_repository()
+            all_workflows = repo.get_all()
+        else:
+            # For dev/prod, read from event store (async API)
+            await connect_event_store()
+            try:
+                client = get_event_store_client()
+                events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
+                workflow_events = [
+                    e for e in events if e.event.event_type == "WorkflowCreated"
+                ]
+                # Create simple workflow-like objects from events
+                all_workflows = []
+                for e in workflow_events:
+                    event_data = e.event.model_dump()
+                    # Create a simple namespace object with required attributes
+                    class WorkflowData:
+                        def __init__(self, data: dict, agg_id: str) -> None:
+                            self.id = agg_id
+                            self.name = data.get("name", "Unknown")
+                            self._workflow_type = type(
+                                "WfType", (), {"value": data.get("workflow_type", "unknown")}
+                            )()
+                            self._status = type("Status", (), {"value": "pending"})()
+                            # Build phases from event data
+                            phases_raw = data.get("phases", [])
+                            self._phases = [
+                                type(
+                                    "Phase",
+                                    (),
+                                    {
+                                        "phase_id": p.get("phase_id", f"phase-{i}"),
+                                        "name": p.get("name", f"Phase {i}"),
+                                        "order": p.get("order", i),
+                                        "description": p.get("description", ""),
+                                    },
+                                )()
+                                for i, p in enumerate(phases_raw, 1)
+                            ]
+
+                    all_workflows.append(WorkflowData(event_data, e.metadata.aggregate_id))
+            finally:
+                await disconnect_event_store()
 
         # Find matching workflows by ID prefix
         matching = [w for w in all_workflows if w.id.startswith(workflow_id)]
@@ -677,8 +726,8 @@ def run_workflow(
             phases_data,
         )
 
-    # Run the sync workflow lookup
-    workflow_info = _find_workflow_sync()
+    # Run the async workflow lookup
+    workflow_info = asyncio.run(_find_workflow_async())
 
     if workflow_info is None:
         if "multiple_matches" in result_container:
@@ -741,17 +790,61 @@ def run_workflow(
             artifact_repo = get_artifact_repository()
             publisher = get_event_publisher()
 
-            # Create agent factory - use mock agent for now
-            # In production, this would use get_agent() to get real agents
+            # Create agent factory - REQUIRES API keys (fail fast)
             def agent_factory(provider: str) -> InstrumentedAgent:
-                """Create an instrumented agent for the given provider."""
-                # For now, use mock agent. In production:
-                # base_agent = get_agent(AgentProvider(provider))
-                mock_config = MockAgentConfig(
-                    default_response=f"Mock response for {provider} agent execution. "
-                    "This is a placeholder - configure real agents for production use."
-                )
-                base_agent = MockAgent(mock_config)
+                """Create an instrumented agent for the given provider.
+
+                REQUIRES real agent API keys. Fails fast if not configured.
+                MockAgent is ONLY available in test environment (APP_ENVIRONMENT=test).
+                """
+                from aef_adapters.agents import get_agent
+                from aef_shared.settings import get_settings
+
+                settings = get_settings()
+
+                # In test mode, MockAgent is allowed
+                if settings.is_test and provider == "mock":
+                    mock_config = MockAgentConfig(
+                        default_response=f"Mock response for {provider} agent execution."
+                    )
+                    base_agent = MockAgent(mock_config)
+                    console.print("[dim]Using MockAgent (test mode)[/dim]")
+                # Default to Claude if provider is 'mock' but we're not in test
+                elif provider == "mock":
+                    # Treat 'mock' as 'claude' in non-test environments
+                    if not settings.anthropic_api_key:
+                        console.print(
+                            "[bold red]Error:[/bold red] ANTHROPIC_API_KEY is required. "
+                            "Add it to your .env file at the project root."
+                        )
+                        raise typer.Exit(1)
+                    base_agent = get_agent(AgentProvider.CLAUDE)
+                    console.print("[dim]Using Claude agent[/dim]")
+                elif provider == "claude":
+                    if not settings.anthropic_api_key:
+                        console.print(
+                            "[bold red]Error:[/bold red] ANTHROPIC_API_KEY is required for Claude agent. "
+                            "Add it to your .env file at the project root."
+                        )
+                        raise typer.Exit(1)
+                    base_agent = get_agent(AgentProvider.CLAUDE)
+                    console.print("[dim]Using Claude agent[/dim]")
+                elif provider == "openai":
+                    if not settings.openai_api_key:
+                        console.print(
+                            "[bold red]Error:[/bold red] OPENAI_API_KEY is required for OpenAI agent. "
+                            "Add it to your .env file at the project root."
+                        )
+                        raise typer.Exit(1)
+                    base_agent = get_agent(AgentProvider.OPENAI)
+                    console.print("[dim]Using OpenAI agent[/dim]")
+                else:
+                    console.print(
+                        f"[bold red]Error:[/bold red] Unknown agent provider: {provider}. "
+                        f"Supported: claude, openai"
+                    )
+                    raise typer.Exit(1)
+
                 hook_client = get_hook_client()
                 validators = ValidatorRegistry()
                 return InstrumentedAgent(

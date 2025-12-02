@@ -325,11 +325,33 @@ class WorkflowExecutionEngine:
             # Import here to avoid circular imports
             from aef_adapters.agents import AgentConfig, AgentMessage, AgentRole
 
+            # Validate prompt is not empty (fail fast)
+            if not prompt.strip():
+                raise WorkflowExecutionError(
+                    message=(
+                        f"Phase '{phase.phase_id}' has empty prompt - "
+                        "workflow phases MUST have a prompt_template defined"
+                    ),
+                    workflow_id=ctx.workflow_id,
+                    phase_id=phase.phase_id,
+                )
+
+            # Validate model is set (fail fast - no mock defaults)
+            if not phase.agent_config.model:
+                raise WorkflowExecutionError(
+                    message=(
+                        f"Phase '{phase.phase_id}' has no model configured - "
+                        "set model in agent_config (e.g., 'claude-sonnet')"
+                    ),
+                    workflow_id=ctx.workflow_id,
+                    phase_id=phase.phase_id,
+                )
+
             # Execute agent
             response = await agent.complete(
                 messages=[AgentMessage(role=AgentRole.USER, content=prompt)],
                 config=AgentConfig(
-                    model=phase.agent_config.model or "mock-model",
+                    model=phase.agent_config.model,
                     max_tokens=phase.agent_config.max_tokens,
                     temperature=phase.agent_config.temperature,
                     timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds,

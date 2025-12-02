@@ -21,8 +21,6 @@ from typing import TYPE_CHECKING, Any
 from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from event_sourcing import EventStoreRepository
-
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
     from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
         AgentSessionAggregate,
@@ -31,10 +29,40 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Cached repository instances (for SDK-based repos)
-_workflow_repository: EventStoreRepository[WorkflowAggregate] | None = None
-_session_repository: EventStoreRepository[AgentSessionAggregate] | None = None
-_artifact_repository: EventStoreRepository[ArtifactAggregate] | None = None
+
+class RepositoryAdapter[TAggregate]:
+    """Adapter that wraps EventStoreRepository to provide get_by_id interface.
+
+    The SDK's EventStoreRepository uses `load()` for fetching aggregates,
+    but our domain expects `get_by_id()`. This adapter provides the mapping.
+    """
+
+    def __init__(self, sdk_repository: Any) -> None:
+        """Initialize with an SDK EventStoreRepository."""
+        self._repo = sdk_repository
+
+    async def get_by_id(self, aggregate_id: str) -> TAggregate | None:
+        """Get aggregate by ID (maps to SDK's load method)."""
+        return await self._repo.load(aggregate_id)
+
+    async def save(self, aggregate: TAggregate) -> None:
+        """Save an aggregate."""
+        await self._repo.save(aggregate)
+
+    async def exists(self, aggregate_id: str) -> bool:
+        """Check if aggregate exists."""
+        return await self._repo.exists(aggregate_id)
+
+    # Allow access to underlying repository if needed
+    @property
+    def sdk_repository(self) -> Any:
+        """Get the underlying SDK repository."""
+        return self._repo
+
+# Cached repository instances (wrapped adapters for SDK-based repos)
+_workflow_repository: RepositoryAdapter[WorkflowAggregate] | None = None
+_session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
+_artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
 
 
 def _get_repository_factory() -> Any:
@@ -49,14 +77,14 @@ def _get_repository_factory() -> Any:
 
 def get_workflow_repository() -> (
     Any
-):  # EventStoreRepository[WorkflowAggregate] or InMemoryWorkflowRepository
+):  # RepositoryAdapter[WorkflowAggregate] or InMemoryWorkflowRepository
     """Get a WorkflowAggregate repository.
 
     For TEST: Returns InMemoryWorkflowRepository (synchronous API)
-    For DEV/PROD: Returns EventStoreRepository (async SDK-based)
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
 
     Returns:
-        Repository for WorkflowAggregate.
+        Repository for WorkflowAggregate with get_by_id/save/exists interface.
     """
     settings = get_settings()
 
@@ -77,25 +105,26 @@ def get_workflow_repository() -> (
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
 
     factory = _get_repository_factory()
-    _workflow_repository = factory.create_repository(
+    sdk_repo = factory.create_repository(
         WorkflowAggregate,
         aggregate_type="Workflow",
     )
+    _workflow_repository = RepositoryAdapter(sdk_repo)
 
-    logger.debug("Created WorkflowAggregate repository (SDK)")
+    logger.debug("Created WorkflowAggregate repository (SDK wrapped)")
     return _workflow_repository
 
 
 def get_session_repository() -> (
     Any
-):  # EventStoreRepository[AgentSessionAggregate] or InMemorySessionRepository
+):  # RepositoryAdapter[AgentSessionAggregate] or InMemorySessionRepository
     """Get an AgentSessionAggregate repository.
 
     For TEST: Returns InMemorySessionRepository (synchronous API)
-    For DEV/PROD: Returns EventStoreRepository (async SDK-based)
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
 
     Returns:
-        Repository for AgentSessionAggregate.
+        Repository for AgentSessionAggregate with get_by_id/save/exists interface.
     """
     settings = get_settings()
 
@@ -116,25 +145,26 @@ def get_session_repository() -> (
     )
 
     factory = _get_repository_factory()
-    _session_repository = factory.create_repository(
+    sdk_repo = factory.create_repository(
         AgentSessionAggregate,
         aggregate_type="AgentSession",
     )
+    _session_repository = RepositoryAdapter(sdk_repo)
 
-    logger.debug("Created AgentSessionAggregate repository (SDK)")
+    logger.debug("Created AgentSessionAggregate repository (SDK wrapped)")
     return _session_repository
 
 
 def get_artifact_repository() -> (
     Any
-):  # EventStoreRepository[ArtifactAggregate] or InMemoryArtifactRepository
+):  # RepositoryAdapter[ArtifactAggregate] or InMemoryArtifactRepository
     """Get an ArtifactAggregate repository.
 
     For TEST: Returns InMemoryArtifactRepository (synchronous API)
-    For DEV/PROD: Returns EventStoreRepository (async SDK-based)
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
 
     Returns:
-        Repository for ArtifactAggregate.
+        Repository for ArtifactAggregate with get_by_id/save/exists interface.
     """
     settings = get_settings()
 
@@ -153,12 +183,13 @@ def get_artifact_repository() -> (
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
 
     factory = _get_repository_factory()
-    _artifact_repository = factory.create_repository(
+    sdk_repo = factory.create_repository(
         ArtifactAggregate,
         aggregate_type="Artifact",
     )
+    _artifact_repository = RepositoryAdapter(sdk_repo)
 
-    logger.debug("Created ArtifactAggregate repository (SDK)")
+    logger.debug("Created ArtifactAggregate repository (SDK wrapped)")
     return _artifact_repository
 
 
