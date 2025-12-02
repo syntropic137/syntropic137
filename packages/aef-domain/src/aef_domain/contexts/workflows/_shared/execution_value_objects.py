@@ -34,10 +34,18 @@ class AgentConfiguration:
     """Agent configuration for executing a phase.
 
     Immutable to ensure configuration integrity.
+
+    NOTE: 'mock' provider is ONLY valid in test environments (APP_ENVIRONMENT=test).
+    Production/development MUST use 'claude' or 'openai' with valid API keys.
+
+    Model Aliases (recommended):
+        - "claude-sonnet" -> latest Claude Sonnet
+        - "claude-opus" -> latest Claude Opus
+        - "claude-haiku" -> latest Claude Haiku
     """
 
-    provider: str  # claude, openai, mock
-    model: str | None = None
+    provider: str = "claude"  # claude, openai (mock only in tests)
+    model: str = "claude-sonnet"  # Use alias - auto-resolves to latest version
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300
@@ -127,6 +135,9 @@ class ExecutablePhase:
     """Phase with full execution configuration.
 
     Combines phase definition with runtime execution config.
+
+    NOTE: All phases MUST have a prompt_template and valid agent_config.
+    Empty prompts will cause agent calls to fail.
     """
 
     phase_id: str
@@ -134,13 +145,11 @@ class ExecutablePhase:
     order: int
     description: str | None = None
 
-    # Agent configuration
-    agent_config: AgentConfiguration = field(
-        default_factory=lambda: AgentConfiguration(provider="mock")
-    )
+    # Agent configuration - defaults to Claude (real agent)
+    agent_config: AgentConfiguration = field(default_factory=AgentConfiguration)
 
-    # Prompt template (actual template, not ID)
-    prompt_template: str = ""
+    # Prompt template (REQUIRED - actual template, not ID)
+    prompt_template: str = ""  # Must be set by workflow definition
 
     # Input configuration
     inputs: list[PhaseInput] = field(default_factory=list)

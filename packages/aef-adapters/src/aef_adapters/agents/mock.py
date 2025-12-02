@@ -1,6 +1,12 @@
-"""Mock agent adapter for testing.
+"""Mock agent adapter for TESTING ONLY.
 
-Provides a controllable mock implementation for unit tests.
+WARNING: MockAgent is for unit/integration tests only.
+For local development and production, use real agent adapters (Claude, OpenAI).
+
+The MockAgent:
+- Does NOT call real AI APIs
+- Should NEVER be used outside of tests
+- Will raise MockAgentError if used in non-test environments
 """
 
 from __future__ import annotations
@@ -16,9 +22,32 @@ from aef_adapters.agents.protocol import (
     AgentProvider,
     AgentResponse,
 )
+from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+
+class MockAgentError(Exception):
+    """Raised when MockAgent is used outside of test environment."""
+
+    pass
+
+
+def _assert_test_environment() -> None:
+    """Assert that we're in a test environment.
+
+    Raises:
+        MockAgentError: If not in test environment (APP_ENVIRONMENT != 'test').
+    """
+    settings = get_settings()
+    if not settings.is_test:
+        raise MockAgentError(
+            f"MockAgent can ONLY be used in test environments. "
+            f"Current environment: {settings.app_environment}. "
+            f"For local development, set ANTHROPIC_API_KEY and use real agents. "
+            f"For testing, set APP_ENVIRONMENT=test"
+        )
 
 
 @dataclass
@@ -68,7 +97,12 @@ class MockAgent(AgentProtocol):
     """
 
     def __init__(self, config: MockAgentConfig | None = None) -> None:
-        """Initialize mock agent with optional configuration."""
+        """Initialize mock agent with optional configuration.
+
+        Raises:
+            MockAgentError: If not in test environment.
+        """
+        _assert_test_environment()
         self._config = config or MockAgentConfig()
         self._available = True
 

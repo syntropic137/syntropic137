@@ -45,7 +45,7 @@ from aef_adapters.agents.factory import (
     is_agent_available,
 )
 from aef_adapters.agents.instrumented import InstrumentedAgent
-from aef_adapters.agents.mock import MockAgent, MockAgentConfig
+from aef_adapters.agents.mock import MockAgent, MockAgentConfig, MockAgentError
 from aef_adapters.agents.protocol import (
     AgentAuthenticationError,
     AgentConfig,
@@ -79,6 +79,7 @@ __all__ = [
     "InstrumentedAgent",
     "MockAgent",
     "MockAgentConfig",
+    "MockAgentError",
     "SessionContext",
     "get_agent",
     "get_available_agents",
