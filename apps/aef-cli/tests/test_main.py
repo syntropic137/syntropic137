@@ -49,6 +49,8 @@ def create_test_workflow(workflow_id: str = "test-workflow") -> str:
                 phase_id="phase-1",
                 name="Test Phase",
                 order=1,
+                # Prompt template is required for execution
+                prompt_template_id="Test prompt for {{topic}}",
             )
         ],
     )

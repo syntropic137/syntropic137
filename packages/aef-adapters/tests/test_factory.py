@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from aef_adapters.agents import (
@@ -16,9 +18,14 @@ from aef_shared.settings import reset_settings
 
 
 @pytest.fixture(autouse=True)
-def _reset_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reset environment for each test."""
-    # Clear any existing API keys
+def _reset_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reset environment for each test.
+
+    Uses a temporary directory to prevent loading from project .env file.
+    """
+    # Change to temp dir to avoid loading project .env
+    monkeypatch.chdir(tmp_path)
+    # Clear any existing API keys from env
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("APP_ENVIRONMENT", "test")

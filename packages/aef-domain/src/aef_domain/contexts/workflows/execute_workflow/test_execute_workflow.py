@@ -297,7 +297,7 @@ class TestExecutionValueObjects:
             order=1,
         )
 
-        assert phase.agent_config.provider == "mock"
+        assert phase.agent_config.provider == "claude"  # Default is now Claude, not mock
         assert phase.agent_config.max_tokens == 4096
         assert phase.output_artifact_type == "text"
 

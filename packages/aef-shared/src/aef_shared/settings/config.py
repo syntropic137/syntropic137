@@ -11,7 +11,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, PostgresDsn, SecretStr
+from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -138,6 +138,18 @@ class Settings(BaseSettings):
             "Legacy gRPC URL for the event store service."
         ),
     )
+
+    # =========================================================================
+    # VALIDATORS - Convert empty strings to None
+    # =========================================================================
+
+    @field_validator("database_url", "event_store_url", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: str | None) -> str | None:
+        """Convert empty strings to None for optional URL fields."""
+        if v == "":
+            return None
+        return v
 
     # =========================================================================
     # LOGGING
