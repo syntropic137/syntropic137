@@ -25,44 +25,28 @@ app.add_typer(config.app, name="config")
 
 
 @app.command()
-def run(
-    workflow_name: str = typer.Argument(..., help="Name or ID of the workflow to execute"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show what would be done"),
-) -> None:
-    """Execute a workflow."""
-    logger.info("Starting workflow", workflow=workflow_name, dry_run=dry_run)
-    console.print(f"[bold blue]Starting workflow:[/bold blue] {workflow_name}")
-
-    if dry_run:
-        console.print("[yellow]Dry run mode - no changes will be made[/yellow]")
-        return
-
-    # TODO: Implement workflow execution
-    console.print("[green]✓ Workflow started[/green]")
-
-
-@app.command()
-def seed(
-    path: str | None = typer.Option(None, "--path", "-p", help="Path to workflow YAML files"),
-) -> None:
-    """Seed workflow definitions from YAML files."""
-    logger.info("Seeding workflows", path=path)
-
-    if path:
-        console.print(f"[blue]Loading workflows from:[/blue] {path}")
-    else:
-        console.print("[blue]Loading workflows from default location[/blue]")
-
-    # TODO: Implement workflow seeding
-    console.print("[green]✓ Workflows seeded[/green]")
-
-
-@app.command()
 def version() -> None:
     """Show version information."""
     from aef_cli import __version__
 
     console.print(f"[bold]Agentic Engineering Framework[/bold] v{__version__}")
+
+
+# Convenience alias: `aef run` delegates to `aef workflow run`
+@app.command("run")
+def run_shortcut(
+    workflow_id: str = typer.Argument(..., help="Workflow ID to execute"),
+    inputs: list[str] | None = typer.Option(
+        None, "--input", "-i", help="Input variables as key=value"
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-n", help="Validate without executing"
+    ),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
+) -> None:
+    """Execute a workflow (shortcut for 'aef workflow run')."""
+    # Delegate to workflow run command
+    workflow.run_workflow(workflow_id, inputs, dry_run, quiet)
 
 
 if __name__ == "__main__":

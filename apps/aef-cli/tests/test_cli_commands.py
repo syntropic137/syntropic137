@@ -127,17 +127,12 @@ class TestMainCommands:
         assert "workflow" in result.stdout.lower()
         assert "--dry-run" in result.stdout
 
-    def test_seed_help(self) -> None:
-        """Test seed --help displays options."""
-        result = runner.invoke(app, ["seed", "--help"])
+    def test_workflow_seed_help(self) -> None:
+        """Test workflow seed --help displays options."""
+        result = runner.invoke(app, ["workflow", "seed", "--help"])
         assert result.exit_code == 0
-        assert "--path" in result.stdout
-
-    def test_run_dry_run(self) -> None:
-        """Test run command with dry-run flag."""
-        result = runner.invoke(app, ["run", "test-workflow", "--dry-run"])
-        assert result.exit_code == 0
-        assert "dry run" in result.stdout.lower() or "Dry run" in result.stdout
+        # seed is now under workflow subcommand
+        assert "--dir" in result.stdout or "--file" in result.stdout
 
 
 class TestWorkflowCreateCommand:

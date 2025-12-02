@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 
     from event_sourcing import EventEnvelope
 
+    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
+    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
         WorkflowAggregate,
     )
@@ -179,10 +185,84 @@ class InMemoryEventPublisher:
         self._published_events = []
 
 
+class InMemorySessionRepository:
+    """In-memory repository for AgentSession aggregates.
+
+    Used for testing and local development.
+    """
+
+    def __init__(self) -> None:
+        self._sessions: dict[str, AgentSessionAggregate] = {}
+
+    async def save(self, aggregate: AgentSessionAggregate) -> None:
+        """Save the session aggregate."""
+        if aggregate.id:
+            self._sessions[str(aggregate.id)] = aggregate
+            aggregate.mark_events_as_committed()
+
+    async def get(self, session_id: str) -> AgentSessionAggregate | None:
+        """Get session by ID."""
+        return self._sessions.get(session_id)
+
+    def get_all(self) -> list[AgentSessionAggregate]:
+        """Get all sessions."""
+        return list(self._sessions.values())
+
+    def get_by_workflow(self, workflow_id: str) -> list[AgentSessionAggregate]:
+        """Get all sessions for a workflow."""
+        return [s for s in self._sessions.values() if s.workflow_id == workflow_id]
+
+    def clear(self) -> None:
+        """Clear all sessions."""
+        self._sessions = {}
+
+
+class InMemoryArtifactRepository:
+    """In-memory repository for Artifact aggregates.
+
+    Used for testing and local development.
+    """
+
+    def __init__(self) -> None:
+        self._artifacts: dict[str, ArtifactAggregate] = {}
+
+    async def save(self, aggregate: ArtifactAggregate) -> None:
+        """Save the artifact aggregate."""
+        if aggregate.id:
+            self._artifacts[str(aggregate.id)] = aggregate
+            aggregate.mark_events_as_committed()
+
+    async def get(self, artifact_id: str) -> ArtifactAggregate | None:
+        """Get artifact by ID."""
+        return self._artifacts.get(artifact_id)
+
+    def get_all(self) -> list[ArtifactAggregate]:
+        """Get all artifacts."""
+        return list(self._artifacts.values())
+
+    def get_by_workflow(self, workflow_id: str) -> list[ArtifactAggregate]:
+        """Get all artifacts for a workflow."""
+        return [a for a in self._artifacts.values() if a.workflow_id == workflow_id]
+
+    def get_by_phase(self, workflow_id: str, phase_id: str) -> list[ArtifactAggregate]:
+        """Get all artifacts for a specific phase."""
+        return [
+            a
+            for a in self._artifacts.values()
+            if a.workflow_id == workflow_id and a.phase_id == phase_id
+        ]
+
+    def clear(self) -> None:
+        """Clear all artifacts."""
+        self._artifacts = {}
+
+
 # Global instances for simple DI (replace with proper DI in production)
 _event_store = InMemoryEventStore()
 _workflow_repository = InMemoryWorkflowRepository(_event_store)
 _event_publisher = InMemoryEventPublisher()
+_session_repository = InMemorySessionRepository()
+_artifact_repository = InMemoryArtifactRepository()
 
 
 def get_event_store() -> InMemoryEventStore:
@@ -200,7 +280,19 @@ def get_event_publisher() -> InMemoryEventPublisher:
     return _event_publisher
 
 
+def get_session_repository() -> InMemorySessionRepository:
+    """Get the global in-memory session repository."""
+    return _session_repository
+
+
+def get_artifact_repository() -> InMemoryArtifactRepository:
+    """Get the global in-memory artifact repository."""
+    return _artifact_repository
+
+
 def reset_storage() -> None:
     """Reset all storage (for testing between tests)."""
     _event_store.clear()
     _event_publisher.clear()
+    _session_repository.clear()
+    _artifact_repository.clear()

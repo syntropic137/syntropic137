@@ -13,12 +13,16 @@ based on the APP_ENVIRONMENT and DATABASE_URL settings.
 """
 
 from aef_adapters.storage.in_memory import (
+    InMemoryArtifactRepository,
     InMemoryEventPublisher,
     InMemoryEventStore,
+    InMemorySessionRepository,
     InMemoryWorkflowRepository,
     StoredEvent,
+    get_artifact_repository,
     get_event_publisher,
     get_event_store,
+    get_session_repository,
     get_workflow_repository,
     reset_storage,
 )
@@ -27,15 +31,19 @@ from aef_adapters.storage.in_memory import (
 # Use get_postgres_* functions or import directly when DATABASE_URL is configured
 
 __all__ = [
+    "InMemoryArtifactRepository",
     "InMemoryEventPublisher",
     "InMemoryEventStore",
+    "InMemorySessionRepository",
     "InMemoryWorkflowRepository",
     "StoredEvent",
     "close_connection_pool",
+    "get_artifact_repository",
     "get_event_publisher",
     "get_event_store",
     "get_postgres_event_store",
     "get_postgres_workflow_repository",
+    "get_session_repository",
     "get_workflow_repository",
     "reset_storage",
 ]
