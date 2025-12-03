@@ -114,6 +114,8 @@ workflows/custom/*.yml
 artifacts/
 # But not the domain artifacts bounded context
 !packages/aef-domain/src/aef_domain/contexts/artifacts/
+# And not the adapters artifacts module
+!packages/aef-adapters/src/aef_adapters/artifacts/
 
 _reference/
 
@@ -137,4 +139,3 @@ PROJECT-PLAN_*.md
 # =============================================================================
 docs/_build/
 site/
-
