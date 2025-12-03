@@ -72,7 +72,10 @@ class ExecutionService:
 
     def __init__(self) -> None:
         """Initialize the execution service."""
+        from aef_adapters.projections import get_projection_manager
+
         self._base_workspace_path = Path.cwd() / ".aef-workspaces"
+        self._projection_manager = get_projection_manager()
 
     async def run_workflow(
         self,
@@ -354,19 +357,82 @@ class ExecutionService:
     async def _persist_artifact(self, event: Any) -> None:
         """Persist artifact from phase completion event.
 
+        Converts the ArtifactBundle to an ArtifactCreated event and
+        dispatches it to the projection manager.
+
         Args:
             event: PhaseCompleted event containing artifact info.
         """
-        # TODO: Implement artifact persistence to projection store
-        # For now, just log it
-        logger.info(
-            "Would persist artifact",
-            extra={
-                "artifact_bundle_id": getattr(event, "artifact_bundle_id", None),
-                "workflow_id": getattr(event, "workflow_id", None),
-                "phase_id": getattr(event, "phase_id", None),
-            },
-        )
+        # Extract bundle from event (if available)
+        bundle = getattr(event, "artifact_bundle", None)
+        workflow_id = getattr(event, "workflow_id", "")
+        phase_id = getattr(event, "phase_id", "")
+        artifact_bundle_id = getattr(event, "artifact_bundle_id", "")
+        completed_at = getattr(event, "completed_at", datetime.now(UTC))
+
+        if bundle is None:
+            # No bundle attached - create minimal artifact record
+            artifact_event = {
+                "artifact_id": artifact_bundle_id,
+                "workflow_id": workflow_id,
+                "session_id": None,
+                "phase_id": phase_id,
+                "artifact_type": "bundle",
+                "title": f"Phase {phase_id} Output",
+                "created_at": completed_at.isoformat()
+                if hasattr(completed_at, "isoformat")
+                else str(completed_at),
+            }
+        else:
+            # Full bundle available - extract rich metadata
+            # Get primary artifact type from bundle
+            primary_type = "bundle"
+            for f in getattr(bundle, "files", []):
+                metadata = getattr(f, "metadata", None)
+                if metadata and getattr(metadata, "is_primary", False):
+                    primary_type = getattr(metadata, "artifact_type", "bundle")
+                    if hasattr(primary_type, "value"):
+                        primary_type = primary_type.value
+                    break
+
+            # Calculate total size
+            total_size = sum(len(getattr(f, "content", b"")) for f in getattr(bundle, "files", []))
+
+            artifact_event = {
+                "artifact_id": getattr(bundle, "bundle_id", artifact_bundle_id),
+                "workflow_id": workflow_id,
+                "session_id": None,
+                "phase_id": phase_id,
+                "artifact_type": primary_type,
+                "title": getattr(bundle, "title", None) or f"Phase {phase_id} Output",
+                "created_at": completed_at.isoformat()
+                if hasattr(completed_at, "isoformat")
+                else str(completed_at),
+                # Extended fields
+                "file_count": len(getattr(bundle, "files", [])),
+                "size_bytes": total_size,
+            }
+
+        # Dispatch to projection manager
+        try:
+            await self._projection_manager.dispatch_event("ArtifactCreated", artifact_event)
+            logger.info(
+                "Persisted artifact to projections",
+                extra={
+                    "artifact_id": artifact_event["artifact_id"],
+                    "workflow_id": workflow_id,
+                    "phase_id": phase_id,
+                    "artifact_type": artifact_event["artifact_type"],
+                },
+            )
+        except Exception as e:
+            logger.error(
+                "Failed to persist artifact",
+                extra={
+                    "artifact_id": artifact_event.get("artifact_id"),
+                    "error": str(e),
+                },
+            )
 
     async def _run_simulated_execution(
         self,
@@ -415,8 +481,25 @@ class ExecutionService:
             # Simulate work (1-3 seconds)
             await asyncio.sleep(1.5)
 
-            # Phase completed
+            # Create real artifact for this phase
             artifact_id = str(uuid4())
+            completed_at = datetime.now(UTC)
+
+            # Persist artifact to projections (creates real entry)
+            artifact_event = {
+                "artifact_id": artifact_id,
+                "workflow_id": workflow_def.workflow_id,
+                "session_id": None,
+                "phase_id": phase.phase_id,
+                "artifact_type": "markdown",
+                "title": f"{phase.name} Output",
+                "created_at": completed_at.isoformat(),
+                "file_count": 1,
+                "size_bytes": len(f"# {phase.name} Output\n\nSimulated output for demonstration."),
+            }
+            await self._projection_manager.dispatch_event("ArtifactCreated", artifact_event)
+
+            # Phase completed SSE event
             push_event(
                 "phase_completed",
                 {

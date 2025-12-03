@@ -29,8 +29,8 @@ class ArtifactSummary:
     name: str
     """Display name of the artifact."""
 
-    created_at: datetime | None
-    """When the artifact was created."""
+    created_at: datetime | str | None
+    """When the artifact was created (datetime or ISO string)."""
 
     @classmethod
     def from_dict(cls, data: dict) -> "ArtifactSummary":
@@ -47,6 +47,14 @@ class ArtifactSummary:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
+        # Handle created_at which could be datetime or already a string
+        created_at_str = None
+        if self.created_at:
+            if isinstance(self.created_at, str):
+                created_at_str = self.created_at
+            else:
+                created_at_str = self.created_at.isoformat()
+
         return {
             "id": self.id,
             "workflow_id": self.workflow_id,
@@ -54,5 +62,5 @@ class ArtifactSummary:
             "phase_id": self.phase_id,
             "artifact_type": self.artifact_type,
             "name": self.name,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": created_at_str,
         }
