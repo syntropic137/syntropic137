@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from agentic_logging import get_logger
 from aef_shared.settings import get_settings
@@ -87,6 +88,9 @@ class ExecutionService:
 
         self._base_workspace_path = Path.cwd() / ".aef-workspaces"
         self._projection_manager = get_projection_manager()
+        # Track session IDs per phase for session event correlation
+        self._phase_sessions: dict[str, str] = {}  # phase_id -> session_id
+        self._phase_start_times: dict[str, datetime] = {}  # phase_id -> start_time
 
     async def run_workflow(
         self,
@@ -147,24 +151,49 @@ class ExecutionService:
                 # Bridge to SSE
                 self._bridge_event_to_sse(event)
 
-                # Update tracker
+                # Update tracker and emit session events
                 if isinstance(event, WorkflowStarted):
                     tracker[execution_id]["status"] = "running"
 
                 elif isinstance(event, PhaseStarted):
                     tracker[execution_id]["current_phase"] = event.phase_id
+                    # Start a session for this phase (via aggregate → event store)
+                    await self._start_session(
+                        workflow_id=event.workflow_id,
+                        phase_id=event.phase_id,
+                        provider=provider,
+                    )
 
                 elif isinstance(event, PhaseCompleted):
                     tracker[execution_id]["completed_phases"] = (
                         tracker[execution_id].get("completed_phases", 0) + 1
                     )
                     tracker[execution_id]["current_phase"] = None
-                    # Persist artifact
-                    await self._persist_artifact(event)
+                    # Complete session (via aggregate → event store)
+                    session_id = self._phase_sessions.get(event.phase_id)
+                    if session_id:
+                        await self._complete_session(
+                            session_id=session_id,
+                            phase_id=event.phase_id,
+                            total_tokens=event.total_tokens,
+                            success=True,
+                        )
+                    # Persist artifact (also via aggregate → event store)
+                    await self._persist_artifact(event, session_id)
 
                 elif isinstance(event, PhaseFailed):
                     tracker[execution_id]["status"] = "failed"
                     tracker[execution_id]["error"] = event.error
+                    # Complete session as failed (via aggregate → event store)
+                    session_id = self._phase_sessions.get(event.phase_id)
+                    if session_id:
+                        await self._complete_session(
+                            session_id=session_id,
+                            phase_id=event.phase_id,
+                            total_tokens=0,
+                            success=False,
+                            error=event.error,
+                        )
 
                 elif isinstance(event, WorkflowCompleted):
                     tracker[execution_id]["status"] = "completed"
@@ -332,94 +361,305 @@ class ExecutionService:
             # Unknown event type - log for debugging
             logger.debug("Unknown event type: %s", type(event).__name__)
 
-    async def _persist_artifact(self, event: Any) -> None:
-        """Persist artifact from phase completion event.
+    async def _start_session(
+        self,
+        workflow_id: str,
+        phase_id: str,
+        provider: str,
+    ) -> str:
+        """Start a session for a phase using the aggregate pattern.
 
-        Converts the ArtifactBundle to an ArtifactCreated event and
-        dispatches it to the projection manager.
+        This properly creates a session via the AgentSessionAggregate,
+        which emits SessionStartedEvent to the event store.
+        The subscription service will update projections.
 
-        IMPORTANT: Currently only metadata is stored in the database.
-        Content is read from the filesystem (.aef-workspaces/).
+        Args:
+            workflow_id: The workflow ID.
+            phase_id: The phase ID.
+            provider: The agent provider (e.g., 'claude').
 
-        TODO: For production deployment, artifact content should be stored
-        in the database or object storage (S3/GCS) so the UI can run
-        independently of execution hosts. Options:
-        1. Store content in PostgreSQL (bytea/text column)
-        2. Store in S3/GCS with presigned URLs
-        3. Store content hash and use content-addressable storage
+        Returns:
+            The generated session_id.
+        """
+        from aef_adapters.storage.repositories import get_session_repository
+        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+            StartSessionCommand,
+        )
 
-        See: docs/adrs/ADR-012-artifact-storage.md (to be created)
+        session_id = str(uuid4())
+
+        # Track session for this phase (for later completion)
+        self._phase_sessions[phase_id] = session_id
+        self._phase_start_times[phase_id] = datetime.now(UTC)
+
+        try:
+            # Create aggregate and dispatch command
+            aggregate = AgentSessionAggregate()
+            command = StartSessionCommand(
+                aggregate_id=session_id,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                milestone_id=None,
+                agent_provider=provider,
+                agent_model="claude-sonnet-4-20250514" if provider == "claude" else None,
+                metadata={},
+            )
+            aggregate._handle_command(command)
+
+            # Persist to event store (events are saved)
+            repository = get_session_repository()
+            await repository.save(aggregate)
+
+            logger.info(
+                "Started session via aggregate",
+                extra={
+                    "session_id": session_id,
+                    "workflow_id": workflow_id,
+                    "phase_id": phase_id,
+                },
+            )
+
+            # Also push to SSE for real-time UI updates
+            push_event(
+                "session_started",
+                {
+                    "session_id": session_id,
+                    "workflow_id": workflow_id,
+                    "phase_id": phase_id,
+                    "agent_provider": provider,
+                    "started_at": datetime.now(UTC).isoformat(),
+                },
+            )
+
+        except Exception as e:
+            logger.error("Failed to start session", extra={"error": str(e)})
+            # Don't fail the workflow, just log the error
+
+        return session_id
+
+    async def _complete_session(
+        self,
+        session_id: str,
+        phase_id: str,
+        total_tokens: int,
+        success: bool,
+        error: str | None = None,
+    ) -> None:
+        """Complete a session using the aggregate pattern.
+
+        This properly completes the session via the AgentSessionAggregate,
+        which emits SessionCompletedEvent to the event store.
+        The subscription service will update projections.
+
+        Args:
+            session_id: The session ID.
+            phase_id: The phase ID.
+            total_tokens: Total tokens used.
+            success: Whether the session succeeded.
+            error: Error message if failed.
+        """
+        from aef_adapters.storage.repositories import get_session_repository
+        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+            CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+            RecordOperationCommand,
+        )
+
+        try:
+            repository = get_session_repository()
+
+            # Load existing aggregate
+            aggregate = await repository.get_by_id(session_id)
+            if aggregate is None:
+                logger.warning("Session not found for completion", extra={"session_id": session_id})
+                return
+
+            # Record the operation (token usage)
+            if total_tokens > 0:
+                input_tokens = int(total_tokens * 0.3)
+                output_tokens = int(total_tokens * 0.7)
+
+                operation_command = RecordOperationCommand(
+                    session_id=session_id,
+                    operation_type="agent_execution",
+                    duration_seconds=None,  # Could calculate from phase start time
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    tool_name=None,
+                    success=success,
+                    metadata={},
+                )
+                aggregate._handle_command(operation_command)
+
+            # Complete the session
+            complete_command = CompleteSessionCommand(
+                session_id=session_id,
+                success=success,
+                error_message=error,
+            )
+            aggregate._handle_command(complete_command)
+
+            # Persist to event store
+            await repository.save(aggregate)
+
+            logger.info(
+                "Completed session via aggregate",
+                extra={
+                    "session_id": session_id,
+                    "success": success,
+                    "total_tokens": total_tokens,
+                },
+            )
+
+            # Also push to SSE for real-time UI updates
+            push_event(
+                "session_completed",
+                {
+                    "session_id": session_id,
+                    "status": "completed" if success else "failed",
+                    "total_tokens": total_tokens,
+                    "error_message": error,
+                    "completed_at": datetime.now(UTC).isoformat(),
+                },
+            )
+
+        except Exception as e:
+            logger.error("Failed to complete session", extra={"error": str(e)})
+
+        # Clean up tracking
+        self._phase_sessions.pop(phase_id, None)
+        self._phase_start_times.pop(phase_id, None)
+
+    async def _persist_artifact(self, event: Any, session_id: str | None = None) -> None:
+        """Persist artifact from phase completion using the aggregate pattern.
+
+        This properly creates an artifact via the ArtifactAggregate,
+        which emits ArtifactCreatedEvent to the event store.
+        The subscription service will update projections.
+
+        NOTE: For MVP, artifact content is stored in the event itself.
+        For production with large artifacts, content should be stored in
+        object storage (S3/Supabase) and only a reference stored in the event.
+        See: docs/adrs/ADR-012-artifact-storage.md
 
         Args:
             event: PhaseCompleted event containing artifact info.
+            session_id: Optional session ID that produced this artifact.
         """
-        # Extract bundle from event (if available)
+        from aef_adapters.storage.repositories import get_artifact_repository
+        from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
+        from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
+        from aef_domain.contexts.artifacts.create_artifact.CreateArtifactCommand import (
+            CreateArtifactCommand,
+        )
+
+        # Extract info from event
         bundle = getattr(event, "artifact_bundle", None)
         workflow_id = getattr(event, "workflow_id", "")
         phase_id = getattr(event, "phase_id", "")
         artifact_bundle_id = getattr(event, "artifact_bundle_id", "")
-        completed_at = getattr(event, "completed_at", datetime.now(UTC))
 
-        if bundle is None:
-            # No bundle attached - create minimal artifact record
-            artifact_event = {
-                "artifact_id": artifact_bundle_id,
-                "workflow_id": workflow_id,
-                "session_id": None,
-                "phase_id": phase_id,
-                "artifact_type": "bundle",
-                "title": f"Phase {phase_id} Output",
-                "created_at": completed_at.isoformat()
-                if hasattr(completed_at, "isoformat")
-                else str(completed_at),
-            }
-        else:
-            # Full bundle available - extract rich metadata
-            # Get primary artifact type from bundle
-            primary_type = "bundle"
+        # Try to get primary file content from bundle
+        content = ""
+        title = f"Phase {phase_id} Output"
+        artifact_type = ArtifactType.RESEARCH_NOTES  # Default type
+
+        if bundle is not None:
+            # Find primary file in bundle
             for f in getattr(bundle, "files", []):
+                file_content = getattr(f, "content", None)
                 metadata = getattr(f, "metadata", None)
-                if metadata and getattr(metadata, "is_primary", False):
-                    primary_type = getattr(metadata, "artifact_type", "bundle")
-                    if hasattr(primary_type, "value"):
-                        primary_type = primary_type.value
-                    break
 
-            # Calculate total size
-            total_size = sum(len(getattr(f, "content", b"")) for f in getattr(bundle, "files", []))
+                if file_content:
+                    # Decode if bytes
+                    if isinstance(file_content, bytes):
+                        try:
+                            content = file_content.decode("utf-8")
+                        except UnicodeDecodeError:
+                            content = f"[Binary content: {len(file_content)} bytes]"
+                    else:
+                        content = str(file_content)
 
-            artifact_event = {
-                "artifact_id": getattr(bundle, "bundle_id", artifact_bundle_id),
-                "workflow_id": workflow_id,
-                "session_id": None,
-                "phase_id": phase_id,
-                "artifact_type": primary_type,
-                "title": getattr(bundle, "title", None) or f"Phase {phase_id} Output",
-                "created_at": completed_at.isoformat()
-                if hasattr(completed_at, "isoformat")
-                else str(completed_at),
-                # Extended fields
-                "file_count": len(getattr(bundle, "files", [])),
-                "size_bytes": total_size,
-            }
+                if metadata:
+                    is_primary = getattr(metadata, "is_primary", False)
+                    if is_primary:
+                        title = getattr(f, "filename", title) or title
+                        # Map artifact type
+                        raw_type = getattr(metadata, "artifact_type", None)
+                        if raw_type:
+                            if hasattr(raw_type, "value"):
+                                raw_type = raw_type.value
+                            # Try to match to ArtifactType enum
+                            try:
+                                artifact_type = ArtifactType(raw_type)
+                            except ValueError:
+                                artifact_type = ArtifactType.RESEARCH_NOTES
+                        break  # Found primary, stop searching
 
-        # Dispatch to projection manager
+            # Use bundle title if available
+            bundle_title = getattr(bundle, "title", None)
+            if bundle_title:
+                title = bundle_title
+
+        # If no content from bundle, create placeholder
+        if not content:
+            content = f"# {title}\n\nArtifact content stored in filesystem.\nSee: .aef-workspaces/"
+
         try:
-            await self._projection_manager.dispatch_event("ArtifactCreated", artifact_event)
+            # Create aggregate and dispatch command
+            aggregate = ArtifactAggregate()
+            command = CreateArtifactCommand(
+                aggregate_id=artifact_bundle_id or str(uuid4()),
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                session_id=session_id,
+                artifact_type=artifact_type,
+                content_type=None,  # Use default (markdown)
+                content=content,
+                title=title,
+                is_primary_deliverable=True,
+                derived_from=None,
+                metadata={},
+            )
+            aggregate._handle_command(command)
+
+            # Persist to event store
+            repository = get_artifact_repository()
+            await repository.save(aggregate)
+
             logger.info(
-                "Persisted artifact to projections",
+                "Persisted artifact via aggregate",
                 extra={
-                    "artifact_id": artifact_event["artifact_id"],
+                    "artifact_id": aggregate.id,
                     "workflow_id": workflow_id,
                     "phase_id": phase_id,
-                    "artifact_type": artifact_event["artifact_type"],
+                    "content_size": len(content),
                 },
             )
+
+            # Also push to SSE for real-time UI updates
+            push_event(
+                "artifact_created",
+                {
+                    "artifact_id": str(aggregate.id),
+                    "workflow_id": workflow_id,
+                    "phase_id": phase_id,
+                    "session_id": session_id,
+                    "title": title,
+                    "artifact_type": artifact_type.value,
+                },
+            )
+
         except Exception as e:
             logger.error(
                 "Failed to persist artifact",
                 extra={
-                    "artifact_id": artifact_event.get("artifact_id"),
+                    "artifact_id": artifact_bundle_id,
                     "error": str(e),
                 },
             )
