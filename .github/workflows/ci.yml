@@ -1,0 +1,195 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/*]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  #############################################################################
+  # PYTHON QA - Fast checks (lint, format, typecheck)
+  #############################################################################
+
+  python-qa:
+    name: Python QA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy apps packages
+
+  #############################################################################
+  # PYTHON TESTS - Unit tests with coverage
+  #############################################################################
+
+  python-tests:
+    name: Python Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run tests with coverage
+        run: |
+          uv run pytest \
+            --cov=apps/aef-cli/src \
+            --cov=apps/aef-dashboard/src \
+            --cov=packages/aef-domain/src \
+            --cov=packages/aef-adapters/src \
+            --cov=packages/aef-shared/src \
+            --cov-report=term-missing \
+            --cov-fail-under=70 \
+            -x -q
+
+  #############################################################################
+  # DASHBOARD UI - TypeScript checks
+  #############################################################################
+
+  dashboard-ui:
+    name: Dashboard UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/aef-dashboard-ui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/aef-dashboard-ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  #############################################################################
+  # SUBMODULE VALIDATION - Ensure submodules are properly referenced
+  #############################################################################
+
+  submodule-check:
+    name: Submodule Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Verify submodules
+        run: |
+          echo "Checking submodule status..."
+          git submodule status
+          
+          # Verify submodules are initialized
+          if [ ! -f "lib/agentic-primitives/README.md" ]; then
+            echo "❌ agentic-primitives submodule not initialized"
+            exit 1
+          fi
+          
+          if [ ! -f "lib/event-sourcing-platform/README.md" ]; then
+            echo "❌ event-sourcing-platform submodule not initialized"
+            exit 1
+          fi
+          
+          echo "✅ All submodules properly initialized"
+
+  #############################################################################
+  # SUMMARY - Required status check for PRs
+  #############################################################################
+
+  ci-success:
+    name: CI Success
+    if: always()
+    needs:
+      - python-qa
+      - python-tests
+      - dashboard-ui
+      - submodule-check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        run: |
+          # Check for failures
+          if [[ "${{ needs.python-qa.result }}" == "failure" ]] || \
+             [[ "${{ needs.python-tests.result }}" == "failure" ]] || \
+             [[ "${{ needs.dashboard-ui.result }}" == "failure" ]] || \
+             [[ "${{ needs.submodule-check.result }}" == "failure" ]]; then
+            echo "❌ CI checks failed"
+            exit 1
+          fi
+          
+          # Check for cancellations
+          if [[ "${{ needs.python-qa.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.python-tests.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.dashboard-ui.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.submodule-check.result }}" == "cancelled" ]]; then
+            echo "⚠️ CI checks were cancelled"
+            exit 1
+          fi
+          
+          echo "✅ All CI checks passed!"
+
+      - name: Write summary
+        run: |
+          echo "## CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Python QA | ${{ needs.python-qa.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Python Tests | ${{ needs.python-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard UI | ${{ needs.dashboard-ui.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Submodule Check | ${{ needs.submodule-check.result }} |" >> $GITHUB_STEP_SUMMARY
+
