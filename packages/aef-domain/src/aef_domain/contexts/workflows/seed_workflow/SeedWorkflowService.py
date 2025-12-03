@@ -209,16 +209,42 @@ class WorkflowSeeder:
                 success=True,
             )
         except Exception as e:
+            error_str = str(e)
+            # Check for concurrency/duplicate errors (workflow already exists)
+            is_duplicate = any(
+                msg in error_str.lower()
+                for msg in [
+                    "already exists",
+                    "precondition failed",
+                    "concurrency conflict",
+                    "duplicate",
+                ]
+            )
+
+            if is_duplicate:
+                self._existing_ids.add(workflow_id)
+                logger.info(
+                    "Workflow already exists, skipping",
+                    workflow_id=workflow_id,
+                    name=definition.name,
+                )
+                return SeedResult(
+                    workflow_id=workflow_id,
+                    name=definition.name,
+                    success=False,
+                    error=f"Workflow {workflow_id} already exists",
+                )
+
             logger.error(
                 "Failed to seed workflow",
                 workflow_id=workflow_id,
-                error=str(e),
+                error=error_str,
             )
             return SeedResult(
                 workflow_id=workflow_id,
                 name=definition.name,
                 success=False,
-                error=str(e),
+                error=error_str,
             )
 
     def register_existing(self, workflow_ids: set[str]) -> None:

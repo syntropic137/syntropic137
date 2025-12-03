@@ -229,3 +229,48 @@ class EventMessage(BaseModel):
     phase_id: str | None = None
     session_id: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+# =============================================================================
+# EXECUTION SCHEMAS
+# =============================================================================
+
+
+class ExecuteWorkflowRequest(BaseModel):
+    """Request to execute a workflow."""
+
+    inputs: dict[str, str] = Field(
+        default_factory=dict,
+        description="Input variables for the workflow (e.g., topic, context)",
+    )
+    provider: str = Field(
+        default="claude",
+        description="Agent provider to use (claude, openai, mock)",
+    )
+    max_budget_usd: float | None = Field(
+        default=None,
+        description="Maximum budget in USD for this execution",
+    )
+
+
+class ExecuteWorkflowResponse(BaseModel):
+    """Response after starting workflow execution."""
+
+    execution_id: str
+    workflow_id: str
+    status: str = "started"
+    message: str = "Workflow execution started"
+
+
+class ExecutionStatusResponse(BaseModel):
+    """Response for execution status check."""
+
+    execution_id: str
+    workflow_id: str
+    status: str
+    current_phase: str | None = None
+    completed_phases: int = 0
+    total_phases: int = 0
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None

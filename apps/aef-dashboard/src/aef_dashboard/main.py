@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from aef_dashboard.api import (
     artifacts_router,
     events_router,
+    execution_router,
     metrics_router,
     sessions_router,
     workflows_router,
@@ -63,6 +64,7 @@ def create_app() -> FastAPI:
 
     # Register API routers
     app.include_router(workflows_router, prefix="/api")
+    app.include_router(execution_router, prefix="/api")  # Workflow execution
     app.include_router(sessions_router, prefix="/api")
     app.include_router(artifacts_router, prefix="/api")
     app.include_router(events_router, prefix="/api")

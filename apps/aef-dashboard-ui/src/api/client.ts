@@ -59,6 +59,29 @@ export async function getWorkflowHistory(workflowId: string): Promise<ExecutionH
   return fetchJSON(`${API_BASE}/workflows/${workflowId}/history`)
 }
 
+export interface ExecuteWorkflowRequest {
+  inputs?: Record<string, string>
+  provider?: string
+  max_budget_usd?: number
+}
+
+export interface ExecuteWorkflowResponse {
+  execution_id: string
+  workflow_id: string
+  status: string
+  message: string
+}
+
+export async function executeWorkflow(
+  workflowId: string,
+  request: ExecuteWorkflowRequest = {}
+): Promise<ExecuteWorkflowResponse> {
+  return fetchJSON(`${API_BASE}/workflows/${workflowId}/execute`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
 // =============================================================================
 // SESSION API
 // =============================================================================
