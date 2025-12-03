@@ -311,43 +311,35 @@ class EventSubscriptionService:
                 last_save_time = now
 
     async def _dispatch_event(self, envelope: object) -> None:
-        """Dispatch an event to projections.
+        """Dispatch an event to projections via validated envelope.
+
+        This uses process_event_envelope() which validates that events
+        came through the proper event store channel, enforcing event
+        sourcing guarantees.
 
         Args:
             envelope: Event envelope from the event store.
         """
         try:
-            # Extract event type from envelope
-            event = getattr(envelope, "event", None)
-            if event is None:
-                logger.warning("Event envelope has no event attribute")
-                return
-
-            # Get event type - try multiple approaches
-            event_type = getattr(event, "event_type", None)
-            if event_type is None:
-                event_type = type(event).__name__
-
-            # Convert to dict for projection handlers
-            if hasattr(event, "to_dict"):
-                event_data = event.to_dict()
-            elif hasattr(event, "model_dump"):
-                event_data = event.model_dump()
-            else:
-                event_data = vars(event) if hasattr(event, "__dict__") else {}
-
-            # Dispatch to projection manager
-            await self._projection_manager.dispatch_event(event_type, event_data)
+            # Use the new validated dispatch method
+            # This validates provenance and extracts event data
+            provenance = await self._projection_manager.process_event_envelope(envelope)
             self._events_processed += 1
 
             logger.debug(
                 "Dispatched event to projections",
                 extra={
-                    "event_type": event_type,
-                    "global_nonce": getattr(
-                        getattr(envelope, "metadata", None), "global_nonce", None
-                    ),
+                    "event_type": provenance.event_type,
+                    "stream_id": provenance.stream_id,
+                    "global_nonce": provenance.global_nonce,
                 },
+            )
+
+        except ValueError as e:
+            # Invalid envelope - log but continue
+            logger.warning(
+                "Invalid event envelope",
+                extra={"error": str(e)},
             )
 
         except Exception as e:
