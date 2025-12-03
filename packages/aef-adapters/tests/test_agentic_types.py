@@ -250,15 +250,17 @@ class TestAgentExecutionResult:
             result="",
         )
 
-        result.add_event(TaskCompleted(
-            result="Success!",
-            input_tokens=1000,
-            output_tokens=500,
-            total_tokens=1500,
-            turns_used=5,
-            duration_ms=3000.0,
-            estimated_cost_usd=0.05,
-        ))
+        result.add_event(
+            TaskCompleted(
+                result="Success!",
+                input_tokens=1000,
+                output_tokens=500,
+                total_tokens=1500,
+                turns_used=5,
+                duration_ms=3000.0,
+                estimated_cost_usd=0.05,
+            )
+        )
 
         assert result.success is True
         assert result.result == "Success!"
@@ -274,11 +276,13 @@ class TestAgentExecutionResult:
             result="",
         )
 
-        result.add_event(TaskFailed(
-            error="Something went wrong",
-            turns_used=2,
-            input_tokens=500,
-        ))
+        result.add_event(
+            TaskFailed(
+                error="Something went wrong",
+                turns_used=2,
+                input_tokens=500,
+            )
+        )
 
         assert result.success is False
         assert result.error == "Something went wrong"

@@ -80,31 +80,14 @@ from aef_adapters.agents.protocol import (
 # Use get_agent(AgentProvider.CLAUDE) or import directly when needed
 
 __all__ = [
-    # Agentic Protocol (recommended)
-    "AgenticProtocol",
-    "AgenticError",
-    "AgenticBudgetExceededError",
-    "AgenticTurnsExceededError",
-    "AgenticTimeoutError",
-    "AgenticSDKError",
-    # Agentic Types
-    "AgentExecutionConfig",
-    "AgentExecutionResult",
-    "AgentEvent",
-    "AgentTool",
-    "ToolUseStarted",
-    "ToolUseCompleted",
-    "ToolBlocked",
-    "ThinkingUpdate",
-    "TextOutput",
-    "TaskCompleted",
-    "TaskFailed",
-    "Workspace",
-    "WorkspaceConfig",
     # Chat Completion Protocol (legacy)
     "AgentAuthenticationError",
     "AgentConfig",
     "AgentError",
+    "AgentEvent",
+    # Agentic Types
+    "AgentExecutionConfig",
+    "AgentExecutionResult",
     "AgentMessage",
     "AgentMetrics",
     "AgentProtocol",
@@ -113,9 +96,26 @@ __all__ = [
     "AgentResponse",
     "AgentRole",
     "AgentTimeoutError",
+    "AgentTool",
+    "AgenticBudgetExceededError",
+    "AgenticError",
+    # Agentic Protocol (recommended)
+    "AgenticProtocol",
+    "AgenticSDKError",
+    "AgenticTimeoutError",
+    "AgenticTurnsExceededError",
     # Mock Agent
     "MockAgent",
     "MockAgentConfig",
+    "TaskCompleted",
+    "TaskFailed",
+    "TextOutput",
+    "ThinkingUpdate",
+    "ToolBlocked",
+    "ToolUseCompleted",
+    "ToolUseStarted",
+    "Workspace",
+    "WorkspaceConfig",
     # Factory
     "get_agent",
     "get_available_agents",

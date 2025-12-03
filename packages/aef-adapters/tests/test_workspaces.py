@@ -40,13 +40,13 @@ class TestLocalWorkspace:
         async with LocalWorkspace.create(workspace_config) as workspace:
             settings_path = workspace.path / ".claude" / "settings.json"
             assert settings_path.exists()
-            
+
             settings = json.loads(settings_path.read_text())
             assert "hooks" in settings
             assert "PreToolUse" in settings["hooks"]
             assert "PostToolUse" in settings["hooks"]
             assert "UserPromptSubmit" in settings["hooks"]
-            
+
             # Check PreToolUse structure
             pre_tool = settings["hooks"]["PreToolUse"][0]
             assert pre_tool["matcher"] == "*"
@@ -63,18 +63,18 @@ class TestLocalWorkspace:
             hooks_source=Path("/nonexistent"),
             cleanup_on_exit=False,
         )
-        
+
         async with LocalWorkspace.create(config) as workspace:
             handlers_dir = workspace.path / ".claude" / "hooks" / "handlers"
-            
+
             # Check stub handlers exist and are executable
             pre_tool = handlers_dir / "pre-tool-use.py"
             assert pre_tool.exists()
             assert pre_tool.stat().st_mode & 0o111  # Executable
-            
+
             post_tool = handlers_dir / "post-tool-use.py"
             assert post_tool.exists()
-            
+
             user_prompt = handlers_dir / "user-prompt.py"
             assert user_prompt.exists()
 
@@ -82,7 +82,10 @@ class TestLocalWorkspace:
     async def test_workspace_path_properties(self, workspace_config: WorkspaceConfig) -> None:
         """Workspace should have correct path properties."""
         async with LocalWorkspace.create(workspace_config) as workspace:
-            assert workspace.analytics_path == workspace.path / ".agentic" / "analytics" / "events.jsonl"
+            assert (
+                workspace.analytics_path
+                == workspace.path / ".agentic" / "analytics" / "events.jsonl"
+            )
             assert workspace.context_dir == workspace.path / ".context"
             assert workspace.output_dir == workspace.path / "output"
             assert workspace.hooks_dir == workspace.path / ".claude" / "hooks"
@@ -96,18 +99,18 @@ class TestLocalWorkspace:
                 (Path("nested/config.json"), b'{"key": "value"}'),
             ]
             metadata = {"phase_id": "phase-1", "workflow_id": "wf-123"}
-            
+
             await LocalWorkspace.inject_context(workspace, files, metadata)
-            
+
             # Check files were written
             data_file = workspace.context_dir / "data.txt"
             assert data_file.exists()
             assert data_file.read_bytes() == b"Hello, World!"
-            
+
             nested_file = workspace.context_dir / "nested" / "config.json"
             assert nested_file.exists()
             assert b'"key"' in nested_file.read_bytes()
-            
+
             # Check metadata was written
             context_json = workspace.context_dir / "context.json"
             assert context_json.exists()
@@ -129,9 +132,9 @@ class TestLocalWorkspace:
             (workspace.output_dir / "result.txt").write_bytes(b"result data")
             (workspace.output_dir / "nested").mkdir()
             (workspace.output_dir / "nested" / "data.json").write_bytes(b'{"ok": true}')
-            
+
             artifacts = await LocalWorkspace.collect_artifacts(workspace)
-            
+
             assert len(artifacts) == 2
             paths = [str(p) for p, _ in artifacts]
             assert "result.txt" in paths
@@ -143,15 +146,15 @@ class TestLocalWorkspace:
         async with LocalWorkspace.create(workspace_config) as workspace:
             # Create mixed output files
             (workspace.output_dir / "result.txt").write_bytes(b"text")
-            (workspace.output_dir / "data.json").write_bytes(b'{}')
-            (workspace.output_dir / "image.png").write_bytes(b'\x89PNG')
-            
+            (workspace.output_dir / "data.json").write_bytes(b"{}")
+            (workspace.output_dir / "image.png").write_bytes(b"\x89PNG")
+
             # Collect only JSON files
             artifacts = await LocalWorkspace.collect_artifacts(
                 workspace,
                 output_patterns=["*.json"],
             )
-            
+
             assert len(artifacts) == 1
             assert artifacts[0][0] == Path("data.json")
 
@@ -163,12 +166,12 @@ class TestLocalWorkspace:
             base_dir=tmp_path,
             cleanup_on_exit=True,
         )
-        
+
         workspace_path = None
         async with LocalWorkspace.create(config) as workspace:
             workspace_path = workspace.path
             assert workspace_path.exists()
-        
+
         # After context exit, workspace should be gone
         assert not workspace_path.exists()
 
@@ -180,11 +183,11 @@ class TestLocalWorkspace:
             base_dir=tmp_path,
             cleanup_on_exit=False,
         )
-        
+
         workspace_path = None
         async with LocalWorkspace.create(config) as workspace:
             workspace_path = workspace.path
-        
+
         # After context exit, workspace should still exist
         assert workspace_path.exists()
 
@@ -200,4 +203,3 @@ class TestLocalWorkspace:
         async with LocalWorkspace.create(workspace_config) as workspace:
             assert workspace.config == workspace_config
             assert workspace.config.session_id == "test-session"
-
