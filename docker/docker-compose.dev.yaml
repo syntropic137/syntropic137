@@ -1,6 +1,8 @@
 # Development Docker Compose
 # Start with: just dev
 
+name: aef
+
 services:
   postgres:
     image: postgres:16-alpine

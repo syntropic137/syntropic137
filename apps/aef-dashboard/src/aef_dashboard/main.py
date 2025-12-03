@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
 import uvicorn
+from agentic_logging import get_logger, setup_logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -23,15 +23,111 @@ from aef_dashboard.config import get_dashboard_config
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-logger = logging.getLogger(__name__)
+# Initialize structured logging from agentic-primitives
+# Configure via env vars: LOG_LEVEL, LOG_FORMAT (json/human), LOG_LEVEL_<COMPONENT>
+setup_logging()
+logger = get_logger(__name__)
+
+# Global reference to subscription service for health checks
+_subscription_service = None
+
+
+async def _start_subscription_service() -> None:
+    """Start the event subscription service for projection updates.
+
+    This connects to the event store and subscribes to events,
+    dispatching them to projections in real-time.
+    """
+    global _subscription_service
+
+    try:
+        from aef_adapters.projection_stores import get_projection_store
+        from aef_adapters.projections import get_projection_manager
+        from aef_adapters.storage import (
+            connect_event_store,
+            get_event_store_client,
+        )
+        from aef_adapters.subscriptions import EventSubscriptionService
+        from aef_shared.settings import get_settings
+
+        settings = get_settings()
+
+        # Skip subscription in test environment
+        if settings.is_test:
+            logger.info("Skipping subscription service in test environment")
+            return
+
+        # Connect to event store
+        await connect_event_store()
+        logger.info("Connected to event store")
+
+        # Create and start subscription service
+        _subscription_service = EventSubscriptionService(
+            event_store_client=get_event_store_client(),
+            projection_manager=get_projection_manager(),
+            projection_store=get_projection_store(),
+            batch_size=100,
+            position_save_interval=10,
+        )
+        await _subscription_service.start()
+        logger.info("Event subscription service started")
+
+    except ImportError as e:
+        logger.warning(
+            "Could not start subscription service - missing dependencies: %s",
+            e,
+        )
+    except Exception as e:
+        logger.error(
+            "Failed to start subscription service: %s",
+            e,
+            exc_info=True,
+        )
+
+
+async def _stop_subscription_service() -> None:
+    """Stop the event subscription service gracefully."""
+    global _subscription_service
+
+    if _subscription_service is not None:
+        try:
+            await _subscription_service.stop()
+            logger.info("Event subscription service stopped")
+        except Exception as e:
+            logger.error("Error stopping subscription service: %s", e)
+
+    try:
+        from aef_adapters.storage import disconnect_event_store
+
+        await disconnect_event_store()
+        logger.info("Disconnected from event store")
+    except Exception as e:
+        logger.warning("Error disconnecting from event store: %s", e)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager."""
+    """Application lifespan manager.
+
+    On startup:
+        - Connect to event store
+        - Start subscription service for projection updates
+
+    On shutdown:
+        - Stop subscription service
+        - Disconnect from event store
+    """
     logger.info("Starting AEF Dashboard...")
+
+    # Start subscription service
+    await _start_subscription_service()
+
     yield
+
     logger.info("Shutting down AEF Dashboard...")
+
+    # Stop subscription service
+    await _stop_subscription_service()
 
 
 def create_app() -> FastAPI:
@@ -81,9 +177,19 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/health")
-    async def health() -> dict[str, str]:
-        """Health check endpoint."""
-        return {"status": "healthy"}
+    async def health() -> dict:
+        """Health check endpoint with subscription status."""
+        response: dict = {"status": "healthy"}
+
+        if _subscription_service is not None:
+            response["subscription"] = {
+                "running": _subscription_service.is_running,
+                "caught_up": _subscription_service.is_caught_up,
+                "last_position": _subscription_service.last_position,
+                "events_processed": _subscription_service.events_processed,
+            }
+
+        return response
 
     return app
 

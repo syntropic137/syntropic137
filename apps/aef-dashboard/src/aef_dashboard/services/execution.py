@@ -6,16 +6,17 @@ It bridges execution events to the SSE stream and persists artifacts.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from agentic_logging import get_logger
+
 from aef_dashboard.api.events import push_event
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # =============================================================================

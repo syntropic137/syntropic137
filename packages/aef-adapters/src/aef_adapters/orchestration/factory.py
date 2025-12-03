@@ -21,7 +21,10 @@ import logging
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager as AsyncContextManager
+
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
+    from aef_adapters.agents.agentic_types import Workspace, WorkspaceConfig
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +99,38 @@ def get_available_agentic_agents() -> list[str]:
         pass
 
     return available
+
+
+# =============================================================================
+# Workspace Factory
+# =============================================================================
+
+
+class WorkspaceFactory(Protocol):
+    """Protocol for workspace factory functions."""
+
+    def __call__(self, config: WorkspaceConfig) -> AsyncContextManager[Workspace]:
+        """Create a workspace for the given configuration."""
+        ...
+
+
+def get_workspace(config: WorkspaceConfig) -> AsyncContextManager[Workspace]:
+    """Get a workspace for agent execution.
+
+    Currently returns a LocalWorkspace. Future versions may support
+    Docker or cloud-based workspaces based on configuration.
+
+    Args:
+        config: Workspace configuration (session_id, paths, etc.)
+
+    Returns:
+        An async context manager that yields a configured Workspace.
+
+    Example:
+        async with get_workspace(config) as workspace:
+            async for event in agent.execute(task, workspace, exec_config):
+                handle_event(event)
+    """
+    from aef_adapters.workspaces import LocalWorkspace
+
+    return LocalWorkspace.create(config)

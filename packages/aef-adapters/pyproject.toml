@@ -8,6 +8,7 @@ dependencies = [
     "aef-shared",
     "aef-domain",
     "agentic-hooks[http]",
+    "agentic-logging",  # Structured logging (ADR-014 from agentic-primitives)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",

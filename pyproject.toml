@@ -48,6 +48,7 @@ aef-shared = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 agentic-hooks = { path = "lib/agentic-primitives/lib/python/agentic_hooks" }
+agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging" }
 
 [tool.ruff]
 target-version = "py312"
@@ -115,6 +116,8 @@ module = [
     "asyncpg.*",
     "agentic_hooks",
     "agentic_hooks.*",
+    "agentic_logging",
+    "agentic_logging.*",
     "sse_starlette",
     "sse_starlette.*",
     "uvicorn",
