@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aef-shared",
     "aef-domain",
+    "agentic-hooks",  # Hook event types and client
 ]
 
 [project.optional-dependencies]

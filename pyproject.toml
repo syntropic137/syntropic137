@@ -42,7 +42,7 @@ aef-adapters = { workspace = true }
 aef-shared = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
-# agentic-primitives = { path = "lib/agentic-primitives/lib/python" }
+agentic-hooks = { path = "lib/agentic-primitives/lib/python/agentic_hooks" }
 
 [tool.ruff]
 target-version = "py312"
