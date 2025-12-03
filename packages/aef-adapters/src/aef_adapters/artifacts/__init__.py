@@ -13,6 +13,7 @@ from aef_adapters.artifacts.bundle import (
     ArtifactBundle,
     ArtifactFile,
     ArtifactMetadata,
+    ArtifactType,
     PhaseContext,
 )
 
@@ -20,5 +21,6 @@ __all__ = [
     "ArtifactBundle",
     "ArtifactFile",
     "ArtifactMetadata",
+    "ArtifactType",
     "PhaseContext",
 ]
