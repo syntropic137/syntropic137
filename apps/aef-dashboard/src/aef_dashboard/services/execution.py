@@ -2,18 +2,36 @@
 
 This service orchestrates workflow execution using the AgenticWorkflowExecutor.
 It bridges execution events to the SSE stream and persists artifacts.
+
+NOTE: This service requires the agentic components to be installed.
+If imports fail at startup, that's a deployment configuration error.
+For testing, use MockAgenticExecutor with APP_ENVIRONMENT=test.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from agentic_logging import get_logger
+from aef_shared.settings import get_settings
 
+from aef_adapters.orchestration import AgenticWorkflowExecutor
+from aef_adapters.orchestration.executor import (
+    PhaseCompleted,
+    PhaseFailed,
+    PhaseStarted,
+    WorkflowCompleted,
+    WorkflowFailed,
+    WorkflowStarted,
+)
+from aef_adapters.orchestration.factory import (
+    get_agentic_agent,
+    get_workspace,
+)
 from aef_dashboard.api.events import push_event
 
 logger = get_logger(__name__)
@@ -110,73 +128,52 @@ class ExecutionService:
             tracker[execution_id]["total_phases"] = len(workflow_def.phases)
             tracker[execution_id]["status"] = "running"
 
-            # Try to import agentic components
-            try:
-                from aef_adapters.orchestration import AgenticWorkflowExecutor
-                from aef_adapters.orchestration.executor import (
-                    PhaseCompleted,
-                    PhaseFailed,
-                    PhaseStarted,
-                    WorkflowCompleted,
-                    WorkflowFailed,
-                    WorkflowStarted,
-                )
-                from aef_adapters.orchestration.factory import (
-                    get_agentic_agent,
-                    get_workspace,
-                )
+            # Create executor - imports are at top level, fail fast if not available
+            executor = AgenticWorkflowExecutor(
+                agent_factory=get_agentic_agent,
+                workspace_factory=get_workspace,
+                base_workspace_path=self._base_workspace_path,
+                default_provider=provider,
+                default_max_budget_usd=max_budget_usd,
+            )
 
-                # Create executor
-                executor = AgenticWorkflowExecutor(
-                    agent_factory=get_agentic_agent,
-                    workspace_factory=get_workspace,
-                    base_workspace_path=self._base_workspace_path,
-                    default_provider=provider,
-                    default_max_budget_usd=max_budget_usd,
-                )
+            # Execute and stream events
+            async for event in executor.execute(
+                workflow_def,
+                inputs,
+                execution_id=execution_id,
+                provider=provider,
+            ):
+                # Bridge to SSE
+                self._bridge_event_to_sse(event)
 
-                # Execute and stream events
-                async for event in executor.execute(
-                    workflow_def,
-                    inputs,
-                    execution_id=execution_id,
-                    provider=provider,
-                ):
-                    # Bridge to SSE
-                    self._bridge_event_to_sse(event)
+                # Update tracker
+                if isinstance(event, WorkflowStarted):
+                    tracker[execution_id]["status"] = "running"
 
-                    # Update tracker
-                    if isinstance(event, WorkflowStarted):
-                        tracker[execution_id]["status"] = "running"
+                elif isinstance(event, PhaseStarted):
+                    tracker[execution_id]["current_phase"] = event.phase_id
 
-                    elif isinstance(event, PhaseStarted):
-                        tracker[execution_id]["current_phase"] = event.phase_id
+                elif isinstance(event, PhaseCompleted):
+                    tracker[execution_id]["completed_phases"] = (
+                        tracker[execution_id].get("completed_phases", 0) + 1
+                    )
+                    tracker[execution_id]["current_phase"] = None
+                    # Persist artifact
+                    await self._persist_artifact(event)
 
-                    elif isinstance(event, PhaseCompleted):
-                        tracker[execution_id]["completed_phases"] = (
-                            tracker[execution_id].get("completed_phases", 0) + 1
-                        )
-                        tracker[execution_id]["current_phase"] = None
-                        # Persist artifact
-                        await self._persist_artifact(event)
+                elif isinstance(event, PhaseFailed):
+                    tracker[execution_id]["status"] = "failed"
+                    tracker[execution_id]["error"] = event.error
 
-                    elif isinstance(event, PhaseFailed):
-                        tracker[execution_id]["status"] = "failed"
-                        tracker[execution_id]["error"] = event.error
+                elif isinstance(event, WorkflowCompleted):
+                    tracker[execution_id]["status"] = "completed"
+                    tracker[execution_id]["completed_at"] = datetime.now(UTC)
 
-                    elif isinstance(event, WorkflowCompleted):
-                        tracker[execution_id]["status"] = "completed"
-                        tracker[execution_id]["completed_at"] = datetime.now(UTC)
-
-                    elif isinstance(event, WorkflowFailed):
-                        tracker[execution_id]["status"] = "failed"
-                        tracker[execution_id]["error"] = event.error
-                        tracker[execution_id]["completed_at"] = datetime.now(UTC)
-
-            except ImportError as e:
-                logger.warning(f"Agentic components not available, using simulated execution: {e}")
-                # Fall back to simulated execution for demo/testing
-                await self._run_simulated_execution(execution_id, workflow_def, inputs, tracker)
+                elif isinstance(event, WorkflowFailed):
+                    tracker[execution_id]["status"] = "failed"
+                    tracker[execution_id]["error"] = event.error
+                    tracker[execution_id]["completed_at"] = datetime.now(UTC)
 
         except Exception as e:
             logger.exception("Workflow execution failed")
@@ -260,98 +257,98 @@ class ExecutionService:
         Args:
             event: The execution event to bridge.
         """
-        # Import event types for matching
-        try:
-            from aef_adapters.orchestration.executor import (
-                PhaseCompleted,
-                PhaseFailed,
-                PhaseStarted,
-                WorkflowCompleted,
-                WorkflowFailed,
-                WorkflowStarted,
+        if isinstance(event, WorkflowStarted):
+            push_event(
+                "workflow_started",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "workflow_name": event.workflow_name,
+                    "total_phases": event.total_phases,
+                },
             )
 
-            if isinstance(event, WorkflowStarted):
-                push_event(
-                    "workflow_started",
-                    {
-                        "workflow_id": event.workflow_id,
-                        "execution_id": event.execution_id,
-                        "workflow_name": event.workflow_name,
-                        "total_phases": event.total_phases,
-                    },
-                )
+        elif isinstance(event, PhaseStarted):
+            push_event(
+                "phase_started",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "phase_name": event.phase_name,
+                    "phase_order": event.phase_order,
+                },
+            )
 
-            elif isinstance(event, PhaseStarted):
-                push_event(
-                    "phase_started",
-                    {
-                        "workflow_id": event.workflow_id,
-                        "execution_id": event.execution_id,
-                        "phase_id": event.phase_id,
-                        "phase_name": event.phase_name,
-                        "phase_order": event.phase_order,
-                    },
-                )
+        elif isinstance(event, PhaseCompleted):
+            push_event(
+                "phase_completed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "artifact_bundle_id": event.artifact_bundle_id,
+                    "tokens": event.total_tokens,
+                    "duration_ms": event.duration_ms,
+                },
+            )
 
-            elif isinstance(event, PhaseCompleted):
-                push_event(
-                    "phase_completed",
-                    {
-                        "workflow_id": event.workflow_id,
-                        "execution_id": event.execution_id,
-                        "phase_id": event.phase_id,
-                        "artifact_bundle_id": event.artifact_bundle_id,
-                        "tokens": event.total_tokens,
-                        "duration_ms": event.duration_ms,
-                    },
-                )
+        elif isinstance(event, PhaseFailed):
+            push_event(
+                "phase_failed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "error": event.error,
+                },
+            )
 
-            elif isinstance(event, PhaseFailed):
-                push_event(
-                    "phase_failed",
-                    {
-                        "workflow_id": event.workflow_id,
-                        "execution_id": event.execution_id,
-                        "phase_id": event.phase_id,
-                        "error": event.error,
-                    },
-                )
+        elif isinstance(event, WorkflowCompleted):
+            push_event(
+                "workflow_completed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "total_phases": event.total_phases,
+                    "completed_phases": event.completed_phases,
+                    "total_tokens": event.total_tokens,
+                    "duration_ms": event.total_duration_ms,
+                },
+            )
 
-            elif isinstance(event, WorkflowCompleted):
-                push_event(
-                    "workflow_completed",
-                    {
-                        "workflow_id": event.workflow_id,
-                        "execution_id": event.execution_id,
-                        "total_phases": event.total_phases,
-                        "completed_phases": event.completed_phases,
-                        "total_tokens": event.total_tokens,
-                        "duration_ms": event.total_duration_ms,
-                    },
-                )
+        elif isinstance(event, WorkflowFailed):
+            push_event(
+                "workflow_failed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "error": event.error,
+                    "failed_phase_id": event.failed_phase_id,
+                },
+            )
 
-            elif isinstance(event, WorkflowFailed):
-                push_event(
-                    "workflow_failed",
-                    {
-                        "workflow_id": event.workflow_id,
-                        "execution_id": event.execution_id,
-                        "error": event.error,
-                        "failed_phase_id": event.failed_phase_id,
-                    },
-                )
-
-        except ImportError:
-            # If imports fail, try to extract basic info
-            event_type = type(event).__name__.lower()
-            push_event(event_type, {"data": str(event)})
+        else:
+            # Unknown event type - log for debugging
+            logger.debug("Unknown event type: %s", type(event).__name__)
 
     async def _persist_artifact(self, event: Any) -> None:
         """Persist artifact from phase completion event.
 
         Converts the ArtifactBundle to an ArtifactCreated event and
         dispatches it to the projection manager.
+
+        IMPORTANT: Currently only metadata is stored in the database.
+        Content is read from the filesystem (.aef-workspaces/).
+
+        TODO: For production deployment, artifact content should be stored
+        in the database or object storage (S3/GCS) so the UI can run
+        independently of execution hosts. Options:
+        1. Store content in PostgreSQL (bytea/text column)
+        2. Store in S3/GCS with presigned URLs
+        3. Store content hash and use content-addressable storage
+
+        See: docs/adrs/ADR-012-artifact-storage.md (to be created)
 
         Args:
             event: PhaseCompleted event containing artifact info.
@@ -426,104 +423,3 @@ class ExecutionService:
                     "error": str(e),
                 },
             )
-
-    async def _run_simulated_execution(
-        self,
-        execution_id: str,
-        workflow_def: WorkflowDefinitionAdapter,
-        inputs: dict[str, str],
-        tracker: dict[str, dict],
-    ) -> None:
-        """Run a simulated execution for demo/testing.
-
-        This is used when the agentic components are not available.
-        """
-        import asyncio
-
-        # Emit workflow started
-        push_event(
-            "workflow_started",
-            {
-                "workflow_id": workflow_def.workflow_id,
-                "execution_id": execution_id,
-                "workflow_name": workflow_def.name,
-                "total_phases": len(workflow_def.phases),
-                "inputs": inputs,
-                "simulated": True,
-            },
-        )
-
-        tracker[execution_id]["status"] = "running"
-
-        # Simulate each phase
-        for phase in workflow_def.phases:
-            # Phase started
-            push_event(
-                "phase_started",
-                {
-                    "workflow_id": workflow_def.workflow_id,
-                    "execution_id": execution_id,
-                    "phase_id": phase.phase_id,
-                    "phase_name": phase.name,
-                    "phase_order": phase.order,
-                    "simulated": True,
-                },
-            )
-            tracker[execution_id]["current_phase"] = phase.phase_id
-
-            # Simulate work (1-3 seconds)
-            await asyncio.sleep(1.5)
-
-            # Create real artifact for this phase
-            artifact_id = str(uuid4())
-            completed_at = datetime.now(UTC)
-
-            # Persist artifact to projections (creates real entry)
-            artifact_event = {
-                "artifact_id": artifact_id,
-                "workflow_id": workflow_def.workflow_id,
-                "session_id": None,
-                "phase_id": phase.phase_id,
-                "artifact_type": "markdown",
-                "title": f"{phase.name} Output",
-                "created_at": completed_at.isoformat(),
-                "file_count": 1,
-                "size_bytes": len(f"# {phase.name} Output\n\nSimulated output for demonstration."),
-            }
-            await self._projection_manager.dispatch_event("ArtifactCreated", artifact_event)
-
-            # Phase completed SSE event
-            push_event(
-                "phase_completed",
-                {
-                    "workflow_id": workflow_def.workflow_id,
-                    "execution_id": execution_id,
-                    "phase_id": phase.phase_id,
-                    "artifact_bundle_id": artifact_id,
-                    "tokens": 1500,
-                    "duration_ms": 1500,
-                    "simulated": True,
-                },
-            )
-
-            tracker[execution_id]["completed_phases"] = (
-                tracker[execution_id].get("completed_phases", 0) + 1
-            )
-            tracker[execution_id]["current_phase"] = None
-
-        # Workflow completed
-        push_event(
-            "workflow_completed",
-            {
-                "workflow_id": workflow_def.workflow_id,
-                "execution_id": execution_id,
-                "total_phases": len(workflow_def.phases),
-                "completed_phases": len(workflow_def.phases),
-                "total_tokens": len(workflow_def.phases) * 1500,
-                "duration_ms": len(workflow_def.phases) * 1500,
-                "simulated": True,
-            },
-        )
-
-        tracker[execution_id]["status"] = "completed"
-        tracker[execution_id]["completed_at"] = datetime.now(UTC)

@@ -138,7 +138,7 @@ Use a third-party logging library.
 Components that have been updated to use `agentic_logging`:
 
 - [x] `aef-dashboard/main.py` - Dashboard startup and lifespan
-- [x] `aef-dashboard/services/execution.py` - Workflow execution service  
+- [x] `aef-dashboard/services/execution.py` - Workflow execution service
 - [x] `aef-adapters/subscriptions/service.py` - Event subscription service
 - [ ] Other components (as needed)
 
@@ -146,4 +146,3 @@ Components that have been updated to use `agentic_logging`:
 
 - [agentic-primitives ADR-014](../../lib/agentic-primitives/docs/adrs/014-centralized-agentic-logging.md) - Original logging design
 - [agentic_logging README](../../lib/agentic-primitives/lib/python/agentic_logging/README.md) - Detailed usage guide
-

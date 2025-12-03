@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,7 @@ from aef_dashboard.api import (
     workflows_router,
 )
 from aef_dashboard.config import get_dashboard_config
+from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -30,6 +32,38 @@ logger = get_logger(__name__)
 
 # Global reference to subscription service for health checks
 _subscription_service = None
+
+
+def _validate_api_keys() -> None:
+    """Validate required API keys are available at startup.
+
+    Fail-fast behavior:
+    - TEST: No API key required (mocks are used)
+    - DEVELOPMENT: Warning only (allows read-only dashboard usage)
+    - PRODUCTION/STAGING: Fail hard - workflow execution requires API key
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    settings = get_settings()
+
+    if not api_key:
+        if settings.is_test:
+            logger.info("No ANTHROPIC_API_KEY set (test mode - using mocks)")
+        elif settings.app_environment == "development":
+            logger.warning(
+                "⚠️  ANTHROPIC_API_KEY not set - workflow execution will fail. "
+                "Set it in .env to enable real agent execution."
+            )
+        else:
+            # Production/Staging - fail hard
+            raise RuntimeError(
+                f"ANTHROPIC_API_KEY is required in {settings.app_environment} mode. "
+                "Workflow execution cannot proceed without it. "
+                "Set the environment variable and restart."
+            )
+    else:
+        # Mask key for logging (show first 8 chars)
+        masked = api_key[:8] + "..." if len(api_key) > 8 else "***"
+        logger.info("✓ ANTHROPIC_API_KEY configured (%s)", masked)
 
 
 async def _start_subscription_service() -> None:
@@ -110,6 +144,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager.
 
     On startup:
+        - Validate API keys (fail-fast)
         - Connect to event store
         - Start subscription service for projection updates
 
@@ -118,6 +153,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         - Disconnect from event store
     """
     logger.info("Starting AEF Dashboard...")
+
+    # Fail-fast: validate required API keys
+    _validate_api_keys()
 
     # Start subscription service
     await _start_subscription_service()

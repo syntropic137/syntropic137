@@ -1,7 +1,11 @@
 # RIPER Project Plans
 !PROJECT-PLAN_*.md
 !EXECUTION-PROMPT_*.md
+!.mcss/
 # Reference materials
 !_reference/
 # Git worktrees for parallel development
 !.workspaces/
+
+# AEF Execution Workspaces (runtime artifacts - large files, pollute context)
+.aef-workspaces/

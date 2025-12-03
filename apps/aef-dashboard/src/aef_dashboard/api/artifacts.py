@@ -1,7 +1,23 @@
-"""Artifact API endpoints."""
+"""Artifact API endpoints.
+
+ARCHITECTURE NOTE: Artifact Storage
+===================================
+Currently, artifact storage is split:
+- **Metadata** (id, title, type, phase_id) → PostgreSQL (via projections)
+- **Content** (actual file content) → Filesystem (.aef-workspaces/)
+
+This is a **development-only** setup. For production:
+- Content should be stored in database or object storage (S3/GCS)
+- This allows the UI to run independently of execution hosts
+- See: docs/adrs/ADR-012-artifact-storage.md (to be created)
+
+The _load_artifact_content() function reads from filesystem as a temporary
+solution. Replace with database/object storage queries for production.
+"""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
@@ -15,6 +31,9 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.read_models import (
         ArtifactSummary as DomainArtifactSummary,
     )
+
+# Base path for workspace artifacts (DEVELOPMENT ONLY - see module docstring)
+_WORKSPACE_BASE = Path.cwd() / ".aef-workspaces"
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
@@ -59,7 +78,7 @@ async def list_artifacts(
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(
     artifact_id: str,
-    include_content: bool = Query(  # noqa: ARG001 - API parameter for future use
+    include_content: bool = Query(
         False, description="Include artifact content in response"
     ),
 ) -> ArtifactResponse:
@@ -77,6 +96,12 @@ async def get_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
+    # Try to load content from workspace if requested
+    content = None
+    size_bytes = 0
+    if include_content:
+        content, size_bytes = _load_artifact_content(artifact_id, artifact.phase_id)
+
     return ArtifactResponse(
         id=artifact.id,
         workflow_id=artifact.workflow_id,
@@ -84,10 +109,10 @@ async def get_artifact(
         session_id=artifact.session_id,
         artifact_type=artifact.artifact_type,
         is_primary_deliverable=False,
-        content=None,  # Content not stored in read model
+        content=content,
         content_type="text/markdown",
         content_hash=None,
-        size_bytes=0,
+        size_bytes=size_bytes,
         title=artifact.name,
         derived_from=[],
         created_at=artifact.created_at,
@@ -97,7 +122,7 @@ async def get_artifact(
 
 
 @router.get("/{artifact_id}/content")
-async def get_artifact_content(artifact_id: str) -> dict[str, str | None]:
+async def get_artifact_content(artifact_id: str) -> dict[str, str | int | None]:
     """Get artifact content only (for large artifacts)."""
     # Get projection manager and create handler
     manager = get_projection_manager()
@@ -111,8 +136,71 @@ async def get_artifact_content(artifact_id: str) -> dict[str, str | None]:
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
+    # Load content from workspace
+    content, size_bytes = _load_artifact_content(artifact_id, artifact.phase_id)
+
     return {
         "artifact_id": artifact_id,
-        "content": None,  # Content not stored in read model
+        "content": content,
         "content_type": "text/markdown",
+        "size_bytes": size_bytes,
     }
+
+
+def _load_artifact_content(artifact_id: str, phase_id: str | None) -> tuple[str | None, int]:
+    """Load artifact content from workspace files.
+
+    Searches for artifact content in the .aef-workspaces directory structure.
+
+    Args:
+        artifact_id: The artifact ID to find.
+        phase_id: The phase ID (e.g., "phase-1").
+
+    Returns:
+        Tuple of (content, size_bytes). Content is None if not found.
+    """
+    if not _WORKSPACE_BASE.exists():
+        return None, 0
+
+    # Search strategy:
+    # 1. Look for phase output file directly (e.g., phase-1_output.md)
+    # 2. Look in artifact subdirectories
+    # 3. Look for any markdown file in the phase directory
+
+    for execution_dir in _WORKSPACE_BASE.iterdir():
+        if not execution_dir.is_dir():
+            continue
+
+        # Try direct phase output
+        if phase_id:
+            phase_output = execution_dir / phase_id / f"{phase_id}_output.md"
+            if phase_output.exists():
+                try:
+                    content = phase_output.read_text(encoding="utf-8")
+                    return content, len(content.encode("utf-8"))
+                except Exception:
+                    pass
+
+            # Check artifacts directory for this artifact ID
+            artifacts_dir = execution_dir / phase_id / ".context" / "artifacts" / artifact_id
+            if artifacts_dir.exists():
+                for md_file in artifacts_dir.glob("*.md"):
+                    try:
+                        content = md_file.read_text(encoding="utf-8")
+                        return content, len(content.encode("utf-8"))
+                    except Exception:
+                        pass
+
+            # Look for any markdown in the phase directory
+            phase_dir = execution_dir / phase_id
+            if phase_dir.exists():
+                for md_file in phase_dir.glob("*.md"):
+                    if md_file.name.startswith("."):
+                        continue
+                    try:
+                        content = md_file.read_text(encoding="utf-8")
+                        return content, len(content.encode("utf-8"))
+                    except Exception:
+                        pass
+
+    return None, 0
