@@ -13,7 +13,9 @@ from datetime import UTC, datetime
 import pytest
 
 # Skip all tests in this module until async storage issue is resolved
-pytestmark = pytest.mark.skip(reason="Async storage issue - entities not persisting in test context")
+pytestmark = pytest.mark.skip(
+    reason="Async storage issue - entities not persisting in test context"
+)
 from fastapi.testclient import TestClient
 
 from aef_adapters.storage import (
