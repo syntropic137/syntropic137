@@ -1,8 +1,7 @@
 """Tests for EventSubscriptionService."""
 
 import asyncio
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -42,11 +41,7 @@ class MockEventStoreClient:
         limit: int = 100,
     ) -> list[MockEventEnvelope]:
         """Return events after the given position."""
-        return [
-            e
-            for e in self.events
-            if e.metadata.global_nonce > after_global_nonce
-        ][:limit]
+        return [e for e in self.events if e.metadata.global_nonce > after_global_nonce][:limit]
 
     async def subscribe(self, from_global_nonce: int = 0):
         """Yield events starting from the given position."""
@@ -318,4 +313,3 @@ class TestEventSubscriptionService:
         await subscription_service.stop()
 
         assert not subscription_service.is_running
-

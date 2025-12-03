@@ -7,4 +7,3 @@ to projections using the pub/sub pattern.
 from aef_adapters.subscriptions.service import EventSubscriptionService
 
 __all__ = ["EventSubscriptionService"]
-

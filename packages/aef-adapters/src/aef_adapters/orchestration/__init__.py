@@ -34,7 +34,9 @@ from aef_adapters.orchestration.executor import (
 )
 from aef_adapters.orchestration.factory import (
     AgenticAgentFactory,
+    WorkspaceFactory,
     get_agentic_agent,
+    get_workspace,
 )
 
 __all__ = [
@@ -47,5 +49,7 @@ __all__ = [
     "WorkflowCompleted",
     "WorkflowFailed",
     "WorkflowStarted",
+    "WorkspaceFactory",
     "get_agentic_agent",
+    "get_workspace",
 ]

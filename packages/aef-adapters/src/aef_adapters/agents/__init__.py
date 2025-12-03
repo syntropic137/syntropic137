@@ -112,6 +112,23 @@ except ImportError:
 # Use get_agent(AgentProvider.CLAUDE) or import directly when needed
 
 __all__ = [
+    # Chat Completion Protocol (legacy)
+    "AgentAuthenticationError",
+    "AgentConfig",
+    "AgentError",
+    # Agentic Types
+    "AgentEvent",
+    "AgentExecutionConfig",
+    "AgentExecutionResult",
+    "AgentMessage",
+    "AgentMetrics",
+    "AgentProtocol",
+    "AgentProvider",
+    "AgentRateLimitError",
+    "AgentResponse",
+    "AgentRole",
+    "AgentTimeoutError",
+    "AgentTool",
     # Agentic Protocol (recommended)
     "AgenticBudgetExceededError",
     "AgenticError",
@@ -119,12 +136,13 @@ __all__ = [
     "AgenticSDKError",
     "AgenticTimeoutError",
     "AgenticTurnsExceededError",
-    # Agentic Types
-    "AgentEvent",
-    "AgentExecutionConfig",
-    "AgentExecutionResult",
-    "AgentTool",
     "ClaudeAgenticAgent",
+    # Instrumented & Mock
+    "InstrumentedAgent",
+    "MockAgent",
+    "MockAgentConfig",
+    "MockAgentError",
+    "SessionContext",
     "TaskCompleted",
     "TaskFailed",
     "TextOutput",
@@ -134,24 +152,6 @@ __all__ = [
     "ToolUseStarted",
     "Workspace",
     "WorkspaceConfig",
-    # Chat Completion Protocol (legacy)
-    "AgentAuthenticationError",
-    "AgentConfig",
-    "AgentError",
-    "AgentMessage",
-    "AgentMetrics",
-    "AgentProtocol",
-    "AgentProvider",
-    "AgentRateLimitError",
-    "AgentResponse",
-    "AgentRole",
-    "AgentTimeoutError",
-    # Instrumented & Mock
-    "InstrumentedAgent",
-    "MockAgent",
-    "MockAgentConfig",
-    "MockAgentError",
-    "SessionContext",
     # Factory
     "get_agent",
     "get_available_agents",

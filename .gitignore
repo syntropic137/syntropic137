@@ -150,3 +150,4 @@ site/
 # Worktrees (for parallel development)
 # =============================================================================
 .workspaces/
+logs/
