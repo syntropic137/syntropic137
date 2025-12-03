@@ -13,25 +13,34 @@ dependencies = [
 postgres = [
     "asyncpg>=0.30.0",
 ]
+# Legacy chat completion adapter (direct Anthropic API)
 claude = [
     "anthropic>=0.42.0",
+]
+# Agentic SDK adapter (recommended)
+claude-agentic = [
+    "claude-agent-sdk>=0.1.9",
 ]
 openai = [
     "openai>=1.59.0",
 ]
-# Install all agent adapters
+# Install all agent adapters (legacy chat completion style)
 agents = [
     "anthropic>=0.42.0",
     "openai>=1.59.0",
+]
+# Install all agentic SDK adapters (recommended for new code)
+agentic = [
+    "claude-agent-sdk>=0.1.9",
 ]
 # Install everything
 all = [
     "asyncpg>=0.30.0",
     "anthropic>=0.42.0",
     "openai>=1.59.0",
+    "claude-agent-sdk>=0.1.9",
 ]
 
 [build-system]
 requires = ["uv_build>=0.9.13"]
 build-backend = "uv_build"
-

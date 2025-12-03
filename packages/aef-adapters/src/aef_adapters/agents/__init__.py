@@ -15,22 +15,32 @@ This module provides adapters for AI agent providers (Claude, OpenAI).
 
 ## Agentic Execution (Recommended)
 
-    from aef_adapters.agents import AgenticProtocol, AgentExecutionConfig
+    from aef_adapters.agents import ClaudeAgenticAgent, AgentExecutionConfig
+    from aef_adapters.workspaces import LocalWorkspace, WorkspaceConfig
 
-    # Agent executes task autonomously with tools
-    async for event in agent.execute(
-        task="Create a hello.py file",
-        workspace=workspace,
-        config=AgentExecutionConfig(max_turns=10),
-    ):
-        if isinstance(event, TaskCompleted):
-            print(f"Done: {event.result}")
+    agent = ClaudeAgenticAgent()
 
-For Testing:
+    async with LocalWorkspace.create(config) as workspace:
+        async for event in agent.execute(
+            task="Create a hello.py file",
+            workspace=workspace,
+            config=AgentExecutionConfig(max_turns=10),
+        ):
+            if isinstance(event, TaskCompleted):
+                print(f"Done: {event.result}")
+
+For Testing (Chat Completion - Legacy):
     from aef_adapters.agents import MockAgent, MockAgentConfig
 
     mock_config = MockAgentConfig(responses=["Test response"])
     agent = MockAgent(mock_config)
+
+For Testing (Agentic):
+    Use unittest.mock to patch the claude-agent-sdk directly.
+    See tests/test_claude_agentic.py for examples.
+
+WARNING: MockAgent can ONLY be used when APP_ENVIRONMENT=test.
+It will raise errors in development, staging, or production.
 """
 
 from aef_adapters.agents.agentic_protocol import (
@@ -76,7 +86,14 @@ from aef_adapters.agents.protocol import (
     AgentTimeoutError,
 )
 
-# Lazy imports for adapters to avoid requiring their dependencies
+# Agentic SDK adapters (require optional dependencies)
+# These import conditionally to avoid ImportError if deps not installed
+try:
+    from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
+except ImportError:
+    ClaudeAgenticAgent = None  # type: ignore[assignment, misc]
+
+# Lazy imports for legacy adapters to avoid requiring their dependencies
 # Use get_agent(AgentProvider.CLAUDE) or import directly when needed
 
 __all__ = [
@@ -104,6 +121,8 @@ __all__ = [
     "AgenticSDKError",
     "AgenticTimeoutError",
     "AgenticTurnsExceededError",
+    # Agentic Agents
+    "ClaudeAgenticAgent",
     # Mock Agent
     "MockAgent",
     "MockAgentConfig",

@@ -112,6 +112,8 @@ workflows/custom/*.yml
 
 # Artifacts directory (if storing locally)
 artifacts/
+# But not the domain artifacts bounded context
+!packages/aef-domain/src/aef_domain/contexts/artifacts/
 
 _reference/
 
