@@ -7,21 +7,13 @@ It bridges execution events to the SSE stream and persists artifacts.
 from __future__ import annotations
 
 import logging
-import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-# Add worktree packages to path for agentic imports
-# This allows using the worktree code before merging
-_WORKTREE_PATH = Path(__file__).parents[5] / ".workspaces" / "agentic-sdk" / "packages"
-_ADAPTERS_PATH = _WORKTREE_PATH / "aef-adapters" / "src"
-if _ADAPTERS_PATH.exists() and str(_ADAPTERS_PATH) not in sys.path:
-    sys.path.insert(0, str(_ADAPTERS_PATH))
-
-from aef_dashboard.api.events import push_event  # noqa: E402
+from aef_dashboard.api.events import push_event
 
 logger = logging.getLogger(__name__)
 
