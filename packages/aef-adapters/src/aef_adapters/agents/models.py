@@ -24,7 +24,9 @@ logger = get_logger(__name__)
 # Path to agentic-primitives models directory
 # Navigate from: packages/aef-adapters/src/aef_adapters/agents/models.py
 # To: lib/agentic-primitives/providers/models
-_PRIMITIVES_MODELS_PATH = Path(__file__).parents[5] / "lib" / "agentic-primitives" / "providers" / "models"
+_PRIMITIVES_MODELS_PATH = (
+    Path(__file__).parents[5] / "lib" / "agentic-primitives" / "providers" / "models"
+)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -207,8 +209,7 @@ class ModelRegistry:
         """
         if provider:
             return [
-                m_id for m_id, m_data in self._models.items()
-                if m_data.get("provider") == provider
+                m_id for m_id, m_data in self._models.items() if m_data.get("provider") == provider
             ]
         return list(self._models.keys())
 

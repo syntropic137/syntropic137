@@ -179,9 +179,7 @@ def list_workflows() -> None:
             try:
                 client = get_event_store_client()
                 events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-                workflow_events = [
-                    e for e in events if e.event.event_type == "WorkflowCreated"
-                ]
+                workflow_events = [e for e in events if e.event.event_type == "WorkflowCreated"]
                 return [
                     {
                         "id": e.metadata.aggregate_id,
@@ -662,13 +660,12 @@ def run_workflow(
             try:
                 client = get_event_store_client()
                 events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-                workflow_events = [
-                    e for e in events if e.event.event_type == "WorkflowCreated"
-                ]
+                workflow_events = [e for e in events if e.event.event_type == "WorkflowCreated"]
                 # Create simple workflow-like objects from events
                 all_workflows = []
                 for e in workflow_events:
                     event_data = e.event.model_dump()
+
                     # Create a simple namespace object with required attributes
                     class WorkflowData:
                         def __init__(self, data: dict, agg_id: str) -> None:

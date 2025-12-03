@@ -59,6 +59,7 @@ class RepositoryAdapter[TAggregate]:
         """Get the underlying SDK repository."""
         return self._repo
 
+
 # Cached repository instances (wrapped adapters for SDK-based repos)
 _workflow_repository: RepositoryAdapter[WorkflowAggregate] | None = None
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None

@@ -73,6 +73,10 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests with coverage
+        env:
+          TERM: dumb
+          NO_COLOR: "1"
+          COLUMNS: "200"
         run: |
           uv run pytest \
             --cov=apps/aef-cli/src \
@@ -132,18 +136,18 @@ jobs:
         run: |
           echo "Checking submodule status..."
           git submodule status
-          
+
           # Verify submodules are initialized
           if [ ! -f "lib/agentic-primitives/README.md" ]; then
             echo "❌ agentic-primitives submodule not initialized"
             exit 1
           fi
-          
+
           if [ ! -f "lib/event-sourcing-platform/README.md" ]; then
             echo "❌ event-sourcing-platform submodule not initialized"
             exit 1
           fi
-          
+
           echo "✅ All submodules properly initialized"
 
   #############################################################################
@@ -170,7 +174,7 @@ jobs:
             echo "❌ CI checks failed"
             exit 1
           fi
-          
+
           # Check for cancellations
           if [[ "${{ needs.python-qa.result }}" == "cancelled" ]] || \
              [[ "${{ needs.python-tests.result }}" == "cancelled" ]] || \
@@ -179,7 +183,7 @@ jobs:
             echo "⚠️ CI checks were cancelled"
             exit 1
           fi
-          
+
           echo "✅ All CI checks passed!"
 
       - name: Write summary
@@ -192,4 +196,3 @@ jobs:
           echo "| Python Tests | ${{ needs.python-tests.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dashboard UI | ${{ needs.dashboard-ui.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Submodule Check | ${{ needs.submodule-check.result }} |" >> $GITHUB_STEP_SUMMARY
-
