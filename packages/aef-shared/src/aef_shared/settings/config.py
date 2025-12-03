@@ -11,7 +11,7 @@ from enum import Enum
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, PostgresDsn, SecretStr
+from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -98,16 +98,29 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # EVENT STORE (gRPC)
+    # EVENT STORE (gRPC) - See ADR-007: Event Store Integration
     # =========================================================================
 
-    event_store_url: str | None = Field(
-        default=None,
+    event_store_host: str = Field(
+        default="localhost",
         description=(
-            "gRPC URL for the event store service. "
-            "Format: grpc://host:port "
-            "For local dev: grpc://localhost:50051 "
-            "Required for production. Optional in development (uses in-memory)."
+            "Event Store Server gRPC host. "
+            "For Docker: event-store (service name). "
+            "For local dev: localhost"
+        ),
+    )
+
+    event_store_port: int = Field(
+        default=50051,
+        ge=1024,
+        le=65535,
+        description="Event Store Server gRPC port.",
+    )
+
+    event_store_tenant_id: str = Field(
+        default="aef",
+        description=(
+            "Tenant ID for multi-tenant Event Store Server. Each tenant has isolated event streams."
         ),
     )
 
@@ -115,8 +128,28 @@ class Settings(BaseSettings):
         default=30,
         ge=1,
         le=300,
-        description="Timeout for event store gRPC calls in seconds.",
+        description="Timeout for Event Store gRPC calls in seconds.",
     )
+
+    event_store_url: str | None = Field(
+        default=None,
+        description=(
+            "DEPRECATED: Use event_store_host and event_store_port instead. "
+            "Legacy gRPC URL for the event store service."
+        ),
+    )
+
+    # =========================================================================
+    # VALIDATORS - Convert empty strings to None
+    # =========================================================================
+
+    @field_validator("database_url", "event_store_url", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: str | None) -> str | None:
+        """Convert empty strings to None for optional URL fields."""
+        if v == "":
+            return None
+        return v
 
     # =========================================================================
     # LOGGING
@@ -172,6 +205,50 @@ class Settings(BaseSettings):
         ge=100,
         le=200000,
         description="Default max tokens for agent responses.",
+    )
+
+    # =========================================================================
+    # HOOKS (Observability)
+    # =========================================================================
+
+    hook_backend_url: str | None = Field(
+        default=None,
+        description=(
+            "URL for hook backend service for observability events. "
+            "Format: http://host:port "
+            "For local dev: http://localhost:8080 "
+            "When not set, uses JSONL file backend at .agentic/hooks/events.jsonl"
+        ),
+    )
+
+    hook_batch_size: int = Field(
+        default=50,
+        ge=1,
+        le=1000,
+        description="Number of events to batch before sending to hook backend.",
+    )
+
+    hook_flush_interval_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=60.0,
+        description="Max seconds to wait before flushing buffered hook events.",
+    )
+
+    # =========================================================================
+    # DASHBOARD
+    # =========================================================================
+
+    dashboard_port: int = Field(
+        default=8000,
+        ge=1024,
+        le=65535,
+        description="Port for the dashboard API server.",
+    )
+
+    dashboard_host: str = Field(
+        default="127.0.0.1",
+        description="Host to bind the dashboard API server.",
     )
 
     # =========================================================================

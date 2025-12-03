@@ -1,14 +1,31 @@
 """Workflows bounded context - workflow management and execution."""
 
 from aef_domain.contexts.workflows._shared import (
+    AgentConfiguration,
+    ExecutablePhase,
+    ExecutionMetrics,
+    ExecutionStatus,
     PhaseDefinition,
     PhaseExecutionType,
+    PhaseInput,
+    PhaseResult,
+    PhaseStatus,
     WorkflowAggregate,
     WorkflowClassification,
     WorkflowDefinition,
     WorkflowType,
     load_workflow_definitions,
     validate_workflow_yaml,
+)
+from aef_domain.contexts.workflows.execute_workflow import (
+    ExecuteWorkflowCommand,
+    PhaseCompletedEvent,
+    PhaseStartedEvent,
+    WorkflowCompletedEvent,
+    WorkflowExecutionEngine,
+    WorkflowExecutionResult,
+    WorkflowExecutionStartedEvent,
+    WorkflowFailedEvent,
 )
 from aef_domain.contexts.workflows.seed_workflow import (
     SeedReport,
@@ -17,13 +34,28 @@ from aef_domain.contexts.workflows.seed_workflow import (
 )
 
 __all__ = [
+    "AgentConfiguration",
+    "ExecutablePhase",
+    "ExecuteWorkflowCommand",
+    "ExecutionMetrics",
+    "ExecutionStatus",
+    "PhaseCompletedEvent",
     "PhaseDefinition",
     "PhaseExecutionType",
+    "PhaseInput",
+    "PhaseResult",
+    "PhaseStartedEvent",
+    "PhaseStatus",
     "SeedReport",
     "SeedResult",
     "WorkflowAggregate",
     "WorkflowClassification",
+    "WorkflowCompletedEvent",
     "WorkflowDefinition",
+    "WorkflowExecutionEngine",
+    "WorkflowExecutionResult",
+    "WorkflowExecutionStartedEvent",
+    "WorkflowFailedEvent",
     "WorkflowSeeder",
     "WorkflowType",
     "load_workflow_definitions",

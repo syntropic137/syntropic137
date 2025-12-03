@@ -1,5 +1,7 @@
 # RIPER Project Plans
 !PROJECT-PLAN_*.md
-
+!EXECUTION-PROMPT_*.md
 # Reference materials
 !_reference/
+# Git worktrees for parallel development
+!.workspaces/

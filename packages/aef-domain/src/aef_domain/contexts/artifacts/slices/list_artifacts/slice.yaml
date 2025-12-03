@@ -1,0 +1,6 @@
+name: list-artifacts
+type: query
+projection: ArtifactListProjection
+subscribes_to:
+  - ArtifactCreatedEvent
+returns: list[ArtifactSummary]

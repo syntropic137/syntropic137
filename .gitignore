@@ -1,4 +1,9 @@
 # =============================================================================
+# Workspace Files
+# =============================================================================
+events.jsonl
+
+# =============================================================================
 # Python
 # =============================================================================
 __pycache__/
@@ -33,7 +38,7 @@ env/
 # =============================================================================
 # uv
 # =============================================================================
-uv.lock
+# uv.lock is committed for reproducible builds
 
 # =============================================================================
 # Testing
@@ -112,11 +117,14 @@ workflows/custom/*.yml
 
 # Artifacts directory (if storing locally)
 artifacts/
+# But not the domain artifacts bounded context
+!packages/aef-domain/src/aef_domain/contexts/artifacts/
 
 _reference/
 
 # Draft project plans (per RIPER-5 guidelines)
 PROJECT-PLAN_*.md
+EXECUTION-PROMPT_*.md
 
 # =============================================================================
 # Build Outputs
@@ -135,4 +143,4 @@ PROJECT-PLAN_*.md
 # =============================================================================
 docs/_build/
 site/
-
+.workspaces/

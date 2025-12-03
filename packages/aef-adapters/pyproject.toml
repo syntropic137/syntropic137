@@ -7,6 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "aef-shared",
     "aef-domain",
+    "agentic-hooks[http]",
+    "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
+    "anthropic>=0.75.0",
+    "pyyaml>=6.0.3",
 ]
 
 [project.optional-dependencies]
@@ -34,4 +38,3 @@ all = [
 [build-system]
 requires = ["uv_build>=0.9.13"]
 build-backend = "uv_build"
-
