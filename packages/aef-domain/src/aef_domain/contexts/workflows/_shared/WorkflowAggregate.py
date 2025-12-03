@@ -129,13 +129,67 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
 
         Event handlers update state only - NO business logic.
         Must be idempotent for rehydration.
+
+        Note: When rehydrating from gRPC event store, event may be a GenericDomainEvent
+        with dict attributes instead of proper typed objects. Handle both cases.
         """
-        self._name = event.name
-        self._workflow_type = event.workflow_type
-        self._classification = event.classification
-        self._repository_url = event.repository_url
-        self._repository_ref = event.repository_ref
-        self._phases = list(event.phases)
+        from aef_domain.contexts.workflows._shared.value_objects import (
+            PhaseDefinition,
+            WorkflowClassification,
+            WorkflowType,
+        )
+
+        # Handle both typed events and GenericDomainEvent (dict-based)
+        if hasattr(event, "model_dump"):
+            # It's a typed event, use attributes directly
+            self._name = event.name
+            workflow_type = event.workflow_type
+            classification = event.classification
+            phases_raw = event.phases
+        else:
+            # It's a GenericDomainEvent or dict-like object
+            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._name = event_data.get("name")
+            workflow_type = event_data.get("workflow_type")  # type: ignore[assignment]
+            classification = event_data.get("classification")  # type: ignore[assignment]
+            phases_raw = event_data.get("phases", [])
+
+        # Convert workflow_type to enum if it's a string
+        if isinstance(workflow_type, str):
+            self._workflow_type = WorkflowType(workflow_type)
+        else:
+            self._workflow_type = workflow_type
+
+        # Convert classification to enum if it's a string
+        if isinstance(classification, str):
+            self._classification = WorkflowClassification(classification)
+        else:
+            self._classification = classification
+
+        # Handle repository URL and ref
+        if hasattr(event, "repository_url"):
+            self._repository_url = event.repository_url
+            self._repository_ref = event.repository_ref
+        else:
+            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._repository_url = event_data.get("repository_url")
+            self._repository_ref = event_data.get("repository_ref")
+
+        # Convert phases - they may be dicts or PhaseDefinition objects
+        self._phases = []
+        for phase in phases_raw:
+            if isinstance(phase, dict):
+                self._phases.append(PhaseDefinition(**phase))
+            else:
+                self._phases.append(phase)
+
         self._status = WorkflowStatus.PENDING
-        self._project_name = event.project_name
-        self._description = event.description
+
+        # Handle optional fields
+        if hasattr(event, "project_name"):
+            self._project_name = event.project_name
+            self._description = event.description
+        else:
+            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._project_name = event_data.get("project_name")
+            self._description = event_data.get("description")

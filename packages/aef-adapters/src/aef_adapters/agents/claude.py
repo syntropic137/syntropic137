@@ -7,7 +7,7 @@ Requires the `anthropic` package and ANTHROPIC_API_KEY environment variable.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from aef_adapters.agents.protocol import (
     AgentAuthenticationError,
@@ -38,21 +38,54 @@ class ClaudeAgent(AgentProtocol):
         if agent.is_available:
             response = await agent.complete(
                 messages=[AgentMessage.user("Hello!")],
-                config=AgentConfig(model="claude-sonnet-4-20250514"),
+                config=AgentConfig(model="claude-sonnet"),  # Uses alias
             )
+
+    Model Aliases:
+        Use aliases for easier upgrades when new model versions are released.
+        Aliases are loaded from agentic-primitives/providers/models/anthropic/.
+
+        Common aliases:
+        - "sonnet" or "claude-sonnet" -> latest Claude Sonnet
+        - "opus" or "claude-opus" -> latest Claude Opus
+        - "haiku" or "claude-haiku" -> latest Claude Haiku
+
+        You can also use specific version names if needed.
     """
 
-    # Default model - latest Claude Sonnet 4 (2025)
-    DEFAULT_MODEL = "claude-sonnet-4-20250514"
+    # Default model alias - resolved from primitives
+    # Use "sonnet" alias which maps to latest Claude Sonnet
+    DEFAULT_MODEL = "sonnet"
 
-    # Supported models with context windows
-    SUPPORTED_MODELS: ClassVar[dict[str, int]] = {
-        "claude-sonnet-4-20250514": 200_000,
-        "claude-opus-4-20250514": 200_000,
-        "claude-3-5-sonnet-20241022": 200_000,
-        "claude-3-5-haiku-20241022": 200_000,
-        "claude-3-opus-20240229": 200_000,
-    }
+    @classmethod
+    def resolve_model(cls, model: str) -> str:
+        """Resolve model alias to specific API version.
+
+        Loads model definitions from agentic-primitives YAML files.
+
+        Args:
+            model: Model name or alias (e.g., "claude-sonnet", "sonnet")
+
+        Returns:
+            Specific API model name (e.g., "claude-sonnet-4-5-20250929")
+        """
+        from aef_adapters.agents.models import resolve_model
+
+        return resolve_model(model)
+
+    @classmethod
+    def get_context_window(cls, model: str) -> int:
+        """Get context window size for a model.
+
+        Args:
+            model: Model name or alias
+
+        Returns:
+            Context window in tokens
+        """
+        from aef_adapters.agents.models import get_model_registry
+
+        return get_model_registry().get_context_window(model)
 
     def __init__(self, api_key: str | None = None) -> None:
         """Initialize the Claude agent.
@@ -139,14 +172,14 @@ class ClaudeAgent(AgentProtocol):
             AgentError: If the request fails.
         """
         client = self._get_client()
-        model = config.model or self.DEFAULT_MODEL
+        raw_model = config.model or self.DEFAULT_MODEL
+        model = self.resolve_model(raw_model)  # Resolve alias to API model name
 
-        if model not in self.SUPPORTED_MODELS:
-            logger.warning(
-                "unknown_claude_model",
-                model=model,
-                supported=list(self.SUPPORTED_MODELS.keys()),
-            )
+        logger.debug(
+            "model_resolved",
+            raw_model=raw_model,
+            resolved_model=model,
+        )
 
         system_prompt, converted_messages = self._convert_messages(messages)
 
@@ -230,7 +263,8 @@ class ClaudeAgent(AgentProtocol):
             AgentError: If the request fails.
         """
         client = self._get_client()
-        model = config.model or self.DEFAULT_MODEL
+        raw_model = config.model or self.DEFAULT_MODEL
+        model = self.resolve_model(raw_model)  # Resolve alias to specific version
 
         system_prompt, converted_messages = self._convert_messages(messages)
 

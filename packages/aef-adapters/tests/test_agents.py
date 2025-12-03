@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from aef_adapters.agents import (
@@ -19,6 +21,9 @@ from aef_adapters.agents import (
     get_available_agents,
     is_agent_available,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # =============================================================================
 # AgentMessage Tests
@@ -306,8 +311,12 @@ class TestAgentFactory:
 
         assert is_agent_available(AgentProvider.MOCK) is True
 
-    def test_claude_not_available_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_claude_not_available_without_key(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Test Claude is not available without API key."""
+        # Change to temp dir to avoid loading project .env file
+        monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         from aef_shared.settings import reset_settings
 

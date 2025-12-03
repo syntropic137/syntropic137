@@ -1,10 +1,10 @@
 # Research Workflow
 # A simple workflow for conducting research on a topic or codebase.
 
-id: research-workflow-v1
+id: research-workflow-v2
 name: Research Workflow
 description: |
-  A structured research workflow for investigating codebases, 
+  A structured research workflow for investigating codebases,
   technologies, or concepts. Produces comprehensive documentation.
 
 type: research
@@ -32,6 +32,17 @@ phases:
       - initial_questions
     max_tokens: 4096
     timeout_seconds: 300
+    prompt_template: |
+      You are a research assistant. Your task is to conduct initial exploration and scoping for the following topic:
+
+      Topic: {{topic}}
+
+      Please:
+      1. Identify key areas of interest related to this topic
+      2. Gather relevant context
+      3. Define 3-5 research questions to guide deeper investigation
+
+      Output a structured research scope with your initial questions.
 
   - id: deep-dive
     name: Deep Dive Analysis
@@ -48,6 +59,18 @@ phases:
       - code_analysis
     max_tokens: 8192
     timeout_seconds: 600
+    prompt_template: |
+      You are a research analyst. Based on the discovery phase findings below, conduct a deep dive analysis.
+
+      Previous Discovery:
+      {{discovery}}
+
+      Please:
+      1. Investigate each identified area in depth
+      2. Analyze patterns, trade-offs, and implications
+      3. Document detailed findings with supporting evidence
+
+      Output comprehensive detailed findings.
 
   - id: synthesis
     name: Synthesis & Documentation
@@ -65,4 +88,15 @@ phases:
       - action_items
     max_tokens: 4096
     timeout_seconds: 300
+    prompt_template: |
+      You are a technical writer synthesizing research findings. Based on the analysis below, create actionable documentation.
 
+      Deep Dive Analysis:
+      {{deep-dive}}
+
+      Please:
+      1. Summarize key findings in a clear, structured format
+      2. Provide specific recommendations
+      3. List concrete action items with priorities
+
+      Output a research summary with recommendations and action items.
