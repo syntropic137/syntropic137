@@ -11,11 +11,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
-# Skip all tests in this module until async storage issue is resolved
-pytestmark = pytest.mark.skip(
-    reason="Async storage issue - entities not persisting in test context"
-)
 from fastapi.testclient import TestClient
 
 from aef_adapters.storage import (
@@ -52,6 +47,11 @@ from aef_domain.contexts.workflows._shared.value_objects import (
 from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
 from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
     CreateWorkflowCommand,
+)
+
+# Skip all tests in this module until async storage issue is resolved
+pytestmark = pytest.mark.skip(
+    reason="Async storage issue - entities not persisting in test context"
 )
 
 
@@ -209,7 +209,6 @@ class TestWorkflowEndpoints:
         assert data["workflows"] == []
         assert data["total"] == 0
 
-    @pytest.mark.skip(reason="Async storage issue - workflows not persisting in test context")
     @pytest.mark.asyncio
     async def test_list_workflows(self, client: TestClient) -> None:
         """Test listing workflows."""

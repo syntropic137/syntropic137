@@ -39,7 +39,7 @@ class SessionListProjection:
             agent_type=event_data.get("agent_provider", "unknown"),
             status="running",
             total_tokens=0,
-            total_cost_usd=0.0,
+            total_cost_usd=Decimal("0"),
             started_at=event_data.get("started_at"),
             completed_at=None,
         )

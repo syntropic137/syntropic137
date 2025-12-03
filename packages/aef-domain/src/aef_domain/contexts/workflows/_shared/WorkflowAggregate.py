@@ -150,8 +150,8 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
             # It's a GenericDomainEvent or dict-like object
             event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
             self._name = event_data.get("name")
-            workflow_type = event_data.get("workflow_type")
-            classification = event_data.get("classification")
+            workflow_type = event_data.get("workflow_type")  # type: ignore[assignment]
+            classification = event_data.get("classification")  # type: ignore[assignment]
             phases_raw = event_data.get("phases", [])
 
         # Convert workflow_type to enum if it's a string

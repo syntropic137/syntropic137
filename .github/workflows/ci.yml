@@ -44,8 +44,6 @@ jobs:
         run: uv run ruff check .
 
       - name: Type check
-        # TODO: Fix type errors and remove --warn-unused-ignores bypass
-        continue-on-error: true
         run: uv run mypy apps packages
 
   #############################################################################

@@ -169,7 +169,7 @@ def _load_validator(validator_path: str) -> ValidatorFunc:
     if not hasattr(module, "validate"):
         raise AttributeError(f"Validator {validator_path} has no validate function")
 
-    return module.validate  # type: ignore[no-any-return]
+    return module.validate
 
 
 @dataclass

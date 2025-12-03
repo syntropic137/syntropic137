@@ -1,7 +1,10 @@
 """Read model for dashboard metrics."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -36,7 +39,7 @@ class DashboardMetrics:
     """Total cost in USD."""
 
     @classmethod
-    def from_dict(cls, data: dict) -> "DashboardMetrics":
+    def from_dict(cls, data: dict[str, Any]) -> DashboardMetrics:
         """Create from dictionary data."""
         return cls(
             total_workflows=data.get("total_workflows", 0),
@@ -49,7 +52,7 @@ class DashboardMetrics:
             total_cost_usd=Decimal(str(data.get("total_cost_usd", 0))),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
         return {
             "total_workflows": self.total_workflows,

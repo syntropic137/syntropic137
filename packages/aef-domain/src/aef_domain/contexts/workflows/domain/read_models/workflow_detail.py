@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
 
 @dataclass(frozen=True)
@@ -44,8 +43,8 @@ class WorkflowDetail:
     description: str | None
     """Optional description of the workflow."""
 
-    phases: list[PhaseDetail | dict[str, Any]] = field(default_factory=list)
-    """List of phases in the workflow (can be PhaseDetail or dict)."""
+    phases: list[PhaseDetail] = field(default_factory=list)
+    """List of phases in the workflow."""
 
     created_at: datetime | None = None
     """When the workflow was created."""

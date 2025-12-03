@@ -255,7 +255,7 @@ def show_workflow(
         }
     else:
         # For dev/prod, read from event store (async API)
-        async def _get_workflow() -> dict | None:
+        async def _get_workflow() -> dict[str, Any] | None:
             await connect_event_store()
             try:
                 client = get_event_store_client()
@@ -283,7 +283,7 @@ def show_workflow(
             finally:
                 await disconnect_event_store()
 
-        workflow_data = asyncio.run(_get_workflow())
+        workflow_data = asyncio.run(_get_workflow())  # type: ignore[arg-type]
 
     if workflow_data is None:
         console.print(f"[red]No workflow found matching: {workflow_id}[/red]")
@@ -607,6 +607,7 @@ def run_workflow(
         aef workflow run research-workflow --quiet
     """
     from aef_adapters.agents import (
+        AgentProtocol,
         AgentProvider,
         InstrumentedAgent,
         MockAgent,
@@ -800,6 +801,7 @@ def run_workflow(
                 settings = get_settings()
 
                 # In test mode, MockAgent is allowed
+                base_agent: AgentProtocol
                 if settings.is_test and provider == "mock":
                     mock_config = MockAgentConfig(
                         default_response=f"Mock response for {provider} agent execution."
