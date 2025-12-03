@@ -74,10 +74,7 @@ def get_agentic_agent(provider: str) -> AgenticProtocol:
     #     return OpenAIAgenticAgent()
 
     supported = ["claude", "anthropic"]
-    raise ValueError(
-        f"Unsupported agentic provider: {provider}. "
-        f"Supported providers: {supported}"
-    )
+    raise ValueError(f"Unsupported agentic provider: {provider}. Supported providers: {supported}")
 
 
 def get_available_agentic_agents() -> list[str]:

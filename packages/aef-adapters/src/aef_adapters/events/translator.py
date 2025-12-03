@@ -148,14 +148,10 @@ class HookToDomainTranslator:
             if isinstance(hook_event.event_type, EventType)
             else hook_event.event_type
         )
-        domain_event_type = HOOK_TO_DOMAIN_EVENT_TYPE.get(
-            event_type_value, "CustomEvent"
-        )
+        domain_event_type = HOOK_TO_DOMAIN_EVENT_TYPE.get(event_type_value, "CustomEvent")
 
         # Determine aggregate type and ID
-        aggregate_type, aggregate_id = self._derive_aggregate(
-            hook_event, domain_event_type
-        )
+        aggregate_type, aggregate_id = self._derive_aggregate(hook_event, domain_event_type)
 
         # Build event data
         event_data = self._build_event_data(hook_event, domain_event_type)

@@ -245,9 +245,7 @@ class MultiFileWatcher:
             paths: List of JSONL files to watch.
             poll_interval: Seconds between file checks.
         """
-        self._watchers = {
-            path: JSONLWatcher(path, poll_interval=poll_interval) for path in paths
-        }
+        self._watchers = {path: JSONLWatcher(path, poll_interval=poll_interval) for path in paths}
 
     async def watch_all(
         self,
@@ -259,6 +257,7 @@ class MultiFileWatcher:
         Yields:
             Tuples of (file_path, hook_event).
         """
+
         # Create tasks for each watcher
         async def watch_single(
             path: Path,
@@ -268,9 +267,7 @@ class MultiFileWatcher:
                 yield (path, event)
 
         # Merge all streams
-        tasks = [
-            watch_single(path, watcher) for path, watcher in self._watchers.items()
-        ]
+        tasks = [watch_single(path, watcher) for path, watcher in self._watchers.items()]
 
         # Simple round-robin polling (could be improved with asyncio.gather)
         while True:

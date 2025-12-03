@@ -97,6 +97,8 @@ class PhaseCompleted:
     total_tokens: int
     duration_ms: float
     estimated_cost_usd: Decimal | None = None
+    # The full artifact bundle for persistence (optional for backwards compat)
+    artifact_bundle: ArtifactBundle | None = None
 
 
 @dataclass(frozen=True)
@@ -163,20 +165,16 @@ class WorkflowPhase(Protocol):
     """Protocol for workflow phase definitions."""
 
     @property
-    def phase_id(self) -> str:
-        ...
+    def phase_id(self) -> str: ...
 
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @property
-    def order(self) -> int:
-        ...
+    def order(self) -> int: ...
 
     @property
-    def description(self) -> str | None:
-        ...
+    def description(self) -> str | None: ...
 
     @property
     def prompt_template(self) -> str:
@@ -194,24 +192,20 @@ class WorkflowPhase(Protocol):
         ...
 
     @property
-    def timeout_seconds(self) -> int:
-        ...
+    def timeout_seconds(self) -> int: ...
 
 
 class WorkflowDefinition(Protocol):
     """Protocol for workflow definitions."""
 
     @property
-    def workflow_id(self) -> str:
-        ...
+    def workflow_id(self) -> str: ...
 
     @property
-    def name(self) -> str:
-        ...
+    def name(self) -> str: ...
 
     @property
-    def phases(self) -> list[WorkflowPhase]:
-        ...
+    def phases(self) -> list[WorkflowPhase]: ...
 
 
 # ============================================================================
@@ -548,7 +542,7 @@ class AgenticWorkflowExecutor:
         duration_ms = (phase_completed_at - phase_started_at).total_seconds() * 1000
         ctx.total_duration_ms += duration_ms
 
-        # Emit phase completed
+        # Emit phase completed with full bundle for persistence
         completed_event = PhaseCompleted(
             workflow_id=ctx.workflow_id,
             execution_id=ctx.execution_id,
@@ -559,6 +553,7 @@ class AgenticWorkflowExecutor:
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
             duration_ms=duration_ms,
+            artifact_bundle=bundle,  # Include full bundle for downstream persistence
         )
         ctx.phase_results.append(completed_event)
 

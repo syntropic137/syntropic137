@@ -99,9 +99,7 @@ class TestHookToDomainTranslator:
         assert domain_event.event_data["workflow_id"] == "workflow-456"
         assert domain_event.event_data["phase_id"] == "research"
 
-    def test_translate_tool_execution_started(
-        self, sample_tool_event: HookEvent
-    ) -> None:
+    def test_translate_tool_execution_started(self, sample_tool_event: HookEvent) -> None:
         """Test translating TOOL_EXECUTION_STARTED event."""
         translator = HookToDomainTranslator()
         domain_event = translator.translate(sample_tool_event)
@@ -345,15 +343,25 @@ class TestJSONLWatcher:
         """Test that invalid JSON lines are skipped."""
         file_path = tmp_path / "mixed.jsonl"
         with file_path.open("w") as f:
-            f.write(json.dumps(HookEvent(
-                event_type=EventType.SESSION_STARTED,
-                session_id="s1",
-            ).to_dict()) + "\n")
+            f.write(
+                json.dumps(
+                    HookEvent(
+                        event_type=EventType.SESSION_STARTED,
+                        session_id="s1",
+                    ).to_dict()
+                )
+                + "\n"
+            )
             f.write("invalid json line\n")
-            f.write(json.dumps(HookEvent(
-                event_type=EventType.SESSION_COMPLETED,
-                session_id="s1",
-            ).to_dict()) + "\n")
+            f.write(
+                json.dumps(
+                    HookEvent(
+                        event_type=EventType.SESSION_COMPLETED,
+                        session_id="s1",
+                    ).to_dict()
+                )
+                + "\n"
+            )
 
         watcher = JSONLWatcher(file_path)
         events = await watcher.read_all()
