@@ -75,15 +75,34 @@ if TYPE_CHECKING:
 
 
 class NoOpEventPublisher:
-    """No-op event publisher for SDK-based repositories.
+    """Minimal event publisher for SDK-based repositories.
 
-    The SDK-based EventStoreRepository handles event persistence internally,
-    so this publisher does nothing. It exists for cross-system integration
-    (which can be implemented later with message queues, webhooks, etc.).
+    With the subscription-based architecture (ADR-010), projections are
+    updated via EventSubscriptionService which subscribes to the event store.
+    This publisher exists for backwards compatibility and logging only.
+
+    The actual projection updates happen through:
+    1. Repository saves event to Event Store (via SDK)
+    2. EventSubscriptionService receives event via subscription
+    3. EventSubscriptionService dispatches to ProjectionManager
+
+    See: EventSubscriptionService, ADR-010
     """
 
     async def publish(self, events: list[Any]) -> None:
-        """No-op publish - events are already persisted by the SDK repository."""
+        """Log event publication - projections updated via subscription.
+
+        Args:
+            events: Events that were persisted to the event store.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+        if events:
+            logger.debug(
+                "Events persisted to event store (projections updated via subscription)",
+                extra={"event_count": len(events)},
+            )
 
 
 def get_event_publisher() -> InMemoryEventPublisher | NoOpEventPublisher:

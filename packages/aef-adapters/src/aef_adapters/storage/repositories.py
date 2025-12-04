@@ -26,6 +26,9 @@ if TYPE_CHECKING:
         AgentSessionAggregate,
     )
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
+    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +65,7 @@ class RepositoryAdapter[TAggregate]:
 
 # Cached repository instances (wrapped adapters for SDK-based repos)
 _workflow_repository: RepositoryAdapter[WorkflowAggregate] | None = None
+_workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
 _artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
 
@@ -114,6 +118,47 @@ def get_workflow_repository() -> (
 
     logger.debug("Created WorkflowAggregate repository (SDK wrapped)")
     return _workflow_repository
+
+
+def get_workflow_execution_repository() -> (
+    Any
+):  # RepositoryAdapter[WorkflowExecutionAggregate] or in-memory
+    """Get a WorkflowExecutionAggregate repository.
+
+    For TEST: Returns in-memory repository
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
+
+    Returns:
+        Repository for WorkflowExecutionAggregate with get_by_id/save/exists interface.
+    """
+    settings = get_settings()
+
+    if settings.is_test:
+        # For tests, use in-memory (needs to be implemented if not exists)
+        from aef_adapters.storage.in_memory import (
+            get_workflow_execution_repository as get_inmem_exec_repo,
+        )
+
+        return get_inmem_exec_repo()
+
+    global _workflow_execution_repository
+
+    if _workflow_execution_repository is not None:
+        return _workflow_execution_repository
+
+    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        WorkflowExecutionAggregate,
+        aggregate_type="WorkflowExecution",
+    )
+    _workflow_execution_repository = RepositoryAdapter(sdk_repo)
+
+    logger.debug("Created WorkflowExecutionAggregate repository (SDK wrapped)")
+    return _workflow_execution_repository
 
 
 def get_session_repository() -> (
@@ -200,8 +245,13 @@ def reset_repositories() -> None:
     Clears all cached repository instances. Call this along with
     reset_event_store_client() for a clean state.
     """
-    global _workflow_repository, _session_repository, _artifact_repository
+    global \
+        _workflow_repository, \
+        _workflow_execution_repository, \
+        _session_repository, \
+        _artifact_repository
     _workflow_repository = None
+    _workflow_execution_repository = None
     _session_repository = None
     _artifact_repository = None
 

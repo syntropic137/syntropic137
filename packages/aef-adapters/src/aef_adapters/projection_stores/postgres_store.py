@@ -39,8 +39,10 @@ class PostgresProjectionStore:
         """Get or create the connection pool."""
         if self._pool is None:
             settings = get_settings()
+            # Convert PostgresDsn to string for asyncpg
+            database_url = str(settings.database_url)
             self._pool = await asyncpg.create_pool(
-                settings.database_url,
+                database_url,
                 min_size=2,
                 max_size=10,
             )

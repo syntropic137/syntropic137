@@ -32,6 +32,9 @@ if TYPE_CHECKING:
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
         WorkflowAggregate,
     )
+    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
 
 
 class InMemoryStorageError(Exception):
@@ -350,10 +353,51 @@ class InMemoryArtifactRepository:
         self._artifacts = {}
 
 
+class InMemoryWorkflowExecutionRepository:
+    """In-memory repository for WorkflowExecution aggregates.
+
+    Used for testing ONLY.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
+    """
+
+    def __init__(self) -> None:
+        _assert_test_environment()
+        self._executions: dict[str, WorkflowExecutionAggregate] = {}
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        """Save the execution aggregate."""
+        if aggregate.id:
+            self._executions[str(aggregate.id)] = aggregate
+            aggregate.mark_events_as_committed()
+
+    async def get_by_id(self, execution_id: str) -> WorkflowExecutionAggregate | None:
+        """Get execution by ID."""
+        return self._executions.get(execution_id)
+
+    async def exists(self, execution_id: str) -> bool:
+        """Check if execution exists."""
+        return execution_id in self._executions
+
+    def get_all(self) -> list[WorkflowExecutionAggregate]:
+        """Get all executions."""
+        return list(self._executions.values())
+
+    def get_by_workflow(self, workflow_id: str) -> list[WorkflowExecutionAggregate]:
+        """Get all executions for a workflow."""
+        return [e for e in self._executions.values() if e.workflow_id == workflow_id]
+
+    def clear(self) -> None:
+        """Clear all executions."""
+        self._executions = {}
+
+
 # Lazy-loaded global instances for simple DI (test environments only)
 # These are created on first access, not at module import time
 _event_store: InMemoryEventStore | None = None
 _workflow_repository: InMemoryWorkflowRepository | None = None
+_workflow_execution_repository: InMemoryWorkflowExecutionRepository | None = None
 _event_publisher: InMemoryEventPublisher | None = None
 _session_repository: InMemorySessionRepository | None = None
 _artifact_repository: InMemoryArtifactRepository | None = None
@@ -419,6 +463,18 @@ def get_artifact_repository() -> InMemoryArtifactRepository:
     return _artifact_repository
 
 
+def get_workflow_execution_repository() -> InMemoryWorkflowExecutionRepository:
+    """Get the global in-memory workflow execution repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _workflow_execution_repository
+    if _workflow_execution_repository is None:
+        _workflow_execution_repository = InMemoryWorkflowExecutionRepository()
+    return _workflow_execution_repository
+
+
 def reset_storage() -> None:
     """Reset all storage (for testing between tests).
 
@@ -432,3 +488,5 @@ def reset_storage() -> None:
         _session_repository.clear()
     if _artifact_repository is not None:
         _artifact_repository.clear()
+    if _workflow_execution_repository is not None:
+        _workflow_execution_repository.clear()

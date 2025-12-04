@@ -12,8 +12,8 @@ class PhaseDetail:
     name: str
     agent_type: str
     status: str
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
+    started_at: datetime | str | None = None
+    completed_at: datetime | str | None = None
     error_message: str | None = None
 
 
@@ -89,6 +89,15 @@ class WorkflowDetail:
             error_message=data.get("error_message"),
         )
 
+    @staticmethod
+    def _to_iso_string(value: datetime | str | None) -> str | None:
+        """Convert datetime or string to ISO string."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        return value.isoformat()
+
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
 
@@ -101,8 +110,8 @@ class WorkflowDetail:
                 "name": p.name,
                 "agent_type": p.agent_type,
                 "status": p.status,
-                "started_at": p.started_at.isoformat() if p.started_at else None,
-                "completed_at": (p.completed_at.isoformat() if p.completed_at else None),
+                "started_at": WorkflowDetail._to_iso_string(p.started_at),
+                "completed_at": WorkflowDetail._to_iso_string(p.completed_at),
                 "error_message": p.error_message,
             }
 
@@ -114,8 +123,8 @@ class WorkflowDetail:
             "status": self.status,
             "description": self.description,
             "phases": [phase_to_dict(p) for p in self.phases],
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": (self.completed_at.isoformat() if self.completed_at else None),
+            "created_at": self._to_iso_string(self.created_at),
+            "started_at": self._to_iso_string(self.started_at),
+            "completed_at": self._to_iso_string(self.completed_at),
             "error_message": self.error_message,
         }
