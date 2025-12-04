@@ -62,7 +62,7 @@ ToolUseBlock: Any = None
 query: Any = None
 
 try:
-    from claude_agent_sdk import (
+    from claude_agent_sdk import (  # type: ignore[import-not-found,no-redef]
         AssistantMessage,
         ClaudeAgentOptions,
         ResultMessage,
