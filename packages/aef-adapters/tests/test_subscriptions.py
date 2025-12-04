@@ -1,6 +1,7 @@
 """Tests for EventSubscriptionService."""
 
 import asyncio
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -11,10 +12,36 @@ from aef_adapters.subscriptions.service import (
 )
 
 
+class MockTestEnvironmentError(Exception):
+    """Raised when a mock is used outside of test environment."""
+
+    pass
+
+
+def _assert_test_environment() -> None:
+    """Assert that we're running in a test environment.
+
+    Raises:
+        MockTestEnvironmentError: If not in test environment.
+    """
+    app_env = os.getenv("APP_ENVIRONMENT", "").lower()
+    if app_env != "test":
+        raise MockTestEnvironmentError(
+            f"Mock objects can only be used in test environment. "
+            f"Current APP_ENVIRONMENT: '{app_env}'. "
+            f"Set APP_ENVIRONMENT=test to use mocks."
+        )
+
+
 class MockEventEnvelope:
-    """Mock event envelope for testing."""
+    """Mock event envelope for testing.
+
+    Raises:
+        MockTestEnvironmentError: If instantiated outside test environment.
+    """
 
     def __init__(self, event_type: str, global_nonce: int, data: dict | None = None):
+        _assert_test_environment()
         self.event = MagicMock()
         self.event.event_type = event_type
         self.event.to_dict.return_value = data or {"id": f"test-{global_nonce}"}
@@ -23,9 +50,14 @@ class MockEventEnvelope:
 
 
 class MockEventStoreClient:
-    """Mock event store client for testing."""
+    """Mock event store client for testing.
+
+    Raises:
+        MockTestEnvironmentError: If instantiated outside test environment.
+    """
 
     def __init__(self):
+        _assert_test_environment()
         self.events: list[MockEventEnvelope] = []
         self._connected = False
 
@@ -54,9 +86,14 @@ class MockEventStoreClient:
 
 
 class MockProjectionStore:
-    """Mock projection store for testing."""
+    """Mock projection store for testing.
+
+    Raises:
+        MockTestEnvironmentError: If instantiated outside test environment.
+    """
 
     def __init__(self):
+        _assert_test_environment()
         self._positions: dict[str, int] = {}
 
     async def get_position(self, projection: str) -> int | None:
@@ -66,14 +103,44 @@ class MockProjectionStore:
         self._positions[projection] = position
 
 
+class MockEventProvenance:
+    """Mock event provenance for testing.
+
+    Raises:
+        MockTestEnvironmentError: If instantiated outside test environment.
+    """
+
+    def __init__(self, event_type: str, stream_id: str = "test-stream", global_nonce: int = 0):
+        _assert_test_environment()
+        self.event_type = event_type
+        self.stream_id = stream_id
+        self.global_nonce = global_nonce
+
+
 class MockProjectionManager:
-    """Mock projection manager for testing."""
+    """Mock projection manager for testing.
+
+    Raises:
+        MockTestEnvironmentError: If instantiated outside test environment.
+    """
 
     def __init__(self):
+        _assert_test_environment()
         self.dispatched_events: list[tuple[str, dict]] = []
 
     async def dispatch_event(self, event_type: str, event_data: dict) -> None:
         self.dispatched_events.append((event_type, event_data))
+
+    async def process_event_envelope(self, envelope: MockEventEnvelope) -> MockEventProvenance:
+        """Process an event envelope (mock implementation)."""
+        event_type = envelope.event.event_type
+        event_data = envelope.event.to_dict()
+        self.dispatched_events.append((event_type, event_data))
+        return MockEventProvenance(
+            event_type=event_type,
+            stream_id=f"test-{envelope.metadata.global_nonce}",
+            global_nonce=envelope.metadata.global_nonce,
+        )
 
 
 @pytest.fixture

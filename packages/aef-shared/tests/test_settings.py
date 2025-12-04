@@ -24,7 +24,8 @@ class TestSettings:
     def test_default_values(self) -> None:
         """Default values should be sensible for development."""
         with patch.dict(os.environ, {}, clear=True):
-            settings = Settings()
+            # Use _env_file=None to prevent reading from .env file
+            settings = Settings(_env_file=None)
 
             assert settings.app_name == "agentic-engineering-framework"
             assert settings.app_environment == AppEnvironment.DEVELOPMENT
@@ -101,12 +102,13 @@ class TestComputedProperties:
         """In-memory storage only allowed in test environment."""
         # Test env without database = in-memory allowed
         with patch.dict(os.environ, {"APP_ENVIRONMENT": "test"}, clear=True):
-            settings = Settings()
+            # Use _env_file=None to prevent reading from .env file
+            settings = Settings(_env_file=None)
             assert settings.use_in_memory_storage is True
 
         # Development without database = NOT in-memory (should use Docker)
         with patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}, clear=True):
-            settings = Settings()
+            settings = Settings(_env_file=None)
             assert settings.use_in_memory_storage is False
 
         # With database configured = never in-memory
@@ -115,7 +117,7 @@ class TestComputedProperties:
             {"APP_ENVIRONMENT": "test", "DATABASE_URL": "postgresql://localhost/db"},
             clear=True,
         ):
-            settings = Settings()
+            settings = Settings(_env_file=None)
             assert settings.use_in_memory_storage is False
 
 
