@@ -2,6 +2,72 @@
 
 ---
 
+## 2025-12-03 — Event Subscriptions & Agentic SDK Full Integration
+
+### Objective
+
+Fix the systemic CQRS issue where events were persisted but projections never updated. Implement proper pub/sub from event store to projections, then complete E2E validation of the agentic SDK integration.
+
+### Where I Left Off
+
+🎉 **Event Subscriptions Complete!** The dashboard now correctly shows seeded workflows within seconds. Full CQRS flow working end-to-end.
+
+### Completed Actions
+
+**Event Sourcing Subscriptions:**
+1. ✅ Added `subscribe()` method to `EventStoreClient` protocol
+2. ✅ Implemented streaming subscription in `GrpcEventStoreClient`
+3. ✅ Implemented in-memory subscription for tests
+4. ✅ Created `EventSubscriptionService` with:
+   - Catch-up subscription (historical events)
+   - Live subscription (real-time updates)
+   - Position tracking (survives restarts)
+   - Graceful shutdown
+5. ✅ Integrated with dashboard `lifespan` (auto-start/stop)
+6. ✅ Added subscription status to `/health` endpoint
+7. ✅ Removed broken `NoOpEventPublisher` pattern
+8. ✅ Created ADR-010 documenting architecture
+9. ✅ E2E validated: seed → workflows appear in dashboard ✅
+
+**Agentic SDK Integration (Earlier in Session):**
+10. ✅ Implemented `ClaudeAgenticAgent` with claude-agent-sdk
+11. ✅ Created `WorkspaceProtocol` and `LocalWorkspace`
+12. ✅ Built `ArtifactBundle` model for phase context flow
+13. ✅ Implemented `EventBridge` for hook → domain events
+14. ✅ Created `AgenticWorkflowExecutor` for orchestration
+15. ✅ Added dashboard execution endpoint
+16. ✅ Fixed multiple bugs:
+    - PostgresDsn → str conversion for asyncpg
+    - ArtifactSummary.created_at datetime parsing
+    - Test fixtures dispatching to projections
+    - Justfile seed-workflows command
+    - Docker compose project name
+
+**QA Results:**
+- 233 tests passing
+- All lint/type checks clean
+- E2E flow validated
+
+### Notes / Insights
+
+- **NoOpEventPublisher was the culprit:** It swallowed all events in non-test environments, breaking CQRS entirely
+- **Subscription pattern:** Catch-up + live tailing is the canonical event sourcing approach
+- **Position tracking critical:** Without it, restarts would replay all events
+- **Health endpoint useful:** Shows `caught_up`, `last_position`, `events_processed`
+
+### Obstacles / Open Questions
+
+- Real Claude agent E2E test still pending (needs API key)
+- Hook auto-firing via `.claude/settings.json` not yet validated
+- M7 (deprecation) and M8 (Docker workspace) still pending
+
+### Commits (Pending)
+
+- Event subscription implementation
+- lib/event-sourcing-platform submodule update
+
+---
+
 ## 2025-12-01 — Agent Adapters & CLI Expansion (M6, M7, M9)
 
 ### Objective

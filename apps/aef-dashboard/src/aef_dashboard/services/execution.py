@@ -10,7 +10,6 @@ For testing, use MockAgenticExecutor with APP_ENVIRONMENT=test.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -18,7 +17,6 @@ from typing import Any
 from uuid import uuid4
 
 from agentic_logging import get_logger
-from aef_shared.settings import get_settings
 
 from aef_adapters.orchestration import AgenticWorkflowExecutor
 from aef_adapters.orchestration.executor import (
@@ -151,9 +149,17 @@ class ExecutionService:
                 # Bridge to SSE
                 self._bridge_event_to_sse(event)
 
-                # Update tracker and emit session events
+                # Update tracker and emit domain events via aggregates
                 if isinstance(event, WorkflowStarted):
                     tracker[execution_id]["status"] = "running"
+                    # Emit WorkflowExecutionStarted domain event
+                    await self._start_workflow_execution(
+                        execution_id=event.execution_id,
+                        workflow_id=event.workflow_id,
+                        workflow_name=event.workflow_name,
+                        total_phases=event.total_phases,
+                        inputs=event.inputs,
+                    )
 
                 elif isinstance(event, PhaseStarted):
                     tracker[execution_id]["current_phase"] = event.phase_id
@@ -198,11 +204,31 @@ class ExecutionService:
                 elif isinstance(event, WorkflowCompleted):
                     tracker[execution_id]["status"] = "completed"
                     tracker[execution_id]["completed_at"] = datetime.now(UTC)
+                    # Emit WorkflowCompleted domain event
+                    await self._complete_workflow_execution(
+                        execution_id=event.execution_id,
+                        completed_phases=event.completed_phases,
+                        total_phases=event.total_phases,
+                        total_input_tokens=event.total_input_tokens,
+                        total_output_tokens=event.total_output_tokens,
+                        total_cost_usd=event.total_cost_usd,
+                        duration_seconds=event.total_duration_ms / 1000,
+                        artifact_ids=event.artifact_ids,
+                    )
 
                 elif isinstance(event, WorkflowFailed):
                     tracker[execution_id]["status"] = "failed"
                     tracker[execution_id]["error"] = event.error
                     tracker[execution_id]["completed_at"] = datetime.now(UTC)
+                    # Emit WorkflowFailed domain event
+                    await self._fail_workflow_execution(
+                        execution_id=event.execution_id,
+                        error=event.error,
+                        error_type=event.error_type,
+                        failed_phase_id=event.failed_phase_id,
+                        completed_phases=event.completed_phases,
+                        total_phases=event.total_phases,
+                    )
 
         except Exception as e:
             logger.exception("Workflow execution failed")
@@ -662,4 +688,202 @@ class ExecutionService:
                     "artifact_id": artifact_bundle_id,
                     "error": str(e),
                 },
+            )
+
+    async def _start_workflow_execution(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        workflow_name: str,
+        total_phases: int,
+        inputs: dict[str, Any],
+    ) -> None:
+        """Start workflow execution using the aggregate pattern.
+
+        This creates a WorkflowExecutionAggregate and emits
+        WorkflowExecutionStartedEvent to the event store.
+        The subscription service will update workflow projections.
+
+        Args:
+            execution_id: The unique execution ID (becomes aggregate ID).
+            workflow_id: The workflow being executed.
+            workflow_name: Human-readable workflow name.
+            total_phases: Number of phases in the workflow.
+            inputs: Input variables for the execution.
+        """
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            StartExecutionCommand,
+            WorkflowExecutionAggregate,
+        )
+
+        try:
+            # Create aggregate and dispatch command
+            aggregate = WorkflowExecutionAggregate()
+            command = StartExecutionCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                workflow_name=workflow_name,
+                total_phases=total_phases,
+                inputs=inputs,
+            )
+            aggregate._handle_command(command)
+
+            # Persist to event store
+            repository = get_workflow_execution_repository()
+            await repository.save(aggregate)
+
+            logger.info(
+                "Started workflow execution via aggregate",
+                extra={
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "total_phases": total_phases,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to start workflow execution",
+                extra={"execution_id": execution_id, "error": str(e)},
+            )
+
+    async def _complete_workflow_execution(
+        self,
+        execution_id: str,
+        completed_phases: int,
+        total_phases: int,
+        total_input_tokens: int,
+        total_output_tokens: int,
+        total_cost_usd: float,
+        duration_seconds: float,
+        artifact_ids: list[str],
+    ) -> None:
+        """Complete workflow execution using the aggregate pattern.
+
+        This loads the WorkflowExecutionAggregate and emits
+        WorkflowCompletedEvent to the event store.
+        The subscription service will update workflow projections.
+
+        Args:
+            execution_id: The execution ID.
+            completed_phases: Number of phases completed.
+            total_phases: Total number of phases.
+            total_input_tokens: Total input tokens used.
+            total_output_tokens: Total output tokens used.
+            total_cost_usd: Total cost in USD.
+            duration_seconds: Total duration in seconds.
+            artifact_ids: IDs of artifacts produced.
+        """
+        from decimal import Decimal
+
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            CompleteExecutionCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+            aggregate = await repository.get_by_id(execution_id)
+
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for completion",
+                    extra={"execution_id": execution_id},
+                )
+                return
+
+            command = CompleteExecutionCommand(
+                execution_id=execution_id,
+                completed_phases=completed_phases,
+                total_phases=total_phases,
+                total_input_tokens=total_input_tokens,
+                total_output_tokens=total_output_tokens,
+                total_cost_usd=Decimal(str(total_cost_usd)),
+                duration_seconds=duration_seconds,
+                artifact_ids=artifact_ids,
+            )
+            aggregate._handle_command(command)
+
+            await repository.save(aggregate)
+
+            logger.info(
+                "Completed workflow execution via aggregate",
+                extra={
+                    "execution_id": execution_id,
+                    "completed_phases": completed_phases,
+                    "total_tokens": total_input_tokens + total_output_tokens,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to complete workflow execution",
+                extra={"execution_id": execution_id, "error": str(e)},
+            )
+
+    async def _fail_workflow_execution(
+        self,
+        execution_id: str,
+        error: str,
+        error_type: str,
+        failed_phase_id: str | None,
+        completed_phases: int,
+        total_phases: int,
+    ) -> None:
+        """Fail workflow execution using the aggregate pattern.
+
+        This loads the WorkflowExecutionAggregate and emits
+        WorkflowFailedEvent to the event store.
+        The subscription service will update workflow projections.
+
+        Args:
+            execution_id: The execution ID.
+            error: Error message.
+            error_type: Type of error.
+            failed_phase_id: ID of the phase that failed.
+            completed_phases: Number of phases completed before failure.
+            total_phases: Total number of phases.
+        """
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            FailExecutionCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+            aggregate = await repository.get_by_id(execution_id)
+
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for failure",
+                    extra={"execution_id": execution_id},
+                )
+                return
+
+            command = FailExecutionCommand(
+                execution_id=execution_id,
+                error=error,
+                error_type=error_type,
+                failed_phase_id=failed_phase_id,
+                completed_phases=completed_phases,
+                total_phases=total_phases,
+            )
+            aggregate._handle_command(command)
+
+            await repository.save(aggregate)
+
+            logger.info(
+                "Failed workflow execution via aggregate",
+                extra={
+                    "execution_id": execution_id,
+                    "error": error,
+                    "failed_phase_id": failed_phase_id,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to record workflow execution failure",
+                extra={"execution_id": execution_id, "error": str(e)},
             )

@@ -89,7 +89,10 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_detail", "on_workflow_created"),
         ("dashboard_metrics", "on_workflow_created"),
     ],
+    # WorkflowExecution events (from WorkflowExecutionAggregate)
+    # These update the workflow projections when executions start/complete
     "WorkflowExecutionStarted": [
+        ("workflow_list", "on_phase_started"),  # Triggers "in_progress" status
         ("workflow_detail", "on_workflow_execution_started"),
         ("dashboard_metrics", "on_workflow_execution_started"),
     ],
