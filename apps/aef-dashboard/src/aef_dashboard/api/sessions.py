@@ -29,6 +29,7 @@ def _domain_session_to_api(session: DomainSessionSummary) -> SessionSummary:
     return SessionSummary(
         id=session.id,
         workflow_id=session.workflow_id,
+        execution_id=session.execution_id,
         phase_id=session.phase_id,
         status=session.status,
         agent_provider=session.agent_type,

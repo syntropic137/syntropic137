@@ -96,6 +96,9 @@ class SessionSummary:
     phase_id: str | None = None
     """ID of the phase this session belongs to."""
 
+    execution_id: str | None = None
+    """ID of the workflow execution/run this session belongs to."""
+
     operations: tuple[OperationRecord, ...] = ()
     """Operations recorded during this session."""
 
@@ -119,6 +122,7 @@ class SessionSummary:
             output_tokens=data.get("output_tokens", 0),
             duration_seconds=data.get("duration_seconds"),
             phase_id=data.get("phase_id"),
+            execution_id=data.get("execution_id"),
             operations=operations,
         )
 
@@ -155,5 +159,6 @@ class SessionSummary:
             "output_tokens": self.output_tokens,
             "duration_seconds": self.duration_seconds,
             "phase_id": self.phase_id,
+            "execution_id": self.execution_id,
             "operations": [op.to_dict() for op in self.operations],
         }

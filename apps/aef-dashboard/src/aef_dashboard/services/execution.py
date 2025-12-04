@@ -166,6 +166,7 @@ class ExecutionService:
                     # Start a session for this phase (via aggregate → event store)
                     await self._start_session(
                         workflow_id=event.workflow_id,
+                        execution_id=execution_id,
                         phase_id=event.phase_id,
                         provider=provider,
                     )
@@ -405,6 +406,7 @@ class ExecutionService:
     async def _start_session(
         self,
         workflow_id: str,
+        execution_id: str,
         phase_id: str,
         provider: str,
     ) -> str:
@@ -416,6 +418,7 @@ class ExecutionService:
 
         Args:
             workflow_id: The workflow ID.
+            execution_id: The workflow execution/run ID.
             phase_id: The phase ID.
             provider: The agent provider (e.g., 'claude').
 
@@ -442,6 +445,7 @@ class ExecutionService:
             command = StartSessionCommand(
                 aggregate_id=session_id,
                 workflow_id=workflow_id,
+                execution_id=execution_id,
                 phase_id=phase_id,
                 milestone_id=None,
                 agent_provider=provider,
@@ -469,6 +473,7 @@ class ExecutionService:
                 {
                     "session_id": session_id,
                     "workflow_id": workflow_id,
+                    "execution_id": execution_id,
                     "phase_id": phase_id,
                     "agent_provider": provider,
                     "started_at": datetime.now(UTC).isoformat(),

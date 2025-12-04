@@ -68,7 +68,8 @@ class SessionListProjection:
             input_tokens=0,
             output_tokens=0,
             duration_seconds=None,
-            phase_id=event_data.get("phase_id"),  # Store phase_id from event
+            phase_id=event_data.get("phase_id"),
+            execution_id=event_data.get("execution_id"),  # Link to workflow execution
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 

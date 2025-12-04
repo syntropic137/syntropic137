@@ -55,6 +55,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def __init__(self) -> None:
         super().__init__()
         self._workflow_id: str | None = None
+        self._execution_id: str | None = None
         self._phase_id: str | None = None
         self._milestone_id: str | None = None
         self._agent_provider: str | None = None
@@ -147,6 +148,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         event = SessionStartedEvent(
             session_id=session_id,
             workflow_id=command.workflow_id,
+            execution_id=command.execution_id,
             phase_id=command.phase_id,
             milestone_id=command.milestone_id,
             agent_provider=command.agent_provider,
@@ -233,6 +235,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def on_session_started(self, event: SessionStartedEvent) -> None:
         """Apply SessionStartedEvent."""
         self._workflow_id = event.workflow_id
+        self._execution_id = event.execution_id
         self._phase_id = event.phase_id
         self._milestone_id = event.milestone_id
         self._agent_provider = event.agent_provider

@@ -79,6 +79,7 @@ class SessionSummary(BaseModel):
 
     id: str
     workflow_id: str | None
+    execution_id: str | None = None
     phase_id: str | None
     status: str
     agent_provider: str | None
