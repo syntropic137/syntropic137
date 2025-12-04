@@ -201,7 +201,9 @@ class TestSessionListProjection:
 
     @pytest.mark.asyncio
     async def test_query_sessions_by_workflow(
-        self, projection: SessionListProjection, mock_store: MockProjectionStore  # noqa: ARG002
+        self,
+        projection: SessionListProjection,
+        mock_store: MockProjectionStore,  # noqa: ARG002
     ) -> None:
         """Test querying sessions filtered by workflow."""
         # Create sessions for different workflows

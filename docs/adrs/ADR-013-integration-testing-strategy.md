@@ -1,8 +1,8 @@
 # ADR-013: Integration Testing Strategy with Event Store
 
-**Status:** Proposed  
-**Date:** 2025-12-04  
-**Authors:** @neural  
+**Status:** Proposed
+**Date:** 2025-12-04
+**Authors:** @neural
 **Related:** ADR-004 (Environment Configuration), ADR-006 (Event Sourcing)
 
 ## Context
@@ -88,7 +88,7 @@ def event_store_container():
     if os.getenv("TEST_EVENTSTORE_URL"):
         yield os.getenv("TEST_EVENTSTORE_URL")
         return
-    
+
     # Fallback to testcontainers
     with PostgresContainer("postgres:15") as postgres:
         yield postgres.get_connection_url()
@@ -102,16 +102,16 @@ def event_store_container():
 async def test_session_projection_round_trip(event_store_container):
     """Test that projections handle event store serialization correctly."""
     client = await connect_event_store(event_store_container)
-    
+
     # Create aggregate, emit event
     session = AgentSessionAggregate()
     session.start(...)
     await repository.save(session)
-    
+
     # Load from event store, process through projection
     events = await client.read_stream(...)
     await projection_manager.process_event_envelope(events[0])
-    
+
     # Verify projection handled datetime serialization
     sessions = await projection.get_all()
     assert len(sessions) == 1
@@ -190,4 +190,3 @@ Key insight: The platform uses **persistent dev containers** for fast iteration,
 - [event-sourcing-platform testing docs](lib/event-sourcing-platform/docs-site/docs/development/fast-testing.md)
 - ADR-004: Environment Configuration
 - ADR-006: Event Sourcing with EventStoreDB
-
