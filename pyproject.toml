@@ -19,6 +19,15 @@ dependencies = [
     "grpcio>=1.60",  # Required by event-sourcing SDK
 ]
 
+# Core agentic SDK (required for full functionality)
+[project.optional-dependencies]
+agentic = [
+    "claude-agent-sdk>=0.1.9",  # Core Claude Agent SDK
+]
+all = [
+    "claude-agent-sdk>=0.1.9",
+]
+
 [dependency-groups]
 dev = [
     "ruff>=0.14.7",
@@ -124,15 +133,8 @@ module = [
     "uvicorn.*",
     "grpc",
     "grpc.*",
-    "claude_agent_sdk",
-    "claude_agent_sdk.*",
 ]
 ignore_missing_imports = true
-
-# Allow unused type:ignore in claude_agentic (SDK may or may not be installed)
-[[tool.mypy.overrides]]
-module = "aef_adapters.agents.claude_agentic"
-warn_unused_ignores = false
 
 [tool.pytest.ini_options]
 testpaths = [
