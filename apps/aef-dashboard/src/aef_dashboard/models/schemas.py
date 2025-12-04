@@ -36,6 +36,14 @@ class PhaseInfo(BaseModel):
     status: str = "pending"
     artifact_id: str | None = None
 
+    # Phase metrics (populated after phase completion)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    duration_seconds: float = 0.0
+    cost_usd: Decimal = Decimal("0")
+    session_id: str | None = None
+
 
 class WorkflowResponse(BaseModel):
     """Detailed workflow response."""

@@ -48,15 +48,41 @@ def _domain_summary_to_api(summary: DomainWorkflowSummary) -> WorkflowSummary:
 
 def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
     """Convert domain WorkflowDetail to API WorkflowResponse."""
-    phases = [
-        PhaseInfo(
-            phase_id=p.get("id", f"phase-{i}") if isinstance(p, dict) else p.id,
-            name=p.get("name", f"Phase {i}") if isinstance(p, dict) else p.name,
-            order=i,
-            description=p.get("description") if isinstance(p, dict) else None,
-        )
-        for i, p in enumerate(detail.phases, 1)
-    ]
+    from decimal import Decimal
+
+    phases = []
+    for i, p in enumerate(detail.phases, 1):
+        if isinstance(p, dict):
+            phase_info = PhaseInfo(
+                phase_id=p.get("id", p.get("phase_id", f"phase-{i}")),
+                name=p.get("name", f"Phase {i}"),
+                order=i,
+                description=p.get("description"),
+                status=p.get("status", "pending"),
+                artifact_id=p.get("artifact_id"),
+                input_tokens=p.get("input_tokens", 0),
+                output_tokens=p.get("output_tokens", 0),
+                total_tokens=p.get("total_tokens", 0),
+                duration_seconds=p.get("duration_seconds", 0.0),
+                cost_usd=Decimal(str(p.get("cost_usd", "0"))),
+                session_id=p.get("session_id"),
+            )
+        else:
+            phase_info = PhaseInfo(
+                phase_id=p.id,
+                name=p.name,
+                order=i,
+                description=None,
+                status=p.status,
+                artifact_id=None,
+                input_tokens=p.input_tokens,
+                output_tokens=p.output_tokens,
+                total_tokens=p.total_tokens,
+                duration_seconds=p.duration_seconds,
+                cost_usd=Decimal(str(p.cost_usd)),
+                session_id=p.session_id,
+            )
+        phases.append(phase_info)
 
     return WorkflowResponse(
         id=detail.id,
