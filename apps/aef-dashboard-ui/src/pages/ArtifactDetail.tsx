@@ -3,7 +3,9 @@ import {
   ArrowLeft,
   Clipboard,
   ClipboardCheck,
+  Code,
   Download,
+  Eye,
   FileCode,
   FileText,
   Hash,
@@ -14,6 +16,7 @@ import { Link, useParams } from 'react-router-dom'
 
 import { getArtifact } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, PageLoader } from '../components'
+import { MarkdownViewer } from '../components/MarkdownViewer'
 import type { ArtifactResponse } from '../types'
 
 const artifactIcons: Record<string, typeof FileText> = {
@@ -36,6 +39,7 @@ export function ArtifactDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [viewMode, setViewMode] = useState<'rendered' | 'raw'>('rendered')
 
   useEffect(() => {
     if (!artifactId) return
@@ -208,19 +212,58 @@ export function ArtifactDetail() {
 
       {/* Content */}
       <Card>
-        <CardHeader title="Content" subtitle="Artifact content preview" />
+        <CardHeader
+          title="Content"
+          subtitle="Artifact content preview"
+          action={
+            artifact.content && isMarkdown(artifact) ? (
+              <div className="flex items-center gap-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5">
+                <button
+                  onClick={() => setViewMode('rendered')}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                    viewMode === 'rendered'
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                  )}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  Rendered
+                </button>
+                <button
+                  onClick={() => setViewMode('raw')}
+                  className={clsx(
+                    'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                    viewMode === 'raw'
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                  )}
+                >
+                  <Code className="h-3.5 w-3.5" />
+                  Raw
+                </button>
+              </div>
+            ) : undefined
+          }
+        />
         <CardContent noPadding>
           {artifact.content ? (
-            <div className="relative">
-              <pre
-                className={clsx(
-                  'overflow-auto p-4 text-sm text-[var(--color-text-secondary)]',
-                  'max-h-[600px] font-mono'
-                )}
-              >
-                <code>{artifact.content}</code>
-              </pre>
-            </div>
+            isMarkdown(artifact) && viewMode === 'rendered' ? (
+              <div className="p-4 max-h-[800px] overflow-auto">
+                <MarkdownViewer content={artifact.content} />
+              </div>
+            ) : (
+              <div className="relative">
+                <pre
+                  className={clsx(
+                    'overflow-auto p-4 text-sm text-[var(--color-text-secondary)]',
+                    'max-h-[600px] font-mono'
+                  )}
+                >
+                  <code>{artifact.content}</code>
+                </pre>
+              </div>
+            )
           ) : (
             <div className="p-8 text-center">
               <FileText className="mx-auto h-8 w-8 text-[var(--color-text-muted)]" />
@@ -233,4 +276,17 @@ export function ArtifactDetail() {
       </Card>
     </div>
   )
+}
+
+/** Check if artifact should be rendered as markdown */
+function isMarkdown(artifact: ArtifactResponse): boolean {
+  if (artifact.artifact_type === 'markdown') return true
+  if (artifact.content_type?.includes('markdown')) return true
+  if (artifact.title?.endsWith('.md')) return true
+  // Check for common markdown patterns in content
+  if (artifact.content) {
+    const firstLine = artifact.content.split('\n')[0] || ''
+    if (firstLine.startsWith('# ')) return true
+  }
+  return false
 }

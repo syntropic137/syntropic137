@@ -21,7 +21,7 @@ import {
   YAxis,
 } from 'recharts'
 
-import { getMetrics, getWorkflow, getWorkflowHistory, listArtifacts } from '../api/client'
+import { executeWorkflow, getMetrics, getWorkflow, getWorkflowHistory, listArtifacts } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { ArtifactSummary, ExecutionHistoryResponse, MetricsResponse, WorkflowResponse } from '../types'
 
@@ -48,6 +48,8 @@ export function WorkflowDetail() {
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isExecuting, setIsExecuting] = useState(false)
+  const [executionMessage, setExecutionMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (!workflowId) return
@@ -72,6 +74,28 @@ export function WorkflowDetail() {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [workflowId])
+
+  const handleExecute = async () => {
+    if (!workflowId || isExecuting) return
+
+    setIsExecuting(true)
+    setExecutionMessage(null)
+
+    try {
+      const response = await executeWorkflow(workflowId, {
+        inputs: { topic: 'AI Agents' }, // Default input for demo
+        provider: 'claude',
+      })
+      setExecutionMessage(`Started! Execution ID: ${response.execution_id.slice(0, 8)}...`)
+
+      // Clear message after 5 seconds
+      setTimeout(() => setExecutionMessage(null), 5000)
+    } catch (err) {
+      setExecutionMessage(`Error: ${err instanceof Error ? err.message : 'Failed to start'}`)
+    } finally {
+      setIsExecuting(false)
+    }
+  }
 
   if (loading) return <PageLoader />
 
@@ -128,6 +152,31 @@ export function WorkflowDetail() {
                 <span>{workflow.classification}</span>
               </div>
             </div>
+          </div>
+
+          {/* Run Workflow Button */}
+          <div className="flex flex-col items-end gap-2">
+            <button
+              onClick={handleExecute}
+              disabled={isExecuting}
+              className={clsx(
+                'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+                isExecuting
+                  ? 'bg-slate-600 text-slate-300 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40'
+              )}
+            >
+              <Play className={clsx('h-4 w-4', isExecuting && 'animate-pulse')} />
+              {isExecuting ? 'Running...' : 'Run Workflow'}
+            </button>
+            {executionMessage && (
+              <span className={clsx(
+                'text-xs',
+                executionMessage.startsWith('Error') ? 'text-red-400' : 'text-emerald-400'
+              )}>
+                {executionMessage}
+              </span>
+            )}
           </div>
         </div>
       </div>

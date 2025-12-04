@@ -39,7 +39,9 @@ cli *args:
     uv run --package aef-cli aef {{args}}
 
 # Start the dashboard backend (API server)
+# Loads .env for database connection and API keys
 dashboard-backend:
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
     uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Start the dashboard frontend (Vite dev server)

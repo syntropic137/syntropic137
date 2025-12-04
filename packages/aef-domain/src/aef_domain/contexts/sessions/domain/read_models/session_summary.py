@@ -52,6 +52,24 @@ class SessionSummary:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
+        # Handle both datetime objects and ISO string format
+        # (events from event store come back as strings after serialization)
+        started_at_str = None
+        if self.started_at:
+            started_at_str = (
+                self.started_at.isoformat()
+                if isinstance(self.started_at, datetime)
+                else str(self.started_at)
+            )
+
+        completed_at_str = None
+        if self.completed_at:
+            completed_at_str = (
+                self.completed_at.isoformat()
+                if isinstance(self.completed_at, datetime)
+                else str(self.completed_at)
+            )
+
         return {
             "id": self.id,
             "workflow_id": self.workflow_id,
@@ -59,6 +77,6 @@ class SessionSummary:
             "status": self.status,
             "total_tokens": self.total_tokens,
             "total_cost_usd": str(self.total_cost_usd),
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": (self.completed_at.isoformat() if self.completed_at else None),
+            "started_at": started_at_str,
+            "completed_at": completed_at_str,
         }

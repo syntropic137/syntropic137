@@ -52,6 +52,15 @@ class WorkflowSummary:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
+        # Handle created_at which could be datetime or already a string
+        created_at_str = None
+        if self.created_at:
+            created_at_str = (
+                self.created_at.isoformat()
+                if isinstance(self.created_at, datetime)
+                else str(self.created_at)
+            )
+
         return {
             "id": self.id,
             "name": self.name,
@@ -60,5 +69,5 @@ class WorkflowSummary:
             "status": self.status,
             "phase_count": self.phase_count,
             "description": self.description,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "created_at": created_at_str,
         }

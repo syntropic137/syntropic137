@@ -1,105 +1,169 @@
 # CURRENT ACTIVE STATE ARTIFACT (CASA)
 
 **Project:** Agentic Engineering Framework
-**Updated:** 2025-12-02
-**Branch:** `feat/vsa-projections`
+**Updated:** 2025-12-04
+**Branch:** `feat/agentic-sdk-full-integration`
+**Status:** All tests passing (233) ✅
 
 ---
 
 ## Where I Left Off
 
-Completed **VSA Projections Implementation** - Full CQRS read-side with Vertical Slice Architecture. The AEF now has proper separation between command and query paths using VSA-compliant projections.
+Completed critical bug fixes for **datetime serialization in projections** and added comprehensive test coverage for the `SessionListProjection`. Also created **ADR-013** outlining an improved integration testing strategy using Testcontainers.
 
 ## What Was Just Completed
 
-### VSA Projections Implementation (ADR-008)
+### Bug Fixes & Test Improvements ✅
 
-**Infrastructure (M1):**
-- ✅ `ProjectionStoreProtocol` - Abstract storage interface
-- ✅ `InMemoryProjectionStore` - For testing
-- ✅ `PostgresProjectionStore` - For production
-- ✅ SQL migrations for projection tables
+**Datetime Serialization Fix:**
+- ✅ Fixed `session_summary.py` - `started_at`/`completed_at` now handle `datetime | str | None`
+- ✅ Fixed `workflow_summary.py` - `created_at` handles `datetime | str | None`
+- ✅ Fixed `workflow_detail.py` - All datetime fields in `PhaseDetail` and `WorkflowDetail`
+- ✅ Root cause: Events from event store come back as serialized ISO strings, not `datetime` objects
 
-**Domain Restructure (M2):**
-- ✅ Query DTOs in `domain/queries/` for each bounded context
-- ✅ Read Model DTOs in `domain/read_models/` for each context
+**Test Coverage Additions:**
+- ✅ Added `test_list_sessions.py` with 9 tests for `SessionListProjection`
+- ✅ Tests include scenarios with serialized event data (ISO strings)
+- ✅ Fixed subscription tests with proper `_assert_test_environment()` enforcement
 
-**Query Slices (M3-M7):**
-- ✅ `list_workflows` - Workflow summaries with filtering
-- ✅ `get_workflow_detail` - Detailed workflow view
-- ✅ `list_sessions` - Session list with workflow filtering
-- ✅ `list_artifacts` - Artifact list with filtering
-- ✅ `get_metrics` - Dashboard aggregate metrics
+**Documentation & ADRs:**
+- ✅ Created ADR-013: Integration Testing Strategy (Testcontainers proposal)
+- ✅ Updated ADR-004: Added "Mock Objects: Test Environment Only" section
+- ✅ Updated E2E-ACCEPTANCE-TESTS.md: Added Mocking Policy section
 
-**Integration (M8-M9):**
-- ✅ `ProjectionManager` - Centralized event dispatch
-- ✅ Dashboard API endpoints using VSA handlers
+**CI/CD Fixes:**
+- ✅ Added `claude-agent-sdk>=0.1.9` to root `pyproject.toml` `[dependency-groups.dev]`
+- ✅ Removed mypy workarounds (now properly installed in CI)
+- ✅ All 233 tests passing in CI ✅
 
 ### QA Status
-- **218 tests passing** ✅
+- **233 tests passing** ✅
 - All lint/type checks passing ✅
-- Full VSA compliance ✅
+- CI/CD pipeline green ✅
 
 ## What To Do Next
 
-**E2E Testing & Validation:**
-1. Start full stack: `just dev`
-2. Seed workflows: `just cli workflow seed`
-3. Run dashboard backend: `just dashboard-backend`
-4. Run dashboard frontend: `just dashboard-frontend`
-5. Test in browser at http://localhost:5173
-6. Validate acceptance criteria
+### Priority 1: Improve Testing Flow (ADR-013)
 
-**Remaining Work:**
-- [ ] Full E2E acceptance tests
-- [ ] Event bus real-time subscription
-- [ ] Performance testing
-- [ ] Documentation updates
+**Goal:** Prevent future serialization bugs by testing with real dependencies.
+
+| Task | Status | Notes |
+|------|--------|-------|
+| Add projection tests with serialized event data | ✅ Done | `test_list_sessions.py` |
+| Create ADR-013 for Testcontainers strategy | ✅ Done | Proposed |
+| Implement Testcontainers for EventStoreDB | ⏳ Pending | Use `event-sourcing-platform` pattern |
+| Implement Testcontainers for PostgreSQL | ⏳ Pending | For projection store tests |
+| Add integration test suite (`tests/integration/`) | ⏳ Pending | Separate from unit tests |
+
+**Implementation Plan:**
+```bash
+# Phase 1: Add integration test infrastructure
+packages/aef-adapters/tests/integration/
+├── conftest.py          # Testcontainers fixtures
+├── test_event_flow.py   # Write → Subscribe → Project
+└── test_artifact_flow.py # Create → Persist → Query
+```
+
+### Priority 2: Real Claude Agent E2E
+
+**Goal:** Validate full stack with real Claude Agent SDK.
+
+```bash
+# Ensure API key is set in .env
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Start the system
+just dev
+
+# Run E2E validation
+# 1. Open dashboard: http://localhost:5173
+# 2. Click "Run Workflow" on a seeded workflow
+# 3. Observe: Sessions created, tokens counted, artifacts viewable
+```
+
+### Priority 3: Cleanup & Merge
+
+- [ ] Deprecate old `AgentProtocol` (M7)
+- [ ] Merge PR to main
+- [ ] Update `agentic-primitives` submodule to latest
 
 ## Open Loops
 
-- [ ] Real-time projection updates via event subscription
-- [ ] Catch-up mechanism for projection rebuilding
-- [ ] CLI event store connection fixes verified
-- [ ] Real agent integration tests
+| Item | Priority | Notes |
+|------|----------|-------|
+| Real Claude agent E2E test | High | Requires API key, validates full stack |
+| Testcontainers integration tests | Medium | ADR-013 outlines approach |
+| Hook auto-fire validation | Medium | `.claude/settings.json` config |
+| Docker workspace implementation | Low | M8 stretch goal |
+| Deprecate `AgentProtocol` | Low | After E2E validation |
+
+## Key Discoveries (Lessons Learned)
+
+### Datetime Serialization Issue
+**Problem:** Projections called `.isoformat()` on values that were already ISO strings.
+
+**Root Cause:** Event store returns events with datetime fields as serialized strings, not `datetime` objects.
+
+**Fix Pattern:**
+```python
+# Before (broken)
+"started_at": self.started_at.isoformat() if self.started_at else None
+
+# After (fixed)
+"started_at": (
+    self.started_at.isoformat()
+    if isinstance(self.started_at, datetime)
+    else str(self.started_at)
+    if self.started_at
+    else None
+)
+```
+
+**Prevention:** ADR-013 proposes Testcontainers for integration tests that validate real serialization paths.
+
+### Mock Environment Enforcement
+All mocks now include `_assert_test_environment()` check:
+```python
+def _assert_test_environment() -> None:
+    app_env = os.getenv("APP_ENVIRONMENT", "").lower()
+    if app_env != "test":
+        raise MockTestEnvironmentError(...)
+```
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              AEF Stack (VSA)                                │
+│                     AEF CQRS ARCHITECTURE WITH SUBSCRIPTIONS                │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  ┌─────────────────────┐        ┌─────────────────────────────────────────┐ │
-│  │   COMMAND SIDE      │        │            QUERY SIDE                   │ │
-│  ├─────────────────────┤        ├─────────────────────────────────────────┤ │
-│  │  CLI / API          │        │  Dashboard API                          │ │
-│  │    ↓                │        │    ↓                                    │ │
-│  │  Command Handlers   │        │  Query Handlers                         │ │
-│  │    ↓                │        │    ↓                                    │ │
-│  │  Aggregates         │        │  Projections                            │ │
-│  │    ↓                │        │    ↓                                    │ │
-│  │  Event Store        │───────→│  Projection Store                       │ │
-│  │  (gRPC)             │ events │  (PostgreSQL)                           │ │
-│  └─────────────────────┘        └─────────────────────────────────────────┘ │
+│  WRITE PATH                          READ PATH                              │
+│  ──────────                          ─────────                              │
+│  CLI / API                           Dashboard API                          │
+│     ↓                                     ↑                                 │
+│  Command Handlers                    Query Handlers                         │
+│     ↓                                     ↑                                 │
+│  Aggregates                          Projections                            │
+│     ↓                                     ↑                                 │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                         EVENT STORE (gRPC)                            │ │
+│  │  Events serialized as JSON (datetimes → ISO strings)                  │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                              ↓                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │              EventSubscriptionService                                  │ │
+│  │  - Catch-up + Live streaming                                          │ │
+│  │  - Position tracking (survives restarts)                              │ │
+│  │  - Dispatches to ProjectionManager                                    │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+│                              ↓                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │                      ProjectionManager                                │ │
+│  │  - Receives events as dicts (serialized)                              │ │
+│  │  - Routes to appropriate projections                                  │ │
+│  │  - Projections must handle datetime|str                               │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
 │                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          Query Slices (VSA)                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  workflows/                sessions/              artifacts/      metrics/  │
-│  ├─ list_workflows/       ├─ list_sessions/      ├─ list_artifacts/ │
-│  │  ├─ projection.py      │  ├─ projection.py    │  ├─ projection.py│
-│  │  ├─ handler.py         │  ├─ handler.py       │  ├─ handler.py   │
-│  │  ├─ slice.yaml         │  ├─ slice.yaml       │  └─ slice.yaml   │
-│  │  └─ test_*.py          │  └─ test_*.py        │                  │
-│  └─ get_workflow_detail/  │                      │  get_metrics/    │
-│     ├─ projection.py      │                      │  ├─ projection   │
-│     ├─ handler.py         │                      │  ├─ handler      │
-│     └─ slice.yaml         │                      │  └─ slice.yaml   │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                          Infrastructure                                     │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  PostgreSQL (5432)  │  Event Store Server (50051)  │  Dashboard (5173)     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -108,74 +172,51 @@ Completed **VSA Projections Implementation** - Full CQRS read-side with Vertical
 ```bash
 # Development
 just dev                  # Start Docker (PostgreSQL + Event Store)
-just cli workflow seed    # Seed sample workflows
-just dashboard-backend    # Run API server
+just seed-workflows       # Seed sample workflows
+just dashboard-backend    # Run API server (loads .env)
 just dashboard-frontend   # Run React dev server
 
 # Testing
 just test                 # Run all tests
-just qa                   # Full QA pipeline (format, lint, type, test)
-uv run pytest packages/aef-domain packages/aef-adapters/tests -v  # Run domain tests
+just qa                   # Full QA pipeline
+APP_ENVIRONMENT=test uv run pytest  # Run with test env (mocks work)
+
+# Health Check
+curl http://localhost:8000/health
 ```
 
 ## Key Files
 
-### VSA Projections (New)
-- `packages/aef-adapters/src/aef_adapters/projection_stores/` - Storage adapters
-  - `protocol.py` - ProjectionStoreProtocol interface
-  - `postgres_store.py` - PostgreSQL implementation
-  - `memory_store.py` - In-memory for tests
-- `packages/aef-adapters/src/aef_adapters/projections/manager.py` - Event dispatch
-- `packages/aef-domain/src/aef_domain/contexts/*/slices/` - Query slices
+### Recent Changes (Bug Fixes)
+- `packages/aef-domain/src/.../session_summary.py` - Datetime serialization fix
+- `packages/aef-domain/src/.../workflow_summary.py` - Datetime serialization fix
+- `packages/aef-domain/src/.../workflow_detail.py` - Datetime serialization fix
+- `packages/aef-domain/src/.../test_list_sessions.py` - New projection tests
 
-### Domain Structure
-```
-aef-domain/contexts/
-├── workflows/
-│   ├── domain/
-│   │   ├── queries/          # Query DTOs
-│   │   └── read_models/      # Read model DTOs
-│   └── slices/
-│       ├── list_workflows/   # Query slice
-│       └── get_workflow_detail/
-├── sessions/
-│   ├── domain/queries/
-│   ├── domain/read_models/
-│   └── slices/list_sessions/
-├── artifacts/
-│   └── slices/list_artifacts/
-└── metrics/
-    └── slices/get_metrics/
-```
+### Testing Infrastructure
+- `docs/adrs/ADR-013-integration-testing-strategy.md` - Testcontainers proposal
+- `docs/adrs/ADR-004-environment-configuration.md` - Mock env enforcement
+- `docs/testing/E2E-ACCEPTANCE-TESTS.md` - Mocking policy docs
 
-### Architecture Decisions
-- `docs/adrs/ADR-006-hook-architecture-agent-swarms.md`
-- `docs/adrs/ADR-007-event-store-integration.md`
-- `docs/adrs/ADR-008-vsa-projection-architecture.md` (to be created)
+### Agentic SDK Integration
+- `packages/aef-adapters/src/aef_adapters/agents/claude_agentic.py` - Claude SDK wrapper
+- `packages/aef-adapters/src/aef_adapters/orchestration/executor.py` - Workflow executor
+- `apps/aef-dashboard/src/aef_dashboard/services/execution.py` - API execution service
 
-## Current State
+## Current State Summary
 
 ```
 Phase 1 (MVP Foundation): ✅ COMPLETE
-
 Phase 2 (Workflow Execution): ✅ COMPLETE
-  Part 1: agentic-primitives hooks ✅
-  Part 2: AEF workflow engine ✅
-    - M1-M5: Core domain & execution
-    - M6: CLI commands
-    - M7: Dashboard backend
-    - M8: Dashboard frontend
-    - M9-M10: Integration & docs
-
 VSA Projections: ✅ COMPLETE
-  - M1: ProjectionStoreProtocol ✅
-  - M2: Domain restructure ✅
-  - M3-M7: Query slices ✅
-  - M8-M9: Integration ✅
-  - M10: Documentation ✅
-  - 218 tests passing
-
 Event Store Integration: ✅ COMPLETE
+Event Subscriptions: ✅ COMPLETE
+Agentic SDK Integration: ✅ M1-M6 Complete
+Bug Fixes: ✅ Datetime serialization, test environment checks
+Test Coverage: ✅ 233 tests passing
 
-Next: E2E Testing & Acceptance Validation
+Next Steps:
+1. Implement Testcontainers for integration tests (ADR-013)
+2. Real Claude E2E validation
+3. PR merge to main
 ```
