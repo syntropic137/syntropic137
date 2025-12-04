@@ -93,7 +93,8 @@ def get_available_agentic_agents() -> list[str]:
         if agent.is_available:
             available.append("claude")
     except ImportError:
-        # ClaudeAgenticAgent not available (missing dependency or API key)
+        # ClaudeAgenticAgent requires claude-agent-sdk optional dependency.
+        # If it cannot be imported, this provider is not available.
         pass
 
     return available
