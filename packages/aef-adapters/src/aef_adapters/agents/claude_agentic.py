@@ -66,12 +66,11 @@ try:
     CLAUDE_SDK_AVAILABLE = True
 except ImportError:
     CLAUDE_SDK_AVAILABLE = False
-    # Placeholders when SDK not installed (only used at runtime, not type checking)
-    AssistantMessage = None
-    ClaudeAgentOptions = None
-    ResultMessage = None
-    ToolUseBlock = None
-    query = None
+    AssistantMessage = None  # type: ignore[misc,assignment]
+    ClaudeAgentOptions = None  # type: ignore[misc,assignment]
+    ResultMessage = None  # type: ignore[misc,assignment]
+    ToolUseBlock = None  # type: ignore[misc,assignment]
+    query = None  # type: ignore[assignment]
 
 
 class ClaudeAgenticAgent:
@@ -165,8 +164,8 @@ class ClaudeAgenticAgent:
             model=self._model,
             cwd=str(workspace.path),
             allowed_tools=allowed_tools,
-            permission_mode=config.permission_mode,
-            setting_sources=list(config.setting_sources),
+            permission_mode=config.permission_mode,  # type: ignore[arg-type]
+            setting_sources=list(config.setting_sources),  # type: ignore[arg-type]
             max_turns=config.max_turns,
             max_budget_usd=config.max_budget_usd,
         )

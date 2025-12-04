@@ -133,7 +133,7 @@ class ExecutionService:
             # Create executor - imports are at top level, fail fast if not available
             executor = AgenticWorkflowExecutor(
                 agent_factory=get_agentic_agent,
-                workspace_factory=get_workspace,
+                workspace_factory=get_workspace,  # type: ignore[arg-type]
                 base_workspace_path=self._base_workspace_path,
                 default_provider=provider,
                 default_max_budget_usd=max_budget_usd,
@@ -141,7 +141,7 @@ class ExecutionService:
 
             # Execute and stream events
             async for event in executor.execute(
-                workflow_def,
+                workflow_def,  # type: ignore[arg-type]
                 inputs,
                 execution_id=execution_id,
                 provider=provider,
@@ -211,7 +211,7 @@ class ExecutionService:
                         total_phases=event.total_phases,
                         total_input_tokens=event.total_input_tokens,
                         total_output_tokens=event.total_output_tokens,
-                        total_cost_usd=event.total_cost_usd,
+                        total_cost_usd=float(event.estimated_cost_usd),
                         duration_seconds=event.total_duration_ms / 1000,
                         artifact_ids=event.artifact_ids,
                     )
@@ -277,13 +277,13 @@ class ExecutionService:
         phases = []
         for i, p in enumerate(detail.phases, 1):
             if isinstance(p, dict):
-                phase_id = p.get("id", p.get("phase_id", f"phase-{i}"))
-                name = p.get("name", f"Phase {i}")
+                phase_id = str(p.get("id", p.get("phase_id", f"phase-{i}")))
+                name = str(p.get("name", f"Phase {i}"))
                 desc = p.get("description")
                 prompt = p.get("prompt_template", f"Complete the {name} phase. {{{{topic}}}}")
             else:
-                phase_id = getattr(p, "phase_id", f"phase-{i}")
-                name = getattr(p, "name", f"Phase {i}")
+                phase_id = str(getattr(p, "phase_id", f"phase-{i}"))
+                name = str(getattr(p, "name", f"Phase {i}"))
                 desc = getattr(p, "description", None)
                 prompt = getattr(p, "prompt_template", f"Complete the {name} phase. {{{{topic}}}}")
 
@@ -488,6 +488,7 @@ class ExecutionService:
             error: Error message if failed.
         """
         from aef_adapters.storage.repositories import get_session_repository
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
@@ -510,8 +511,8 @@ class ExecutionService:
                 output_tokens = int(total_tokens * 0.7)
 
                 operation_command = RecordOperationCommand(
-                    session_id=session_id,
-                    operation_type="agent_execution",
+                    aggregate_id=session_id,
+                    operation_type=OperationType.AGENT_REQUEST,
                     duration_seconds=None,  # Could calculate from phase start time
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -524,7 +525,7 @@ class ExecutionService:
 
             # Complete the session
             complete_command = CompleteSessionCommand(
-                session_id=session_id,
+                aggregate_id=session_id,
                 success=success,
                 error_message=error,
             )
@@ -593,7 +594,7 @@ class ExecutionService:
         # Try to get primary file content from bundle
         content = ""
         title = f"Phase {phase_id} Output"
-        artifact_type = ArtifactType.RESEARCH_NOTES  # Default type
+        artifact_type = ArtifactType.RESEARCH_SUMMARY  # Default type
 
         if bundle is not None:
             # Find primary file in bundle
@@ -624,7 +625,7 @@ class ExecutionService:
                             try:
                                 artifact_type = ArtifactType(raw_type)
                             except ValueError:
-                                artifact_type = ArtifactType.RESEARCH_NOTES
+                                artifact_type = ArtifactType.RESEARCH_SUMMARY
                         break  # Found primary, stop searching
 
             # Use bundle title if available
@@ -826,7 +827,7 @@ class ExecutionService:
         self,
         execution_id: str,
         error: str,
-        error_type: str,
+        error_type: str | None,
         failed_phase_id: str | None,
         completed_phases: int,
         total_phases: int,

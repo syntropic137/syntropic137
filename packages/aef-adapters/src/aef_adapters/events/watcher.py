@@ -275,7 +275,7 @@ class MultiFileWatcher:
                 try:
                     # Get next event with timeout
                     event_tuple = await asyncio.wait_for(
-                        task.__anext__(),  # type: ignore[union-attr]
+                        task.__anext__(),
                         timeout=0.1,
                     )
                     yield event_tuple

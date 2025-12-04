@@ -110,7 +110,7 @@ class PhaseFailed:
     phase_id: str
     failed_at: datetime
     error: str
-    error_type: str
+    error_type: str | None = None
     partial_tokens: int = 0
 
 
@@ -140,7 +140,7 @@ class WorkflowFailed:
     failed_at: datetime
     failed_phase_id: str | None
     error: str
-    error_type: str
+    error_type: str | None
     completed_phases: int
     total_phases: int
 

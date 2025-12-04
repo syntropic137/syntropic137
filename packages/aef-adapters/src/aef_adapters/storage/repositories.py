@@ -245,7 +245,11 @@ def reset_repositories() -> None:
     Clears all cached repository instances. Call this along with
     reset_event_store_client() for a clean state.
     """
-    global _workflow_repository, _workflow_execution_repository, _session_repository, _artifact_repository
+    global \
+        _workflow_repository, \
+        _workflow_execution_repository, \
+        _session_repository, \
+        _artifact_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _session_repository = None

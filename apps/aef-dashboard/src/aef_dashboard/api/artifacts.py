@@ -17,6 +17,7 @@ solution. Replace with database/object storage queries for production.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,18 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.read_models import (
         ArtifactSummary as DomainArtifactSummary,
     )
+
+
+def _parse_datetime(value: datetime | str | None) -> datetime | None:
+    """Parse datetime from string or datetime."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return None
+
 
 # Base path for workspace artifacts (DEVELOPMENT ONLY - see module docstring)
 _WORKSPACE_BASE = Path.cwd() / ".aef-workspaces"
@@ -47,7 +60,7 @@ def _domain_artifact_to_api(artifact: DomainArtifactSummary) -> ArtifactSummary:
         artifact_type=artifact.artifact_type,
         title=artifact.name,
         size_bytes=0,  # Not tracked in current domain model
-        created_at=artifact.created_at,
+        created_at=_parse_datetime(artifact.created_at),
     )
 
 
@@ -78,9 +91,7 @@ async def list_artifacts(
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(
     artifact_id: str,
-    include_content: bool = Query(
-        False, description="Include artifact content in response"
-    ),
+    include_content: bool = Query(False, description="Include artifact content in response"),
 ) -> ArtifactResponse:
     """Get artifact details by ID."""
     # Get projection manager and create handler
@@ -115,7 +126,7 @@ async def get_artifact(
         size_bytes=size_bytes,
         title=artifact.name,
         derived_from=[],
-        created_at=artifact.created_at,
+        created_at=_parse_datetime(artifact.created_at),
         created_by=None,
         metadata={},
     )

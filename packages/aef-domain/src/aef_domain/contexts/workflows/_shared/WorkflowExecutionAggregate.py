@@ -85,7 +85,7 @@ class FailExecutionCommand:
         self,
         execution_id: str,
         error: str,
-        error_type: str,
+        error_type: str | None,
         failed_phase_id: str | None,
         completed_phases: int,
         total_phases: int,
@@ -200,7 +200,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             total_duration_seconds=command.duration_seconds,
             artifact_ids=command.artifact_ids,
         )
-        self._apply(event)
+        self._apply(event)  # type: ignore[arg-type]
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
@@ -223,7 +223,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
         )
-        self._apply(event)
+        self._apply(event)  # type: ignore[arg-type]
 
     # =========================================================================
     # EVENT SOURCING HANDLERS
@@ -276,4 +276,3 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._error = data.get("error_message")
 
         self._status = ExecutionStatus.FAILED
-
