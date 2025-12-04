@@ -71,10 +71,7 @@ def get_agentic_agent(provider: str) -> AgenticProtocol:
             )
         return agent
 
-    # TODO: Add more providers as they become available
-    # if provider_lower in ("openai", "gpt"):
-    #     from aef_adapters.agents.openai_agentic import OpenAIAgenticAgent
-    #     return OpenAIAgenticAgent()
+    # TODO: Add more providers (OpenAI, etc.) as they become available
 
     supported = ["claude", "anthropic"]
     raise ValueError(f"Unsupported agentic provider: {provider}. Supported providers: {supported}")
@@ -96,6 +93,7 @@ def get_available_agentic_agents() -> list[str]:
         if agent.is_available:
             available.append("claude")
     except ImportError:
+        # ClaudeAgenticAgent not available (missing dependency or API key)
         pass
 
     return available

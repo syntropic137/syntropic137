@@ -420,6 +420,7 @@ class TestAgenticAgentFactory:
             # All should return same type
             assert type(agent1) is type(agent2) is type(agent3)
         except ValueError:
+            # Provider may not be available - that's OK for this test
             pass
 
 

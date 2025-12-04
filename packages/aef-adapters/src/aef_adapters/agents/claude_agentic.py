@@ -243,7 +243,8 @@ class ClaudeAgenticAgent:
             )
 
         except TimeoutError as e:
-            duration_ms = (time.time() - start_time) * 1000
+            # duration_ms calculated but not exposed in error (timeout already indicates duration)
+            _ = (time.time() - start_time) * 1000
             raise AgenticTimeoutError(
                 f"Execution timed out after {config.timeout_seconds}s",
                 provider=self.provider,
