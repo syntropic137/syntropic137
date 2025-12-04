@@ -73,21 +73,38 @@ class SessionListProjection:
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 
     async def on_operation_recorded(self, event_data: dict) -> None:
-        """Handle OperationRecorded - update token counts."""
+        """Handle OperationRecorded - update token counts and store operation."""
         session_id = event_data.get("session_id")
         if not session_id:
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         if existing:
-            # Accumulate tokens
-            existing["total_tokens"] = existing.get("total_tokens", 0) + event_data.get(
-                "tokens_used", 0
-            )
+            # Accumulate tokens from operation
+            op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
+            existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
             existing["total_cost_usd"] = float(
                 Decimal(str(existing.get("total_cost_usd", 0)))
                 + Decimal(str(event_data.get("cost_usd", 0)))
             )
+
+            # Store the operation in the operations list
+            operations = existing.get("operations", [])
+            operations.append(
+                {
+                    "operation_id": event_data.get("operation_id", ""),
+                    "operation_type": event_data.get("operation_type", ""),
+                    "timestamp": event_data.get("timestamp"),
+                    "duration_seconds": event_data.get("duration_seconds"),
+                    "input_tokens": event_data.get("input_tokens"),
+                    "output_tokens": event_data.get("output_tokens"),
+                    "total_tokens": event_data.get("total_tokens"),
+                    "tool_name": event_data.get("tool_name"),
+                    "success": event_data.get("success", True),
+                }
+            )
+            existing["operations"] = operations
+
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_session_completed(self, event_data: dict) -> None:

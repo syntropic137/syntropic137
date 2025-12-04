@@ -47,14 +47,20 @@ class WorkflowDetailProjection:
         await self._store.save(self.PROJECTION_NAME, workflow_id, detail.to_dict())
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
-        """Handle WorkflowExecutionStarted - mark workflow as started."""
+        """Handle WorkflowExecutionStarted - record execution metadata.
+
+        Note: Status is NOT changed here to be consistent with list projection.
+        Status changes to in_progress on phase_started when actual work begins.
+        This prevents incomplete/failed executions from overriding valid states.
+        """
         workflow_id = event_data.get("workflow_id")
         if not workflow_id:
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
         if existing:
-            existing["status"] = "in_progress"
+            # Only update started_at, not status
+            # Status changes to in_progress on phase_started (consistent with list)
             existing["started_at"] = event_data.get("started_at")
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
@@ -81,7 +87,9 @@ class WorkflowDetailProjection:
             # Update phase status and metrics in the phases list
             phase_id = event_data.get("phase_id")
             for phase in existing.get("phases", []):
-                if phase.get("phase_id") == phase_id:
+                # Support both 'phase_id' and 'id' keys for robustness
+                stored_phase_id = phase.get("phase_id") or phase.get("id")
+                if stored_phase_id == phase_id:
                     phase["status"] = "completed"
                     # Store phase metrics from event
                     phase["input_tokens"] = event_data.get("input_tokens", 0)

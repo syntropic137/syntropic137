@@ -14,8 +14,14 @@ from aef_adapters.projection_stores import get_projection_store
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from aef_domain.contexts.metrics.slices.get_metrics import DashboardMetricsProjection
 from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
+from aef_domain.contexts.workflows.slices.get_execution_detail import (
+    WorkflowExecutionDetailProjection,
+)
 from aef_domain.contexts.workflows.slices.get_workflow_detail import (
     WorkflowDetailProjection,
+)
+from aef_domain.contexts.workflows.slices.list_executions import (
+    WorkflowExecutionListProjection,
 )
 from aef_domain.contexts.workflows.slices.list_workflows import WorkflowListProjection
 
@@ -94,23 +100,32 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "WorkflowExecutionStarted": [
         ("workflow_list", "on_phase_started"),  # Triggers "in_progress" status
         ("workflow_detail", "on_workflow_execution_started"),
+        ("execution_list", "on_workflow_execution_started"),
+        ("execution_detail", "on_workflow_execution_started"),
         ("dashboard_metrics", "on_workflow_execution_started"),
     ],
     "PhaseStarted": [
         ("workflow_list", "on_phase_started"),
         ("workflow_detail", "on_phase_started"),
+        ("execution_detail", "on_phase_started"),
     ],
     "PhaseCompleted": [
         ("workflow_detail", "on_phase_completed"),
+        ("execution_list", "on_phase_completed"),
+        ("execution_detail", "on_phase_completed"),
     ],
     "WorkflowCompleted": [
         ("workflow_list", "on_workflow_completed"),
         ("workflow_detail", "on_workflow_completed"),
+        ("execution_list", "on_workflow_completed"),
+        ("execution_detail", "on_workflow_completed"),
         ("dashboard_metrics", "on_workflow_completed"),
     ],
     "WorkflowFailed": [
         ("workflow_list", "on_workflow_failed"),
         ("workflow_detail", "on_workflow_failed"),
+        ("execution_list", "on_workflow_failed"),
+        ("execution_detail", "on_workflow_failed"),
         ("dashboard_metrics", "on_workflow_failed"),
     ],
     # Session events
@@ -156,6 +171,8 @@ class ProjectionManager:
         self._projections = {
             "workflow_list": WorkflowListProjection(self._store),
             "workflow_detail": WorkflowDetailProjection(self._store),
+            "execution_list": WorkflowExecutionListProjection(self._store),
+            "execution_detail": WorkflowExecutionDetailProjection(self._store),
             "session_list": SessionListProjection(self._store),
             "artifact_list": ArtifactListProjection(self._store),
             "dashboard_metrics": DashboardMetricsProjection(self._store),
@@ -282,6 +299,18 @@ class ProjectionManager:
         """Get the artifact list projection."""
         self._ensure_initialized()
         return self._projections["artifact_list"]
+
+    @property
+    def execution_list(self) -> WorkflowExecutionListProjection:
+        """Get the workflow execution list projection."""
+        self._ensure_initialized()
+        return self._projections["execution_list"]
+
+    @property
+    def execution_detail(self) -> WorkflowExecutionDetailProjection:
+        """Get the workflow execution detail projection."""
+        self._ensure_initialized()
+        return self._projections["execution_detail"]
 
     @property
     def dashboard_metrics(self) -> DashboardMetricsProjection:

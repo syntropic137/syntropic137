@@ -6,6 +6,53 @@ from decimal import Decimal
 
 
 @dataclass(frozen=True)
+class OperationRecord:
+    """Individual operation recorded during a session."""
+
+    operation_id: str
+    operation_type: str
+    timestamp: str | datetime | None
+    duration_seconds: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    tool_name: str | None = None
+    success: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OperationRecord":
+        """Create from dictionary."""
+        return cls(
+            operation_id=data.get("operation_id", ""),
+            operation_type=data.get("operation_type", ""),
+            timestamp=data.get("timestamp"),
+            duration_seconds=data.get("duration_seconds"),
+            input_tokens=data.get("input_tokens"),
+            output_tokens=data.get("output_tokens"),
+            total_tokens=data.get("total_tokens"),
+            tool_name=data.get("tool_name"),
+            success=data.get("success", True),
+        )
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        ts = self.timestamp
+        if isinstance(ts, datetime):
+            ts = ts.isoformat()
+        return {
+            "operation_id": self.operation_id,
+            "operation_type": self.operation_type,
+            "timestamp": ts,
+            "duration_seconds": self.duration_seconds,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "tool_name": self.tool_name,
+            "success": self.success,
+        }
+
+
+@dataclass(frozen=True)
 class SessionSummary:
     """Read model for session list view.
 
@@ -49,9 +96,16 @@ class SessionSummary:
     phase_id: str | None = None
     """ID of the phase this session belongs to."""
 
+    operations: tuple[OperationRecord, ...] = ()
+    """Operations recorded during this session."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "SessionSummary":
         """Create from dictionary data."""
+        # Parse operations list
+        ops_data = data.get("operations", [])
+        operations = tuple(OperationRecord.from_dict(op) for op in ops_data)
+
         return cls(
             id=data["id"],
             workflow_id=data["workflow_id"],
@@ -65,6 +119,7 @@ class SessionSummary:
             output_tokens=data.get("output_tokens", 0),
             duration_seconds=data.get("duration_seconds"),
             phase_id=data.get("phase_id"),
+            operations=operations,
         )
 
     def to_dict(self) -> dict:
@@ -100,4 +155,5 @@ class SessionSummary:
             "output_tokens": self.output_tokens,
             "duration_seconds": self.duration_seconds,
             "phase_id": self.phase_id,
+            "operations": [op.to_dict() for op in self.operations],
         }

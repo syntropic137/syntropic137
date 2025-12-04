@@ -93,7 +93,7 @@ class OperationInfo(BaseModel):
 
     operation_id: str
     operation_type: str
-    timestamp: datetime
+    timestamp: datetime | None = None
     duration_seconds: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -201,8 +201,33 @@ class MetricsResponse(BaseModel):
 # =============================================================================
 
 
+class ExecutionRunSummary(BaseModel):
+    """Summary of a single execution run for list views."""
+
+    execution_id: str
+    workflow_id: str
+    workflow_name: str
+    status: str
+    started_at: datetime | str | None = None
+    completed_at: datetime | str | None = None
+    completed_phases: int = 0
+    total_phases: int = 0
+    total_tokens: int = 0
+    total_cost_usd: Decimal = Decimal("0")
+    error_message: str | None = None
+
+
+class ExecutionRunListResponse(BaseModel):
+    """Response for listing workflow execution runs."""
+
+    runs: list[ExecutionRunSummary]
+    total: int
+    workflow_id: str
+    workflow_name: str
+
+
 class ExecutionRun(BaseModel):
-    """A single execution run of a workflow."""
+    """A single execution run of a workflow (detailed view)."""
 
     execution_id: str
     status: str

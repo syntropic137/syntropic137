@@ -185,7 +185,21 @@ class ExecutionService:
                             success=True,
                         )
                     # Persist artifact (also via aggregate → event store)
-                    await self._persist_artifact(event, session_id)
+                    artifact_id = await self._persist_artifact(event, session_id)
+
+                    # Emit PhaseCompleted domain event for workflow projection
+                    await self._complete_phase(
+                        execution_id=event.execution_id,
+                        workflow_id=event.workflow_id,
+                        phase_id=event.phase_id,
+                        session_id=session_id,
+                        artifact_id=artifact_id,
+                        input_tokens=event.input_tokens,
+                        output_tokens=event.output_tokens,
+                        total_tokens=event.total_tokens,
+                        cost_usd=float(event.estimated_cost_usd or 0),
+                        duration_seconds=event.duration_ms / 1000,
+                    )
 
                 elif isinstance(event, PhaseFailed):
                     tracker[execution_id]["status"] = "failed"
@@ -282,7 +296,8 @@ class ExecutionService:
                 desc = p.get("description")
                 prompt = p.get("prompt_template", f"Complete the {name} phase. {{{{topic}}}}")
             else:
-                phase_id = str(getattr(p, "phase_id", f"phase-{i}"))
+                # PhaseDetail has 'id' attribute, not 'phase_id'
+                phase_id = str(getattr(p, "id", getattr(p, "phase_id", f"phase-{i}")))
                 name = str(getattr(p, "name", f"Phase {i}"))
                 desc = getattr(p, "description", None)
                 prompt = getattr(p, "prompt_template", f"Complete the {name} phase. {{{{topic}}}}")
@@ -562,7 +577,89 @@ class ExecutionService:
         self._phase_sessions.pop(phase_id, None)
         self._phase_start_times.pop(phase_id, None)
 
-    async def _persist_artifact(self, event: Any, session_id: str | None = None) -> None:
+    async def _complete_phase(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_id: str,
+        session_id: str | None,
+        artifact_id: str | None,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        cost_usd: float,
+        duration_seconds: float,
+    ) -> None:
+        """Complete a phase using the aggregate pattern.
+
+        This emits PhaseCompletedEvent to the event store, which the
+        workflow detail projection picks up to update phase metrics.
+
+        Args:
+            execution_id: The workflow execution ID.
+            workflow_id: The workflow template ID.
+            phase_id: The phase ID.
+            session_id: The session ID for this phase.
+            artifact_id: The artifact ID if one was created.
+            input_tokens: Input tokens used.
+            output_tokens: Output tokens used.
+            total_tokens: Total tokens used.
+            cost_usd: Cost in USD.
+            duration_seconds: Duration of the phase.
+        """
+        from decimal import Decimal
+
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            CompletePhaseCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+
+            # Load existing aggregate
+            aggregate = await repository.get_by_id(execution_id)
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for phase completion",
+                    extra={"execution_id": execution_id, "phase_id": phase_id},
+                )
+                return
+
+            # Complete the phase
+            command = CompletePhaseCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                session_id=session_id,
+                artifact_id=artifact_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
+                cost_usd=Decimal(str(cost_usd)),
+                duration_seconds=duration_seconds,
+            )
+            aggregate._handle_command(command)
+
+            # Persist to event store
+            await repository.save(aggregate)
+
+            logger.info(
+                "Completed phase via aggregate",
+                extra={
+                    "execution_id": execution_id,
+                    "phase_id": phase_id,
+                    "total_tokens": total_tokens,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to complete phase",
+                extra={"execution_id": execution_id, "phase_id": phase_id, "error": str(e)},
+            )
+
+    async def _persist_artifact(self, event: Any, session_id: str | None = None) -> str | None:
         """Persist artifact from phase completion using the aggregate pattern.
 
         This properly creates an artifact via the ArtifactAggregate,
@@ -577,6 +674,9 @@ class ExecutionService:
         Args:
             event: PhaseCompleted event containing artifact info.
             session_id: Optional session ID that produced this artifact.
+
+        Returns:
+            The artifact ID if created, None otherwise.
         """
         from aef_adapters.storage.repositories import get_artifact_repository
         from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
@@ -637,11 +737,13 @@ class ExecutionService:
         if not content:
             content = f"# {title}\n\nArtifact content stored in filesystem.\nSee: .aef-workspaces/"
 
+        artifact_id: str | None = None
         try:
             # Create aggregate and dispatch command
+            artifact_id = artifact_bundle_id or str(uuid4())
             aggregate = ArtifactAggregate()
             command = CreateArtifactCommand(
-                aggregate_id=artifact_bundle_id or str(uuid4()),
+                aggregate_id=artifact_id,
                 workflow_id=workflow_id,
                 phase_id=phase_id,
                 session_id=session_id,
@@ -690,6 +792,8 @@ class ExecutionService:
                     "error": str(e),
                 },
             )
+
+        return artifact_id
 
     async def _start_workflow_execution(
         self,

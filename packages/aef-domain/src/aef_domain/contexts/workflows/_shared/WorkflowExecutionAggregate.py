@@ -99,6 +99,35 @@ class FailExecutionCommand:
         self.total_phases = total_phases
 
 
+class CompletePhaseCommand:
+    """Command to mark a phase as completed with metrics."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_id: str,
+        session_id: str | None,
+        artifact_id: str | None,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        cost_usd: Decimal,
+        duration_seconds: float,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.workflow_id = workflow_id
+        self.phase_id = phase_id
+        self.session_id = session_id
+        self.artifact_id = artifact_id
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.total_tokens = total_tokens
+        self.cost_usd = cost_usd
+        self.duration_seconds = duration_seconds
+
+
 # =============================================================================
 # Aggregate
 # =============================================================================
@@ -225,6 +254,33 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)  # type: ignore[arg-type]
 
+    @command_handler("CompletePhaseCommand")
+    def complete_phase(self, command: CompletePhaseCommand) -> None:
+        """Handle CompletePhaseCommand - emit PhaseCompletedEvent."""
+        from aef_domain.contexts.workflows.execute_workflow.PhaseCompletedEvent import (
+            PhaseCompletedEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot complete phase in status {self._status}"
+            raise ValueError(msg)
+
+        event = PhaseCompletedEvent(
+            workflow_id=command.workflow_id,
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            completed_at=datetime.now(UTC),
+            success=True,
+            artifact_id=command.artifact_id,
+            session_id=command.session_id,
+            input_tokens=command.input_tokens,
+            output_tokens=command.output_tokens,
+            total_tokens=command.total_tokens,
+            cost_usd=command.cost_usd,
+            duration_seconds=command.duration_seconds,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
     # =========================================================================
     # EVENT SOURCING HANDLERS
     # =========================================================================
@@ -276,3 +332,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._error = data.get("error_message")
 
         self._status = ExecutionStatus.FAILED
+
+    @event_sourcing_handler("PhaseCompleted")
+    def on_phase_completed(self, _event: Any) -> None:
+        """Apply PhaseCompletedEvent - track completed phases."""
+        # Increment completed phases count
+        # Note: We don't use event data here - just counting phases
+        self._completed_phases += 1

@@ -34,6 +34,27 @@ dev-reset:
     docker compose -f docker/docker-compose.dev.yaml down -v
     docker compose -f docker/docker-compose.dev.yaml up --build -d
 
+# Force start full dev stack (kills existing processes on ports 5173, 8000)
+dev-force:
+    @echo "Stopping any existing processes on ports 5173 and 8000..."
+    -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+    -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    @echo "Starting Docker services..."
+    docker compose -f docker/docker-compose.dev.yaml up -d
+    @sleep 2
+    @echo "Starting dashboard backend on :8000..."
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+    uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
+    @sleep 2
+    @echo "Starting dashboard frontend on :5173..."
+    @cd apps/aef-dashboard-ui && npm run dev &
+    @sleep 2
+    @echo ""
+    @echo "✅ Development stack ready!"
+    @echo "   Frontend: http://localhost:5173"
+    @echo "   Backend:  http://localhost:8000"
+    @echo "   API Docs: http://localhost:8000/docs"
+
 # Run the CLI application
 cli *args:
     uv run --package aef-cli aef {{args}}
