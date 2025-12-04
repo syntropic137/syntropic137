@@ -36,6 +36,19 @@ class SessionSummary:
     completed_at: datetime | None
     """When the session completed (if completed)."""
 
+    # Enhanced fields for detailed metrics
+    input_tokens: int = 0
+    """Input tokens used in this session."""
+
+    output_tokens: int = 0
+    """Output tokens used in this session."""
+
+    duration_seconds: float | None = None
+    """Duration of the session in seconds."""
+
+    phase_id: str | None = None
+    """ID of the phase this session belongs to."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "SessionSummary":
         """Create from dictionary data."""
@@ -48,6 +61,10 @@ class SessionSummary:
             total_cost_usd=Decimal(str(data.get("total_cost_usd", 0))),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
+            input_tokens=data.get("input_tokens", 0),
+            output_tokens=data.get("output_tokens", 0),
+            duration_seconds=data.get("duration_seconds"),
+            phase_id=data.get("phase_id"),
         )
 
     def to_dict(self) -> dict:
@@ -79,4 +96,8 @@ class SessionSummary:
             "total_cost_usd": str(self.total_cost_usd),
             "started_at": started_at_str,
             "completed_at": completed_at_str,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "duration_seconds": self.duration_seconds,
+            "phase_id": self.phase_id,
         }

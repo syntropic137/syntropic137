@@ -28,7 +28,7 @@ def _domain_session_to_api(session: DomainSessionSummary) -> SessionSummary:
     return SessionSummary(
         id=session.id,
         workflow_id=session.workflow_id,
-        phase_id=None,  # Not tracked in current domain model
+        phase_id=session.phase_id,
         status=session.status,
         agent_provider=session.agent_type,
         total_tokens=session.total_tokens,
@@ -79,19 +79,19 @@ async def get_session(session_id: str) -> SessionResponse:
     return SessionResponse(
         id=session.id,
         workflow_id=session.workflow_id,
-        phase_id=None,
+        phase_id=session.phase_id,
         milestone_id=None,
         agent_provider=session.agent_type,
         agent_model=None,
         status=session.status,
-        input_tokens=0,
-        output_tokens=0,
+        input_tokens=session.input_tokens,
+        output_tokens=session.output_tokens,
         total_tokens=session.total_tokens,
         total_cost_usd=Decimal(str(session.total_cost_usd)),
         operations=[],
         started_at=session.started_at,
         completed_at=session.completed_at,
-        duration_seconds=None,
+        duration_seconds=session.duration_seconds,
         error_message=None,
         metadata={},
     )

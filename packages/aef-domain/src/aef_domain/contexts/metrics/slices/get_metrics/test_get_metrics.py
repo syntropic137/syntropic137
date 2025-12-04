@@ -133,6 +133,56 @@ class TestDashboardMetricsProjection:
         assert metrics.total_tokens == 2000
         assert metrics.total_cost_usd == Decimal("0.1")
 
+    @pytest.mark.asyncio
+    async def test_input_output_token_tracking(self, projection: DashboardMetricsProjection):
+        """Test that input/output tokens are tracked separately."""
+        await projection.on_session_started({"session_id": "s-1"})
+        await projection.on_session_completed(
+            {
+                "session_id": "s-1",
+                "total_tokens": 2500,
+                "total_input_tokens": 1000,
+                "total_output_tokens": 1500,
+                "total_cost_usd": "0.025",
+            }
+        )
+
+        await projection.on_session_started({"session_id": "s-2"})
+        await projection.on_session_completed(
+            {
+                "session_id": "s-2",
+                "total_tokens": 3500,
+                "total_input_tokens": 1500,
+                "total_output_tokens": 2000,
+                "total_cost_usd": "0.035",
+            }
+        )
+
+        metrics = await projection.get_metrics()
+        assert metrics.total_tokens == 6000
+        assert metrics.total_input_tokens == 2500
+        assert metrics.total_output_tokens == 3500
+
+    @pytest.mark.asyncio
+    async def test_input_output_tokens_default_to_zero(
+        self, projection: DashboardMetricsProjection
+    ):
+        """Test that input/output tokens default to zero when not provided."""
+        await projection.on_session_started({"session_id": "s-1"})
+        await projection.on_session_completed(
+            {
+                "session_id": "s-1",
+                "total_tokens": 1000,
+                "total_cost_usd": "0.01",
+                # No input/output breakdown provided
+            }
+        )
+
+        metrics = await projection.get_metrics()
+        assert metrics.total_tokens == 1000
+        assert metrics.total_input_tokens == 0
+        assert metrics.total_output_tokens == 0
+
 
 class TestGetDashboardMetricsHandler:
     """Tests for GetDashboardMetricsHandler."""

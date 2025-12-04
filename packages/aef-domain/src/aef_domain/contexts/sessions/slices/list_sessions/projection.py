@@ -1,11 +1,34 @@
 """Projection for session list view."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from aef_domain.contexts.sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
+
+
+def _calculate_duration(
+    started_at: str | datetime | None, completed_at: str | datetime | None
+) -> float | None:
+    """Calculate duration in seconds between two timestamps.
+
+    Handles both datetime objects and ISO strings.
+    """
+    if not started_at or not completed_at:
+        return None
+
+    try:
+        # Parse if string
+        if isinstance(started_at, str):
+            started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        if isinstance(completed_at, str):
+            completed_at = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+
+        return (completed_at - started_at).total_seconds()
+    except (ValueError, TypeError):
+        return None
 
 
 class SessionListProjection:
@@ -42,6 +65,10 @@ class SessionListProjection:
             total_cost_usd=Decimal("0"),
             started_at=event_data.get("started_at"),
             completed_at=None,
+            input_tokens=0,
+            output_tokens=0,
+            duration_seconds=None,
+            phase_id=event_data.get("phase_id"),  # Store phase_id from event
         )
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 
@@ -73,12 +100,23 @@ class SessionListProjection:
         if existing:
             existing["status"] = event_data.get("status", "completed")
             existing["completed_at"] = event_data.get("completed_at")
+
+            # Token breakdown - extract input/output separately
+            existing["input_tokens"] = event_data.get("total_input_tokens", 0)
+            existing["output_tokens"] = event_data.get("total_output_tokens", 0)
             existing["total_tokens"] = event_data.get(
                 "total_tokens", existing.get("total_tokens", 0)
             )
             existing["total_cost_usd"] = float(
                 Decimal(str(event_data.get("total_cost_usd", existing.get("total_cost_usd", 0))))
             )
+
+            # Duration calculation
+            started_at = existing.get("started_at")
+            completed_at = event_data.get("completed_at")
+            if started_at and completed_at:
+                existing["duration_seconds"] = _calculate_duration(started_at, completed_at)
+
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def get_all(self) -> list[SessionSummary]:

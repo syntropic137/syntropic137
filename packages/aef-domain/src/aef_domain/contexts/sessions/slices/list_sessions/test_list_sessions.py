@@ -163,6 +163,89 @@ class TestSessionListProjection:
         assert result["total_tokens"] == 1500
 
     @pytest.mark.asyncio
+    async def test_on_session_completed_extracts_token_breakdown(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """Test that session completed extracts input/output token breakdown."""
+        # Create session
+        await projection.on_session_started(
+            {
+                "session_id": "session-tokens",
+                "workflow_id": "workflow-tokens",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        # Complete with token breakdown
+        await projection.on_session_completed(
+            {
+                "session_id": "session-tokens",
+                "status": "completed",
+                "completed_at": "2025-12-04T01:30:00.000000Z",
+                "total_tokens": 2500,
+                "total_input_tokens": 1000,
+                "total_output_tokens": 1500,
+                "total_cost_usd": "0.025",
+            }
+        )
+
+        result = await mock_store.get("session_summaries", "session-tokens")
+        assert result is not None
+        assert result["total_tokens"] == 2500
+        assert result["input_tokens"] == 1000
+        assert result["output_tokens"] == 1500
+
+    @pytest.mark.asyncio
+    async def test_on_session_completed_calculates_duration(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """Test that session completed calculates duration from timestamps."""
+        # Create session
+        await projection.on_session_started(
+            {
+                "session_id": "session-duration",
+                "workflow_id": "workflow-duration",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+            }
+        )
+
+        # Complete 1 hour later
+        await projection.on_session_completed(
+            {
+                "session_id": "session-duration",
+                "status": "completed",
+                "completed_at": "2025-12-04T02:00:00.000000Z",
+                "total_tokens": 1000,
+                "total_cost_usd": "0.01",
+            }
+        )
+
+        result = await mock_store.get("session_summaries", "session-duration")
+        assert result is not None
+        assert result["duration_seconds"] == 3600.0  # 1 hour = 3600 seconds
+
+    @pytest.mark.asyncio
+    async def test_on_session_started_stores_phase_id(
+        self, projection: SessionListProjection, mock_store: MockProjectionStore
+    ) -> None:
+        """Test that session started stores phase_id from event."""
+        await projection.on_session_started(
+            {
+                "session_id": "session-phase",
+                "workflow_id": "workflow-phase",
+                "agent_provider": "claude",
+                "started_at": "2025-12-04T01:00:00.000000Z",
+                "phase_id": "phase-123",
+            }
+        )
+
+        result = await mock_store.get("session_summaries", "session-phase")
+        assert result is not None
+        assert result["phase_id"] == "phase-123"
+
+    @pytest.mark.asyncio
     async def test_on_operation_recorded_accumulates_tokens(
         self, projection: SessionListProjection, mock_store: MockProjectionStore
     ) -> None:

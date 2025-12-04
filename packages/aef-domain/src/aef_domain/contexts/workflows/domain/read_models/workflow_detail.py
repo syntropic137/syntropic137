@@ -16,6 +16,14 @@ class PhaseDetail:
     completed_at: datetime | str | None = None
     error_message: str | None = None
 
+    # Phase metrics
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    duration_seconds: float = 0.0
+    cost_usd: str = "0"
+    session_id: str | None = None
+
 
 @dataclass(frozen=True)
 class WorkflowDetail:
@@ -58,19 +66,28 @@ class WorkflowDetail:
     error_message: str | None = None
     """Error message if the workflow failed."""
 
+    completed_phases: int = 0
+    """Number of completed phases."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
         phases_data = data.get("phases", [])
         phases = [
             PhaseDetail(
-                id=p.get("id", ""),
+                id=p.get("id", p.get("phase_id", "")),  # Support both id and phase_id
                 name=p.get("name", ""),
                 agent_type=p.get("agent_type", ""),
                 status=p.get("status", "pending"),
                 started_at=p.get("started_at"),
                 completed_at=p.get("completed_at"),
                 error_message=p.get("error_message"),
+                input_tokens=p.get("input_tokens", 0),
+                output_tokens=p.get("output_tokens", 0),
+                total_tokens=p.get("total_tokens", 0),
+                duration_seconds=p.get("duration_seconds", 0.0),
+                cost_usd=str(p.get("cost_usd", "0")),
+                session_id=p.get("session_id"),
             )
             for p in phases_data
         ]
@@ -87,6 +104,7 @@ class WorkflowDetail:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             error_message=data.get("error_message"),
+            completed_phases=data.get("completed_phases", 0),
         )
 
     @staticmethod
@@ -113,6 +131,12 @@ class WorkflowDetail:
                 "started_at": WorkflowDetail._to_iso_string(p.started_at),
                 "completed_at": WorkflowDetail._to_iso_string(p.completed_at),
                 "error_message": p.error_message,
+                "input_tokens": p.input_tokens,
+                "output_tokens": p.output_tokens,
+                "total_tokens": p.total_tokens,
+                "duration_seconds": p.duration_seconds,
+                "cost_usd": p.cost_usd,
+                "session_id": p.session_id,
             }
 
         return {
@@ -127,4 +151,5 @@ class WorkflowDetail:
             "started_at": self._to_iso_string(self.started_at),
             "completed_at": self._to_iso_string(self.completed_at),
             "error_message": self.error_message,
+            "completed_phases": self.completed_phases,
         }

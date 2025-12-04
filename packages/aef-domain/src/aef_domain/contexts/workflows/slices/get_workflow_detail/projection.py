@@ -71,19 +71,33 @@ class WorkflowDetailProjection:
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def on_phase_completed(self, event_data: dict) -> None:
-        """Handle PhaseCompleted - update phase status in phases list."""
+        """Handle PhaseCompleted - update phase status and metrics in phases list."""
         workflow_id = event_data.get("workflow_id")
         if not workflow_id:
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
         if existing:
-            # Update phase status in the phases list
+            # Update phase status and metrics in the phases list
             phase_id = event_data.get("phase_id")
             for phase in existing.get("phases", []):
                 if phase.get("phase_id") == phase_id:
                     phase["status"] = "completed"
+                    # Store phase metrics from event
+                    phase["input_tokens"] = event_data.get("input_tokens", 0)
+                    phase["output_tokens"] = event_data.get("output_tokens", 0)
+                    phase["total_tokens"] = event_data.get("total_tokens", 0)
+                    phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
+                    phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
+                    phase["session_id"] = event_data.get("session_id")
                     break
+
+            # Track completed phase count
+            completed_count = sum(
+                1 for p in existing.get("phases", []) if p.get("status") == "completed"
+            )
+            existing["completed_phases"] = completed_count
+
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def on_workflow_completed(self, event_data: dict) -> None:
