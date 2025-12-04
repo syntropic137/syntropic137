@@ -51,21 +51,21 @@ async def store_artifact(artifact_id: str, content: bytes, metadata: dict) -> st
         body=content,
         content_type="text/markdown",
     )
-    
+
     # 2. Store metadata with URI
     await projection_store.save("artifacts", artifact_id, {
         **metadata,
         "storage_uri": storage_uri,
         "content_hash": hashlib.sha256(content).hexdigest(),
     })
-    
+
     return storage_uri
 
 # Retrieve artifact
 async def get_artifact_content(artifact_id: str) -> bytes:
     # 1. Get metadata
     metadata = await projection_store.get("artifacts", artifact_id)
-    
+
     # 2. Generate presigned URL or fetch content
     if presigned_urls_enabled:
         return await s3_client.generate_presigned_url(metadata["storage_uri"])
@@ -130,4 +130,3 @@ async def get_artifact_content(artifact_id: str) -> bytes:
 - [AWS S3 Best Practices](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html)
 - [MinIO Documentation](https://min.io/docs/minio/linux/index.html)
 - [Presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/ShareObjectPreSignedURL.html)
-

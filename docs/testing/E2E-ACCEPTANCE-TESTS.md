@@ -55,6 +55,51 @@ python -c "from claude_agent_sdk import query; print('SDK OK')"
 
 ---
 
+## ⚠️ Mocking Policy: Test Environment Only
+
+> **CRITICAL**: All mock objects in the AEF codebase are **strictly test-only**.
+
+### Environment Variable Enforcement
+
+All mock classes (`MockAgent`, `MockProjectionManager`, `MockEventStoreClient`, etc.) include an environment check that **throws an error** if instantiated outside of the test environment:
+
+```python
+def _assert_test_environment() -> None:
+    """Assert that we're running in a test environment."""
+    app_env = os.getenv("APP_ENVIRONMENT", "").lower()
+    if app_env != "test":
+        raise MockTestEnvironmentError(
+            f"Mock objects can only be used in test environment. "
+            f"Current APP_ENVIRONMENT: '{app_env}'. "
+            f"Set APP_ENVIRONMENT=test to use mocks."
+        )
+```
+
+### Why This Matters
+
+1. **Production Safety**: Prevents accidental use of mocks in development/staging/production
+2. **Real Integration Testing**: Forces E2E tests to use real implementations
+3. **Early Detection**: Fails immediately with a clear error message if misconfigured
+4. **Explicit Intent**: Makes it obvious when test code is being used
+
+### Running Tests
+
+Always set `APP_ENVIRONMENT=test` when running unit tests:
+
+```bash
+# Correct - mocks are allowed
+APP_ENVIRONMENT=test pytest
+
+# Will fail if mocks are used
+APP_ENVIRONMENT=development pytest  # ❌ MockTestEnvironmentError
+```
+
+### Reference
+
+See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configuration.md) for the full environment configuration strategy.
+
+---
+
 ## Feature 1: Infrastructure & Docker
 
 ### F1.1 Docker Compose Startup

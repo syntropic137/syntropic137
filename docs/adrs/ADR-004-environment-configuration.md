@@ -101,6 +101,29 @@ def reset_settings_cache():
     reset_settings()
 ```
 
+#### 7. Mock Objects: Test Environment Only
+
+All mock objects in the codebase (`MockAgent`, `MockProjectionManager`, `InMemoryEventStore`, etc.) **must validate** they are running in the test environment:
+
+```python
+def _assert_test_environment() -> None:
+    """Assert test environment - REQUIRED for all mocks."""
+    app_env = os.getenv("APP_ENVIRONMENT", "").lower()
+    if app_env != "test":
+        raise MockTestEnvironmentError(
+            f"Mock objects can only be used in test environment. "
+            f"Current APP_ENVIRONMENT: '{app_env}'"
+        )
+```
+
+**This is critical** - mocks should NEVER run in development, staging, or production. The environment check:
+
+1. Prevents accidental mock usage in production
+2. Forces real implementations for E2E testing
+3. Fails fast with clear error messages
+
+See `docs/testing/E2E-ACCEPTANCE-TESTS.md` for the full mocking policy.
+
 ### Configuration Categories
 
 | Category | Examples | Required |

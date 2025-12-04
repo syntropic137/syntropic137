@@ -212,8 +212,8 @@ export function ArtifactDetail() {
 
       {/* Content */}
       <Card>
-        <CardHeader 
-          title="Content" 
+        <CardHeader
+          title="Content"
           subtitle="Artifact content preview"
           action={
             artifact.content && isMarkdown(artifact) ? (
