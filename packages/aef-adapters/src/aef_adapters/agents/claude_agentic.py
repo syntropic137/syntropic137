@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aef_adapters.agents.agentic_protocol import (
     AgenticSDKError,
@@ -54,6 +54,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Try to import claude-agent-sdk (optional dependency)
+# These are typed as Any to handle the case where the SDK is not installed
+AssistantMessage: Any = None
+ClaudeAgentOptions: Any = None
+ResultMessage: Any = None
+ToolUseBlock: Any = None
+query: Any = None
+
 try:
     from claude_agent_sdk import (
         AssistantMessage,
@@ -66,11 +73,6 @@ try:
     CLAUDE_SDK_AVAILABLE = True
 except ImportError:
     CLAUDE_SDK_AVAILABLE = False
-    AssistantMessage = None  # type: ignore[misc,assignment]
-    ClaudeAgentOptions = None  # type: ignore[misc,assignment]
-    ResultMessage = None  # type: ignore[misc,assignment]
-    ToolUseBlock = None  # type: ignore[misc,assignment]
-    query = None  # type: ignore[assignment]
 
 
 class ClaudeAgenticAgent:
@@ -164,8 +166,8 @@ class ClaudeAgenticAgent:
             model=self._model,
             cwd=str(workspace.path),
             allowed_tools=allowed_tools,
-            permission_mode=config.permission_mode,  # type: ignore[arg-type]
-            setting_sources=list(config.setting_sources),  # type: ignore[arg-type]
+            permission_mode=config.permission_mode,
+            setting_sources=list(config.setting_sources),
             max_turns=config.max_turns,
             max_budget_usd=config.max_budget_usd,
         )

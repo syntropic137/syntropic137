@@ -159,7 +159,7 @@ export function MarkdownViewer({ content, className = '' }: MarkdownViewerProps)
                     ),
 
                     // Code
-                    code: ({ className, children, ...props }) => {
+                    code: ({ className, children }) => {
                         const isInline = !className;
                         if (isInline) {
                             return (
