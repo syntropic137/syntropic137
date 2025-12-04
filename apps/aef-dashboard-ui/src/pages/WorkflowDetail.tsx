@@ -21,9 +21,9 @@ import {
   YAxis,
 } from 'recharts'
 
-import { executeWorkflow, getMetrics, getWorkflow, getWorkflowHistory, listArtifacts } from '../api/client'
+import { executeWorkflow, getMetrics, getWorkflow, getWorkflowHistory, listArtifacts, listExecutions } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
-import type { ArtifactSummary, ExecutionHistoryResponse, MetricsResponse, WorkflowResponse } from '../types'
+import type { ArtifactSummary, ExecutionHistoryResponse, MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../types'
 
 const phaseStatusIcons: Record<string, typeof Play> = {
   pending: Clock,
@@ -46,6 +46,7 @@ export function WorkflowDetail() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [, setHistory] = useState<ExecutionHistoryResponse | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([])
+  const [executions, setExecutions] = useState<WorkflowExecutionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
@@ -60,13 +61,15 @@ export function WorkflowDetail() {
       getMetrics(workflowId),
       getWorkflowHistory(workflowId),
       listArtifacts({ workflow_id: workflowId }),
+      listExecutions(workflowId),
     ])
-      .then(([wf, met, hist, arts]) => {
+      .then(([wf, met, hist, arts, execs]) => {
         if (cancelled) return
         setWorkflow(wf)
         setMetrics(met)
         setHistory(hist)
         setArtifacts(arts)
+        setExecutions(execs)
       })
       .catch((err) => {
         if (!cancelled) setError(err.message)
@@ -182,7 +185,7 @@ export function WorkflowDetail() {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Phases"
           value={workflow.phases.length}
@@ -190,11 +193,19 @@ export function WorkflowDetail() {
           color="accent"
           subtitle={`${metrics?.phases.filter(p => p.status === 'completed').length ?? 0} completed`}
         />
+        <Link to={`/workflows/${workflowId}/runs`} className="block">
+          <MetricCard
+            title="Runs"
+            value={executions.length}
+            icon={Play}
+            color="success"
+            subtitle="View all →"
+          />
+        </Link>
         <MetricCard
           title="Sessions"
           value={metrics?.total_sessions ?? 0}
           icon={Play}
-          color="success"
         />
         <MetricCard
           title="Total Tokens"

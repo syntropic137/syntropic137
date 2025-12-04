@@ -47,6 +47,7 @@ export interface WorkflowListResponse {
 export interface SessionSummary {
   id: string
   workflow_id: string | null
+  execution_id: string | null
   phase_id: string | null
   status: string
   agent_provider: string | null
@@ -170,6 +171,49 @@ export interface ExecutionHistoryResponse {
   workflow_name: string
   executions: ExecutionRun[]
   total_executions: number
+}
+
+// =============================================================================
+// WORKFLOW EXECUTION TYPES (NEW)
+// =============================================================================
+
+export interface WorkflowExecutionSummary {
+  execution_id: string
+  workflow_id: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  completed_phases: number
+  total_phases: number
+  total_tokens: number
+  total_cost_usd: number
+}
+
+export interface PhaseExecutionDetail {
+  phase_id: string
+  name: string
+  status: string
+  session_id: string | null
+  artifact_id: string | null
+  input_tokens: number
+  output_tokens: number
+  duration_seconds: number
+  cost_usd: number
+}
+
+export interface ExecutionDetailResponse {
+  execution_id: string
+  workflow_id: string
+  workflow_name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  phases: PhaseExecutionDetail[]
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cost_usd: number
+  artifact_ids: string[]
+  error_message: string | null
 }
 
 // =============================================================================

@@ -2,10 +2,12 @@ import type {
   ArtifactResponse,
   ArtifactSummary,
   EventMessage,
+  ExecutionDetailResponse,
   ExecutionHistoryResponse,
   MetricsResponse,
   SessionResponse,
   SessionSummary,
+  WorkflowExecutionSummary,
   WorkflowListResponse,
   WorkflowResponse,
 } from '../types'
@@ -80,6 +82,26 @@ export async function executeWorkflow(
     method: 'POST',
     body: JSON.stringify(request),
   })
+}
+
+// =============================================================================
+// EXECUTION API
+// =============================================================================
+
+export async function listExecutions(
+  workflowId: string,
+  params?: { page?: number; page_size?: number }
+): Promise<WorkflowExecutionSummary[]> {
+  const searchParams = new URLSearchParams()
+  if (params?.page) searchParams.set('page', String(params.page))
+  if (params?.page_size) searchParams.set('page_size', String(params.page_size))
+
+  const query = searchParams.toString()
+  return fetchJSON(`${API_BASE}/workflows/${workflowId}/runs${query ? `?${query}` : ''}`)
+}
+
+export async function getExecution(executionId: string): Promise<ExecutionDetailResponse> {
+  return fetchJSON(`${API_BASE}/executions/${executionId}`)
 }
 
 // =============================================================================
