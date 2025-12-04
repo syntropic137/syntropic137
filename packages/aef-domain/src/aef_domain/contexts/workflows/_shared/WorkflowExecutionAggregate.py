@@ -218,7 +218,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             execution_id=command.aggregate_id,
             failed_at=datetime.now(UTC),
             failed_phase_id=command.failed_phase_id,
-            error=command.error,
+            error_message=command.error,
             error_type=command.error_type,
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
@@ -269,11 +269,11 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         """Apply WorkflowFailedEvent."""
         if hasattr(event, "failed_at"):
             self._completed_at = event.failed_at
-            self._error = event.error
+            self._error = event.error_message
         else:
             data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
             self._completed_at = data.get("failed_at")
-            self._error = data.get("error")
+            self._error = data.get("error_message")
 
         self._status = ExecutionStatus.FAILED
 
