@@ -592,3 +592,86 @@ class TestEventsEndpoints:
         data = response.json()
         assert len(data) == 1
         assert data[0]["event_type"] == "test_event"
+
+
+# =============================================================================
+# EXECUTION ENDPOINTS (F7.6 Regression Tests)
+# =============================================================================
+
+
+class TestExecutionEndpoints:
+    """REGRESSION: Test execution API endpoints for F7.6 Workflow Execution Model."""
+
+    @pytest.mark.asyncio
+    async def test_list_workflow_runs_empty(self, client: httpx.AsyncClient) -> None:
+        """REGRESSION: GET /api/workflows/{id}/runs returns empty list when no runs."""
+        from aef_adapters.projections import get_projection_manager
+
+        manager = get_projection_manager()
+
+        # Create a workflow first
+        workflow_id = "test-workflow-for-runs"
+        await manager.dispatch_event(
+            "WorkflowCreated",
+            {
+                "workflow_id": workflow_id,
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "classification": "development",
+                "phases": [],
+                "created_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+        response = await client.get(f"/api/workflows/{workflow_id}/runs")
+        assert response.status_code == 200
+        data = response.json()
+        assert "runs" in data
+        assert data["runs"] == []
+        assert data["total"] == 0
+        assert data["workflow_id"] == workflow_id
+        assert "workflow_name" in data
+
+    @pytest.mark.asyncio
+    async def test_list_workflow_runs_not_found(self, client: httpx.AsyncClient) -> None:
+        """REGRESSION: GET /api/workflows/{id}/runs returns 404 for unknown workflow."""
+        response = await client.get("/api/workflows/nonexistent-workflow/runs")
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_execution_not_found(self, client: httpx.AsyncClient) -> None:
+        """REGRESSION: GET /api/executions/{id} returns 404 for unknown execution."""
+        response = await client.get("/api/executions/nonexistent-execution")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_session_response_schema_has_execution_id(
+        self, client: httpx.AsyncClient
+    ) -> None:
+        """REGRESSION: Session response schema includes execution_id field."""
+        from aef_adapters.projections import get_projection_manager
+
+        manager = get_projection_manager()
+
+        # Create a session
+        session_id = "test-session-with-exec"
+        await manager.dispatch_event(
+            "SessionStarted",
+            {
+                "aggregate_id": session_id,
+                "session_id": session_id,
+                "workflow_id": "test-workflow",
+                "execution_id": "test-execution",
+                "phase_id": "phase-1",
+                "agent_provider": "claude",
+                "started_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+        response = await client.get("/api/sessions")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) > 0
+        # Verify execution_id field exists
+        assert "execution_id" in data[0]

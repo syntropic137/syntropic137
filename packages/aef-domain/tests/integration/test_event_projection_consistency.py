@@ -473,3 +473,426 @@ class TestEventHandlerCompleteness:
             assert hasattr(SessionListProjection, handler), (
                 f"SessionListProjection missing handler: {handler}"
             )
+
+    def test_workflow_execution_list_projection_has_required_handlers(self) -> None:
+        """REGRESSION: Ensure WorkflowExecutionListProjection handles all execution events."""
+        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        required_handlers = [
+            "on_workflow_execution_started",
+            "on_phase_completed",
+            "on_workflow_completed",
+            "on_workflow_failed",
+        ]
+
+        for handler in required_handlers:
+            assert hasattr(WorkflowExecutionListProjection, handler), (
+                f"WorkflowExecutionListProjection missing handler: {handler}"
+            )
+
+    def test_workflow_execution_detail_projection_has_required_handlers(self) -> None:
+        """REGRESSION: Ensure WorkflowExecutionDetailProjection handles all execution events."""
+        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+            WorkflowExecutionDetailProjection,
+        )
+
+        required_handlers = [
+            "on_workflow_execution_started",
+            "on_phase_completed",
+            "on_workflow_completed",
+            "on_workflow_failed",
+        ]
+
+        for handler in required_handlers:
+            assert hasattr(WorkflowExecutionDetailProjection, handler), (
+                f"WorkflowExecutionDetailProjection missing handler: {handler}"
+            )
+
+
+# =============================================================================
+# Test: Workflow Execution Model (F7.6)
+# =============================================================================
+
+
+class TestWorkflowExecutionListProjection:
+    """REGRESSION: Test WorkflowExecutionListProjection handles events correctly."""
+
+    @pytest.fixture
+    def mock_store(self) -> AsyncMock:
+        """Create a mock projection store."""
+        store = AsyncMock()
+        store.get = AsyncMock(return_value=None)
+        store.save = AsyncMock()
+        store.get_all = AsyncMock(return_value=[])
+        return store
+
+    @pytest.mark.asyncio
+    async def test_handles_workflow_execution_started(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: Projection must create execution summary on start."""
+        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        projection = WorkflowExecutionListProjection(mock_store)
+
+        await projection.on_workflow_execution_started(
+            {
+                "execution_id": "exec-1",
+                "workflow_id": "workflow-1",
+                "workflow_name": "Test Workflow",
+                "started_at": "2024-12-04T10:00:00Z",
+                "total_phases": 5,
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert saved_data["execution_id"] == "exec-1"
+        assert saved_data["workflow_id"] == "workflow-1"
+        assert saved_data["status"] == "running"
+        assert saved_data["total_phases"] == 5
+        assert saved_data["completed_phases"] == 0
+
+    @pytest.mark.asyncio
+    async def test_handles_phase_completed_updates_metrics(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: Projection must update metrics when phase completes."""
+        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        # Setup existing execution
+        mock_store.get = AsyncMock(
+            return_value={
+                "execution_id": "exec-1",
+                "workflow_id": "workflow-1",
+                "status": "running",
+                "completed_phases": 1,
+                "total_phases": 5,
+                "total_tokens": 500,
+                "total_cost_usd": "0.10",
+            }
+        )
+
+        projection = WorkflowExecutionListProjection(mock_store)
+
+        await projection.on_phase_completed(
+            {
+                "execution_id": "exec-1",
+                "phase_id": "phase-2",
+                "total_tokens": 300,
+                "cost_usd": Decimal("0.05"),
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert saved_data["completed_phases"] == 2
+        assert saved_data["total_tokens"] == 800  # 500 + 300
+        assert saved_data["total_cost_usd"] == "0.15"  # 0.10 + 0.05
+
+    @pytest.mark.asyncio
+    async def test_handles_workflow_completed(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: Projection must mark execution as completed."""
+        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        mock_store.get = AsyncMock(
+            return_value={
+                "execution_id": "exec-1",
+                "status": "running",
+                "completed_phases": 4,
+            }
+        )
+
+        projection = WorkflowExecutionListProjection(mock_store)
+
+        await projection.on_workflow_completed(
+            {
+                "execution_id": "exec-1",
+                "completed_at": "2024-12-04T11:00:00Z",
+                "completed_phases": 5,
+                "total_tokens": 2000,
+                "total_cost_usd": "0.50",
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert saved_data["status"] == "completed"
+        assert saved_data["completed_at"] == "2024-12-04T11:00:00Z"
+
+    @pytest.mark.asyncio
+    async def test_handles_workflow_failed(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: Projection must mark execution as failed."""
+        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        mock_store.get = AsyncMock(
+            return_value={
+                "execution_id": "exec-1",
+                "status": "running",
+            }
+        )
+
+        projection = WorkflowExecutionListProjection(mock_store)
+
+        await projection.on_workflow_failed(
+            {
+                "execution_id": "exec-1",
+                "failed_at": "2024-12-04T10:30:00Z",
+                "error_message": "Agent timeout",
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert saved_data["status"] == "failed"
+        assert saved_data["completed_at"] == "2024-12-04T10:30:00Z"
+
+    @pytest.mark.asyncio
+    async def test_get_by_workflow_id_filters_correctly(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: get_by_workflow_id must filter and sort executions."""
+        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        mock_store.get_all = AsyncMock(
+            return_value=[
+                {
+                    "execution_id": "exec-1",
+                    "workflow_id": "workflow-1",
+                    "workflow_name": "Test",
+                    "status": "completed",
+                    "started_at": "2024-12-04T09:00:00Z",
+                    "completed_phases": 3,
+                    "total_phases": 3,
+                    "total_tokens": 1000,
+                    "total_cost_usd": "0.20",
+                },
+                {
+                    "execution_id": "exec-2",
+                    "workflow_id": "workflow-1",
+                    "workflow_name": "Test",
+                    "status": "completed",
+                    "started_at": "2024-12-04T10:00:00Z",  # Later, should be first
+                    "completed_phases": 3,
+                    "total_phases": 3,
+                    "total_tokens": 1500,
+                    "total_cost_usd": "0.30",
+                },
+                {
+                    "execution_id": "exec-3",
+                    "workflow_id": "workflow-2",  # Different workflow
+                    "workflow_name": "Other",
+                    "status": "completed",
+                    "started_at": "2024-12-04T11:00:00Z",
+                    "completed_phases": 2,
+                    "total_phases": 2,
+                    "total_tokens": 500,
+                    "total_cost_usd": "0.10",
+                },
+            ]
+        )
+
+        projection = WorkflowExecutionListProjection(mock_store)
+        executions = await projection.get_by_workflow_id("workflow-1")
+
+        assert len(executions) == 2
+        assert all(e.workflow_id == "workflow-1" for e in executions)
+        # Should be sorted by started_at descending
+        assert executions[0].execution_id == "exec-2"
+        assert executions[1].execution_id == "exec-1"
+
+
+class TestWorkflowExecutionDetailProjection:
+    """REGRESSION: Test WorkflowExecutionDetailProjection handles events correctly."""
+
+    @pytest.fixture
+    def mock_store(self) -> AsyncMock:
+        """Create a mock projection store."""
+        store = AsyncMock()
+        store.get = AsyncMock(return_value=None)
+        store.save = AsyncMock()
+        return store
+
+    @pytest.mark.asyncio
+    async def test_handles_workflow_execution_started(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: Projection must create execution detail on start."""
+        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+            WorkflowExecutionDetailProjection,
+        )
+
+        projection = WorkflowExecutionDetailProjection(mock_store)
+
+        await projection.on_workflow_execution_started(
+            {
+                "execution_id": "exec-1",
+                "workflow_id": "workflow-1",
+                "workflow_name": "Test Workflow",
+                "started_at": "2024-12-04T10:00:00Z",
+                "total_phases": 3,
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert saved_data["execution_id"] == "exec-1"
+        assert saved_data["workflow_name"] == "Test Workflow"
+        assert saved_data["status"] == "running"
+        assert saved_data["phases"] == []  # Empty until phases complete
+
+    @pytest.mark.asyncio
+    async def test_handles_phase_completed_adds_phase_detail(self, mock_store: AsyncMock) -> None:
+        """REGRESSION: Projection must add phase detail when phase completes."""
+        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+            WorkflowExecutionDetailProjection,
+        )
+
+        mock_store.get = AsyncMock(
+            return_value={
+                "execution_id": "exec-1",
+                "workflow_id": "workflow-1",
+                "workflow_name": "Test Workflow",
+                "status": "running",
+                "phases": [],
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cost_usd": "0",
+                "artifact_ids": [],
+            }
+        )
+
+        projection = WorkflowExecutionDetailProjection(mock_store)
+
+        await projection.on_phase_completed(
+            {
+                "execution_id": "exec-1",
+                "phase_id": "research",
+                "phase_name": "Research",
+                "session_id": "session-1",
+                "artifact_id": "artifact-1",
+                "input_tokens": 100,
+                "output_tokens": 200,
+                "cost_usd": Decimal("0.05"),
+                "duration_seconds": 10.5,
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert len(saved_data["phases"]) == 1
+        phase = saved_data["phases"][0]
+        assert phase["phase_id"] == "research"
+        # Name falls back to phase_name from event, or phase_id if not provided
+        assert phase["name"] in ("Research", "research")
+        assert phase["session_id"] == "session-1"
+        assert phase["input_tokens"] == 100
+        assert phase["output_tokens"] == 200
+        assert saved_data["total_input_tokens"] == 100
+        assert saved_data["total_output_tokens"] == 200
+
+
+class TestSessionExecutionLinkage:
+    """REGRESSION: Test that sessions are properly linked to executions."""
+
+    @pytest.mark.asyncio
+    async def test_session_started_event_includes_execution_id(self) -> None:
+        """REGRESSION: SessionStartedEvent must include execution_id."""
+        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+            StartSessionCommand,
+        )
+
+        aggregate = AgentSessionAggregate()
+        command = StartSessionCommand(
+            aggregate_id="session-1",
+            workflow_id="workflow-1",
+            execution_id="exec-1",  # This must be included
+            phase_id="phase-1",
+            agent_provider="claude",
+        )
+        aggregate._handle_command(command)
+
+        events = aggregate.get_uncommitted_events()
+        assert len(events) == 1
+        event = events[0].event
+        assert event.__class__.__name__ == "SessionStartedEvent"
+        assert event.execution_id == "exec-1"
+
+    @pytest.mark.asyncio
+    async def test_session_projection_stores_execution_id(self) -> None:
+        """REGRESSION: SessionListProjection must store execution_id."""
+        from aef_domain.contexts.sessions.slices.list_sessions.projection import (
+            SessionListProjection,
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get = AsyncMock(return_value=None)
+        mock_store.save = AsyncMock()
+
+        projection = SessionListProjection(mock_store)
+
+        await projection.on_session_started(
+            {
+                "session_id": "session-1",
+                "workflow_id": "workflow-1",
+                "execution_id": "exec-1",
+                "phase_id": "phase-1",
+                "agent_provider": "claude",
+                "started_at": "2024-12-04T10:00:00Z",
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved_data = mock_store.save.call_args[0][2]
+        assert saved_data["execution_id"] == "exec-1"
+
+
+# =============================================================================
+# Test: Projection Manager Event Registration
+# =============================================================================
+
+
+class TestProjectionManagerEventRegistration:
+    """REGRESSION: Test that ProjectionManager routes events to correct projections."""
+
+    def test_execution_events_registered_to_execution_list_projection(self) -> None:
+        """REGRESSION: Execution events must be routed to execution_list projection."""
+        from aef_adapters.projections.manager import EVENT_HANDLERS
+
+        # Verify execution events are routed to execution_list
+        execution_events = [
+            "WorkflowExecutionStarted",
+            "PhaseCompleted",
+            "WorkflowCompleted",
+            "WorkflowFailed",
+        ]
+        for event in execution_events:
+            assert event in EVENT_HANDLERS, f"Event {event} not in handlers"
+            projections = [h[0] for h in EVENT_HANDLERS[event]]
+            assert "execution_list" in projections, (
+                f"Event {event} not routed to execution_list projection"
+            )
+
+    def test_execution_events_registered_to_execution_detail_projection(self) -> None:
+        """REGRESSION: Execution events must be routed to execution_detail projection."""
+        from aef_adapters.projections.manager import EVENT_HANDLERS
+
+        execution_events = [
+            "WorkflowExecutionStarted",
+            "PhaseCompleted",
+            "WorkflowCompleted",
+            "WorkflowFailed",
+        ]
+        for event in execution_events:
+            assert event in EVENT_HANDLERS, f"Event {event} not in handlers"
+            projections = [h[0] for h in EVENT_HANDLERS[event]]
+            assert "execution_detail" in projections, (
+                f"Event {event} not routed to execution_detail projection"
+            )
