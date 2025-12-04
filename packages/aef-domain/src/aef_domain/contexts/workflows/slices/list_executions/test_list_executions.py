@@ -171,8 +171,8 @@ class TestWorkflowExecutionListProjection:
         )
 
         mock_store.get_all = AsyncMock(
-            return_value={
-                "exec-1": {
+            return_value=[
+                {
                     "execution_id": "exec-1",
                     "workflow_id": "workflow-1",
                     "workflow_name": "Test Workflow",
@@ -184,7 +184,7 @@ class TestWorkflowExecutionListProjection:
                     "total_tokens": 3000,
                     "total_cost_usd": "0.20",
                 },
-                "exec-2": {
+                {
                     "execution_id": "exec-2",
                     "workflow_id": "workflow-1",
                     "workflow_name": "Test Workflow",
@@ -196,7 +196,7 @@ class TestWorkflowExecutionListProjection:
                     "total_tokens": 4000,
                     "total_cost_usd": "0.25",
                 },
-                "exec-3": {
+                {
                     "execution_id": "exec-3",
                     "workflow_id": "workflow-2",  # Different workflow
                     "workflow_name": "Other Workflow",
@@ -207,7 +207,7 @@ class TestWorkflowExecutionListProjection:
                     "total_tokens": 2000,
                     "total_cost_usd": "0.15",
                 },
-            }
+            ]
         )
 
         projection = WorkflowExecutionListProjection(mock_store)

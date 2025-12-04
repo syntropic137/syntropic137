@@ -142,7 +142,8 @@ class WorkflowExecutionListProjection:
         all_data = await self._store.get_all(self.PROJECTION_NAME)
         executions = []
 
-        for data in all_data.values():
+        # get_all returns a list, not a dict
+        for data in all_data:
             if data.get("workflow_id") == workflow_id:
                 executions.append(WorkflowExecutionSummary.from_dict(data))
 
