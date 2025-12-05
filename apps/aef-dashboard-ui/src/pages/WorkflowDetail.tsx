@@ -1,12 +1,9 @@
 import { clsx } from 'clsx'
 import {
   ArrowLeft,
-  CheckCircle2,
-  Clock,
   FileText,
   GitBranch,
   Play,
-  XCircle,
   Zap,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
@@ -21,23 +18,12 @@ import {
   YAxis,
 } from 'recharts'
 
-import { executeWorkflow, getMetrics, getWorkflow, getWorkflowHistory, listArtifacts } from '../api/client'
-import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
-import type { ArtifactSummary, ExecutionHistoryResponse, MetricsResponse, WorkflowResponse } from '../types'
+import { executeWorkflow, getMetrics, getWorkflow, getWorkflowHistory, listArtifacts, listExecutions } from '../api/client'
+import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader } from '../components'
+import type { ArtifactSummary, ExecutionHistoryResponse, MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../types'
 
-const phaseStatusIcons: Record<string, typeof Play> = {
-  pending: Clock,
-  running: Play,
-  completed: CheckCircle2,
-  failed: XCircle,
-}
-
-const phaseStatusColors: Record<string, string> = {
-  pending: 'border-slate-500/30 bg-slate-500/10',
-  running: 'border-blue-500/30 bg-blue-500/10',
-  completed: 'border-emerald-500/30 bg-emerald-500/10',
-  failed: 'border-red-500/30 bg-red-500/10',
-}
+// Default phase style for template view (no execution status)
+const defaultPhaseStyle = 'border-slate-500/30 bg-slate-500/10'
 
 export function WorkflowDetail() {
   const { workflowId } = useParams<{ workflowId: string }>()
@@ -46,6 +32,7 @@ export function WorkflowDetail() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [, setHistory] = useState<ExecutionHistoryResponse | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([])
+  const [executions, setExecutions] = useState<WorkflowExecutionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
@@ -60,13 +47,15 @@ export function WorkflowDetail() {
       getMetrics(workflowId),
       getWorkflowHistory(workflowId),
       listArtifacts({ workflow_id: workflowId }),
+      listExecutions(workflowId),
     ])
-      .then(([wf, met, hist, arts]) => {
+      .then(([wf, met, hist, arts, execs]) => {
         if (cancelled) return
         setWorkflow(wf)
         setMetrics(met)
         setHistory(hist)
         setArtifacts(arts)
+        setExecutions(execs)
       })
       .catch((err) => {
         if (!cancelled) setError(err.message)
@@ -141,7 +130,9 @@ export function WorkflowDetail() {
                 <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
                   {workflow.name}
                 </h1>
-                <StatusBadge status={workflow.status} size="lg" pulse />
+                <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/20 text-indigo-400 ring-1 ring-inset ring-indigo-500/30">
+                  Template
+                </span>
               </div>
               <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
                 {workflow.description || `${workflow.workflow_type} workflow`}
@@ -182,7 +173,7 @@ export function WorkflowDetail() {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Phases"
           value={workflow.phases.length}
@@ -190,11 +181,19 @@ export function WorkflowDetail() {
           color="accent"
           subtitle={`${metrics?.phases.filter(p => p.status === 'completed').length ?? 0} completed`}
         />
+        <Link to={`/workflows/${workflowId}/runs`} className="block">
+          <MetricCard
+            title="Runs"
+            value={executions.length}
+            icon={Play}
+            color="success"
+            subtitle="View all →"
+          />
+        </Link>
         <MetricCard
           title="Sessions"
           value={metrics?.total_sessions ?? 0}
           icon={Play}
-          color="success"
         />
         <MetricCard
           title="Total Tokens"
@@ -216,7 +215,6 @@ export function WorkflowDetail() {
         <CardContent>
           <div className="flex items-center gap-2 overflow-x-auto pb-2">
             {workflow.phases.map((phase, idx) => {
-              const Icon = phaseStatusIcons[phase.status] ?? Clock
               const phaseMetric = metrics?.phases.find(p => p.phase_id === phase.phase_id)
 
               return (
@@ -224,17 +222,11 @@ export function WorkflowDetail() {
                   <div
                     className={clsx(
                       'flex min-w-[180px] flex-col rounded-lg border p-4 transition-all',
-                      phaseStatusColors[phase.status] ?? phaseStatusColors.pending
+                      defaultPhaseStyle
                     )}
                   >
                     <div className="flex items-center gap-2">
-                      <Icon className={clsx(
-                        'h-4 w-4',
-                        phase.status === 'completed' && 'text-emerald-400',
-                        phase.status === 'running' && 'text-blue-400',
-                        phase.status === 'failed' && 'text-red-400',
-                        phase.status === 'pending' && 'text-slate-400'
-                      )} />
+                      <GitBranch className="h-4 w-4 text-slate-400" />
                       <span className="text-sm font-medium text-[var(--color-text-primary)]">
                         {phase.name}
                       </span>
@@ -244,8 +236,11 @@ export function WorkflowDetail() {
                         {phase.description}
                       </p>
                     )}
+                    <div className="mt-2 text-xs text-[var(--color-text-muted)]">
+                      {phase.agent_type}
+                    </div>
                     {phaseMetric && (
-                      <div className="mt-2 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
+                      <div className="mt-1 flex items-center gap-3 text-xs text-[var(--color-text-muted)]">
                         <span>{phaseMetric.total_tokens.toLocaleString()} tok</span>
                         <span>${Number(phaseMetric.cost_usd).toFixed(4)}</span>
                       </div>

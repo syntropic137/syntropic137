@@ -44,6 +44,7 @@ from aef_adapters.agents.agentic_types import (
     ToolUseStarted,
     Workspace,
 )
+from aef_adapters.agents.models import get_model_registry
 from aef_adapters.agents.protocol import AgentProvider
 
 if TYPE_CHECKING:
@@ -80,13 +81,42 @@ class ClaudeAgenticAgent:
 
     Implements the AgenticProtocol for true agentic execution.
     Uses the official claude-agent-sdk for multi-turn autonomous operation.
+
+    Model Aliases:
+        Use aliases for easier upgrades when new model versions are released.
+        Aliases are resolved from agentic-primitives/providers/models/anthropic/.
+
+        Common aliases:
+        - "sonnet" or "claude-sonnet" -> latest Claude Sonnet
+        - "opus" or "claude-opus" -> latest Claude Opus
+        - "haiku" or "claude-haiku" -> latest Claude Haiku
+
+        You can also use specific version names if needed.
     """
 
-    # Default model for Claude agentic execution
-    DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+    # Default model alias for Claude agentic execution
+    # NOTE: Using Haiku alias to reduce costs during testing
+    # This will resolve to the latest Haiku API name (e.g., claude-3-5-haiku-20241022)
+    DEFAULT_MODEL = "claude-haiku"
 
     # Standard tools supported by claude-agent-sdk
     SUPPORTED_TOOLS: frozenset[str] = frozenset(AgentTool.all())
+
+    @classmethod
+    def resolve_model(cls, model: str) -> str:
+        """Resolve a model alias to its API name.
+
+        Uses the ModelRegistry to resolve aliases like "claude-haiku" to
+        actual API names like "claude-3-5-haiku-20241022".
+
+        Args:
+            model: Model alias or API name
+
+        Returns:
+            The resolved API model name
+        """
+        registry = get_model_registry()
+        return registry.resolve(model)
 
     def __init__(
         self,
@@ -96,11 +126,18 @@ class ClaudeAgenticAgent:
         """Initialize Claude agentic agent.
 
         Args:
-            model: Model name (default: claude-sonnet-4-5-20250929)
+            model: Model name or alias (default: claude-haiku)
             api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var)
         """
-        self._model = model or self.DEFAULT_MODEL
+        raw_model = model or self.DEFAULT_MODEL
+        self._model_alias = raw_model  # Store original alias for reference
+        self._model = self.resolve_model(raw_model)  # Resolve to API name
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+
+        logger.debug(
+            "model_resolved",
+            extra={"alias": raw_model, "resolved": self._model},
+        )
 
     @property
     def provider(self) -> AgentProvider:

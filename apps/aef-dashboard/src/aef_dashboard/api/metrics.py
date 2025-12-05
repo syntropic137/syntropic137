@@ -32,8 +32,8 @@ async def get_metrics(
         completed_workflows=metrics.completed_workflows,
         failed_workflows=metrics.failed_workflows,
         total_sessions=metrics.total_sessions,
-        total_input_tokens=0,  # Not tracked separately yet
-        total_output_tokens=0,  # Not tracked separately yet
+        total_input_tokens=metrics.total_input_tokens,
+        total_output_tokens=metrics.total_output_tokens,
         total_tokens=metrics.total_tokens,
         total_cost_usd=metrics.total_cost_usd,
         total_artifacts=metrics.total_artifacts,

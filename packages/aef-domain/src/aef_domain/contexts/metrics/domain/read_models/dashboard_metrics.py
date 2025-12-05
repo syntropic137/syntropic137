@@ -35,6 +35,12 @@ class DashboardMetrics:
     total_tokens: int = 0
     """Total tokens used across all sessions."""
 
+    total_input_tokens: int = 0
+    """Total input tokens used across all sessions."""
+
+    total_output_tokens: int = 0
+    """Total output tokens used across all sessions."""
+
     total_cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))
     """Total cost in USD."""
 
@@ -49,6 +55,8 @@ class DashboardMetrics:
             total_sessions=data.get("total_sessions", 0),
             total_artifacts=data.get("total_artifacts", 0),
             total_tokens=data.get("total_tokens", 0),
+            total_input_tokens=data.get("total_input_tokens", 0),
+            total_output_tokens=data.get("total_output_tokens", 0),
             total_cost_usd=Decimal(str(data.get("total_cost_usd", 0))),
         )
 
@@ -62,5 +70,7 @@ class DashboardMetrics:
             "total_sessions": self.total_sessions,
             "total_artifacts": self.total_artifacts,
             "total_tokens": self.total_tokens,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
             "total_cost_usd": str(self.total_cost_usd),
         }

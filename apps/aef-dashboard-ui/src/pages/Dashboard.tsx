@@ -14,7 +14,7 @@ import {
 } from 'recharts'
 
 import { getMetrics, listWorkflows } from '../api/client'
-import { Card, CardContent, CardHeader, EventFeed, MetricCard, PageLoader, StatusBadge } from '../components'
+import { Card, CardContent, CardHeader, EventFeed, MetricCard, PageLoader } from '../components'
 import type { MetricsResponse, WorkflowSummary } from '../types'
 
 export function Dashboard() {
@@ -222,7 +222,7 @@ export function Dashboard() {
                 <th className="px-4 py-3">Name</th>
                 <th className="px-4 py-3">Type</th>
                 <th className="px-4 py-3">Phases</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Runs</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +261,9 @@ export function Dashboard() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <StatusBadge status={workflow.status} />
+                      <span className="text-sm text-[var(--color-text-secondary)]">
+                        {workflow.runs_count}
+                      </span>
                     </td>
                   </tr>
                 ))

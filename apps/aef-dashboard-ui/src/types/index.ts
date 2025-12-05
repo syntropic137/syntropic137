@@ -1,23 +1,23 @@
 // =============================================================================
-// WORKFLOW TYPES
+// WORKFLOW TEMPLATE TYPES
+// Note: Templates don't have status. Status belongs to Executions.
 // =============================================================================
 
 export interface WorkflowSummary {
   id: string
   name: string
   workflow_type: string
-  status: string
   phase_count: number
   created_at: string | null
+  runs_count: number
 }
 
-export interface PhaseInfo {
+export interface PhaseDefinition {
   phase_id: string
   name: string
   order: number
   description: string | null
-  status: string
-  artifact_id: string | null
+  agent_type: string
 }
 
 export interface WorkflowResponse {
@@ -26,11 +26,10 @@ export interface WorkflowResponse {
   description: string | null
   workflow_type: string
   classification: string
-  status: string
-  phases: PhaseInfo[]
+  phases: PhaseDefinition[]
   created_at: string | null
-  updated_at: string | null
-  metadata: Record<string, unknown>
+  runs_count: number
+  runs_link: string | null
 }
 
 export interface WorkflowListResponse {
@@ -47,6 +46,7 @@ export interface WorkflowListResponse {
 export interface SessionSummary {
   id: string
   workflow_id: string | null
+  execution_id: string | null
   phase_id: string | null
   status: string
   agent_provider: string | null
@@ -170,6 +170,70 @@ export interface ExecutionHistoryResponse {
   workflow_name: string
   executions: ExecutionRun[]
   total_executions: number
+}
+
+// =============================================================================
+// WORKFLOW EXECUTION TYPES (NEW)
+// =============================================================================
+
+export interface WorkflowExecutionSummary {
+  execution_id: string
+  workflow_id: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  completed_phases: number
+  total_phases: number
+  total_tokens: number
+  total_cost_usd: number
+}
+
+/** Item in the global execution list (includes workflow_name) */
+export interface ExecutionListItem {
+  execution_id: string
+  workflow_id: string
+  workflow_name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  completed_phases: number
+  total_phases: number
+  total_tokens: number
+  total_cost_usd: number
+}
+
+export interface ExecutionListResponse {
+  executions: ExecutionListItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface PhaseExecutionDetail {
+  phase_id: string
+  name: string
+  status: string
+  session_id: string | null
+  artifact_id: string | null
+  input_tokens: number
+  output_tokens: number
+  duration_seconds: number
+  cost_usd: number
+}
+
+export interface ExecutionDetailResponse {
+  execution_id: string
+  workflow_id: string
+  workflow_name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  phases: PhaseExecutionDetail[]
+  total_input_tokens: number
+  total_output_tokens: number
+  total_cost_usd: number
+  artifact_ids: string[]
+  error_message: string | null
 }
 
 // =============================================================================

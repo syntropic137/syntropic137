@@ -14,8 +14,14 @@ from aef_adapters.projection_stores import get_projection_store
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from aef_domain.contexts.metrics.slices.get_metrics import DashboardMetricsProjection
 from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
+from aef_domain.contexts.workflows.slices.get_execution_detail import (
+    WorkflowExecutionDetailProjection,
+)
 from aef_domain.contexts.workflows.slices.get_workflow_detail import (
     WorkflowDetailProjection,
+)
+from aef_domain.contexts.workflows.slices.list_executions import (
+    WorkflowExecutionListProjection,
 )
 from aef_domain.contexts.workflows.slices.list_workflows import WorkflowListProjection
 
@@ -82,35 +88,42 @@ class EventProvenance:
 
 
 # Event type to projection method mapping
+#
+# IMPORTANT: Workflow TEMPLATE projections (workflow_list, workflow_detail)
+# only handle template events (WorkflowCreated) and runs_count updates.
+# Execution events go to EXECUTION projections (execution_list, execution_detail).
 EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
-    # Workflow events
+    # Workflow TEMPLATE events
     "WorkflowCreated": [
         ("workflow_list", "on_workflow_created"),
         ("workflow_detail", "on_workflow_created"),
         ("dashboard_metrics", "on_workflow_created"),
     ],
     # WorkflowExecution events (from WorkflowExecutionAggregate)
-    # These update the workflow projections when executions start/complete
+    # Template projections only update runs_count, not status
     "WorkflowExecutionStarted": [
-        ("workflow_list", "on_phase_started"),  # Triggers "in_progress" status
-        ("workflow_detail", "on_workflow_execution_started"),
+        ("workflow_list", "on_workflow_execution_started"),  # Increment runs_count
+        ("workflow_detail", "on_workflow_execution_started"),  # Increment runs_count
+        ("workflow_execution_list", "on_workflow_execution_started"),
+        ("workflow_execution_detail", "on_workflow_execution_started"),
         ("dashboard_metrics", "on_workflow_execution_started"),
     ],
+    # Execution events - go to EXECUTION projections only
     "PhaseStarted": [
-        ("workflow_list", "on_phase_started"),
-        ("workflow_detail", "on_phase_started"),
+        ("workflow_execution_detail", "on_phase_started"),
     ],
     "PhaseCompleted": [
-        ("workflow_detail", "on_phase_completed"),
+        ("workflow_execution_list", "on_phase_completed"),
+        ("workflow_execution_detail", "on_phase_completed"),
     ],
     "WorkflowCompleted": [
-        ("workflow_list", "on_workflow_completed"),
-        ("workflow_detail", "on_workflow_completed"),
+        ("workflow_execution_list", "on_workflow_completed"),
+        ("workflow_execution_detail", "on_workflow_completed"),
         ("dashboard_metrics", "on_workflow_completed"),
     ],
     "WorkflowFailed": [
-        ("workflow_list", "on_workflow_failed"),
-        ("workflow_detail", "on_workflow_failed"),
+        ("workflow_execution_list", "on_workflow_failed"),
+        ("workflow_execution_detail", "on_workflow_failed"),
         ("dashboard_metrics", "on_workflow_failed"),
     ],
     # Session events
@@ -156,6 +169,8 @@ class ProjectionManager:
         self._projections = {
             "workflow_list": WorkflowListProjection(self._store),
             "workflow_detail": WorkflowDetailProjection(self._store),
+            "workflow_execution_list": WorkflowExecutionListProjection(self._store),
+            "workflow_execution_detail": WorkflowExecutionDetailProjection(self._store),
             "session_list": SessionListProjection(self._store),
             "artifact_list": ArtifactListProjection(self._store),
             "dashboard_metrics": DashboardMetricsProjection(self._store),
@@ -219,6 +234,9 @@ class ProjectionManager:
         self._ensure_initialized()
 
         handlers = EVENT_HANDLERS.get(event_type, [])
+        if not handlers:
+            logger.debug("No handlers registered for event type: %s", event_type)
+
         for projection_name, method_name in handlers:
             projection = self._projections.get(projection_name)
             if projection:
@@ -227,7 +245,16 @@ class ProjectionManager:
                     try:
                         await handler(event_data)
                     except Exception as e:
-                        logger.error(f"Error in projection {projection_name}.{method_name}: {e}")
+                        logger.error(
+                            "Error in projection handler",
+                            extra={
+                                "projection": projection_name,
+                                "method": method_name,
+                                "event_type": event_type,
+                                "error": str(e),
+                            },
+                            exc_info=True,
+                        )
 
     async def dispatch_event(self, event_type: str, event_data: dict) -> None:
         """DEPRECATED: Use process_event_envelope() instead.
@@ -282,6 +309,29 @@ class ProjectionManager:
         """Get the artifact list projection."""
         self._ensure_initialized()
         return self._projections["artifact_list"]
+
+    @property
+    def workflow_execution_list(self) -> WorkflowExecutionListProjection:
+        """Get the workflow execution list projection."""
+        self._ensure_initialized()
+        return self._projections["workflow_execution_list"]
+
+    @property
+    def workflow_execution_detail(self) -> WorkflowExecutionDetailProjection:
+        """Get the workflow execution detail projection."""
+        self._ensure_initialized()
+        return self._projections["workflow_execution_detail"]
+
+    # Backward compatibility aliases
+    @property
+    def execution_list(self) -> WorkflowExecutionListProjection:
+        """Alias for workflow_execution_list (deprecated)."""
+        return self.workflow_execution_list
+
+    @property
+    def execution_detail(self) -> WorkflowExecutionDetailProjection:
+        """Alias for workflow_execution_detail (deprecated)."""
+        return self.workflow_execution_detail
 
     @property
     def dashboard_metrics(self) -> DashboardMetricsProjection:

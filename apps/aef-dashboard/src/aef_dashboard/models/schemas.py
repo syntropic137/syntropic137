@@ -14,42 +14,54 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkflowSummary(BaseModel):
-    """Summary of a workflow for list views."""
+    """Summary of a workflow TEMPLATE for list views.
+
+    Note: Templates don't have status. Status belongs to executions.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     name: str
     workflow_type: str
-    status: str
     phase_count: int
     created_at: datetime | None = None
+    runs_count: int = 0
+    """Number of times this workflow has been executed."""
 
 
-class PhaseInfo(BaseModel):
-    """Information about a workflow phase."""
+class PhaseDefinition(BaseModel):
+    """Phase definition within a workflow template.
+
+    This is the template definition, not execution state.
+    For phase execution details, see PhaseExecutionDetail.
+    """
 
     phase_id: str
     name: str
-    order: int
+    order: int = 0
     description: str | None = None
-    status: str = "pending"
-    artifact_id: str | None = None
+    agent_type: str = ""
 
 
 class WorkflowResponse(BaseModel):
-    """Detailed workflow response."""
+    """Detailed workflow TEMPLATE response.
+
+    Templates don't have execution status.
+    For execution details, use /api/executions/{id}.
+    """
 
     id: str
     name: str
     description: str | None = None
     workflow_type: str
     classification: str
-    status: str
-    phases: list[PhaseInfo] = Field(default_factory=list)
+    phases: list[PhaseDefinition] = Field(default_factory=list)
     created_at: datetime | None = None
-    updated_at: datetime | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    runs_count: int = 0
+    """Number of times this workflow has been executed."""
+    runs_link: str | None = None
+    """Link to execution runs: /api/workflows/{id}/runs"""
 
 
 class WorkflowListResponse(BaseModel):
@@ -71,6 +83,7 @@ class SessionSummary(BaseModel):
 
     id: str
     workflow_id: str | None
+    execution_id: str | None = None
     phase_id: str | None
     status: str
     agent_provider: str | None
@@ -85,7 +98,7 @@ class OperationInfo(BaseModel):
 
     operation_id: str
     operation_type: str
-    timestamp: datetime
+    timestamp: datetime | None = None
     duration_seconds: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -193,8 +206,33 @@ class MetricsResponse(BaseModel):
 # =============================================================================
 
 
+class ExecutionRunSummary(BaseModel):
+    """Summary of a single execution run for list views."""
+
+    execution_id: str
+    workflow_id: str
+    workflow_name: str
+    status: str
+    started_at: datetime | str | None = None
+    completed_at: datetime | str | None = None
+    completed_phases: int = 0
+    total_phases: int = 0
+    total_tokens: int = 0
+    total_cost_usd: Decimal = Decimal("0")
+    error_message: str | None = None
+
+
+class ExecutionRunListResponse(BaseModel):
+    """Response for listing workflow execution runs."""
+
+    runs: list[ExecutionRunSummary]
+    total: int
+    workflow_id: str
+    workflow_name: str
+
+
 class ExecutionRun(BaseModel):
-    """A single execution run of a workflow."""
+    """A single execution run of a workflow (detailed view)."""
 
     execution_id: str
     status: str

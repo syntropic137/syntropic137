@@ -45,7 +45,8 @@ class AgentConfiguration:
     """
 
     provider: str = "claude"  # claude, openai (mock only in tests)
-    model: str = "claude-sonnet"  # Use alias - auto-resolves to latest version
+    # NOTE: Temporarily using Haiku to reduce costs during testing
+    model: str = "claude-haiku"  # Use alias - auto-resolves to latest version
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300

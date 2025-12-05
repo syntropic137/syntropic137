@@ -2,6 +2,9 @@
 
 These tests verify the WorkflowListProjection and ListWorkflowsHandler
 work correctly together.
+
+Note: WorkflowListProjection is for TEMPLATES, not executions.
+Templates don't have status - only runs_count.
 """
 
 import os
@@ -39,7 +42,7 @@ def handler(projection: WorkflowListProjection) -> ListWorkflowsHandler:
 
 
 class TestWorkflowListProjection:
-    """Tests for WorkflowListProjection."""
+    """Tests for WorkflowListProjection (template projection)."""
 
     @pytest.mark.asyncio
     async def test_on_workflow_created(self, projection: WorkflowListProjection):
@@ -60,57 +63,55 @@ class TestWorkflowListProjection:
         assert len(summaries) == 1
         assert summaries[0].id == "wf-1"
         assert summaries[0].name == "Test Workflow"
-        assert summaries[0].status == "pending"
         assert summaries[0].phase_count == 2
+        assert summaries[0].runs_count == 0  # Templates start with 0 runs
 
     @pytest.mark.asyncio
-    async def test_on_phase_started_updates_status(self, projection: WorkflowListProjection):
-        """Test that PhaseStarted updates status from pending to in_progress."""
-        # Create workflow first
+    async def test_on_workflow_execution_started_increments_runs(
+        self, projection: WorkflowListProjection
+    ):
+        """Test that WorkflowExecutionStarted increments runs_count."""
+        # Create workflow template first
         await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
 
-        # Start a phase
-        await projection.on_phase_started({"workflow_id": "wf-1"})
+        # Start an execution
+        await projection.on_workflow_execution_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-1"}
+        )
 
         summaries = await projection.get_all()
-        assert summaries[0].status == "in_progress"
+        assert summaries[0].runs_count == 1
 
-    @pytest.mark.asyncio
-    async def test_on_workflow_completed(self, projection: WorkflowListProjection):
-        """Test handling WorkflowCompleted event."""
-        await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
-        await projection.on_workflow_completed({"workflow_id": "wf-1"})
-
-        summaries = await projection.get_all()
-        assert summaries[0].status == "completed"
-
-    @pytest.mark.asyncio
-    async def test_on_workflow_failed(self, projection: WorkflowListProjection):
-        """Test handling WorkflowFailed event."""
-        await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
-        await projection.on_workflow_failed({"workflow_id": "wf-1"})
+        # Start another execution
+        await projection.on_workflow_execution_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-2"}
+        )
 
         summaries = await projection.get_all()
-        assert summaries[0].status == "failed"
+        assert summaries[0].runs_count == 2
 
     @pytest.mark.asyncio
-    async def test_query_with_status_filter(self, projection: WorkflowListProjection):
-        """Test querying with status filter."""
+    async def test_query_with_workflow_type_filter(self, projection: WorkflowListProjection):
+        """Test querying with workflow type filter."""
         await projection.on_workflow_created(
-            {"workflow_id": "wf-1", "name": "Pending", "phases": []}
+            {"workflow_id": "wf-1", "name": "Research", "workflow_type": "research", "phases": []}
         )
         await projection.on_workflow_created(
-            {"workflow_id": "wf-2", "name": "Also Pending", "phases": []}
+            {
+                "workflow_id": "wf-2",
+                "name": "Implementation",
+                "workflow_type": "implementation",
+                "phases": [],
+            }
         )
-        await projection.on_workflow_completed({"workflow_id": "wf-1"})
 
-        pending = await projection.query(status_filter="pending")
-        assert len(pending) == 1
-        assert pending[0].id == "wf-2"
+        research_workflows = await projection.query(workflow_type_filter="research")
+        assert len(research_workflows) == 1
+        assert research_workflows[0].id == "wf-1"
 
-        completed = await projection.query(status_filter="completed")
-        assert len(completed) == 1
-        assert completed[0].id == "wf-1"
+        impl_workflows = await projection.query(workflow_type_filter="implementation")
+        assert len(impl_workflows) == 1
+        assert impl_workflows[0].id == "wf-2"
 
     @pytest.mark.asyncio
     async def test_query_with_pagination(self, projection: WorkflowListProjection):

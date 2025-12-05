@@ -1,78 +1,84 @@
-"""Read model for workflow detail views."""
+"""Read model for workflow TEMPLATE detail views.
+
+NOTE: This is for workflow TEMPLATES (definitions), not executions.
+Templates don't have status, started_at, completed_at, etc.
+For execution details, see WorkflowExecutionDetail.
+"""
 
 from dataclasses import dataclass, field
 from datetime import datetime
 
 
 @dataclass(frozen=True)
-class PhaseDetail:
-    """Read model for phase information within a workflow."""
+class PhaseDefinitionDetail:
+    """Read model for phase DEFINITION within a workflow template.
+
+    This represents the phase as defined in the template,
+    NOT the execution state of a phase.
+    """
 
     id: str
+    """Phase identifier."""
+
     name: str
-    agent_type: str
-    status: str
-    started_at: datetime | str | None = None
-    completed_at: datetime | str | None = None
-    error_message: str | None = None
+    """Display name of the phase."""
+
+    description: str | None = None
+    """Optional description of what this phase does."""
+
+    agent_type: str = ""
+    """Type of agent to use for this phase."""
+
+    order: int = 0
+    """Order in which this phase executes."""
 
 
 @dataclass(frozen=True)
 class WorkflowDetail:
-    """Read model for workflow detail view.
+    """Read model for workflow TEMPLATE detail view.
 
-    This is a comprehensive DTO containing all workflow information
-    needed for detailed displays.
+    This represents a workflow definition/template.
+    Templates are reusable definitions that can be executed multiple times.
+    Each execution creates a WorkflowExecution with its own status and metrics.
     """
 
     id: str
-    """Unique identifier for the workflow."""
+    """Unique identifier for the workflow template."""
 
     name: str
     """Display name of the workflow."""
 
     workflow_type: str
-    """Type of workflow (e.g., 'sequential', 'parallel')."""
+    """Type of workflow (e.g., 'research', 'implementation')."""
 
     classification: str
     """Classification category of the workflow."""
 
-    status: str
-    """Current status (pending, in_progress, completed, failed)."""
-
     description: str | None
     """Optional description of the workflow."""
 
-    phases: list[PhaseDetail] = field(default_factory=list)
-    """List of phases in the workflow."""
+    phases: list[PhaseDefinitionDetail] = field(default_factory=list)
+    """List of phase definitions in the workflow."""
 
     created_at: datetime | None = None
-    """When the workflow was created."""
+    """When the workflow template was created."""
 
-    started_at: datetime | None = None
-    """When the workflow execution started."""
-
-    completed_at: datetime | None = None
-    """When the workflow completed (if completed)."""
-
-    error_message: str | None = None
-    """Error message if the workflow failed."""
+    runs_count: int = 0
+    """Number of times this workflow has been executed."""
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
         phases_data = data.get("phases", [])
         phases = [
-            PhaseDetail(
-                id=p.get("id", ""),
+            PhaseDefinitionDetail(
+                id=p.get("id", p.get("phase_id", "")),
                 name=p.get("name", ""),
+                description=p.get("description"),
                 agent_type=p.get("agent_type", ""),
-                status=p.get("status", "pending"),
-                started_at=p.get("started_at"),
-                completed_at=p.get("completed_at"),
-                error_message=p.get("error_message"),
+                order=p.get("order", i),
             )
-            for p in phases_data
+            for i, p in enumerate(phases_data)
         ]
 
         return cls(
@@ -80,13 +86,10 @@ class WorkflowDetail:
             name=data["name"],
             workflow_type=data.get("workflow_type", ""),
             classification=data.get("classification", ""),
-            status=data.get("status", "pending"),
             description=data.get("description"),
             phases=phases,
             created_at=data.get("created_at"),
-            started_at=data.get("started_at"),
-            completed_at=data.get("completed_at"),
-            error_message=data.get("error_message"),
+            runs_count=data.get("runs_count", 0),
         )
 
     @staticmethod
@@ -101,18 +104,16 @@ class WorkflowDetail:
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
 
-        def phase_to_dict(p: PhaseDetail | dict) -> dict:
-            """Convert a phase to dict, handling both PhaseDetail and dict inputs."""
+        def phase_to_dict(p: PhaseDefinitionDetail | dict) -> dict:
+            """Convert a phase to dict."""
             if isinstance(p, dict):
                 return p
             return {
                 "id": p.id,
                 "name": p.name,
+                "description": p.description,
                 "agent_type": p.agent_type,
-                "status": p.status,
-                "started_at": WorkflowDetail._to_iso_string(p.started_at),
-                "completed_at": WorkflowDetail._to_iso_string(p.completed_at),
-                "error_message": p.error_message,
+                "order": p.order,
             }
 
         return {
@@ -120,11 +121,8 @@ class WorkflowDetail:
             "name": self.name,
             "workflow_type": self.workflow_type,
             "classification": self.classification,
-            "status": self.status,
             "description": self.description,
             "phases": [phase_to_dict(p) for p in self.phases],
             "created_at": self._to_iso_string(self.created_at),
-            "started_at": self._to_iso_string(self.started_at),
-            "completed_at": self._to_iso_string(self.completed_at),
-            "error_message": self.error_message,
+            "runs_count": self.runs_count,
         }

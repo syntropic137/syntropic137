@@ -67,13 +67,49 @@ class MockEventStoreClient:
     async def disconnect(self) -> None:
         self._connected = False
 
+    async def read_all(
+        self,
+        from_global_nonce: int = 0,
+        max_count: int = 100,
+        forward: bool = True,
+    ) -> tuple[list[MockEventEnvelope], bool, int]:
+        """Return events from the given position with pagination.
+
+        Returns:
+            Tuple of (events, is_end, next_from_global_nonce)
+        """
+        if forward:
+            filtered = [e for e in self.events if e.metadata.global_nonce >= from_global_nonce]
+            filtered.sort(key=lambda e: e.metadata.global_nonce)
+        else:
+            filtered = [e for e in self.events if e.metadata.global_nonce <= from_global_nonce]
+            filtered.sort(key=lambda e: e.metadata.global_nonce, reverse=True)
+
+        page = filtered[:max_count]
+        is_end = len(page) < max_count or len(filtered) <= max_count
+
+        if page:
+            if forward:
+                next_from = page[-1].metadata.global_nonce + 1
+            else:
+                next_from = page[-1].metadata.global_nonce - 1
+        else:
+            next_from = from_global_nonce
+
+        return page, is_end, next_from
+
     async def read_all_events_from(
         self,
         after_global_nonce: int = 0,
         limit: int = 100,
     ) -> list[MockEventEnvelope]:
-        """Return events after the given position."""
-        return [e for e in self.events if e.metadata.global_nonce > after_global_nonce][:limit]
+        """Return events after the given position (deprecated)."""
+        events, _, _ = await self.read_all(
+            from_global_nonce=after_global_nonce + 1,
+            max_count=limit,
+            forward=True,
+        )
+        return events
 
     async def subscribe(self, from_global_nonce: int = 0):
         """Yield events starting from the given position."""
