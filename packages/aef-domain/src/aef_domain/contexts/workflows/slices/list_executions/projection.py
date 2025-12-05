@@ -164,3 +164,33 @@ class WorkflowExecutionListProjection:
         if data:
             return WorkflowExecutionSummary.from_dict(data)
         return None
+
+    async def get_all(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        status_filter: str | None = None,
+    ) -> list[WorkflowExecutionSummary]:
+        """Get all executions with optional filtering.
+
+        Args:
+            limit: Maximum number of results.
+            offset: Number of results to skip.
+            status_filter: Optional status to filter by.
+
+        Returns:
+            List of execution summaries sorted by started_at descending.
+        """
+        all_data = await self._store.get_all(self.PROJECTION_NAME)
+        executions = []
+
+        for data in all_data:
+            if status_filter and data.get("status") != status_filter:
+                continue
+            executions.append(WorkflowExecutionSummary.from_dict(data))
+
+        # Sort by started_at descending (most recent first)
+        executions.sort(key=lambda e: e.started_at or "", reverse=True)
+
+        # Apply pagination
+        return executions[offset : offset + limit]

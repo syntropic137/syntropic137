@@ -188,6 +188,27 @@ export interface WorkflowExecutionSummary {
   total_cost_usd: number
 }
 
+/** Item in the global execution list (includes workflow_name) */
+export interface ExecutionListItem {
+  execution_id: string
+  workflow_id: string
+  workflow_name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  completed_phases: number
+  total_phases: number
+  total_tokens: number
+  total_cost_usd: number
+}
+
+export interface ExecutionListResponse {
+  executions: ExecutionListItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface PhaseExecutionDetail {
   phase_id: string
   name: string

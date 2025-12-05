@@ -13,6 +13,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Workflows', href: '/workflows', icon: GitBranch },
+  { name: 'Executions', href: '/executions', icon: Zap },
   { name: 'Sessions', href: '/sessions', icon: Activity },
   { name: 'Artifacts', href: '/artifacts', icon: FileText },
 ]

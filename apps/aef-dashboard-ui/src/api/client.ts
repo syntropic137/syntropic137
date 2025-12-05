@@ -4,6 +4,7 @@ import type {
   EventMessage,
   ExecutionDetailResponse,
   ExecutionHistoryResponse,
+  ExecutionListResponse,
   MetricsResponse,
   SessionResponse,
   SessionSummary,
@@ -105,6 +106,20 @@ export async function listExecutions(
 
 export async function getExecution(executionId: string): Promise<ExecutionDetailResponse> {
   return fetchJSON(`${API_BASE}/executions/${executionId}`)
+}
+
+export async function listAllExecutions(params?: {
+  status?: string
+  page?: number
+  page_size?: number
+}): Promise<ExecutionListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.status) searchParams.set('status', params.status)
+  if (params?.page) searchParams.set('page', String(params.page))
+  if (params?.page_size) searchParams.set('page_size', String(params.page_size))
+
+  const query = searchParams.toString()
+  return fetchJSON(`${API_BASE}/executions${query ? `?${query}` : ''}`)
 }
 
 // =============================================================================
