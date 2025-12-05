@@ -83,7 +83,8 @@ class ClaudeAgenticAgent:
     """
 
     # Default model for Claude agentic execution
-    DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+    # NOTE: Temporarily using Haiku to reduce costs during testing
+    DEFAULT_MODEL = "claude-3-5-haiku-20241022"
 
     # Standard tools supported by claude-agent-sdk
     SUPPORTED_TOOLS: frozenset[str] = frozenset(AgentTool.all())

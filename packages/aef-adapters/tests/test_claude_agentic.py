@@ -111,7 +111,8 @@ class TestClaudeAgenticAgentCreation:
 
             agent = ClaudeAgenticAgent()
 
-            assert agent._model == "claude-sonnet-4-5-20250929"
+            # NOTE: Default is Haiku for cost reduction during testing
+            assert agent._model == "claude-3-5-haiku-20241022"
             assert agent.provider == AgentProvider.CLAUDE
 
     def test_create_with_custom_model(self) -> None:
