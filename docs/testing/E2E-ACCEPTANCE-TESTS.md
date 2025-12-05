@@ -505,6 +505,83 @@ curl -N http://localhost:8000/api/events/stream
 2. Filter by "EventStream" or "stream"
 3. Verify connection is active
 
+### F5.6 Live Dashboard Updates ⭐ NEW
+
+**Given** a workflow is running
+**When** events occur during execution
+**Then** the UI updates in real-time without refresh
+
+#### F5.6.1 Live Execution Status
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 5.6.1.1 | ExecutionList shows "Live" connection indicator | ⬜ |
+| 5.6.1.2 | New executions appear in list without refresh | ⬜ |
+| 5.6.1.3 | Status badge updates (running → completed/failed) | ⬜ |
+| 5.6.1.4 | Progress bar updates as phases complete | ⬜ |
+| 5.6.1.5 | Token count updates as phases complete | ⬜ |
+
+**Validation Steps:**
+1. Open ExecutionList page
+2. Verify "Live" indicator shows (green dot)
+3. Start a workflow execution via API/CLI
+4. Verify execution appears in list without refresh
+5. Watch status badge change from "running" to "completed"
+
+#### F5.6.2 Live Duration Timer
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 5.6.2.1 | Duration column shows elapsed time for running executions | ⬜ |
+| 5.6.2.2 | Duration updates every second (watch for 5+ seconds) | ⬜ |
+| 5.6.2.3 | Duration stops updating when execution completes | ⬜ |
+| 5.6.2.4 | ExecutionDetail page duration also updates live | ⬜ |
+
+**Validation Steps:**
+1. Start a multi-phase workflow
+2. Watch Duration column tick every second
+3. Verify it stops when execution completes
+
+#### F5.6.3 Tool Call Tracking
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 5.6.3.1 | Tool call count column visible in ExecutionList | ⬜ |
+| 5.6.3.2 | Tool count increments as tools are used during execution | ⬜ |
+| 5.6.3.3 | Final tool count matches total tools used | ⬜ |
+
+**Validation Steps:**
+1. Start a workflow that uses tools (Read, Write, etc.)
+2. Watch tool count increment in real-time
+3. Verify final count after completion
+
+#### F5.6.4 Context Window Display
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 5.6.4.1 | ExecutionDetail shows context window percentage | ⬜ |
+| 5.6.4.2 | Progress bar color changes based on usage (green → amber → red) | ⬜ |
+| 5.6.4.3 | Shows token count as "X / 200,000 tokens" | ⬜ |
+| 5.6.4.4 | Context percentage updates as phases complete | ⬜ |
+
+**Validation Steps:**
+1. Open ExecutionDetail for a running execution
+2. Verify context window card shows percentage
+3. Verify color coding: <50% green, 50-80% amber, >80% red
+
+#### F5.6.5 Dashboard Live Metrics
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 5.6.5.1 | Dashboard shows "Live" connection indicator | ⬜ |
+| 5.6.5.2 | Metrics refresh when workflows complete | ⬜ |
+| 5.6.5.3 | Token distribution chart updates | ⬜ |
+
+**Validation Steps:**
+1. Open Dashboard page
+2. Verify "Live" indicator shows
+3. Complete a workflow and verify metrics update
+
 ---
 
 ## Feature 6: Data Consistency
@@ -1370,6 +1447,7 @@ poetry run poe check-fix
 | F3 | CLI Workflow Management | 12 | ⬜ | ⬜ | ⬜ |
 | F4 | Dashboard Backend API | 21 | ⬜ | ⬜ | ⬜ |
 | F5 | Dashboard Frontend | 15 | ⬜ | ⬜ | ⬜ |
+| **F5.6** | **Live Dashboard Updates** ⭐ | **16** | ⬜ | ⬜ | ⬜ |
 | F6 | Data Consistency | 6 | ⬜ | ⬜ | ⬜ |
 | F7 | Error Handling | 6 | ⬜ | ⬜ | ⬜ |
 | **F7.5** | **Event Store Verification** ⭐ | **22** | ⬜ | ⬜ | ⬜ |
@@ -1379,7 +1457,7 @@ poetry run poe check-fix
 | **F10** | **Artifact Bundle Flow** | **13** | ⬜ | ⬜ | ⬜ |
 | **F11** | **Event Bridge** | **12** | ⬜ | ⬜ | ⬜ |
 | **F12** | **Agent Provider Management** | **9** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **194** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **210** | ⬜ | ⬜ | ⬜ |
 
 ---
 
