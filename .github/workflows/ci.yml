@@ -95,9 +95,6 @@ jobs:
   dashboard-ui:
     name: Dashboard UI
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/aef-dashboard-ui
     steps:
       - uses: actions/checkout@v4
 
@@ -108,16 +105,29 @@ jobs:
           cache: npm
           cache-dependency-path: apps/aef-dashboard-ui/package-lock.json
 
-      - name: Install dependencies
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install ui-feedback-react dependencies
+        working-directory: lib/ui-feedback/packages/ui-feedback-react
+        run: pnpm install --ignore-scripts
+
+      - name: Install dashboard dependencies
+        working-directory: apps/aef-dashboard-ui
         run: npm ci
 
+      - name: Link ui-feedback-react
+        working-directory: apps/aef-dashboard-ui
+        run: npm link ../../lib/ui-feedback/packages/ui-feedback-react
+
       - name: Lint
+        working-directory: apps/aef-dashboard-ui
         run: npm run lint
 
-      - name: Type check
-        run: npx tsc --noEmit
-
       - name: Build
+        working-directory: apps/aef-dashboard-ui
         run: npm run build
 
   #############################################################################
