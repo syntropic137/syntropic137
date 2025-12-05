@@ -22,8 +22,9 @@ export function ExecutionList() {
 
   useEffect(() => {
     let cancelled = false
-    setLoading(true)
 
+    // Note: We start with loading: true and only set false when complete.
+    // For filter changes, the brief stale data display is acceptable.
     listAllExecutions({
       status: statusFilter || undefined,
       page,
@@ -32,12 +33,13 @@ export function ExecutionList() {
       .then((response) => {
         if (cancelled) return
         setExecutions(response.executions)
+        setLoading(false)
       })
       .catch((err) => {
-        if (!cancelled) setError(err.message)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {
+          setError(err.message)
+          setLoading(false)
+        }
       })
 
     return () => { cancelled = true }
