@@ -237,14 +237,21 @@ class EventSubscriptionService:
             self._running = False
 
     async def _run_catchup(self) -> None:
-        """Run catch-up subscription to process historical events."""
+        """Run catch-up subscription to process historical events.
+
+        Uses the read_all RPC for reliable batch reading with explicit
+        pagination and end-of-batch signals.
+        """
         events_in_batch = 0
+        # Start from the next position (exclusive start)
+        from_position = self._last_position + 1 if self._last_position > 0 else 0
 
         while not self._stop_event.is_set():
-            # Read batch of events
-            events = await self._event_store.read_all_events_from(
-                after_global_nonce=self._last_position,
-                limit=self._batch_size,
+            # Read batch of events using the new read_all RPC
+            events, is_end, next_position = await self._event_store.read_all(
+                from_global_nonce=from_position,
+                max_count=self._batch_size,
+                forward=True,
             )
 
             if not events:
@@ -274,6 +281,13 @@ class EventSubscriptionService:
                         "events_processed": self._events_processed,
                     },
                 )
+
+            # Use explicit end signal instead of heuristic
+            if is_end:
+                break
+
+            # Continue from next position for next batch
+            from_position = next_position
 
         # Final save after catch-up
         if events_in_batch > 0:
