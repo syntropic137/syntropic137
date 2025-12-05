@@ -224,6 +224,8 @@ export function subscribeToEvents(
     'session_started',
     'session_completed',
     'session_failed',
+    'tool_used',
+    'artifact_created',
   ]
 
   eventTypes.forEach((eventType) => {

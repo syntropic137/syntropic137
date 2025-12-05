@@ -135,8 +135,13 @@ async def stream_events(
     - workflow_started: Workflow execution began
     - phase_started: A phase began execution
     - phase_completed: A phase finished (success or failure)
+    - phase_failed: A phase failed with an error
     - workflow_completed: Workflow finished successfully
     - workflow_failed: Workflow failed with error
+    - tool_used: A tool was executed during a phase
+    - session_started: An agent session started
+    - session_completed: An agent session completed
+    - artifact_created: An artifact was created
     - heartbeat: Periodic keep-alive signal
 
     Example JavaScript client:
@@ -144,6 +149,7 @@ async def stream_events(
     const evtSource = new EventSource('/api/events/stream?workflow_id=xxx');
     evtSource.onmessage = (event) => console.log(event.data);
     evtSource.addEventListener('phase_completed', (e) => console.log(e.data));
+    evtSource.addEventListener('tool_used', (e) => console.log('Tool:', e.data));
     ```
     """
     return EventSourceResponse(

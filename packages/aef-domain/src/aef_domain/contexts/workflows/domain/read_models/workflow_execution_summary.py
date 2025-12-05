@@ -43,6 +43,9 @@ class WorkflowExecutionSummary:
     total_cost_usd: Decimal | str
     """Total cost in USD."""
 
+    tool_call_count: int = 0
+    """Total number of tool calls across all phases."""
+
     error_message: str | None = None
     """Error message if execution failed."""
 
@@ -64,6 +67,7 @@ class WorkflowExecutionSummary:
             total_phases=data.get("total_phases", 0),
             total_tokens=data.get("total_tokens", 0),
             total_cost_usd=cost,
+            tool_call_count=data.get("tool_call_count", 0),
             error_message=data.get("error_message"),
         )
 
@@ -89,5 +93,6 @@ class WorkflowExecutionSummary:
             "total_phases": self.total_phases,
             "total_tokens": self.total_tokens,
             "total_cost_usd": str(self.total_cost_usd),
+            "tool_call_count": self.tool_call_count,
             "error_message": self.error_message,
         }

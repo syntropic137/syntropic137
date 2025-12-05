@@ -54,13 +54,14 @@ class WorkflowExecutionListProjection:
             total_phases=event_data.get("total_phases", 0),
             total_tokens=0,
             total_cost_usd="0",
+            tool_call_count=0,
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 
     async def on_phase_completed(self, event_data: dict) -> None:
         """Handle PhaseCompleted event.
 
-        Updates completed phase count and token metrics.
+        Updates completed phase count, token metrics, and tool call count.
         """
         execution_id = event_data.get("execution_id")
         if not execution_id:
@@ -74,6 +75,10 @@ class WorkflowExecutionListProjection:
             # Add tokens from this phase
             phase_tokens = event_data.get("total_tokens", 0)
             existing["total_tokens"] = existing.get("total_tokens", 0) + phase_tokens
+
+            # Add tool calls from this phase
+            phase_tool_calls = event_data.get("tool_call_count", 0)
+            existing["tool_call_count"] = existing.get("tool_call_count", 0) + phase_tool_calls
 
             # Add cost from this phase
             from decimal import Decimal

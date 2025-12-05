@@ -72,10 +72,20 @@ class EventSubscriptionService:
         self._last_position: int = 0
         self._events_processed: int = 0
         self._last_position_save: datetime | None = None
+        self._reconnect_count: int = 0
+        self._last_event_time: datetime | None = None
 
         # Background task
         self._subscription_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
+
+        logger.debug(
+            "[SUBSCRIPTION] Service initialized",
+            extra={
+                "batch_size": batch_size,
+                "position_save_interval": position_save_interval,
+            },
+        )
 
     @property
     def is_running(self) -> bool:
@@ -97,6 +107,39 @@ class EventSubscriptionService:
         """Get total events processed since start."""
         return self._events_processed
 
+    @property
+    def reconnect_count(self) -> int:
+        """Get number of reconnection attempts."""
+        return self._reconnect_count
+
+    @property
+    def last_event_time(self) -> datetime | None:
+        """Get timestamp of last received event."""
+        return self._last_event_time
+
+    def get_status(self) -> dict:
+        """Get detailed status of the subscription service.
+
+        Returns a dictionary with current state information useful for
+        debugging and health checks.
+        """
+        status = {
+            "running": self._running,
+            "caught_up": self._caught_up,
+            "last_position": self._last_position,
+            "events_processed": self._events_processed,
+            "reconnect_count": self._reconnect_count,
+            "last_event_time": self._last_event_time.isoformat() if self._last_event_time else None,
+            "last_position_save": self._last_position_save.isoformat()
+            if self._last_position_save
+            else None,
+        }
+        logger.debug(
+            "[SUBSCRIPTION] Status requested",
+            extra=status,
+        )
+        return status
+
     async def start(self) -> None:
         """Start the subscription service.
 
@@ -104,10 +147,10 @@ class EventSubscriptionService:
         as a background task.
         """
         if self._running:
-            logger.warning("Subscription service already running")
+            logger.warning("[SUBSCRIPTION] Service already running, ignoring start request")
             return
 
-        logger.info("Starting event subscription service...")
+        logger.info("[SUBSCRIPTION] 🚀 Starting event subscription service...")
 
         # Load last position from projection store
         await self._load_position()
@@ -117,6 +160,15 @@ class EventSubscriptionService:
         self._running = True
         self._caught_up = False
         self._events_processed = 0
+        self._reconnect_count = 0
+
+        logger.info(
+            "[SUBSCRIPTION] ✅ Loaded checkpoint position",
+            extra={
+                "last_position": self._last_position,
+                "will_start_from": self._last_position + 1 if self._last_position > 0 else 0,
+            },
+        )
 
         # Start subscription loop as background task
         self._subscription_task = asyncio.create_task(
@@ -125,8 +177,11 @@ class EventSubscriptionService:
         )
 
         logger.info(
-            "Event subscription service started",
-            extra={"from_position": self._last_position},
+            "[SUBSCRIPTION] ✅ Background task started",
+            extra={
+                "task_name": "event-subscription-loop",
+                "from_position": self._last_position,
+            },
         )
 
     async def stop(self) -> None:
@@ -205,36 +260,118 @@ class EventSubscriptionService:
             )
 
     async def _subscription_loop(self) -> None:
-        """Main subscription loop.
+        """Main subscription loop with automatic reconnection.
 
         This runs catch-up first, then switches to live subscription.
+        If the live subscription fails, it will retry with exponential backoff.
         """
-        try:
-            # Phase 1: Catch-up
-            logger.info("Starting catch-up phase...")
-            await self._run_catchup()
+        retry_delay = 1.0  # Initial retry delay in seconds
+        max_retry_delay = 60.0  # Maximum retry delay
+        consecutive_failures = 0
 
-            self._caught_up = True
-            logger.info(
-                "Catch-up complete, switching to live subscription",
-                extra={
-                    "position": self._last_position,
-                    "events_processed": self._events_processed,
-                },
-            )
+        logger.info(
+            "[SUBSCRIPTION] 🔄 Main loop started",
+            extra={"last_position": self._last_position},
+        )
 
-            # Phase 2: Live subscription
-            await self._run_live_subscription()
+        while not self._stop_event.is_set():
+            try:
+                # Only count as reconnect if we've had failures or previous connections
+                is_reconnect = consecutive_failures > 0 or self._reconnect_count > 0
+                if is_reconnect:
+                    self._reconnect_count += 1
+                    logger.info(
+                        "[SUBSCRIPTION] 🔄 Reconnecting after failure/disconnect",
+                        extra={
+                            "reconnect_count": self._reconnect_count,
+                            "consecutive_failures": consecutive_failures,
+                            "from_position": self._last_position + 1
+                            if self._last_position > 0
+                            else 0,
+                        },
+                    )
+                else:
+                    logger.info(
+                        "[SUBSCRIPTION] 📥 Starting initial connection",
+                        extra={
+                            "from_position": self._last_position + 1
+                            if self._last_position > 0
+                            else 0,
+                        },
+                    )
 
-        except asyncio.CancelledError:
-            logger.info("Subscription loop cancelled")
-            raise
-        except Exception as e:
-            logger.exception(
-                "Subscription loop failed",
-                extra={"error": str(e)},
-            )
-            self._running = False
+                # Phase 1: Catch-up (always run on reconnect to pick up missed events)
+                await self._run_catchup()
+
+                # Reset backoff state on successful catch-up
+                consecutive_failures = 0
+                retry_delay = 1.0
+
+                self._caught_up = True
+                logger.info(
+                    "[SUBSCRIPTION] ✅ Catch-up complete, transitioning to live",
+                    extra={
+                        "position": self._last_position,
+                        "events_processed": self._events_processed,
+                        "reconnect_count": self._reconnect_count,
+                    },
+                )
+
+                # Phase 2: Live subscription
+                logger.info(
+                    "[SUBSCRIPTION] 🔴 Starting live subscription",
+                    extra={"from_position": self._last_position + 1},
+                )
+                await self._run_live_subscription()
+
+                # If we get here, subscription exited normally (shouldn't happen in healthy state)
+                self._caught_up = False
+                logger.warning(
+                    "[SUBSCRIPTION] ⚠️ Live subscription exited unexpectedly, will reconnect",
+                    extra={
+                        "last_position": self._last_position,
+                        "events_processed": self._events_processed,
+                    },
+                )
+                consecutive_failures = 0
+                retry_delay = 1.0
+
+            except asyncio.CancelledError:
+                logger.info("[SUBSCRIPTION] 🛑 Loop cancelled by stop signal")
+                raise
+            except Exception as e:
+                consecutive_failures += 1
+                self._caught_up = False
+                logger.error(
+                    "[SUBSCRIPTION] ❌ Loop failed, will retry with backoff",
+                    extra={
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "consecutive_failures": consecutive_failures,
+                        "retry_delay_seconds": retry_delay,
+                        "last_position": self._last_position,
+                    },
+                    exc_info=True,
+                )
+
+                # Wait before retry with exponential backoff
+                if not self._stop_event.is_set():
+                    logger.info(
+                        "[SUBSCRIPTION] ⏳ Waiting before retry",
+                        extra={"delay_seconds": retry_delay},
+                    )
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
+
+        logger.info(
+            "[SUBSCRIPTION] 🛑 Main loop stopped",
+            extra={
+                "final_position": self._last_position,
+                "total_events_processed": self._events_processed,
+                "total_reconnects": self._reconnect_count,
+            },
+        )
+        self._running = False
 
     async def _run_catchup(self) -> None:
         """Run catch-up subscription to process historical events.
@@ -243,30 +380,44 @@ class EventSubscriptionService:
         pagination and end-of-batch signals.
         """
         events_in_batch = 0
+        total_catchup_events = 0
+        batch_number = 0
         # Start from the next position (exclusive start)
         from_position = self._last_position + 1 if self._last_position > 0 else 0
 
         logger.info(
-            "Catch-up starting",
+            "[SUBSCRIPTION] 📥 Catch-up phase starting",
             extra={
                 "from_position": from_position,
-                "last_position": self._last_position,
+                "checkpoint_position": self._last_position,
+                "batch_size": self._batch_size,
             },
         )
 
         while not self._stop_event.is_set():
+            batch_number += 1
             # Read batch of events using the new read_all RPC
+            logger.debug(
+                "[SUBSCRIPTION] 📖 Reading batch from event store",
+                extra={
+                    "batch_number": batch_number,
+                    "from_position": from_position,
+                    "max_count": self._batch_size,
+                },
+            )
+
             events, is_end, next_position = await self._event_store.read_all(
                 from_global_nonce=from_position,
                 max_count=self._batch_size,
                 forward=True,
             )
 
-            logger.debug(
-                "Catch-up read_all result",
+            logger.info(
+                "[SUBSCRIPTION] 📦 Batch received",
                 extra={
+                    "batch_number": batch_number,
                     "from_position": from_position,
-                    "events_count": len(events),
+                    "events_in_batch": len(events),
                     "is_end": is_end,
                     "next_position": next_position,
                 },
@@ -274,26 +425,38 @@ class EventSubscriptionService:
 
             if not events:
                 # No more events, catch-up complete
-                logger.debug("No events returned, catch-up complete")
+                logger.info(
+                    "[SUBSCRIPTION] ✅ Catch-up complete (no more events)",
+                    extra={
+                        "total_batches": batch_number,
+                        "total_events": total_catchup_events,
+                        "final_position": self._last_position,
+                    },
+                )
                 break
 
             # Process events
-            for envelope in events:
+            for idx, envelope in enumerate(events):
                 if self._stop_event.is_set():
+                    logger.info("[SUBSCRIPTION] 🛑 Catch-up interrupted by stop signal")
                     break
 
                 event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
                 global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-                logger.info(
-                    "Catch-up processing event",
+                logger.debug(
+                    "[SUBSCRIPTION] 📨 Processing catch-up event",
                     extra={
                         "event_type": event_type,
                         "global_nonce": global_nonce,
+                        "batch_index": idx + 1,
+                        "batch_size": len(events),
                     },
                 )
 
                 await self._dispatch_event(envelope)
                 events_in_batch += 1
+                total_catchup_events += 1
+                self._last_event_time = datetime.now(UTC)
 
                 # Update position
                 if envelope.metadata.global_nonce is not None:
@@ -323,30 +486,54 @@ class EventSubscriptionService:
             await self._save_position()
 
     async def _run_live_subscription(self) -> None:
-        """Run live subscription for real-time events."""
+        """Run live subscription for real-time events.
+
+        This method will exit (not raise) when the subscription stream ends,
+        allowing the main loop to reconnect.
+        """
         events_since_save = 0
+        live_events_received = 0
         last_save_time = datetime.now(UTC)
 
         start_position = self._last_position + 1
         logger.info(
-            "Starting live subscription",
-            extra={"from_position": start_position},
+            "[SUBSCRIPTION] 🔴 Live subscription connecting",
+            extra={
+                "from_position": start_position,
+                "checkpoint_position": self._last_position,
+            },
         )
 
         try:
             # Start subscription from current position + 1 (since we've processed up to current)
+            logger.info(
+                "[SUBSCRIPTION] 📡 Establishing gRPC stream to event store",
+                extra={"from_global_nonce": start_position},
+            )
+
             async for envelope in self._event_store.subscribe(from_global_nonce=start_position):
                 if self._stop_event.is_set():
-                    logger.info("Live subscription stopped by stop event")
-                    break
+                    logger.info(
+                        "[SUBSCRIPTION] 🛑 Live subscription stopped by signal",
+                        extra={"events_received": live_events_received},
+                    )
+                    return
 
                 event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
                 global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+                aggregate_id = getattr(
+                    getattr(envelope, "metadata", None), "aggregate_id", "unknown"
+                )
+                live_events_received += 1
+                self._last_event_time = datetime.now(UTC)
+
                 logger.info(
-                    "Live subscription received event",
+                    "[SUBSCRIPTION] 📨 Live event received",
                     extra={
                         "event_type": event_type,
                         "global_nonce": global_nonce,
+                        "aggregate_id": aggregate_id,
+                        "live_event_number": live_events_received,
                     },
                 )
 
@@ -365,20 +552,45 @@ class EventSubscriptionService:
                 )
 
                 if should_save:
+                    logger.debug(
+                        "[SUBSCRIPTION] 💾 Saving position checkpoint",
+                        extra={
+                            "position": self._last_position,
+                            "events_since_last_save": events_since_save,
+                        },
+                    )
                     await self._save_position()
                     events_since_save = 0
                     last_save_time = now
 
-            logger.warning("Live subscription async for loop exited normally")
+            # Stream ended - this triggers reconnection in main loop
+            logger.warning(
+                "[SUBSCRIPTION] ⚠️ Live stream ended (server closed connection)",
+                extra={
+                    "last_position": self._last_position,
+                    "live_events_received": live_events_received,
+                },
+            )
 
         except asyncio.CancelledError:
-            logger.info("Live subscription cancelled")
+            logger.info(
+                "[SUBSCRIPTION] 🛑 Live subscription cancelled",
+                extra={"live_events_received": live_events_received},
+            )
             raise
         except Exception as e:
-            logger.exception(
-                "Live subscription error",
-                extra={"error": str(e)},
+            # Re-raise to trigger reconnection in main loop
+            logger.error(
+                "[SUBSCRIPTION] ❌ Live subscription error",
+                extra={
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "last_position": self._last_position,
+                    "live_events_received": live_events_received,
+                },
+                exc_info=True,
             )
+            raise
 
     async def _dispatch_event(self, envelope: object) -> None:
         """Dispatch an event to projections via validated envelope.
@@ -390,6 +602,9 @@ class EventSubscriptionService:
         Args:
             envelope: Event envelope from the event store.
         """
+        event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
+        global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+
         try:
             # Use the new validated dispatch method
             # This validates provenance and extracts event data
@@ -397,31 +612,36 @@ class EventSubscriptionService:
             self._events_processed += 1
 
             logger.debug(
-                "Dispatched event to projections",
+                "[SUBSCRIPTION] ✅ Event dispatched to projections",
                 extra={
                     "event_type": provenance.event_type,
                     "stream_id": provenance.stream_id,
                     "global_nonce": provenance.global_nonce,
+                    "total_events_processed": self._events_processed,
                 },
             )
 
         except ValueError as e:
             # Invalid envelope - log but continue
             logger.warning(
-                "Invalid event envelope",
-                extra={"error": str(e)},
+                "[SUBSCRIPTION] ⚠️ Invalid event envelope skipped",
+                extra={
+                    "error": str(e),
+                    "event_type": event_type,
+                    "global_nonce": global_nonce,
+                },
             )
 
         except Exception as e:
             # Log error but continue processing
             # Don't let one bad event break the entire subscription
             logger.error(
-                "Failed to dispatch event to projections",
+                "[SUBSCRIPTION] ❌ Failed to dispatch event to projections",
                 extra={
                     "error": str(e),
-                    "event_type": getattr(
-                        getattr(envelope, "event", None), "event_type", "unknown"
-                    ),
+                    "error_type": type(e).__name__,
+                    "event_type": event_type,
+                    "global_nonce": global_nonce,
                 },
                 exc_info=True,
             )

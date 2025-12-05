@@ -75,6 +75,7 @@ class ExecutionSummaryResponse(BaseModel):
     total_phases: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    tool_call_count: int = 0
 
 
 class ExecutionListResponse(BaseModel):
@@ -128,6 +129,7 @@ async def list_all_executions(
                 total_phases=e.total_phases,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
+                tool_call_count=e.tool_call_count,
             )
             for e in executions
         ],

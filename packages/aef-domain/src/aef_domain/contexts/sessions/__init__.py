@@ -7,8 +7,11 @@ Usage:
     from aef_domain.contexts.sessions import (
         AgentSessionAggregate,
         StartSessionCommand,
-        RecordOperationCommand,
         CompleteSessionCommand,
+        # Convenience functions for recording operations
+        record_tool_started,
+        record_tool_completed,
+        record_message_response,
     )
 
     # Create session
@@ -19,12 +22,12 @@ Usage:
         agent_provider="claude",
     ))
 
-    # Record operations
-    session.record_operation(RecordOperationCommand(
-        aggregate_id=str(session.id),
-        operation_type=OperationType.AGENT_REQUEST,
-        total_tokens=1000,
-    ))
+    # Record tool operations (type-safe convenience functions)
+    cmd = record_tool_started(str(session.id), "Read", "tool-123", {"path": "/foo"})
+    session.record_operation(cmd)
+
+    cmd = record_tool_completed(str(session.id), "Read", "tool-123", "file contents...")
+    session.record_operation(cmd)
 
     # Complete session
     session.complete_session(CompleteSessionCommand(
@@ -48,6 +51,14 @@ from aef_domain.contexts.sessions.complete_session import (
 from aef_domain.contexts.sessions.record_operation import (
     OperationRecordedEvent,
     RecordOperationCommand,
+    # Convenience factory functions
+    record_error,
+    record_message_request,
+    record_message_response,
+    record_thinking,
+    record_tool_blocked,
+    record_tool_completed,
+    record_tool_started,
 )
 from aef_domain.contexts.sessions.start_session import (
     SessionStartedEvent,
@@ -67,4 +78,11 @@ __all__ = [
     "SessionStatus",
     "StartSessionCommand",
     "TokenMetrics",
+    "record_error",
+    "record_message_request",
+    "record_message_response",
+    "record_thinking",
+    "record_tool_blocked",
+    "record_tool_completed",
+    "record_tool_started",
 ]

@@ -23,6 +23,7 @@ from aef_adapters.orchestration.executor import (
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
+    ToolUsed,
     WorkflowCompleted,
     WorkflowFailed,
     WorkflowStarted,
@@ -231,6 +232,20 @@ class ExecutionService:
                         artifact_ids=event.artifact_ids,
                     )
 
+                elif isinstance(event, ToolUsed):
+                    # Record each tool completion as an operation on the session
+                    session_id = self._phase_sessions.get(event.phase_id)
+                    if session_id:
+                        await self._record_tool_operation(
+                            session_id=session_id,
+                            tool_name=event.tool_name,
+                            tool_use_id=event.tool_use_id,
+                            success=event.success,
+                            tool_output=event.tool_output,
+                            duration_ms=event.duration_ms,
+                            error=event.error,
+                        )
+
                 elif isinstance(event, WorkflowFailed):
                     tracker[execution_id]["status"] = "failed"
                     tracker[execution_id]["error"] = event.error
@@ -399,6 +414,20 @@ class ExecutionService:
                 },
             )
 
+        elif isinstance(event, ToolUsed):
+            push_event(
+                "tool_used",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "success": event.success,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
         else:
             # Unknown event type - log for debugging
             logger.debug("Unknown event type: %s", type(event).__name__)
@@ -485,6 +514,88 @@ class ExecutionService:
             # Don't fail the workflow, just log the error
 
         return session_id
+
+    async def _record_tool_operation(
+        self,
+        session_id: str,
+        tool_name: str,
+        tool_use_id: str | None,
+        success: bool,
+        tool_output: str | None = None,
+        duration_ms: float | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Record a tool completion operation on the session.
+
+        This creates an OperationRecordedEvent for each tool call,
+        providing full observability including output and timing.
+
+        Args:
+            session_id: The session ID.
+            tool_name: Name of the tool used.
+            tool_use_id: Unique ID of the tool invocation.
+            success: Whether the tool call succeeded.
+            tool_output: Output from the tool (may be truncated).
+            duration_ms: How long the tool took in milliseconds.
+            error: Error message if the tool failed.
+        """
+        from aef_adapters.storage.repositories import get_session_repository
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
+        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+            RecordOperationCommand,
+        )
+
+        try:
+            repository = get_session_repository()
+
+            # Load existing aggregate
+            aggregate = await repository.get_by_id(session_id)
+            if aggregate is None:
+                logger.warning(
+                    "Session not found for tool operation",
+                    extra={"session_id": session_id, "tool_name": tool_name},
+                )
+                return
+
+            # Convert duration from ms to seconds
+            duration_seconds = duration_ms / 1000 if duration_ms else None
+
+            # Record the tool completion operation
+            operation_command = RecordOperationCommand(
+                aggregate_id=session_id,
+                operation_type=OperationType.TOOL_COMPLETED,
+                duration_seconds=duration_seconds,
+                success=success,
+                # Tool details
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                tool_output=tool_output,
+                # Error info in metadata if present
+                metadata={"error": error} if error else None,
+            )
+            aggregate.record_operation(operation_command)
+
+            # Persist to event store
+            await repository.save(aggregate)
+
+            logger.debug(
+                "[TOOL] Recorded tool completion",
+                extra={
+                    "session_id": session_id,
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "success": success,
+                    "duration_ms": duration_ms,
+                    "has_output": tool_output is not None,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to record tool operation",
+                extra={"error": str(e), "session_id": session_id, "tool_name": tool_name},
+            )
+            # Don't fail execution, just log the error
 
     async def _complete_session(
         self,

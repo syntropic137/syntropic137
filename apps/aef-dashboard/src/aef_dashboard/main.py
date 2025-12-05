@@ -226,16 +226,12 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        """Health check endpoint with subscription status."""
+        """Health check endpoint with detailed subscription status."""
         response: dict = {"status": "healthy"}
 
         if _subscription_service is not None:
-            response["subscription"] = {
-                "running": _subscription_service.is_running,
-                "caught_up": _subscription_service.is_caught_up,
-                "last_position": _subscription_service.last_position,
-                "events_processed": _subscription_service.events_processed,
-            }
+            # Use the new detailed status method
+            response["subscription"] = _subscription_service.get_status()
 
         return response
 
