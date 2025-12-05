@@ -149,10 +149,10 @@ class WorkflowFailed:
 
 @dataclass(frozen=True)
 class ToolUsed:
-    """Emitted when a tool is used during phase execution.
+    """Emitted when a tool completes execution during a phase.
 
-    This event allows real-time tracking of tool usage for
-    context window monitoring and observability.
+    This event provides full observability of tool usage including
+    outputs and duration for debugging and analytics.
     """
 
     workflow_id: str
@@ -161,6 +161,10 @@ class ToolUsed:
     tool_name: str
     tool_use_id: str | None = None
     success: bool = True
+    # Output and timing (new fields for full observability)
+    tool_output: str | None = None   # Tool output (may be truncated)
+    duration_ms: float | None = None  # How long the tool took
+    error: str | None = None          # Error message if failed
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -518,8 +522,14 @@ class AgenticWorkflowExecutor:
 
         async for event in agent.execute(task, workspace, config):
             if isinstance(event, ToolUseCompleted):
-                # Emit tool used event for real-time tracking
+                # Emit tool used event for real-time tracking with full observability
                 tool_call_count += 1
+
+                # Truncate long tool outputs (keep under 10KB for storage)
+                tool_output = event.tool_output
+                if tool_output and len(tool_output) > 10000:
+                    tool_output = tool_output[:10000] + "... [truncated]"
+
                 yield ToolUsed(
                     workflow_id=ctx.workflow_id,
                     execution_id=ctx.execution_id,
@@ -527,6 +537,9 @@ class AgenticWorkflowExecutor:
                     tool_name=event.tool_name,
                     tool_use_id=event.tool_use_id,
                     success=event.success,
+                    tool_output=tool_output,
+                    duration_ms=event.duration_ms,
+                    error=event.error,
                 )
 
             elif isinstance(event, TaskCompleted):

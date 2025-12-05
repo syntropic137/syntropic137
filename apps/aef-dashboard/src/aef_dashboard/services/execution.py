@@ -233,7 +233,7 @@ class ExecutionService:
                     )
 
                 elif isinstance(event, ToolUsed):
-                    # Record each tool use as an operation on the session
+                    # Record each tool completion as an operation on the session
                     session_id = self._phase_sessions.get(event.phase_id)
                     if session_id:
                         await self._record_tool_operation(
@@ -241,7 +241,9 @@ class ExecutionService:
                             tool_name=event.tool_name,
                             tool_use_id=event.tool_use_id,
                             success=event.success,
-                            timestamp=event.timestamp,
+                            tool_output=event.tool_output,
+                            duration_ms=event.duration_ms,
+                            error=event.error,
                         )
 
                 elif isinstance(event, WorkflowFailed):
@@ -517,21 +519,25 @@ class ExecutionService:
         self,
         session_id: str,
         tool_name: str,
-        tool_use_id: str,
+        tool_use_id: str | None,
         success: bool,
-        timestamp: Any,
+        tool_output: str | None = None,
+        duration_ms: float | None = None,
+        error: str | None = None,
     ) -> None:
-        """Record a tool use operation on the session.
+        """Record a tool completion operation on the session.
 
         This creates an OperationRecordedEvent for each tool call,
-        providing full observability of what tools were used.
+        providing full observability including output and timing.
 
         Args:
             session_id: The session ID.
             tool_name: Name of the tool used.
             tool_use_id: Unique ID of the tool invocation.
             success: Whether the tool call succeeded.
-            timestamp: When the tool was used.
+            tool_output: Output from the tool (may be truncated).
+            duration_ms: How long the tool took in milliseconds.
+            error: Error message if the tool failed.
         """
         from aef_adapters.storage.repositories import get_session_repository
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
@@ -551,17 +557,21 @@ class ExecutionService:
                 )
                 return
 
-            # Record the tool operation
+            # Convert duration from ms to seconds
+            duration_seconds = duration_ms / 1000 if duration_ms else None
+
+            # Record the tool completion operation
             operation_command = RecordOperationCommand(
                 aggregate_id=session_id,
-                operation_type=OperationType.TOOL_USE,
-                duration_seconds=None,  # We don't have duration for individual tool calls yet
-                input_tokens=None,
-                output_tokens=None,
-                total_tokens=None,
-                tool_name=tool_name,
+                operation_type=OperationType.TOOL_COMPLETED,
+                duration_seconds=duration_seconds,
                 success=success,
-                metadata={"tool_use_id": tool_use_id},
+                # Tool details
+                tool_name=tool_name,
+                tool_use_id=tool_use_id,
+                tool_output=tool_output,
+                # Error info in metadata if present
+                metadata={"error": error} if error else None,
             )
             aggregate._handle_command(operation_command)
 
@@ -569,12 +579,14 @@ class ExecutionService:
             await repository.save(aggregate)
 
             logger.debug(
-                "[TOOL] Recorded tool operation",
+                "[TOOL] Recorded tool completion",
                 extra={
                     "session_id": session_id,
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
                     "success": success,
+                    "duration_ms": duration_ms,
+                    "has_output": tool_output is not None,
                 },
             )
 
