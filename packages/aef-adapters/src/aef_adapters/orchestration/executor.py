@@ -41,6 +41,7 @@ from aef_adapters.agents.agentic_types import (
     AgentExecutionConfig,
     TaskCompleted,
     TaskFailed,
+    ToolUseCompleted,
     Workspace,
     WorkspaceConfig,
 )
@@ -96,6 +97,7 @@ class PhaseCompleted:
     output_tokens: int
     total_tokens: int
     duration_ms: float
+    tool_call_count: int = 0
     estimated_cost_usd: Decimal | None = None
     # The full artifact bundle for persistence (optional for backwards compat)
     artifact_bundle: ArtifactBundle | None = None
@@ -145,6 +147,27 @@ class WorkflowFailed:
     total_phases: int
 
 
+@dataclass(frozen=True)
+class ToolUsed:
+    """Emitted when a tool completes execution during a phase.
+
+    This event provides full observability of tool usage including
+    outputs and duration for debugging and analytics.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    tool_name: str
+    tool_use_id: str | None = None
+    success: bool = True
+    # Output and timing (new fields for full observability)
+    tool_output: str | None = None  # Tool output (may be truncated)
+    duration_ms: float | None = None  # How long the tool took
+    error: str | None = None  # Error message if failed
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
 # Union type for all execution events
 ExecutionEvent = (
     WorkflowStarted
@@ -153,6 +176,7 @@ ExecutionEvent = (
     | PhaseFailed
     | WorkflowCompleted
     | WorkflowFailed
+    | ToolUsed
 )
 
 
@@ -494,9 +518,31 @@ class AgenticWorkflowExecutor:
         result_text = ""
         input_tokens = 0
         output_tokens = 0
+        tool_call_count = 0
 
         async for event in agent.execute(task, workspace, config):
-            if isinstance(event, TaskCompleted):
+            if isinstance(event, ToolUseCompleted):
+                # Emit tool used event for real-time tracking with full observability
+                tool_call_count += 1
+
+                # Truncate long tool outputs (keep under 10KB for storage)
+                tool_output = event.tool_output
+                if tool_output and len(tool_output) > 10000:
+                    tool_output = tool_output[:10000] + "... [truncated]"
+
+                yield ToolUsed(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    tool_name=event.tool_name,
+                    tool_use_id=event.tool_use_id,
+                    success=event.success,
+                    tool_output=tool_output,
+                    duration_ms=event.duration_ms,
+                    error=event.error,
+                )
+
+            elif isinstance(event, TaskCompleted):
                 result_text = event.result
                 input_tokens = event.input_tokens
                 output_tokens = event.output_tokens
@@ -553,6 +599,7 @@ class AgenticWorkflowExecutor:
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
             duration_ms=duration_ms,
+            tool_call_count=tool_call_count,
             artifact_bundle=bundle,  # Include full bundle for downstream persistence
         )
         ctx.phase_results.append(completed_event)

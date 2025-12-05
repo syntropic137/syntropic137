@@ -2,11 +2,15 @@ import { clsx } from 'clsx'
 import {
   Activity,
   ArrowLeft,
+  Brain,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Coins,
   Cpu,
   MessageSquare,
+  Play,
   Terminal,
   Wrench,
   XCircle,
@@ -17,24 +21,44 @@ import { Link, useParams } from 'react-router-dom'
 
 import { getSession } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
-import type { SessionResponse } from '../types'
+import type { OperationInfo, SessionResponse } from '../types'
 
+// Icons for operation types
 const operationIcons: Record<string, typeof Activity> = {
+  // New v2 types
+  message_request: MessageSquare,
+  message_response: MessageSquare,
+  tool_started: Play,
+  tool_completed: Terminal,
+  tool_blocked: XCircle,
+  thinking: Brain,
+  error: XCircle,
+  // Legacy types (v1 backward compat)
   agent_request: MessageSquare,
   agent_response: MessageSquare,
   tool_use: Wrench,
+  tool_execution: Wrench,
   tool_result: Terminal,
   validation: CheckCircle2,
-  error: XCircle,
 }
 
+// Colors for operation types
 const operationColors: Record<string, string> = {
+  // New v2 types
+  message_request: 'text-blue-400 bg-blue-500/10',
+  message_response: 'text-indigo-400 bg-indigo-500/10',
+  tool_started: 'text-amber-400 bg-amber-500/10',
+  tool_completed: 'text-emerald-400 bg-emerald-500/10',
+  tool_blocked: 'text-red-400 bg-red-500/10',
+  thinking: 'text-purple-400 bg-purple-500/10',
+  error: 'text-red-400 bg-red-500/10',
+  // Legacy types
   agent_request: 'text-blue-400 bg-blue-500/10',
   agent_response: 'text-indigo-400 bg-indigo-500/10',
   tool_use: 'text-amber-400 bg-amber-500/10',
+  tool_execution: 'text-amber-400 bg-amber-500/10',
   tool_result: 'text-emerald-400 bg-emerald-500/10',
   validation: 'text-green-400 bg-green-500/10',
-  error: 'text-red-400 bg-red-500/10',
 }
 
 function formatTime(timestamp: string): string {
@@ -51,6 +75,65 @@ function formatDuration(seconds: number | null): string {
   if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
   if (seconds < 60) return `${seconds.toFixed(1)}s`
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+}
+
+// Component for expandable operation details
+function OperationDetails({ op }: { op: OperationInfo }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const hasDetails = op.tool_output || op.tool_input || op.message_content || op.thinking_content
+
+  if (!hasDetails) return null
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {expanded ? 'Hide details' : 'Show details'}
+      </button>
+      {expanded && (
+        <div className="mt-2 rounded-lg bg-[var(--color-surface)] p-3 text-xs">
+          {op.tool_input && (
+            <div className="mb-2">
+              <span className="font-medium text-[var(--color-text-secondary)]">Input:</span>
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-muted)] font-mono">
+                {JSON.stringify(op.tool_input, null, 2)}
+              </pre>
+            </div>
+          )}
+          {op.tool_output && (
+            <div className="mb-2">
+              <span className="font-medium text-[var(--color-text-secondary)]">Output:</span>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)] font-mono">
+                {op.tool_output}
+              </pre>
+            </div>
+          )}
+          {op.message_content && (
+            <div className="mb-2">
+              <span className="font-medium text-[var(--color-text-secondary)]">
+                Message ({op.message_role}):
+              </span>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
+                {op.message_content}
+              </pre>
+            </div>
+          )}
+          {op.thinking_content && (
+            <div>
+              <span className="font-medium text-[var(--color-text-secondary)]">Thinking:</span>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)]">
+                {op.thinking_content}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function SessionDetail() {
@@ -225,7 +308,7 @@ export function SessionDetail() {
                           </span>
                         </div>
 
-                        {/* Details */}
+                        {/* Summary details */}
                         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
                           {op.tool_name && (
                             <span className="flex items-center gap-1">
@@ -233,7 +316,13 @@ export function SessionDetail() {
                               {op.tool_name}
                             </span>
                           )}
-                          {op.total_tokens !== null && (
+                          {op.message_role && (
+                            <span className="flex items-center gap-1">
+                              <MessageSquare className="h-3 w-3" />
+                              {op.message_role}
+                            </span>
+                          )}
+                          {op.total_tokens !== null && op.total_tokens > 0 && (
                             <span className="flex items-center gap-1">
                               <Zap className="h-3 w-3" />
                               {op.total_tokens.toLocaleString()} tokens
@@ -246,6 +335,9 @@ export function SessionDetail() {
                             </span>
                           )}
                         </div>
+
+                        {/* Expandable details */}
+                        <OperationDetails op={op} />
                       </div>
                     </div>
                   )

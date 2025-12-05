@@ -74,22 +74,32 @@ class SessionListProjection:
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 
     async def on_operation_recorded(self, event_data: dict) -> None:
-        """Handle OperationRecorded - update token counts and store operation."""
+        """Handle OperationRecorded - update token counts and store operation.
+
+        Handles both v1 and v2 event formats for backward compatibility.
+        """
         session_id = event_data.get("session_id")
         if not session_id:
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         if existing:
-            # Accumulate tokens from operation
+            # Accumulate tokens from operation (for MESSAGE_RESPONSE operations)
             op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
-            existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
+            if op_tokens:
+                existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
+                # Also accumulate input/output tokens
+                input_toks = event_data.get("input_tokens", 0) or 0
+                output_toks = event_data.get("output_tokens", 0) or 0
+                existing["input_tokens"] = existing.get("input_tokens", 0) + input_toks
+                existing["output_tokens"] = existing.get("output_tokens", 0) + output_toks
+
             existing["total_cost_usd"] = float(
                 Decimal(str(existing.get("total_cost_usd", 0)))
                 + Decimal(str(event_data.get("cost_usd", 0)))
             )
 
-            # Store the operation in the operations list
+            # Store the operation with all fields (v2 event format)
             operations = existing.get("operations", [])
             operations.append(
                 {
@@ -97,11 +107,21 @@ class SessionListProjection:
                     "operation_type": event_data.get("operation_type", ""),
                     "timestamp": event_data.get("timestamp"),
                     "duration_seconds": event_data.get("duration_seconds"),
+                    "success": event_data.get("success", True),
+                    # Token metrics
                     "input_tokens": event_data.get("input_tokens"),
                     "output_tokens": event_data.get("output_tokens"),
                     "total_tokens": event_data.get("total_tokens"),
+                    # Tool details
                     "tool_name": event_data.get("tool_name"),
-                    "success": event_data.get("success", True),
+                    "tool_use_id": event_data.get("tool_use_id"),
+                    "tool_input": event_data.get("tool_input"),
+                    "tool_output": event_data.get("tool_output"),
+                    # Message details
+                    "message_role": event_data.get("message_role"),
+                    "message_content": event_data.get("message_content"),
+                    # Thinking details
+                    "thinking_content": event_data.get("thinking_content"),
                 }
             )
             existing["operations"] = operations

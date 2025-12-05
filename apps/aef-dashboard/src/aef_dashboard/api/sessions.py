@@ -78,7 +78,7 @@ async def get_session(session_id: str) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    # Convert operations from projection to API model
+    # Convert operations from projection to API model (includes v2 fields)
     operations = []
     for op in session.operations:
         # Handle timestamp - can be string or datetime
@@ -96,11 +96,21 @@ async def get_session(session_id: str) -> SessionResponse:
                 operation_type=op.operation_type,
                 timestamp=ts,
                 duration_seconds=op.duration_seconds,
+                success=op.success,
+                # Token metrics
                 input_tokens=op.input_tokens,
                 output_tokens=op.output_tokens,
                 total_tokens=op.total_tokens,
+                # Tool details
                 tool_name=op.tool_name,
-                success=op.success,
+                tool_use_id=op.tool_use_id,
+                tool_input=op.tool_input,
+                tool_output=op.tool_output,
+                # Message details
+                message_role=op.message_role,
+                message_content=op.message_content,
+                # Thinking details
+                thinking_content=op.thinking_content,
             )
         )
 

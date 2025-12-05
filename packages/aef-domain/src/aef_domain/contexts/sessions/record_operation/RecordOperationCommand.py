@@ -12,9 +12,10 @@ from aef_domain.contexts.sessions._shared.value_objects import OperationType  # 
 
 @command("RecordOperation", "Records an operation in an agent session")
 class RecordOperationCommand(BaseModel):
-    """Command to record an operation (agent request, tool execution, etc.).
+    """Command to record an operation (message, tool call, thinking, etc.).
 
-    Operations track individual actions within a session.
+    Operations track granular actions within a session for full observability.
+    Use the appropriate operation_type and populate type-specific fields.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -25,15 +26,25 @@ class RecordOperationCommand(BaseModel):
     # Operation details
     operation_type: OperationType
     duration_seconds: float | None = None
+    success: bool = True
 
-    # Token metrics (for agent requests)
+    # Token metrics (for MESSAGE_* types)
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
 
-    # Tool execution details
+    # Tool execution details (for TOOL_* types)
     tool_name: str | None = None
-    success: bool = True
+    tool_use_id: str | None = None  # Correlate TOOL_STARTED/COMPLETED
+    tool_input: dict[str, Any] | None = None  # Tool input parameters
+    tool_output: str | None = None  # Tool output (truncated if large)
 
-    # Optional metadata
+    # Message details (for MESSAGE_* types)
+    message_role: str | None = None  # user, assistant, system
+    message_content: str | None = None  # Message content (truncated)
+
+    # Thinking details (for THINKING type)
+    thinking_content: str | None = None  # Extended thinking (truncated)
+
+    # Generic metadata
     metadata: dict[str, Any] | None = None

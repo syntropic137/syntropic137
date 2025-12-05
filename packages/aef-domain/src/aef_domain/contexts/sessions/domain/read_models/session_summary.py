@@ -3,35 +3,67 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 
 @dataclass(frozen=True)
 class OperationRecord:
-    """Individual operation recorded during a session."""
+    """Individual operation recorded during a session.
+
+    Supports multiple operation types for full observability:
+    - MESSAGE_REQUEST/RESPONSE: LLM API calls
+    - TOOL_STARTED/COMPLETED/BLOCKED: Tool lifecycle
+    - THINKING: Extended thinking content
+    - ERROR: Error information
+    """
 
     operation_id: str
     operation_type: str
     timestamp: str | datetime | None
     duration_seconds: float | None = None
+    success: bool = True
+
+    # Token metrics (for MESSAGE_* types)
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
+
+    # Tool details (for TOOL_* types)
     tool_name: str | None = None
-    success: bool = True
+    tool_use_id: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_output: str | None = None
+
+    # Message details (for MESSAGE_* types)
+    message_role: str | None = None
+    message_content: str | None = None
+
+    # Thinking details (for THINKING type)
+    thinking_content: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> "OperationRecord":
-        """Create from dictionary."""
+        """Create from dictionary. Handles both v1 and v2 event formats."""
         return cls(
             operation_id=data.get("operation_id", ""),
             operation_type=data.get("operation_type", ""),
             timestamp=data.get("timestamp"),
             duration_seconds=data.get("duration_seconds"),
+            success=data.get("success", True),
+            # Token metrics
             input_tokens=data.get("input_tokens"),
             output_tokens=data.get("output_tokens"),
             total_tokens=data.get("total_tokens"),
+            # Tool details
             tool_name=data.get("tool_name"),
-            success=data.get("success", True),
+            tool_use_id=data.get("tool_use_id"),
+            tool_input=data.get("tool_input"),
+            tool_output=data.get("tool_output"),
+            # Message details
+            message_role=data.get("message_role"),
+            message_content=data.get("message_content"),
+            # Thinking details
+            thinking_content=data.get("thinking_content"),
         )
 
     def to_dict(self) -> dict:
@@ -44,11 +76,21 @@ class OperationRecord:
             "operation_type": self.operation_type,
             "timestamp": ts,
             "duration_seconds": self.duration_seconds,
+            "success": self.success,
+            # Token metrics
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
+            # Tool details
             "tool_name": self.tool_name,
-            "success": self.success,
+            "tool_use_id": self.tool_use_id,
+            "tool_input": self.tool_input,
+            "tool_output": self.tool_output,
+            # Message details
+            "message_role": self.message_role,
+            "message_content": self.message_content,
+            # Thinking details
+            "thinking_content": self.thinking_content,
         }
 
 
