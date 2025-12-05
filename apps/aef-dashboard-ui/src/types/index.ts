@@ -1,23 +1,23 @@
 // =============================================================================
-// WORKFLOW TYPES
+// WORKFLOW TEMPLATE TYPES
+// Note: Templates don't have status. Status belongs to Executions.
 // =============================================================================
 
 export interface WorkflowSummary {
   id: string
   name: string
   workflow_type: string
-  status: string
   phase_count: number
   created_at: string | null
+  runs_count: number
 }
 
-export interface PhaseInfo {
+export interface PhaseDefinition {
   phase_id: string
   name: string
   order: number
   description: string | null
-  status: string
-  artifact_id: string | null
+  agent_type: string
 }
 
 export interface WorkflowResponse {
@@ -26,11 +26,10 @@ export interface WorkflowResponse {
   description: string | null
   workflow_type: string
   classification: string
-  status: string
-  phases: PhaseInfo[]
+  phases: PhaseDefinition[]
   created_at: string | null
-  updated_at: string | null
-  metadata: Record<string, unknown>
+  runs_count: number
+  runs_link: string | null
 }
 
 export interface WorkflowListResponse {

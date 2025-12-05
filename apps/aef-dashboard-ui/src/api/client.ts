@@ -40,12 +40,12 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 // =============================================================================
 
 export async function listWorkflows(params?: {
-  status?: string
+  workflow_type?: string
   page?: number
   page_size?: number
 }): Promise<WorkflowListResponse> {
   const searchParams = new URLSearchParams()
-  if (params?.status) searchParams.set('status', params.status)
+  if (params?.workflow_type) searchParams.set('workflow_type', params.workflow_type)
   if (params?.page) searchParams.set('page', String(params.page))
   if (params?.page_size) searchParams.set('page_size', String(params.page_size))
 
@@ -97,7 +97,10 @@ export async function listExecutions(
   if (params?.page_size) searchParams.set('page_size', String(params.page_size))
 
   const query = searchParams.toString()
-  return fetchJSON(`${API_BASE}/workflows/${workflowId}/runs${query ? `?${query}` : ''}`)
+  const response = await fetchJSON<{ runs: WorkflowExecutionSummary[] }>(
+    `${API_BASE}/workflows/${workflowId}/runs${query ? `?${query}` : ''}`
+  )
+  return response.runs ?? []
 }
 
 export async function getExecution(executionId: string): Promise<ExecutionDetailResponse> {
