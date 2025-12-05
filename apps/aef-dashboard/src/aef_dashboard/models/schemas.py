@@ -94,17 +94,38 @@ class SessionSummary(BaseModel):
 
 
 class OperationInfo(BaseModel):
-    """Information about a session operation."""
+    """Information about a session operation.
+
+    Supports multiple operation types for full observability:
+    - MESSAGE_REQUEST/RESPONSE: LLM API calls
+    - TOOL_STARTED/COMPLETED/BLOCKED: Tool lifecycle
+    - THINKING: Extended thinking content
+    - ERROR: Error information
+    """
 
     operation_id: str
     operation_type: str
     timestamp: datetime | None = None
     duration_seconds: float | None = None
+    success: bool = True
+
+    # Token metrics (for MESSAGE_* types)
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
+
+    # Tool details (for TOOL_* types)
     tool_name: str | None = None
-    success: bool = True
+    tool_use_id: str | None = None
+    tool_input: dict[str, Any] | None = None
+    tool_output: str | None = None
+
+    # Message details (for MESSAGE_* types)
+    message_role: str | None = None
+    message_content: str | None = None
+
+    # Thinking details (for THINKING type)
+    thinking_content: str | None = None
 
 
 class SessionResponse(BaseModel):
