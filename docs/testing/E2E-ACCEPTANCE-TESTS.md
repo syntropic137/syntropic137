@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 2.0.0
+**Version:** 3.0.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-03
+**Updated:** 2025-12-04
 **Status:** Active
 
 ---
@@ -11,11 +11,59 @@
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
 
-**Version 2.0** adds comprehensive testing for the Agentic SDK integration including:
+**Version 3.0** adds:
+- **Workflow Execution Model** - Separate Templates from Executions/Runs
+- **Event Store Verification** - Critical tests ensuring all events reach the event store
+- **PhaseCompleted Events** - Verification of phase metrics propagation
+- **Execution Detail API** - New endpoints for viewing individual runs
+
+**Version 2.0** added comprehensive testing for the Agentic SDK integration including:
 - AgenticWorkflowExecutor with claude-agent-sdk
 - Workspace management with hook integration
 - Artifact bundle flow between phases
 - Event bridge connecting hook events to event store
+
+---
+
+## ⚠️ CRITICAL: Event Store is the Source of Truth
+
+> **GOLDEN RULE: If it's not in the Event Store, it didn't happen.**
+
+All state changes in AEF **MUST** be persisted to the event store via aggregates. This is non-negotiable because:
+
+1. **Projections depend on events** - Read models are built from event streams
+2. **Audit trail** - Events provide complete history of all actions
+3. **Recovery** - System state can be rebuilt from events
+4. **Consistency** - Single source of truth prevents data drift
+
+### Event Emission Checklist
+
+Every command handler MUST emit events. Verify these are in the event store:
+
+| Action | Expected Event | Aggregate |
+|--------|----------------|-----------|
+| Start workflow execution | `WorkflowExecutionStarted` | WorkflowExecution |
+| Complete phase | `PhaseCompleted` | WorkflowExecution |
+| Complete workflow | `WorkflowCompleted` | WorkflowExecution |
+| Fail workflow | `WorkflowFailed` | WorkflowExecution |
+| Start session | `SessionStarted` | AgentSession |
+| Record operation | `OperationRecorded` | AgentSession |
+| Complete session | `SessionCompleted` | AgentSession |
+| Create artifact | `ArtifactCreated` | Artifact |
+| Create workflow | `WorkflowCreated` | Workflow |
+
+### Verification Query
+
+After any action, verify events exist:
+
+```sql
+-- Check events were persisted
+SELECT event_type, aggregate_id, global_nonce, created_at
+FROM events
+WHERE event_type = 'PhaseCompleted'
+ORDER BY global_nonce DESC
+LIMIT 10;
+```
 
 ### Test Environment
 
@@ -543,6 +591,273 @@ curl -s http://localhost:8000/api/workflows | jq '.total'
 
 ---
 
+## Feature 7.5: Event Store Verification ⭐ CRITICAL
+
+> **This feature tests the most critical invariant: all events reach the event store**
+
+### F7.5.1 WorkflowExecutionStarted Event Persistence
+
+**Given** I start a workflow execution via the dashboard
+**When** the execution begins
+**Then** `WorkflowExecutionStarted` event is in the event store
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.5.1.1 | Event exists in `events` table | ⬜ |
+| 7.5.1.2 | `aggregate_type` = 'WorkflowExecution' | ⬜ |
+| 7.5.1.3 | Payload contains `execution_id` | ⬜ |
+| 7.5.1.4 | Payload contains `workflow_id` | ⬜ |
+| 7.5.1.5 | Payload contains `total_phases` | ⬜ |
+
+**Validation:**
+```bash
+# After starting a workflow
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, aggregate_id, global_nonce FROM events WHERE event_type = 'WorkflowExecutionStarted' ORDER BY global_nonce DESC LIMIT 1;"
+```
+
+### F7.5.2 PhaseCompleted Event Persistence
+
+**Given** a phase completes during workflow execution
+**When** the phase finishes successfully
+**Then** `PhaseCompleted` event is in the event store with metrics
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.5.2.1 | Event exists in `events` table | ⬜ |
+| 7.5.2.2 | Payload contains `phase_id` | ⬜ |
+| 7.5.2.3 | Payload contains `input_tokens` > 0 | ⬜ |
+| 7.5.2.4 | Payload contains `output_tokens` > 0 | ⬜ |
+| 7.5.2.5 | Payload contains `duration_seconds` > 0 | ⬜ |
+| 7.5.2.6 | Payload contains `cost_usd` | ⬜ |
+| 7.5.2.7 | Payload contains `session_id` | ⬜ |
+
+**Validation:**
+```bash
+# After a phase completes
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, convert_from(payload, 'UTF8')::json as payload FROM events WHERE event_type = 'PhaseCompleted' ORDER BY global_nonce DESC LIMIT 1;"
+```
+
+### F7.5.3 SessionStarted/Completed Event Persistence
+
+**Given** a session runs during phase execution
+**When** the session completes
+**Then** both `SessionStarted` and `SessionCompleted` events exist
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.5.3.1 | `SessionStarted` event exists | ⬜ |
+| 7.5.3.2 | `SessionCompleted` event exists | ⬜ |
+| 7.5.3.3 | `OperationRecorded` event exists (if tokens used) | ⬜ |
+| 7.5.3.4 | Session events have matching `session_id` | ⬜ |
+| 7.5.3.5 | Completed event has `total_tokens` | ⬜ |
+
+**Validation:**
+```bash
+# Check session events
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, aggregate_id FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce;"
+```
+
+### F7.5.4 Event Store → Projection Consistency
+
+**Given** events are in the event store
+**When** I query the API
+**Then** projection data matches event data
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.5.4.1 | Workflow detail reflects WorkflowExecutionStarted | ⬜ |
+| 7.5.4.2 | Phase metrics reflect PhaseCompleted events | ⬜ |
+| 7.5.4.3 | Session list reflects SessionStarted events | ⬜ |
+| 7.5.4.4 | Session detail reflects OperationRecorded events | ⬜ |
+| 7.5.4.5 | Dashboard metrics reflect all completed sessions | ⬜ |
+
+**Validation:**
+```bash
+# Compare event store to API
+EVENT_COUNT=$(docker exec aef-postgres psql -U aef -d aef -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
+API_COUNT=$(curl -s http://localhost:8000/api/sessions?status=completed | jq 'length')
+echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
+```
+
+### F7.5.5 Missing Event Detection (Regression Test)
+
+**Given** a workflow executes end-to-end
+**When** I count events by type
+**Then** all expected event types are present
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.5.5.1 | WorkflowExecutionStarted count = executions started | ⬜ |
+| 7.5.5.2 | PhaseCompleted count = phases completed | ⬜ |
+| 7.5.5.3 | SessionStarted count = sessions started | ⬜ |
+| 7.5.5.4 | SessionCompleted count = sessions completed | ⬜ |
+| 7.5.5.5 | No orphan sessions (started without completed) | ⬜ |
+
+**Validation:**
+```bash
+# Full event audit
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
+```
+
+---
+
+## Feature 7.6: Workflow Execution Model ⭐ NEW
+
+> **Separates Workflow Templates from Workflow Executions (Runs)**
+
+### Entity Model
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     WORKFLOW EXECUTION MODEL                      │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                   │
+│   WorkflowDefinition (Template)                                   │
+│   ├── id: "implementation-workflow-v1"                           │
+│   ├── name: "Implementation Workflow"                            │
+│   └── phases: [research, innovate, plan, execute, review]        │
+│           │                                                       │
+│           │ 1:N                                                   │
+│           ▼                                                       │
+│   WorkflowExecution (Run)                                         │
+│   ├── execution_id: "exec-abc123"                                │
+│   ├── workflow_id: "implementation-workflow-v1"                  │
+│   ├── status: "completed"                                        │
+│   ├── started_at / completed_at                                  │
+│   ├── total_tokens, total_cost                                   │
+│   └── phases: [{phase_id, status, tokens, cost, duration}, ...]  │
+│           │                                                       │
+│           │ 1:N                                                   │
+│           ▼                                                       │
+│   Session                                                         │
+│   ├── session_id: "sess-xyz"                                     │
+│   ├── execution_id: "exec-abc123"  ← Links to execution          │
+│   ├── phase_id: "research"                                       │
+│   └── tokens, cost, operations                                   │
+│                                                                   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### F7.6.1 Workflow Runs List API
+
+**Given** a workflow has been executed multiple times
+**When** I request `/api/workflows/{id}/runs`
+**Then** I get a list of all executions
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.6.1.1 | Endpoint returns 200 | ⬜ |
+| 7.6.1.2 | Response includes `runs` array | ⬜ |
+| 7.6.1.3 | Each run has `execution_id` | ⬜ |
+| 7.6.1.4 | Each run has `status` | ⬜ |
+| 7.6.1.5 | Each run has `started_at` | ⬜ |
+| 7.6.1.6 | Each run has `completed_phases` / `total_phases` | ⬜ |
+| 7.6.1.7 | Each run has `total_tokens` | ⬜ |
+| 7.6.1.8 | Each run has `total_cost_usd` | ⬜ |
+| 7.6.1.9 | Runs are ordered by `started_at` descending | ⬜ |
+
+**Validation:**
+```bash
+curl -s http://localhost:8000/api/workflows/implementation-workflow-v1/runs | jq
+```
+
+### F7.6.2 Execution Detail API
+
+**Given** a workflow execution exists
+**When** I request `/api/executions/{execution_id}`
+**Then** I get full execution details with phase metrics
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.6.2.1 | Endpoint returns 200 | ⬜ |
+| 7.6.2.2 | Response includes `execution_id` | ⬜ |
+| 7.6.2.3 | Response includes `workflow_id` | ⬜ |
+| 7.6.2.4 | Response includes `status` | ⬜ |
+| 7.6.2.5 | Response includes `phases` array | ⬜ |
+| 7.6.2.6 | Each phase has `phase_id` and `name` | ⬜ |
+| 7.6.2.7 | Each phase has `input_tokens` and `output_tokens` | ⬜ |
+| 7.6.2.8 | Each phase has `duration_seconds` | ⬜ |
+| 7.6.2.9 | Each phase has `cost_usd` | ⬜ |
+| 7.6.2.10 | Each phase has `session_id` link | ⬜ |
+| 7.6.2.11 | Response includes `artifact_ids` | ⬜ |
+
+**Validation:**
+```bash
+curl -s http://localhost:8000/api/executions/<execution_id> | jq
+```
+
+### F7.6.3 Session → Execution Link
+
+**Given** sessions are created during execution
+**When** I query session detail
+**Then** it includes `execution_id`
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.6.3.1 | Session response includes `execution_id` | ⬜ |
+| 7.6.3.2 | Sessions can be filtered by `execution_id` | ⬜ |
+| 7.6.3.3 | Session list shows execution link | ⬜ |
+
+**Validation:**
+```bash
+curl -s http://localhost:8000/api/sessions/<session_id> | jq '.execution_id'
+curl -s "http://localhost:8000/api/sessions?execution_id=<exec_id>" | jq
+```
+
+### F7.6.4 Workflow Template → Runs Count
+
+**Given** a workflow has executions
+**When** I request workflow detail
+**Then** it shows total runs count with link
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.6.4.1 | Workflow detail includes `runs_count` | ⬜ |
+| 7.6.4.2 | `runs_count` matches actual executions | ⬜ |
+| 7.6.4.3 | Workflow detail includes `runs_link` | ⬜ |
+
+**Validation:**
+```bash
+curl -s http://localhost:8000/api/workflows/implementation-workflow-v1 | jq '{runs_count, runs_link}'
+```
+
+### F7.6.5 UI: Workflow Runs Page
+
+**Given** I'm on a workflow detail page
+**When** I click "View Runs"
+**Then** I see the runs list page
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.6.5.1 | "Runs" card shows count on template page | ⬜ |
+| 7.6.5.2 | "View →" link navigates to `/workflows/{id}/runs` | ⬜ |
+| 7.6.5.3 | Runs list shows all executions | ⬜ |
+| 7.6.5.4 | Each run shows status badge | ⬜ |
+| 7.6.5.5 | Each run shows token count and cost | ⬜ |
+| 7.6.5.6 | Clicking a run navigates to execution detail | ⬜ |
+
+### F7.6.6 UI: Execution Detail Page
+
+**Given** I'm on the runs list
+**When** I click an execution
+**Then** I see the execution detail page
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 7.6.6.1 | URL is `/executions/{execution_id}` | ⬜ |
+| 7.6.6.2 | Shows execution status and duration | ⬜ |
+| 7.6.6.3 | Shows phase pipeline with status | ⬜ |
+| 7.6.6.4 | Shows "Token Usage by Phase" chart with data | ⬜ |
+| 7.6.6.5 | Shows sessions list for this execution | ⬜ |
+| 7.6.6.6 | Shows artifacts generated | ⬜ |
+| 7.6.6.7 | Back link returns to runs list | ⬜ |
+
+---
+
 ## Feature 8: Agentic Workflow Execution ⭐ NEW
 
 > **Requires:** `aef-adapters[claude-agentic]` installed
@@ -1005,6 +1320,10 @@ assert agent is not None
 6. [ ] **F6: Consistency** - Cross-component validation
 7. [ ] **F7: Error Handling** - Edge cases
 
+**Event Store & Execution Model (F7.5-F7.6) ⭐ CRITICAL:**
+7.5. [ ] **F7.5: Event Store Verification** - Verify all events reach event store
+7.6. [ ] **F7.6: Workflow Execution Model** - Test runs list and execution detail
+
 **Agentic Integration (F8-F12):**
 8. [ ] **F8: Agentic Execution** - AgenticWorkflowExecutor tests
 9. [ ] **F9: Workspaces** - LocalWorkspace with hooks
@@ -1015,6 +1334,12 @@ assert agent is not None
 ### Quick Pytest Commands
 
 ```bash
+# ⭐ CRITICAL: Run event store regression tests FIRST
+APP_ENVIRONMENT=test pytest packages/aef-domain/tests/integration/test_event_projection_consistency.py -v
+
+# Run all domain tests
+APP_ENVIRONMENT=test pytest packages/aef-domain/ -v
+
 # Run all agentic tests (F8-F12)
 pytest packages/aef-adapters/tests/test_*.py -v
 
@@ -1024,6 +1349,9 @@ pytest packages/aef-adapters/tests/test_workspaces.py -v         # F9
 pytest packages/aef-adapters/tests/test_artifacts.py -v          # F10
 pytest packages/aef-adapters/tests/test_events.py -v             # F11
 pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
+
+# Full QA check (lint + type + test)
+poetry run poe check-fix
 ```
 
 ### Post-Test
@@ -1044,12 +1372,14 @@ pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
 | F5 | Dashboard Frontend | 15 | ⬜ | ⬜ | ⬜ |
 | F6 | Data Consistency | 6 | ⬜ | ⬜ | ⬜ |
 | F7 | Error Handling | 6 | ⬜ | ⬜ | ⬜ |
+| **F7.5** | **Event Store Verification** ⭐ | **22** | ⬜ | ⬜ | ⬜ |
+| **F7.6** | **Workflow Execution Model** ⭐ | **30** | ⬜ | ⬜ | ⬜ |
 | **F8** | **Agentic Workflow Execution** | **16** | ⬜ | ⬜ | ⬜ |
 | **F9** | **Workspace & Hook Integration** | **13** | ⬜ | ⬜ | ⬜ |
 | **F10** | **Artifact Bundle Flow** | **13** | ⬜ | ⬜ | ⬜ |
 | **F11** | **Event Bridge** | **12** | ⬜ | ⬜ | ⬜ |
 | **F12** | **Agent Provider Management** | **9** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **142** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **194** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -1064,6 +1394,15 @@ pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
 ## Notes
 
 _Add any observations, recommendations, or follow-up items here._
+
+### Migration Notes (v2.0 → v3.0)
+
+- **Event Store Verification:** New F7.5 tests ensure all events reach event store
+- **Workflow Execution Model:** New F7.6 tests for separating templates from runs
+- **New Endpoints:** `/api/workflows/{id}/runs` and `/api/executions/{id}`
+- **Session Updates:** Sessions now link to `execution_id`
+- **Test Count:** Increased from 142 to 194 criteria
+- **Critical Tests:** F7.5 tests should **never** be skipped - they catch event emission bugs
 
 ### Migration Notes (v1.0 → v2.0)
 
@@ -1081,4 +1420,37 @@ _Add any observations, recommendations, or follow-up items here._
 | API | F4 | curl/httpie or pytest |
 | Frontend | F5 | Manual browser |
 | Integration | F6, F7 | Mixed |
+| **Event Store** ⭐ | **F7.5** | **SQL + API (critical)** |
+| **Execution Model** ⭐ | **F7.6** | **API + Browser** |
 | **Agentic** | **F8-F12** | **pytest (automated)** |
+
+### Known Issues & Learnings
+
+| Issue | Root Cause | Fix | ADR |
+|-------|------------|-----|-----|
+| PhaseCompleted events missing | Command existed but not called in execution service | Added `_complete_phase()` method | ADR-013 |
+| Operations not showing in UI | Projection didn't store operations array | Updated `on_operation_recorded` handler | ADR-013 |
+| Workflow status inconsistent | List vs detail projections updated differently | Unified status update logic | ADR-013 |
+| Sessions stuck in "running" | Session never completed if execution failed | Add cleanup on failure | - |
+
+### Event Store Debugging Commands
+
+```bash
+# List all events
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
+
+# Find missing PhaseCompleted events
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT
+     (SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted') as session_completed,
+     (SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted') as phase_completed;"
+
+# Check projection sync
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT projection_name, last_event_position FROM projection_states;"
+
+# Reset projections (DANGEROUS - rebuilds from scratch)
+docker exec aef-postgres psql -U aef -d aef -c \
+  "UPDATE projection_states SET last_event_position = 0 WHERE projection_name = 'global_subscription';"
+```

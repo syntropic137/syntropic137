@@ -142,11 +142,12 @@ class EventBridge:
             if self._event_store is not None:
                 await self._store_event(domain_event)
 
-            # Call callback if provided
+            # Call callback if provided (return value is intentionally ignored;
+            # callbacks are for side effects, but we await coroutines)
             if callback is not None:
-                result = callback(domain_event)
-                if asyncio.iscoroutine(result):
-                    await result
+                maybe_coro = callback(domain_event)
+                if asyncio.iscoroutine(maybe_coro):
+                    await maybe_coro
 
             events_processed += 1
 
@@ -197,11 +198,12 @@ class EventBridge:
                 if self._event_store is not None:
                     await self._store_event(domain_event)
 
-                # Call callback if provided
+                # Call callback if provided (return value is intentionally ignored;
+                # callbacks are for side effects, but we await coroutines)
                 if callback is not None:
-                    result = callback(domain_event)
-                    if asyncio.iscoroutine(result):
-                        await result
+                    maybe_coro = callback(domain_event)
+                    if asyncio.iscoroutine(maybe_coro):
+                        await maybe_coro
 
         except asyncio.CancelledError:
             logger.info("Event bridge watch cancelled")

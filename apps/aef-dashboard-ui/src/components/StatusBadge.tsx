@@ -23,8 +23,10 @@ const sizeClasses = {
 }
 
 export function StatusBadge({ status, size = 'md', pulse = false }: StatusBadgeProps) {
-  const colors = statusColors[status] ?? statusColors.pending
-  const isActive = status === 'running' || status === 'in_progress'
+  // Guard against undefined/null status
+  const safeStatus = status ?? 'unknown'
+  const colors = statusColors[safeStatus] ?? statusColors.pending
+  const isActive = safeStatus === 'running' || safeStatus === 'in_progress'
 
   return (
     <span
@@ -42,18 +44,18 @@ export function StatusBadge({ status, size = 'md', pulse = false }: StatusBadgeP
           <span
             className={clsx(
               'absolute inline-flex h-full w-full animate-ping rounded-full opacity-75',
-              status === 'running' ? 'bg-blue-400' : 'bg-blue-400'
+              safeStatus === 'running' ? 'bg-blue-400' : 'bg-blue-400'
             )}
           />
           <span
             className={clsx(
               'relative inline-flex h-2 w-2 rounded-full',
-              status === 'running' ? 'bg-blue-500' : 'bg-blue-500'
+              safeStatus === 'running' ? 'bg-blue-500' : 'bg-blue-500'
             )}
           />
         </span>
       )}
-      {status.replace('_', ' ')}
+      {safeStatus.replace('_', ' ')}
     </span>
   )
 }

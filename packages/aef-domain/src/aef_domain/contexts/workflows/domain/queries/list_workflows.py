@@ -1,21 +1,18 @@
-"""Query DTO for listing workflows."""
+"""Query DTO for listing workflow templates."""
 
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class ListWorkflowsQuery:
-    """Query to list all workflows with optional filtering.
+    """Query to list workflow templates with optional filtering.
 
-    This is a pure data transfer object that contains no business logic.
-    It simply defines the parameters for the query operation.
+    Note: Templates don't have status. For execution status filtering,
+    use ListWorkflowExecutionsQuery instead.
     """
 
-    status_filter: str | None = None
-    """Filter by workflow status (e.g., 'pending', 'in_progress', 'completed')."""
-
     workflow_type_filter: str | None = None
-    """Filter by workflow type."""
+    """Filter by workflow type (e.g., 'research', 'implementation')."""
 
     limit: int = 100
     """Maximum number of results to return."""

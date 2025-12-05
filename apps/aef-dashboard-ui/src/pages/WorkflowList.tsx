@@ -1,16 +1,16 @@
-import { ChevronRight, GitBranch, Search } from 'lucide-react'
+import { ChevronRight, GitBranch, Play, Search } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { listWorkflows } from '../api/client'
-import { Card, CardContent, EmptyState, PageLoader, StatusBadge } from '../components'
+import { Card, CardContent, EmptyState, PageLoader } from '../components'
 import type { WorkflowSummary } from '../types'
 
 export function WorkflowList() {
   const [workflows, setWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [typeFilter, setTypeFilter] = useState<string>('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const pageSize = 20
@@ -18,7 +18,7 @@ export function WorkflowList() {
   useEffect(() => {
     let cancelled = false
     listWorkflows({
-      status: statusFilter || undefined,
+      workflow_type: typeFilter || undefined,
       page,
       page_size: pageSize,
     })
@@ -30,13 +30,13 @@ export function WorkflowList() {
       })
       .catch((err) => { if (!cancelled) { console.error(err); setLoading(false) } })
     return () => { cancelled = true }
-  }, [statusFilter, page])
+  }, [typeFilter, page])
 
   const filteredWorkflows = searchQuery
     ? workflows.filter((w) =>
-        w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        w.id.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+      w.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      w.id.toLowerCase().includes(searchQuery.toLowerCase())
+    )
     : workflows
 
   const totalPages = Math.ceil(total / pageSize)
@@ -46,9 +46,9 @@ export function WorkflowList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Workflows</h1>
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Workflow Templates</h1>
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-            Manage and monitor your agentic workflows
+            Reusable workflow definitions you can execute
           </p>
         </div>
       </div>
@@ -66,19 +66,18 @@ export function WorkflowList() {
           />
         </div>
         <select
-          value={statusFilter}
+          value={typeFilter}
           onChange={(e) => {
-            setStatusFilter(e.target.value)
+            setTypeFilter(e.target.value)
             setPage(1)
           }}
           className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
         >
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="in_progress">In Progress</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="cancelled">Cancelled</option>
+          <option value="">All types</option>
+          <option value="research">Research</option>
+          <option value="implementation">Implementation</option>
+          <option value="planning">Planning</option>
+          <option value="review">Review</option>
         </select>
       </div>
 
@@ -93,7 +92,7 @@ export function WorkflowList() {
             description={
               searchQuery
                 ? 'Try adjusting your search query'
-                : 'Run your first workflow with `aef run workflow.yaml`'
+                : 'Seed workflows with `just seed-workflows`'
             }
           />
         </Card>
@@ -118,7 +117,12 @@ export function WorkflowList() {
                           <span className="font-medium text-[var(--color-text-primary)]">
                             {workflow.name}
                           </span>
-                          <StatusBadge status={workflow.status} size="sm" />
+                          {workflow.runs_count > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-elevated)] px-2 py-0.5 text-xs text-[var(--color-text-secondary)]">
+                              <Play className="h-3 w-3" />
+                              {workflow.runs_count} runs
+                            </span>
+                          )}
                         </div>
                         <div className="mt-0.5 flex items-center gap-3 text-xs text-[var(--color-text-secondary)]">
                           <span className="font-mono">{workflow.id.slice(0, 8)}...</span>

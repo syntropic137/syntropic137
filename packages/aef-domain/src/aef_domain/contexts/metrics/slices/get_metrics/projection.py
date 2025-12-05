@@ -85,8 +85,16 @@ class DashboardMetricsProjection:
         """Handle SessionCompleted - update token and cost totals."""
         metrics = await self._get_or_create_metrics()
 
-        # Add tokens from this session
+        # Add total tokens from this session
         metrics["total_tokens"] = metrics.get("total_tokens", 0) + event_data.get("total_tokens", 0)
+
+        # Add input/output token breakdown
+        metrics["total_input_tokens"] = metrics.get("total_input_tokens", 0) + event_data.get(
+            "total_input_tokens", 0
+        )
+        metrics["total_output_tokens"] = metrics.get("total_output_tokens", 0) + event_data.get(
+            "total_output_tokens", 0
+        )
 
         # Add cost from this session
         existing_cost = Decimal(str(metrics.get("total_cost_usd", 0)))

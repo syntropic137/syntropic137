@@ -2,14 +2,18 @@
 
 **Project:** Agentic Engineering Framework
 **Updated:** 2025-12-04
-**Branch:** `feat/agentic-sdk-full-integration`
-**Status:** All tests passing (233) ✅
+**Branch:** `testing/e2e-validation` (NEW - testing refinement branch)
+**Status:** All tests passing (233) ✅ | PR #4 merged to main ✅
 
 ---
 
 ## Where I Left Off
 
-Completed critical bug fixes for **datetime serialization in projections** and added comprehensive test coverage for the `SessionListProjection`. Also created **ADR-013** outlining an improved integration testing strategy using Testcontainers.
+**Merged PR #4** (`feat/agentic-sdk-full-integration` → `main`) with all Claude Agent SDK integration work. Now on a new branch to work out remaining kinks and ensure all features work as expected.
+
+## Current Focus: Testing & Polish
+
+Goal: Fix inconsistencies, validate all features work E2E, and ensure clean architecture.
 
 ## What Was Just Completed
 
@@ -41,7 +45,25 @@ Completed critical bug fixes for **datetime serialization in projections** and a
 - All lint/type checks passing ✅
 - CI/CD pipeline green ✅
 
+## Known Issues to Fix
+
+Based on user testing, the following inconsistencies need to be addressed:
+
+| Issue | Status | Notes |
+|-------|--------|-------|
+| Token distributions not showing | ⏳ | Dashboard metrics may not be updating |
+| Workflow status staying "pending" | ⏳ | WorkflowExecutionAggregate events not flowing to projections |
+| Session list not updating | ⏳ | Session events may not be subscribed properly |
+| Artifact content not viewable | ⏳ | Content reading from workspace may have issues |
+
 ## What To Do Next
+
+### Priority 0: Fix Known Issues
+
+1. **Debug workflow status** - Why do workflows stay "pending" after execution?
+2. **Debug token counts** - Why aren't token metrics displaying?
+3. **Debug sessions** - Why doesn't the session list update?
+4. **Debug artifacts** - Why can't artifact content be viewed?
 
 ### Priority 1: Improve Testing Flow (ADR-013)
 

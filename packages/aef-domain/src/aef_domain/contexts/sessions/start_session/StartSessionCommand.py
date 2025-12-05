@@ -23,6 +23,7 @@ class StartSessionCommand(BaseModel):
 
     # Context
     workflow_id: str = Field(..., description="Workflow this session belongs to")
+    execution_id: str | None = Field(default=None, description="Workflow execution/run ID")
     phase_id: str = Field(..., description="Phase within the workflow")
     milestone_id: str | None = Field(default=None, description="Optional milestone")
 
