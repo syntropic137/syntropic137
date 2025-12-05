@@ -183,6 +183,7 @@ dependencies = [
     { name = "aef-dashboard" },
     { name = "aef-domain" },
     { name = "aef-shared" },
+    { name = "claude-agent-sdk" },
     { name = "event-sourcing-python" },
     { name = "grpcio" },
 ]
@@ -214,6 +215,7 @@ requires-dist = [
     { name = "aef-dashboard", editable = "apps/aef-dashboard" },
     { name = "aef-domain", editable = "packages/aef-domain" },
     { name = "aef-shared", editable = "packages/aef-shared" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.11" },
     { name = "claude-agent-sdk", marker = "extra == 'agentic'", specifier = ">=0.1.9" },
     { name = "claude-agent-sdk", marker = "extra == 'all'", specifier = ">=0.1.9" },
     { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
