@@ -17,11 +17,10 @@ Architecture verified:
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 from datetime import UTC, datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -29,7 +28,6 @@ from aef_adapters.subscriptions.service import (
     SUBSCRIPTION_POSITION_KEY,
     EventSubscriptionService,
 )
-
 
 # ============================================================================
 # Mock Event Store
@@ -309,7 +307,7 @@ class TestLiveUpdatesE2E:
         # 1. Setup: register a projection handler to simulate update
         updated_record = None
 
-        async def handle_phase_completed(event_type: str, event_data: dict) -> None:
+        async def handle_phase_completed(_event_type: str, event_data: dict) -> None:
             nonlocal updated_record
             # Simulate projection update
             updated_record = {
@@ -368,9 +366,7 @@ class TestLiveUpdatesE2E:
         assert updated_record["cost_usd"] == "0.07"
 
         # 7. Verify record is queryable via projection store
-        stored = await projection_store.get(
-            "execution_phases", "exec-001#research"
-        )
+        stored = await projection_store.get("execution_phases", "exec-001#research")
         assert stored is not None
         assert stored["total_tokens"] == 2400
 
@@ -505,8 +501,6 @@ class TestLiveUpdatesE2E:
     async def test_live_subscription_receives_new_events(
         self,
         event_store: MockEventStore,
-        projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
         subscription_service: EventSubscriptionService,
     ):
         """Test that subscription receives new events after catch-up completes."""
@@ -547,8 +541,6 @@ class TestLiveUpdatesE2E:
     async def test_health_endpoint_status(
         self,
         event_store: MockEventStore,
-        projection_manager: MockProjectionManager,
-        projection_store: MockProjectionStore,
         subscription_service: EventSubscriptionService,
     ):
         """Test health status reflects subscription state."""
@@ -602,7 +594,7 @@ class TestLiveUpdatesE2E:
         # Setup: track aggregated metrics
         execution_summaries = {}
 
-        async def handle_execution_started(event_type: str, event_data: dict) -> None:
+        async def handle_execution_started(_event_type: str, event_data: dict) -> None:
             exec_id = event_data["execution_id"]
             execution_summaries[exec_id] = {
                 "execution_id": exec_id,
@@ -617,7 +609,7 @@ class TestLiveUpdatesE2E:
                 "workflow_executions", exec_id, execution_summaries[exec_id]
             )
 
-        async def handle_phase_completed(event_type: str, event_data: dict) -> None:
+        async def handle_phase_completed(_event_type: str, event_data: dict) -> None:
             exec_id = event_data["execution_id"]
             if exec_id in execution_summaries:
                 summary = execution_summaries[exec_id]
@@ -626,7 +618,7 @@ class TestLiveUpdatesE2E:
                 summary["total_cost_usd"] += Decimal(event_data.get("cost_usd", "0"))
                 await projection_store.save("workflow_executions", exec_id, summary)
 
-        async def handle_workflow_completed(event_type: str, event_data: dict) -> None:
+        async def handle_workflow_completed(_event_type: str, event_data: dict) -> None:
             exec_id = event_data["execution_id"]
             if exec_id in execution_summaries:
                 execution_summaries[exec_id]["status"] = "completed"
@@ -636,9 +628,7 @@ class TestLiveUpdatesE2E:
                     execution_summaries[exec_id],
                 )
 
-        projection_manager.register_handler(
-            "WorkflowExecutionStarted", handle_execution_started
-        )
+        projection_manager.register_handler("WorkflowExecutionStarted", handle_execution_started)
         projection_manager.register_handler("PhaseCompleted", handle_phase_completed)
         projection_manager.register_handler("WorkflowCompleted", handle_workflow_completed)
 
@@ -727,7 +717,6 @@ class TestLiveUpdatesPerformance:
         event_store: MockEventStore,
         projection_manager: MockProjectionManager,
         projection_store: MockProjectionStore,
-        subscription_service: EventSubscriptionService,
     ):
         """Test handling of high event volume (100+ events)."""
         # 1. Generate 100 events

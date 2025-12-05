@@ -25,25 +25,25 @@ class OperationType(str, Enum):
     """
 
     # Messages (LLM API calls)
-    MESSAGE_REQUEST = "message_request"    # User/system prompt sent to LLM
+    MESSAGE_REQUEST = "message_request"  # User/system prompt sent to LLM
     MESSAGE_RESPONSE = "message_response"  # LLM response received
 
     # Tool lifecycle
-    TOOL_STARTED = "tool_started"          # Tool invocation began
-    TOOL_COMPLETED = "tool_completed"      # Tool finished (success/fail)
-    TOOL_BLOCKED = "tool_blocked"          # Tool blocked by validator
+    TOOL_STARTED = "tool_started"  # Tool invocation began
+    TOOL_COMPLETED = "tool_completed"  # Tool finished (success/fail)
+    TOOL_BLOCKED = "tool_blocked"  # Tool blocked by validator
 
     # Extended thinking
-    THINKING = "thinking"                  # Extended thinking content
+    THINKING = "thinking"  # Extended thinking content
 
     # Errors
-    ERROR = "error"                        # Error occurred
+    ERROR = "error"  # Error occurred
 
     # Legacy (deprecated, keep for backward compat)
-    AGENT_REQUEST = "agent_request"        # Deprecated - use MESSAGE_*
-    TOOL_EXECUTION = "tool_execution"      # Deprecated - use TOOL_*
-    TOOL_USE = "tool_use"                  # Deprecated - use TOOL_COMPLETED
-    VALIDATION = "validation"              # Keep for validation operations
+    AGENT_REQUEST = "agent_request"  # Deprecated - use MESSAGE_*
+    TOOL_EXECUTION = "tool_execution"  # Deprecated - use TOOL_*
+    TOOL_USE = "tool_use"  # Deprecated - use TOOL_COMPLETED
+    VALIDATION = "validation"  # Keep for validation operations
 
 
 @dataclass(frozen=True)
@@ -83,16 +83,16 @@ class OperationRecord:
 
     # Tool execution details (for TOOL_* types)
     tool_name: str | None = None
-    tool_use_id: str | None = None           # Correlate TOOL_STARTED/COMPLETED
+    tool_use_id: str | None = None  # Correlate TOOL_STARTED/COMPLETED
     tool_input: dict[str, Any] | None = None  # Tool input parameters
-    tool_output: str | None = None            # Tool output (truncated)
+    tool_output: str | None = None  # Tool output (truncated)
 
     # Message details (for MESSAGE_* types)
-    message_role: str | None = None           # user, assistant, system
-    message_content: str | None = None        # Message content (truncated)
+    message_role: str | None = None  # user, assistant, system
+    message_content: str | None = None  # Message content (truncated)
 
     # Thinking details (for THINKING type)
-    thinking_content: str | None = None       # Extended thinking (truncated)
+    thinking_content: str | None = None  # Extended thinking (truncated)
 
     # Generic metadata
     metadata: dict[str, Any] = field(default_factory=dict)

@@ -162,9 +162,9 @@ class ToolUsed:
     tool_use_id: str | None = None
     success: bool = True
     # Output and timing (new fields for full observability)
-    tool_output: str | None = None   # Tool output (may be truncated)
+    tool_output: str | None = None  # Tool output (may be truncated)
     duration_ms: float | None = None  # How long the tool took
-    error: str | None = None          # Error message if failed
+    error: str | None = None  # Error message if failed
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 

@@ -130,7 +130,9 @@ class EventSubscriptionService:
             "events_processed": self._events_processed,
             "reconnect_count": self._reconnect_count,
             "last_event_time": self._last_event_time.isoformat() if self._last_event_time else None,
-            "last_position_save": self._last_position_save.isoformat() if self._last_position_save else None,
+            "last_position_save": self._last_position_save.isoformat()
+            if self._last_position_save
+            else None,
         }
         logger.debug(
             "[SUBSCRIPTION] Status requested",
@@ -500,7 +502,9 @@ class EventSubscriptionService:
 
                 event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
                 global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-                aggregate_id = getattr(getattr(envelope, "metadata", None), "aggregate_id", "unknown")
+                aggregate_id = getattr(
+                    getattr(envelope, "metadata", None), "aggregate_id", "unknown"
+                )
                 live_events_received += 1
                 self._last_event_time = datetime.now(UTC)
 

@@ -42,16 +42,16 @@ class OperationRecordedEvent(DomainEvent):
 
     # Tool execution details (for TOOL_* types)
     tool_name: str | None = None
-    tool_use_id: str | None = None              # Correlate TOOL_STARTED/COMPLETED
-    tool_input: dict[str, Any] | None = None    # Tool input parameters
-    tool_output: str | None = None              # Tool output (truncated if large)
+    tool_use_id: str | None = None  # Correlate TOOL_STARTED/COMPLETED
+    tool_input: dict[str, Any] | None = None  # Tool input parameters
+    tool_output: str | None = None  # Tool output (truncated if large)
 
     # Message details (for MESSAGE_* types)
-    message_role: str | None = None             # user, assistant, system
-    message_content: str | None = None          # Message content (truncated)
+    message_role: str | None = None  # user, assistant, system
+    message_content: str | None = None  # Message content (truncated)
 
     # Thinking details (for THINKING type)
-    thinking_content: str | None = None         # Extended thinking (truncated)
+    thinking_content: str | None = None  # Extended thinking (truncated)
 
     # Generic metadata
     metadata: dict[str, Any] = {}  # noqa: RUF012
