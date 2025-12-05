@@ -156,3 +156,7 @@ logs/
 # AEF Execution Workspaces (generated at runtime)
 # =============================================================================
 .aef-workspaces/
+
+# Generated workflow artifacts
+RESEARCH-PHASE_*.md
+.context/
