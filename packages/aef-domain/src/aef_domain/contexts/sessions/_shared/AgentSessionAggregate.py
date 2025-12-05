@@ -163,7 +163,8 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
     def record_operation(self, command: RecordOperationCommand) -> None:
         """Handle RecordOperationCommand.
 
-        Records an operation (agent request, tool execution, etc.).
+        Records an operation (message, tool call, thinking, etc.).
+        Supports full observability with type-specific fields.
         """
         from aef_domain.contexts.sessions.record_operation.OperationRecordedEvent import (
             OperationRecordedEvent,
@@ -177,18 +178,29 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         # Generate operation ID
         operation_id = str(uuid4())
 
-        # Create and apply event
+        # Create and apply event with all fields
         event = OperationRecordedEvent(
             session_id=str(self.id),
             operation_id=operation_id,
             operation_type=command.operation_type,
             timestamp=datetime.now(UTC),
             duration_seconds=command.duration_seconds,
+            success=command.success,
+            # Token metrics
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
             total_tokens=command.total_tokens,
+            # Tool details
             tool_name=command.tool_name,
-            success=command.success,
+            tool_use_id=command.tool_use_id,
+            tool_input=command.tool_input,
+            tool_output=command.tool_output,
+            # Message details
+            message_role=command.message_role,
+            message_content=command.message_content,
+            # Thinking details
+            thinking_content=command.thinking_content,
+            # Metadata
             metadata=command.metadata or {},
         )
 
@@ -246,8 +258,12 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
     @event_sourcing_handler("OperationRecorded")
     def on_operation_recorded(self, event: OperationRecordedEvent) -> None:
-        """Apply OperationRecordedEvent."""
-        # Create operation record
+        """Apply OperationRecordedEvent.
+
+        Handles both v1 and v2 events for backward compatibility.
+        New fields default to None if not present in older events.
+        """
+        # Create token metrics if available
         tokens = None
         if event.total_tokens:
             tokens = TokenMetrics(
@@ -263,14 +279,25 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
                 output_tokens=event.output_tokens or 0,
             )
 
+        # Create operation record with all fields (new fields default to None for v1 events)
         operation = OperationRecord(
             operation_id=event.operation_id,
             operation_type=event.operation_type,
             timestamp=event.timestamp,
             duration_seconds=event.duration_seconds,
             tokens=tokens,
-            tool_name=event.tool_name,
             success=event.success,
+            # Tool details
+            tool_name=event.tool_name,
+            tool_use_id=getattr(event, "tool_use_id", None),
+            tool_input=getattr(event, "tool_input", None),
+            tool_output=getattr(event, "tool_output", None),
+            # Message details
+            message_role=getattr(event, "message_role", None),
+            message_content=getattr(event, "message_content", None),
+            # Thinking details
+            thinking_content=getattr(event, "thinking_content", None),
+            # Metadata
             metadata=dict(event.metadata),
         )
         self._operations.append(operation)

@@ -19,13 +19,31 @@ class SessionStatus(str, Enum):
 
 
 class OperationType(str, Enum):
-    """Type of operation recorded in a session."""
+    """Type of operation recorded in a session.
 
-    AGENT_REQUEST = "agent_request"
-    TOOL_EXECUTION = "tool_execution"
-    TOOL_BLOCKED = "tool_blocked"
-    VALIDATION = "validation"
-    ERROR = "error"
+    Operations track granular activities within an agent session.
+    """
+
+    # Messages (LLM API calls)
+    MESSAGE_REQUEST = "message_request"    # User/system prompt sent to LLM
+    MESSAGE_RESPONSE = "message_response"  # LLM response received
+
+    # Tool lifecycle
+    TOOL_STARTED = "tool_started"          # Tool invocation began
+    TOOL_COMPLETED = "tool_completed"      # Tool finished (success/fail)
+    TOOL_BLOCKED = "tool_blocked"          # Tool blocked by validator
+
+    # Extended thinking
+    THINKING = "thinking"                  # Extended thinking content
+
+    # Errors
+    ERROR = "error"                        # Error occurred
+
+    # Legacy (deprecated, keep for backward compat)
+    AGENT_REQUEST = "agent_request"        # Deprecated - use MESSAGE_*
+    TOOL_EXECUTION = "tool_execution"      # Deprecated - use TOOL_*
+    TOOL_USE = "tool_use"                  # Deprecated - use TOOL_COMPLETED
+    VALIDATION = "validation"              # Keep for validation operations
 
 
 @dataclass(frozen=True)
@@ -53,6 +71,7 @@ class OperationRecord:
     """Record of a single operation in a session.
 
     Immutable to ensure operation history is not modified.
+    Supports different operation types with type-specific fields.
     """
 
     operation_id: str
@@ -60,8 +79,22 @@ class OperationRecord:
     timestamp: datetime
     duration_seconds: float | None = None
     tokens: TokenMetrics | None = None
-    tool_name: str | None = None
     success: bool = True
+
+    # Tool execution details (for TOOL_* types)
+    tool_name: str | None = None
+    tool_use_id: str | None = None           # Correlate TOOL_STARTED/COMPLETED
+    tool_input: dict[str, Any] | None = None  # Tool input parameters
+    tool_output: str | None = None            # Tool output (truncated)
+
+    # Message details (for MESSAGE_* types)
+    message_role: str | None = None           # user, assistant, system
+    message_content: str | None = None        # Message content (truncated)
+
+    # Thinking details (for THINKING type)
+    thinking_content: str | None = None       # Extended thinking (truncated)
+
+    # Generic metadata
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
