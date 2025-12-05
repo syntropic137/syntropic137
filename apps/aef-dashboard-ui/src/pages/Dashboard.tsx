@@ -1,10 +1,11 @@
+import { clsx } from 'clsx'
 import {
   Activity,
   FileText,
   GitBranch,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   Cell,
   Pie,
@@ -13,15 +14,24 @@ import {
   Tooltip,
 } from 'recharts'
 
-import { getMetrics, listWorkflows } from '../api/client'
+import { getMetrics, listWorkflows, subscribeToEvents } from '../api/client'
 import { Card, CardContent, CardHeader, EventFeed, MetricCard, PageLoader } from '../components'
-import type { MetricsResponse, WorkflowSummary } from '../types'
+import type { EventMessage, MetricsResponse, WorkflowSummary } from '../types'
 
 export function Dashboard() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [recentWorkflows, setRecentWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [isConnected, setIsConnected] = useState(false)
 
+  // Refresh metrics
+  const refreshMetrics = useCallback(() => {
+    getMetrics()
+      .then((metricsData) => setMetrics(metricsData))
+      .catch(console.error)
+  }, [])
+
+  // Initial data fetch
   useEffect(() => {
     Promise.all([
       getMetrics(),
@@ -35,32 +45,64 @@ export function Dashboard() {
       .finally(() => setLoading(false))
   }, [])
 
+  // SSE subscription for live metric updates
+  useEffect(() => {
+    const handleEvent = (event: EventMessage) => {
+      // Refresh metrics on workflow completion/failure events
+      if (['workflow_completed', 'workflow_failed', 'phase_completed'].includes(event.event_type)) {
+        refreshMetrics()
+      }
+    }
+
+    const unsubscribe = subscribeToEvents(
+      handleEvent,
+      () => setIsConnected(false),
+      () => setIsConnected(true)
+    )
+
+    return unsubscribe
+  }, [refreshMetrics])
+
   if (loading) return <PageLoader />
 
   // Prepare chart data
   const tokenDistribution = metrics
     ? [
-        { name: 'Input', value: metrics.total_input_tokens, fill: '#6366f1' },
-        { name: 'Output', value: metrics.total_output_tokens, fill: '#818cf8' },
-      ]
+      { name: 'Input', value: metrics.total_input_tokens, fill: '#6366f1' },
+      { name: 'Output', value: metrics.total_output_tokens, fill: '#818cf8' },
+    ]
     : []
 
   const workflowStatusData = metrics
     ? [
-        { name: 'Completed', value: metrics.completed_workflows, fill: '#22c55e' },
-        { name: 'Failed', value: metrics.failed_workflows, fill: '#ef4444' },
-        { name: 'Other', value: metrics.total_workflows - metrics.completed_workflows - metrics.failed_workflows, fill: '#6366f1' },
-      ].filter(d => d.value > 0)
+      { name: 'Completed', value: metrics.completed_workflows, fill: '#22c55e' },
+      { name: 'Failed', value: metrics.failed_workflows, fill: '#ef4444' },
+      { name: 'Other', value: metrics.total_workflows - metrics.completed_workflows - metrics.failed_workflows, fill: '#6366f1' },
+    ].filter(d => d.value > 0)
     : []
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Dashboard</h1>
-        <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-          Monitor your agentic workflows in real-time
-        </p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Dashboard</h1>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            Monitor your agentic workflows in real-time
+          </p>
+        </div>
+        {/* Connection status indicator */}
+        <div className="flex items-center gap-2 text-sm">
+          <span
+            className={clsx(
+              'h-2 w-2 rounded-full',
+              isConnected ? 'bg-emerald-500' : 'bg-slate-400'
+            )}
+          />
+          <span className="text-[var(--color-text-muted)]">
+            {isConnected ? 'Live' : 'Connecting...'}
+          </span>
+        </div>
       </div>
 
       {/* Metric cards */}

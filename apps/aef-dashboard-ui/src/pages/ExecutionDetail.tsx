@@ -8,7 +8,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Bar,
@@ -20,9 +20,12 @@ import {
   YAxis,
 } from 'recharts'
 
-import { getExecution } from '../api/client'
+import { getExecution, subscribeToEvents } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
-import type { ExecutionDetailResponse } from '../types'
+import type { EventMessage, ExecutionDetailResponse } from '../types'
+
+// Claude's context window (approximate)
+const MAX_CONTEXT_TOKENS = 200_000
 
 const phaseStatusIcons: Record<string, typeof Play> = {
   pending: Clock,
@@ -44,23 +47,56 @@ export function ExecutionDetail() {
   const [execution, setExecution] = useState<ExecutionDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [now, setNow] = useState(() => Date.now())
+  const [isConnected, setIsConnected] = useState(false)
 
+  // Refresh execution data
+  const refreshExecution = useCallback(() => {
+    if (!executionId) return
+    getExecution(executionId)
+      .then((exec) => setExecution(exec))
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }, [executionId])
+
+  // Initial data fetch
+  useEffect(() => {
+    refreshExecution()
+  }, [refreshExecution])
+
+  // SSE subscription for live updates
   useEffect(() => {
     if (!executionId) return
 
-    let cancelled = false
-    getExecution(executionId)
-      .then((exec) => {
-        if (!cancelled) setExecution(exec)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [executionId])
+    const handleEvent = (event: EventMessage) => {
+      const eventExecutionId = event.data?.execution_id as string | undefined
+      if (eventExecutionId !== executionId) return
+
+      // Refresh on relevant events
+      if (['phase_completed', 'workflow_completed', 'workflow_failed', 'phase_started'].includes(event.event_type)) {
+        refreshExecution()
+      }
+    }
+
+    const unsubscribe = subscribeToEvents(
+      handleEvent,
+      () => setIsConnected(false),
+      () => setIsConnected(true)
+    )
+
+    return unsubscribe
+  }, [executionId, refreshExecution])
+
+  // Timer for live duration updates
+  useEffect(() => {
+    if (!execution || execution.status !== 'running') return
+
+    const interval = setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [execution])
 
   if (loading) return <PageLoader />
 
@@ -80,7 +116,8 @@ export function ExecutionDetail() {
   const formatDuration = (startedAt: string | null, completedAt: string | null): string => {
     if (!startedAt) return '-'
     const start = new Date(startedAt)
-    const end = completedAt ? new Date(completedAt) : new Date()
+    // Use `now` state for running executions to enable live timer updates
+    const end = completedAt ? new Date(completedAt) : new Date(now)
     const seconds = Math.floor((end.getTime() - start.getTime()) / 1000)
     if (seconds < 60) return `${seconds}s`
     const minutes = Math.floor(seconds / 60)
@@ -90,6 +127,9 @@ export function ExecutionDetail() {
 
   const totalTokens = execution.total_input_tokens + execution.total_output_tokens
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
+
+  // Calculate context window usage percentage
+  const contextUsagePercent = Math.min(100, (totalTokens / MAX_CONTEXT_TOKENS) * 100)
 
   // Prepare phase metrics chart data
   const phaseChartData = execution.phases.map((p) => ({
@@ -102,34 +142,48 @@ export function ExecutionDetail() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <Link
-          to={`/workflows/${execution.workflow_id}/runs`}
-          className="inline-flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Runs
-        </Link>
-        <div className="mt-4 flex items-start gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
-            <Play className="h-6 w-6 text-emerald-400" />
-          </div>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
-                Execution
-              </h1>
-              <StatusBadge status={execution.status} size="lg" pulse={execution.status === 'running'} />
+      <div className="flex justify-between items-start">
+        <div>
+          <Link
+            to={`/workflows/${execution.workflow_id}/runs`}
+            className="inline-flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to Runs
+          </Link>
+          <div className="mt-4 flex items-start gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
+              <Play className="h-6 w-6 text-emerald-400" />
             </div>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              {execution.workflow_name}
-            </p>
-            <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-              <span className="font-mono">{execution.execution_id}</span>
-              <span>•</span>
-              <span>Duration: {formatDuration(execution.started_at, execution.completed_at)}</span>
+            <div>
+              <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+                  Execution
+                </h1>
+                <StatusBadge status={execution.status} size="lg" pulse={execution.status === 'running'} />
+              </div>
+              <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                {execution.workflow_name}
+              </p>
+              <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+                <span className="font-mono">{execution.execution_id}</span>
+                <span>•</span>
+                <span>Duration: {formatDuration(execution.started_at, execution.completed_at)}</span>
+              </div>
             </div>
           </div>
+        </div>
+        {/* Connection status indicator */}
+        <div className="flex items-center gap-2 text-sm">
+          <span
+            className={clsx(
+              'h-2 w-2 rounded-full',
+              isConnected ? 'bg-emerald-500' : 'bg-slate-400'
+            )}
+          />
+          <span className="text-[var(--color-text-muted)]">
+            {isConnected ? 'Live' : 'Connecting...'}
+          </span>
         </div>
       </div>
 
@@ -151,7 +205,7 @@ export function ExecutionDetail() {
       )}
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <MetricCard
           title="Phases"
           value={`${completedPhases}/${execution.phases.length}`}
@@ -165,6 +219,29 @@ export function ExecutionDetail() {
           icon={Zap}
           subtitle={`In: ${execution.total_input_tokens.toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`}
         />
+        {/* Context Window Usage */}
+        <Card className="p-4">
+          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+            Context Window
+          </div>
+          <div className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
+            {contextUsagePercent.toFixed(1)}%
+          </div>
+          <div className="mt-2 h-2 bg-[var(--color-surface)] rounded-full overflow-hidden">
+            <div
+              className={clsx(
+                'h-full rounded-full transition-all',
+                contextUsagePercent < 50 && 'bg-emerald-500',
+                contextUsagePercent >= 50 && contextUsagePercent < 80 && 'bg-amber-500',
+                contextUsagePercent >= 80 && 'bg-red-500'
+              )}
+              style={{ width: `${contextUsagePercent}%` }}
+            />
+          </div>
+          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+            {totalTokens.toLocaleString()} / {MAX_CONTEXT_TOKENS.toLocaleString()} tokens
+          </div>
+        </Card>
         <MetricCard
           title="Total Cost"
           value={`$${Number(execution.total_cost_usd).toFixed(4)}`}
