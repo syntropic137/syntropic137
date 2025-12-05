@@ -161,3 +161,6 @@ logs/
 RESEARCH-PHASE_*.md
 .context/
 DEEP-DIVE_*.md
+
+# Browser testing screenshots
+assets/
