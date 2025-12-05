@@ -160,3 +160,4 @@ logs/
 # Generated workflow artifacts
 RESEARCH-PHASE_*.md
 .context/
+DEEP-DIVE_*.md
