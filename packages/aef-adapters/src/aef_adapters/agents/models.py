@@ -131,14 +131,18 @@ class ModelRegistry:
 
     def _load_fallback(self) -> None:
         """Load fallback model definitions if primitives not available."""
-        # Minimal fallback - should rarely be needed
+        # Minimal fallback - uses actual existing API model names
+        # Update these when new model versions are released
         self._aliases = {
-            "sonnet": "claude-sonnet-4-5-20250929",
-            "claude-sonnet": "claude-sonnet-4-5-20250929",
-            "opus": "claude-opus-4-1-20250630",
-            "claude-opus": "claude-opus-4-1-20250630",
-            "haiku": "claude-haiku-4-5-20250929",
-            "claude-haiku": "claude-haiku-4-5-20250929",
+            # Sonnet aliases
+            "sonnet": "claude-sonnet-4-5-20250514",
+            "claude-sonnet": "claude-sonnet-4-5-20250514",
+            # Opus aliases
+            "opus": "claude-3-opus-20240229",
+            "claude-opus": "claude-3-opus-20240229",
+            # Haiku aliases - uses Claude 3.5 Haiku (current available)
+            "haiku": "claude-3-5-haiku-20241022",
+            "claude-haiku": "claude-3-5-haiku-20241022",
         }
         logger.warning("using_fallback_models", aliases=list(self._aliases.keys()))
 

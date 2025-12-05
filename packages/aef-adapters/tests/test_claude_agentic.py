@@ -111,8 +111,12 @@ class TestClaudeAgenticAgentCreation:
 
             agent = ClaudeAgenticAgent()
 
-            # NOTE: Default is Haiku for cost reduction during testing
-            assert agent._model == "claude-3-5-haiku-20241022"
+            # Default is "claude-haiku" alias, resolved to actual API name
+            assert agent._model_alias == "claude-haiku"
+            # Model should be resolved (not the raw alias)
+            # The exact model name depends on agentic-primitives config
+            assert agent._model != "claude-haiku"  # Should be resolved
+            assert "haiku" in agent._model.lower()  # Should still be a haiku variant
             assert agent.provider == AgentProvider.CLAUDE
 
     def test_create_with_custom_model(self) -> None:
@@ -473,8 +477,10 @@ class TestConfigIntegration:
             assert len(captured_options) == 1
             opts = captured_options[0]
 
-            # Check model
-            assert opts["model"] == "claude-3-opus"
+            # Check model - should be resolved from alias to API name
+            # "claude-3-opus" resolves to actual API name (e.g., "claude-3-opus-20240229")
+            assert "opus" in opts["model"].lower()  # Should be an opus model
+            assert opts["model"] != "claude-3-opus"  # Should be resolved, not raw alias
 
             # Check workspace path
             assert opts["cwd"] == str(workspace.path)
