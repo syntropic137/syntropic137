@@ -55,6 +55,33 @@ dev-force:
     @echo "   Backend:  http://localhost:8000"
     @echo "   API Docs: http://localhost:8000/docs"
 
+# Clean database, seed workflows, and start full dev stack (fresh start)
+dev-fresh:
+    @echo "🧹 Cleaning database and restarting full stack..."
+    docker compose -f docker/docker-compose.dev.yaml down -v
+    @echo "Building & starting Docker services (PostgreSQL + Event Store)..."
+    docker compose -f docker/docker-compose.dev.yaml up -d --build
+    @sleep 4
+    @echo "🌱 Seeding workflows (before backend starts)..."
+    just seed-workflows
+    @echo ""
+    @echo "Stopping any existing processes on ports 5173 and 8000..."
+    -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+    -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    @sleep 1
+    @echo "Starting dashboard backend on :8000..."
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+    uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
+    @sleep 4
+    @echo "Starting dashboard frontend on :5173..."
+    @cd apps/aef-dashboard-ui && npm run dev &
+    @sleep 2
+    @echo ""
+    @echo "✅ Fresh development environment ready!"
+    @echo "   Frontend: http://localhost:5173"
+    @echo "   Backend:  http://localhost:8000"
+    @echo "   API Docs: http://localhost:8000/docs"
+
 # Run the CLI application
 cli *args:
     uv run --package aef-cli aef {{args}}
@@ -118,7 +145,7 @@ qa-full: lint format typecheck test-cov vsa-validate
 
 # Seed workflows from YAML files
 seed-workflows:
-    uv run --package aef-cli aef seed
+    uv run --package aef-cli aef workflow seed
 
 # --- Utility Commands ---
 
@@ -137,6 +164,13 @@ lock:
 # Sync dependencies
 sync:
     uv sync
+
+# Sync event-sourcing platform (after local changes to lib/event-sourcing-platform)
+sync-es:
+    @echo "🔄 Rebuilding event-sourcing-python from local source..."
+    uv sync --reinstall-package event-sourcing-python
+    @echo "✅ event-sourcing-python synced!"
+    @uv run python -c "from event_sourcing.client.grpc_client import GrpcEventStoreClient; print('  Methods:', len([m for m in dir(GrpcEventStoreClient) if not m.startswith('_')]), 'public methods available')"
 
 # Clean up build artifacts, virtual environments, and Docker containers
 clean:
