@@ -246,6 +246,14 @@ class EventSubscriptionService:
         # Start from the next position (exclusive start)
         from_position = self._last_position + 1 if self._last_position > 0 else 0
 
+        logger.info(
+            "Catch-up starting",
+            extra={
+                "from_position": from_position,
+                "last_position": self._last_position,
+            },
+        )
+
         while not self._stop_event.is_set():
             # Read batch of events using the new read_all RPC
             events, is_end, next_position = await self._event_store.read_all(
@@ -254,14 +262,35 @@ class EventSubscriptionService:
                 forward=True,
             )
 
+            logger.debug(
+                "Catch-up read_all result",
+                extra={
+                    "from_position": from_position,
+                    "events_count": len(events),
+                    "is_end": is_end,
+                    "next_position": next_position,
+                },
+            )
+
             if not events:
                 # No more events, catch-up complete
+                logger.debug("No events returned, catch-up complete")
                 break
 
             # Process events
             for envelope in events:
                 if self._stop_event.is_set():
                     break
+
+                event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
+                global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+                logger.info(
+                    "Catch-up processing event",
+                    extra={
+                        "event_type": event_type,
+                        "global_nonce": global_nonce,
+                    },
+                )
 
                 await self._dispatch_event(envelope)
                 events_in_batch += 1
@@ -298,31 +327,58 @@ class EventSubscriptionService:
         events_since_save = 0
         last_save_time = datetime.now(UTC)
 
-        # Start subscription from current position + 1 (since we've processed up to current)
-        async for envelope in self._event_store.subscribe(
-            from_global_nonce=self._last_position + 1
-        ):
-            if self._stop_event.is_set():
-                break
+        start_position = self._last_position + 1
+        logger.info(
+            "Starting live subscription",
+            extra={"from_position": start_position},
+        )
 
-            await self._dispatch_event(envelope)
-            events_since_save += 1
+        try:
+            # Start subscription from current position + 1 (since we've processed up to current)
+            async for envelope in self._event_store.subscribe(from_global_nonce=start_position):
+                if self._stop_event.is_set():
+                    logger.info("Live subscription stopped by stop event")
+                    break
 
-            # Update position
-            if envelope.metadata.global_nonce is not None:
-                self._last_position = envelope.metadata.global_nonce
+                event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
+                global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+                logger.info(
+                    "Live subscription received event",
+                    extra={
+                        "event_type": event_type,
+                        "global_nonce": global_nonce,
+                    },
+                )
 
-            # Save position periodically
-            now = datetime.now(UTC)
-            should_save = (
-                events_since_save >= self._batch_size
-                or (now - last_save_time).total_seconds() >= self._position_save_interval
+                await self._dispatch_event(envelope)
+                events_since_save += 1
+
+                # Update position
+                if envelope.metadata.global_nonce is not None:
+                    self._last_position = envelope.metadata.global_nonce
+
+                # Save position periodically
+                now = datetime.now(UTC)
+                should_save = (
+                    events_since_save >= self._batch_size
+                    or (now - last_save_time).total_seconds() >= self._position_save_interval
+                )
+
+                if should_save:
+                    await self._save_position()
+                    events_since_save = 0
+                    last_save_time = now
+
+            logger.warning("Live subscription async for loop exited normally")
+
+        except asyncio.CancelledError:
+            logger.info("Live subscription cancelled")
+            raise
+        except Exception as e:
+            logger.exception(
+                "Live subscription error",
+                extra={"error": str(e)},
             )
-
-            if should_save:
-                await self._save_position()
-                events_since_save = 0
-                last_save_time = now
 
     async def _dispatch_event(self, envelope: object) -> None:
         """Dispatch an event to projections via validated envelope.

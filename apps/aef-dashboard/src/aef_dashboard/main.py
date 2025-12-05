@@ -42,9 +42,12 @@ def _validate_api_keys() -> None:
     - TEST: No API key required (mocks are used)
     - DEVELOPMENT: Warning only (allows read-only dashboard usage)
     - PRODUCTION/STAGING: Fail hard - workflow execution requires API key
+
+    Also exports the API key to os.environ so that agent adapters
+    (which read from os.environ) can access it.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
     settings = get_settings()
+    api_key = settings.anthropic_api_key
 
     if not api_key:
         if settings.is_test:
@@ -62,9 +65,14 @@ def _validate_api_keys() -> None:
                 "Set the environment variable and restart."
             )
     else:
+        # Export to os.environ so agent adapters can find it
+        # (ClaudeAgenticAgent reads from os.environ.get("ANTHROPIC_API_KEY"))
+        key_value = api_key.get_secret_value()
+        os.environ["ANTHROPIC_API_KEY"] = key_value
+
         # Mask key for logging (show first 8 chars)
-        masked = api_key[:8] + "..." if len(api_key) > 8 else "***"
-        logger.info("✓ ANTHROPIC_API_KEY configured (%s)", masked)
+        masked = key_value[:8] + "..." if len(key_value) > 8 else "***"
+        logger.info("✓ ANTHROPIC_API_KEY configured and exported (%s)", masked)
 
 
 async def _start_subscription_service() -> None:
