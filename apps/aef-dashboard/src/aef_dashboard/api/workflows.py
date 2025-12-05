@@ -1,4 +1,8 @@
-"""Workflow API endpoints."""
+"""Workflow TEMPLATE API endpoints.
+
+These endpoints manage workflow TEMPLATES (definitions).
+For execution details, see /api/executions.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,7 @@ from aef_dashboard.models.schemas import (
     ExecutionHistoryResponse,
     ExecutionRunListResponse,
     ExecutionRunSummary,
-    PhaseInfo,
+    PhaseDefinition,
     WorkflowListResponse,
     WorkflowResponse,
     WorkflowSummary,
@@ -37,54 +41,44 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
 def _domain_summary_to_api(summary: DomainWorkflowSummary) -> WorkflowSummary:
-    """Convert domain WorkflowSummary to API WorkflowSummary."""
+    """Convert domain WorkflowSummary to API WorkflowSummary.
+
+    Templates don't have status - only runs_count.
+    """
     return WorkflowSummary(
         id=summary.id,
         name=summary.name,
         workflow_type=summary.workflow_type,
-        status=summary.status,
         phase_count=summary.phase_count,
         created_at=summary.created_at,
+        runs_count=summary.runs_count,
     )
 
 
 def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
-    """Convert domain WorkflowDetail to API WorkflowResponse."""
-    from decimal import Decimal
+    """Convert domain WorkflowDetail to API WorkflowResponse.
 
+    Templates don't have execution status - only definition info.
+    """
     phases = []
     for i, p in enumerate(detail.phases, 1):
         if isinstance(p, dict):
-            phase_info = PhaseInfo(
+            phase_def = PhaseDefinition(
                 phase_id=str(p.get("id") or p.get("phase_id") or f"phase-{i}"),
                 name=str(p.get("name") or f"Phase {i}"),
-                order=i,
+                order=p.get("order", i),
                 description=p.get("description"),
-                status=p.get("status", "pending"),
-                artifact_id=p.get("artifact_id"),
-                input_tokens=p.get("input_tokens", 0),
-                output_tokens=p.get("output_tokens", 0),
-                total_tokens=p.get("total_tokens", 0),
-                duration_seconds=p.get("duration_seconds", 0.0),
-                cost_usd=Decimal(str(p.get("cost_usd", "0"))),
-                session_id=p.get("session_id"),
+                agent_type=p.get("agent_type", ""),
             )
         else:
-            phase_info = PhaseInfo(
+            phase_def = PhaseDefinition(
                 phase_id=p.id,
                 name=p.name,
-                order=i,
-                description=None,
-                status=p.status,
-                artifact_id=None,
-                input_tokens=p.input_tokens,
-                output_tokens=p.output_tokens,
-                total_tokens=p.total_tokens,
-                duration_seconds=p.duration_seconds,
-                cost_usd=Decimal(str(p.cost_usd)),
-                session_id=p.session_id,
+                order=getattr(p, "order", i),
+                description=getattr(p, "description", None),
+                agent_type=getattr(p, "agent_type", ""),
             )
-        phases.append(phase_info)
+        phases.append(phase_def)
 
     return WorkflowResponse(
         id=detail.id,
@@ -92,36 +86,36 @@ def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
         description=detail.description,
         workflow_type=detail.workflow_type,
         classification=detail.classification,
-        status=detail.status,
         phases=phases,
         created_at=detail.created_at,
-        updated_at=None,
-        metadata={},
+        runs_count=detail.runs_count,
+        runs_link=f"/api/workflows/{detail.id}/runs",
     )
 
 
 @router.get("", response_model=WorkflowListResponse)
 async def list_workflows(
-    status: str | None = Query(None, description="Filter by status"),
+    workflow_type: str | None = Query(None, description="Filter by workflow type"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
 ) -> WorkflowListResponse:
-    """List all workflows with optional filtering."""
-    # Get projection manager and create handler
+    """List all workflow templates.
+
+    Note: Templates don't have status. Use /api/executions for execution status.
+    """
     manager = get_projection_manager()
     handler = ListWorkflowsHandler(manager.workflow_list)
 
-    # Build and execute query
     offset = (page - 1) * page_size
     query = ListWorkflowsQuery(
-        status_filter=status,
+        workflow_type_filter=workflow_type,
         limit=page_size,
         offset=offset,
     )
     summaries = await handler.handle(query)
 
-    # Get total count (without pagination) for proper pagination info
-    total_query = ListWorkflowsQuery(status_filter=status, limit=10000, offset=0)
+    # Get total count
+    total_query = ListWorkflowsQuery(workflow_type_filter=workflow_type, limit=10000, offset=0)
     all_summaries = await handler.handle(total_query)
     total = len(all_summaries)
 

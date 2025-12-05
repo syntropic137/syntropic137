@@ -13,16 +13,12 @@ from .projection import WorkflowListProjection
 class ListWorkflowsHandler:
     """Handles ListWorkflowsQuery requests.
 
-    This handler retrieves workflow data from the WorkflowListProjection.
-    It is the primary interface for listing workflows.
+    Retrieves workflow TEMPLATE data from the projection.
+    Templates don't have status - for execution status, use executions API.
     """
 
     def __init__(self, projection: WorkflowListProjection):
-        """Initialize with a projection.
-
-        Args:
-            projection: The WorkflowListProjection to query
-        """
+        """Initialize with a projection."""
         self._projection = projection
 
     async def handle(self, query: ListWorkflowsQuery) -> list[WorkflowSummary]:
@@ -35,7 +31,6 @@ class ListWorkflowsHandler:
             List of WorkflowSummary matching the query
         """
         return await self._projection.query(
-            status_filter=query.status_filter,
             workflow_type_filter=query.workflow_type_filter,
             limit=query.limit,
             offset=query.offset,

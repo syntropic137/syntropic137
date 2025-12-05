@@ -1,4 +1,9 @@
-"""Tests for get_workflow_detail query slice."""
+"""Tests for get_workflow_detail query slice.
+
+Note: WorkflowDetailProjection is for workflow TEMPLATES, not executions.
+Templates don't have status - only runs_count.
+For execution status, see WorkflowExecutionDetailProjection.
+"""
 
 import os
 from dataclasses import FrozenInstanceError
@@ -57,7 +62,7 @@ class TestGetWorkflowDetailQuery:
 
 
 class TestWorkflowDetailProjection:
-    """Tests for WorkflowDetailProjection."""
+    """Tests for WorkflowDetailProjection (TEMPLATE projection)."""
 
     @pytest.mark.asyncio
     async def test_handles_workflow_created(self, projection: WorkflowDetailProjection):
@@ -68,7 +73,7 @@ class TestWorkflowDetailProjection:
             "workflow_type": "research",
             "classification": "technical",
             "description": "A test workflow",
-            "phases": [{"phase_id": "p1", "name": "Phase 1"}],
+            "phases": [{"id": "p1", "name": "Phase 1", "agent_type": "claude"}],
             "created_at": datetime.now(UTC),
         }
 
@@ -79,13 +84,15 @@ class TestWorkflowDetailProjection:
         assert detail.id == "wf-1"
         assert detail.name == "Test Workflow"
         assert detail.workflow_type == "research"
-        assert detail.status == "pending"
         assert len(detail.phases) == 1
+        assert detail.runs_count == 0  # Templates start with 0 runs
 
     @pytest.mark.asyncio
-    async def test_handles_workflow_completed(self, projection: WorkflowDetailProjection):
-        """Test projection handles WorkflowCompleted event."""
-        # First create the workflow
+    async def test_handles_workflow_execution_started_increments_runs(
+        self, projection: WorkflowDetailProjection
+    ):
+        """Test projection increments runs_count on execution start."""
+        # First create the workflow template
         await projection.on_workflow_created(
             {
                 "workflow_id": "wf-1",
@@ -96,61 +103,22 @@ class TestWorkflowDetailProjection:
             }
         )
 
-        # Then complete it
-        await projection.on_workflow_completed(
-            {"workflow_id": "wf-1", "completed_at": "2024-01-01T12:00:00"}
+        # Start an execution
+        await projection.on_workflow_execution_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-1"}
         )
 
         detail = await projection.get_by_id("wf-1")
         assert detail is not None
-        assert detail.status == "completed"
-        assert detail.completed_at is not None
+        assert detail.runs_count == 1
 
-    @pytest.mark.asyncio
-    async def test_handles_workflow_failed(self, projection: WorkflowDetailProjection):
-        """Test projection handles WorkflowFailed event."""
-        # First create the workflow
-        await projection.on_workflow_created(
-            {
-                "workflow_id": "wf-1",
-                "name": "Test Workflow",
-                "workflow_type": "research",
-                "classification": "technical",
-                "phases": [],
-            }
-        )
-
-        # Then fail it
-        await projection.on_workflow_failed(
-            {"workflow_id": "wf-1", "error_message": "Something went wrong"}
+        # Start another execution
+        await projection.on_workflow_execution_started(
+            {"workflow_id": "wf-1", "execution_id": "exec-2"}
         )
 
         detail = await projection.get_by_id("wf-1")
-        assert detail is not None
-        assert detail.status == "failed"
-
-    @pytest.mark.asyncio
-    async def test_handles_phase_started(self, projection: WorkflowDetailProjection):
-        """Test projection updates status on PhaseStarted."""
-        # First create the workflow
-        await projection.on_workflow_created(
-            {
-                "workflow_id": "wf-1",
-                "name": "Test Workflow",
-                "workflow_type": "research",
-                "classification": "technical",
-                "phases": [{"phase_id": "p1", "name": "Phase 1"}],
-            }
-        )
-
-        # Start a phase
-        await projection.on_phase_started(
-            {"workflow_id": "wf-1", "started_at": datetime.now(UTC).isoformat()}
-        )
-
-        detail = await projection.get_by_id("wf-1")
-        assert detail is not None
-        assert detail.status == "in_progress"
+        assert detail.runs_count == 2
 
     @pytest.mark.asyncio
     async def test_returns_none_for_missing_workflow(self, projection: WorkflowDetailProjection):
@@ -159,52 +127,8 @@ class TestWorkflowDetailProjection:
         assert detail is None
 
     @pytest.mark.asyncio
-    async def test_handles_phase_completed_with_metrics(self, projection: WorkflowDetailProjection):
-        """Test projection stores phase metrics on PhaseCompleted event."""
-        # First create the workflow with a phase
-        await projection.on_workflow_created(
-            {
-                "workflow_id": "wf-1",
-                "name": "Test Workflow",
-                "workflow_type": "research",
-                "classification": "technical",
-                "phases": [{"phase_id": "p1", "name": "Phase 1", "status": "pending"}],
-            }
-        )
-
-        # Complete the phase with metrics
-        await projection.on_phase_completed(
-            {
-                "workflow_id": "wf-1",
-                "phase_id": "p1",
-                "input_tokens": 1000,
-                "output_tokens": 1500,
-                "total_tokens": 2500,
-                "duration_seconds": 45.5,
-                "cost_usd": "0.025",
-                "session_id": "session-123",
-            }
-        )
-
-        detail = await projection.get_by_id("wf-1")
-        assert detail is not None
-        assert detail.completed_phases == 1
-
-        # Find the phase and check metrics
-        phase = next((p for p in detail.phases if p.id == "p1"), None)
-        assert phase is not None
-        assert phase.status == "completed"
-        assert phase.input_tokens == 1000
-        assert phase.output_tokens == 1500
-        assert phase.total_tokens == 2500
-        assert phase.duration_seconds == 45.5
-        assert phase.cost_usd == "0.025"
-        assert phase.session_id == "session-123"
-
-    @pytest.mark.asyncio
-    async def test_completed_phases_count_increments(self, projection: WorkflowDetailProjection):
-        """Test completed_phases count increments correctly."""
-        # Create workflow with multiple phases
+    async def test_phases_are_phase_definitions(self, projection: WorkflowDetailProjection):
+        """Test that phases are definitions, not execution state."""
         await projection.on_workflow_created(
             {
                 "workflow_id": "wf-1",
@@ -212,26 +136,22 @@ class TestWorkflowDetailProjection:
                 "workflow_type": "research",
                 "classification": "technical",
                 "phases": [
-                    {"phase_id": "p1", "name": "Phase 1", "status": "pending"},
-                    {"phase_id": "p2", "name": "Phase 2", "status": "pending"},
-                    {"phase_id": "p3", "name": "Phase 3", "status": "pending"},
+                    {"id": "p1", "name": "Research", "agent_type": "claude", "order": 0},
+                    {"id": "p2", "name": "Innovate", "agent_type": "claude", "order": 1},
+                    {"id": "p3", "name": "Synthesize", "agent_type": "claude", "order": 2},
                 ],
             }
         )
 
-        # Complete first phase
-        await projection.on_phase_completed(
-            {"workflow_id": "wf-1", "phase_id": "p1", "total_tokens": 100}
-        )
         detail = await projection.get_by_id("wf-1")
-        assert detail.completed_phases == 1
+        assert detail is not None
+        assert len(detail.phases) == 3
 
-        # Complete second phase
-        await projection.on_phase_completed(
-            {"workflow_id": "wf-1", "phase_id": "p2", "total_tokens": 200}
-        )
-        detail = await projection.get_by_id("wf-1")
-        assert detail.completed_phases == 2
+        # Phases should be definitions with id, name, order, agent_type
+        phase_1 = detail.phases[0]
+        assert phase_1.id == "p1"
+        assert phase_1.name == "Research"
+        assert phase_1.order == 0
 
 
 class TestGetWorkflowDetailHandler:
