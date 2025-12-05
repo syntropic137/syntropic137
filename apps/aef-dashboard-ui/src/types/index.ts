@@ -61,11 +61,25 @@ export interface OperationInfo {
   operation_type: string
   timestamp: string
   duration_seconds: number | null
+  success: boolean
+
+  // Token metrics (for MESSAGE_* types)
   input_tokens: number | null
   output_tokens: number | null
   total_tokens: number | null
+
+  // Tool details (for TOOL_* types)
   tool_name: string | null
-  success: boolean
+  tool_use_id: string | null
+  tool_input: Record<string, unknown> | null
+  tool_output: string | null
+
+  // Message details (for MESSAGE_* types)
+  message_role: string | null
+  message_content: string | null
+
+  // Thinking details (for THINKING type)
+  thinking_content: string | null
 }
 
 export interface SessionResponse {
