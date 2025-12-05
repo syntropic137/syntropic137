@@ -276,17 +276,36 @@ class EventSubscriptionService:
 
         while not self._stop_event.is_set():
             try:
-                self._reconnect_count += 1
-                logger.info(
-                    "[SUBSCRIPTION] 📥 Starting catch-up phase",
-                    extra={
-                        "reconnect_count": self._reconnect_count,
-                        "from_position": self._last_position + 1 if self._last_position > 0 else 0,
-                    },
-                )
+                # Only count as reconnect if we've had failures or previous connections
+                is_reconnect = consecutive_failures > 0 or self._reconnect_count > 0
+                if is_reconnect:
+                    self._reconnect_count += 1
+                    logger.info(
+                        "[SUBSCRIPTION] 🔄 Reconnecting after failure/disconnect",
+                        extra={
+                            "reconnect_count": self._reconnect_count,
+                            "consecutive_failures": consecutive_failures,
+                            "from_position": self._last_position + 1
+                            if self._last_position > 0
+                            else 0,
+                        },
+                    )
+                else:
+                    logger.info(
+                        "[SUBSCRIPTION] 📥 Starting initial connection",
+                        extra={
+                            "from_position": self._last_position + 1
+                            if self._last_position > 0
+                            else 0,
+                        },
+                    )
 
                 # Phase 1: Catch-up (always run on reconnect to pick up missed events)
                 await self._run_catchup()
+
+                # Reset backoff state on successful catch-up
+                consecutive_failures = 0
+                retry_delay = 1.0
 
                 self._caught_up = True
                 logger.info(

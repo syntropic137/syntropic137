@@ -458,7 +458,6 @@ class TestLiveUpdatesE2E:
     ):
         """Test that subscription resumes from saved position, skipping already processed events."""
         # 1. Setup events
-        event_store = event_store
         events_to_emit = [
             MockEventEnvelope("Event1", global_nonce=1),
             MockEventEnvelope("Event2", global_nonce=2),

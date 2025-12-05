@@ -573,7 +573,7 @@ class ExecutionService:
                 # Error info in metadata if present
                 metadata={"error": error} if error else None,
             )
-            aggregate._handle_command(operation_command)
+            aggregate.record_operation(operation_command)
 
             # Persist to event store
             await repository.save(aggregate)
