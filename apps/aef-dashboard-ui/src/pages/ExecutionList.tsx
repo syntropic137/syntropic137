@@ -2,14 +2,15 @@ import { clsx } from 'clsx'
 import {
   Activity,
   Play,
+  Wrench,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { listAllExecutions } from '../api/client'
+import { listAllExecutions, subscribeToEvents } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, PageLoader, StatusBadge } from '../components'
-import type { ExecutionListItem } from '../types'
+import type { EventMessage, ExecutionListItem } from '../types'
 
 
 export function ExecutionList() {
@@ -18,37 +19,122 @@ export function ExecutionList() {
   const [error, setError] = useState<string | null>(null)
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [page, setPage] = useState(1)
+  const [now, setNow] = useState(() => Date.now())
+  const [isConnected, setIsConnected] = useState(false)
   const pageSize = 50
 
-  useEffect(() => {
-    let cancelled = false
-
-    // Note: We start with loading: true and only set false when complete.
-    // For filter changes, the brief stale data display is acceptable.
+  // Refresh the executions list
+  const refreshExecutions = useCallback(() => {
     listAllExecutions({
       status: statusFilter || undefined,
       page,
       page_size: pageSize,
     })
       .then((response) => {
-        if (cancelled) return
         setExecutions(response.executions)
         setLoading(false)
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err.message)
-          setLoading(false)
-        }
+        setError(err.message)
+        setLoading(false)
       })
-
-    return () => { cancelled = true }
   }, [statusFilter, page])
+
+  // Initial data fetch
+  useEffect(() => {
+    refreshExecutions()
+  }, [refreshExecutions])
+
+  // SSE subscription for live updates
+  useEffect(() => {
+    const handleEvent = (event: EventMessage) => {
+      const eventType = event.event_type
+      const executionId = event.data?.execution_id as string | undefined
+
+      if (!executionId) return
+
+      // Handle different event types
+      if (eventType === 'workflow_started') {
+        // Refresh to get the new execution
+        refreshExecutions()
+      } else if (eventType === 'phase_completed') {
+        // Update the specific execution
+        setExecutions((prev) =>
+          prev.map((exec) => {
+            if (exec.execution_id !== executionId) return exec
+            return {
+              ...exec,
+              completed_phases: (event.data?.completed_phases as number) ?? exec.completed_phases + 1,
+              total_tokens: (event.data?.tokens as number) ?? exec.total_tokens,
+              tool_call_count: (event.data?.tool_call_count as number) ?? exec.tool_call_count,
+            }
+          })
+        )
+      } else if (eventType === 'workflow_completed') {
+        // Update status to completed
+        setExecutions((prev) =>
+          prev.map((exec) => {
+            if (exec.execution_id !== executionId) return exec
+            return {
+              ...exec,
+              status: 'completed',
+              completed_at: new Date().toISOString(),
+              total_tokens: (event.data?.total_tokens as number) ?? exec.total_tokens,
+            }
+          })
+        )
+      } else if (eventType === 'workflow_failed') {
+        // Update status to failed
+        setExecutions((prev) =>
+          prev.map((exec) => {
+            if (exec.execution_id !== executionId) return exec
+            return {
+              ...exec,
+              status: 'failed',
+              completed_at: new Date().toISOString(),
+            }
+          })
+        )
+      } else if (eventType === 'tool_used') {
+        // Increment tool call count
+        setExecutions((prev) =>
+          prev.map((exec) => {
+            if (exec.execution_id !== executionId) return exec
+            return {
+              ...exec,
+              tool_call_count: exec.tool_call_count + 1,
+            }
+          })
+        )
+      }
+    }
+
+    const unsubscribe = subscribeToEvents(
+      handleEvent,
+      () => setIsConnected(false),
+      () => setIsConnected(true)
+    )
+
+    return unsubscribe
+  }, [refreshExecutions])
+
+  // Timer for live duration updates (every second when there are running executions)
+  useEffect(() => {
+    const hasRunning = executions.some((e) => e.status === 'running')
+    if (!hasRunning) return
+
+    const interval = setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [executions])
 
   const formatDuration = (startedAt: string | null, completedAt: string | null): string => {
     if (!startedAt) return '-'
     const start = new Date(startedAt)
-    const end = completedAt ? new Date(completedAt) : new Date()
+    // Use `now` state for running executions to enable live timer updates
+    const end = completedAt ? new Date(completedAt) : new Date(now)
     const seconds = Math.floor((end.getTime() - start.getTime()) / 1000)
     if (seconds < 60) return `${seconds}s`
     const minutes = Math.floor(seconds / 60)
@@ -86,6 +172,18 @@ export function ExecutionList() {
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
             All workflow executions across all workflows
           </p>
+        </div>
+        {/* Connection status indicator */}
+        <div className="flex items-center gap-2 text-sm">
+          <span
+            className={clsx(
+              'h-2 w-2 rounded-full',
+              isConnected ? 'bg-emerald-500' : 'bg-slate-400'
+            )}
+          />
+          <span className="text-[var(--color-text-muted)]">
+            {isConnected ? 'Live' : 'Connecting...'}
+          </span>
         </div>
       </div>
 
@@ -125,7 +223,7 @@ export function ExecutionList() {
           ) : (
             <div className="divide-y divide-[var(--color-border)]">
               {/* Table Header */}
-              <div className="grid grid-cols-7 gap-4 px-4 py-3 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider bg-[var(--color-surface-elevated)]">
+              <div className="grid grid-cols-8 gap-4 px-4 py-3 text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider bg-[var(--color-surface-elevated)]">
                 <div>Execution ID</div>
                 <div>Workflow</div>
                 <div>Status</div>
@@ -133,6 +231,10 @@ export function ExecutionList() {
                 <div className="flex items-center gap-1">
                   <Zap className="h-3 w-3" />
                   Tokens
+                </div>
+                <div className="flex items-center gap-1">
+                  <Wrench className="h-3 w-3" />
+                  Tools
                 </div>
                 <div>Duration</div>
                 <div>Started</div>
@@ -143,7 +245,7 @@ export function ExecutionList() {
                   <Link
                     key={exec.execution_id}
                     to={`/executions/${exec.execution_id}`}
-                    className="grid grid-cols-7 gap-4 px-4 py-4 hover:bg-[var(--color-surface-elevated)] transition-colors items-center"
+                    className="grid grid-cols-8 gap-4 px-4 py-4 hover:bg-[var(--color-surface-elevated)] transition-colors items-center"
                   >
                     <div className="font-mono text-sm text-[var(--color-text-primary)]">
                       {exec.execution_id.slice(0, 8)}...
@@ -182,6 +284,9 @@ export function ExecutionList() {
                       <span className="text-xs text-[var(--color-text-muted)] ml-1">
                         (${Number(exec.total_cost_usd).toFixed(4)})
                       </span>
+                    </div>
+                    <div className="text-sm text-[var(--color-text-secondary)]">
+                      {exec.tool_call_count}
                     </div>
                     <div className="text-sm text-[var(--color-text-secondary)]">
                       {formatDuration(exec.started_at, exec.completed_at)}

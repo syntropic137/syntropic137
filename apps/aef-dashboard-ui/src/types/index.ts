@@ -200,6 +200,7 @@ export interface ExecutionListItem {
   total_phases: number
   total_tokens: number
   total_cost_usd: number
+  tool_call_count: number
 }
 
 export interface ExecutionListResponse {
