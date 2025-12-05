@@ -195,8 +195,12 @@ class TestWorkflowExecutionEventProjectionConsistency:
         assert events[0].event.error_message == "Something went wrong"
 
 
-class TestWorkflowDetailProjectionHandlesAllEvents:
-    """Test that WorkflowDetailProjection handles all workflow events."""
+class TestWorkflowTemplateProjectionHandlesTemplateEvents:
+    """Test that WorkflowDetailProjection handles TEMPLATE events.
+
+    Note: WorkflowDetailProjection is for TEMPLATES only.
+    Execution events are handled by WorkflowExecutionDetailProjection.
+    """
 
     @pytest.fixture
     def mock_store(self) -> AsyncMock:
@@ -207,51 +211,45 @@ class TestWorkflowDetailProjectionHandlesAllEvents:
         return store
 
     @pytest.mark.asyncio
-    async def test_projection_handles_phase_completed(self, mock_store: AsyncMock) -> None:
-        """REGRESSION: Projection must handle PhaseCompleted to update phase metrics."""
+    async def test_projection_increments_runs_count_on_execution_started(
+        self, mock_store: AsyncMock
+    ) -> None:
+        """Template projection should increment runs_count when execution starts."""
         from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
             WorkflowDetailProjection,
         )
 
-        # Setup existing workflow
+        # Setup existing workflow template
         mock_store.get = AsyncMock(
             return_value={
                 "id": "workflow-1",
                 "name": "Test Workflow",
-                "status": "in_progress",
+                "workflow_type": "research",
+                "classification": "standard",
+                "description": None,
                 "phases": [
-                    {"phase_id": "phase-1", "name": "Research", "status": "pending"},
-                    {"phase_id": "phase-2", "name": "Innovate", "status": "pending"},
+                    {"id": "phase-1", "name": "Research", "order": 0},
                 ],
+                "created_at": None,
+                "runs_count": 5,
             }
         )
 
         projection = WorkflowDetailProjection(mock_store)
 
-        # Process PhaseCompleted event
-        await projection.on_phase_completed(
+        # Process WorkflowExecutionStarted event
+        await projection.on_workflow_execution_started(
             {
                 "workflow_id": "workflow-1",
-                "phase_id": "phase-1",
-                "input_tokens": 100,
-                "output_tokens": 200,
-                "total_tokens": 300,
-                "cost_usd": Decimal("0.05"),
-                "duration_seconds": 10.5,
-                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "started_at": "2025-01-01T00:00:00",
             }
         )
 
-        # Verify save was called with updated data
+        # Verify save was called with incremented runs_count
         mock_store.save.assert_called_once()
         saved_data = mock_store.save.call_args[0][2]
-
-        # Find the phase that was updated
-        phase_1 = next(p for p in saved_data["phases"] if p["phase_id"] == "phase-1")
-        assert phase_1["status"] == "completed"
-        assert phase_1["input_tokens"] == 100
-        assert phase_1["output_tokens"] == 200
-        assert phase_1["total_tokens"] == 300
+        assert saved_data["runs_count"] == 6
 
 
 # =============================================================================
@@ -438,18 +436,19 @@ class TestEventHandlerCompleteness:
     """
 
     def test_workflow_detail_projection_has_required_handlers(self) -> None:
-        """Ensure WorkflowDetailProjection handles all workflow events."""
+        """Ensure WorkflowDetailProjection (TEMPLATE) handles template events.
+
+        Note: WorkflowDetailProjection is for TEMPLATES, not executions.
+        Execution events are handled by WorkflowExecutionDetailProjection.
+        """
         from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
             WorkflowDetailProjection,
         )
 
+        # Template projection only needs these handlers
         required_handlers = [
             "on_workflow_created",
-            "on_workflow_execution_started",
-            "on_phase_started",
-            "on_phase_completed",  # CRITICAL: This was missing!
-            "on_workflow_completed",
-            "on_workflow_failed",
+            "on_workflow_execution_started",  # To increment runs_count
         ]
 
         for handler in required_handlers:
@@ -863,10 +862,10 @@ class TestProjectionManagerEventRegistration:
     """REGRESSION: Test that ProjectionManager routes events to correct projections."""
 
     def test_execution_events_registered_to_execution_list_projection(self) -> None:
-        """REGRESSION: Execution events must be routed to execution_list projection."""
+        """REGRESSION: Execution events must be routed to workflow_execution_list projection."""
         from aef_adapters.projections.manager import EVENT_HANDLERS
 
-        # Verify execution events are routed to execution_list
+        # Verify execution events are routed to workflow_execution_list
         execution_events = [
             "WorkflowExecutionStarted",
             "PhaseCompleted",
@@ -876,12 +875,12 @@ class TestProjectionManagerEventRegistration:
         for event in execution_events:
             assert event in EVENT_HANDLERS, f"Event {event} not in handlers"
             projections = [h[0] for h in EVENT_HANDLERS[event]]
-            assert "execution_list" in projections, (
-                f"Event {event} not routed to execution_list projection"
+            assert "workflow_execution_list" in projections, (
+                f"Event {event} not routed to workflow_execution_list projection"
             )
 
     def test_execution_events_registered_to_execution_detail_projection(self) -> None:
-        """REGRESSION: Execution events must be routed to execution_detail projection."""
+        """REGRESSION: Execution events must be routed to workflow_execution_detail projection."""
         from aef_adapters.projections.manager import EVENT_HANDLERS
 
         execution_events = [
@@ -893,6 +892,6 @@ class TestProjectionManagerEventRegistration:
         for event in execution_events:
             assert event in EVENT_HANDLERS, f"Event {event} not in handlers"
             projections = [h[0] for h in EVENT_HANDLERS[event]]
-            assert "execution_detail" in projections, (
-                f"Event {event} not routed to execution_detail projection"
+            assert "workflow_execution_detail" in projections, (
+                f"Event {event} not routed to workflow_execution_detail projection"
             )

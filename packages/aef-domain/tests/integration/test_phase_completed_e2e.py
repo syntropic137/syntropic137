@@ -86,59 +86,40 @@ class TestPhaseCompletedE2EFlow:
     async def test_phase_completed_projection_updates_phase_metrics(
         self, mock_projection_store: AsyncMock
     ) -> None:
-        """Test that projection correctly updates phase metrics."""
-        from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
-            WorkflowDetailProjection,
+        """Test that EXECUTION projection correctly updates phase metrics.
+
+        Note: PhaseCompleted is handled by WorkflowExecutionDetailProjection,
+        not WorkflowDetailProjection (which is for templates).
+        """
+        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+            WorkflowExecutionDetailProjection,
         )
 
-        # Setup existing workflow with phases
-        existing_workflow = {
-            "id": "workflow-e2e-1",
-            "name": "E2E Test Workflow",
-            "workflow_type": "sequential",
-            "classification": "test",
-            "status": "in_progress",
-            "description": "Test workflow",
-            "phases": [
-                {
-                    "phase_id": "research",
-                    "name": "Research",
-                    "agent_type": "claude",
-                    "status": "pending",
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "duration_seconds": 0.0,
-                    "cost_usd": "0",
-                    "session_id": None,
-                },
-                {
-                    "phase_id": "innovate",
-                    "name": "Innovate",
-                    "agent_type": "claude",
-                    "status": "pending",
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "duration_seconds": 0.0,
-                    "cost_usd": "0",
-                    "session_id": None,
-                },
-            ],
-            "created_at": "2024-12-04T00:00:00Z",
+        # Setup existing execution in projection
+        existing_execution = {
+            "execution_id": "exec-e2e-1",
+            "workflow_id": "workflow-e2e-1",
+            "workflow_name": "E2E Test Workflow",
+            "status": "running",
             "started_at": "2024-12-04T00:01:00Z",
             "completed_at": None,
-            "completed_phases": 0,
+            "phases": [],
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost_usd": "0",
+            "artifact_ids": [],
+            "error_message": None,
         }
 
-        mock_projection_store.get = AsyncMock(return_value=existing_workflow)
-        projection = WorkflowDetailProjection(mock_projection_store)
+        mock_projection_store.get = AsyncMock(return_value=existing_execution)
+        projection = WorkflowExecutionDetailProjection(mock_projection_store)
 
-        # Simulate PhaseCompleted event data (as it comes from event store)
+        # Simulate PhaseCompleted event data
         event_data = {
             "workflow_id": "workflow-e2e-1",
             "execution_id": "exec-e2e-1",
             "phase_id": "research",
+            "phase_name": "Research",
             "completed_at": "2024-12-04T00:02:30Z",
             "success": True,
             "error_message": None,
@@ -157,31 +138,25 @@ class TestPhaseCompletedE2EFlow:
         # Verify projection store was called with updated data
         mock_projection_store.save.assert_called_once()
         call_args = mock_projection_store.save.call_args
-        saved_data = call_args[0][2]  # Third positional arg is the data
+        saved_data = call_args[0][2]
 
-        # Find the research phase
-        research_phase = next(
-            (p for p in saved_data["phases"] if p["phase_id"] == "research"),
-            None,
-        )
-        assert research_phase is not None, "Research phase not found"
+        # Verify phase was added with metrics
+        assert len(saved_data["phases"]) == 1
+        phase = saved_data["phases"][0]
+        assert phase["phase_id"] == "research"
+        assert phase["input_tokens"] == 500
+        assert phase["output_tokens"] == 1500
 
-        # Verify metrics were updated
-        assert research_phase["status"] == "completed"
-        assert research_phase["input_tokens"] == 500
-        assert research_phase["output_tokens"] == 1500
-        assert research_phase["total_tokens"] == 2000
-        assert research_phase["duration_seconds"] == 45.5
-        assert research_phase["session_id"] == "session-e2e-1"
-        # cost_usd is stored as string in projection
-        assert research_phase["cost_usd"] == "0.15"
-
-        # Verify completed_phases count updated
-        assert saved_data["completed_phases"] == 1
+        # Verify totals updated
+        assert saved_data["total_input_tokens"] == 500
+        assert saved_data["total_output_tokens"] == 1500
 
     @pytest.mark.asyncio
     async def test_projection_manager_routes_phase_completed(self) -> None:
-        """Test that ProjectionManager correctly routes PhaseCompleted events."""
+        """Test that ProjectionManager correctly routes PhaseCompleted events.
+
+        PhaseCompleted should route to EXECUTION projections, not template projections.
+        """
         from aef_adapters.projections.manager import EVENT_HANDLERS
 
         # Verify PhaseCompleted is in the event handlers registry
@@ -189,15 +164,15 @@ class TestPhaseCompletedE2EFlow:
 
         handlers = EVENT_HANDLERS["PhaseCompleted"]
 
-        # Should route to workflow_detail projection
+        # Should route to workflow_execution_detail projection (not workflow_detail)
         projection_names = [h[0] for h in handlers]
-        assert "workflow_detail" in projection_names, (
-            "PhaseCompleted not routed to workflow_detail projection"
+        assert "workflow_execution_detail" in projection_names, (
+            "PhaseCompleted not routed to workflow_execution_detail projection"
         )
 
         # Verify handler method name
-        workflow_detail_handler = next(h for h in handlers if h[0] == "workflow_detail")
-        assert workflow_detail_handler[1] == "on_phase_completed", (
+        exec_detail_handler = next(h for h in handlers if h[0] == "workflow_execution_detail")
+        assert exec_detail_handler[1] == "on_phase_completed", (
             "Wrong handler method for PhaseCompleted"
         )
 
@@ -205,13 +180,13 @@ class TestPhaseCompletedE2EFlow:
     async def test_full_flow_aggregate_to_projection(
         self, mock_projection_store: AsyncMock
     ) -> None:
-        """Test the complete flow from aggregate command to projection update.
+        """Test the complete flow from aggregate command to EXECUTION projection.
 
         This simulates what happens in production:
         1. ExecutionService calls aggregate command
         2. Aggregate emits event
         3. Event is "persisted" (mocked)
-        4. Event is dispatched to projection
+        4. Event is dispatched to EXECUTION projection
         5. Projection updates read model
         """
         from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
@@ -219,8 +194,8 @@ class TestPhaseCompletedE2EFlow:
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
-        from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
-            WorkflowDetailProjection,
+        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+            WorkflowExecutionDetailProjection,
         )
 
         # Step 1: Create aggregate and execute commands
@@ -268,6 +243,7 @@ class TestPhaseCompletedE2EFlow:
                 "workflow_id": emitted_event.workflow_id,
                 "execution_id": emitted_event.execution_id,
                 "phase_id": emitted_event.phase_id,
+                "phase_name": "Phase 1",
                 "session_id": emitted_event.session_id,
                 "artifact_id": emitted_event.artifact_id,
                 "input_tokens": emitted_event.input_tokens,
@@ -277,54 +253,45 @@ class TestPhaseCompletedE2EFlow:
                 "duration_seconds": emitted_event.duration_seconds,
             }
 
-        # Step 4: Setup projection with existing workflow
-        existing_workflow = {
-            "id": "workflow-full-e2e",
-            "name": "Full E2E Workflow",
-            "workflow_type": "sequential",
-            "classification": "test",
-            "status": "in_progress",
-            "description": None,
-            "phases": [
-                {
-                    "phase_id": "phase-1",
-                    "name": "Phase 1",
-                    "agent_type": "claude",
-                    "status": "pending",
-                },
-                {
-                    "phase_id": "phase-2",
-                    "name": "Phase 2",
-                    "agent_type": "claude",
-                    "status": "pending",
-                },
-            ],
-            "created_at": None,
+        # Add phase_name if not present (for test)
+        if "phase_name" not in event_data:
+            event_data["phase_name"] = "Phase 1"
+
+        # Step 4: Setup EXECUTION projection with existing execution
+        existing_execution = {
+            "execution_id": "exec-full-e2e",
+            "workflow_id": "workflow-full-e2e",
+            "workflow_name": "Full E2E Workflow",
+            "status": "running",
             "started_at": None,
             "completed_at": None,
-            "completed_phases": 0,
+            "phases": [],
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cost_usd": "0",
+            "artifact_ids": [],
+            "error_message": None,
         }
-        mock_projection_store.get = AsyncMock(return_value=existing_workflow)
+        mock_projection_store.get = AsyncMock(return_value=existing_execution)
 
-        # Step 5: Dispatch to projection (as subscription service does)
-        projection = WorkflowDetailProjection(mock_projection_store)
+        # Step 5: Dispatch to EXECUTION projection
+        projection = WorkflowExecutionDetailProjection(mock_projection_store)
         await projection.on_phase_completed(event_data)
 
         # Step 6: Verify projection was updated correctly
         mock_projection_store.save.assert_called_once()
         saved_data = mock_projection_store.save.call_args[0][2]
 
-        phase_1 = next(p for p in saved_data["phases"] if p["phase_id"] == "phase-1")
-        assert phase_1["status"] == "completed"
+        # Phase should be added to phases list
+        assert len(saved_data["phases"]) == 1
+        phase_1 = saved_data["phases"][0]
+        assert phase_1["phase_id"] == "phase-1"
         assert phase_1["input_tokens"] == 1000
         assert phase_1["output_tokens"] == 3000
-        assert phase_1["total_tokens"] == 4000
-        assert phase_1["duration_seconds"] == 60.0
-        assert phase_1["session_id"] == "session-full-1"
 
-        # phase-2 should remain pending
-        phase_2 = next(p for p in saved_data["phases"] if p["phase_id"] == "phase-2")
-        assert phase_2["status"] == "pending"
+        # Totals should be updated
+        assert saved_data["total_input_tokens"] == 1000
+        assert saved_data["total_output_tokens"] == 3000
 
 
 class TestEventStoreIntegration:
