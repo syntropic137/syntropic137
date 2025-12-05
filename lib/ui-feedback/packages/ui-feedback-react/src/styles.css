@@ -410,7 +410,8 @@ body.ui-feedback-mode-active * {
   width: 100%;
   min-height: 80px;
   padding: 12px;
-  padding-bottom: 44px; /* Space for voice recorder button */
+  padding-bottom: 44px;
+  /* Space for voice recorder button */
   border: 1px solid var(--feedback-border);
   border-radius: 8px;
   background-color: var(--feedback-background);
