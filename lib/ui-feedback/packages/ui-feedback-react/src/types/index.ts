@@ -34,8 +34,8 @@ export interface LocationContext {
   route?: string;
   viewportWidth: number;
   viewportHeight: number;
-  clickX: number;
-  clickY: number;
+  clickX?: number;
+  clickY?: number;
   cssSelector?: string;
   xpath?: string;
   componentName?: string;
