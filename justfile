@@ -104,6 +104,14 @@ dashboard-install:
 dashboard-build:
     cd apps/aef-dashboard-ui && npm run build
 
+# Lint dashboard frontend
+dashboard-lint:
+    cd apps/aef-dashboard-ui && npm run lint
+
+# Full dashboard QA (lint + build)
+dashboard-qa: dashboard-lint dashboard-build
+    @echo "✅ Dashboard UI checks passed!"
+
 # --- Testing & Quality Assurance ---
 
 # Run all tests with coverage
@@ -131,13 +139,18 @@ vsa-validate:
     @echo "VSA validation not yet implemented."
     # TODO: Implement VSA validation using the tool from lib/event-sourcing-platform
 
-# Run all QA checks (lint, format, typecheck, test)
-qa: lint format typecheck test
+# Run all QA checks (Python + Frontend)
+qa: lint format typecheck test dashboard-qa
     @echo ""
     @echo "✅ All QA checks passed!"
 
+# Run Python-only QA (faster, no frontend build)
+qa-python: lint format typecheck test
+    @echo ""
+    @echo "✅ Python QA checks passed!"
+
 # Run full QA with coverage
-qa-full: lint format typecheck test-cov vsa-validate
+qa-full: lint format typecheck test-cov dashboard-qa vsa-validate
     @echo ""
     @echo "✅ All QA checks passed with coverage!"
 
