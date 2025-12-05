@@ -1,0 +1,1384 @@
+/**
+ * UI Feedback Widget Styles
+ *
+ * These styles use CSS custom properties set by FeedbackProvider
+ * for theming support.
+ */
+
+/* Root container - just for CSS variables */
+.ui-feedback-root {
+  /* Variables are set inline by FeedbackProvider */
+}
+
+/* =====================================================
+   Feedback Button
+   ===================================================== */
+
+.ui-feedback-button {
+  position: fixed;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--feedback-primary);
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: all 0.2s ease;
+}
+
+.ui-feedback-button:hover {
+  background-color: var(--feedback-primary-hover);
+  transform: scale(1.05);
+}
+
+.ui-feedback-button:active {
+  transform: scale(0.95);
+}
+
+.ui-feedback-button--bottom-right {
+  bottom: 24px;
+  right: 24px;
+}
+
+.ui-feedback-button--bottom-left {
+  bottom: 24px;
+  left: 24px;
+}
+
+.ui-feedback-button--top-right {
+  top: 24px;
+  right: 24px;
+}
+
+.ui-feedback-button--top-left {
+  top: 24px;
+  left: 24px;
+}
+
+/* =====================================================
+   Feedback Mode Overlay
+   ===================================================== */
+
+/* Body class when feedback mode is active */
+body.ui-feedback-mode-active,
+body.ui-feedback-mode-active * {
+  cursor: crosshair !important;
+}
+
+.ui-feedback-mode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99998;
+  /* Let mouse events pass through to elements below */
+  pointer-events: none;
+  /* Visual indicator - colored border around viewport */
+  border: 3px solid var(--feedback-primary);
+  box-shadow: inset 0 0 20px rgba(99, 102, 241, 0.2);
+}
+
+.ui-feedback-mode-hint {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  background-color: var(--feedback-surface);
+  color: var(--feedback-text);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  font-size: 13px;
+  pointer-events: none;
+  text-align: center;
+  z-index: 99999;
+}
+
+.ui-feedback-mode-hint kbd {
+  display: inline-block;
+  padding: 2px 6px;
+  margin: 0 4px;
+  background-color: var(--feedback-background);
+  border: 1px solid var(--feedback-border);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+/* Element highlight on hover in feedback mode */
+.ui-feedback-element-highlight {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99997;
+  background-color: rgba(99, 102, 241, 0.15);
+  border: 2px solid var(--feedback-primary);
+  border-radius: 4px;
+  transition: all 0.1s ease-out;
+}
+
+.ui-feedback-element-highlight::before {
+  content: attr(data-component);
+  position: absolute;
+  top: -24px;
+  left: 0;
+  padding: 2px 8px;
+  background-color: var(--feedback-primary);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.ui-feedback-element-highlight::after {
+  content: 'Click to select';
+  position: absolute;
+  bottom: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 8px;
+  background-color: var(--feedback-surface);
+  color: var(--feedback-text-secondary);
+  font-size: 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* =====================================================
+   Modal Overlay & Container
+   ===================================================== */
+
+.ui-feedback-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+}
+
+.ui-feedback-modal {
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  margin: 16px;
+  overflow: hidden;
+  background-color: var(--feedback-surface);
+  border: 1px solid var(--feedback-border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+}
+
+/* =====================================================
+   Modal Header
+   ===================================================== */
+
+.ui-feedback-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--feedback-border);
+  background-color: var(--feedback-background);
+}
+
+.ui-feedback-modal-header-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-feedback-modal-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--feedback-text);
+}
+
+.ui-feedback-modal-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--feedback-text-secondary);
+  word-break: break-all;
+}
+
+.ui-feedback-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-left: 12px;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--feedback-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-modal-close:hover {
+  background-color: var(--feedback-surface-hover);
+  color: var(--feedback-text);
+}
+
+/* =====================================================
+   Modal Body
+   ===================================================== */
+
+.ui-feedback-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+/* Location Info */
+.ui-feedback-location-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ui-feedback-location-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  background-color: var(--feedback-background);
+  border: 1px solid var(--feedback-border);
+  border-radius: 4px;
+  color: var(--feedback-text-secondary);
+}
+
+.ui-feedback-location-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* =====================================================
+   Badge Row (Type & Priority Dropdowns)
+   ===================================================== */
+
+.ui-feedback-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.ui-feedback-badge-container {
+  position: relative;
+}
+
+.ui-feedback-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-badge:hover {
+  filter: brightness(1.1);
+}
+
+.ui-feedback-badge svg {
+  width: 10px;
+  height: 10px;
+  opacity: 0.8;
+}
+
+.ui-feedback-badge-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 140px;
+  padding: 4px;
+  background-color: var(--feedback-surface);
+  border: 1px solid var(--feedback-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+}
+
+.ui-feedback-badge-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--feedback-text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ui-feedback-badge-option:hover {
+  background-color: var(--feedback-surface-hover);
+}
+
+.ui-feedback-badge-option--active {
+  background-color: var(--feedback-primary);
+  background-color: rgba(99, 102, 241, 0.2);
+}
+
+.ui-feedback-priority-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ui-feedback-location-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--feedback-text-secondary);
+  font-family: monospace;
+}
+
+.ui-feedback-location-compact span {
+  opacity: 0.7;
+}
+
+/* =====================================================
+   Compact Textarea Section
+   ===================================================== */
+
+.ui-feedback-section--textarea {
+  position: relative;
+}
+
+.ui-feedback-textarea-actions {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.ui-feedback-section--screenshots {
+  margin-bottom: 0;
+}
+
+/* Form Sections */
+.ui-feedback-section {
+  margin-bottom: 16px;
+}
+
+.ui-feedback-section:last-child {
+  margin-bottom: 0;
+}
+
+.ui-feedback-section-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--feedback-text);
+}
+
+/* =====================================================
+   Form Controls
+   ===================================================== */
+
+.ui-feedback-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 12px;
+  padding-bottom: 44px; /* Space for voice recorder button */
+  border: 1px solid var(--feedback-border);
+  border-radius: 8px;
+  background-color: var(--feedback-background);
+  color: var(--feedback-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.15s ease;
+}
+
+.ui-feedback-textarea:focus {
+  outline: none;
+  border-color: var(--feedback-primary);
+}
+
+.ui-feedback-textarea::placeholder {
+  color: var(--feedback-text-secondary);
+}
+
+.ui-feedback-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 8px;
+  background-color: var(--feedback-background);
+  color: var(--feedback-text);
+  font-family: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.ui-feedback-select:focus {
+  outline: none;
+  border-color: var(--feedback-primary);
+}
+
+.ui-feedback-select-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* =====================================================
+   Voice Recorder
+   ===================================================== */
+
+.ui-feedback-voice-recorder {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background-color: var(--feedback-background);
+  border: 1px solid var(--feedback-border);
+  border-radius: 8px;
+}
+
+.ui-feedback-voice-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--feedback-primary);
+  color: white;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-voice-button:hover {
+  background-color: var(--feedback-primary-hover);
+}
+
+.ui-feedback-voice-button--recording {
+  background-color: var(--feedback-error);
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.ui-feedback-voice-timer {
+  font-size: 14px;
+  font-family: monospace;
+  color: var(--feedback-text);
+}
+
+.ui-feedback-voice-playback {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ui-feedback-voice-playback audio {
+  flex: 1;
+  height: 32px;
+}
+
+.ui-feedback-voice-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background-color: transparent;
+  color: var(--feedback-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-voice-delete:hover {
+  background-color: var(--feedback-error);
+  color: white;
+}
+
+/* Voice Recorder Compact */
+.ui-feedback-voice-recorder--compact {
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.ui-feedback-voice-button--compact {
+  width: 32px;
+  height: 32px;
+  background-color: transparent;
+  color: var(--feedback-text-secondary);
+  border: 1px solid var(--feedback-border);
+}
+
+.ui-feedback-voice-button--compact:hover {
+  background-color: var(--feedback-surface-hover);
+  color: var(--feedback-text);
+}
+
+.ui-feedback-voice-button--compact.ui-feedback-voice-button--recording {
+  background-color: var(--feedback-error);
+  color: white;
+  border-color: var(--feedback-error);
+}
+
+.ui-feedback-voice-timer--compact {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  padding: 2px 4px;
+  font-size: 9px;
+  background-color: var(--feedback-error);
+  color: white;
+  border-radius: 4px;
+}
+
+.ui-feedback-voice-playback--compact {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ui-feedback-voice-playback--compact audio {
+  width: 200px;
+  height: 28px;
+}
+
+/* =====================================================
+   Screenshot Upload
+   ===================================================== */
+
+.ui-feedback-screenshots {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ui-feedback-screenshot-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.ui-feedback-screenshot-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 6px;
+  background-color: var(--feedback-background);
+  color: var(--feedback-text);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-screenshot-button:hover {
+  background-color: var(--feedback-surface-hover);
+  border-color: var(--feedback-primary);
+}
+
+.ui-feedback-screenshot-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Screenshot compact styles */
+.ui-feedback-screenshots--compact {
+  gap: 8px;
+}
+
+.ui-feedback-screenshot-buttons--compact {
+  gap: 4px;
+}
+
+.ui-feedback-screenshot-button--compact {
+  padding: 6px 8px;
+  font-size: 0;
+  gap: 0;
+}
+
+.ui-feedback-screenshot-button--compact svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ui-feedback-dropzone--compact {
+  min-height: 40px;
+  padding: 8px 12px;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.ui-feedback-dropzone--compact svg {
+  width: 16px;
+  height: 16px;
+  margin-bottom: 0;
+}
+
+.ui-feedback-screenshot-previews--compact {
+  gap: 4px;
+}
+
+.ui-feedback-screenshot-preview--compact {
+  width: 48px;
+  height: 36px;
+}
+
+.ui-feedback-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  padding: 16px;
+  border: 2px dashed var(--feedback-border);
+  border-radius: 8px;
+  background-color: var(--feedback-background);
+  color: var(--feedback-text-secondary);
+  font-size: 13px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-dropzone:hover,
+.ui-feedback-dropzone--active {
+  border-color: var(--feedback-primary);
+  background-color: rgba(99, 102, 241, 0.05);
+}
+
+.ui-feedback-dropzone svg {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 8px;
+  opacity: 0.5;
+}
+
+.ui-feedback-screenshot-previews {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ui-feedback-screenshot-preview {
+  position: relative;
+  width: 80px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--feedback-border);
+}
+
+.ui-feedback-screenshot-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ui-feedback-screenshot-preview-delete {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--feedback-error);
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.ui-feedback-screenshot-preview:hover .ui-feedback-screenshot-preview-delete {
+  opacity: 1;
+}
+
+/* =====================================================
+   Area Selector
+   ===================================================== */
+
+.ui-feedback-area-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  cursor: crosshair;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.ui-feedback-area-selection {
+  position: fixed;
+  border: 2px solid var(--feedback-primary);
+  background-color: rgba(99, 102, 241, 0.1);
+  pointer-events: none;
+}
+
+.ui-feedback-area-hint {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 20px;
+  background-color: var(--feedback-surface);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  color: var(--feedback-text);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+/* =====================================================
+   Modal Footer
+   ===================================================== */
+
+.ui-feedback-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--feedback-border);
+  background-color: var(--feedback-background);
+}
+
+.ui-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-btn--secondary {
+  background-color: var(--feedback-surface-hover);
+  color: var(--feedback-text);
+}
+
+.ui-feedback-btn--secondary:hover {
+  background-color: var(--feedback-border);
+}
+
+.ui-feedback-btn--primary {
+  background-color: var(--feedback-primary);
+  color: white;
+}
+
+.ui-feedback-btn--primary:hover {
+  background-color: var(--feedback-primary-hover);
+}
+
+.ui-feedback-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =====================================================
+   Location Pin
+   ===================================================== */
+
+.ui-feedback-pin {
+  position: fixed;
+  z-index: 99997;
+  width: 24px;
+  height: 24px;
+  margin-left: -12px;
+  margin-top: -24px;
+  pointer-events: none;
+}
+
+.ui-feedback-pin svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+/* =====================================================
+   Loading & Status
+   ===================================================== */
+
+.ui-feedback-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.ui-feedback-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--feedback-border);
+  border-top-color: var(--feedback-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ui-feedback-success {
+  color: var(--feedback-success);
+}
+
+.ui-feedback-error {
+  color: var(--feedback-error);
+}
+
+/* =====================================================
+   Feedback List / Tickets View
+   ===================================================== */
+
+.ui-feedback-stats-bar {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--feedback-border);
+  background-color: var(--feedback-background);
+  overflow-x: auto;
+}
+
+.ui-feedback-stat-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 16px;
+  background-color: transparent;
+  color: var(--feedback-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.ui-feedback-stat-btn:hover {
+  background-color: var(--feedback-surface-hover);
+  color: var(--feedback-text);
+}
+
+.ui-feedback-stat-btn--active {
+  background-color: var(--feedback-primary);
+  border-color: var(--feedback-primary);
+  color: white;
+}
+
+.ui-feedback-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-feedback-list-item {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--feedback-border);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ui-feedback-list-item:hover {
+  background-color: var(--feedback-surface-hover);
+}
+
+.ui-feedback-list-item:last-child {
+  border-bottom: none;
+}
+
+.ui-feedback-list-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ui-feedback-list-item-type {
+  font-size: 16px;
+}
+
+.ui-feedback-list-item-url {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--feedback-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-feedback-list-item-status {
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+}
+
+.ui-feedback-list-item-body {
+  margin-bottom: 8px;
+}
+
+.ui-feedback-list-item-comment {
+  margin: 0;
+  font-size: 13px;
+  color: var(--feedback-text-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ui-feedback-list-item-comment--empty {
+  font-style: italic;
+  opacity: 0.5;
+}
+
+.ui-feedback-list-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ui-feedback-list-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--feedback-text-secondary);
+}
+
+.ui-feedback-list-item-component {
+  font-family: monospace;
+  color: var(--feedback-primary);
+}
+
+.ui-feedback-list-item-time {
+  opacity: 0.7;
+}
+
+.ui-feedback-list-item-status-select {
+  padding: 4px 8px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 4px;
+  background-color: var(--feedback-background);
+  color: var(--feedback-text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ui-feedback-list-loading,
+.ui-feedback-list-error,
+.ui-feedback-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 20px;
+  text-align: center;
+  color: var(--feedback-text-secondary);
+}
+
+.ui-feedback-list-empty p {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--feedback-text);
+}
+
+.ui-feedback-list-empty span {
+  font-size: 13px;
+}
+
+/* =====================================================
+   Draggable Button
+   ===================================================== */
+
+.ui-feedback-button--draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.ui-feedback-button--dragging {
+  cursor: grabbing;
+  opacity: 0.8;
+}
+
+/* Middle-right position */
+.ui-feedback-button--middle-right {
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.ui-feedback-button--middle-left {
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Ticket count badge */
+.ui-feedback-button-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background-color: var(--feedback-error);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Button inner wrapper */
+.ui-feedback-button-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* =====================================================
+   Dropdown Menu
+   ===================================================== */
+
+.ui-feedback-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  padding: 8px 0;
+  background-color: var(--feedback-surface);
+  border: 1px solid var(--feedback-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+.ui-feedback-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--feedback-text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ui-feedback-menu-item:hover {
+  background-color: var(--feedback-surface-hover);
+}
+
+.ui-feedback-menu-item svg {
+  width: 18px;
+  height: 18px;
+  opacity: 0.7;
+}
+
+.ui-feedback-menu-badge {
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background-color: var(--feedback-error);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* =====================================================
+   Feedback Detail View
+   ===================================================== */
+
+.ui-feedback-detail-modal {
+  overflow: hidden;
+}
+
+.ui-feedback-detail-body {
+  overflow-y: auto;
+  max-height: calc(90vh - 180px);
+}
+
+.ui-feedback-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ui-feedback-detail-type-badge,
+.ui-feedback-detail-priority-badge,
+.ui-feedback-detail-status-badge {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ui-feedback-detail-type-badge {
+  background-color: var(--feedback-surface-hover);
+  color: var(--feedback-text);
+}
+
+.ui-feedback-detail-priority-badge {
+  color: white;
+}
+
+.ui-feedback-detail-status-badge {
+  color: white;
+}
+
+.ui-feedback-detail-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--feedback-border);
+}
+
+.ui-feedback-detail-section:last-child {
+  border-bottom: none;
+}
+
+.ui-feedback-detail-section-title {
+  margin: 0 0 12px 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--feedback-text-secondary);
+}
+
+.ui-feedback-detail-location {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ui-feedback-detail-location-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ui-feedback-detail-label {
+  flex-shrink: 0;
+  min-width: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--feedback-text-secondary);
+}
+
+.ui-feedback-detail-value {
+  font-size: 13px;
+  color: var(--feedback-text);
+  word-break: break-word;
+}
+
+.ui-feedback-detail-code {
+  padding: 2px 6px;
+  background-color: var(--feedback-background);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--feedback-text);
+  word-break: break-all;
+}
+
+.ui-feedback-detail-component {
+  font-family: monospace;
+  color: var(--feedback-primary);
+}
+
+.ui-feedback-detail-comment {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--feedback-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ui-feedback-detail-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.ui-feedback-detail-media-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.ui-feedback-detail-media-item:hover {
+  transform: scale(1.02);
+}
+
+.ui-feedback-detail-thumbnail {
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--feedback-border);
+  background-color: var(--feedback-background);
+}
+
+.ui-feedback-detail-media-name {
+  font-size: 11px;
+  color: var(--feedback-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-feedback-detail-voice-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ui-feedback-detail-voice-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-feedback-detail-audio {
+  width: 100%;
+  height: 40px;
+}
+
+.ui-feedback-detail-metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ui-feedback-detail-status-select {
+  padding: 8px 12px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 6px;
+  background-color: var(--feedback-background);
+  color: var(--feedback-text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* =====================================================
+   Image Lightbox
+   ===================================================== */
+
+.ui-feedback-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgba(0, 0, 0, 0.9);
+  cursor: zoom-out;
+}
+
+.ui-feedback-lightbox-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.ui-feedback-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.ui-feedback-lightbox-close:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
