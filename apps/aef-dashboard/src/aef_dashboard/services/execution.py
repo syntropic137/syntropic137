@@ -23,6 +23,7 @@ from aef_adapters.orchestration.executor import (
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
+    ToolUsed,
     WorkflowCompleted,
     WorkflowFailed,
     WorkflowStarted,
@@ -396,6 +397,20 @@ class ExecutionService:
                     "execution_id": event.execution_id,
                     "error": event.error,
                     "failed_phase_id": event.failed_phase_id,
+                },
+            )
+
+        elif isinstance(event, ToolUsed):
+            push_event(
+                "tool_used",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "success": event.success,
+                    "timestamp": event.timestamp.isoformat(),
                 },
             )
 
