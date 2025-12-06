@@ -34,11 +34,12 @@ dev-reset:
     docker compose -f docker/docker-compose.dev.yaml down -v
     docker compose -f docker/docker-compose.dev.yaml up --build -d
 
-# Force start full dev stack (kills existing processes on ports 5173, 8000)
+# Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
 dev-force:
-    @echo "Stopping any existing processes on ports 5173 and 8000..."
+    @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
     -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    -lsof -ti:8001 | xargs kill -9 2>/dev/null || true
     @echo "Starting Docker services..."
     docker compose -f docker/docker-compose.dev.yaml up -d
     @sleep 2
@@ -46,14 +47,21 @@ dev-force:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
     uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
     @sleep 2
+    @echo "Starting feedback API on :8001..."
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+    cd lib/ui-feedback/backend/ui-feedback-api && \
+    UI_FEEDBACK_DATABASE_URL=$AEF_PROJECTIONS_DATABASE_URL \
+    uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
+    @sleep 2
     @echo "Starting dashboard frontend on :5173..."
-    @cd apps/aef-dashboard-ui && npm run dev &
+    @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 2
     @echo ""
     @echo "✅ Development stack ready!"
-    @echo "   Frontend: http://localhost:5173"
-    @echo "   Backend:  http://localhost:8000"
-    @echo "   API Docs: http://localhost:8000/docs"
+    @echo "   Frontend:     http://localhost:5173"
+    @echo "   Backend:      http://localhost:8000"
+    @echo "   Feedback API: http://localhost:8001"
+    @echo "   API Docs:     http://localhost:8000/docs"
 
 # Clean database, seed workflows, and start full dev stack (fresh start)
 dev-fresh:
@@ -62,25 +70,35 @@ dev-fresh:
     @echo "Building & starting Docker services (PostgreSQL + Event Store)..."
     docker compose -f docker/docker-compose.dev.yaml up -d --build
     @sleep 4
+    @echo "🌱 Running database migrations..."
+    just feedback-migrate
     @echo "🌱 Seeding workflows (before backend starts)..."
     just seed-workflows
     @echo ""
-    @echo "Stopping any existing processes on ports 5173 and 8000..."
+    @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
     -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
+    -lsof -ti:8001 | xargs kill -9 2>/dev/null || true
     @sleep 1
     @echo "Starting dashboard backend on :8000..."
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
     uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
     @sleep 4
+    @echo "Starting feedback API on :8001..."
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+    cd lib/ui-feedback/backend/ui-feedback-api && \
+    UI_FEEDBACK_DATABASE_URL=$AEF_PROJECTIONS_DATABASE_URL \
+    uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
+    @sleep 2
     @echo "Starting dashboard frontend on :5173..."
-    @cd apps/aef-dashboard-ui && npm run dev &
+    @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 2
     @echo ""
     @echo "✅ Fresh development environment ready!"
-    @echo "   Frontend: http://localhost:5173"
-    @echo "   Backend:  http://localhost:8000"
-    @echo "   API Docs: http://localhost:8000/docs"
+    @echo "   Frontend:     http://localhost:5173"
+    @echo "   Backend:      http://localhost:8000"
+    @echo "   Feedback API: http://localhost:8001"
+    @echo "   API Docs:     http://localhost:8000/docs"
 
 # Run the CLI application
 cli *args:
@@ -94,19 +112,39 @@ dashboard-backend:
 
 # Start the dashboard frontend (Vite dev server)
 dashboard-frontend:
-    cd apps/aef-dashboard-ui && npm run dev
+    cd apps/aef-dashboard-ui && pnpm run dev
 
 # Install dashboard frontend dependencies
 dashboard-install:
-    cd apps/aef-dashboard-ui && npm install
+    cd lib/ui-feedback/packages/ui-feedback-react && pnpm install
+    cd apps/aef-dashboard-ui && pnpm install
 
 # Build dashboard frontend for production
 dashboard-build:
-    cd apps/aef-dashboard-ui && npm run build
+    cd apps/aef-dashboard-ui && pnpm run build
 
 # Lint dashboard frontend
 dashboard-lint:
-    cd apps/aef-dashboard-ui && npm run lint
+    cd apps/aef-dashboard-ui && pnpm run lint
+
+# --- UI Feedback Commands ---
+
+# Start the feedback API server
+feedback-backend:
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+    cd lib/ui-feedback/backend/ui-feedback-api && \
+    UI_FEEDBACK_DATABASE_URL=$AEF_PROJECTIONS_DATABASE_URL \
+    uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload
+
+# Run feedback database migrations
+feedback-migrate:
+    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
+    psql $AEF_PROJECTIONS_DATABASE_URL -f lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/migrations/001_feedback_tables.sql
+
+# Install feedback widget dependencies
+feedback-install:
+    cd lib/ui-feedback/backend/ui-feedback-api && uv sync
+    cd lib/ui-feedback/packages/ui-feedback-react && pnpm install
 
 # Full dashboard QA (lint + build)
 dashboard-qa: dashboard-lint dashboard-build
