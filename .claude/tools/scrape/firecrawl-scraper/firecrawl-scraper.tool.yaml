@@ -1,0 +1,72 @@
+id: firecrawl-scraper
+kind: tool
+category: scrape
+description: "Scrape web pages using Firecrawl API and save content as markdown with metadata frontmatter. Supports URL scraping with automatic title detection, version tagging, and session correlation."
+
+args:
+  - name: url
+    type: string
+    description: "URL of the web page to scrape"
+    required: true
+    pattern: "^https?://.+"
+
+  - name: output_path
+    type: string
+    description: "Output file path for the scraped markdown content"
+    required: true
+
+  - name: title
+    type: string
+    description: "Optional title override for the document frontmatter"
+    required: false
+
+  - name: version
+    type: string
+    description: "Version tag for the documentation (e.g., '2.5.0', 'latest')"
+    required: false
+
+  - name: session_id
+    type: string
+    description: "Session ID for log correlation with agentic_logging"
+    required: false
+
+  - name: formats
+    type: array
+    description: "Output formats to request from Firecrawl (default: ['markdown'])"
+    required: false
+    default: ["markdown"]
+
+returns:
+  type: object
+  description: "Scrape result with file path, content size, and source metadata"
+
+safety:
+  max_runtime_sec: 120
+  working_dir: "."
+  allow_write: true
+  allow_network: true
+  danger_level: moderate
+  requires_confirmation: false
+
+providers:
+  claude:
+    native_tool: bash
+  local:
+    impl_file: firecrawl_scraper.py
+    runtime: python
+
+examples:
+  - description: "Scrape Pydantic documentation"
+    args:
+      url: "https://docs.pydantic.dev/latest/concepts/models/"
+      output_path: "docs/deps/pydantic-models.md"
+      version: "2.5.0"
+    expected_result: "Markdown file saved with frontmatter containing source URL and version"
+
+  - description: "Scrape with session tracking"
+    args:
+      url: "https://example.com/api-docs"
+      output_path: "docs/api-reference.md"
+      session_id: "abc-123-def"
+    expected_result: "Markdown saved, operation logged with session_id"
+

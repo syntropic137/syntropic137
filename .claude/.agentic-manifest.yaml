@@ -1,53 +1,92 @@
 version: '1.0'
-updated_at: 2025-12-06T04:59:50.363769Z
+updated_at: 2025-12-06T20:56:17.277435Z
 source: agentic-primitives
 provider: claude
 primitives:
-- id: firecrawl-scraper
-  kind: scrape
+- id: scrape/firecrawl-scraper
+  kind: tools
   version: 1
   hash: unknown
   files:
   - ./build/claude/mcp.json
+  - ./build/claude/tools/scrape/firecrawl-scraper/firecrawl_scraper.py
+  - ./build/claude/tools/scrape/firecrawl-scraper/README.md
+  - ./build/claude/tools/scrape/firecrawl-scraper/firecrawl-scraper.tool.yaml
+- id: devops/commit
+  kind: commands
+  version: 1
+  hash: blake3:240c2afbb7dfbd5adf753fccd99678c93ced9c9658ed1383b1973ddece658448
+  files:
+  - commands/devops/commit.md
+- id: devops/merge
+  kind: commands
+  version: 1
+  hash: blake3:bb6bf2ce413367f1852dca7ed1c5813dab70b588c5b4bfd8a49f8d25654a9d9c
+  files:
+  - commands/devops/merge.md
+- id: devops/push
+  kind: commands
+  version: 1
+  hash: blake3:2db9ee58413940f66bc2f7c82dd4c34890787db54f65f2d9145e6c89df153225
+  files:
+  - commands/devops/push.md
+- id: meta/create-doc-sync
+  kind: commands
+  version: 1
+  hash: blake3:d37490a6124e739e58c971e99afbe837bb748f4623307a8ae237664a19a63e6a
+  files:
+  - commands/meta/create-doc-sync.md
+- id: meta/create-prime
+  kind: commands
+  version: 1
+  hash: blake3:4c553b3ba4dec7b12e28cb50f78203615ecf64cb90af07b8b1dd97bf0bc65c66
+  files:
+  - commands/meta/create-prime.md
+- id: meta/prompt-generator
+  kind: commands
+  version: 1
+  hash: blake3:52075fba9bec948c8675a75a7e69d6776c80d3ede1292b864a32b798ec9e45c5
+  files:
+  - commands/meta/prompt-generator.md
 - id: qa/pre-commit-qa
   kind: commands
   version: 1
   hash: blake3:218154a6476cccb8fd33dbce249a65eb410ab289e16662bbc701d1f7b06be981
   files:
-  - commands/pre-commit-qa.md
+  - commands/qa/pre-commit-qa.md
 - id: qa/qa-setup
   kind: commands
   version: 1
   hash: blake3:57200f81fafa21caeb2a515904d6f78bbc4833db68807881df8cffab7135c639
   files:
-  - commands/qa-setup.md
+  - commands/qa/qa-setup.md
 - id: qa/review
   kind: commands
   version: 1
   hash: blake3:d3a73d520e65ce718e2b92086d688de1fb8e37d4a9a1ff9a84500ee5dbf80c41
   files:
-  - commands/review.md
+  - commands/qa/review.md
 - id: docs/doc-scraper
   kind: commands
   version: 1
   hash: blake3:e27d8a500d8c22fca5e28577e85b2fb6bfa48b9d535f6f06a34fd2559faba76e
   files:
-  - commands/doc-scraper.md
-- id: create-doc-sync
-  kind: meta-prompts
+  - commands/docs/doc-scraper.md
+- id: review/fetch
+  kind: commands
   version: 1
-  hash: blake3:d37490a6124e739e58c971e99afbe837bb748f4623307a8ae237664a19a63e6a
+  hash: blake3:a4419a80e6c2c0787e6775a73b38a017f6a20b0fc0febb25029ed636ce0b70b7
   files:
-  - commands/create-doc-sync.md
-- id: create-prime
-  kind: meta-prompts
+  - commands/review/fetch.md
+- id: workflow/merge-cycle
+  kind: commands
   version: 1
-  hash: blake3:4c553b3ba4dec7b12e28cb50f78203615ecf64cb90af07b8b1dd97bf0bc65c66
+  hash: blake3:1c26b2fa2bf146ec0a770110a1d63ed4ae7f2444a5893dcfd9f9185616b99b8b
   files:
-  - commands/create-prime.md
-- id: prompt-generator
-  kind: meta-prompts
+  - commands/workflow/merge-cycle.md
+- id: review/prioritize
+  kind: skills
   version: 1
-  hash: blake3:52075fba9bec948c8675a75a7e69d6776c80d3ede1292b864a32b798ec9e45c5
+  hash: blake3:722de9b69fd0843ae06b705eaa423359f8d9066a128aae1519c880e4ae6ae46f
   files:
-  - commands/prompt-generator.md
+  - ./build/claude/skills.json
