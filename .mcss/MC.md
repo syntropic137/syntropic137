@@ -47,9 +47,13 @@ agentic-engineering-framework/          # uv monorepo (uv_build backend)
 - In-memory storage for unit tests, Docker PostgreSQL for local dev
 - Event store connection via gRPC (port 50051)
 
+## Current Milestone
+
+**Context & Token Observability** — Track agent context usage, tool invocations, and enable full-cycle automation.
+
 ## Current Branch
 
-`feat/agentic-sdk-full-integration` — Agentic SDK + Event Subscriptions
+`main` — Both repos synced after primitives restructure
 
 ## Important Links / Files
 
@@ -58,6 +62,25 @@ agentic-engineering-framework/          # uv monorepo (uv_build backend)
 - ADRs: `docs/adrs/`
 - Domain Reference: `docs/_reference/20251130-aggregate-entity-design.md`
 - System Model: `docs/_reference/20251130-agentic-engineering-system_final-model.md`
+
+## Status Summary
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| Event Sourcing | ✅ Complete | Subscriptions + projections working |
+| Agentic SDK | ✅ Integrated | Claude Agent SDK hooked up |
+| Primitives | ✅ Restructured | ADR-021 standard, `.claude/` aligned |
+| Dashboard API | ✅ Working | All endpoints functional |
+| Dashboard UI | ⚠️ Build issue | TypeScript import error (pre-existing) |
+| Tests | ✅ 469 passing | Full coverage on domain layer |
+
+## Next Up
+
+1. **Context Tracking:** `context_size`, `total_tokens_in/out` per session
+2. **Tool Observability:** Events for all tool usage, backend-first
+3. **Docker Workspace:** Isolated agent execution environment
+4. **Automated Workflows:** Full issue→merge cycle
+5. **Training Data:** Export valuable sessions as training examples
 
 ## Quick Commands
 
@@ -69,8 +92,11 @@ just dashboard-frontend   # React dev (port 5173)
 
 # Seed and test
 just seed-workflows       # Seed sample workflows
-just test                 # Run all 233 tests
+just test                 # Run all tests
 just qa                   # Full QA pipeline
+
+# Primitives
+just primitives-sync      # Sync from agentic-primitives submodule
 
 # Check health
 curl http://localhost:8000/health

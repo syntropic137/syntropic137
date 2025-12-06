@@ -1,244 +1,159 @@
 # CURRENT ACTIVE STATE ARTIFACT (CASA)
 
 **Project:** Agentic Engineering Framework
-**Updated:** 2025-12-04
-**Branch:** `testing/e2e-validation` (NEW - testing refinement branch)
-**Status:** All tests passing (233) ✅ | PR #4 merged to main ✅
+**Updated:** 2025-12-06
+**Branch:** `main` (both repos synced)
+**Status:** All synced ✅ | Primitives restructure complete ✅
 
 ---
 
 ## Where I Left Off
 
-**Merged PR #4** (`feat/agentic-sdk-full-integration` → `main`) with all Claude Agent SDK integration work. Now on a new branch to work out remaining kinks and ensure all features work as expected.
+**Just completed the Primitives Directory Restructure** — a major refactoring to align `agentic-primitives` with Claude Code's `.claude/` directory standard. Both PRs merged:
 
-## Current Focus: Testing & Polish
+- **agentic-primitives PR #22:** `f362fb9` (merged)
+- **AEF PR #9:** `e0d242f` (merged)
 
-Goal: Fix inconsistencies, validate all features work E2E, and ensure clean architecture.
-
-## What Was Just Completed
-
-### Bug Fixes & Test Improvements ✅
-
-**Datetime Serialization Fix:**
-- ✅ Fixed `session_summary.py` - `started_at`/`completed_at` now handle `datetime | str | None`
-- ✅ Fixed `workflow_summary.py` - `created_at` handles `datetime | str | None`
-- ✅ Fixed `workflow_detail.py` - All datetime fields in `PhaseDetail` and `WorkflowDetail`
-- ✅ Root cause: Events from event store come back as serialized ISO strings, not `datetime` objects
-
-**Test Coverage Additions:**
-- ✅ Added `test_list_sessions.py` with 9 tests for `SessionListProjection`
-- ✅ Tests include scenarios with serialized event data (ISO strings)
-- ✅ Fixed subscription tests with proper `_assert_test_environment()` enforcement
-
-**Documentation & ADRs:**
-- ✅ Created ADR-013: Integration Testing Strategy (Testcontainers proposal)
-- ✅ Updated ADR-004: Added "Mock Objects: Test Environment Only" section
-- ✅ Updated E2E-ACCEPTANCE-TESTS.md: Added Mocking Policy section
-
-**CI/CD Fixes:**
-- ✅ Added `claude-agent-sdk>=0.1.9` to root `pyproject.toml` `[dependency-groups.dev]`
-- ✅ Removed mypy workarounds (now properly installed in CI)
-- ✅ All 233 tests passing in CI ✅
-
-### QA Status
-- **233 tests passing** ✅
-- All lint/type checks passing ✅
-- CI/CD pipeline green ✅
-
-## Known Issues to Fix
-
-Based on user testing, the following inconsistencies need to be addressed:
-
-| Issue | Status | Notes |
-|-------|--------|-------|
-| Token distributions not showing | ⏳ | Dashboard metrics may not be updating |
-| Workflow status staying "pending" | ⏳ | WorkflowExecutionAggregate events not flowing to projections |
-| Session list not updating | ⏳ | Session events may not be subscribed properly |
-| Artifact content not viewable | ⏳ | Content reading from workspace may have issues |
+New directory structure:
+```
+primitives/v1/
+├── commands/{category}/{id}/      # /command-name
+│   └── meta/{id}/                 # Meta-prompts
+├── skills/{category}/{id}/        # Referenced in prompts
+├── agents/{category}/{id}/        # @agent-name
+├── tools/{category}/{id}/         # MCP integrations
+└── hooks/{category}/{id}/         # Lifecycle handlers
+```
 
 ## What To Do Next
 
-### Priority 0: Fix Known Issues
+### Priority 1: Context & Token Tracking
 
-1. **Debug workflow status** - Why do workflows stay "pending" after execution?
-2. **Debug token counts** - Why aren't token metrics displaying?
-3. **Debug sessions** - Why doesn't the session list update?
-4. **Debug artifacts** - Why can't artifact content be viewed?
+**Goal:** Accurately track and observe agent context usage.
 
-### Priority 1: Improve Testing Flow (ADR-013)
+| Metric | Description | Storage |
+|--------|-------------|---------|
+| `context_size` | Current context window usage | Per-session |
+| `total_tokens_in` | Cumulative input tokens | Per-session |
+| `total_tokens_out` | Cumulative output tokens | Per-session |
+| `context_limit` | Model's max context | Per-agent config |
 
-**Goal:** Prevent future serialization bugs by testing with real dependencies.
-
-| Task | Status | Notes |
-|------|--------|-------|
-| Add projection tests with serialized event data | ✅ Done | `test_list_sessions.py` |
-| Create ADR-013 for Testcontainers strategy | ✅ Done | Proposed |
-| Implement Testcontainers for EventStoreDB | ⏳ Pending | Use `event-sourcing-platform` pattern |
-| Implement Testcontainers for PostgreSQL | ⏳ Pending | For projection store tests |
-| Add integration test suite (`tests/integration/`) | ⏳ Pending | Separate from unit tests |
-
-**Implementation Plan:**
-```bash
-# Phase 1: Add integration test infrastructure
-packages/aef-adapters/tests/integration/
-├── conftest.py          # Testcontainers fixtures
-├── test_event_flow.py   # Write → Subscribe → Project
-└── test_artifact_flow.py # Create → Persist → Query
+**Implementation:**
+```python
+# New event: ContextMetricsUpdated
+@event("ContextMetricsUpdated", "v1")
+class ContextMetricsUpdated:
+    session_id: str
+    context_size: int           # Current window
+    total_tokens_in: int        # Cumulative
+    total_tokens_out: int       # Cumulative
+    context_limit: int          # Model max
+    timestamp: datetime
 ```
 
-### Priority 2: Real Claude Agent E2E
+**Key Insight:** `total_tokens_in/out` can exceed `context_size` due to context engineering (sliding window, summarization, etc.)
 
-**Goal:** Validate full stack with real Claude Agent SDK.
+### Priority 2: Tool Usage Tracking
 
-```bash
-# Ensure API key is set in .env
-ANTHROPIC_API_KEY=sk-ant-...
+**Goal:** Full observability into tool invocations.
 
-# Start the system
-just dev
+| Data Point | Description |
+|------------|-------------|
+| `tool_name` | Which tool was called |
+| `tool_input` | Input parameters |
+| `tool_output` | Return value/result |
+| `duration_ms` | Execution time |
+| `status` | success/error/timeout |
+| `blocked_by_hook` | If safety hook prevented |
 
-# Run E2E validation
-# 1. Open dashboard: http://localhost:5173
-# 2. Click "Run Workflow" on a seeded workflow
-# 3. Observe: Sessions created, tokens counted, artifacts viewable
+**Backend First:** Events capture all tool usage. UI is just a validation/display layer.
+
+### Priority 3: Docker Workspace for Agentic Coding
+
+**Goal:** Isolated, reproducible agent execution environment.
+
+```yaml
+# docker-compose.workspace.yaml
+services:
+  agent-workspace:
+    build: ./workspace
+    volumes:
+      - ./repos:/workspace/repos   # Code to work on
+      - ./artifacts:/workspace/out # Output artifacts
+    environment:
+      - ANTHROPIC_API_KEY
+    security_opt:
+      - no-new-privileges:true
 ```
 
-### Priority 3: Cleanup & Merge
+**Safety:** Sandboxed file access, network restrictions, resource limits.
 
-- [ ] Deprecate old `AgentProtocol` (M7)
-- [ ] Merge PR to main
-- [ ] Update `agentic-primitives` submodule to latest
+### Priority 4: Automated Engineering Workflows
+
+**Goal:** Full-cycle automation from issue to merged PR.
+
+```
+Issue → Plan → Implement → Test → Review → Merge
+  ↓       ↓        ↓         ↓       ↓        ↓
+Event   Event   Event     Event   Event   Event
+```
+
+**Commands already built:**
+- `/qa/pre-commit-qa` — QA checks
+- `/devops/commit` — Conventional commits
+- `/devops/push` — Push + CI wait
+- `/review/fetch` — Get review comments
+- `/workflow/merge-cycle` — Full orchestration
+
+### Priority 5: Training Data & Public Development
+
+**Goal:** Build reusable training data from development sessions.
+
+**Approach:**
+- Capture human-AI interactions as training examples
+- Export successful workflows as templates
+- Public "instructor development" — open development process
 
 ## Open Loops
 
 | Item | Priority | Notes |
 |------|----------|-------|
-| Real Claude agent E2E test | High | Requires API key, validates full stack |
-| Testcontainers integration tests | Medium | ADR-013 outlines approach |
-| Hook auto-fire validation | Medium | `.claude/settings.json` config |
-| Docker workspace implementation | Low | M8 stretch goal |
-| Deprecate `AgentProtocol` | Low | After E2E validation |
-
-## Key Discoveries (Lessons Learned)
-
-### Datetime Serialization Issue
-**Problem:** Projections called `.isoformat()` on values that were already ISO strings.
-
-**Root Cause:** Event store returns events with datetime fields as serialized strings, not `datetime` objects.
-
-**Fix Pattern:**
-```python
-# Before (broken)
-"started_at": self.started_at.isoformat() if self.started_at else None
-
-# After (fixed)
-"started_at": (
-    self.started_at.isoformat()
-    if isinstance(self.started_at, datetime)
-    else str(self.started_at)
-    if self.started_at
-    else None
-)
-```
-
-**Prevention:** ADR-013 proposes Testcontainers for integration tests that validate real serialization paths.
-
-### Mock Environment Enforcement
-All mocks now include `_assert_test_environment()` check:
-```python
-def _assert_test_environment() -> None:
-    app_env = os.getenv("APP_ENVIRONMENT", "").lower()
-    if app_env != "test":
-        raise MockTestEnvironmentError(...)
-```
-
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     AEF CQRS ARCHITECTURE WITH SUBSCRIPTIONS                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  WRITE PATH                          READ PATH                              │
-│  ──────────                          ─────────                              │
-│  CLI / API                           Dashboard API                          │
-│     ↓                                     ↑                                 │
-│  Command Handlers                    Query Handlers                         │
-│     ↓                                     ↑                                 │
-│  Aggregates                          Projections                            │
-│     ↓                                     ↑                                 │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                         EVENT STORE (gRPC)                            │ │
-│  │  Events serialized as JSON (datetimes → ISO strings)                  │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                              ↓                                              │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │              EventSubscriptionService                                  │ │
-│  │  - Catch-up + Live streaming                                          │ │
-│  │  - Position tracking (survives restarts)                              │ │
-│  │  - Dispatches to ProjectionManager                                    │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                              ↓                                              │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                      ProjectionManager                                │ │
-│  │  - Receives events as dicts (serialized)                              │ │
-│  │  - Routes to appropriate projections                                  │ │
-│  │  - Projections must handle datetime|str                               │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Key Commands
-
-```bash
-# Development
-just dev                  # Start Docker (PostgreSQL + Event Store)
-just seed-workflows       # Seed sample workflows
-just dashboard-backend    # Run API server (loads .env)
-just dashboard-frontend   # Run React dev server
-
-# Testing
-just test                 # Run all tests
-just qa                   # Full QA pipeline
-APP_ENVIRONMENT=test uv run pytest  # Run with test env (mocks work)
-
-# Health Check
-curl http://localhost:8000/health
-```
+| Context tracking implementation | High | New events + projections |
+| Tool usage backend | High | Hooks already capture, need projection |
+| Docker workspace | Medium | Security considerations critical |
+| Automated workflows | Medium | Commands exist, need orchestration polish |
+| Training data export | Low | After observability is solid |
 
 ## Key Files
 
-### Recent Changes (Bug Fixes)
-- `packages/aef-domain/src/.../session_summary.py` - Datetime serialization fix
-- `packages/aef-domain/src/.../workflow_summary.py` - Datetime serialization fix
-- `packages/aef-domain/src/.../workflow_detail.py` - Datetime serialization fix
-- `packages/aef-domain/src/.../test_list_sessions.py` - New projection tests
+### Just Completed (Restructure)
+- `lib/agentic-primitives/docs/adrs/021-primitives-directory-structure.md` — New standard
+- `lib/agentic-primitives/primitives/v1/{commands,skills,agents}/` — Restructured
+- `.claude/commands/{devops,qa,review,workflow}/` — New command categories
 
-### Testing Infrastructure
-- `docs/adrs/ADR-013-integration-testing-strategy.md` - Testcontainers proposal
-- `docs/adrs/ADR-004-environment-configuration.md` - Mock env enforcement
-- `docs/testing/E2E-ACCEPTANCE-TESTS.md` - Mocking policy docs
+### For Context Tracking
+- `packages/aef-domain/src/aef_domain/session/` — Session aggregate
+- `packages/aef-adapters/src/aef_adapters/agents/` — Agent adapters
 
-### Agentic SDK Integration
-- `packages/aef-adapters/src/aef_adapters/agents/claude_agentic.py` - Claude SDK wrapper
-- `packages/aef-adapters/src/aef_adapters/orchestration/executor.py` - Workflow executor
-- `apps/aef-dashboard/src/aef_dashboard/services/execution.py` - API execution service
+### For Tool Tracking
+- `.claude/hooks/handlers/pre-tool-use.py` — Tool interception
+- `.claude/hooks/handlers/post-tool-use.py` — Result capture
 
-## Current State Summary
+## Commands Reference
 
-```
-Phase 1 (MVP Foundation): ✅ COMPLETE
-Phase 2 (Workflow Execution): ✅ COMPLETE
-VSA Projections: ✅ COMPLETE
-Event Store Integration: ✅ COMPLETE
-Event Subscriptions: ✅ COMPLETE
-Agentic SDK Integration: ✅ M1-M6 Complete
-Bug Fixes: ✅ Datetime serialization, test environment checks
-Test Coverage: ✅ 233 tests passing
+```bash
+# Development
+just dev                    # Start Docker stack
+just dashboard-backend      # API server (8000)
+just dashboard-frontend     # React UI (5173)
+just primitives-sync        # Sync from agentic-primitives
 
-Next Steps:
-1. Implement Testcontainers for integration tests (ADR-013)
-2. Real Claude E2E validation
-3. PR merge to main
+# Testing
+just test                   # All tests
+just qa                     # Full QA pipeline
+
+# Primitives
+cd lib/agentic-primitives
+agentic-p validate primitives  # Validate all
+agentic-p build --provider claude  # Build for Claude
 ```
