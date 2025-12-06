@@ -4,6 +4,7 @@ Firecrawl Scraper Tool
 
 Scrape web pages using Firecrawl API and save as markdown with metadata frontmatter.
 """
+
 from __future__ import annotations
 
 import logging
@@ -296,4 +297,3 @@ def version() -> None:
 
 if __name__ == "__main__":
     app()
-

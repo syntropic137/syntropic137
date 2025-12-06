@@ -11,7 +11,7 @@ This handler:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +23,7 @@ def log_analytics(event: dict[str, Any]) -> None:
         path = Path(os.getenv("ANALYTICS_PATH", ".agentic/analytics/events.jsonl"))
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
-            f.write(
-                json.dumps(
-                    {"timestamp": datetime.now(timezone.utc).isoformat(), **event}
-                )
-                + "\n"
-            )
+            f.write(json.dumps({"timestamp": datetime.now(UTC).isoformat(), **event}) + "\n")
     except Exception:
         pass  # Never block on analytics failure
 
@@ -42,9 +37,7 @@ def extract_output_preview(tool_result: Any, max_length: int = 200) -> str:
         output = tool_result
     elif isinstance(tool_result, dict):
         # Try common output fields
-        result = (
-            tool_result.get("output") or tool_result.get("stdout") or str(tool_result)
-        )
+        result = tool_result.get("output") or tool_result.get("stdout") or str(tool_result)
         output = str(result)
     else:
         output = str(tool_result)
@@ -97,9 +90,7 @@ def main() -> None:
         analytics_event = {
             "event_type": "tool_execution",
             "handler": "post-tool-use",
-            "hook_event": event.get(
-                "hook_event_name", "PostToolUse"
-            ),  # Claude's hook event
+            "hook_event": event.get("hook_event_name", "PostToolUse"),  # Claude's hook event
             "tool_name": tool_name,
             "session_id": event.get("session_id"),
             "tool_use_id": event.get("tool_use_id"),

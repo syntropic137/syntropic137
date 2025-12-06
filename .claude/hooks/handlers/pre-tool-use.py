@@ -13,7 +13,7 @@ This handler:
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +35,7 @@ def log_analytics(event: dict[str, Any]) -> None:
         path = Path(os.getenv("ANALYTICS_PATH", ".agentic/analytics/events.jsonl"))
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
-            f.write(
-                json.dumps(
-                    {"timestamp": datetime.now(timezone.utc).isoformat(), **event}
-                )
-                + "\n"
-            )
+            f.write(json.dumps({"timestamp": datetime.now(UTC).isoformat(), **event}) + "\n")
     except Exception:
         pass  # Never block on analytics failure
 
