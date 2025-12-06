@@ -1,0 +1,79 @@
+version: '1.0'
+updated_at: 2025-12-06T03:07:07.754845Z
+source: agentic-primitives
+provider: claude
+primitives:
+- id: firecrawl-scraper
+  kind: scrape
+  version: 1
+  hash: unknown
+  files:
+  - mcp.json
+- id: atomic-hooks
+  kind: hooks
+  version: 1
+  hash: unknown
+  files:
+  - .claude/settings.json
+  - .claude/hooks/handlers/pre-tool-use.py
+  - .claude/hooks/handlers/session-end.py
+  - .claude/hooks/handlers/session-start.py
+  - .claude/hooks/handlers/notification.py
+  - .claude/hooks/handlers/post-tool-use.py
+  - .claude/hooks/handlers/user-prompt.py
+  - .claude/hooks/handlers/stop.py
+  - .claude/hooks/handlers/pre-compact.py
+  - .claude/hooks/handlers/subagent-stop.py
+  - .claude/hooks/validators/security/bash.py
+  - .claude/hooks/validators/security/__init__.py
+  - .claude/hooks/validators/security/file.py
+  - .claude/hooks/validators/prompt/__init__.py
+  - .claude/hooks/validators/prompt/pii.py
+- id: devops/manage-security-patches
+  kind: commands
+  version: 1
+  hash: blake3:13ea6f48a200a78eb1e8f56ae4a0dcb98cfe3332014a186b21b5e4fb13eb055d
+  files:
+  - commands/devops/manage-security-patches.md
+- id: qa/pre-commit-qa
+  kind: commands
+  version: 1
+  hash: blake3:218154a6476cccb8fd33dbce249a65eb410ab289e16662bbc701d1f7b06be981
+  files:
+  - commands/qa/pre-commit-qa.md
+- id: qa/qa-setup
+  kind: commands
+  version: 1
+  hash: blake3:57200f81fafa21caeb2a515904d6f78bbc4833db68807881df8cffab7135c639
+  files:
+  - commands/qa/qa-setup.md
+- id: qa/review
+  kind: commands
+  version: 1
+  hash: blake3:d3a73d520e65ce718e2b92086d688de1fb8e37d4a9a1ff9a84500ee5dbf80c41
+  files:
+  - commands/qa/review.md
+- id: docs/doc-scraper
+  kind: commands
+  version: 1
+  hash: blake3:e27d8a500d8c22fca5e28577e85b2fb6bfa48b9d535f6f06a34fd2559faba76e
+  files:
+  - commands/docs/doc-scraper.md
+- id: create-doc-sync
+  kind: meta-prompts
+  version: 1
+  hash: blake3:d37490a6124e739e58c971e99afbe837bb748f4623307a8ae237664a19a63e6a
+  files:
+  - commands/meta/create-doc-sync.md
+- id: create-prime
+  kind: meta-prompts
+  version: 1
+  hash: blake3:4c553b3ba4dec7b12e28cb50f78203615ecf64cb90af07b8b1dd97bf0bc65c66
+  files:
+  - commands/meta/create-prime.md
+- id: prompt-generator
+  kind: meta-prompts
+  version: 1
+  hash: blake3:52075fba9bec948c8675a75a7e69d6776c80d3ede1292b864a32b798ec9e45c5
+  files:
+  - commands/meta/prompt-generator.md

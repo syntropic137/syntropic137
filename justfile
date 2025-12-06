@@ -249,6 +249,79 @@ submodules-init:
 submodules-update:
     git submodule update --remote --merge
 
+# --- Primitives (Claude Commands/Tools/Hooks) ---
+
+# Path to agentic-primitives CLI
+_ap_cli := "lib/agentic-primitives/cli/target/release/agentic-p"
+
+# Build agentic-primitives CLI (if needed)
+primitives-cli-build:
+    @echo "Building agentic-primitives CLI..."
+    cd lib/agentic-primitives/cli && cargo build --release
+    @echo "✅ CLI built at {{_ap_cli}}"
+
+# Sync primitives from agentic-primitives → AEF (preserves local commands)
+primitives-sync: primitives-cli-build
+    @echo "🔄 Building primitives from agentic-primitives..."
+    cd lib/agentic-primitives && ./cli/target/release/agentic-p build --provider claude
+    @echo ""
+    @echo "📦 Copying build to AEF..."
+    rm -rf build/claude
+    cp -r lib/agentic-primitives/build/claude build/
+    @echo ""
+    @echo "📥 Installing to .claude/ (local commands preserved)..."
+    ./{{_ap_cli}} install --provider claude --verbose
+    @echo ""
+    @echo "✅ Primitives synced! Local commands in .claude/commands/ are preserved."
+
+# Show what's managed vs local in .claude/
+primitives-status:
+    #!/usr/bin/env bash
+    echo "📋 Primitives Status"
+    echo "===================="
+    echo ""
+    echo "Managed (from agentic-primitives):"
+    if [ -f .claude/.agentic-manifest.yaml ]; then
+        grep -E "^- id:" .claude/.agentic-manifest.yaml | sed 's/- id:/  •/'
+    else
+        echo "  No manifest found - run 'just primitives-sync' first"
+    fi
+    echo ""
+    echo "Local (repo-specific, not synced):"
+    if [ -f .claude/.agentic-manifest.yaml ]; then
+        for f in $(find .claude/commands -name "*.md" 2>/dev/null); do
+            rel=${f#.claude/}
+            if ! grep -q "$rel" .claude/.agentic-manifest.yaml 2>/dev/null; then
+                echo "  • $rel"
+            fi
+        done
+    else
+        find .claude/commands -name "*.md" 2>/dev/null | sed 's/^/  • /'
+    fi
+
+# List local-only commands (candidates for contribution to agentic-primitives)
+primitives-local:
+    #!/usr/bin/env bash
+    echo "📝 Local Commands (not from agentic-primitives)"
+    echo "================================================"
+    echo "These can be contributed back to agentic-primitives:"
+    echo ""
+    if [ -f .claude/.agentic-manifest.yaml ]; then
+        for f in $(find .claude/commands -name "*.md" 2>/dev/null); do
+            rel=${f#.claude/}
+            if ! grep -q "$rel" .claude/.agentic-manifest.yaml 2>/dev/null; then
+                echo "  $f"
+            fi
+        done
+    else
+        find .claude/commands -name "*.md" 2>/dev/null
+    fi
+
+# Clean primitives build artifacts
+primitives-clean:
+    rm -rf build/claude
+    @echo "✅ Cleaned build/claude"
+
 # Add a new package to the workspace
 new-package name:
     @echo "Creating package: {{name}}"

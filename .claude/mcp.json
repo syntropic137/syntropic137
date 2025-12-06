@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "firecrawl-scraper": {
+      "command": "echo",
+      "args": [
+        "Tool 'firecrawl-scraper' not implemented"
+      ]
+    }
+  }
+}
