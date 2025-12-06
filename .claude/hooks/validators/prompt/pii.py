@@ -78,9 +78,7 @@ CONTEXT_PATTERNS: list[tuple[str, str]] = [
 ]
 
 
-def validate(
-    tool_input: dict[str, Any], context: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def validate(tool_input: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Validate a prompt for PII patterns.
 

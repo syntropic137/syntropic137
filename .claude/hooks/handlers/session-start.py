@@ -23,10 +23,7 @@ def log_analytics(event: dict[str, Any]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
             f.write(
-                json.dumps(
-                    {"timestamp": datetime.now(timezone.utc).isoformat(), **event}
-                )
-                + "\n"
+                json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), **event}) + "\n"
             )
     except Exception:
         pass
