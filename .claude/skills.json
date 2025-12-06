@@ -1,0 +1,40 @@
+{
+  "note": "This is a manifest file only. Skills are injected into system prompts by the orchestrator.",
+  "skills": [
+    {
+      "id": "prioritize",
+      "domain": "code-review",
+      "category": "review",
+      "summary": "Prioritize review comments by severity: security > logic > style",
+      "version": 1
+    },
+    {
+      "id": "prioritize",
+      "domain": "code-review",
+      "category": "review",
+      "summary": "Prioritize review comments by severity: security > logic > style",
+      "version": 1
+    },
+    {
+      "id": "prioritize",
+      "domain": "code-review",
+      "category": "review",
+      "summary": "Prioritize review comments by severity: security > logic > style",
+      "version": 1
+    },
+    {
+      "id": "prioritize",
+      "domain": "code-review",
+      "category": "review",
+      "summary": "Prioritize review comments by severity: security > logic > style",
+      "version": 1
+    },
+    {
+      "id": "prioritize",
+      "domain": "code-review",
+      "category": "review",
+      "summary": "Prioritize review comments by severity: security > logic > style",
+      "version": 1
+    }
+  ]
+}
