@@ -147,3 +147,77 @@ def generate_user_prompt_event_id(
         timestamp,
         prompt_hash[:16],
     )
+
+
+def generate_stop_event_id(
+    session_id: str,
+    timestamp: datetime,
+    event_type: str = "agent_stopped",
+) -> str:
+    """Generate deterministic ID for stop events.
+
+    Args:
+        session_id: Agent session identifier
+        timestamp: When the stop occurred
+        event_type: Type of stop event (agent_stopped or subagent_stopped)
+
+    Returns:
+        32-character hex string
+    """
+    return generate_event_id(session_id, event_type, timestamp)
+
+
+def generate_notification_event_id(
+    session_id: str,
+    timestamp: datetime,
+    content_hash: str,
+) -> str:
+    """Generate deterministic ID for notification events.
+
+    Args:
+        session_id: Agent session identifier
+        timestamp: When the notification was sent
+        content_hash: Hash of the notification content
+
+    Returns:
+        32-character hex string
+    """
+    return generate_event_id(
+        session_id,
+        "notification_sent",
+        timestamp,
+        content_hash[:16],
+    )
+
+
+def generate_git_event_id(
+    session_id: str,
+    event_type: str,
+    timestamp: datetime,
+    commit_hash: str | None = None,
+    branch: str | None = None,
+) -> str:
+    """Generate deterministic ID for git events.
+
+    Args:
+        session_id: Agent session identifier
+        event_type: Type of git event (git_commit, git_branch_created, etc.)
+        timestamp: When the git operation occurred
+        commit_hash: Git commit hash (for commit events)
+        branch: Branch name (for branch events)
+
+    Returns:
+        32-character hex string
+    """
+    content_parts = []
+    if commit_hash:
+        content_parts.append(commit_hash[:16])
+    if branch:
+        content_parts.append(branch)
+
+    content_hash = None
+    if content_parts:
+        content = "|".join(content_parts)
+        content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    return generate_event_id(session_id, event_type, timestamp, content_hash)
