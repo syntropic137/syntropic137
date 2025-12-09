@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 3.0.0
+**Version:** 4.0.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-04
+**Updated:** 2025-12-09
 **Status:** Active
 
 ---
@@ -10,6 +10,13 @@
 ## Overview
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+
+**Version 4.0** adds:
+- **WebSocket Control Plane** - Real-time execution control (pause/resume/cancel)
+- **Control API Endpoints** - HTTP and WebSocket interfaces
+- **Executor Integration** - Signal checking at yield points
+- **Frontend Control UI** - Interactive control buttons
+- **CLI Control Commands** - Terminal-based execution control
 
 **Version 3.0** adds:
 - **Workflow Execution Model** - Separate Templates from Executions/Runs
@@ -1377,6 +1384,227 @@ assert agent is not None
 
 ---
 
+## Feature 13: WebSocket Control Plane ⭐ NEW
+
+> **ADR:** [ADR-019: WebSocket Control Plane Architecture](/docs/adrs/ADR-019-websocket-control-plane.md)
+
+### Overview
+
+The WebSocket Control Plane enables real-time execution control:
+- **Pause** running executions at yield points
+- **Resume** paused executions
+- **Cancel** running or paused executions
+- **Inject context** into running executions (future)
+
+### F13.1 Control Plane HTTP API
+
+**Given** an execution is running
+**When** I call control endpoints
+**Then** control signals are queued
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 13.1.1 | `GET /api/executions/{id}/state` returns current state | ⬜ |
+| 13.1.2 | State is one of: pending, running, paused, cancelled, completed, failed | ⬜ |
+| 13.1.3 | `POST /api/executions/{id}/pause` queues pause signal | ⬜ |
+| 13.1.4 | Pause returns success with "Pause signal queued" message | ⬜ |
+| 13.1.5 | Pause on non-running execution returns 400 error | ⬜ |
+| 13.1.6 | `POST /api/executions/{id}/resume` queues resume signal | ⬜ |
+| 13.1.7 | Resume on non-paused execution returns 400 error | ⬜ |
+| 13.1.8 | `POST /api/executions/{id}/cancel` queues cancel signal | ⬜ |
+| 13.1.9 | Cancel on terminal execution returns 400 error | ⬜ |
+
+**Validation Commands:**
+```bash
+# Get execution state
+curl -s http://localhost:8000/api/executions/<execution_id>/state | jq
+
+# Pause a running execution
+curl -X POST http://localhost:8000/api/executions/<execution_id>/pause \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Testing pause"}' | jq
+
+# Resume a paused execution
+curl -X POST http://localhost:8000/api/executions/<execution_id>/resume | jq
+
+# Cancel an execution
+curl -X POST http://localhost:8000/api/executions/<execution_id>/cancel \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "User cancelled"}' | jq
+```
+
+### F13.2 WebSocket Control Endpoint
+
+**Given** I connect to the WebSocket control endpoint
+**When** I send control commands
+**Then** I receive real-time state updates
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 13.2.1 | WebSocket connects to `/api/ws/control/{execution_id}` | ⬜ |
+| 13.2.2 | Initial message contains current state | ⬜ |
+| 13.2.3 | `{"command": "pause"}` queues pause signal | ⬜ |
+| 13.2.4 | `{"command": "resume"}` queues resume signal | ⬜ |
+| 13.2.5 | `{"command": "cancel"}` queues cancel signal | ⬜ |
+| 13.2.6 | Result messages include success/error status | ⬜ |
+| 13.2.7 | Unknown commands return error type message | ⬜ |
+| 13.2.8 | WebSocket stays connected for multiple commands | ⬜ |
+
+**Validation (Browser Console):**
+```javascript
+const ws = new WebSocket('ws://localhost:8000/api/ws/control/exec-123');
+ws.onmessage = (e) => console.log('Received:', JSON.parse(e.data));
+ws.onopen = () => {
+  console.log('Connected');
+  ws.send(JSON.stringify({ command: 'pause', reason: 'Testing' }));
+};
+```
+
+### F13.3 Executor Control Signal Integration
+
+**Given** an executor with control signal checker configured
+**When** the executor yields tool events
+**Then** it checks for and handles control signals
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 13.3.1 | Executor accepts `control_signal_checker` parameter | ⬜ |
+| 13.3.2 | Signal check occurs after each `ToolUsed` event | ⬜ |
+| 13.3.3 | `ExecutionPaused` event emitted on pause signal | ⬜ |
+| 13.3.4 | Execution waits (polling 1s) while paused | ⬜ |
+| 13.3.5 | `ExecutionResumed` event emitted on resume signal | ⬜ |
+| 13.3.6 | Execution continues after resume | ⬜ |
+| 13.3.7 | `ExecutionCancelled` event emitted on cancel signal | ⬜ |
+| 13.3.8 | Execution exits phase on cancel | ⬜ |
+| 13.3.9 | Cancel while paused works correctly | ⬜ |
+| 13.3.10 | No signal check when checker is None | ⬜ |
+
+**Validation (pytest):**
+```bash
+pytest packages/aef-adapters/tests/test_executor_control.py -v
+```
+
+### F13.4 Frontend Control UI
+
+**Given** I'm viewing an execution detail page
+**When** the execution is running or paused
+**Then** I see control buttons
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 13.4.1 | Control buttons visible for running executions | ⬜ |
+| 13.4.2 | Control buttons visible for paused executions | ⬜ |
+| 13.4.3 | Control buttons hidden for terminal executions | ⬜ |
+| 13.4.4 | Pause button visible when running | ⬜ |
+| 13.4.5 | Resume button visible when paused | ⬜ |
+| 13.4.6 | Cancel button visible when running or paused | ⬜ |
+| 13.4.7 | Cancel shows confirmation prompt | ⬜ |
+| 13.4.8 | State indicator shows current state with color | ⬜ |
+| 13.4.9 | State updates in real-time via WebSocket | ⬜ |
+| 13.4.10 | Connection status indicator shown | ⬜ |
+
+**Validation Steps:**
+1. Start a long-running workflow (multi-phase)
+2. Navigate to execution detail page
+3. Verify control buttons are visible
+4. Click Pause - verify state changes to "paused"
+5. Click Resume - verify execution continues
+6. Start another execution
+7. Click Cancel - verify confirmation, then cancellation
+
+### F13.5 CLI Control Commands
+
+**Given** the CLI is configured
+**When** I run control commands
+**Then** control signals are sent via HTTP API
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 13.5.1 | `aef control pause <id>` sends pause signal | ⬜ |
+| 13.5.2 | `aef control pause <id> --reason "..."` includes reason | ⬜ |
+| 13.5.3 | `aef control resume <id>` sends resume signal | ⬜ |
+| 13.5.4 | `aef control cancel <id>` prompts for confirmation | ⬜ |
+| 13.5.5 | `aef control cancel <id> --force` skips confirmation | ⬜ |
+| 13.5.6 | `aef control status <id>` shows current state | ⬜ |
+| 13.5.7 | Status shows colored output (green/yellow/red) | ⬜ |
+| 13.5.8 | Error messages shown when API unavailable | ⬜ |
+| 13.5.9 | `AEF_DASHBOARD_URL` environment variable supported | ⬜ |
+| 13.5.10 | `--url` flag overrides default dashboard URL | ⬜ |
+
+**Validation Commands:**
+```bash
+# Pause execution
+aef control pause exec-123 --reason "Need to review"
+
+# Resume execution
+aef control resume exec-123
+
+# Cancel with force
+aef control cancel exec-123 --force --reason "Timeout"
+
+# Check status
+aef control status exec-123
+
+# Use custom dashboard URL
+AEF_DASHBOARD_URL=http://prod:8000 aef control status exec-123
+```
+
+### F13.6 End-to-End Control Flow ⭐ CRITICAL
+
+**Given** a workflow is executing
+**When** I pause, resume, and cancel
+**Then** the entire flow works correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 13.6.1 | Start workflow via dashboard | ⬜ |
+| 13.6.2 | Verify execution appears with "running" status | ⬜ |
+| 13.6.3 | Click Pause in UI | ⬜ |
+| 13.6.4 | Verify state changes to "paused" in UI | ⬜ |
+| 13.6.5 | Verify `ExecutionPaused` event in SSE stream | ⬜ |
+| 13.6.6 | Verify execution duration timer stops | ⬜ |
+| 13.6.7 | Click Resume in UI | ⬜ |
+| 13.6.8 | Verify state changes back to "running" | ⬜ |
+| 13.6.9 | Verify `ExecutionResumed` event in SSE stream | ⬜ |
+| 13.6.10 | Verify duration timer resumes | ⬜ |
+| 13.6.11 | Start new execution | ⬜ |
+| 13.6.12 | Click Cancel in UI | ⬜ |
+| 13.6.13 | Confirm cancellation | ⬜ |
+| 13.6.14 | Verify `ExecutionCancelled` event | ⬜ |
+| 13.6.15 | Verify execution ends cleanly | ⬜ |
+
+**Browser Automation Test:**
+```javascript
+// Example Playwright test
+test('execution control flow', async ({ page }) => {
+  // Start workflow
+  await page.goto('http://localhost:5173/workflows');
+  await page.click('[data-testid="execute-workflow"]');
+  
+  // Wait for running state
+  await expect(page.locator('[data-testid="status-badge"]'))
+    .toHaveText('running');
+  
+  // Pause
+  await page.click('[data-testid="pause-button"]');
+  await expect(page.locator('[data-testid="status-badge"]'))
+    .toHaveText('paused');
+  
+  // Resume
+  await page.click('[data-testid="resume-button"]');
+  await expect(page.locator('[data-testid="status-badge"]'))
+    .toHaveText('running');
+  
+  // Cancel
+  await page.click('[data-testid="cancel-button"]');
+  await page.click('[data-testid="confirm-cancel"]');
+  await expect(page.locator('[data-testid="status-badge"]'))
+    .toContainText(/cancelled|completed/);
+});
+```
+
+---
+
 ## Test Execution Checklist
 
 ### Pre-Test Setup
@@ -1407,6 +1635,9 @@ assert agent is not None
 10. [ ] **F10: Artifacts** - ArtifactBundle flow
 11. [ ] **F11: Event Bridge** - Hook-to-domain events
 12. [ ] **F12: Providers** - Agent factory and availability
+
+**WebSocket Control Plane (F13) ⭐ NEW:**
+13. [ ] **F13: WebSocket Control Plane** - Pause/Resume/Cancel with browser automation
 
 ### Quick Pytest Commands
 
@@ -1457,7 +1688,8 @@ poetry run poe check-fix
 | **F10** | **Artifact Bundle Flow** | **13** | ⬜ | ⬜ | ⬜ |
 | **F11** | **Event Bridge** | **12** | ⬜ | ⬜ | ⬜ |
 | **F12** | **Agent Provider Management** | **9** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **210** | ⬜ | ⬜ | ⬜ |
+| **F13** | **WebSocket Control Plane** ⭐ | **54** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **264** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -1472,6 +1704,17 @@ poetry run poe check-fix
 ## Notes
 
 _Add any observations, recommendations, or follow-up items here._
+
+### Migration Notes (v3.0 → v4.0)
+
+- **WebSocket Control Plane:** New F13 tests for real-time execution control
+- **Control API:** New endpoints `/api/executions/{id}/pause|resume|cancel|state`
+- **WebSocket Endpoint:** `/api/ws/control/{execution_id}` for bidirectional control
+- **New Events:** `ExecutionPaused`, `ExecutionResumed`, `ExecutionCancelled`
+- **Executor Enhancement:** `control_signal_checker` parameter for signal handling
+- **CLI Commands:** `aef control pause|resume|cancel|status`
+- **Test Count:** Increased from 210 to 264 criteria
+- **Browser Automation:** F13.6 tests recommended for Playwright/Cypress
 
 ### Migration Notes (v2.0 → v3.0)
 
@@ -1501,6 +1744,7 @@ _Add any observations, recommendations, or follow-up items here._
 | **Event Store** ⭐ | **F7.5** | **SQL + API (critical)** |
 | **Execution Model** ⭐ | **F7.6** | **API + Browser** |
 | **Agentic** | **F8-F12** | **pytest (automated)** |
+| **Control Plane** ⭐ | **F13** | **Browser automation (Playwright)** |
 
 ### Known Issues & Learnings
 
