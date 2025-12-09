@@ -45,12 +45,14 @@ class TokenUsageRecord:
         """Create from dictionary."""
         input_toks = data.get("input_tokens", 0)
         output_toks = data.get("output_tokens", 0)
+        # timestamp is required, default to empty string if missing
+        timestamp = data.get("timestamp") or ""
 
         return cls(
             event_id=data.get("event_id", ""),
             session_id=data.get("session_id", ""),
             message_uuid=data.get("message_uuid", ""),
-            timestamp=data.get("timestamp"),
+            timestamp=timestamp,
             input_tokens=input_toks,
             output_tokens=output_toks,
             cache_creation_tokens=data.get("cache_creation_tokens", 0),

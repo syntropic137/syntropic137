@@ -52,13 +52,15 @@ class ToolExecution:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ToolExecution":
         """Create from dictionary."""
+        # started_at is required, default to empty string if missing
+        started_at = data.get("started_at") or ""
         return cls(
             event_id=data.get("event_id", ""),
             session_id=data.get("session_id", ""),
             tool_name=data.get("tool_name", ""),
             tool_use_id=data.get("tool_use_id", ""),
             status=data.get("status", "unknown"),
-            started_at=data.get("started_at"),
+            started_at=started_at,
             completed_at=data.get("completed_at"),
             duration_ms=data.get("duration_ms"),
             success=data.get("success"),
