@@ -23,6 +23,8 @@ from aef_adapters.orchestration.executor import (
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
+    ToolBlockedExecution,
+    ToolStarted,
     ToolUsed,
     WorkflowCompleted,
     WorkflowFailed,
@@ -414,7 +416,37 @@ class ExecutionService:
                 },
             )
 
+        elif isinstance(event, ToolStarted):
+            # Push tool_execution_started to SSE (Pattern 2 real-time)
+            push_event(
+                "tool_execution_started",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "tool_input": event.tool_input,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
         elif isinstance(event, ToolUsed):
+            # Push tool_execution_completed to SSE (Pattern 2 real-time)
+            push_event(
+                "tool_execution_completed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "success": event.success,
+                    "duration_ms": event.duration_ms,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+            # Also push legacy tool_used for backward compatibility
             push_event(
                 "tool_used",
                 {
@@ -424,6 +456,22 @@ class ExecutionService:
                     "tool_name": event.tool_name,
                     "tool_use_id": event.tool_use_id,
                     "success": event.success,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        elif isinstance(event, ToolBlockedExecution):
+            # Push tool_blocked to SSE (Pattern 2 real-time)
+            push_event(
+                "tool_blocked",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "reason": event.reason,
+                    "validator": event.validator,
                     "timestamp": event.timestamp.isoformat(),
                 },
             )
