@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, AsyncIterator
-from unittest.mock import AsyncMock, MagicMock
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
 
 from aef_adapters.agents.agentic_types import (
     AgentExecutionConfig,
@@ -21,17 +23,7 @@ from aef_adapters.agents.agentic_types import (
 from aef_adapters.control import ControlSignal, ControlSignalType
 from aef_adapters.orchestration.executor import (
     AgenticWorkflowExecutor,
-    ExecutionCancelled,
-    ExecutionPaused,
-    ExecutionResumed,
-    PhaseCompleted,
-    PhaseStarted,
-    ToolStarted,
-    ToolUsed,
-    WorkflowCompleted,
-    WorkflowStarted,
 )
-
 
 # =============================================================================
 # Mock Classes
@@ -75,9 +67,9 @@ class MockAgent:
 
     async def execute(
         self,
-        task: str,
-        workspace: Workspace,
-        config: AgentExecutionConfig,
+        _task: str,
+        _workspace: Workspace,
+        _config: AgentExecutionConfig,
     ) -> AsyncIterator:
         """Execute mock agent, yielding configured events."""
         for event in self._events:
@@ -153,7 +145,7 @@ class TestExecutorControlSignals:
             execution_id="exec-1",
         )
 
-        async def check_signal(execution_id: str) -> ControlSignal | None:
+        async def check_signal(_execution_id: str) -> ControlSignal | None:
             signal_calls[0] += 1
             if signal_calls[0] == 1:
                 return pause_signal
@@ -218,7 +210,7 @@ class TestExecutorControlSignals:
             reason="User cancelled",
         )
 
-        async def check_signal(execution_id: str) -> ControlSignal | None:
+        async def check_signal(_execution_id: str) -> ControlSignal | None:
             return cancel_signal
 
         executor = AgenticWorkflowExecutor(
@@ -272,7 +264,7 @@ class TestExecutorControlSignals:
         mock_agent = MockAgent(agent_events)
 
         # Signal checker always returns None
-        async def check_signal(execution_id: str) -> ControlSignal | None:
+        async def check_signal(_execution_id: str) -> ControlSignal | None:
             return None
 
         executor = AgenticWorkflowExecutor(
@@ -387,7 +379,7 @@ class TestExecutorControlSignals:
             reason="User cancelled while paused",
         )
 
-        async def check_signal(execution_id: str) -> ControlSignal | None:
+        async def check_signal(_execution_id: str) -> ControlSignal | None:
             signal_calls[0] += 1
             if signal_calls[0] == 1:
                 return pause_signal

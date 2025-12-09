@@ -21,7 +21,7 @@ import {
 } from 'recharts'
 
 import { getExecution, subscribeToEvents } from '../api/client'
-import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import { Card, CardContent, CardHeader, EmptyState, ExecutionControl, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { EventMessage, ExecutionDetailResponse } from '../types'
 
 // Claude's context window (approximate)
@@ -162,6 +162,10 @@ export function ExecutionDetail() {
                 </h1>
                 <StatusBadge status={execution.status} size="lg" pulse={execution.status === 'running'} />
               </div>
+              {/* Execution Control - only show for running or paused executions */}
+              {(execution.status === 'running' || execution.status === 'paused') && (
+                <ExecutionControl executionId={execution.execution_id} className="mt-3" />
+              )}
               <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
                 {execution.workflow_name}
               </p>
