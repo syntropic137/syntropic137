@@ -11,6 +11,7 @@ keywords = ["ai", "agents", "event-sourcing", "workflows", "metrics"]
 # Workspace member dependencies
 dependencies = [
     "aef-cli",
+    "aef-collector",
     "aef-dashboard",
     "aef-domain",
     "aef-adapters",
@@ -51,6 +52,7 @@ exclude = ["apps/aef-dashboard-ui"]
 
 [tool.uv.sources]
 aef-cli = { workspace = true }
+aef-collector = { workspace = true }
 aef-dashboard = { workspace = true }
 aef-domain = { workspace = true }
 aef-adapters = { workspace = true }
@@ -91,7 +93,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["aef_cli", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared"]
+known-first-party = ["aef_cli", "aef_collector", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -141,6 +143,7 @@ ignore_missing_imports = true
 testpaths = [
     "apps/aef-cli/tests",
     "apps/aef-dashboard/tests",
+    "packages/aef-collector/tests",
     "packages/aef-domain/tests",
     "packages/aef-domain/src",  # VSA co-located tests
     "packages/aef-adapters/tests",
@@ -149,6 +152,7 @@ testpaths = [
 pythonpath = [
     "apps/aef-cli/src",
     "apps/aef-dashboard/src",
+    "packages/aef-collector/src",
     "packages/aef-domain/src",
     "packages/aef-adapters/src",
     "packages/aef-shared/src",
