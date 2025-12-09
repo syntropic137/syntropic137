@@ -15,7 +15,10 @@ from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import Any
 
 from aef_collector.events.ids import (
+    generate_git_event_id,
+    generate_notification_event_id,
     generate_session_event_id,
+    generate_stop_event_id,
     generate_tool_event_id,
     generate_user_prompt_event_id,
 )
@@ -27,20 +30,37 @@ logger = logging.getLogger(__name__)
 
 # Mapping from hook event types to our EventType enum
 HOOK_EVENT_MAP: dict[str, EventType] = {
+    # Session lifecycle events
     "session_started": EventType.SESSION_STARTED,
     "session_ended": EventType.SESSION_ENDED,
+    "agent_stopped": EventType.AGENT_STOPPED,
+    "subagent_stopped": EventType.SUBAGENT_STOPPED,
+    # Tool execution events
     "tool_execution_started": EventType.TOOL_EXECUTION_STARTED,
     "tool_execution_completed": EventType.TOOL_EXECUTION_COMPLETED,
     "tool_blocked": EventType.TOOL_BLOCKED,
+    # User interaction events
     "user_prompt_submitted": EventType.USER_PROMPT_SUBMITTED,
+    "notification_sent": EventType.NOTIFICATION_SENT,
+    # Context management
     "pre_compact": EventType.PRE_COMPACT,
-    # Also handle hook handler names
+    # Git operations
+    "git_commit": EventType.GIT_COMMIT,
+    "git_branch_created": EventType.GIT_BRANCH_CREATED,
+    "git_branch_switched": EventType.GIT_BRANCH_SWITCHED,
+    "git_merge_completed": EventType.GIT_MERGE_COMPLETED,
+    "git_commits_rewritten": EventType.GIT_COMMITS_REWRITTEN,
+    "git_push_started": EventType.GIT_PUSH_STARTED,
+    "git_push_completed": EventType.GIT_PUSH_COMPLETED,
+    # Hook handler name mappings (alternative names)
     "pre-tool-use": EventType.TOOL_EXECUTION_STARTED,
     "post-tool-use": EventType.TOOL_EXECUTION_COMPLETED,
     "session-start": EventType.SESSION_STARTED,
     "session-end": EventType.SESSION_ENDED,
     "user-prompt": EventType.USER_PROMPT_SUBMITTED,
-    "pre-compact": EventType.PRE_COMPACT,
+    "stop": EventType.AGENT_STOPPED,
+    "subagent-stop": EventType.SUBAGENT_STOPPED,
+    "notification": EventType.NOTIFICATION_SENT,
 }
 
 
@@ -254,6 +274,9 @@ class HookWatcher(BaseWatcher):
         Returns:
             32-character event ID
         """
+        import hashlib
+
+        # Tool execution events
         if event_type in (
             EventType.TOOL_EXECUTION_STARTED,
             EventType.TOOL_EXECUTION_COMPLETED,
@@ -265,12 +288,38 @@ class HookWatcher(BaseWatcher):
                 session_id, event_type.value, timestamp, tool_name, tool_use_id
             )
 
+        # User prompt events
         elif event_type == EventType.USER_PROMPT_SUBMITTED:
-            import hashlib
-
             prompt = str(data.get("prompt", ""))
             prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
             return generate_user_prompt_event_id(session_id, timestamp, prompt_hash)
 
+        # Stop events (agent/subagent)
+        elif event_type in (EventType.AGENT_STOPPED, EventType.SUBAGENT_STOPPED):
+            return generate_stop_event_id(session_id, timestamp, event_type.value)
+
+        # Notification events
+        elif event_type == EventType.NOTIFICATION_SENT:
+            content = str(data.get("content_preview", data.get("message", "")))
+            content_hash = hashlib.sha256(content.encode()).hexdigest()
+            return generate_notification_event_id(session_id, timestamp, content_hash)
+
+        # Git events
+        elif event_type in (
+            EventType.GIT_COMMIT,
+            EventType.GIT_BRANCH_CREATED,
+            EventType.GIT_BRANCH_SWITCHED,
+            EventType.GIT_MERGE_COMPLETED,
+            EventType.GIT_COMMITS_REWRITTEN,
+            EventType.GIT_PUSH_STARTED,
+            EventType.GIT_PUSH_COMPLETED,
+        ):
+            commit_hash = data.get("commit_hash")
+            branch = data.get("branch")
+            return generate_git_event_id(
+                session_id, event_type.value, timestamp, commit_hash, branch
+            )
+
+        # Default: session-style events
         else:
             return generate_session_event_id(session_id, event_type.value, timestamp)

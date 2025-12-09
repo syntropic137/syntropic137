@@ -21,6 +21,8 @@ class EventType(str, Enum):
     Session lifecycle:
     - SESSION_STARTED: Agent session begins
     - SESSION_ENDED: Agent session ends
+    - AGENT_STOPPED: Agent stopped (normal completion or interrupt)
+    - SUBAGENT_STOPPED: Subagent completed
 
     Tool execution:
     - TOOL_EXECUTION_STARTED: Tool call initiated (PreToolUse)
@@ -29,17 +31,29 @@ class EventType(str, Enum):
 
     User interaction:
     - USER_PROMPT_SUBMITTED: User submitted a prompt
+    - NOTIFICATION_SENT: Notification sent to user
 
     Token usage:
     - TOKEN_USAGE: Per-turn token metrics from transcript
 
     Context management:
     - PRE_COMPACT: Context compaction triggered
+
+    Git operations:
+    - GIT_COMMIT: Git commit completed with metrics
+    - GIT_BRANCH_CREATED: New branch created
+    - GIT_BRANCH_SWITCHED: Switched to existing branch
+    - GIT_MERGE_COMPLETED: Merge completed
+    - GIT_COMMITS_REWRITTEN: Commits rewritten (rebase/amend)
+    - GIT_PUSH_STARTED: Push operation started
+    - GIT_PUSH_COMPLETED: Push operation completed
     """
 
     # Session lifecycle
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+    AGENT_STOPPED = "agent_stopped"
+    SUBAGENT_STOPPED = "subagent_stopped"
 
     # Tool execution
     TOOL_EXECUTION_STARTED = "tool_execution_started"
@@ -48,12 +62,22 @@ class EventType(str, Enum):
 
     # User interaction
     USER_PROMPT_SUBMITTED = "user_prompt_submitted"
+    NOTIFICATION_SENT = "notification_sent"
 
     # Token usage
     TOKEN_USAGE = "token_usage"
 
     # Context management
     PRE_COMPACT = "pre_compact"
+
+    # Git operations
+    GIT_COMMIT = "git_commit"
+    GIT_BRANCH_CREATED = "git_branch_created"
+    GIT_BRANCH_SWITCHED = "git_branch_switched"
+    GIT_MERGE_COMPLETED = "git_merge_completed"
+    GIT_COMMITS_REWRITTEN = "git_commits_rewritten"
+    GIT_PUSH_STARTED = "git_push_started"
+    GIT_PUSH_COMPLETED = "git_push_completed"
 
 
 class CollectedEvent(BaseModel):
