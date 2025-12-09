@@ -2,6 +2,7 @@ import { clsx } from 'clsx'
 import {
   Activity,
   ArrowLeft,
+  Ban,
   Brain,
   CheckCircle2,
   ChevronDown,
@@ -19,11 +20,24 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { getSession } from '../api/client'
+import { getSession, getToolTimeline, type ToolExecution, type ToolTimelineResponse } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { OperationInfo, SessionResponse } from '../types'
 
-// Icons for operation types
+// Icons for tool execution status (from ToolTimelineProjection)
+const toolStatusIcons: Record<string, typeof Activity> = {
+  started: Play,
+  completed: Terminal,
+  blocked: Ban,
+}
+
+const toolStatusColors: Record<string, string> = {
+  started: 'text-amber-400 bg-amber-500/10',
+  completed: 'text-emerald-400 bg-emerald-500/10',
+  blocked: 'text-red-400 bg-red-500/10',
+}
+
+// Icons for operation types (legacy - for non-tool operations)
 const operationIcons: Record<string, typeof Activity> = {
   // New v2 types
   message_request: MessageSquare,
@@ -77,7 +91,56 @@ function formatDuration(seconds: number | null): string {
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
 }
 
-// Component for expandable operation details
+// Component for expandable tool execution details (from ToolTimelineProjection)
+function ToolExecutionDetails({ tool }: { tool: ToolExecution }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const hasDetails = tool.tool_output || tool.tool_input || tool.block_reason
+
+  if (!hasDetails) return null
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)]"
+      >
+        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {expanded ? 'Hide details' : 'Show details'}
+      </button>
+      {expanded && (
+        <div className="mt-2 rounded-lg bg-[var(--color-surface)] p-3 text-xs">
+          {tool.tool_input && (
+            <div className="mb-2">
+              <span className="font-medium text-[var(--color-text-secondary)]">Input:</span>
+              <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[var(--color-text-muted)] font-mono">
+                {JSON.stringify(tool.tool_input, null, 2)}
+              </pre>
+            </div>
+          )}
+          {tool.tool_output && (
+            <div className="mb-2">
+              <span className="font-medium text-[var(--color-text-secondary)]">Output:</span>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap text-[var(--color-text-muted)] font-mono">
+                {tool.tool_output}
+              </pre>
+            </div>
+          )}
+          {tool.block_reason && (
+            <div className="mb-2">
+              <span className="font-medium text-red-400">Blocked:</span>
+              <pre className="mt-1 whitespace-pre-wrap text-[var(--color-text-muted)]">
+                {tool.block_reason}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Component for expandable operation details (legacy - for non-tool operations)
 function OperationDetails({ op }: { op: OperationInfo }) {
   const [expanded, setExpanded] = useState(false)
 
@@ -139,6 +202,7 @@ function OperationDetails({ op }: { op: OperationInfo }) {
 export function SessionDetail() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const [session, setSession] = useState<SessionResponse | null>(null)
+  const [toolTimeline, setToolTimeline] = useState<ToolTimelineResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -146,10 +210,21 @@ export function SessionDetail() {
     if (!sessionId) return
 
     let cancelled = false
-    getSession(sessionId)
-      .then((data) => { if (!cancelled) setSession(data) })
+
+    // Fetch both session and tool timeline in parallel
+    Promise.all([
+      getSession(sessionId),
+      getToolTimeline(sessionId).catch(() => null), // Tool timeline may not exist yet
+    ])
+      .then(([sessionData, toolData]) => {
+        if (!cancelled) {
+          setSession(sessionData)
+          setToolTimeline(toolData)
+        }
+      })
       .catch((err) => { if (!cancelled) setError(err.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
+
     return () => { cancelled = true }
   }, [sessionId])
 
@@ -255,7 +330,91 @@ export function SessionDetail() {
         </Card>
       )}
 
-      {/* Operations timeline */}
+      {/* Tool Executions Timeline (from ToolTimelineProjection - ADR-018 Pattern 2) */}
+      {toolTimeline && toolTimeline.executions.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Tool Executions"
+            subtitle={`${toolTimeline.total_executions} tools used • ${toolTimeline.success_rate !== null ? `${Math.round(toolTimeline.success_rate * 100)}% success rate` : 'N/A'}`}
+          />
+          <CardContent noPadding>
+            <div className="relative">
+              {/* Timeline line */}
+              <div className="absolute left-8 top-0 bottom-0 w-px bg-[var(--color-border)]" />
+
+              {/* Tool executions - sorted by time descending (latest first) */}
+              <div className="space-y-0">
+                {[...toolTimeline.executions]
+                  .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+                  .map((tool, idx) => {
+                    const Icon = toolStatusIcons[tool.status] ?? Wrench
+                    const color = toolStatusColors[tool.status] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
+                    const [textColor, bgColor] = color.split(' ')
+
+                    return (
+                      <div
+                        key={tool.event_id || `${tool.tool_use_id}-${idx}`}
+                        className="relative flex items-start gap-4 px-4 py-3 hover:bg-[var(--color-surface-elevated)] transition-colors animate-fade-in"
+                        style={{ animationDelay: `${idx * 30}ms` }}
+                      >
+                        {/* Icon */}
+                        <div className={clsx('relative z-10 flex h-8 w-8 items-center justify-center rounded-lg', bgColor)}>
+                          <Icon className={clsx('h-4 w-4', textColor)} />
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                              {tool.tool_name}
+                            </span>
+                            {tool.status === 'completed' && (
+                              tool.success ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                              ) : (
+                                <XCircle className="h-3.5 w-3.5 text-red-400" />
+                              )
+                            )}
+                            {tool.status === 'blocked' && (
+                              <Ban className="h-3.5 w-3.5 text-red-400" />
+                            )}
+                            {tool.status === 'started' && (
+                              <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                            )}
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {formatTime(tool.started_at)}
+                            </span>
+                          </div>
+
+                          {/* Summary details */}
+                          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
+                            <span className="capitalize px-1.5 py-0.5 rounded bg-[var(--color-surface)] text-[var(--color-text-muted)]">
+                              {tool.status}
+                            </span>
+                            {tool.duration_ms !== undefined && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {tool.duration_ms < 1000 ? `${tool.duration_ms}ms` : `${(tool.duration_ms / 1000).toFixed(1)}s`}
+                              </span>
+                            )}
+                            <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                              {tool.tool_use_id.slice(0, 12)}...
+                            </span>
+                          </div>
+
+                          {/* Expandable details */}
+                          <ToolExecutionDetails tool={tool} />
+                        </div>
+                      </div>
+                    )
+                  })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Operations timeline (legacy - for message operations) */}
       <Card>
         <CardHeader
           title="Operations Timeline"
@@ -274,74 +433,76 @@ export function SessionDetail() {
               {/* Timeline line */}
               <div className="absolute left-8 top-0 bottom-0 w-px bg-[var(--color-border)]" />
 
-              {/* Operations */}
+              {/* Operations - filter out tool operations if we have toolTimeline */}
               <div className="space-y-0">
-                {session.operations.map((op, idx) => {
-                  const Icon = operationIcons[op.operation_type] ?? Activity
-                  const color = operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
-                  const [textColor, bgColor] = color.split(' ')
+                {session.operations
+                  .filter(op => !toolTimeline || !['tool_started', 'tool_completed', 'tool_blocked', 'tool_use', 'tool_execution'].includes(op.operation_type))
+                  .map((op, idx) => {
+                    const Icon = operationIcons[op.operation_type] ?? Activity
+                    const color = operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
+                    const [textColor, bgColor] = color.split(' ')
 
-                  return (
-                    <div
-                      key={op.operation_id}
-                      className="relative flex items-start gap-4 px-4 py-3 hover:bg-[var(--color-surface-elevated)] transition-colors animate-fade-in"
-                      style={{ animationDelay: `${idx * 30}ms` }}
-                    >
-                      {/* Icon */}
-                      <div className={clsx('relative z-10 flex h-8 w-8 items-center justify-center rounded-lg', bgColor)}>
-                        <Icon className={clsx('h-4 w-4', textColor)} />
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3">
-                          <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                            {op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
-                          </span>
-                          {op.success ? (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                          ) : (
-                            <XCircle className="h-3.5 w-3.5 text-red-400" />
-                          )}
-                          <span className="text-xs text-[var(--color-text-muted)]">
-                            {formatTime(op.timestamp)}
-                          </span>
+                    return (
+                      <div
+                        key={op.operation_id}
+                        className="relative flex items-start gap-4 px-4 py-3 hover:bg-[var(--color-surface-elevated)] transition-colors animate-fade-in"
+                        style={{ animationDelay: `${idx * 30}ms` }}
+                      >
+                        {/* Icon */}
+                        <div className={clsx('relative z-10 flex h-8 w-8 items-center justify-center rounded-lg', bgColor)}>
+                          <Icon className={clsx('h-4 w-4', textColor)} />
                         </div>
 
-                        {/* Summary details */}
-                        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
-                          {op.tool_name && (
-                            <span className="flex items-center gap-1">
-                              <Wrench className="h-3 w-3" />
-                              {op.tool_name}
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-[var(--color-text-primary)]">
+                              {op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                             </span>
-                          )}
-                          {op.message_role && (
-                            <span className="flex items-center gap-1">
-                              <MessageSquare className="h-3 w-3" />
-                              {op.message_role}
+                            {op.success ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                            ) : (
+                              <XCircle className="h-3.5 w-3.5 text-red-400" />
+                            )}
+                            <span className="text-xs text-[var(--color-text-muted)]">
+                              {formatTime(op.timestamp)}
                             </span>
-                          )}
-                          {op.total_tokens !== null && op.total_tokens > 0 && (
-                            <span className="flex items-center gap-1">
-                              <Zap className="h-3 w-3" />
-                              {op.total_tokens.toLocaleString()} tokens
-                            </span>
-                          )}
-                          {op.duration_seconds !== null && (
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {formatDuration(op.duration_seconds)}
-                            </span>
-                          )}
-                        </div>
+                          </div>
 
-                        {/* Expandable details */}
-                        <OperationDetails op={op} />
+                          {/* Summary details */}
+                          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
+                            {op.tool_name && (
+                              <span className="flex items-center gap-1">
+                                <Wrench className="h-3 w-3" />
+                                {op.tool_name}
+                              </span>
+                            )}
+                            {op.message_role && (
+                              <span className="flex items-center gap-1">
+                                <MessageSquare className="h-3 w-3" />
+                                {op.message_role}
+                              </span>
+                            )}
+                            {op.total_tokens !== null && op.total_tokens > 0 && (
+                              <span className="flex items-center gap-1">
+                                <Zap className="h-3 w-3" />
+                                {op.total_tokens.toLocaleString()} tokens
+                              </span>
+                            )}
+                            {op.duration_seconds !== null && (
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {formatDuration(op.duration_seconds)}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Expandable details */}
+                          <OperationDetails op={op} />
+                        </div>
                       </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
               </div>
             </div>
           )}
