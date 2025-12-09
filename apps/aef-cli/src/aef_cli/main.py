@@ -3,7 +3,7 @@
 import typer
 from rich.console import Console
 
-from aef_cli.commands import agent, config, workflow
+from aef_cli.commands import agent, config, control, workflow
 from aef_shared.logging import LogConfig, configure_logging, get_logger
 
 # Configure logging
@@ -22,6 +22,7 @@ console = Console()
 app.add_typer(workflow.app, name="workflow")
 app.add_typer(agent.app, name="agent")
 app.add_typer(config.app, name="config")
+app.add_typer(control.app, name="control")
 
 
 @app.command()

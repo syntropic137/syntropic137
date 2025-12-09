@@ -34,11 +34,11 @@ interface UseExecutionControlResult {
 
 /**
  * React hook for controlling execution via WebSocket.
- * 
+ *
  * @example
  * ```tsx
  * const { state, pause, resume, cancel, canPause, canResume, canCancel } = useExecutionControl(executionId)
- * 
+ *
  * return (
  *   <div>
  *     <p>State: {state}</p>
@@ -79,7 +79,7 @@ export function useExecutionControl(executionId: string): UseExecutionControlRes
     ws.onmessage = (event) => {
       try {
         const msg: ControlMessage = JSON.parse(event.data)
-        
+
         if (msg.type === 'state' && msg.state) {
           setState(msg.state)
         } else if (msg.type === 'result') {
