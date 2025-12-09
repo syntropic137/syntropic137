@@ -188,6 +188,79 @@ export async function getMetrics(workflowId?: string): Promise<MetricsResponse> 
 }
 
 // =============================================================================
+// OBSERVABILITY API
+// =============================================================================
+
+/**
+ * Tool execution from ToolTimelineProjection (ADR-018 Pattern 2).
+ * This is the preferred source for tool data over session.operations.
+ */
+export interface ToolExecution {
+  event_id: string
+  session_id: string
+  tool_name: string
+  tool_use_id: string
+  status: 'started' | 'completed' | 'blocked'
+  started_at: string
+  completed_at?: string
+  duration_ms?: number
+  success?: boolean
+  tool_input?: Record<string, unknown>
+  tool_output?: string
+  block_reason?: string
+}
+
+export interface ToolTimelineResponse {
+  session_id: string
+  executions: ToolExecution[]
+  total_executions: number
+  completed_count: number
+  blocked_count: number
+  success_rate: number | null
+}
+
+/**
+ * Get tool execution timeline for a session.
+ * Uses the observability endpoint which pulls from ToolTimelineProjection.
+ *
+ * @param sessionId - The session ID
+ * @param options - Optional parameters
+ * @returns Tool timeline with execution details
+ */
+export async function getToolTimeline(
+  sessionId: string,
+  options?: { limit?: number; includeBlocked?: boolean }
+): Promise<ToolTimelineResponse> {
+  const searchParams = new URLSearchParams()
+  if (options?.limit) searchParams.set('limit', String(options.limit))
+  if (options?.includeBlocked !== undefined) {
+    searchParams.set('include_blocked', String(options.includeBlocked))
+  }
+
+  const query = searchParams.toString()
+  return fetchJSON(`${API_BASE}/observability/sessions/${sessionId}/tools${query ? `?${query}` : ''}`)
+}
+
+export interface TokenMetricsResponse {
+  session_id: string
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  message_count: number
+}
+
+/**
+ * Get token usage metrics for a session.
+ * Uses the observability endpoint which pulls from TokenMetricsProjection.
+ *
+ * @param sessionId - The session ID
+ * @returns Token metrics with aggregated data
+ */
+export async function getTokenMetrics(sessionId: string): Promise<TokenMetricsResponse> {
+  return fetchJSON(`${API_BASE}/observability/sessions/${sessionId}/tokens`)
+}
+
+// =============================================================================
 // EVENTS API
 // =============================================================================
 
