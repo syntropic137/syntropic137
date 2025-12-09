@@ -544,10 +544,11 @@ export function SessionDetail() {
               {/* Timeline line */}
               <div className="absolute left-8 top-0 bottom-0 w-px bg-[var(--color-border)]" />
 
-              {/* Operations - filter out tool operations if we have toolTimeline */}
+              {/* Operations - filter out tool ops, sort descending (latest first) */}
               <div className="space-y-0">
-                {session.operations
+                {[...session.operations]
                   .filter(op => !toolTimeline || !['tool_started', 'tool_completed', 'tool_blocked', 'tool_use', 'tool_execution'].includes(op.operation_type))
+                  .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
                   .map((op, idx) => {
                     const Icon = operationIcons[op.operation_type] ?? Activity
                     const color = operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
