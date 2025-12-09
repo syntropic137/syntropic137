@@ -1,0 +1,21 @@
+name: tool_timeline
+description: Tool execution timeline for sessions
+context: observability
+type: query
+
+# Events this slice subscribes to (Pattern 2: observations)
+subscribes_to:
+  - tool_execution_started
+  - tool_execution_completed
+  - tool_blocked
+
+# Query this slice handles
+query:
+  name: GetToolTimelineQuery
+  returns: ToolTimeline
+
+# Read model this slice produces
+read_model: ToolTimeline
+
+# Projection that builds the read model
+projection: ToolTimelineProjection

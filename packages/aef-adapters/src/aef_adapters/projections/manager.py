@@ -13,6 +13,8 @@ from typing import Any, Protocol, runtime_checkable
 from aef_adapters.projection_stores import get_projection_store
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from aef_domain.contexts.metrics.slices.get_metrics import DashboardMetricsProjection
+from aef_domain.contexts.observability.slices.token_metrics import TokenMetricsProjection
+from aef_domain.contexts.observability.slices.tool_timeline import ToolTimelineProjection
 from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
 from aef_domain.contexts.workflows.slices.get_execution_detail import (
     WorkflowExecutionDetailProjection,
@@ -143,6 +145,20 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("artifact_list", "on_artifact_created"),
         ("dashboard_metrics", "on_artifact_created"),
     ],
+    # Observability events (Pattern 2: Event Log + CQRS, see ADR-018)
+    # These are observations from aef-collector, not commands
+    "tool_execution_started": [
+        ("tool_timeline", "on_tool_execution_started"),
+    ],
+    "tool_execution_completed": [
+        ("tool_timeline", "on_tool_execution_completed"),
+    ],
+    "tool_blocked": [
+        ("tool_timeline", "on_tool_blocked"),
+    ],
+    "token_usage": [
+        ("token_metrics", "on_token_usage"),
+    ],
 }
 
 
@@ -174,6 +190,9 @@ class ProjectionManager:
             "session_list": SessionListProjection(self._store),
             "artifact_list": ArtifactListProjection(self._store),
             "dashboard_metrics": DashboardMetricsProjection(self._store),
+            # Observability projections (Pattern 2: Event Log + CQRS)
+            "tool_timeline": ToolTimelineProjection(self._store),
+            "token_metrics": TokenMetricsProjection(self._store),
         }
         self._initialized = True
 
@@ -338,6 +357,19 @@ class ProjectionManager:
         """Get the dashboard metrics projection."""
         self._ensure_initialized()
         return self._projections["dashboard_metrics"]
+
+    # Observability projections (Pattern 2: Event Log + CQRS)
+    @property
+    def tool_timeline(self) -> ToolTimelineProjection:
+        """Get the tool timeline projection."""
+        self._ensure_initialized()
+        return self._projections["tool_timeline"]
+
+    @property
+    def token_metrics(self) -> TokenMetricsProjection:
+        """Get the token metrics projection."""
+        self._ensure_initialized()
+        return self._projections["token_metrics"]
 
 
 @lru_cache
