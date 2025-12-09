@@ -297,7 +297,12 @@ export function subscribeToEvents(
     'session_started',
     'session_completed',
     'session_failed',
+    // Legacy tool event
     'tool_used',
+    // Pattern 2 tool events (real-time, from ADR-018)
+    'tool_execution_started',
+    'tool_execution_completed',
+    'tool_blocked',
     'artifact_created',
   ]
 

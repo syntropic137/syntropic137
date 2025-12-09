@@ -151,6 +151,23 @@ class WorkflowFailed:
 
 
 @dataclass(frozen=True)
+class ToolStarted:
+    """Emitted when a tool execution begins during a phase.
+
+    This event enables real-time tracking of tool execution in the UI
+    via SSE. Pattern 2 (ADR-018) - observability events.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    tool_name: str
+    tool_use_id: str | None = None
+    tool_input: dict[str, Any] | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
 class ToolUsed:
     """Emitted when a tool completes execution during a phase.
 
@@ -171,6 +188,24 @@ class ToolUsed:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+@dataclass(frozen=True)
+class ToolBlockedExecution:
+    """Emitted when a tool is blocked by a validator during a phase.
+
+    This event enables real-time tracking of blocked tools in the UI
+    via SSE. Pattern 2 (ADR-018) - observability events.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    tool_name: str
+    tool_use_id: str | None = None
+    reason: str = ""
+    validator: str | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
 # Union type for all execution events
 ExecutionEvent = (
     WorkflowStarted
@@ -179,7 +214,9 @@ ExecutionEvent = (
     | PhaseFailed
     | WorkflowCompleted
     | WorkflowFailed
+    | ToolStarted
     | ToolUsed
+    | ToolBlockedExecution
 )
 
 
@@ -582,6 +619,17 @@ class AgenticWorkflowExecutor:
                     except Exception as e:
                         logger.warning("Failed to send tool_started to collector: %s", e)
 
+                # Yield for SSE real-time tracking (Pattern 2)
+                yield ToolStarted(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    tool_name=event.tool_name,
+                    tool_use_id=event.tool_use_id,
+                    tool_input=event.tool_input,
+                    timestamp=event.timestamp,
+                )
+
             elif isinstance(event, ToolUseCompleted):
                 # Emit tool used event for real-time tracking with full observability
                 tool_call_count += 1
@@ -632,6 +680,18 @@ class AgenticWorkflowExecutor:
                         )
                     except Exception as e:
                         logger.warning("Failed to send tool_blocked to collector: %s", e)
+
+                # Yield for SSE real-time tracking (Pattern 2)
+                yield ToolBlockedExecution(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    tool_name=event.tool_name,
+                    tool_use_id=event.tool_use_id,
+                    reason=event.reason,
+                    validator=event.validator,
+                    timestamp=event.timestamp,
+                )
 
             elif isinstance(event, TaskCompleted):
                 result_text = event.result

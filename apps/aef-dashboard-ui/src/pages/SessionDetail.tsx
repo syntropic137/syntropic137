@@ -20,7 +20,7 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { getSession, getToolTimeline, type ToolExecution, type ToolTimelineResponse } from '../api/client'
+import { getSession, getToolTimeline, subscribeToEvents, type ToolExecution, type ToolTimelineResponse } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { OperationInfo, SessionResponse } from '../types'
 
@@ -227,6 +227,117 @@ export function SessionDetail() {
 
     return () => { cancelled = true }
   }, [sessionId])
+
+  // Subscribe to SSE for real-time tool updates
+  useEffect(() => {
+    if (!sessionId || !session) return
+
+    const unsubscribe = subscribeToEvents((event) => {
+      // Only handle tool events for this session
+      const eventSessionId = event.session_id || event.execution_id
+      if (!eventSessionId || eventSessionId !== session.execution_id) return
+
+      if (event.event_type === 'tool_execution_started') {
+        setToolTimeline((prev) => {
+          if (!prev) {
+            return {
+              session_id: sessionId,
+              executions: [{
+                event_id: `sse-${event.tool_use_id}-started`,
+                session_id: sessionId,
+                tool_name: event.tool_name,
+                tool_use_id: event.tool_use_id,
+                status: 'started',
+                started_at: event.timestamp,
+                tool_input: event.tool_input,
+              }],
+              total_executions: 1,
+              completed_count: 0,
+              blocked_count: 0,
+              success_rate: null,
+            }
+          }
+          // Check if this tool_use_id already exists
+          const exists = prev.executions.some(e => e.tool_use_id === event.tool_use_id)
+          if (exists) return prev
+
+          return {
+            ...prev,
+            executions: [...prev.executions, {
+              event_id: `sse-${event.tool_use_id}-started`,
+              session_id: sessionId,
+              tool_name: event.tool_name,
+              tool_use_id: event.tool_use_id,
+              status: 'started',
+              started_at: event.timestamp,
+              tool_input: event.tool_input,
+            }],
+            total_executions: prev.total_executions + 1,
+          }
+        })
+      } else if (event.event_type === 'tool_execution_completed') {
+        setToolTimeline((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            executions: prev.executions.map(e =>
+              e.tool_use_id === event.tool_use_id
+                ? {
+                    ...e,
+                    status: 'completed' as const,
+                    completed_at: event.timestamp,
+                    duration_ms: event.duration_ms,
+                    success: event.success,
+                  }
+                : e
+            ),
+            completed_count: prev.completed_count + 1,
+            success_rate: event.success
+              ? (prev.success_rate ?? 0) + (1 / (prev.completed_count + 1))
+              : prev.success_rate,
+          }
+        })
+      } else if (event.event_type === 'tool_blocked') {
+        setToolTimeline((prev) => {
+          if (!prev) {
+            return {
+              session_id: sessionId,
+              executions: [{
+                event_id: `sse-${event.tool_use_id}-blocked`,
+                session_id: sessionId,
+                tool_name: event.tool_name,
+                tool_use_id: event.tool_use_id,
+                status: 'blocked',
+                started_at: event.timestamp,
+                block_reason: event.reason,
+              }],
+              total_executions: 1,
+              completed_count: 0,
+              blocked_count: 1,
+              success_rate: null,
+            }
+          }
+          return {
+            ...prev,
+            executions: [...prev.executions, {
+              event_id: `sse-${event.tool_use_id}-blocked`,
+              session_id: sessionId,
+              tool_name: event.tool_name,
+              tool_use_id: event.tool_use_id,
+              status: 'blocked',
+              started_at: event.timestamp,
+              block_reason: event.reason,
+            }],
+            total_executions: prev.total_executions + 1,
+            blocked_count: prev.blocked_count + 1,
+          }
+        })
+      }
+    })
+
+    return () => unsubscribe()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-subscribe when execution_id changes
+  }, [sessionId, session?.execution_id])
 
   if (loading) return <PageLoader />
 
