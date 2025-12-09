@@ -78,6 +78,27 @@ Events flow through a message queue to event store
 
 This provides a universal pattern that works identically across all environments while maintaining simplicity.
 
+### Architectural Pattern
+
+This ADR implements **Pattern 2: Event Log + CQRS** as defined in [ADR-018](./ADR-018-commands-vs-observations-event-architecture.md).
+
+Observability events (tool executions, token usage) are **observations of external facts**, not commands that need aggregate validation. They:
+
+- Represent things that already happened (Claude executed a tool)
+- Have no business rules to enforce (can't reject an observation)
+- Are high-volume (every tool call, every message)
+
+Therefore, we use the lightweight Event Log pattern:
+
+1. **Validate schema** (Pydantic models)
+2. **Generate deterministic event ID** (deduplication via content hash)
+3. **Soft-validate session correlation** (warn if unknown session, still accept)
+4. **Append to event store** (no aggregate loading required)
+
+This provides all the benefits of event-driven architecture (replayability, audit trail, CQRS, VSA) without the overhead of aggregate-based event sourcing.
+
+See [ADR-018](./ADR-018-commands-vs-observations-event-architecture.md) for the full architectural rationale and decision matrix.
+
 ## Architecture
 
 ### High-Level Overview
@@ -402,6 +423,7 @@ This architecture provides a foundation for:
 - [ADR-010: Event Subscription Architecture](./ADR-010-event-subscription-architecture.md)
 - [ADR-015: Agent Session Observability](./ADR-015-agent-observability.md)
 - [ADR-016: UI Feedback Module](./ADR-016-ui-feedback-module.md)
+- [ADR-018: Commands vs Observations](./ADR-018-commands-vs-observations-event-architecture.md) - Architectural pattern used
 
 ## References
 
