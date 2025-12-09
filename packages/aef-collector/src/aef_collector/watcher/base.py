@@ -49,11 +49,14 @@ class BaseWatcher(ABC):
         self._inode: int | None = None
 
     @abstractmethod
-    async def watch(self, *, from_end: bool = True) -> AsyncIterator[CollectedEvent]:
+    def watch(self, *, from_end: bool = True) -> AsyncIterator[CollectedEvent]:
         """Watch for new events.
 
         Continuously monitors the file and yields new events
         as they are appended.
+
+        Note: Implementations should be async generators (async def with yield).
+        The abstract method is not async to allow proper type inference.
 
         Args:
             from_end: Start from end of file (skip existing events)

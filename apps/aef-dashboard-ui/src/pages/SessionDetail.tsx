@@ -238,16 +238,18 @@ export function SessionDetail() {
       if (!eventSessionId || eventSessionId !== session.execution_id) return
 
       if (event.event_type === 'tool_execution_started') {
+        const toolUseId = event.tool_use_id ?? ''
+        const toolName = event.tool_name ?? 'unknown'
         setToolTimeline((prev) => {
           if (!prev) {
             return {
               session_id: sessionId,
               executions: [{
-                event_id: `sse-${event.tool_use_id}-started`,
+                event_id: `sse-${toolUseId}-started`,
                 session_id: sessionId,
-                tool_name: event.tool_name,
-                tool_use_id: event.tool_use_id,
-                status: 'started',
+                tool_name: toolName,
+                tool_use_id: toolUseId,
+                status: 'started' as const,
                 started_at: event.timestamp,
                 tool_input: event.tool_input,
               }],
@@ -258,17 +260,17 @@ export function SessionDetail() {
             }
           }
           // Check if this tool_use_id already exists
-          const exists = prev.executions.some(e => e.tool_use_id === event.tool_use_id)
+          const exists = prev.executions.some(e => e.tool_use_id === toolUseId)
           if (exists) return prev
 
           return {
             ...prev,
             executions: [...prev.executions, {
-              event_id: `sse-${event.tool_use_id}-started`,
+              event_id: `sse-${toolUseId}-started`,
               session_id: sessionId,
-              tool_name: event.tool_name,
-              tool_use_id: event.tool_use_id,
-              status: 'started',
+              tool_name: toolName,
+              tool_use_id: toolUseId,
+              status: 'started' as const,
               started_at: event.timestamp,
               tool_input: event.tool_input,
             }],
@@ -276,19 +278,20 @@ export function SessionDetail() {
           }
         })
       } else if (event.event_type === 'tool_execution_completed') {
+        const toolUseId = event.tool_use_id ?? ''
         setToolTimeline((prev) => {
           if (!prev) return prev
           return {
             ...prev,
             executions: prev.executions.map(e =>
-              e.tool_use_id === event.tool_use_id
+              e.tool_use_id === toolUseId
                 ? {
-                    ...e,
-                    status: 'completed' as const,
-                    completed_at: event.timestamp,
-                    duration_ms: event.duration_ms,
-                    success: event.success,
-                  }
+                  ...e,
+                  status: 'completed' as const,
+                  completed_at: event.timestamp,
+                  duration_ms: event.duration_ms,
+                  success: event.success,
+                }
                 : e
             ),
             completed_count: prev.completed_count + 1,
@@ -298,16 +301,18 @@ export function SessionDetail() {
           }
         })
       } else if (event.event_type === 'tool_blocked') {
+        const toolUseId = event.tool_use_id ?? ''
+        const toolName = event.tool_name ?? 'unknown'
         setToolTimeline((prev) => {
           if (!prev) {
             return {
               session_id: sessionId,
               executions: [{
-                event_id: `sse-${event.tool_use_id}-blocked`,
+                event_id: `sse-${toolUseId}-blocked`,
                 session_id: sessionId,
-                tool_name: event.tool_name,
-                tool_use_id: event.tool_use_id,
-                status: 'blocked',
+                tool_name: toolName,
+                tool_use_id: toolUseId,
+                status: 'blocked' as const,
                 started_at: event.timestamp,
                 block_reason: event.reason,
               }],
@@ -320,11 +325,11 @@ export function SessionDetail() {
           return {
             ...prev,
             executions: [...prev.executions, {
-              event_id: `sse-${event.tool_use_id}-blocked`,
+              event_id: `sse-${toolUseId}-blocked`,
               session_id: sessionId,
-              tool_name: event.tool_name,
-              tool_use_id: event.tool_use_id,
-              status: 'blocked',
+              tool_name: toolName,
+              tool_use_id: toolUseId,
+              status: 'blocked' as const,
               started_at: event.timestamp,
               block_reason: event.reason,
             }],
