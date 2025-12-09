@@ -82,7 +82,7 @@ The executor checks for control signals at yield points (after tool events):
 ```python
 async for event in agent.execute(task, workspace, config):
     yield ToolUsed(...)
-    
+
     # Check for control signals
     if self._check_signal:
         signal = await self._check_signal(ctx.execution_id)

@@ -81,9 +81,7 @@ class TestControlHTTPEndpoints:
         assert "Cannot pause" in response.json()["detail"]
 
     @pytest.mark.asyncio
-    async def test_resume_paused_execution(
-        self, client: TestClient, paused_execution: str
-    ) -> None:
+    async def test_resume_paused_execution(self, client: TestClient, paused_execution: str) -> None:
         """Test resuming a paused execution."""
         response = client.post(f"/api/executions/{paused_execution}/resume")
         assert response.status_code == 200
@@ -115,9 +113,7 @@ class TestControlHTTPEndpoints:
         assert data["message"] == "Cancel signal queued"
 
     @pytest.mark.asyncio
-    async def test_cancel_paused_execution(
-        self, client: TestClient, paused_execution: str
-    ) -> None:
+    async def test_cancel_paused_execution(self, client: TestClient, paused_execution: str) -> None:
         """Test cancelling a paused execution."""
         response = client.post(f"/api/executions/{paused_execution}/cancel")
         assert response.status_code == 200
@@ -156,9 +152,7 @@ class TestControlWebSocket:
         self, client: TestClient, running_execution: str
     ) -> None:
         """Test sending pause command via WebSocket."""
-        with client.websocket_connect(
-            f"/api/ws/control/{running_execution}"
-        ) as websocket:
+        with client.websocket_connect(f"/api/ws/control/{running_execution}") as websocket:
             # Receive initial state
             websocket.receive_json()
 

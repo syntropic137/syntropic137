@@ -25,12 +25,8 @@ def _get_dashboard_url(url: str | None) -> str:
 @app.command()
 def pause(
     execution_id: str = typer.Argument(..., help="Execution ID to pause"),
-    reason: str | None = typer.Option(
-        None, "--reason", "-r", help="Reason for pausing"
-    ),
-    dashboard_url: str | None = typer.Option(
-        None, "--url", "-u", help="Dashboard API URL"
-    ),
+    reason: str | None = typer.Option(None, "--reason", "-r", help="Reason for pausing"),
+    dashboard_url: str | None = typer.Option(None, "--url", "-u", help="Dashboard API URL"),
 ) -> None:
     """Pause a running execution.
 
@@ -68,9 +64,7 @@ def pause(
 @app.command()
 def resume(
     execution_id: str = typer.Argument(..., help="Execution ID to resume"),
-    dashboard_url: str | None = typer.Option(
-        None, "--url", "-u", help="Dashboard API URL"
-    ),
+    dashboard_url: str | None = typer.Option(None, "--url", "-u", help="Dashboard API URL"),
 ) -> None:
     """Resume a paused execution."""
     url = _get_dashboard_url(dashboard_url)
@@ -101,15 +95,9 @@ def resume(
 @app.command()
 def cancel(
     execution_id: str = typer.Argument(..., help="Execution ID to cancel"),
-    reason: str | None = typer.Option(
-        None, "--reason", "-r", help="Reason for cancelling"
-    ),
-    force: bool = typer.Option(
-        False, "--force", "-f", help="Skip confirmation prompt"
-    ),
-    dashboard_url: str | None = typer.Option(
-        None, "--url", "-u", help="Dashboard API URL"
-    ),
+    reason: str | None = typer.Option(None, "--reason", "-r", help="Reason for cancelling"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+    dashboard_url: str | None = typer.Option(None, "--url", "-u", help="Dashboard API URL"),
 ) -> None:
     """Cancel a running or paused execution.
 
@@ -119,9 +107,7 @@ def cancel(
 
     # Confirm unless force flag is set
     if not force:
-        confirm = typer.confirm(
-            f"Are you sure you want to cancel execution {execution_id}?"
-        )
+        confirm = typer.confirm(f"Are you sure you want to cancel execution {execution_id}?")
         if not confirm:
             console.print("Cancelled.", style="dim")
             raise typer.Exit(0)
@@ -153,9 +139,7 @@ def cancel(
 @app.command()
 def status(
     execution_id: str = typer.Argument(..., help="Execution ID to check"),
-    dashboard_url: str | None = typer.Option(
-        None, "--url", "-u", help="Dashboard API URL"
-    ),
+    dashboard_url: str | None = typer.Option(None, "--url", "-u", help="Dashboard API URL"),
 ) -> None:
     """Get current execution control state."""
     url = _get_dashboard_url(dashboard_url)
