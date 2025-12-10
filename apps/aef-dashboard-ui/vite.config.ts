@@ -16,6 +16,11 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,  // Enable WebSocket proxy
       },
+      '/ws': {
+        target: 'ws://localhost:8000',
+        ws: true,
+        changeOrigin: true,
+      },
     },
     fs: {
       // Allow serving files from the ui-feedback package

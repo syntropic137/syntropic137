@@ -19,6 +19,7 @@ from aef_dashboard.api import (
     metrics_router,
     observability_router,
     sessions_router,
+    websocket_router,
     workflows_router,
 )
 from aef_dashboard.config import get_dashboard_config
@@ -215,6 +216,9 @@ def create_app() -> FastAPI:
     app.include_router(metrics_router, prefix="/api")
     app.include_router(observability_router, prefix="/api")  # Tool/token metrics
     app.include_router(control_router, prefix="/api")  # Execution control (pause/resume/cancel)
+
+    # WebSocket endpoint for real-time events (no /api prefix)
+    app.include_router(websocket_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:
