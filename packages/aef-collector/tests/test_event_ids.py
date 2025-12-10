@@ -259,12 +259,8 @@ class TestGenerateGitEventId:
         """Commit hash and branch together should work."""
         ts = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
 
-        result1 = generate_git_event_id(
-            "s1", "git_commit", ts, commit_hash="abc", branch="main"
-        )
-        result2 = generate_git_event_id(
-            "s1", "git_commit", ts, commit_hash="abc", branch="dev"
-        )
+        result1 = generate_git_event_id("s1", "git_commit", ts, commit_hash="abc", branch="main")
+        result2 = generate_git_event_id("s1", "git_commit", ts, commit_hash="abc", branch="dev")
 
         assert result1 != result2
 
