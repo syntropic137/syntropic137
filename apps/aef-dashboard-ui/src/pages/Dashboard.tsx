@@ -14,15 +14,17 @@ import {
   Tooltip,
 } from 'recharts'
 
-import { getMetrics, listWorkflows, subscribeToEvents } from '../api/client'
+import { getMetrics, listWorkflows } from '../api/client'
 import { Card, CardContent, CardHeader, EventFeed, MetricCard, PageLoader } from '../components'
-import type { EventMessage, MetricsResponse, WorkflowSummary } from '../types'
+import type { MetricsResponse, WorkflowSummary } from '../types'
+
+// Polling interval for dashboard refresh (10 seconds)
+const POLL_INTERVAL = 10000
 
 export function Dashboard() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [recentWorkflows, setRecentWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(true)
-  const [isConnected, setIsConnected] = useState(false)
 
   // Refresh metrics
   const refreshMetrics = useCallback(() => {
@@ -45,22 +47,10 @@ export function Dashboard() {
       .finally(() => setLoading(false))
   }, [])
 
-  // SSE subscription for live metric updates
+  // Polling for live updates (replaces SSE)
   useEffect(() => {
-    const handleEvent = (event: EventMessage) => {
-      // Refresh metrics on workflow completion/failure events
-      if (['workflow_completed', 'workflow_failed', 'phase_completed'].includes(event.event_type)) {
-        refreshMetrics()
-      }
-    }
-
-    const unsubscribe = subscribeToEvents(
-      handleEvent,
-      () => setIsConnected(false),
-      () => setIsConnected(true)
-    )
-
-    return unsubscribe
+    const interval = setInterval(refreshMetrics, POLL_INTERVAL)
+    return () => clearInterval(interval)
   }, [refreshMetrics])
 
   if (loading) return <PageLoader />
