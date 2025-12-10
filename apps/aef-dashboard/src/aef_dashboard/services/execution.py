@@ -186,11 +186,20 @@ class ExecutionService:
                 elif isinstance(event, PhaseStarted):
                     tracker[execution_id]["current_phase"] = event.phase_id
                     # Start a session for this phase (via aggregate → event store)
-                    await self._start_session(
+                    session_id = await self._start_session(
                         workflow_id=event.workflow_id,
                         execution_id=execution_id,
                         phase_id=event.phase_id,
                         provider=provider,
+                    )
+                    # Emit PhaseStarted domain event (via aggregate → event store)
+                    await self._start_phase(
+                        execution_id=execution_id,
+                        workflow_id=event.workflow_id,
+                        phase_id=event.phase_id,
+                        phase_name=event.phase_name,
+                        phase_order=event.phase_order,
+                        session_id=session_id,
                     )
 
                 elif isinstance(event, PhaseCompleted):
@@ -716,6 +725,74 @@ class ExecutionService:
         except Exception as e:
             logger.error(
                 "Failed to complete phase",
+                extra={"execution_id": execution_id, "phase_id": phase_id, "error": str(e)},
+            )
+
+    async def _start_phase(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_id: str,
+        phase_name: str,
+        phase_order: int,
+        session_id: str | None = None,
+    ) -> None:
+        """Start a phase using the aggregate pattern.
+
+        This emits PhaseStartedEvent to the event store, which the
+        RealTimeProjection picks up to push to WebSocket clients.
+
+        Args:
+            execution_id: The workflow execution ID.
+            workflow_id: The workflow template ID.
+            phase_id: The phase ID.
+            phase_name: The phase name.
+            phase_order: The phase order (1-indexed).
+            session_id: Optional session ID for this phase.
+        """
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            StartPhaseCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+
+            # Load existing aggregate
+            aggregate = await repository.get_by_id(execution_id)
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for phase start",
+                    extra={"execution_id": execution_id, "phase_id": phase_id},
+                )
+                return
+
+            # Start the phase
+            command = StartPhaseCommand(
+                execution_id=execution_id,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+                phase_name=phase_name,
+                phase_order=phase_order,
+                session_id=session_id,
+            )
+            aggregate._handle_command(command)
+
+            # Persist to event store
+            await repository.save(aggregate)
+
+            logger.info(
+                "Started phase via aggregate",
+                extra={
+                    "execution_id": execution_id,
+                    "phase_id": phase_id,
+                    "phase_order": phase_order,
+                },
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to start phase",
                 extra={"execution_id": execution_id, "phase_id": phase_id, "error": str(e)},
             )
 
