@@ -11,8 +11,8 @@ Example usage:
     uv run aef-collector serve --port 8080
 
     # Start file watcher (sidecar mode)
-    uv run aef-collector watch \\
-        --hooks-file .agentic/analytics/events.jsonl \\
+    uv run aef-collector watch \
+        --hooks-file .agentic/analytics/events.jsonl \
         --transcript-dir ~/.claude/projects/
 """
 

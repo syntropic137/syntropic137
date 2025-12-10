@@ -35,9 +35,9 @@ ENV EVENT_COLLECTOR_PORT=8080
 ENV EVENT_BATCH_SIZE=100
 ENV EVENT_BATCH_INTERVAL_MS=1000
 
-# Health check
+# Health check (using Python since curl is not available in slim image)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${EVENT_COLLECTOR_PORT}/health || exit 1
+    CMD python -c "import sys, http.client, os; port = int(os.environ.get('EVENT_COLLECTOR_PORT', 8080)); conn = http.client.HTTPConnection('localhost', port, timeout=5); conn.request('GET', '/health'); resp = conn.getresponse(); sys.exit(0 if resp.status == 200 else 1)"
 
 # Expose collector port
 EXPOSE 8080
