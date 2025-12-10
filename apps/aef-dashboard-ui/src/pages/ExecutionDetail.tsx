@@ -20,10 +20,10 @@ import {
   YAxis,
 } from 'recharts'
 
-import { getExecution, subscribeToEvents } from '../api/client'
-import { Card, CardContent, CardHeader, EmptyState, ExecutionControl, MetricCard, PageLoader, StatusBadge } from '../components'
-import type { EventMessage, ExecutionDetailResponse } from '../types'
-import { SSE_EVENTS } from '../types'
+import { getExecution } from '../api/client'
+import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import { useExecutionStream } from '../hooks'
+import type { ExecutionDetailResponse } from '../types'
 
 // Claude's context window (approximate)
 const MAX_CONTEXT_TOKENS = 200_000
@@ -49,15 +49,6 @@ export function ExecutionDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  const [isConnected, setIsConnected] = useState(false)
-
-  // Live token streaming state
-  const [liveTokens, setLiveTokens] = useState<{
-    inputTokens: number
-    outputTokens: number
-    turnNumber: number
-    lastUpdate: number
-  } | null>(null)
 
   // Refresh execution data
   const refreshExecution = useCallback(() => {
@@ -73,62 +64,24 @@ export function ExecutionDetail() {
     refreshExecution()
   }, [refreshExecution])
 
-  // SSE subscription for live updates
-  useEffect(() => {
-    if (!executionId) return
-
-    const handleEvent = (event: EventMessage) => {
-      const eventExecutionId = event.data?.execution_id as string | undefined
-      if (eventExecutionId !== executionId) return
-
-      // Handle live token updates
-      if (event.event_type === SSE_EVENTS.TURN_UPDATE) {
-        const data = event.data as {
-          cumulative_input_tokens?: number
-          cumulative_output_tokens?: number
-          turn_number?: number
-        }
-        setLiveTokens({
-          inputTokens: data.cumulative_input_tokens ?? 0,
-          outputTokens: data.cumulative_output_tokens ?? 0,
-          turnNumber: data.turn_number ?? 0,
-          lastUpdate: Date.now(),
-        })
-        return
-      }
-
-      // Events that trigger a refresh
-      const refreshEvents: string[] = [
-        SSE_EVENTS.PHASE_STARTED,
-        SSE_EVENTS.PHASE_COMPLETED,
-        SSE_EVENTS.WORKFLOW_COMPLETED,
-        SSE_EVENTS.WORKFLOW_FAILED,
-      ]
-
-      // Events that indicate completion (clear live tokens)
-      const completionEvents: string[] = [
-        SSE_EVENTS.PHASE_COMPLETED,
-        SSE_EVENTS.WORKFLOW_COMPLETED,
-        SSE_EVENTS.WORKFLOW_FAILED,
-      ]
-
-      if (refreshEvents.includes(event.event_type)) {
-        refreshExecution()
-        // Clear live tokens when phase/workflow completes (they're now in the projection)
-        if (completionEvents.includes(event.event_type)) {
-          setLiveTokens(null)
+  // WebSocket subscription for live updates
+  const { isConnected } = useExecutionStream(executionId, {
+    onEvent: (event) => {
+      // Refresh on relevant domain events
+      if (event.type === 'event' && event.event_type) {
+        const refreshEvents = [
+          'PhaseStarted',
+          'PhaseCompleted',
+          'WorkflowCompleted',
+          'WorkflowFailed',
+          'OperationRecorded',
+        ]
+        if (refreshEvents.includes(event.event_type)) {
+          refreshExecution()
         }
       }
-    }
-
-    const unsubscribe = subscribeToEvents(
-      handleEvent,
-      () => setIsConnected(false),
-      () => setIsConnected(true)
-    )
-
-    return unsubscribe
-  }, [executionId, refreshExecution])
+    },
+  })
 
   // Timer for live duration updates
   useEffect(() => {
@@ -168,12 +121,7 @@ export function ExecutionDetail() {
     return `${minutes}m ${remainingSeconds}s`
   }
 
-  // Use live tokens if available, otherwise use projection data
-  const displayInputTokens = liveTokens?.inputTokens ?? execution.total_input_tokens
-  const displayOutputTokens = liveTokens?.outputTokens ?? execution.total_output_tokens
-  const totalTokens = displayInputTokens + displayOutputTokens
-  // Check if live updating based on lastUpdate timestamp (now state is declared at top of component)
-  const isLiveUpdating = liveTokens !== null && now - liveTokens.lastUpdate < 5000
+  const totalTokens = execution.total_input_tokens + execution.total_output_tokens
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
 
   // Calculate context window usage percentage
@@ -210,10 +158,6 @@ export function ExecutionDetail() {
                 </h1>
                 <StatusBadge status={execution.status} size="lg" pulse={execution.status === 'running'} />
               </div>
-              {/* Execution Control - only show for running or paused executions */}
-              {(execution.status === 'running' || execution.status === 'paused') && (
-                <ExecutionControl executionId={execution.execution_id} className="mt-3" />
-              )}
               <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
                 {execution.workflow_name}
               </p>
@@ -266,20 +210,10 @@ export function ExecutionDetail() {
           subtitle={`${completedPhases} completed`}
         />
         <MetricCard
-          title={
-            <span className="flex items-center gap-2">
-              Total Tokens
-              {isLiveUpdating && (
-                <span className="flex items-center gap-1 text-xs font-normal text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  live
-                </span>
-              )}
-            </span>
-          }
+          title="Total Tokens"
           value={totalTokens.toLocaleString()}
           icon={Zap}
-          subtitle={`In: ${displayInputTokens.toLocaleString()} / Out: ${displayOutputTokens.toLocaleString()}`}
+          subtitle={`In: ${execution.total_input_tokens.toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`}
         />
         {/* Context Window Usage */}
         <Card className="p-4">

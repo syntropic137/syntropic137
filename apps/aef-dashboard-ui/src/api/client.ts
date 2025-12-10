@@ -1,7 +1,6 @@
 import type {
   ArtifactResponse,
   ArtifactSummary,
-  EventMessage,
   ExecutionDetailResponse,
   ExecutionHistoryResponse,
   ExecutionListResponse,
@@ -261,96 +260,29 @@ export async function getTokenMetrics(sessionId: string): Promise<TokenMetricsRe
 }
 
 // =============================================================================
-// WEBSOCKET HELPERS
+// WEBSOCKET API
 // =============================================================================
 
 /**
- * Get WebSocket URL for execution control.
+ * Get WebSocket URL for an execution stream.
  *
- * @param executionId - The execution ID to control
- * @returns WebSocket URL for the control endpoint
+ * The WebSocket endpoint receives domain events from RealTimeProjection:
+ *   Event Store → Subscription → ProjectionManager → RealTimeProjection → WebSocket
+ *
+ * @param executionId - The execution ID to subscribe to
  */
-export function getControlWebSocketUrl(executionId: string): string {
+export function getExecutionWebSocketUrl(executionId: string): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}${API_BASE}/ws/control/${executionId}`
-}
-
-// =============================================================================
-// EVENTS API
-// =============================================================================
-
-export async function getRecentEvents(): Promise<EventMessage[]> {
-  return fetchJSON(`${API_BASE}/events/recent`)
+  return `${protocol}//${window.location.host}/ws/executions/${executionId}`
 }
 
 /**
- * Subscribe to SSE events from the backend.
- *
- * Uses dynamic event handling - the backend (bridging domain events)
- * determines what events are sent. No hardcoded event list needed.
+ * Check WebSocket health endpoint.
  */
-export function subscribeToEvents(
-  onEvent: (event: EventMessage) => void,
-  onError?: (error: Event) => void,
-  onConnected?: () => void
-): () => void {
-  const eventSource = new EventSource(`${API_BASE}/events/stream`)
-
-  // Track known event types dynamically
-  const registeredTypes = new Set<string>(['connected', 'heartbeat'])
-
-  // Handle connection events
-  eventSource.addEventListener('connected', () => {
-    console.log('SSE connected to server')
-    onConnected?.()
-  })
-
-  eventSource.addEventListener('heartbeat', () => {
-    onConnected?.()
-  })
-
-  // Generic message handler - parses all events from backend
-  // The backend sends named events, so we use onmessage as fallback
-  eventSource.onmessage = (event: MessageEvent) => {
-    try {
-      const data = JSON.parse(event.data)
-      const eventType = data.event_type || 'unknown'
-
-      // Dynamically register listener for this event type if not seen before
-      if (!registeredTypes.has(eventType)) {
-        registeredTypes.add(eventType)
-        eventSource.addEventListener(eventType, (e: MessageEvent) => {
-          try {
-            const eventData = JSON.parse(e.data)
-            onEvent({
-              event_type: eventType,
-              timestamp: eventData.timestamp || new Date().toISOString(),
-              data: eventData,
-              ...eventData,
-            } as EventMessage)
-          } catch (err) {
-            console.error('Failed to parse SSE event:', err)
-          }
-        })
-      }
-
-      onEvent({
-        event_type: eventType,
-        timestamp: data.timestamp || new Date().toISOString(),
-        data: data,
-        ...data,
-      } as EventMessage)
-    } catch (e) {
-      console.error('Failed to parse SSE message:', e)
-    }
-  }
-
-  eventSource.onerror = (error) => {
-    console.error('SSE connection error:', error)
-    onError?.(error)
-  }
-
-  return () => {
-    eventSource.close()
-  }
+export async function getWebSocketHealth(): Promise<{
+  status: string
+  active_executions: number
+  active_connections: number
+}> {
+  return fetchJSON('/ws/health')
 }

@@ -1,2 +1,10 @@
-export { useExecutionControl } from './useExecutionControl'
-export type { ExecutionState } from './useExecutionControl'
+/**
+ * Custom React hooks for the AEF Dashboard.
+ */
+
+export { useExecutionStream } from './useExecutionStream'
+export type {
+  ExecutionEvent,
+  UseExecutionStreamOptions,
+  UseExecutionStreamResult,
+} from './useExecutionStream'
