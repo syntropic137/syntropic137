@@ -32,6 +32,8 @@ export interface UseExecutionStreamOptions {
   autoReconnect?: boolean
   /** Reconnect delay in ms (default: 2000) */
   reconnectDelay?: number
+  /** Max reconnect attempts before giving up (default: 5) */
+  maxReconnectAttempts?: number
 }
 
 /** Return type for the hook */
@@ -56,7 +58,12 @@ export function useExecutionStream(
   executionId: string | undefined,
   options: UseExecutionStreamOptions = {}
 ): UseExecutionStreamResult {
-  const { onEvent, autoReconnect = true, reconnectDelay = 2000 } = options
+  const {
+    onEvent,
+    autoReconnect = true,
+    reconnectDelay = 2000,
+    maxReconnectAttempts = 5,
+  } = options
 
   const [isConnected, setIsConnected] = useState(false)
   const [events, setEvents] = useState<ExecutionEvent[]>([])
@@ -64,6 +71,10 @@ export function useExecutionStream(
 
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<number | null>(null)
+  const reconnectAttemptsRef = useRef(0)
+  // Store callback in ref to avoid triggering reconnects on callback change
+  const onEventRef = useRef(onEvent)
+  onEventRef.current = onEvent
 
   // Clean up reconnect timeout
   const clearReconnectTimeout = useCallback(() => {
@@ -99,6 +110,8 @@ export function useExecutionStream(
         console.log(`[WebSocket] Connected to execution ${executionId}`)
         setIsConnected(true)
         clearReconnectTimeout()
+        // Reset reconnect attempts on successful connection
+        reconnectAttemptsRef.current = 0
       }
 
       ws.onmessage = (messageEvent) => {
@@ -109,8 +122,8 @@ export function useExecutionStream(
           setEvents((prev) => [...prev, event])
           setLatestEvent(event)
 
-          // Call user callback
-          onEvent?.(event)
+          // Call user callback (via ref to avoid reconnects)
+          onEventRef.current?.(event)
 
           // Log event type
           if (event.type === 'connected') {
@@ -132,10 +145,19 @@ export function useExecutionStream(
         setIsConnected(false)
         wsRef.current = null
 
-        // Auto-reconnect if enabled
+        // Auto-reconnect if enabled and under max attempts
         if (autoReconnect && !closeEvent.wasClean) {
-          console.log(`[WebSocket] Reconnecting in ${reconnectDelay}ms...`)
-          reconnectTimeoutRef.current = window.setTimeout(connect, reconnectDelay)
+          reconnectAttemptsRef.current += 1
+          if (reconnectAttemptsRef.current <= maxReconnectAttempts) {
+            console.log(
+              `[WebSocket] Reconnecting in ${reconnectDelay}ms... (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`
+            )
+            reconnectTimeoutRef.current = window.setTimeout(connect, reconnectDelay)
+          } else {
+            console.warn(
+              `[WebSocket] Max reconnect attempts (${maxReconnectAttempts}) reached. Giving up.`
+            )
+          }
         }
       }
     }
@@ -150,7 +172,7 @@ export function useExecutionStream(
         wsRef.current = null
       }
     }
-  }, [executionId, autoReconnect, reconnectDelay, onEvent, clearReconnectTimeout])
+  }, [executionId, autoReconnect, reconnectDelay, maxReconnectAttempts, clearReconnectTimeout])
 
   return {
     isConnected,
