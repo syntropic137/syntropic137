@@ -240,6 +240,83 @@ class WorkflowExecutionDetailProjection:
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    async def on_execution_paused(self, event_data: dict) -> None:
+        """Handle ExecutionPaused event.
+
+        Marks execution as paused via control plane.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+
+        existing["status"] = "paused"
+
+        # Mark current phase as paused
+        phase_id = event_data.get("phase_id")
+        if phase_id:
+            for phase in existing.get("phases", []):
+                if phase.get("phase_id") == phase_id:
+                    phase["status"] = "paused"
+                    break
+
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_resumed(self, event_data: dict) -> None:
+        """Handle ExecutionResumed event.
+
+        Marks execution as running again after pause.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+
+        existing["status"] = "running"
+
+        # Mark current phase as running
+        phase_id = event_data.get("phase_id")
+        if phase_id:
+            for phase in existing.get("phases", []):
+                if phase.get("phase_id") == phase_id:
+                    phase["status"] = "running"
+                    break
+
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_cancelled(self, event_data: dict) -> None:
+        """Handle ExecutionCancelled event.
+
+        Marks execution as cancelled via control plane.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+
+        existing["status"] = "cancelled"
+        existing["completed_at"] = event_data.get("cancelled_at")
+        existing["error_message"] = event_data.get("reason") or "Cancelled by user"
+
+        # Mark current phase as cancelled
+        phase_id = event_data.get("phase_id")
+        if phase_id:
+            for phase in existing.get("phases", []):
+                if phase.get("phase_id") == phase_id:
+                    phase["status"] = "cancelled"
+                    break
+
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionDetail | None:
         """Get execution detail by ID.
 

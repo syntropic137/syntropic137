@@ -135,6 +135,49 @@ class WorkflowExecutionListProjection:
 
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    async def on_execution_paused(self, event_data: dict) -> None:
+        """Handle ExecutionPaused event.
+
+        Marks execution as paused via control plane.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["status"] = "paused"
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_resumed(self, event_data: dict) -> None:
+        """Handle ExecutionResumed event.
+
+        Marks execution as running again after pause.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["status"] = "running"
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_execution_cancelled(self, event_data: dict) -> None:
+        """Handle ExecutionCancelled event.
+
+        Marks execution as cancelled via control plane.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["status"] = "cancelled"
+            existing["completed_at"] = event_data.get("cancelled_at")
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
     async def get_by_workflow_id(self, workflow_id: str) -> list[WorkflowExecutionSummary]:
         """Get all executions for a workflow.
 
