@@ -14,7 +14,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from aef_dashboard.api import (
     artifacts_router,
     control_router,
-    events_router,
     execution_router,
     executions_router,
     metrics_router,
@@ -213,7 +212,6 @@ def create_app() -> FastAPI:
     app.include_router(executions_router, prefix="/api")  # Execution detail
     app.include_router(sessions_router, prefix="/api")
     app.include_router(artifacts_router, prefix="/api")
-    app.include_router(events_router, prefix="/api")
     app.include_router(metrics_router, prefix="/api")
     app.include_router(observability_router, prefix="/api")  # Tool/token metrics
     app.include_router(control_router, prefix="/api")  # Execution control (pause/resume/cancel)

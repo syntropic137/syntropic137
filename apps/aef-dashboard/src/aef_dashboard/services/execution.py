@@ -1,7 +1,12 @@
 """Workflow execution service.
 
 This service orchestrates workflow execution using the AgenticWorkflowExecutor.
-It bridges execution events to the SSE stream and persists artifacts.
+It emits domain events via aggregates and persists artifacts.
+
+Real-time UI updates are handled by the RealTimeProjection, which receives
+events from the subscription service and pushes them to WebSocket clients.
+This follows proper event sourcing patterns - all events flow through the
+event store, and the UI is updated via projections.
 
 NOTE: This service requires the agentic components to be installed.
 If imports fail at startup, that's a deployment configuration error.
@@ -41,7 +46,6 @@ from aef_adapters.orchestration.factory import (
     get_agentic_agent,
     get_workspace,
 )
-from aef_dashboard.api.events import push_event
 
 logger = get_logger(__name__)
 
@@ -165,10 +169,9 @@ class ExecutionService:
                 execution_id=execution_id,
                 provider=provider,
             ):
-                # Bridge to SSE
-                self._bridge_event_to_sse(event)
-
                 # Update tracker and emit domain events via aggregates
+                # Real-time UI updates happen via RealTimeProjection which
+                # receives events from the subscription service
                 if isinstance(event, WorkflowStarted):
                     tracker[execution_id]["status"] = "running"
                     # Emit WorkflowExecutionStarted domain event
@@ -313,16 +316,10 @@ class ExecutionService:
                 "error": str(e),
                 "completed_at": datetime.now(UTC),
             }
-
-            # Push failure event
-            push_event(
-                "workflow_failed",
-                {
-                    "workflow_id": workflow_id,
-                    "execution_id": execution_id,
-                    "error": str(e),
-                },
-            )
+            # Note: WorkflowFailed domain event is emitted via aggregate in the
+            # normal flow. This exception handler is for unexpected errors.
+            # The RealTimeProjection will receive the event from the subscription
+            # service and push it to connected WebSocket clients.
 
     async def _load_workflow_definition(self, workflow_id: str) -> WorkflowDefinitionAdapter | None:
         """Load workflow definition from repository.
@@ -381,199 +378,6 @@ class ExecutionService:
             name=detail.name,
             phases=phases,
         )
-
-    def _bridge_event_to_sse(self, event: Any) -> None:
-        """Bridge an executor event to SSE.
-
-        Args:
-            event: The execution event to bridge.
-        """
-        if isinstance(event, WorkflowStarted):
-            push_event(
-                "workflow_started",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "workflow_name": event.workflow_name,
-                    "total_phases": event.total_phases,
-                },
-            )
-
-        elif isinstance(event, PhaseStarted):
-            push_event(
-                "phase_started",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "phase_name": event.phase_name,
-                    "phase_order": event.phase_order,
-                },
-            )
-
-        elif isinstance(event, PhaseCompleted):
-            push_event(
-                "phase_completed",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "artifact_bundle_id": event.artifact_bundle_id,
-                    "tokens": event.total_tokens,
-                    "duration_ms": event.duration_ms,
-                },
-            )
-
-        elif isinstance(event, PhaseFailed):
-            push_event(
-                "phase_failed",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "error": event.error,
-                },
-            )
-
-        elif isinstance(event, WorkflowCompleted):
-            push_event(
-                "workflow_completed",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "total_phases": event.total_phases,
-                    "completed_phases": event.completed_phases,
-                    "total_tokens": event.total_tokens,
-                    "duration_ms": event.total_duration_ms,
-                },
-            )
-
-        elif isinstance(event, WorkflowFailed):
-            push_event(
-                "workflow_failed",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "error": event.error,
-                    "failed_phase_id": event.failed_phase_id,
-                },
-            )
-
-        elif isinstance(event, ToolStarted):
-            # Push tool_execution_started to SSE (Pattern 2 real-time)
-            push_event(
-                "tool_execution_started",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "tool_name": event.tool_name,
-                    "tool_use_id": event.tool_use_id,
-                    "tool_input": event.tool_input,
-                    "timestamp": event.timestamp.isoformat(),
-                },
-            )
-
-        elif isinstance(event, ToolUsed):
-            # Push tool_execution_completed to SSE (Pattern 2 real-time)
-            push_event(
-                "tool_execution_completed",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "tool_name": event.tool_name,
-                    "tool_use_id": event.tool_use_id,
-                    "success": event.success,
-                    "duration_ms": event.duration_ms,
-                    "timestamp": event.timestamp.isoformat(),
-                },
-            )
-            # Also push legacy tool_used for backward compatibility
-            push_event(
-                "tool_used",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "tool_name": event.tool_name,
-                    "tool_use_id": event.tool_use_id,
-                    "success": event.success,
-                    "timestamp": event.timestamp.isoformat(),
-                },
-            )
-
-        elif isinstance(event, ToolBlockedExecution):
-            # Push tool_blocked to SSE (Pattern 2 real-time)
-            push_event(
-                "tool_blocked",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "tool_name": event.tool_name,
-                    "tool_use_id": event.tool_use_id,
-                    "reason": event.reason,
-                    "validator": event.validator,
-                    "timestamp": event.timestamp.isoformat(),
-                },
-            )
-
-        elif isinstance(event, TurnUpdate):
-            # Push turn_update for live token streaming
-            push_event(
-                "turn_update",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "turn_number": event.turn_number,
-                    "input_tokens": event.input_tokens,
-                    "output_tokens": event.output_tokens,
-                    "cumulative_input_tokens": event.cumulative_input_tokens,
-                    "cumulative_output_tokens": event.cumulative_output_tokens,
-                    "timestamp": event.timestamp.isoformat(),
-                },
-            )
-
-        elif isinstance(event, ExecutionPaused):
-            push_event(
-                "execution_paused",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "paused_at": event.paused_at.isoformat(),
-                    "reason": event.reason,
-                },
-            )
-
-        elif isinstance(event, ExecutionResumed):
-            push_event(
-                "execution_resumed",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "resumed_at": event.resumed_at.isoformat(),
-                },
-            )
-
-        elif isinstance(event, ExecutionCancelled):
-            push_event(
-                "execution_cancelled",
-                {
-                    "workflow_id": event.workflow_id,
-                    "execution_id": event.execution_id,
-                    "phase_id": event.phase_id,
-                    "cancelled_at": event.cancelled_at.isoformat(),
-                    "reason": event.reason,
-                },
-            )
-
-        else:
-            # Unknown event type - log for debugging
-            logger.debug("Unknown event type: %s", type(event).__name__)
 
     async def _start_session(
         self,
@@ -638,19 +442,8 @@ class ExecutionService:
                     "phase_id": phase_id,
                 },
             )
-
-            # Also push to SSE for real-time UI updates
-            push_event(
-                "session_started",
-                {
-                    "session_id": session_id,
-                    "workflow_id": workflow_id,
-                    "execution_id": execution_id,
-                    "phase_id": phase_id,
-                    "agent_provider": provider,
-                    "started_at": datetime.now(UTC).isoformat(),
-                },
-            )
+            # Real-time UI updates happen via RealTimeProjection which
+            # receives SessionStartedEvent from the subscription service
 
         except Exception as e:
             logger.error("Failed to start session", extra={"error": str(e)})
@@ -834,18 +627,8 @@ class ExecutionService:
                     "total_tokens": total_tokens,
                 },
             )
-
-            # Also push to SSE for real-time UI updates
-            push_event(
-                "session_completed",
-                {
-                    "session_id": session_id,
-                    "status": "completed" if success else "failed",
-                    "total_tokens": total_tokens,
-                    "error_message": error,
-                    "completed_at": datetime.now(UTC).isoformat(),
-                },
-            )
+            # Real-time UI updates happen via RealTimeProjection which
+            # receives SessionCompletedEvent from the subscription service
 
         except Exception as e:
             logger.error("Failed to complete session", extra={"error": str(e)})
@@ -1047,19 +830,8 @@ class ExecutionService:
                     "content_size": len(content),
                 },
             )
-
-            # Also push to SSE for real-time UI updates
-            push_event(
-                "artifact_created",
-                {
-                    "artifact_id": str(aggregate.id),
-                    "workflow_id": workflow_id,
-                    "phase_id": phase_id,
-                    "session_id": session_id,
-                    "title": title,
-                    "artifact_type": artifact_type.value,
-                },
-            )
+            # Real-time UI updates happen via RealTimeProjection which
+            # receives ArtifactCreatedEvent from the subscription service
 
         except Exception as e:
             logger.error(
