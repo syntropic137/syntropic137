@@ -23,14 +23,17 @@ from aef_domain.contexts.workflows._shared.workflow_definition import (
 from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
 from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
     CompleteExecutionCommand,
+    CompletePhaseCommand,
     FailExecutionCommand,
     StartExecutionCommand,
+    StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
 
 __all__ = [
     "AgentConfiguration",
     "CompleteExecutionCommand",
+    "CompletePhaseCommand",
     "ExecutablePhase",
     "ExecutionMetrics",
     "ExecutionStatus",
@@ -41,6 +44,7 @@ __all__ = [
     "PhaseResult",
     "PhaseStatus",
     "StartExecutionCommand",
+    "StartPhaseCommand",
     "WorkflowAggregate",
     "WorkflowClassification",
     "WorkflowDefinition",
