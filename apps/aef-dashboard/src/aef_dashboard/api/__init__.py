@@ -7,6 +7,7 @@ from aef_dashboard.api.executions import router as executions_router
 from aef_dashboard.api.metrics import router as metrics_router
 from aef_dashboard.api.observability import router as observability_router
 from aef_dashboard.api.sessions import router as sessions_router
+from aef_dashboard.api.websocket import router as websocket_router
 from aef_dashboard.api.workflows import router as workflows_router
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "metrics_router",
     "observability_router",
     "sessions_router",
+    "websocket_router",
     "workflows_router",
 ]
