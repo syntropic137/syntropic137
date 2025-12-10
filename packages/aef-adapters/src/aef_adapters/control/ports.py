@@ -35,3 +35,10 @@ class SignalQueuePort(Protocol):
     async def dequeue(self, execution_id: str) -> ControlSignal | None:
         """Get and remove next signal for execution, or None if empty."""
         ...
+
+    async def get_signal(self, execution_id: str) -> ControlSignal | None:
+        """Alias for dequeue - get next signal for executor.
+
+        This is the preferred method name for control plane use cases.
+        """
+        ...

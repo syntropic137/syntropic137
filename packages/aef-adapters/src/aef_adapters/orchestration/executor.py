@@ -817,9 +817,11 @@ class AgenticWorkflowExecutor:
 
                 # Check for control signals between turns (pause/cancel)
                 if self._check_signal:
+                    from aef_adapters.control import ControlSignalType
+
                     signal = await self._check_signal(ctx.execution_id)
                     if signal:
-                        if signal.action == "cancel":
+                        if signal.signal_type == ControlSignalType.CANCEL:
                             yield ExecutionCancelled(
                                 workflow_id=ctx.workflow_id,
                                 execution_id=ctx.execution_id,
@@ -829,7 +831,7 @@ class AgenticWorkflowExecutor:
                             )
                             return  # Exit execution
 
-                        elif signal.action == "pause":
+                        elif signal.signal_type == ControlSignalType.PAUSE:
                             yield ExecutionPaused(
                                 workflow_id=ctx.workflow_id,
                                 execution_id=ctx.execution_id,
@@ -841,7 +843,10 @@ class AgenticWorkflowExecutor:
                             while True:
                                 await asyncio.sleep(0.5)
                                 resume_signal = await self._check_signal(ctx.execution_id)
-                                if resume_signal and resume_signal.action == "resume":
+                                if (
+                                    resume_signal
+                                    and resume_signal.signal_type == ControlSignalType.RESUME
+                                ):
                                     yield ExecutionResumed(
                                         workflow_id=ctx.workflow_id,
                                         execution_id=ctx.execution_id,
@@ -849,7 +854,10 @@ class AgenticWorkflowExecutor:
                                         resumed_at=datetime.now(UTC),
                                     )
                                     break
-                                elif resume_signal and resume_signal.action == "cancel":
+                                elif (
+                                    resume_signal
+                                    and resume_signal.signal_type == ControlSignalType.CANCEL
+                                ):
                                     yield ExecutionCancelled(
                                         workflow_id=ctx.workflow_id,
                                         execution_id=ctx.execution_id,
