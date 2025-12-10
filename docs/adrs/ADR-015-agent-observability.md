@@ -2,14 +2,15 @@
 
 ## Status
 
-**Proposed** - 2025-12-05
+**Accepted** - 2025-12-05
+**Updated:** 2025-12-09 - SSE replaced with WebSocket/RealTimeProjection (see ADR-010)
 
 ## Context
 
 The AEF dashboard needs **full observability** into agent execution sessions. Currently:
 
 1. Only **one aggregate operation** is recorded per session at completion
-2. Individual tool calls are sent to SSE but **not persisted** as domain events
+2. Individual tool calls were previously sent to SSE but **not persisted** as domain events
 3. Session detail page shows minimal information
 4. No visibility into tool inputs/outputs, messages, or thinking content
 
@@ -26,7 +27,7 @@ Users need to see:
 2. **Vertical Slice Architecture** - Follow established patterns
 3. **Backward Compatibility** - Don't break existing event replay
 4. **Performance** - Handle high event volume efficiently
-5. **Real-time Updates** - SSE integration for live UI
+5. **Real-time Updates** - WebSocket integration for live UI (via RealTimeProjection)
 
 ## Considered Options
 
@@ -205,10 +206,17 @@ Agent Execution
        │                        OperationRecordedEvent
        │                              │
        │                              ▼
-       │                        Projection Updates
+       │                        Event Store → Subscription
        │                              │
        │                              ▼
-       │                        SSE Push to UI
+       │                        ProjectionManager
+       │                              │
+       │              ┌───────────────┼───────────────┐
+       │              ▼               ▼               ▼
+       │        Persisting      Persisting     RealTimeProjection
+       │        Projections     Projections          │
+       │                                             ▼
+       │                                      WebSocket → UI
        │
        └─► TaskCompleted
 ```
