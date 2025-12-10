@@ -268,6 +268,12 @@ export async function getRecentEvents(): Promise<EventMessage[]> {
   return fetchJSON(`${API_BASE}/events/recent`)
 }
 
+/**
+ * Subscribe to SSE events from the backend.
+ *
+ * Uses dynamic event handling - the backend (bridging domain events)
+ * determines what events are sent. No hardcoded event list needed.
+ */
 export function subscribeToEvents(
   onEvent: (event: EventMessage) => void,
   onError?: (error: Event) => void,
@@ -275,59 +281,52 @@ export function subscribeToEvents(
 ): () => void {
   const eventSource = new EventSource(`${API_BASE}/events/stream`)
 
-  // Handle named 'connected' event
+  // Track known event types dynamically
+  const registeredTypes = new Set<string>(['connected', 'heartbeat'])
+
+  // Handle connection events
   eventSource.addEventListener('connected', () => {
     console.log('SSE connected to server')
     onConnected?.()
   })
 
-  // Handle named 'heartbeat' event - keeps connection status alive
   eventSource.addEventListener('heartbeat', () => {
     onConnected?.()
   })
 
-  // Handle all other named events (workflow_started, phase_completed, etc.)
-  const eventTypes = [
-    'workflow_started',
-    'workflow_completed',
-    'workflow_failed',
-    'phase_started',
-    'phase_completed',
-    'phase_failed',
-    'session_started',
-    'session_completed',
-    'session_failed',
-    // Legacy tool event
-    'tool_used',
-    // Pattern 2 tool events (real-time, from ADR-018)
-    'tool_execution_started',
-    'tool_execution_completed',
-    'tool_blocked',
-    'artifact_created',
-  ]
-
-  eventTypes.forEach((eventType) => {
-    eventSource.addEventListener(eventType, (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data)
-        onEvent({
-          event_type: eventType,
-          timestamp: data.timestamp || new Date().toISOString(),
-          ...data,
-        } as EventMessage)
-      } catch (e) {
-        console.error('Failed to parse event:', e)
-      }
-    })
-  })
-
-  // Handle unnamed events (fallback)
-  eventSource.onmessage = (event) => {
+  // Generic message handler - parses all events from backend
+  // The backend sends named events, so we use onmessage as fallback
+  eventSource.onmessage = (event: MessageEvent) => {
     try {
-      const data = JSON.parse(event.data) as EventMessage
-      onEvent(data)
+      const data = JSON.parse(event.data)
+      const eventType = data.event_type || 'unknown'
+
+      // Dynamically register listener for this event type if not seen before
+      if (!registeredTypes.has(eventType)) {
+        registeredTypes.add(eventType)
+        eventSource.addEventListener(eventType, (e: MessageEvent) => {
+          try {
+            const eventData = JSON.parse(e.data)
+            onEvent({
+              event_type: eventType,
+              timestamp: eventData.timestamp || new Date().toISOString(),
+              data: eventData,
+              ...eventData,
+            } as EventMessage)
+          } catch (err) {
+            console.error('Failed to parse SSE event:', err)
+          }
+        })
+      }
+
+      onEvent({
+        event_type: eventType,
+        timestamp: data.timestamp || new Date().toISOString(),
+        data: data,
+        ...data,
+      } as EventMessage)
     } catch (e) {
-      console.error('Failed to parse event:', e)
+      console.error('Failed to parse SSE message:', e)
     }
   }
 
@@ -336,7 +335,6 @@ export function subscribeToEvents(
     onError?.(error)
   }
 
-  // Return cleanup function
   return () => {
     eventSource.close()
   }

@@ -256,6 +256,26 @@ export interface ExecutionDetailResponse {
 // EVENT TYPES
 // =============================================================================
 
+/**
+ * SSE event type constants used by UI components.
+ *
+ * NOTE: These are bridged from domain events defined in aef-domain.
+ * The domain layer (Python) is the source of truth for event definitions.
+ * Only add constants here for events the UI explicitly handles.
+ */
+export const SSE_EVENTS = {
+  // Events that trigger execution refresh
+  PHASE_STARTED: 'phase_started',
+  PHASE_COMPLETED: 'phase_completed',
+  WORKFLOW_COMPLETED: 'workflow_completed',
+  WORKFLOW_FAILED: 'workflow_failed',
+
+  // Live streaming (control plane)
+  TURN_UPDATE: 'turn_update',
+} as const
+
+export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]
+
 export interface EventMessage {
   event_type: string
   timestamp: string
