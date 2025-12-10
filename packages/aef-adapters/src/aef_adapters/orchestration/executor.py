@@ -815,13 +815,49 @@ class AgenticWorkflowExecutor:
                     timestamp=event.timestamp,
                 )
 
-                # TODO: Check for control signals here (pause/cancel)
-                # This is where we can make execution interruptible between turns
-                # if self._signal_port:
-                #     signal = await self._signal_port.get_signal(ctx.execution_id)
-                #     if signal and signal.action == "cancel":
-                #         yield ExecutionCancelled(...)
-                #         return
+                # Check for control signals between turns (pause/cancel)
+                if self._check_signal:
+                    signal = await self._check_signal(ctx.execution_id)
+                    if signal:
+                        if signal.action == "cancel":
+                            yield ExecutionCancelled(
+                                workflow_id=ctx.workflow_id,
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                cancelled_at=datetime.now(UTC),
+                                reason=signal.reason,
+                            )
+                            return  # Exit execution
+
+                        elif signal.action == "pause":
+                            yield ExecutionPaused(
+                                workflow_id=ctx.workflow_id,
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                paused_at=datetime.now(UTC),
+                                reason=signal.reason,
+                            )
+                            # Wait for resume signal
+                            while True:
+                                await asyncio.sleep(0.5)
+                                resume_signal = await self._check_signal(ctx.execution_id)
+                                if resume_signal and resume_signal.action == "resume":
+                                    yield ExecutionResumed(
+                                        workflow_id=ctx.workflow_id,
+                                        execution_id=ctx.execution_id,
+                                        phase_id=phase.phase_id,
+                                        resumed_at=datetime.now(UTC),
+                                    )
+                                    break
+                                elif resume_signal and resume_signal.action == "cancel":
+                                    yield ExecutionCancelled(
+                                        workflow_id=ctx.workflow_id,
+                                        execution_id=ctx.execution_id,
+                                        phase_id=phase.phase_id,
+                                        cancelled_at=datetime.now(UTC),
+                                        reason=resume_signal.reason,
+                                    )
+                                    return
 
             elif isinstance(event, TaskCompleted):
                 result_text = event.result

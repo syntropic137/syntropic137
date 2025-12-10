@@ -13,13 +13,19 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agentic_logging import get_logger
 
 from aef_adapters.orchestration import AgenticWorkflowExecutor
+
+if TYPE_CHECKING:
+    from aef_adapters.control import ControlSignal
 from aef_adapters.orchestration.executor import (
+    ExecutionCancelled,
+    ExecutionPaused,
+    ExecutionResumed,
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
@@ -134,13 +140,22 @@ class ExecutionService:
             tracker[execution_id]["total_phases"] = len(workflow_def.phases)
             tracker[execution_id]["status"] = "running"
 
-            # Create executor - imports are at top level, fail fast if not available
+            # Create executor with control signal checker
+            from aef_dashboard.services.control import get_signal_adapter
+
+            signal_adapter = get_signal_adapter()
+
+            async def check_signal(exec_id: str) -> ControlSignal | None:
+                """Check for control signals (pause/resume/cancel)."""
+                return await signal_adapter.get_signal(exec_id)
+
             executor = AgenticWorkflowExecutor(
                 agent_factory=get_agentic_agent,
                 workspace_factory=get_workspace,  # type: ignore[arg-type]
                 base_workspace_path=self._base_workspace_path,
                 default_provider=provider,
                 default_max_budget_usd=max_budget_usd,
+                control_signal_checker=check_signal,
             )
 
             # Execute and stream events
@@ -491,6 +506,41 @@ class ExecutionService:
                     "cumulative_input_tokens": event.cumulative_input_tokens,
                     "cumulative_output_tokens": event.cumulative_output_tokens,
                     "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        elif isinstance(event, ExecutionPaused):
+            push_event(
+                "execution_paused",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "paused_at": event.paused_at.isoformat(),
+                    "reason": event.reason,
+                },
+            )
+
+        elif isinstance(event, ExecutionResumed):
+            push_event(
+                "execution_resumed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "resumed_at": event.resumed_at.isoformat(),
+                },
+            )
+
+        elif isinstance(event, ExecutionCancelled):
+            push_event(
+                "execution_cancelled",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "cancelled_at": event.cancelled_at.isoformat(),
+                    "reason": event.reason,
                 },
             )
 
