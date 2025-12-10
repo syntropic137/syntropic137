@@ -125,6 +125,231 @@ class TestHookWatcher:
 
         assert watcher.get_position() > 0
 
+    @pytest.mark.asyncio
+    async def test_parse_git_commit_event(self, temp_hook_file: Path) -> None:
+        """Parse git commit events."""
+        events_data = [
+            {
+                "event_type": "git_commit",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "commit_hash": "abc123def456",
+                "commit_message": "feat: add feature",
+                "author": "Developer",
+                "branch": "main",
+                "files_changed": 5,
+                "insertions": 120,
+                "deletions": 30,
+                "estimated_tokens_added": 450,
+                "estimated_tokens_removed": 112,
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.GIT_COMMIT
+        assert events[0].data["commit_hash"] == "abc123def456"
+        assert events[0].data["branch"] == "main"
+        assert events[0].data["insertions"] == 120
+
+    @pytest.mark.asyncio
+    async def test_parse_git_branch_events(self, temp_hook_file: Path) -> None:
+        """Parse git branch created and switched events."""
+        events_data = [
+            {
+                "event_type": "git_branch_created",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "branch": "feat/new-feature",
+                "from_ref": "main",
+            },
+            {
+                "event_type": "git_branch_switched",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:01Z",
+                "branch": "main",
+                "previous_branch": "feat/new-feature",
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 2
+        assert events[0].event_type == EventType.GIT_BRANCH_CREATED
+        assert events[0].data["branch"] == "feat/new-feature"
+        assert events[1].event_type == EventType.GIT_BRANCH_SWITCHED
+        assert events[1].data["previous_branch"] == "feat/new-feature"
+
+    @pytest.mark.asyncio
+    async def test_parse_git_merge_event(self, temp_hook_file: Path) -> None:
+        """Parse git merge completed event."""
+        events_data = [
+            {
+                "event_type": "git_merge_completed",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "branch": "main",
+                "merge_head": "feat/feature",
+                "merge_mode": "normal",
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.GIT_MERGE_COMPLETED
+        assert events[0].data["merge_head"] == "feat/feature"
+
+    @pytest.mark.asyncio
+    async def test_parse_git_push_events(self, temp_hook_file: Path) -> None:
+        """Parse git push started event."""
+        events_data = [
+            {
+                "event_type": "git_push_started",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "remote": "origin",
+                "branch": "main",
+                "commit_count": 3,
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.GIT_PUSH_STARTED
+        assert events[0].data["commit_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_parse_git_rewrite_event(self, temp_hook_file: Path) -> None:
+        """Parse git commits rewritten event (rebase/amend)."""
+        events_data = [
+            {
+                "event_type": "git_commits_rewritten",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "branch": "feat/feature",
+                "command": "rebase",
+                "rewritten_count": 5,
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.GIT_COMMITS_REWRITTEN
+        assert events[0].data["command"] == "rebase"
+        assert events[0].data["rewritten_count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_parse_stop_events(self, temp_hook_file: Path) -> None:
+        """Parse agent stopped and subagent stopped events."""
+        events_data = [
+            {
+                "event_type": "agent_stopped",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "reason": "normal_completion",
+            },
+            {
+                "event_type": "subagent_stopped",
+                "session_id": "session-456",
+                "timestamp": "2025-01-01T12:00:01Z",
+                "reason": "task_complete",
+                "parent_session_id": "session-123",
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 2
+        assert events[0].event_type == EventType.AGENT_STOPPED
+        assert events[0].data["reason"] == "normal_completion"
+        assert events[1].event_type == EventType.SUBAGENT_STOPPED
+        assert events[1].data["parent_session_id"] == "session-123"
+
+    @pytest.mark.asyncio
+    async def test_parse_notification_event(self, temp_hook_file: Path) -> None:
+        """Parse notification sent event."""
+        events_data = [
+            {
+                "event_type": "notification_sent",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+                "notification_type": "completion",
+                "content_preview": "Task completed successfully...",
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 1
+        assert events[0].event_type == EventType.NOTIFICATION_SENT
+        assert events[0].data["notification_type"] == "completion"
+
+    @pytest.mark.asyncio
+    async def test_handler_name_mapping(self, temp_hook_file: Path) -> None:
+        """Handler names should map to correct event types."""
+        events_data = [
+            {
+                "handler": "stop",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:00Z",
+            },
+            {
+                "handler": "notification",
+                "session_id": "session-123",
+                "timestamp": "2025-01-01T12:00:01Z",
+            },
+        ]
+
+        with temp_hook_file.open("w") as f:
+            for event in events_data:
+                f.write(json.dumps(event) + "\n")
+
+        watcher = HookWatcher(temp_hook_file)
+        events = await watcher.read_existing()
+
+        assert len(events) == 2
+        assert events[0].event_type == EventType.AGENT_STOPPED
+        assert events[1].event_type == EventType.NOTIFICATION_SENT
+
 
 class TestTranscriptWatcher:
     """Tests for the transcript watcher."""
