@@ -26,6 +26,7 @@ from aef_adapters.orchestration.executor import (
     ToolBlockedExecution,
     ToolStarted,
     ToolUsed,
+    TurnUpdate,
     WorkflowCompleted,
     WorkflowFailed,
     WorkflowStarted,
@@ -472,6 +473,23 @@ class ExecutionService:
                     "tool_use_id": event.tool_use_id,
                     "reason": event.reason,
                     "validator": event.validator,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        elif isinstance(event, TurnUpdate):
+            # Push turn_update for live token streaming
+            push_event(
+                "turn_update",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "turn_number": event.turn_number,
+                    "input_tokens": event.input_tokens,
+                    "output_tokens": event.output_tokens,
+                    "cumulative_input_tokens": event.cumulative_input_tokens,
+                    "cumulative_output_tokens": event.cumulative_output_tokens,
                     "timestamp": event.timestamp.isoformat(),
                 },
             )

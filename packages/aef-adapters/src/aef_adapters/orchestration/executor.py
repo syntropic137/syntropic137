@@ -45,6 +45,7 @@ from aef_adapters.agents.agentic_types import (
     ToolBlocked,
     ToolUseCompleted,
     ToolUseStarted,
+    TurnCompleted,
     Workspace,
     WorkspaceConfig,
 )
@@ -205,6 +206,27 @@ class ToolBlockedExecution:
     tool_use_id: str | None = None
     reason: str = ""
     validator: str | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class TurnUpdate:
+    """Emitted after each agent turn with live token metrics.
+
+    This event enables real-time token streaming in the UI.
+    Emitted after each AssistantMessage from the agent.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    turn_number: int
+    # Per-turn tokens
+    input_tokens: int = 0
+    output_tokens: int = 0
+    # Cumulative totals for this phase
+    cumulative_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -778,6 +800,28 @@ class AgenticWorkflowExecutor:
                     validator=event.validator,
                     timestamp=event.timestamp,
                 )
+
+            elif isinstance(event, TurnCompleted):
+                # Emit live token update for real-time UI streaming
+                yield TurnUpdate(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    turn_number=event.turn_number,
+                    input_tokens=event.input_tokens,
+                    output_tokens=event.output_tokens,
+                    cumulative_input_tokens=event.cumulative_input_tokens,
+                    cumulative_output_tokens=event.cumulative_output_tokens,
+                    timestamp=event.timestamp,
+                )
+
+                # TODO: Check for control signals here (pause/cancel)
+                # This is where we can make execution interruptible between turns
+                # if self._signal_port:
+                #     signal = await self._signal_port.get_signal(ctx.execution_id)
+                #     if signal and signal.action == "cancel":
+                #         yield ExecutionCancelled(...)
+                #         return
 
             elif isinstance(event, TaskCompleted):
                 result_text = event.result
