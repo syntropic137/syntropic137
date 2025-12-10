@@ -13,14 +13,14 @@ This is the correct ES pattern - no parallel event paths.
 from __future__ import annotations
 
 import contextlib
-import logging
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from aef_adapters.projections import get_realtime_projection
+from agentic_logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["websocket"])
 
@@ -78,7 +78,9 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
         # (Future: parse control commands here)
         while True:
             try:
+                # receive() will raise WebSocketDisconnect on client disconnect
                 data = await websocket.receive_json()
+                
                 # Future: Handle control commands
                 # command = data.get("command")
                 # if command == "pause": ...
@@ -86,16 +88,25 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
                     "Received WebSocket message",
                     extra={"execution_id": execution_id, "data": data},
                 )
+            except WebSocketDisconnect:
+                # Client disconnected - exit the loop cleanly
+                logger.info(
+                    "WebSocket client disconnected",
+                    extra={"execution_id": execution_id},
+                )
+                break
             except Exception as e:
-                # JSON parse error or other issue
-                logger.debug(
-                    "Error processing WebSocket message",
+                # JSON parse error or connection issue - exit to avoid CPU spin
+                logger.warning(
+                    "WebSocket receive error, closing connection",
                     extra={"execution_id": execution_id, "error": str(e)},
                 )
+                break
 
     except WebSocketDisconnect:
-        logger.info(
-            "WebSocket disconnected",
+        # Handled inside the loop, but may also occur during send
+        logger.debug(
+            "WebSocket disconnected during send",
             extra={"execution_id": execution_id},
         )
     except Exception as e:
@@ -112,6 +123,10 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
             )
     finally:
         # Always unregister on disconnect
+        logger.debug(
+            "Cleaning up WebSocket connection",
+            extra={"execution_id": execution_id},
+        )
         await realtime.disconnect(execution_id, websocket)
 
 
