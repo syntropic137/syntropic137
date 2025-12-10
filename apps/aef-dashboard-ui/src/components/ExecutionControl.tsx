@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useExecutionControl, ExecutionState } from '../hooks'
+import { useExecutionControl, type ExecutionState } from '../hooks'
 
 interface ExecutionControlProps {
   executionId: string
