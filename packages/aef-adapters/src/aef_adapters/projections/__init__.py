@@ -10,10 +10,18 @@ from .manager import (
     get_projection_manager,
     reset_projection_manager,
 )
+from .realtime import (
+    RealTimeProjection,
+    get_realtime_projection,
+    reset_realtime_projection,
+)
 
 __all__ = [
     "EventProvenance",
     "ProjectionManager",
+    "RealTimeProjection",
     "get_projection_manager",
+    "get_realtime_projection",
     "reset_projection_manager",
+    "reset_realtime_projection",
 ]

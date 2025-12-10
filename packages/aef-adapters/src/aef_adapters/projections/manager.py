@@ -94,6 +94,9 @@ class EventProvenance:
 # IMPORTANT: Workflow TEMPLATE projections (workflow_list, workflow_detail)
 # only handle template events (WorkflowCreated) and runs_count updates.
 # Execution events go to EXECUTION projections (execution_list, execution_detail).
+#
+# The "realtime" projection pushes events to WebSocket clients for live UI updates.
+# It doesn't persist data - it's a pure forwarding layer.
 EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     # Workflow TEMPLATE events
     "WorkflowCreated": [
@@ -109,24 +112,29 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_execution_list", "on_workflow_execution_started"),
         ("workflow_execution_detail", "on_workflow_execution_started"),
         ("dashboard_metrics", "on_workflow_execution_started"),
+        ("realtime", "on_workflow_execution_started"),  # Real-time UI push
     ],
     # Execution events - go to EXECUTION projections only
     "PhaseStarted": [
         ("workflow_execution_detail", "on_phase_started"),
+        ("realtime", "on_phase_started"),  # Real-time UI push
     ],
     "PhaseCompleted": [
         ("workflow_execution_list", "on_phase_completed"),
         ("workflow_execution_detail", "on_phase_completed"),
+        ("realtime", "on_phase_completed"),  # Real-time UI push
     ],
     "WorkflowCompleted": [
         ("workflow_execution_list", "on_workflow_completed"),
         ("workflow_execution_detail", "on_workflow_completed"),
         ("dashboard_metrics", "on_workflow_completed"),
+        ("realtime", "on_workflow_completed"),  # Real-time UI push
     ],
     "WorkflowFailed": [
         ("workflow_execution_list", "on_workflow_failed"),
         ("workflow_execution_detail", "on_workflow_failed"),
         ("dashboard_metrics", "on_workflow_failed"),
+        ("realtime", "on_workflow_failed"),  # Real-time UI push
     ],
     # Control plane events
     "ExecutionPaused": [
@@ -145,18 +153,22 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "SessionStarted": [
         ("session_list", "on_session_started"),
         ("dashboard_metrics", "on_session_started"),
+        ("realtime", "on_session_started"),  # Real-time UI push
     ],
     "OperationRecorded": [
         ("session_list", "on_operation_recorded"),
+        ("realtime", "on_operation_recorded"),  # Real-time UI push
     ],
     "SessionCompleted": [
         ("session_list", "on_session_completed"),
         ("dashboard_metrics", "on_session_completed"),
+        ("realtime", "on_session_completed"),  # Real-time UI push
     ],
     # Artifact events
     "ArtifactCreated": [
         ("artifact_list", "on_artifact_created"),
         ("dashboard_metrics", "on_artifact_created"),
+        ("realtime", "on_artifact_created"),  # Real-time UI push
     ],
     # Observability events (Pattern 2: Event Log + CQRS, see ADR-018)
     # These are observations from aef-collector, not commands
@@ -195,6 +207,8 @@ class ProjectionManager:
         if self._initialized:
             return
 
+        from .realtime import get_realtime_projection
+
         self._projections = {
             "workflow_list": WorkflowListProjection(self._store),
             "workflow_detail": WorkflowDetailProjection(self._store),
@@ -206,6 +220,8 @@ class ProjectionManager:
             # Observability projections (Pattern 2: Event Log + CQRS)
             "tool_timeline": ToolTimelineProjection(self._store),
             "token_metrics": TokenMetricsProjection(self._store),
+            # Real-time projection for WebSocket push (doesn't use store)
+            "realtime": get_realtime_projection(),
         }
         self._initialized = True
 
@@ -383,6 +399,12 @@ class ProjectionManager:
         """Get the token metrics projection."""
         self._ensure_initialized()
         return self._projections["token_metrics"]
+
+    @property
+    def realtime(self) -> Any:
+        """Get the real-time projection for WebSocket push."""
+        self._ensure_initialized()
+        return self._projections["realtime"]
 
 
 @lru_cache
