@@ -39,7 +39,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 50051 || exit 1"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/50051' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,8 +48,8 @@ services:
 
   collector:
     build:
-      context: ../packages/aef-collector
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: packages/aef-collector/Dockerfile
     container_name: aef-collector
     environment:
       EVENT_COLLECTOR_PORT: "8080"
@@ -63,7 +63,7 @@ services:
       event-store:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import http.client; c=http.client.HTTPConnection('localhost',8080); c.request('GET','/health'); exit(0 if c.getresponse().status==200 else 1)\""]
       interval: 10s
       timeout: 5s
       retries: 5
