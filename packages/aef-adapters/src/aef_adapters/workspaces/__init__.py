@@ -30,6 +30,10 @@ See ADR-021: Isolated Workspace Architecture
 """
 
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace
+from aef_adapters.workspaces.collector_emitter import (
+    CollectorEmitter,
+    InMemoryCollectorEmitter,
+)
 from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
 from aef_adapters.workspaces.events import (
@@ -51,10 +55,12 @@ from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceCo
 
 __all__ = [
     "BaseIsolatedWorkspace",
+    "CollectorEmitter",
     "E2BWorkspace",
     "FirecrackerWorkspace",
     "GVisorWorkspace",
     "HardenedDockerWorkspace",
+    "InMemoryCollectorEmitter",
     "IsolatedWorkspace",
     "IsolatedWorkspaceConfig",
     "IsolatedWorkspaceProtocol",
