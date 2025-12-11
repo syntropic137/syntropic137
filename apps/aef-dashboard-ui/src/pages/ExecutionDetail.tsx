@@ -172,7 +172,13 @@ export function ExecutionDetail() {
   const displayInputTokens = liveTokens?.inputTokens ?? execution.total_input_tokens
   const displayOutputTokens = liveTokens?.outputTokens ?? execution.total_output_tokens
   const totalTokens = displayInputTokens + displayOutputTokens
-  const isLiveUpdating = liveTokens !== null && Date.now() - liveTokens.lastUpdate < 5000
+  // Check if live updating based on lastUpdate timestamp (use state to avoid impure Date.now() during render)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+  const isLiveUpdating = liveTokens !== null && now - liveTokens.lastUpdate < 5000
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
 
   // Calculate context window usage percentage

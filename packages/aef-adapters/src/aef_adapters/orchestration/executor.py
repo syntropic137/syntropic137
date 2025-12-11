@@ -276,6 +276,7 @@ ExecutionEvent = (
     | ExecutionPaused
     | ExecutionResumed
     | ExecutionCancelled
+    | TurnUpdate
 )
 
 
