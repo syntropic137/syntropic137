@@ -208,7 +208,7 @@ class ExecutionService:
                     )
                     tracker[execution_id]["current_phase"] = None
                     # Complete session (via aggregate → event store)
-                    session_id = self._phase_sessions.get(event.phase_id)
+                    session_id = self._phase_sessions.get(event.phase_id) or ""
                     if session_id:
                         await self._complete_session(
                             session_id=session_id,
@@ -237,7 +237,7 @@ class ExecutionService:
                     tracker[execution_id]["status"] = "failed"
                     tracker[execution_id]["error"] = event.error
                     # Complete session as failed (via aggregate → event store)
-                    session_id = self._phase_sessions.get(event.phase_id)
+                    session_id = self._phase_sessions.get(event.phase_id) or ""
                     if session_id:
                         await self._complete_session(
                             session_id=session_id,
@@ -264,7 +264,7 @@ class ExecutionService:
 
                 elif isinstance(event, ToolUsed):
                     # Record each tool completion as an operation on the session
-                    session_id = self._phase_sessions.get(event.phase_id)
+                    session_id = self._phase_sessions.get(event.phase_id) or ""
                     if session_id:
                         await self._record_tool_operation(
                             session_id=session_id,

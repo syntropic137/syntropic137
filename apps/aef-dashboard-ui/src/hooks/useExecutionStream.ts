@@ -74,7 +74,9 @@ export function useExecutionStream(
   const reconnectAttemptsRef = useRef(0)
   // Store callback in ref to avoid triggering reconnects on callback change
   const onEventRef = useRef(onEvent)
-  onEventRef.current = onEvent
+  useEffect(() => {
+    onEventRef.current = onEvent
+  }, [onEvent])
 
   // Clean up reconnect timeout
   const clearReconnectTimeout = useCallback(() => {
