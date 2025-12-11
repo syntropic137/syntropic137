@@ -6,7 +6,7 @@ import asyncio
 import time
 import uuid
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aef_perf.metrics import BenchmarkResult, WorkspaceTiming
 
@@ -130,7 +130,7 @@ class BaseBenchmark(ABC):
         )
 
     @abstractmethod
-    async def run(self, **kwargs) -> BenchmarkResult:
+    async def run(self, **kwargs: Any) -> BenchmarkResult:
         """Run the benchmark.
 
         Returns:

@@ -156,7 +156,8 @@ class GitInjector:
             logger.warning("Git identity incomplete, skipping injection")
             return False
 
-        # Set git user.name
+        # Set git user.name (is_configured ensures user_name is not None)
+        assert git_settings.user_name is not None
         exit_code, _stdout, stderr = await executor(
             workspace,
             ["git", "config", "--global", "user.name", git_settings.user_name],
@@ -165,7 +166,8 @@ class GitInjector:
             logger.error(f"Failed to set git user.name: {stderr}")
             return False
 
-        # Set git user.email
+        # Set git user.email (is_configured ensures user_email is not None)
+        assert git_settings.user_email is not None
         exit_code, _stdout, stderr = await executor(
             workspace,
             ["git", "config", "--global", "user.email", git_settings.user_email],

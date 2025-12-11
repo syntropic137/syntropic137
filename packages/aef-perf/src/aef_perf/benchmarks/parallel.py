@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import Any
 
 from aef_perf.benchmarks.base import BaseBenchmark
 from aef_perf.metrics import BenchmarkResult
@@ -26,7 +27,7 @@ class ParallelBenchmark(BaseBenchmark):
 
     benchmark_type = "parallel"
 
-    async def run(self, count: int = 10, **_kwargs: object) -> BenchmarkResult:  # type: ignore[override]
+    async def run(self, count: int = 10, **_kwargs: Any) -> BenchmarkResult:
         """Run parallel workspace benchmark.
 
         Args:

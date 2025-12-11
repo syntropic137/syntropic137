@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from aef_perf.benchmarks.base import BaseBenchmark
 from aef_perf.metrics import BenchmarkResult
@@ -24,7 +25,7 @@ class SingleBenchmark(BaseBenchmark):
 
     benchmark_type = "single"
 
-    async def run(self, iterations: int = 10, **_kwargs: object) -> BenchmarkResult:  # type: ignore[override]
+    async def run(self, iterations: int = 10, **_kwargs: Any) -> BenchmarkResult:
         """Run single workspace benchmark.
 
         Args:

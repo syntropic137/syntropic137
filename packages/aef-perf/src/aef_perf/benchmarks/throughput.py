@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import Any
 
 from aef_perf.benchmarks.base import BaseBenchmark
 from aef_perf.metrics import BenchmarkResult
@@ -28,7 +29,7 @@ class ThroughputBenchmark(BaseBenchmark):
         self,
         duration: float = 30.0,
         max_concurrent: int = 5,
-        **_kwargs: object,  # type: ignore[override]
+        **_kwargs: Any,
     ) -> BenchmarkResult:
         """Run throughput benchmark.
 
