@@ -187,9 +187,22 @@ class ExecutionController:
         return self._state_machines[execution_id]
 
     async def get_state(self, execution_id: str) -> ExecutionState | None:
-        """Get current state for an execution."""
-        sm = await self._get_state_machine(execution_id)
-        return sm.state
+        """Get current state for an execution.
+
+        Returns None if the execution is not known (never initialized).
+        """
+        # Check cache first
+        if execution_id in self._state_machines:
+            return self._state_machines[execution_id].state
+
+        # Check state port - don't create state machine for unknown executions
+        state = await self._state_port.get_state(execution_id)
+        if state is None:
+            return None
+
+        # Cache and return
+        self._state_machines[execution_id] = ExecutionStateMachine(state)
+        return state
 
     async def check_signal(self, execution_id: str) -> ControlSignal | None:
         """Check for pending control signal (called by executor)."""
