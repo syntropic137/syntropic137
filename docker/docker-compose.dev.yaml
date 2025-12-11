@@ -63,11 +63,7 @@ services:
       event-store:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import http.client; c=http.client.HTTPConnection(''localhost'',8080); c.request(''GET'',''/health''); exit(0 if c.getresponse().status==200 else 1)"',
-        ]
+      test: ["CMD-SHELL", "python -c \"import http.client; c=http.client.HTTPConnection('localhost',8080); c.request('GET','/health'); exit(0 if c.getresponse().status==200 else 1)\""]
       interval: 10s
       timeout: 5s
       retries: 5
