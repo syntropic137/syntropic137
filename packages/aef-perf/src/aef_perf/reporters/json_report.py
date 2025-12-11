@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from aef_perf.metrics import TimingStats
 
@@ -59,7 +59,7 @@ class JSONReporter:
         Returns:
             Dictionary ready for JSON serialization
         """
-        report = {
+        report: dict[str, Any] = {
             "available_backends": result.available_backends,
             "unavailable_backends": result.unavailable_backends,
             "best_backend": result.best_backend,

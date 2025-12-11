@@ -7,7 +7,7 @@ import time
 import uuid
 
 from aef_perf.benchmarks.base import BaseBenchmark
-from aef_perf.metrics import BenchmarkResult
+from aef_perf.metrics import BenchmarkResult, WorkspaceTiming
 
 
 class ParallelBenchmark(BaseBenchmark):
@@ -26,7 +26,7 @@ class ParallelBenchmark(BaseBenchmark):
 
     benchmark_type = "parallel"
 
-    async def run(self, count: int = 10) -> BenchmarkResult:
+    async def run(self, count: int = 10, **kwargs) -> BenchmarkResult:  # type: ignore[override]
         """Run parallel workspace benchmark.
 
         Args:
@@ -74,7 +74,7 @@ class ParallelBenchmark(BaseBenchmark):
                         error=str(timing),
                     )
                 )
-            else:
+            elif isinstance(timing, WorkspaceTiming):
                 result.add_timing(timing)
 
         # Calculate speedup

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -108,7 +109,7 @@ class EnvInjector:
     async def inject_api_keys(
         self,
         workspace: IsolatedWorkspace,
-        executor: callable,
+        executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         *,
         require_anthropic: bool = False,
     ) -> bool:

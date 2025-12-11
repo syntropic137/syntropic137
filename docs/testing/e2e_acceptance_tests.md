@@ -1631,6 +1631,7 @@ test('execution control flow', async ({ page }) => {
 
 ---
 
+<<<<<<< HEAD
 ## Feature 14: Isolated Workspace Architecture ⭐ NEW
 
 > **ADR:** [ADR-021: Isolated Workspace Architecture](/docs/adrs/ADR-021-isolated-workspace-architecture.md)
@@ -1885,6 +1886,8 @@ just perf-all
 
 ---
 
+=======
+>>>>>>> origin/main
 ## Test Execution Checklist
 
 ### Pre-Test Setup
@@ -1916,12 +1919,18 @@ just perf-all
 11. [ ] **F11: Event Bridge** - Hook-to-domain events
 12. [ ] **F12: Providers** - Agent factory and availability
 
+<<<<<<< HEAD
 **WebSocket Control Plane (F13) ⭐:**
 13. [ ] **F13: WebSocket Control Plane** - Pause/Resume/Cancel with browser automation
 
 **Isolated Workspace Architecture (F14) ⭐ NEW:**
 14. [ ] **F14: Isolated Workspaces** - Docker isolation, git identity, logging, network allowlist
 
+=======
+**WebSocket Control Plane (F13) ⭐ NEW:**
+13. [ ] **F13: WebSocket Control Plane** - Pause/Resume/Cancel with browser automation
+
+>>>>>>> origin/main
 ### Quick Pytest Commands
 
 ```bash
@@ -1941,6 +1950,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v          # F10
 pytest packages/aef-adapters/tests/test_events.py -v             # F11
 pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
 
+<<<<<<< HEAD
 # Run isolated workspace tests (F14)
 pytest packages/aef-adapters/tests/workspaces/ -v
 pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
@@ -1952,6 +1962,8 @@ just poc-claude-api     # Claude API connectivity
 just poc-logging        # Container logging
 just poc-allowlist      # Network allowlist
 
+=======
+>>>>>>> origin/main
 # Full QA check (lint + type + test)
 poetry run poe check-fix
 ```
@@ -1983,8 +1995,12 @@ poetry run poe check-fix
 | **F11** | **Event Bridge** | **12** | ⬜ | ⬜ | ⬜ |
 | **F12** | **Agent Provider Management** | **9** | ⬜ | ⬜ | ⬜ |
 | **F13** | **WebSocket Control Plane** ⭐ | **55** | ⬜ | ⬜ | ⬜ |
+<<<<<<< HEAD
 | **F14** | **Isolated Workspace Architecture** ⭐ | **52** | ⬜ | ⬜ | ⬜ |
 | **TOTAL** | | **323** | ⬜ | ⬜ | ⬜ |
+=======
+| **TOTAL** | | **271** | ⬜ | ⬜ | ⬜ |
+>>>>>>> origin/main
 
 ---
 
@@ -2000,6 +2016,7 @@ poetry run poe check-fix
 
 _Add any observations, recommendations, or follow-up items here._
 
+<<<<<<< HEAD
 ### Migration Notes (v4.0 → v5.0)
 
 - **Isolated Workspace Architecture:** New F14 tests for workspace isolation
@@ -2013,6 +2030,8 @@ _Add any observations, recommendations, or follow-up items here._
 - **Test Count:** Increased from 271 to 323 criteria
 - **Unit Tests:** 95+ new tests for workspace isolation
 
+=======
+>>>>>>> origin/main
 ### Migration Notes (v3.0 → v4.0)
 
 - **WebSocket Control Plane:** New F13 tests for real-time execution control
@@ -2053,7 +2072,10 @@ _Add any observations, recommendations, or follow-up items here._
 | **Execution Model** ⭐ | **F7.6** | **API + Browser** |
 | **Agentic** | **F8-F12** | **pytest (automated)** |
 | **Control Plane** ⭐ | **F13** | **Browser automation (Playwright)** |
+<<<<<<< HEAD
 | **Isolated Workspaces** ⭐ | **F14** | **pytest + just POC commands** |
+=======
+>>>>>>> origin/main
 
 ### Known Issues & Learnings
 

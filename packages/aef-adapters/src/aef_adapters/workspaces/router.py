@@ -430,7 +430,7 @@ class WorkspaceRouter:
 
         # Track command count
         if hasattr(workspace, "_command_count"):
-            workspace._command_count += 1  # type: ignore[attr-defined]
+            workspace._command_count += 1
 
         # Emit command executed event
         emitter = get_workspace_emitter()

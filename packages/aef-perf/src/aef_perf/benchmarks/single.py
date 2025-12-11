@@ -24,7 +24,7 @@ class SingleBenchmark(BaseBenchmark):
 
     benchmark_type = "single"
 
-    async def run(self, iterations: int = 10) -> BenchmarkResult:
+    async def run(self, iterations: int = 10, **kwargs) -> BenchmarkResult:  # type: ignore[override]
         """Run single workspace benchmark.
 
         Args:

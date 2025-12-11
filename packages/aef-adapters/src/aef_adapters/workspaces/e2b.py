@@ -30,7 +30,7 @@ from aef_shared.settings import IsolationBackend
 if TYPE_CHECKING:
     from pathlib import Path
 
-    import aiohttp
+    import aiohttp  # type: ignore[import-not-found]
 
     from aef_shared.settings import WorkspaceSecuritySettings
 

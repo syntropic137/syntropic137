@@ -58,6 +58,47 @@ class ApiError extends Error {
   }
 }
 
+class NetworkError extends Error {
+  readonly originalError?: Error;
+
+  constructor(message: string, originalError?: Error) {
+    super(message);
+    this.name = 'NetworkError';
+    this.originalError = originalError;
+  }
+}
+
+/**
+ * Wrapper for fetch that provides better error messages for network failures.
+ */
+async function safeFetch(url: string, options?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch (err) {
+    // Network errors (API not running, CORS, etc.)
+    const message = err instanceof Error ? err.message : 'Unknown error';
+
+    if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+      throw new NetworkError(
+        'Feedback API unavailable. Run: just feedback-backend',
+        err instanceof Error ? err : undefined
+      );
+    }
+
+    if (message.includes('CORS') || message.includes('cross-origin')) {
+      throw new NetworkError(
+        'CORS error: Feedback API may need CORS configuration',
+        err instanceof Error ? err : undefined
+      );
+    }
+
+    throw new NetworkError(
+      `Network error: ${message}`,
+      err instanceof Error ? err : undefined
+    );
+  }
+}
+
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let body: unknown;
@@ -66,11 +107,18 @@ async function handleResponse<T>(response: Response): Promise<T> {
     } catch {
       body = await response.text();
     }
-    throw new ApiError(
-      `API error: ${response.status} ${response.statusText}`,
-      response.status,
-      body
-    );
+
+    // Provide helpful messages for common HTTP errors
+    let message = `API error: ${response.status} ${response.statusText}`;
+    if (response.status === 404) {
+      message = 'Feedback endpoint not found. Check API URL configuration.';
+    } else if (response.status === 500) {
+      message = 'Server error. Check feedback API logs.';
+    } else if (response.status === 422) {
+      message = 'Invalid data. Please check your input.';
+    }
+
+    throw new ApiError(message, response.status, body);
   }
 
   // Handle 204 No Content
@@ -86,7 +134,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const createFeedback = useCallback(
     async (data: FeedbackCreate): Promise<FeedbackItem> => {
-      const response = await fetch(`${baseUrl}/feedback`, {
+      const response = await safeFetch(`${baseUrl}/feedback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -98,7 +146,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const getFeedback = useCallback(
     async (id: string): Promise<FeedbackItemWithMedia> => {
-      const response = await fetch(`${baseUrl}/feedback/${id}`);
+      const response = await safeFetch(`${baseUrl}/feedback/${id}`);
       return handleResponse<FeedbackItemWithMedia>(response);
     },
     [baseUrl]
@@ -118,7 +166,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
       if (params.desc !== undefined) searchParams.set('desc', params.desc.toString());
 
       const url = `${baseUrl}/feedback${searchParams.toString() ? `?${searchParams}` : ''}`;
-      const response = await fetch(url);
+      const response = await safeFetch(url);
       return handleResponse<FeedbackList>(response);
     },
     [baseUrl]
@@ -126,7 +174,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const updateFeedback = useCallback(
     async (id: string, data: FeedbackUpdate): Promise<FeedbackItem> => {
-      const response = await fetch(`${baseUrl}/feedback/${id}`, {
+      const response = await safeFetch(`${baseUrl}/feedback/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -138,7 +186,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const deleteFeedback = useCallback(
     async (id: string): Promise<void> => {
-      const response = await fetch(`${baseUrl}/feedback/${id}`, {
+      const response = await safeFetch(`${baseUrl}/feedback/${id}`, {
         method: 'DELETE',
       });
       await handleResponse<void>(response);
@@ -152,7 +200,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
       formData.append('file', media.blob, media.fileName || 'file');
       formData.append('media_type', media.mediaType);
 
-      const response = await fetch(`${baseUrl}/feedback/${feedbackId}/media`, {
+      const response = await safeFetch(`${baseUrl}/feedback/${feedbackId}/media`, {
         method: 'POST',
         body: formData,
       });
@@ -170,7 +218,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
 
   const deleteMedia = useCallback(
     async (feedbackId: string, mediaId: string): Promise<void> => {
-      const response = await fetch(`${baseUrl}/feedback/${feedbackId}/media/${mediaId}`, {
+      const response = await safeFetch(`${baseUrl}/feedback/${feedbackId}/media/${mediaId}`, {
         method: 'DELETE',
       });
       await handleResponse<void>(response);
@@ -183,7 +231,7 @@ export function useFeedbackApi({ apiUrl }: UseFeedbackApiOptions): FeedbackApiRe
       const url = appName
         ? `${baseUrl}/feedback/stats?app=${encodeURIComponent(appName)}`
         : `${baseUrl}/feedback/stats`;
-      const response = await fetch(url);
+      const response = await safeFetch(url);
       return handleResponse<FeedbackStats>(response);
     },
     [baseUrl]

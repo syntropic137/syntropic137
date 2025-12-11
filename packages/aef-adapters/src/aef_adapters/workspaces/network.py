@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
 
@@ -274,7 +275,7 @@ class EgressProxy:
 
 async def inject_proxy_config(
     workspace: IsolatedWorkspace,
-    executor: callable,
+    executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
     config: NetworkConfig,
 ) -> bool:
     """Inject proxy configuration into a workspace.

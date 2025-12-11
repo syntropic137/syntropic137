@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -123,7 +124,7 @@ class GitInjector:
     async def inject_identity(
         self,
         workspace: IsolatedWorkspace,
-        executor: callable,
+        executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         workflow_override: GitIdentitySettings | None = None,
     ) -> bool:
         """Inject git identity into a workspace.
@@ -183,7 +184,7 @@ class GitInjector:
     async def _inject_credentials(
         self,
         workspace: IsolatedWorkspace,
-        executor: callable,
+        executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         git_settings: GitIdentitySettings,
     ) -> bool:
         """Inject git credentials for push access.
@@ -209,7 +210,7 @@ class GitInjector:
     async def _inject_https_credentials(
         self,
         workspace: IsolatedWorkspace,
-        executor: callable,
+        executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         git_settings: GitIdentitySettings,
     ) -> bool:
         """Inject HTTPS credentials using git-credentials store.
@@ -261,7 +262,7 @@ class GitInjector:
     async def _inject_github_app_credentials(
         self,
         _workspace: IsolatedWorkspace,
-        _executor: callable,
+        _executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         _git_settings: GitIdentitySettings,
     ) -> bool:
         """Inject GitHub App credentials.

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path  # noqa: TC003 - needed at runtime for typer
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -22,7 +22,7 @@ def get_reporter() -> ConsoleReporter:
     return ConsoleReporter()
 
 
-def save_json_if_requested(result, output: Path | None, reporter_type: str) -> None:
+def save_json_if_requested(result: Any, output: Path | None, reporter_type: str) -> None:
     """Save JSON report if output path provided."""
     if output:
         json_reporter = JSONReporter()
