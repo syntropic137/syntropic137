@@ -9,7 +9,8 @@ export default defineConfig({
     dts({
       include: ['src'],
       outDir: 'dist',
-      rollupTypes: true,
+      // Don't roll up types - just emit .d.ts files alongside JS
+      rollupTypes: false,
     }),
   ],
   build: {
@@ -31,6 +32,8 @@ export default defineConfig({
     },
     sourcemap: true,
     minify: false,
+    // Copy CSS to dist
+    cssCodeSplit: false,
   },
   resolve: {
     alias: {

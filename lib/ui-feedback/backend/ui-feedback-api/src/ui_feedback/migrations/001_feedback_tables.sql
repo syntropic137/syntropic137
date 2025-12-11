@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS feedback_items (
     app_name TEXT NOT NULL,
     app_version TEXT,
     user_agent TEXT,
+
+    -- Environment context (for knowing where feedback came from)
+    environment VARCHAR(50),    -- development, staging, production
+    git_commit VARCHAR(50),     -- git commit hash
+    git_branch VARCHAR(100),    -- git branch name
+    hostname TEXT,              -- hostname where app is running
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     resolved_at TIMESTAMPTZ
@@ -45,6 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_feedback_items_app ON feedback_items(app_name);
 CREATE INDEX IF NOT EXISTS idx_feedback_items_type ON feedback_items(feedback_type);
 CREATE INDEX IF NOT EXISTS idx_feedback_items_priority ON feedback_items(priority);
 CREATE INDEX IF NOT EXISTS idx_feedback_items_created ON feedback_items(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_items_environment ON feedback_items(environment);
 
 -- =====================================================
 -- Feedback Media Table
@@ -104,6 +112,10 @@ COMMENT ON COLUMN feedback_items.component_name IS 'React component name if dete
 COMMENT ON COLUMN feedback_items.feedback_type IS 'Type: bug, feature, ui_ux, performance, question, other';
 COMMENT ON COLUMN feedback_items.status IS 'Workflow status: open, in_progress, resolved, closed, wont_fix';
 COMMENT ON COLUMN feedback_items.priority IS 'Priority: low, medium, high, critical';
+COMMENT ON COLUMN feedback_items.environment IS 'Environment: development, staging, production';
+COMMENT ON COLUMN feedback_items.git_commit IS 'Git commit hash for tracking which version';
+COMMENT ON COLUMN feedback_items.git_branch IS 'Git branch name';
+COMMENT ON COLUMN feedback_items.hostname IS 'Hostname where the app is running';
 
 COMMENT ON COLUMN feedback_media.media_type IS 'Type of media: screenshot or voice_note';
 COMMENT ON COLUMN feedback_media.data IS 'Binary data for local/dev storage';

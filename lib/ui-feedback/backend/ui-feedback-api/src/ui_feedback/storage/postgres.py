@@ -1,6 +1,7 @@
 """PostgreSQL storage implementation for UI Feedback."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
 import asyncpg
@@ -19,12 +20,16 @@ from ui_feedback.models import (
 )
 from ui_feedback.storage.protocol import FeedbackStorageProtocol
 
+# Path to migrations directory
+MIGRATIONS_DIR = Path(__file__).parent.parent / "migrations"
+
 
 class PostgresFeedbackStorage(FeedbackStorageProtocol):
     """PostgreSQL implementation of feedback storage."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, database_url: str, auto_migrate: bool = True) -> None:
         self.database_url = database_url
+        self.auto_migrate = auto_migrate
         self._pool: asyncpg.Pool | None = None
 
     @property
@@ -35,14 +40,33 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
         return self._pool
 
     async def connect(self) -> None:
-        """Initialize connection pool."""
+        """Initialize connection pool and run migrations if needed."""
         self._pool = await asyncpg.create_pool(self.database_url, min_size=2, max_size=10)
+
+        # Auto-migrate on connect (idempotent - uses IF NOT EXISTS)
+        if self.auto_migrate:
+            await self._run_migrations()
 
     async def disconnect(self) -> None:
         """Close connection pool."""
         if self._pool:
             await self._pool.close()
             self._pool = None
+
+    async def _run_migrations(self) -> None:
+        """Run database migrations (idempotent - safe to run multiple times)."""
+        migration_file = MIGRATIONS_DIR / "001_feedback_tables.sql"
+        if not migration_file.exists():
+            print(f"Warning: Migration file not found: {migration_file}")
+            return
+
+        sql = migration_file.read_text()
+
+        async with self.pool.acquire() as conn:
+            # Execute the migration SQL
+            # All statements use IF NOT EXISTS, so this is idempotent
+            await conn.execute(sql)
+            print("✅ Database migrations applied (feedback_items, feedback_media)")
 
     # =========================================================
     # Feedback CRUD
@@ -55,9 +79,11 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
                 url, route, viewport_width, viewport_height,
                 click_x, click_y, css_selector, xpath, component_name,
                 feedback_type, comment, priority,
-                app_name, app_version, user_agent
+                app_name, app_version, user_agent,
+                environment, git_commit, git_branch, hostname
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+                $16, $17, $18, $19
             )
             RETURNING *
         """
@@ -78,6 +104,10 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
             data.app_name,
             data.app_version,
             data.user_agent,
+            data.environment,
+            data.git_commit,
+            data.git_branch,
+            data.hostname,
         )
         return self._row_to_feedback_item(row, media_count=0)
 
@@ -415,6 +445,10 @@ class PostgresFeedbackStorage(FeedbackStorageProtocol):
             app_name=row["app_name"],
             app_version=row["app_version"],
             user_agent=row["user_agent"],
+            environment=row["environment"],
+            git_commit=row["git_commit"],
+            git_branch=row["git_branch"],
+            hostname=row["hostname"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             resolved_at=row["resolved_at"],

@@ -73,6 +73,23 @@ export function FeedbackList({ apiUrl, appName, onClose, onSelectFeedback }: Fee
     loadData();
   }, [loadData]);
 
+  // Handle Escape key to close modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        // If detail view is open, close that first
+        if (selectedId) {
+          setSelectedId(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [onClose, selectedId]);
+
   const handleStatusChange = useCallback(
     async (id: string, newStatus: Status) => {
       try {
