@@ -36,6 +36,11 @@ from aef_adapters.workspaces.collector_emitter import (
 )
 from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
+from aef_adapters.workspaces.env_injector import (
+    EnvInjector,
+    InjectedEnvVar,
+    get_env_injector,
+)
 from aef_adapters.workspaces.events import (
     WorkspaceEventEmitter,
     configure_workspace_emitter,
@@ -63,12 +68,14 @@ __all__ = [
     "BaseIsolatedWorkspace",
     "CollectorEmitter",
     "E2BWorkspace",
+    "EnvInjector",
     "ExecutionContext",
     "FirecrackerWorkspace",
     "GVisorWorkspace",
     "GitInjector",
     "HardenedDockerWorkspace",
     "InMemoryCollectorEmitter",
+    "InjectedEnvVar",
     "IsolatedWorkspace",
     "IsolatedWorkspaceConfig",
     "IsolatedWorkspaceProtocol",
@@ -80,6 +87,7 @@ __all__ = [
     "WorkspaceRouter",
     "build_commit_message",
     "configure_workspace_emitter",
+    "get_env_injector",
     "get_git_injector",
     "get_workspace_emitter",
     "get_workspace_router",

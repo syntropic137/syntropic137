@@ -48,9 +48,7 @@ class TestIsolatedWorkspace:
         assert isolated_workspace.vm_id is None
         assert isolated_workspace.sandbox_id is None
 
-    def test_path_properties(
-        self, isolated_workspace: IsolatedWorkspace, tmp_path: Path
-    ) -> None:
+    def test_path_properties(self, isolated_workspace: IsolatedWorkspace, tmp_path: Path) -> None:
         """IsolatedWorkspace should have correct path properties."""
         ws = isolated_workspace
         base = tmp_path / "workspace"
@@ -89,9 +87,7 @@ class TestIsolatedWorkspace:
         )
         assert ws_sandbox.isolation_id == "sandbox-789"
 
-    def test_lifecycle_timestamps(
-        self, isolated_workspace: IsolatedWorkspace
-    ) -> None:
+    def test_lifecycle_timestamps(self, isolated_workspace: IsolatedWorkspace) -> None:
         """Lifecycle timestamps should track workspace state."""
         ws = isolated_workspace
 
@@ -114,9 +110,7 @@ class TestIsolatedWorkspace:
         assert not ws.is_running
         assert ws.duration_seconds is not None
 
-    def test_resource_usage_tracking(
-        self, isolated_workspace: IsolatedWorkspace
-    ) -> None:
+    def test_resource_usage_tracking(self, isolated_workspace: IsolatedWorkspace) -> None:
         """Resource usage should be trackable."""
         ws = isolated_workspace
 
@@ -172,9 +166,7 @@ class TestIsolatedWorkspaceConfig:
         assert isolated_config.security is not None
         assert isolated_config.security.allow_network is False
 
-    def test_accepts_isolation_backend_override(
-        self, base_config: WorkspaceConfig
-    ) -> None:
+    def test_accepts_isolation_backend_override(self, base_config: WorkspaceConfig) -> None:
         """IsolatedWorkspaceConfig should accept backend override."""
         isolated_config = IsolatedWorkspaceConfig(
             base_config=base_config,
@@ -246,9 +238,7 @@ class TestSecuritySettingsIntegration:
         assert security.max_pids == 100
         assert security.max_execution_time == 3600
 
-    def test_isolated_workspace_stores_security(
-        self, tmp_path: Path
-    ) -> None:
+    def test_isolated_workspace_stores_security(self, tmp_path: Path) -> None:
         """IsolatedWorkspace should store security settings."""
         config = WorkspaceConfig(
             session_id="test",

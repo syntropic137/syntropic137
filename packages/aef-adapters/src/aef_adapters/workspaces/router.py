@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, ClassVar
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace  # noqa: TC001
 from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
+from aef_adapters.workspaces.env_injector import get_env_injector
 from aef_adapters.workspaces.events import get_workspace_emitter
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
 from aef_adapters.workspaces.git import get_git_injector
@@ -234,6 +235,9 @@ class WorkspaceRouter:
                 # Inject git identity if configured
                 await self._inject_git_identity(workspace, backend_class, config)
 
+                # Inject API keys for LLM access
+                await self._inject_api_keys(workspace, backend_class)
+
                 commands_executed = 0
                 try:
                     # Track command count in workspace metadata
@@ -299,6 +303,34 @@ class WorkspaceRouter:
                 workspace,
                 executor,
                 workflow_override=workflow_override,
+            )
+
+    async def _inject_api_keys(
+        self,
+        workspace: IsolatedWorkspace,
+        backend_class: type[BaseIsolatedWorkspace],
+    ) -> None:
+        """Inject API keys (Anthropic, OpenAI) into workspace.
+
+        Args:
+            workspace: The workspace to configure
+            backend_class: Backend class for command execution
+        """
+        injector = get_env_injector()
+
+        # Create executor function for the injector
+        async def executor(
+            ws: IsolatedWorkspace,
+            cmd: list[str],
+        ) -> tuple[int, str, str]:
+            return await backend_class.execute_command(ws, cmd)
+
+        # API keys not configured is OK for some workspaces
+        with contextlib.suppress(ValueError):
+            await injector.inject_api_keys(
+                workspace,
+                executor,
+                require_anthropic=False,
             )
 
     def _get_available_backend_class(

@@ -384,6 +384,20 @@ poc-isolation-quick:
     @echo "=== Test 3: Claude SDK Install ==="
     docker run --rm --network=bridge python:3.12-slim sh -c "pip install -q anthropic && python -c 'from anthropic import Anthropic; print(\"✓ Claude SDK installed\")'"
 
+# Test Claude API key injection in container
+poc-claude-api:
+    @echo "=== Claude API Key Injection Test ==="
+    @if [ -z "$ANTHROPIC_API_KEY" ]; then echo "❌ ANTHROPIC_API_KEY not set. Export it first."; exit 1; fi
+    @echo "Testing: Install SDK → Call Claude API → Verify Response"
+    @echo ""
+    docker run --rm --network=bridge \
+        -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+        python:3.12-slim sh -c '\
+        pip install -q anthropic && \
+        python -c "from anthropic import Anthropic; c=Anthropic(); r=c.messages.create(model=\"claude-3-5-haiku-20241022\", max_tokens=50, messages=[{\"role\":\"user\",\"content\":\"Say TEST_SUCCESS\"}]); print(r.content[0].text)" && \
+        echo "" && \
+        echo "✓ Claude API key injection successful!"'
+
 # Test git identity injection in container
 poc-git-identity:
     @echo "=== Git Identity Injection Test ==="
