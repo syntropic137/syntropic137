@@ -206,22 +206,22 @@ class ExecutionService:
                     )
                     tracker[execution_id]["current_phase"] = None
                     # Complete session (via aggregate → event store)
-                    session_id: str | None = self._phase_sessions.get(event.phase_id)
-                    if not session_id:
+                    completed_session_id = self._phase_sessions.get(event.phase_id)
+                    if not completed_session_id:
                         logger.warning(
                             f"Session ID not found for phase_id={event.phase_id} "
                             f"in execution_id={execution_id}. "
                             "This may indicate a data inconsistency."
                         )
-                    if session_id:
+                    if completed_session_id:
                         await self._complete_session(
-                            session_id=session_id,
+                            session_id=completed_session_id,
                             phase_id=event.phase_id,
                             total_tokens=event.total_tokens,
                             success=True,
                         )
                     # Persist artifact (also via aggregate → event store)
-                    artifact_id = await self._persist_artifact(event, session_id)
+                    artifact_id = await self._persist_artifact(event, completed_session_id)
 
                     # Emit PhaseCompleted domain event for workflow projection
                     await self._complete_phase(
