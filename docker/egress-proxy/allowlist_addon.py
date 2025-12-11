@@ -17,7 +17,7 @@ import logging
 import os
 import re
 
-from mitmproxy import ctx, http
+from mitmproxy import http
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -93,11 +93,7 @@ class AllowlistAddon:
             return True
 
         # Check wildcard patterns
-        for pattern in self.allowed_patterns:
-            if pattern.match(host):
-                return True
-
-        return False
+        return any(pattern.match(host) for pattern in self.allowed_patterns)
 
     def request(self, flow: http.HTTPFlow) -> None:
         """Handle HTTP request - block if not in allowlist.

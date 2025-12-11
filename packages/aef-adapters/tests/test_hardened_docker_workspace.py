@@ -106,9 +106,9 @@ class TestBuildDockerCommand:
             security=security,
             network="none",
         )
-        # Check memory limit
+        # Check memory limit (Docker format, not Kubernetes)
         assert "--memory" in cmd
-        assert security.max_memory in cmd
+        assert security.get_docker_memory() in cmd
 
         # Check CPU limit
         assert "--cpus" in cmd

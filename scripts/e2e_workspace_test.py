@@ -28,7 +28,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 # Test repo - small, public, fast to clone
 TEST_REPO = "https://github.com/keleshev/schema.git"  # Tiny Python lib
 TEST_REPO_NAME = "schema"
@@ -86,7 +85,7 @@ class E2EWorkspaceTest:
                 print(f"     stderr: {stderr.decode()[:200]}")
 
             return exit_code, stdout.decode(), stderr.decode()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             return -1, "", "Timeout"
 
@@ -169,14 +168,14 @@ class E2EWorkspaceTest:
     async def install_git(self) -> bool:
         """Install git in container."""
         self.log("Installing git...")
-        exit_code, stdout, stderr = await self.run_container(
+        exit_code, _stdout, _stderr = await self.run_container(
             ["apt-get", "update"], timeout=120, check=False
         )
         if exit_code != 0:
-            print(f"❌ apt-get update failed")
+            print("❌ apt-get update failed")
             return False
 
-        exit_code, stdout, stderr = await self.run_container(
+        exit_code, _stdout, stderr = await self.run_container(
             ["apt-get", "install", "-y", "git"], timeout=120, check=False
         )
         if exit_code != 0:
@@ -189,7 +188,7 @@ class E2EWorkspaceTest:
     async def clone_repo(self) -> bool:
         """Clone the test repository."""
         self.log(f"Cloning {TEST_REPO}...")
-        exit_code, stdout, stderr = await self.run_container(
+        exit_code, _stdout, stderr = await self.run_container(
             ["git", "clone", "--depth", "1", TEST_REPO, TEST_REPO_NAME],
             timeout=60,
             check=False,

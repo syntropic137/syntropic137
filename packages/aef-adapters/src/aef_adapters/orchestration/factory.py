@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -160,7 +159,7 @@ async def get_workspace(config: WorkspaceConfig) -> AsyncIterator[Workspace]:
         # Convert IsolatedWorkspace to agent Workspace type
         # The agent Workspace is a simple dataclass with path and config
         agent_workspace = Workspace(
-            path=Path(isolated_workspace.workspace_path),
+            path=isolated_workspace.path,
             config=config,
         )
 

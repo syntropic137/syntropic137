@@ -98,7 +98,7 @@ class TestStructuredLogger:
         logger.error("Error message")  # Should be logged
 
         content = temp_log_file.read_text()
-        lines = [l for l in content.strip().split("\n") if l]
+        lines = [line for line in content.strip().split("\n") if line]
         assert len(lines) == 2
 
     def test_redacts_secrets(self, temp_log_file: Path) -> None:

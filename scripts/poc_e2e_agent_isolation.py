@@ -48,7 +48,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "packages"))
 
 from aef_adapters.agents.agentic_types import WorkspaceConfig
 from aef_adapters.workspaces import (
-    HardenedDockerWorkspace,
     InMemoryCollectorEmitter,
     IsolatedWorkspaceConfig,
     WorkspaceRouter,
@@ -107,7 +106,7 @@ class POCRunner:
                 console.print(f"  Container: {workspace.container_id[:12]}")
 
                 # Try to ping external host (should fail)
-                exit_code, stdout, stderr = await self.router.execute_command(
+                exit_code, _stdout, _stderr = await self.router.execute_command(
                     workspace, ["ping", "-c", "1", "-W", "1", "8.8.8.8"]
                 )
 
@@ -119,7 +118,7 @@ class POCRunner:
                     console.print("  [red]✗[/] SECURITY ISSUE: ping succeeded")
 
                 # Try DNS (should also fail)
-                exit_code, stdout, stderr = await self.router.execute_command(
+                exit_code, _stdout, _stderr = await self.router.execute_command(
                     workspace, ["nslookup", "api.anthropic.com"]
                 )
 
@@ -179,7 +178,7 @@ class POCRunner:
 
                 # Test 1: Should be able to reach allowed hosts
                 # (Note: In real implementation, this would go through egress proxy)
-                exit_code, stdout, stderr = await self.router.execute_command(
+                exit_code, _stdout, _stderr = await self.router.execute_command(
                     workspace,
                     ["sh", "-c", "command -v curl >/dev/null || apt-get update && apt-get install -y curl"],
                     timeout=60,
@@ -190,7 +189,7 @@ class POCRunner:
                     console.print("  [green]✓[/] Can install packages")
 
                 # Try to reach GitHub (allowed)
-                exit_code, stdout, stderr = await self.router.execute_command(
+                exit_code, _stdout, stderr = await self.router.execute_command(
                     workspace,
                     ["curl", "-I", "https://api.github.com", "-m", "5"],
                     timeout=10,
@@ -204,7 +203,7 @@ class POCRunner:
                     console.print(f"  [red]✗[/] Cannot reach api.github.com: {stderr[:100]}")
 
                 # Try to reach disallowed host
-                exit_code, stdout, stderr = await self.router.execute_command(
+                exit_code, _stdout, _stderr = await self.router.execute_command(
                     workspace,
                     ["curl", "-I", "https://example.com", "-m", "5"],
                     timeout=10,

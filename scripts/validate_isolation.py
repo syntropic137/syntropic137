@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import shutil
 import subprocess
 import sys
@@ -70,9 +69,7 @@ class IsolationValidator:
             for line in result.details.split("\n"):
                 print(f"   {line}")
 
-    async def run_in_container(
-        self, command: list[str], timeout: int = 10
-    ) -> tuple[int, str, str]:
+    async def run_in_container(self, command: list[str], timeout: int = 10) -> tuple[int, str, str]:
         """Execute command inside the test container."""
         if not self.container_id:
             raise RuntimeError("Container not started")
@@ -86,11 +83,9 @@ class IsolationValidator:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode or 0, stdout.decode(), stderr.decode()
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return -1, "", "Command timed out"
 
     def run_host_command(self, command: list[str]) -> tuple[int, str, str]:
@@ -182,13 +177,11 @@ class IsolationValidator:
     async def validate_process_isolation(self) -> None:
         """Verify container can't see host processes."""
         # Get process list from container
-        exit_code, stdout, stderr = await self.run_in_container(["ps", "aux"])
+        exit_code, stdout, _stderr = await self.run_in_container(["ps", "aux"])
 
         if exit_code != 0:
             # ps might not be installed, try /proc
-            exit_code, stdout, stderr = await self.run_in_container(
-                ["ls", "/proc"]
-            )
+            exit_code, stdout, _stderr = await self.run_in_container(["ls", "/proc"])
             processes = [p for p in stdout.split() if p.isdigit()]
         else:
             processes = stdout.strip().split("\n")
@@ -208,9 +201,7 @@ class IsolationValidator:
                 name="Process Isolation",
                 passed=passed,
                 message=f"Container sees {container_count} processes (host has {host_count})",
-                details=f"Container processes: {processes[:5]}..."
-                if self.verbose
-                else "",
+                details=f"Container processes: {processes[:5]}..." if self.verbose else "",
             )
         )
 
@@ -235,14 +226,13 @@ class IsolationValidator:
         exit_code, container_etc_hostname, _ = await self.run_in_container(["cat", "/etc/hostname"])
 
         etc_isolated = (
-            exit_code == 0
-            and container_etc_hostname.strip() != host_etc_hostname.strip()
+            exit_code == 0 and container_etc_hostname.strip() != host_etc_hostname.strip()
         )
 
         # Verify container can't see host user's home directory content
         # Container's /root should be empty (not host's /root)
-        exit_code, stdout, _ = await self.run_in_container(["ls", "-la", "/root"])
-        root_is_minimal = exit_code == 0 and len(stdout.split("\n")) <= 4  # Just . and ..
+        _ = await self.run_in_container(["ls", "-la", "/root"])
+        # We don't check root_is_minimal - just verify the command runs
 
         passed = hostname_isolated and etc_isolated
 
@@ -273,9 +263,7 @@ class IsolationValidator:
         writable = []
 
         for path in test_paths:
-            exit_code, _, stderr = await self.run_in_container(
-                ["touch", path]
-            )
+            exit_code, _, _stderr = await self.run_in_container(["touch", path])
             if exit_code == 0:
                 read_only = False
                 writable.append(path)
@@ -341,9 +329,7 @@ class IsolationValidator:
     async def validate_capability_drop(self) -> None:
         """Verify all capabilities are dropped."""
         # Check current capabilities
-        exit_code, stdout, _ = await self.run_in_container(
-            ["cat", "/proc/self/status"]
-        )
+        exit_code, stdout, _ = await self.run_in_container(["cat", "/proc/self/status"])
 
         if exit_code != 0:
             self.add_result(
@@ -357,9 +343,7 @@ class IsolationValidator:
             return
 
         # Parse capability lines
-        cap_lines = [
-            line for line in stdout.split("\n") if line.startswith("Cap")
-        ]
+        cap_lines = [line for line in stdout.split("\n") if line.startswith("Cap")]
         cap_info = {}
         for line in cap_lines:
             if ":" in line:
@@ -432,7 +416,7 @@ class IsolationValidator:
         """Verify PID limit is enforced."""
         # Try to create more processes than allowed
         # We set --pids-limit 50
-        exit_code, stdout, stderr = await self.run_in_container(
+        exit_code, stdout, _stderr = await self.run_in_container(
             [
                 "python3",
                 "-c",
@@ -483,8 +467,7 @@ print(f"Created {len(pids)} processes")
         exit_code, stdout, _ = await self.run_in_container(["id"])
 
         if exit_code == 0:
-            # Check if running as root
-            is_root = "uid=0" in stdout or "root" in stdout
+            # Report user identity (either root or non-root is acceptable)
             self.add_result(
                 ValidationResult(
                     name="User Isolation",
@@ -594,9 +577,7 @@ print(f"Created {len(pids)} processes")
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Validate AEF workspace isolation"
-    )
+    parser = argparse.ArgumentParser(description="Validate AEF workspace isolation")
     parser.add_argument(
         "--backend",
         choices=["gvisor", "docker_hardened"],
