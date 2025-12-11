@@ -59,6 +59,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Control signal polling interval (seconds)
+# Used when execution is paused waiting for resume/cancel signal
+CONTROL_SIGNAL_POLL_INTERVAL = 0.5
+
 
 # ============================================================================
 # Execution Events
@@ -746,7 +750,7 @@ class AgenticWorkflowExecutor:
                             )
                             # Wait for resume or cancel signal
                             while True:
-                                await asyncio.sleep(1)
+                                await asyncio.sleep(CONTROL_SIGNAL_POLL_INTERVAL)
                                 signal = await self._check_signal(ctx.execution_id)
                                 if signal and signal.signal_type == ControlSignalType.RESUME:
                                     yield ExecutionResumed(
@@ -842,7 +846,7 @@ class AgenticWorkflowExecutor:
                             )
                             # Wait for resume signal
                             while True:
-                                await asyncio.sleep(0.5)
+                                await asyncio.sleep(CONTROL_SIGNAL_POLL_INTERVAL)
                                 resume_signal = await self._check_signal(ctx.execution_id)
                                 if (
                                     resume_signal

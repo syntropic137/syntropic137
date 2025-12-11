@@ -1,3 +1,4 @@
+import { Pause, Play, X } from 'lucide-react'
 import { useState } from 'react'
 import { useExecutionControl, type ExecutionState } from '../hooks'
 
@@ -72,9 +73,7 @@ export function ExecutionControl({ executionId, className = '' }: ExecutionContr
             onClick={() => pause()}
             className="inline-flex items-center px-3 py-1.5 border border-yellow-300 text-sm font-medium rounded-md text-yellow-700 bg-yellow-50 hover:bg-yellow-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
           >
-            <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6" />
-            </svg>
+            <Pause className="mr-1.5 h-4 w-4" />
             Pause
           </button>
         )}
@@ -84,9 +83,7 @@ export function ExecutionControl({ executionId, className = '' }: ExecutionContr
             onClick={() => resume()}
             className="inline-flex items-center px-3 py-1.5 border border-green-300 text-sm font-medium rounded-md text-green-700 bg-green-50 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
           >
-            <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-            </svg>
+            <Play className="mr-1.5 h-4 w-4" />
             Resume
           </button>
         )}
@@ -116,9 +113,7 @@ export function ExecutionControl({ executionId, className = '' }: ExecutionContr
                 onClick={() => setShowCancelConfirm(true)}
                 className="inline-flex items-center px-3 py-1.5 border border-red-300 text-sm font-medium rounded-md text-red-700 bg-red-50 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
               >
-                <svg className="mr-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="mr-1.5 h-4 w-4" />
                 Cancel
               </button>
             )}

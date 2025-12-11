@@ -261,6 +261,21 @@ export async function getTokenMetrics(sessionId: string): Promise<TokenMetricsRe
 }
 
 // =============================================================================
+// WEBSOCKET HELPERS
+// =============================================================================
+
+/**
+ * Get WebSocket URL for execution control.
+ *
+ * @param executionId - The execution ID to control
+ * @returns WebSocket URL for the control endpoint
+ */
+export function getControlWebSocketUrl(executionId: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${protocol}//${window.location.host}${API_BASE}/ws/control/${executionId}`
+}
+
+// =============================================================================
 // EVENTS API
 // =============================================================================
 

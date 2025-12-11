@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { getControlWebSocketUrl } from '../api/client'
 
 export type ExecutionState = 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed' | 'unknown'
 
@@ -56,9 +57,8 @@ export function useExecutionControl(executionId: string): UseExecutionControlRes
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
-    // Determine WebSocket URL based on current location
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/api/ws/control/${executionId}`
+    // Get WebSocket URL from centralized API client
+    const wsUrl = getControlWebSocketUrl(executionId)
 
     const ws = new WebSocket(wsUrl)
 

@@ -24,12 +24,20 @@ def _assert_test_environment() -> None:
     use persistent adapters (e.g., ProjectionControlStateAdapter).
 
     Raises:
-        RuntimeError: If APP_ENVIRONMENT is not 'test'.
+        RuntimeError: If APP_ENVIRONMENT is not set or not 'test'/'development'.
     """
     app_env = os.getenv("APP_ENVIRONMENT", "").lower()
-    # Allow 'test' or 'development' for local dev convenience
-    # Production will use Redis/projection-backed adapters
-    if app_env not in ("test", "development", ""):
+
+    # Fail explicitly if APP_ENVIRONMENT is not set
+    if app_env == "":
+        raise RuntimeError(
+            "APP_ENVIRONMENT is not set. InMemory adapters can only be used when "
+            "APP_ENVIRONMENT is explicitly set to 'test' or 'development'. "
+            "Set APP_ENVIRONMENT=test for testing, or use a persistent adapter for production."
+        )
+
+    # Only allow 'test' or 'development' environments
+    if app_env not in ("test", "development"):
         raise RuntimeError(
             f"InMemory adapters can only be used in test/development environment. "
             f"Current APP_ENVIRONMENT: '{app_env}'. "
