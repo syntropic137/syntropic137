@@ -20,10 +20,11 @@ import {
 } from 'recharts'
 
 import { getExecution } from '../api/client'
-import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge, WorkspaceInfoCard } from '../components'
 import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import { useExecutionStream } from '../hooks'
 import type { ExecutionDetailResponse } from '../types'
+import { SSE_EVENTS } from '../types'
 
 const phaseStatusIcons: Record<string, typeof Play> = {
   pending: Clock,
@@ -72,6 +73,10 @@ export function ExecutionDetail() {
           'WorkflowCompleted',
           'WorkflowFailed',
           'OperationRecorded',
+          // Workspace lifecycle events (ADR-021)
+          SSE_EVENTS.WORKSPACE_CREATED,
+          SSE_EVENTS.WORKSPACE_DESTROYED,
+          SSE_EVENTS.WORKSPACE_ERROR,
         ]
         if (refreshEvents.includes(event.event_type)) {
           refreshExecution()
@@ -201,6 +206,9 @@ export function ExecutionDetail() {
           </CardContent>
         </Card>
       )}
+
+      {/* Workspace Info - ADR-021 */}
+      <WorkspaceInfoCard workspace={execution.workspace} isLoading={loading} />
 
       {/* Metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
