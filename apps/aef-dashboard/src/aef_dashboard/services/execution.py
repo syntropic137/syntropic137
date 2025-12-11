@@ -206,14 +206,13 @@ class ExecutionService:
                     )
                     tracker[execution_id]["current_phase"] = None
                     # Complete session (via aggregate → event store)
-                    session_id = self._phase_sessions.get(event.phase_id)
+                    session_id: str | None = self._phase_sessions.get(event.phase_id)
                     if not session_id:
                         logger.warning(
                             f"Session ID not found for phase_id={event.phase_id} "
                             f"in execution_id={execution_id}. "
                             "This may indicate a data inconsistency."
                         )
-                        session_id = ""
                     if session_id:
                         await self._complete_session(
                             session_id=session_id,
