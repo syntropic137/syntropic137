@@ -333,6 +333,85 @@ class IsolatedWorkspace:
     def isolation_id(self) -> str | None: ...
 ```
 
+## Performance Benchmarks
+
+Run benchmarks to measure workspace performance on your system:
+
+```bash
+# Quick benchmark
+just perf-check
+
+# Full benchmark suite
+just perf-all
+```
+
+### Benchmark Results (macOS, docker_hardened)
+
+```
+╭─────────────────────────────────╮
+│ Workspace Performance Benchmark │
+╰─────────────────────────────────╯
+
+Backend: docker_hardened
+Iterations: 5
+Success Rate: 100.0%
+
+                   Timing Statistics
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃ Metric       ┃   Min ┃   Max ┃  Mean ┃   P95 ┃   P99 ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ Create Time  │ 133ms │ 217ms │ 179ms │ 215ms │ 216ms │
+│ Destroy Time │ 5.36s │ 5.87s │ 5.53s │ 5.80s │ 5.85s │
+│ Total Cycle  │ 5.53s │ 6.09s │ 5.72s │ 6.02s │ 6.08s │
+└──────────────┴───────┴───────┴───────┴───────┴───────┘
+```
+
+### Parallel Scaling
+
+```
+╭────────────────────────────╮
+│ Parallel Scaling Benchmark │
+╰────────────────────────────╯
+
+Backend: docker_hardened
+Concurrent Workspaces: 10
+Success Rate: 100.0%
+
+Results:
+  Total Time:        7.91s
+  Avg per Workspace: 791ms
+  Sequential Est.:   75.52s
+  Speedup:           9.54x  ⬅️ Near-linear scaling!
+```
+
+### Key Metrics
+
+| Metric | Value | Notes |
+|--------|-------|-------|
+| **Container Create** | ~170ms | Docker container startup |
+| **Container Destroy** | ~5.5s | Docker stop timeout (configurable) |
+| **Parallel Speedup (10x)** | **9.54x** | Near-linear scaling |
+| **Throughput** | ~5 workspaces/min | With default settings |
+
+### Running Custom Benchmarks
+
+```bash
+# Single workspace timing
+uv run python -m aef_perf single --iterations 10
+
+# Parallel scaling test
+uv run python -m aef_perf parallel --count 10
+
+# Throughput test
+uv run python -m aef_perf throughput --duration 30
+
+# Compare all backends
+uv run python -m aef_perf compare
+
+# Export to JSON for CI
+uv run python -m aef_perf single --output results.json
+```
+
 ## Testing
 
 ```bash

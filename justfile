@@ -322,6 +322,55 @@ primitives-clean:
     rm -rf build/claude
     @echo "✅ Cleaned build/claude"
 
+# --- Workspace Performance Benchmarks ---
+
+# Check available isolation backends
+perf-check:
+    uv run python -m aef_perf check
+
+# Run single workspace benchmark (5 iterations)
+perf-single iterations="5":
+    uv run python -m aef_perf single --iterations {{iterations}}
+
+# Run parallel scaling benchmark
+perf-parallel count="10":
+    uv run python -m aef_perf parallel --count {{count}}
+
+# Run throughput benchmark
+perf-throughput duration="30":
+    uv run python -m aef_perf throughput --duration {{duration}}
+
+# Compare all available backends
+perf-compare:
+    uv run python -m aef_perf compare --iterations 3
+
+# Run all benchmarks
+perf-all:
+    @echo "=== Backend Availability ==="
+    uv run python -m aef_perf check
+    @echo ""
+    @echo "=== Single Workspace Benchmark ==="
+    uv run python -m aef_perf single --iterations 5
+    @echo ""
+    @echo "=== Parallel Scaling (10 concurrent) ==="
+    uv run python -m aef_perf parallel --count 10
+    @echo ""
+    @echo "=== Throughput Test (30s) ==="
+    uv run python -m aef_perf throughput --duration 30
+
+# Run benchmark and save JSON report
+perf-report:
+    @mkdir -p reports
+    uv run python -m aef_perf single --iterations 10 --output reports/perf-single.json
+    uv run python -m aef_perf parallel --count 10 --output reports/perf-parallel.json
+    @echo "Reports saved to reports/"
+
+# Demo workspace events E2E
+demo-workspace-events:
+    uv run python scripts/demo_workspace_events.py
+
+# --- Package Management ---
+
 # Add a new package to the workspace
 new-package name:
     @echo "Creating package: {{name}}"
