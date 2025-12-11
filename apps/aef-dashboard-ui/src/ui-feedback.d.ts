@@ -35,9 +35,9 @@ declare module '@aef/ui-feedback-react' {
 
   export const FeedbackProvider: FC<FeedbackProviderProps>
 
-  export interface FeedbackWidgetProps {
-    // Widget is configured via FeedbackProvider, no props needed
-  }
+  /** Widget is configured via FeedbackProvider, no props needed */
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  export interface FeedbackWidgetProps {}
 
   export const FeedbackWidget: FC<FeedbackWidgetProps>
 }
