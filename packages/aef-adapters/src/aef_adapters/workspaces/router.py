@@ -20,6 +20,8 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import asyncio
+import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, ClassVar
@@ -28,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace  # noqa: TC001
 from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
+from aef_adapters.workspaces.events import get_workspace_emitter
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.types import (  # noqa: TC001
@@ -203,24 +206,61 @@ class WorkspaceRouter:
         # Get backend class
         backend_class = self._get_available_backend_class(backend)
 
+        # Get event emitter
+        emitter = get_workspace_emitter()
+
+        # Generate workspace ID for tracking
+        pre_workspace_id = f"ws-{uuid.uuid4().hex[:8]}"
+        create_start = time.perf_counter()
+
+        # Emit creating event
+        await emitter.workspace_creating(config, pre_workspace_id)
+
         # Create the workspace
         try:
             async with backend_class.create(config) as workspace:
                 # Track active workspace
-                workspace_id = workspace.isolation_id or str(id(workspace))
+                workspace_id = workspace.isolation_id or pre_workspace_id
                 async with self._lock:
                     self._active_workspaces[workspace_id] = (workspace, backend_class)
                     self._stats.total_created += 1
                     self._stats.by_backend[backend] = self._stats.by_backend.get(backend, 0) + 1
 
+                # Emit created event
+                await emitter.workspace_created(workspace, config)
+
+                commands_executed = 0
                 try:
+                    # Track command count in workspace metadata
+                    workspace._command_count = 0  # type: ignore[attr-defined]
                     yield workspace
+                    commands_executed = getattr(workspace, "_command_count", 0)
                 finally:
+                    # Emit destroying event (tracks destroy start time internally)
+                    await emitter.workspace_destroying(workspace)
+
                     async with self._lock:
                         self._active_workspaces.pop(workspace_id, None)
 
+                    # Calculate total lifetime
+                    total_lifetime_ms = (time.perf_counter() - create_start) * 1000
+
+                    # Emit destroyed event (after context manager cleanup)
+                    await emitter.workspace_destroyed(
+                        workspace,
+                        total_lifetime_ms=total_lifetime_ms,
+                        commands_executed=commands_executed,
+                    )
+
         except Exception as e:
             self._stats.failed_count += 1
+            await emitter.workspace_error(
+                workspace_id=pre_workspace_id,
+                session_id=config.base_config.session_id,
+                operation="create",
+                error=e,
+                isolation_backend=backend.value if backend else None,
+            )
             raise RuntimeError(f"Failed to create workspace with {backend}: {e}") from e
 
     def _get_available_backend_class(
@@ -276,7 +316,30 @@ class WorkspaceRouter:
             raise RuntimeError("Workspace not managed by this router")
 
         _, backend_class = entry
-        return await backend_class.execute_command(workspace, command, timeout, cwd)
+
+        # Execute and time command
+        start_time = time.perf_counter()
+        exit_code, stdout, stderr = await backend_class.execute_command(
+            workspace, command, timeout, cwd
+        )
+        duration_ms = (time.perf_counter() - start_time) * 1000
+
+        # Track command count
+        if hasattr(workspace, "_command_count"):
+            workspace._command_count += 1  # type: ignore[attr-defined]
+
+        # Emit command executed event
+        emitter = get_workspace_emitter()
+        await emitter.workspace_command_executed(
+            workspace,
+            command,
+            exit_code,
+            duration_ms,
+            stdout_lines=len(stdout.split("\n")) if stdout else 0,
+            stderr_lines=len(stderr.split("\n")) if stderr else 0,
+        )
+
+        return exit_code, stdout, stderr
 
     async def health_check(self, workspace: IsolatedWorkspace) -> bool:
         """Check workspace health using the correct backend.
