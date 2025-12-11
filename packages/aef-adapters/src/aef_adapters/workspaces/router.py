@@ -25,6 +25,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 # These imports are needed at runtime for BACKEND_CLASSES mapping
@@ -238,6 +239,9 @@ class WorkspaceRouter:
                 # Inject API keys for LLM access
                 await self._inject_api_keys(workspace, backend_class)
 
+                # Setup logging directory
+                await self._setup_logging(workspace, backend_class)
+
                 commands_executed = 0
                 try:
                     # Track command count in workspace metadata
@@ -331,6 +335,36 @@ class WorkspaceRouter:
                 workspace,
                 executor,
                 require_anthropic=False,
+            )
+
+    async def _setup_logging(
+        self,
+        workspace: IsolatedWorkspace,
+        backend_class: type[BaseIsolatedWorkspace],
+    ) -> None:
+        """Setup logging directory inside workspace.
+
+        Args:
+            workspace: The workspace to configure
+            backend_class: Backend class for command execution
+        """
+        from aef_shared.settings import get_settings
+
+        settings = get_settings()
+        log_path = settings.container_logging.log_file_path
+
+        # Create log directory
+        log_dir = str(Path(log_path).parent)
+        exit_code, _, _ = await backend_class.execute_command(
+            workspace,
+            ["mkdir", "-p", log_dir],
+        )
+
+        if exit_code == 0:
+            # Initialize empty log file
+            await backend_class.execute_command(
+                workspace,
+                ["touch", log_path],
             )
 
     def _get_available_backend_class(

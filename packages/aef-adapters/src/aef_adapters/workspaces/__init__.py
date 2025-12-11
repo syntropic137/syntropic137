@@ -55,6 +55,14 @@ from aef_adapters.workspaces.git import (
 )
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace, NonIsolatedWorkspaceError
+from aef_adapters.workspaces.logging import (
+    ContainerLogStreamer,
+    LogEntry,
+    LogLevel,
+    StructuredLogger,
+    ViewContainerLogsTool,
+    create_container_logger,
+)
 from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
 from aef_adapters.workspaces.router import (
     RouterStats,
@@ -67,6 +75,7 @@ from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceCo
 __all__ = [
     "BaseIsolatedWorkspace",
     "CollectorEmitter",
+    "ContainerLogStreamer",
     "E2BWorkspace",
     "EnvInjector",
     "ExecutionContext",
@@ -80,13 +89,18 @@ __all__ = [
     "IsolatedWorkspaceConfig",
     "IsolatedWorkspaceProtocol",
     "LocalWorkspace",
+    "LogEntry",
+    "LogLevel",
     "NonIsolatedWorkspaceError",
     "RouterStats",
+    "StructuredLogger",
+    "ViewContainerLogsTool",
     "WorkspaceEventEmitter",
     "WorkspaceProtocol",
     "WorkspaceRouter",
     "build_commit_message",
     "configure_workspace_emitter",
+    "create_container_logger",
     "get_env_injector",
     "get_git_injector",
     "get_workspace_emitter",

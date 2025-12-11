@@ -384,6 +384,21 @@ poc-isolation-quick:
     @echo "=== Test 3: Claude SDK Install ==="
     docker run --rm --network=bridge python:3.12-slim sh -c "pip install -q anthropic && python -c 'from anthropic import Anthropic; print(\"✓ Claude SDK installed\")'"
 
+# Test container logging setup
+poc-logging:
+    @echo "=== Container Logging Test ==="
+    @echo "Testing: Create log dir → Write logs → Read logs"
+    @echo ""
+    docker run --rm python:3.12-slim sh -c '\
+        mkdir -p /workspace/.logs && \
+        echo "{\"timestamp\":\"2025-01-01T00:00:00Z\",\"level\":\"INFO\",\"message\":\"Agent started\",\"event_type\":\"info\"}" >> /workspace/.logs/agent.jsonl && \
+        echo "{\"timestamp\":\"2025-01-01T00:00:01Z\",\"level\":\"INFO\",\"message\":\"Command: git clone\",\"event_type\":\"command\",\"exit_code\":0}" >> /workspace/.logs/agent.jsonl && \
+        echo "{\"timestamp\":\"2025-01-01T00:00:02Z\",\"level\":\"ERROR\",\"message\":\"Compilation failed\",\"event_type\":\"error\"}" >> /workspace/.logs/agent.jsonl && \
+        echo "Log contents:" && \
+        cat /workspace/.logs/agent.jsonl && \
+        echo "" && \
+        echo "✓ Container logging works!"'
+
 # Test Claude API key injection in container
 poc-claude-api:
     @echo "=== Claude API Key Injection Test ==="
