@@ -45,3 +45,5 @@ contexts:
     description: "Artifact storage, metadata, and retrieval"
   workspaces:
     description: "Isolated workspace lifecycle, performance metrics, and observability"
+  costs:
+    description: "Session and execution cost tracking with real-time aggregation"
