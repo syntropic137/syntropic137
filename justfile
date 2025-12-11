@@ -384,6 +384,57 @@ poc-isolation-quick:
     @echo "=== Test 3: Claude SDK Install ==="
     docker run --rm --network=bridge python:3.12-slim sh -c "pip install -q anthropic && python -c 'from anthropic import Anthropic; print(\"✓ Claude SDK installed\")'"
 
+# --- Egress Proxy (Network Allowlist) ---
+
+# Build the egress proxy image
+proxy-build:
+    docker build -t aef-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
+
+# Start the egress proxy
+proxy-start:
+    @docker rm -f aef-egress-proxy 2>/dev/null || true
+    docker run -d --name aef-egress-proxy -p 8080:8080 \
+        -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
+        aef-egress-proxy:latest
+    @echo "✓ Egress proxy started on port 8080"
+
+# Stop the egress proxy
+proxy-stop:
+    docker rm -f aef-egress-proxy
+    @echo "✓ Egress proxy stopped"
+
+# View proxy logs
+proxy-logs:
+    docker logs -f aef-egress-proxy
+
+# Test network allowlist enforcement
+poc-allowlist:
+    @echo "=== Network Allowlist Test ==="
+    @echo "1. Starting egress proxy..."
+    @just proxy-build >/dev/null 2>&1 || true
+    @docker rm -f aef-egress-proxy 2>/dev/null || true
+    @docker run -d --name aef-egress-proxy -p 8080:8080 \
+        -e ALLOWED_HOSTS="api.anthropic.com,github.com" \
+        aef-egress-proxy:latest >/dev/null
+    @sleep 2
+    @echo ""
+    @echo "2. Testing ALLOWED host (github.com)..."
+    @docker run --rm --add-host=host.docker.internal:host-gateway \
+        -e HTTP_PROXY=http://host.docker.internal:8080 \
+        -e HTTPS_PROXY=http://host.docker.internal:8080 \
+        curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://github.com || echo "Connection failed"
+    @echo " <- Expected: 200"
+    @echo ""
+    @echo "3. Testing BLOCKED host (evil.com)..."
+    @docker run --rm --add-host=host.docker.internal:host-gateway \
+        -e HTTP_PROXY=http://host.docker.internal:8080 \
+        -e HTTPS_PROXY=http://host.docker.internal:8080 \
+        curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://evil.com || echo "403"
+    @echo " <- Expected: 403"
+    @echo ""
+    @docker rm -f aef-egress-proxy >/dev/null
+    @echo "✓ Network allowlist test complete!"
+
 # Test container logging setup
 poc-logging:
     @echo "=== Container Logging Test ==="

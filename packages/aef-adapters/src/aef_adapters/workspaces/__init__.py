@@ -63,6 +63,14 @@ from aef_adapters.workspaces.logging import (
     ViewContainerLogsTool,
     create_container_logger,
 )
+from aef_adapters.workspaces.network import (
+    DEFAULT_ALLOWED_HOSTS,
+    EgressProxy,
+    NetworkConfig,
+    ensure_proxy_running,
+    get_egress_proxy,
+    inject_proxy_config,
+)
 from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
 from aef_adapters.workspaces.router import (
     RouterStats,
@@ -73,10 +81,12 @@ from aef_adapters.workspaces.router import (
 from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceConfig
 
 __all__ = [
+    "DEFAULT_ALLOWED_HOSTS",
     "BaseIsolatedWorkspace",
     "CollectorEmitter",
     "ContainerLogStreamer",
     "E2BWorkspace",
+    "EgressProxy",
     "EnvInjector",
     "ExecutionContext",
     "FirecrackerWorkspace",
@@ -91,6 +101,7 @@ __all__ = [
     "LocalWorkspace",
     "LogEntry",
     "LogLevel",
+    "NetworkConfig",
     "NonIsolatedWorkspaceError",
     "RouterStats",
     "StructuredLogger",
@@ -101,9 +112,12 @@ __all__ = [
     "build_commit_message",
     "configure_workspace_emitter",
     "create_container_logger",
+    "ensure_proxy_running",
+    "get_egress_proxy",
     "get_env_injector",
     "get_git_injector",
     "get_workspace_emitter",
     "get_workspace_router",
+    "inject_proxy_config",
     "reset_workspace_router",
 ]
