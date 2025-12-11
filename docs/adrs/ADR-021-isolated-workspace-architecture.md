@@ -291,7 +291,6 @@ See: `PROJECT-PLAN_20251211_ISOLATED-WORKSPACE-ARCHITECTURE.md`
 8. **Documentation**: ADR, usage guides, runbooks
 9. **Testing**: Security tests, scale tests, benchmarks
 
-<<<<<<< HEAD
 ## POC Findings (2025-12-11)
 
 Proof-of-concept testing validated the isolated workspace architecture:
@@ -599,8 +598,6 @@ This provides:
 - [ ] Add integration tests for git operations
 - [ ] Add credential rotation documentation
 
-=======
->>>>>>> origin/main
 ## Related ADRs
 
 - **ADR-009**: Agentic Execution Architecture (original workspace design)

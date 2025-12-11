@@ -28,7 +28,7 @@ class ThroughputBenchmark(BaseBenchmark):
         self,
         duration: float = 30.0,
         max_concurrent: int = 5,
-        **kwargs,  # type: ignore[override]
+        **_kwargs: object,  # type: ignore[override]
     ) -> BenchmarkResult:
         """Run throughput benchmark.
 

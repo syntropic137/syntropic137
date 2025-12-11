@@ -15,7 +15,6 @@ Usage:
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -26,6 +25,8 @@ from aef_shared.settings.workspace import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from aef_adapters.workspaces.types import IsolatedWorkspace
 
 logger = logging.getLogger(__name__)

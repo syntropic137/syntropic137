@@ -18,7 +18,9 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from aef_adapters.workspaces.config import IsolatedWorkspaceConfig  # type: ignore[import-untyped]
+    from aef_adapters.workspaces.config import (
+        IsolatedWorkspaceConfig,  # type: ignore[import-untyped]
+    )
     from aef_adapters.workspaces.protocol import IsolatedWorkspace
 
 logger = logging.getLogger(__name__)

@@ -16,11 +16,12 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from aef_adapters.workspaces.types import IsolatedWorkspace
 
 logger = logging.getLogger(__name__)
