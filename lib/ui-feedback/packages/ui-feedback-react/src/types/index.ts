@@ -91,6 +91,11 @@ export interface FeedbackCreate {
   app_name: string;
   app_version?: string;
   user_agent?: string;
+  // Environment context
+  environment?: string;
+  git_commit?: string;
+  git_branch?: string;
+  hostname?: string;
 }
 
 export interface FeedbackUpdate {
@@ -121,6 +126,11 @@ export interface FeedbackItem {
   app_name: string;
   app_version?: string;
   user_agent?: string;
+  // Environment context
+  environment?: string;
+  git_commit?: string;
+  git_branch?: string;
+  hostname?: string;
   created_at: string;
   updated_at: string;
   resolved_at?: string;
@@ -202,6 +212,15 @@ export interface FeedbackProviderConfig {
   position?: WidgetPosition;
   /** Disable the widget (useful for conditional rendering) */
   disabled?: boolean;
+  // Environment context - for knowing where feedback came from
+  /** Environment name (e.g., 'development', 'staging', 'production') */
+  environment?: string;
+  /** Git commit hash */
+  gitCommit?: string;
+  /** Git branch name */
+  gitBranch?: string;
+  /** Hostname where the app is running */
+  hostname?: string;
 }
 
 // =====================================================
@@ -224,5 +243,5 @@ export interface FeedbackContextValue extends FeedbackState {
   addMedia: (media: MediaUpload) => void;
   removeMedia: (index: number) => void;
   clearMedia: () => void;
-  submitFeedback: (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent'>) => Promise<FeedbackItem>;
+  submitFeedback: (data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname'>) => Promise<FeedbackItem>;
 }

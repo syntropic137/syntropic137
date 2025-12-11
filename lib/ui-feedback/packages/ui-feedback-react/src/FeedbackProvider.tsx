@@ -68,6 +68,11 @@ export function FeedbackProvider({
   classNames,
   position = 'bottom-right',
   disabled = false,
+  // Environment context
+  environment,
+  gitCommit,
+  gitBranch,
+  hostname,
 }: FeedbackProviderProps) {
   const [state, setState] = useState<FeedbackState>({
     isOpen: false,
@@ -90,8 +95,12 @@ export function FeedbackProvider({
       classNames,
       position,
       disabled,
+      environment,
+      gitCommit,
+      gitBranch,
+      hostname,
     }),
-    [apiUrl, appName, appVersion, keyboardShortcut, customTheme, classNames, position, disabled]
+    [apiUrl, appName, appVersion, keyboardShortcut, customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname]
   );
 
   // State management functions
@@ -142,14 +151,18 @@ export function FeedbackProvider({
 
   const submitFeedback = useCallback(
     async (
-      data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent'>
+      data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname'>
     ): Promise<FeedbackItem> => {
-      // Create feedback item
+      // Create feedback item with environment context
       const feedbackData: FeedbackCreate = {
         ...data,
         app_name: appName,
         app_version: appVersion,
         user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
+        environment,
+        git_commit: gitCommit,
+        git_branch: gitBranch,
+        hostname,
       };
 
       const item = await api.createFeedback(feedbackData);
@@ -164,7 +177,7 @@ export function FeedbackProvider({
 
       return item;
     },
-    [api, appName, appVersion, state.pendingMedia, closeModal]
+    [api, appName, appVersion, environment, gitCommit, gitBranch, hostname, state.pendingMedia, closeModal]
   );
 
   // Keyboard shortcut handler
@@ -268,7 +281,8 @@ export function FeedbackProvider({
 
   return (
     <FeedbackContext.Provider value={contextValue}>
-      <div style={cssVariables} className="ui-feedback-root">
+      {/* Theme wrapper - just for CSS variables, NOT ui-feedback-root */}
+      <div style={cssVariables} className="ui-feedback-theme">
         {children}
       </div>
     </FeedbackContext.Provider>

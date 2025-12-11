@@ -5,9 +5,14 @@
  * for theming support.
  */
 
-/* Root container - just for CSS variables */
-.ui-feedback-root {
+/* Theme container - just for CSS variables */
+.ui-feedback-theme {
   /* Variables are set inline by FeedbackProvider */
+}
+
+/* Root container - for feedback widget UI elements only */
+.ui-feedback-root {
+  /* Used to identify feedback widget elements for click handling */
 }
 
 /* =====================================================
@@ -1119,7 +1124,7 @@ body.ui-feedback-mode-active * {
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  min-width: 180px;
+  min-width: 220px;
   padding: 8px 0;
   background-color: var(--feedback-surface);
   border: 1px solid var(--feedback-border);
@@ -1153,8 +1158,23 @@ body.ui-feedback-mode-active * {
   opacity: 0.7;
 }
 
-.ui-feedback-menu-badge {
+.ui-feedback-menu-label {
+  flex: 1;
+}
+
+.ui-feedback-menu-hotkey {
   margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: var(--feedback-background);
+  border: 1px solid var(--feedback-border);
+  color: var(--feedback-text-secondary);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ui-feedback-menu-badge {
   padding: 2px 8px;
   border-radius: 10px;
   background-color: var(--feedback-error);
