@@ -78,21 +78,22 @@ def _validate_api_keys() -> None:
 
 
 async def _start_subscription_service() -> None:
-    """Start the event subscription service for projection updates.
+    """Start the coordinator subscription service for projection updates.
 
     This connects to the event store and subscribes to events,
-    dispatching them to projections in real-time.
+    dispatching them to projections in real-time using the new
+    SubscriptionCoordinator architecture (ADR-014).
     """
     global _subscription_service
 
     try:
         from aef_adapters.projection_stores import get_projection_store
-        from aef_adapters.projections import get_projection_manager
+        from aef_adapters.projections.realtime import get_realtime_projection
         from aef_adapters.storage import (
             connect_event_store,
             get_event_store_client,
         )
-        from aef_adapters.subscriptions import EventSubscriptionService
+        from aef_adapters.subscriptions import create_coordinator_service
         from aef_shared.settings import get_settings
 
         settings = get_settings()
@@ -106,16 +107,14 @@ async def _start_subscription_service() -> None:
         await connect_event_store()
         logger.info("Connected to event store")
 
-        # Create and start subscription service
-        _subscription_service = EventSubscriptionService(
-            event_store_client=get_event_store_client(),
-            projection_manager=get_projection_manager(),
+        # Create and start coordinator subscription service (ADR-014)
+        _subscription_service = create_coordinator_service(
+            event_store=get_event_store_client(),
             projection_store=get_projection_store(),
-            batch_size=100,
-            position_save_interval=10,
+            realtime_projection=get_realtime_projection(),
         )
         await _subscription_service.start()
-        logger.info("Event subscription service started")
+        logger.info("Coordinator subscription service started (ADR-014)")
 
     except ImportError as e:
         logger.warning(

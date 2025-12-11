@@ -15,10 +15,10 @@ from __future__ import annotations
 import contextlib
 from typing import Any
 
+from agentic_logging import get_logger
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from aef_adapters.projections import get_realtime_projection
-from agentic_logging import get_logger
 
 logger = get_logger(__name__)
 
