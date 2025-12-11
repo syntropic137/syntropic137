@@ -31,6 +31,7 @@ See ADR-021: Isolated Workspace Architecture
 
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace
 from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
+from aef_adapters.workspaces.e2b import E2BWorkspace
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace
@@ -39,6 +40,7 @@ from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceCo
 
 __all__ = [
     "BaseIsolatedWorkspace",
+    "E2BWorkspace",
     "FirecrackerWorkspace",
     "GVisorWorkspace",
     "HardenedDockerWorkspace",
