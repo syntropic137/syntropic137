@@ -1,12 +1,18 @@
 """Workspace adapters - isolated execution environments for agents.
 
 This module provides workspace implementations for agentic execution:
-- LocalWorkspace: File-based workspace in temp directories (MVP)
-- DockerWorkspace: Isolated Docker containers (future)
-- CloudWorkspace: Cloud-based execution (future)
+- LocalWorkspace: File-based workspace in temp directories (development/testing)
+- BaseIsolatedWorkspace: Abstract base for all isolated backends (ADR-021)
 
-Quick Start:
-    from aef_adapters.workspaces import LocalWorkspace, WorkspaceConfig
+Isolated Backends (all production use - agents are isolated by default):
+- GVisorWorkspace: Docker + gVisor runtime (Milestone 3)
+- HardenedDockerWorkspace: Docker with security hardening (Milestone 4)
+- FirecrackerWorkspace: Firecracker MicroVMs (Milestone 5)
+- E2BWorkspace: E2B cloud sandboxes (Milestone 6)
+
+Quick Start (Development):
+    from aef_adapters.workspaces import LocalWorkspace
+    from aef_adapters.agents.agentic_types import WorkspaceConfig
 
     config = WorkspaceConfig(session_id="my-session")
     async with LocalWorkspace.create(config) as workspace:
@@ -14,12 +20,25 @@ Quick Start:
         # Execute agent in workspace.path
         ...
         # Artifacts collected on exit
+
+Production (with isolation):
+    from aef_adapters.workspaces import BaseIsolatedWorkspace, IsolatedWorkspaceConfig
+
+    # See WorkspaceRouter for automatic backend selection (Milestone 7)
+
+See ADR-021: Isolated Workspace Architecture
 """
 
+from aef_adapters.workspaces.base import BaseIsolatedWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace
-from aef_adapters.workspaces.protocol import WorkspaceProtocol
+from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
+from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceConfig
 
 __all__ = [
+    "BaseIsolatedWorkspace",
+    "IsolatedWorkspace",
+    "IsolatedWorkspaceConfig",
+    "IsolatedWorkspaceProtocol",
     "LocalWorkspace",
     "WorkspaceProtocol",
 ]
