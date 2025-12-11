@@ -26,7 +26,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -151,8 +151,7 @@ class WorkspaceSecuritySettings(BaseSettings):
         ge=10,
         le=10000,
         description=(
-            "Maximum number of processes per workspace. "
-            "Prevents fork bombs and process exhaustion."
+            "Maximum number of processes per workspace. Prevents fork bombs and process exhaustion."
         ),
     )
 
@@ -229,8 +228,7 @@ class WorkspaceSettings(BaseSettings):
         ge=1,
         le=100000,
         description=(
-            "Maximum concurrent workspaces. "
-            "Requests beyond this will queue or overflow to cloud."
+            "Maximum concurrent workspaces. Requests beyond this will queue or overflow to cloud."
         ),
     )
 
@@ -241,8 +239,7 @@ class WorkspaceSettings(BaseSettings):
     enable_cloud_overflow: bool = Field(
         default=True,
         description=(
-            "Enable cloud overflow when local capacity exceeded. "
-            "Requires cloud_api_key to be set."
+            "Enable cloud overflow when local capacity exceeded. Requires cloud_api_key to be set."
         ),
     )
 
