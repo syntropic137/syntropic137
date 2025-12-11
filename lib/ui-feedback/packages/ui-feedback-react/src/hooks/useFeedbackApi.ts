@@ -74,21 +74,21 @@ async function safeFetch(url: string, options?: RequestInit): Promise<Response> 
   } catch (err) {
     // Network errors (API not running, CORS, etc.)
     const message = err instanceof Error ? err.message : 'Unknown error';
-    
+
     if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
       throw new NetworkError(
         'Feedback API unavailable. Run: just feedback-backend',
         err instanceof Error ? err : undefined
       );
     }
-    
+
     if (message.includes('CORS') || message.includes('cross-origin')) {
       throw new NetworkError(
         'CORS error: Feedback API may need CORS configuration',
         err instanceof Error ? err : undefined
       );
     }
-    
+
     throw new NetworkError(
       `Network error: ${message}`,
       err instanceof Error ? err : undefined
@@ -104,7 +104,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
     } catch {
       body = await response.text();
     }
-    
+
     // Provide helpful messages for common HTTP errors
     let message = `API error: ${response.status} ${response.statusText}`;
     if (response.status === 404) {
@@ -114,7 +114,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
     } else if (response.status === 422) {
       message = 'Invalid data. Please check your input.';
     }
-    
+
     throw new ApiError(message, response.status, body);
   }
 
