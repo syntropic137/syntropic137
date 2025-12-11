@@ -742,3 +742,76 @@ class EventSubscriptionService:
                 exc_info=True,
             )
             return False
+
+    async def health_check(self) -> dict:
+        """Perform health check for subscription service.
+
+        This checks for consistency between saved position and the actual
+        state of projections. Useful for detecting issues after crashes
+        or unexpected shutdowns.
+
+        Returns:
+            Dictionary with health status:
+            - healthy: bool - True if no issues detected
+            - position_saved: int - Last saved position in projection_states
+            - position_in_memory: int - Current position in memory
+            - position_gap: int - Difference between saved and in-memory
+            - warnings: list[str] - Any warnings detected
+        """
+        warnings_list: list[str] = []
+
+        # Get saved position from store
+        try:
+            saved_position = await self._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
+            if saved_position is None:
+                saved_position = 0
+        except Exception as e:
+            saved_position = -1
+            warnings_list.append(f"Failed to read saved position: {e}")
+
+        # Check for position gaps
+        position_gap = abs(self._last_position - (saved_position or 0))
+
+        # If there's a large gap between memory and saved, something might be wrong
+        if position_gap > self._batch_size * 2:
+            warnings_list.append(
+                f"Large gap between saved position ({saved_position}) "
+                f"and in-memory position ({self._last_position})"
+            )
+
+        # Check if service is running but not processing
+        if self._running and not self._caught_up:
+            time_since_event = None
+            if self._last_event_time:
+                time_since_event = (datetime.now(UTC) - self._last_event_time).total_seconds()
+                if time_since_event > 60:  # No events for 60+ seconds
+                    warnings_list.append(
+                        f"Running but no events processed for {time_since_event:.0f}s"
+                    )
+
+        # Check reconnect count (many reconnects might indicate problems)
+        if self._reconnect_count > 10:
+            warnings_list.append(
+                f"High reconnect count ({self._reconnect_count}) - "
+                "possible connectivity or event store issues"
+            )
+
+        health_status = {
+            "healthy": len(warnings_list) == 0,
+            "position_saved": saved_position,
+            "position_in_memory": self._last_position,
+            "position_gap": position_gap,
+            "events_processed": self._events_processed,
+            "reconnect_count": self._reconnect_count,
+            "is_running": self._running,
+            "is_caught_up": self._caught_up,
+            "warnings": warnings_list,
+        }
+
+        logger.log(
+            logging.WARNING if warnings_list else logging.DEBUG,
+            "[SUBSCRIPTION] Health check completed",
+            extra=health_status,
+        )
+
+        return health_status
