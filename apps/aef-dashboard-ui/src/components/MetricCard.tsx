@@ -1,8 +1,9 @@
 import { clsx } from 'clsx'
 import type { LucideIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 
 interface MetricCardProps {
-  title: string
+  title: ReactNode
   value: string | number
   subtitle?: string
   icon?: LucideIcon

@@ -9,6 +9,15 @@ This slice handles the execution of workflows, including:
 from aef_domain.contexts.workflows.execute_workflow.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
 )
+from aef_domain.contexts.workflows.execute_workflow.ExecutionCancelledEvent import (
+    ExecutionCancelledEvent,
+)
+from aef_domain.contexts.workflows.execute_workflow.ExecutionPausedEvent import (
+    ExecutionPausedEvent,
+)
+from aef_domain.contexts.workflows.execute_workflow.ExecutionResumedEvent import (
+    ExecutionResumedEvent,
+)
 from aef_domain.contexts.workflows.execute_workflow.PhaseCompletedEvent import (
     PhaseCompletedEvent,
 )
@@ -31,6 +40,9 @@ from aef_domain.contexts.workflows.execute_workflow.WorkflowFailedEvent import (
 
 __all__ = [
     "ExecuteWorkflowCommand",
+    "ExecutionCancelledEvent",
+    "ExecutionPausedEvent",
+    "ExecutionResumedEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
     "WorkflowCompletedEvent",

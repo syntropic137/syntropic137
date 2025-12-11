@@ -128,6 +128,19 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_execution_detail", "on_workflow_failed"),
         ("dashboard_metrics", "on_workflow_failed"),
     ],
+    # Control plane events
+    "ExecutionPaused": [
+        ("workflow_execution_list", "on_execution_paused"),
+        ("workflow_execution_detail", "on_execution_paused"),
+    ],
+    "ExecutionResumed": [
+        ("workflow_execution_list", "on_execution_resumed"),
+        ("workflow_execution_detail", "on_execution_resumed"),
+    ],
+    "ExecutionCancelled": [
+        ("workflow_execution_list", "on_execution_cancelled"),
+        ("workflow_execution_detail", "on_execution_cancelled"),
+    ],
     # Session events
     "SessionStarted": [
         ("session_list", "on_session_started"),

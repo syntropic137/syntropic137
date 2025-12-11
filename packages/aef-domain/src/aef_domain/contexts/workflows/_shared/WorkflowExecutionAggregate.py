@@ -128,6 +128,49 @@ class CompletePhaseCommand:
         self.duration_seconds = duration_seconds
 
 
+class PauseExecutionCommand:
+    """Command to pause a workflow execution."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str | None = None,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.reason = reason
+
+
+class ResumeExecutionCommand:
+    """Command to resume a paused workflow execution."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+
+
+class CancelExecutionCommand:
+    """Command to cancel a workflow execution."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str | None = None,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.reason = reason
+
+
 # =============================================================================
 # Aggregate
 # =============================================================================
@@ -339,3 +382,90 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # Increment completed phases count
         # Note: We don't use event data here - just counting phases
         self._completed_phases += 1
+
+    # =========================================================================
+    # CONTROL PLANE COMMAND HANDLERS
+    # =========================================================================
+
+    @command_handler("PauseExecutionCommand")
+    def pause_execution(self, command: PauseExecutionCommand) -> None:
+        """Handle PauseExecutionCommand."""
+        from aef_domain.contexts.workflows.execute_workflow.ExecutionPausedEvent import (
+            ExecutionPausedEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot pause execution in status {self._status}"
+            raise ValueError(msg)
+
+        event = ExecutionPausedEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            paused_at=datetime.now(UTC),
+            reason=command.reason,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
+    @command_handler("ResumeExecutionCommand")
+    def resume_execution(self, command: ResumeExecutionCommand) -> None:
+        """Handle ResumeExecutionCommand."""
+        from aef_domain.contexts.workflows.execute_workflow.ExecutionResumedEvent import (
+            ExecutionResumedEvent,
+        )
+
+        if self._status != ExecutionStatus.PAUSED:
+            msg = f"Cannot resume execution in status {self._status}"
+            raise ValueError(msg)
+
+        event = ExecutionResumedEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            resumed_at=datetime.now(UTC),
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
+    @command_handler("CancelExecutionCommand")
+    def cancel_execution(self, command: CancelExecutionCommand) -> None:
+        """Handle CancelExecutionCommand."""
+        from aef_domain.contexts.workflows.execute_workflow.ExecutionCancelledEvent import (
+            ExecutionCancelledEvent,
+        )
+
+        if self._status not in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED):
+            msg = f"Cannot cancel execution in status {self._status}"
+            raise ValueError(msg)
+
+        event = ExecutionCancelledEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            cancelled_at=datetime.now(UTC),
+            reason=command.reason,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
+    # =========================================================================
+    # CONTROL PLANE EVENT SOURCING HANDLERS
+    # =========================================================================
+
+    @event_sourcing_handler("ExecutionPaused")
+    def on_execution_paused(self, _event: Any) -> None:
+        """Apply ExecutionPausedEvent."""
+        self._status = ExecutionStatus.PAUSED
+
+    @event_sourcing_handler("ExecutionResumed")
+    def on_execution_resumed(self, _event: Any) -> None:
+        """Apply ExecutionResumedEvent."""
+        self._status = ExecutionStatus.RUNNING
+
+    @event_sourcing_handler("ExecutionCancelled")
+    def on_execution_cancelled(self, event: Any) -> None:
+        """Apply ExecutionCancelledEvent."""
+        if hasattr(event, "cancelled_at"):
+            self._completed_at = event.cancelled_at
+        else:
+            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._completed_at = data.get("cancelled_at")
+        self._status = ExecutionStatus.CANCELLED

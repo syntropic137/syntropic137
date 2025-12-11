@@ -42,6 +42,7 @@ from aef_adapters.agents.agentic_types import (
     TextOutput,
     ToolUseCompleted,
     ToolUseStarted,
+    TurnCompleted,
     Workspace,
 )
 from aef_adapters.agents.models import get_model_registry
@@ -215,6 +216,10 @@ class ClaudeAgenticAgent:
         turns_used = 0
         current_tool_id: str | None = None
 
+        # Track cumulative tokens for live streaming
+        cumulative_input_tokens = 0
+        cumulative_output_tokens = 0
+
         try:
             result_text = ""
             input_tokens = 0
@@ -224,6 +229,15 @@ class ClaudeAgenticAgent:
             async for message in query(prompt=task, options=options):
                 if isinstance(message, AssistantMessage):
                     turns_used += 1
+
+                    # Extract per-turn usage if available
+                    turn_input = 0
+                    turn_output = 0
+                    if hasattr(message, "usage") and message.usage:
+                        turn_input = message.usage.get("input_tokens", 0)
+                        turn_output = message.usage.get("output_tokens", 0)
+                        cumulative_input_tokens += turn_input
+                        cumulative_output_tokens += turn_output
 
                     # Process content blocks
                     if hasattr(message, "content") and message.content:
@@ -255,6 +269,15 @@ class ClaudeAgenticAgent:
                                     content=block.text,
                                     is_partial=True,
                                 )
+
+                    # Emit TurnCompleted with live token counts
+                    yield TurnCompleted(
+                        turn_number=turns_used,
+                        input_tokens=turn_input,
+                        output_tokens=turn_output,
+                        cumulative_input_tokens=cumulative_input_tokens,
+                        cumulative_output_tokens=cumulative_output_tokens,
+                    )
 
                 elif isinstance(message, ResultMessage):
                     result_text = message.result or ""

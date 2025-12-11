@@ -13,19 +13,26 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agentic_logging import get_logger
 
 from aef_adapters.orchestration import AgenticWorkflowExecutor
+
+if TYPE_CHECKING:
+    from aef_adapters.control import ControlSignal
 from aef_adapters.orchestration.executor import (
+    ExecutionCancelled,
+    ExecutionPaused,
+    ExecutionResumed,
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
     ToolBlockedExecution,
     ToolStarted,
     ToolUsed,
+    TurnUpdate,
     WorkflowCompleted,
     WorkflowFailed,
     WorkflowStarted,
@@ -133,13 +140,22 @@ class ExecutionService:
             tracker[execution_id]["total_phases"] = len(workflow_def.phases)
             tracker[execution_id]["status"] = "running"
 
-            # Create executor - imports are at top level, fail fast if not available
+            # Create executor with control signal checker
+            from aef_dashboard.services.control import get_signal_adapter
+
+            signal_adapter = get_signal_adapter()
+
+            async def check_signal(exec_id: str) -> ControlSignal | None:
+                """Check for control signals (pause/resume/cancel)."""
+                return await signal_adapter.get_signal(exec_id)
+
             executor = AgenticWorkflowExecutor(
                 agent_factory=get_agentic_agent,
                 workspace_factory=get_workspace,  # type: ignore[arg-type]
                 base_workspace_path=self._base_workspace_path,
                 default_provider=provider,
                 default_max_budget_usd=max_budget_usd,
+                control_signal_checker=check_signal,
             )
 
             # Execute and stream events
@@ -260,6 +276,33 @@ class ExecutionService:
                         failed_phase_id=event.failed_phase_id,
                         completed_phases=event.completed_phases,
                         total_phases=event.total_phases,
+                    )
+
+                elif isinstance(event, ExecutionPaused):
+                    tracker[execution_id]["status"] = "paused"
+                    # Emit ExecutionPaused domain event
+                    await self._pause_workflow_execution(
+                        execution_id=event.execution_id,
+                        phase_id=event.phase_id,
+                        reason=event.reason,
+                    )
+
+                elif isinstance(event, ExecutionResumed):
+                    tracker[execution_id]["status"] = "running"
+                    # Emit ExecutionResumed domain event
+                    await self._resume_workflow_execution(
+                        execution_id=event.execution_id,
+                        phase_id=event.phase_id,
+                    )
+
+                elif isinstance(event, ExecutionCancelled):
+                    tracker[execution_id]["status"] = "cancelled"
+                    tracker[execution_id]["completed_at"] = datetime.now(UTC)
+                    # Emit ExecutionCancelled domain event
+                    await self._cancel_workflow_execution(
+                        execution_id=event.execution_id,
+                        phase_id=event.phase_id,
+                        reason=event.reason,
                     )
 
         except Exception as e:
@@ -473,6 +516,58 @@ class ExecutionService:
                     "reason": event.reason,
                     "validator": event.validator,
                     "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        elif isinstance(event, TurnUpdate):
+            # Push turn_update for live token streaming
+            push_event(
+                "turn_update",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "turn_number": event.turn_number,
+                    "input_tokens": event.input_tokens,
+                    "output_tokens": event.output_tokens,
+                    "cumulative_input_tokens": event.cumulative_input_tokens,
+                    "cumulative_output_tokens": event.cumulative_output_tokens,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        elif isinstance(event, ExecutionPaused):
+            push_event(
+                "execution_paused",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "paused_at": event.paused_at.isoformat(),
+                    "reason": event.reason,
+                },
+            )
+
+        elif isinstance(event, ExecutionResumed):
+            push_event(
+                "execution_resumed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "resumed_at": event.resumed_at.isoformat(),
+                },
+            )
+
+        elif isinstance(event, ExecutionCancelled):
+            push_event(
+                "execution_cancelled",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "cancelled_at": event.cancelled_at.isoformat(),
+                    "reason": event.reason,
                 },
             )
 
@@ -1172,5 +1267,144 @@ class ExecutionService:
         except Exception as e:
             logger.error(
                 "Failed to record workflow execution failure",
+                extra={"execution_id": execution_id, "error": str(e)},
+            )
+
+    async def _pause_workflow_execution(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str | None,
+    ) -> None:
+        """Pause workflow execution using the aggregate pattern.
+
+        This loads the WorkflowExecutionAggregate and emits
+        ExecutionPausedEvent to the event store.
+        """
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            PauseExecutionCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+            aggregate = await repository.get_by_id(execution_id)
+
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for pause",
+                    extra={"execution_id": execution_id},
+                )
+                return
+
+            command = PauseExecutionCommand(
+                execution_id=execution_id,
+                phase_id=phase_id,
+                reason=reason,
+            )
+            aggregate._handle_command(command)
+
+            await repository.save(aggregate)
+
+            logger.info(
+                "Paused workflow execution via aggregate",
+                extra={"execution_id": execution_id, "phase_id": phase_id},
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to pause workflow execution",
+                extra={"execution_id": execution_id, "error": str(e)},
+            )
+
+    async def _resume_workflow_execution(
+        self,
+        execution_id: str,
+        phase_id: str,
+    ) -> None:
+        """Resume workflow execution using the aggregate pattern.
+
+        This loads the WorkflowExecutionAggregate and emits
+        ExecutionResumedEvent to the event store.
+        """
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            ResumeExecutionCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+            aggregate = await repository.get_by_id(execution_id)
+
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for resume",
+                    extra={"execution_id": execution_id},
+                )
+                return
+
+            command = ResumeExecutionCommand(
+                execution_id=execution_id,
+                phase_id=phase_id,
+            )
+            aggregate._handle_command(command)
+
+            await repository.save(aggregate)
+
+            logger.info(
+                "Resumed workflow execution via aggregate",
+                extra={"execution_id": execution_id, "phase_id": phase_id},
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to resume workflow execution",
+                extra={"execution_id": execution_id, "error": str(e)},
+            )
+
+    async def _cancel_workflow_execution(
+        self,
+        execution_id: str,
+        phase_id: str,
+        reason: str | None,
+    ) -> None:
+        """Cancel workflow execution using the aggregate pattern.
+
+        This loads the WorkflowExecutionAggregate and emits
+        ExecutionCancelledEvent to the event store.
+        """
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            CancelExecutionCommand,
+        )
+
+        try:
+            repository = get_workflow_execution_repository()
+            aggregate = await repository.get_by_id(execution_id)
+
+            if aggregate is None:
+                logger.warning(
+                    "Workflow execution not found for cancel",
+                    extra={"execution_id": execution_id},
+                )
+                return
+
+            command = CancelExecutionCommand(
+                execution_id=execution_id,
+                phase_id=phase_id,
+                reason=reason,
+            )
+            aggregate._handle_command(command)
+
+            await repository.save(aggregate)
+
+            logger.info(
+                "Cancelled workflow execution via aggregate",
+                extra={"execution_id": execution_id, "phase_id": phase_id},
+            )
+
+        except Exception as e:
+            logger.error(
+                "Failed to cancel workflow execution",
                 extra={"execution_id": execution_id, "error": str(e)},
             )

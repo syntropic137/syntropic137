@@ -28,8 +28,9 @@ Example:
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable  # noqa: TC003 - used at runtime
+from collections.abc import AsyncIterator, Awaitable, Callable  # noqa: TC003 - used at runtime
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -44,6 +45,7 @@ from aef_adapters.agents.agentic_types import (
     ToolBlocked,
     ToolUseCompleted,
     ToolUseStarted,
+    TurnCompleted,
     Workspace,
     WorkspaceConfig,
 )
@@ -52,9 +54,14 @@ from aef_adapters.artifacts import ArtifactBundle, ArtifactType, PhaseContext
 if TYPE_CHECKING:
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
     from aef_adapters.collector import CollectorClient
+    from aef_adapters.control import ControlSignal
     from aef_adapters.workspaces.protocol import WorkspaceProtocol
 
 logger = logging.getLogger(__name__)
+
+# Control signal polling interval (seconds)
+# Used when execution is paused waiting for resume/cancel signal
+CONTROL_SIGNAL_POLL_INTERVAL = 0.5
 
 
 # ============================================================================
@@ -206,6 +213,59 @@ class ToolBlockedExecution:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+@dataclass(frozen=True)
+class TurnUpdate:
+    """Emitted after each agent turn with live token metrics.
+
+    This event enables real-time token streaming in the UI.
+    Emitted after each AssistantMessage from the agent.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    turn_number: int
+    # Per-turn tokens
+    input_tokens: int = 0
+    output_tokens: int = 0
+    # Cumulative totals for this phase
+    cumulative_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
+class ExecutionPaused:
+    """Emitted when execution is paused via control plane."""
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    paused_at: datetime
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionResumed:
+    """Emitted when execution resumes after being paused."""
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    resumed_at: datetime
+
+
+@dataclass(frozen=True)
+class ExecutionCancelled:
+    """Emitted when execution is cancelled via control plane."""
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    cancelled_at: datetime
+    reason: str | None = None
+
+
 # Union type for all execution events
 ExecutionEvent = (
     WorkflowStarted
@@ -217,6 +277,10 @@ ExecutionEvent = (
     | ToolStarted
     | ToolUsed
     | ToolBlockedExecution
+    | ExecutionPaused
+    | ExecutionResumed
+    | ExecutionCancelled
+    | TurnUpdate
 )
 
 
@@ -358,6 +422,7 @@ class AgenticWorkflowExecutor:
         default_max_turns: int = 50,
         default_max_budget_usd: float | None = None,
         collector_url: str | None = None,
+        control_signal_checker: Callable[[str], Awaitable[ControlSignal | None]] | None = None,
     ) -> None:
         """Initialize the executor.
 
@@ -370,6 +435,8 @@ class AgenticWorkflowExecutor:
             default_max_budget_usd: Default max budget per phase.
             collector_url: Optional URL for Collector service (observability).
                           When set, tool events are sent to the Collector.
+            control_signal_checker: Optional callback to check for control signals
+                          (pause/resume/cancel). Called after each tool event.
         """
         self._agent_factory = agent_factory
         self._workspace_factory = workspace_factory
@@ -379,6 +446,7 @@ class AgenticWorkflowExecutor:
         self._default_max_budget_usd = default_max_budget_usd
         self._collector_url = collector_url
         self._collector: CollectorClient | None = None
+        self._check_signal = control_signal_checker
 
     async def execute(
         self,
@@ -666,6 +734,51 @@ class AgenticWorkflowExecutor:
                     error=event.error,
                 )
 
+                # Check for control signals after each tool event
+                if self._check_signal:
+                    from aef_adapters.control import ControlSignalType
+
+                    signal = await self._check_signal(ctx.execution_id)
+                    if signal:
+                        if signal.signal_type == ControlSignalType.PAUSE:
+                            yield ExecutionPaused(
+                                workflow_id=ctx.workflow_id,
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                paused_at=datetime.now(UTC),
+                                reason=signal.reason,
+                            )
+                            # Wait for resume or cancel signal
+                            while True:
+                                await asyncio.sleep(CONTROL_SIGNAL_POLL_INTERVAL)
+                                signal = await self._check_signal(ctx.execution_id)
+                                if signal and signal.signal_type == ControlSignalType.RESUME:
+                                    yield ExecutionResumed(
+                                        workflow_id=ctx.workflow_id,
+                                        execution_id=ctx.execution_id,
+                                        phase_id=phase.phase_id,
+                                        resumed_at=datetime.now(UTC),
+                                    )
+                                    break
+                                if signal and signal.signal_type == ControlSignalType.CANCEL:
+                                    yield ExecutionCancelled(
+                                        workflow_id=ctx.workflow_id,
+                                        execution_id=ctx.execution_id,
+                                        phase_id=phase.phase_id,
+                                        cancelled_at=datetime.now(UTC),
+                                        reason=signal.reason,
+                                    )
+                                    return  # Exit phase execution
+                        elif signal.signal_type == ControlSignalType.CANCEL:
+                            yield ExecutionCancelled(
+                                workflow_id=ctx.workflow_id,
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                cancelled_at=datetime.now(UTC),
+                                reason=signal.reason,
+                            )
+                            return  # Exit phase execution
+
             elif isinstance(event, ToolBlocked):
                 # Send tool_blocked to Collector
                 if self._collector:
@@ -692,6 +805,72 @@ class AgenticWorkflowExecutor:
                     validator=event.validator,
                     timestamp=event.timestamp,
                 )
+
+            elif isinstance(event, TurnCompleted):
+                # Emit live token update for real-time UI streaming
+                yield TurnUpdate(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    turn_number=event.turn_number,
+                    input_tokens=event.input_tokens,
+                    output_tokens=event.output_tokens,
+                    cumulative_input_tokens=event.cumulative_input_tokens,
+                    cumulative_output_tokens=event.cumulative_output_tokens,
+                    timestamp=event.timestamp,
+                )
+
+                # Check for control signals between turns (pause/cancel)
+                if self._check_signal:
+                    from aef_adapters.control import ControlSignalType
+
+                    signal = await self._check_signal(ctx.execution_id)
+                    if signal:
+                        if signal.signal_type == ControlSignalType.CANCEL:
+                            yield ExecutionCancelled(
+                                workflow_id=ctx.workflow_id,
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                cancelled_at=datetime.now(UTC),
+                                reason=signal.reason,
+                            )
+                            return  # Exit execution
+
+                        elif signal.signal_type == ControlSignalType.PAUSE:
+                            yield ExecutionPaused(
+                                workflow_id=ctx.workflow_id,
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                paused_at=datetime.now(UTC),
+                                reason=signal.reason,
+                            )
+                            # Wait for resume signal
+                            while True:
+                                await asyncio.sleep(CONTROL_SIGNAL_POLL_INTERVAL)
+                                resume_signal = await self._check_signal(ctx.execution_id)
+                                if (
+                                    resume_signal
+                                    and resume_signal.signal_type == ControlSignalType.RESUME
+                                ):
+                                    yield ExecutionResumed(
+                                        workflow_id=ctx.workflow_id,
+                                        execution_id=ctx.execution_id,
+                                        phase_id=phase.phase_id,
+                                        resumed_at=datetime.now(UTC),
+                                    )
+                                    break
+                                elif (
+                                    resume_signal
+                                    and resume_signal.signal_type == ControlSignalType.CANCEL
+                                ):
+                                    yield ExecutionCancelled(
+                                        workflow_id=ctx.workflow_id,
+                                        execution_id=ctx.execution_id,
+                                        phase_id=phase.phase_id,
+                                        cancelled_at=datetime.now(UTC),
+                                        reason=resume_signal.reason,
+                                    )
+                                    return
 
             elif isinstance(event, TaskCompleted):
                 result_text = event.result

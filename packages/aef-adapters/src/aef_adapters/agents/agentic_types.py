@@ -187,6 +187,28 @@ class TextOutput:
 
 
 @dataclass(frozen=True)
+class TurnCompleted:
+    """Agent completed a turn (one API round-trip).
+
+    Emitted after each AssistantMessage with per-turn token usage.
+    This enables live token streaming during execution.
+    """
+
+    event_type: str = field(default="turn_completed", init=False)
+    turn_number: int = 0
+
+    # Per-turn token usage
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+    # Cumulative totals so far
+    cumulative_input_tokens: int = 0
+    cumulative_output_tokens: int = 0
+
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
 class TaskCompleted:
     """Agent completed the task.
 
@@ -240,6 +262,7 @@ AgentEvent = (
     | ToolBlocked
     | ThinkingUpdate
     | TextOutput
+    | TurnCompleted
     | TaskCompleted
     | TaskFailed
 )
