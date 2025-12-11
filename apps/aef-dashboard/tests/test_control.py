@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import pytest
 from starlette.testclient import TestClient
 
+import aef_dashboard.api.control as control_api_module
+import aef_dashboard.services.control as control_module
 from aef_adapters.control import ExecutionController, ExecutionState
 from aef_adapters.control.adapters.memory import (
     InMemoryControlStateAdapter,
     InMemorySignalQueueAdapter,
 )
 from aef_dashboard.main import app
-import aef_dashboard.api.control as control_api_module
-import aef_dashboard.services.control as control_module
 
 if TYPE_CHECKING:
-    pass
-
+    from collections.abc import Iterator
 
 # Module-level test adapters (reset per test)
 _test_state_adapter: InMemoryControlStateAdapter | None = None
