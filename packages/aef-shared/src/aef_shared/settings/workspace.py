@@ -178,6 +178,26 @@ class WorkspaceSecuritySettings(BaseSettings):
             return []
         return [h.strip() for h in self.allowed_hosts.split(",") if h.strip()]
 
+    def get_docker_memory(self) -> str:
+        """Get memory limit in Docker format.
+
+        Converts Kubernetes format (512Mi, 1Gi) to Docker format (512m, 1g).
+        Docker only accepts lowercase 'm', 'g' suffixes without 'i'.
+        """
+        mem = self.max_memory.strip()
+        # Convert Kubernetes binary units to Docker format
+        # Ki -> k, Mi -> m, Gi -> g (Docker uses lowercase)
+        if mem.endswith("Ki"):
+            return mem[:-2] + "k"
+        if mem.endswith("Mi"):
+            return mem[:-2] + "m"
+        if mem.endswith("Gi"):
+            return mem[:-2] + "g"
+        if mem.endswith("Ti"):
+            return mem[:-2] + "t"
+        # Already in Docker format or plain bytes
+        return mem.lower()
+
 
 class WorkspaceSettings(BaseSettings):
     """Workspace isolation backend configuration.
@@ -267,10 +287,12 @@ class WorkspaceSettings(BaseSettings):
     # =========================================================================
 
     docker_image: str = Field(
-        default="aef-workspace:latest",
+        default="python:3.12-slim",
         description=(
             "Docker image for container-based backends. "
-            "Should include Python, uv, and pre-configured hooks."
+            "Default: python:3.12-slim (widely available). "
+            "For production, build and use 'aef-workspace:latest' with "
+            "pre-configured hooks and tools."
         ),
     )
 

@@ -123,11 +123,11 @@ class HardenedDockerWorkspace(GVisorWorkspace):
         else:
             cmd.extend(["--network", network])
 
-        # Resource limits
+        # Resource limits (use Docker format for memory, not Kubernetes format)
         cmd.extend(
             [
                 "--memory",
-                security.max_memory,
+                security.get_docker_memory(),
                 "--cpus",
                 str(security.max_cpu),
                 "--pids-limit",
