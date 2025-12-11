@@ -59,9 +59,12 @@ class ApiError extends Error {
 }
 
 class NetworkError extends Error {
-  constructor(message: string, public readonly originalError?: Error) {
+  readonly originalError?: Error;
+
+  constructor(message: string, originalError?: Error) {
     super(message);
     this.name = 'NetworkError';
+    this.originalError = originalError;
   }
 }
 
