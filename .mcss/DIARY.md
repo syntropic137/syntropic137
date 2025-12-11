@@ -2,6 +2,87 @@
 
 ---
 
+## 2025-12-06 — Primitives Directory Restructure Complete
+
+### Objective
+
+Restructure the `agentic-primitives` directory layout to align with Claude Code's `.claude/` standard, removing the unnecessary `prompts/` layer and placing types directly under `v1/`.
+
+### Where I Left Off
+
+🎉 **Both repos fully synced!** Primitives restructure complete with all 10 milestones delivered.
+
+### Completed Actions
+
+**Agentic-Primitives (PR #22):**
+1. ✅ Created ADR-021: Primitives Directory Structure Standard
+2. ✅ Updated ADR-019 and ADR-020 for new paths
+3. ✅ Restructured test fixtures to new layout
+4. ✅ Updated 12 CLI source files for path detection
+5. ✅ Moved all 14 primitives using `git mv`
+6. ✅ Rebuilt `.claude/` output with new manifest
+7. ✅ Updated README with terminology table
+8. ✅ All 22 tests passing, all validations green
+9. ✅ PR merged with squash
+
+**AEF (PR #9):**
+10. ✅ Updated submodule to merged main
+11. ✅ Synced `.claude/` with new primitives
+12. ✅ Fixed ruff lint issues (27 auto-fixed, 2 noqa)
+13. ✅ Fixed duplicate skills in skills.json
+14. ✅ All CI checks passing (5/5)
+15. ✅ PR merged with squash
+
+**New Directory Structure:**
+```
+primitives/v1/
+├── commands/           # User-invoked (/command)
+│   ├── devops/        # commit, merge, push
+│   ├── docs/          # doc-scraper
+│   ├── meta/          # Meta-prompts (prompt generators)
+│   ├── qa/            # pre-commit-qa, qa-setup, review
+│   ├── review/        # fetch
+│   └── workflow/      # merge-cycle
+├── skills/            # Referenced (prioritize)
+├── agents/            # Personas (empty, ready)
+├── tools/             # MCP (firecrawl-scraper)
+└── hooks/             # Lifecycle handlers
+```
+
+### QA Results
+- **agentic-primitives:** 22 tests, 14 primitives validated
+- **AEF:** 469 tests, all CI checks green
+- Both repos at identical commits with origin
+
+### Commits
+
+**agentic-primitives:**
+```
+f362fb9 refactor: restructure primitives directory to match Claude Code .claude/ standard (#22)
+```
+
+**AEF:**
+```
+e0d242f chore: sync primitives with restructured directory layout (#9)
+```
+
+### Notes / Insights
+
+- **Merge-cycle workflow worked!** Successfully used `/workflow/merge-cycle` command to automate PR flow
+- **Branch protection requires PRs:** AEF main branch enforces PR-based changes
+- **Copilot reviews helpful:** Caught duplicate skills in skills.json
+- **Pre-existing issues:** Dashboard build has TypeScript import issue (unrelated to restructure)
+
+### Next Steps Identified
+
+1. **Context Size Tracking:** Track `context_size`, `total_tokens_in/out` per session
+2. **Tool Usage Observability:** Backend events for all tool invocations
+3. **Docker Workspace:** Sandboxed agent execution environment
+4. **Automated Engineering:** Full issue→merge workflow automation
+5. **Training Data:** Capture valuable dev sessions as training examples
+
+---
+
 ## 2025-12-03 — Event Subscriptions & Agentic SDK Full Integration
 
 ### Objective

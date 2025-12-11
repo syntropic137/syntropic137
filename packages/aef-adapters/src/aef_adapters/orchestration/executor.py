@@ -41,7 +41,9 @@ from aef_adapters.agents.agentic_types import (
     AgentExecutionConfig,
     TaskCompleted,
     TaskFailed,
+    ToolBlocked,
     ToolUseCompleted,
+    ToolUseStarted,
     Workspace,
     WorkspaceConfig,
 )
@@ -49,6 +51,7 @@ from aef_adapters.artifacts import ArtifactBundle, ArtifactType, PhaseContext
 
 if TYPE_CHECKING:
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
+    from aef_adapters.collector import CollectorClient
     from aef_adapters.workspaces.protocol import WorkspaceProtocol
 
 logger = logging.getLogger(__name__)
@@ -148,6 +151,23 @@ class WorkflowFailed:
 
 
 @dataclass(frozen=True)
+class ToolStarted:
+    """Emitted when a tool execution begins during a phase.
+
+    This event enables real-time tracking of tool execution in the UI
+    via SSE. Pattern 2 (ADR-018) - observability events.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    tool_name: str
+    tool_use_id: str | None = None
+    tool_input: dict[str, Any] | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass(frozen=True)
 class ToolUsed:
     """Emitted when a tool completes execution during a phase.
 
@@ -168,6 +188,24 @@ class ToolUsed:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
+@dataclass(frozen=True)
+class ToolBlockedExecution:
+    """Emitted when a tool is blocked by a validator during a phase.
+
+    This event enables real-time tracking of blocked tools in the UI
+    via SSE. Pattern 2 (ADR-018) - observability events.
+    """
+
+    workflow_id: str
+    execution_id: str
+    phase_id: str
+    tool_name: str
+    tool_use_id: str | None = None
+    reason: str = ""
+    validator: str | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
 # Union type for all execution events
 ExecutionEvent = (
     WorkflowStarted
@@ -176,7 +214,9 @@ ExecutionEvent = (
     | PhaseFailed
     | WorkflowCompleted
     | WorkflowFailed
+    | ToolStarted
     | ToolUsed
+    | ToolBlockedExecution
 )
 
 
@@ -294,12 +334,14 @@ class AgenticWorkflowExecutor:
     - Streams execution events
     - Manages workspaces per execution
     - Handles artifact bundles for context flow
+    - Sends tool events to Collector for observability (when configured)
 
     Example:
         executor = AgenticWorkflowExecutor(
             agent_factory=get_agentic_agent,
             workspace_factory=LocalWorkspace.create,
             base_workspace_path=Path("/tmp/aef-workspaces"),
+            collector_url="http://localhost:8080",  # Optional
         )
 
         async for event in executor.execute(workflow, {"topic": "AI agents"}):
@@ -315,6 +357,7 @@ class AgenticWorkflowExecutor:
         default_provider: str = "claude",
         default_max_turns: int = 50,
         default_max_budget_usd: float | None = None,
+        collector_url: str | None = None,
     ) -> None:
         """Initialize the executor.
 
@@ -325,6 +368,8 @@ class AgenticWorkflowExecutor:
             default_provider: Default agent provider.
             default_max_turns: Default max turns per phase.
             default_max_budget_usd: Default max budget per phase.
+            collector_url: Optional URL for Collector service (observability).
+                          When set, tool events are sent to the Collector.
         """
         self._agent_factory = agent_factory
         self._workspace_factory = workspace_factory
@@ -332,6 +377,8 @@ class AgenticWorkflowExecutor:
         self._default_provider = default_provider
         self._default_max_turns = default_max_turns
         self._default_max_budget_usd = default_max_budget_usd
+        self._collector_url = collector_url
+        self._collector: CollectorClient | None = None
 
     async def execute(
         self,
@@ -352,6 +399,41 @@ class AgenticWorkflowExecutor:
         Yields:
             ExecutionEvent instances as execution progresses.
         """
+        # Initialize collector client if URL is configured
+        if self._collector_url and self._collector is None:
+            from aef_adapters.collector import CollectorClient
+
+            self._collector = CollectorClient(
+                collector_url=self._collector_url,
+                agent_id=f"executor-{workflow.workflow_id[:8]}",
+            )
+            await self._collector.start()
+            logger.info(
+                "Collector client started for observability",
+                extra={"collector_url": self._collector_url},
+            )
+
+        try:
+            async for event in self._execute_workflow(workflow, inputs, execution_id, provider):
+                yield event
+        finally:
+            # Flush and close collector on completion
+            if self._collector:
+                try:
+                    await self._collector.close()
+                    logger.debug("Collector client closed")
+                except Exception as e:
+                    logger.warning("Failed to close collector client: %s", e)
+                self._collector = None
+
+    async def _execute_workflow(
+        self,
+        workflow: WorkflowDefinition,
+        inputs: dict[str, Any],
+        execution_id: str | None,
+        provider: str | None,
+    ) -> AsyncIterator[ExecutionEvent]:
+        """Internal workflow execution logic."""
         # Initialize context
         ctx = ExecutionContext(
             workflow_id=workflow.workflow_id,
@@ -515,15 +597,57 @@ class AgenticWorkflowExecutor:
         )
 
         # Execute agent
+        # Use execution_id as session_id for collector correlation
+        session_id = ctx.execution_id
         result_text = ""
         input_tokens = 0
         output_tokens = 0
         tool_call_count = 0
 
         async for event in agent.execute(task, workspace, config):
-            if isinstance(event, ToolUseCompleted):
+            if isinstance(event, ToolUseStarted):
+                # Send tool_execution_started to Collector for observability
+                if self._collector:
+                    try:
+                        await self._collector.send_tool_started(
+                            session_id=session_id,
+                            tool_name=event.tool_name,
+                            tool_use_id=event.tool_use_id or "",
+                            tool_input=event.tool_input,
+                            timestamp=event.timestamp,
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to send tool_started to collector: %s", e)
+
+                # Yield for SSE real-time tracking (Pattern 2)
+                yield ToolStarted(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    tool_name=event.tool_name,
+                    tool_use_id=event.tool_use_id,
+                    tool_input=event.tool_input,
+                    timestamp=event.timestamp,
+                )
+
+            elif isinstance(event, ToolUseCompleted):
                 # Emit tool used event for real-time tracking with full observability
                 tool_call_count += 1
+
+                # Send tool_execution_completed to Collector
+                if self._collector:
+                    try:
+                        await self._collector.send_tool_completed(
+                            session_id=session_id,
+                            tool_name=event.tool_name,
+                            tool_use_id=event.tool_use_id or "",
+                            duration_ms=int(event.duration_ms),
+                            success=event.success,
+                            error_message=event.error,
+                            timestamp=event.timestamp,
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to send tool_completed to collector: %s", e)
 
                 # Truncate long tool outputs (keep under 10KB for storage)
                 tool_output = event.tool_output
@@ -540,6 +664,33 @@ class AgenticWorkflowExecutor:
                     tool_output=tool_output,
                     duration_ms=event.duration_ms,
                     error=event.error,
+                )
+
+            elif isinstance(event, ToolBlocked):
+                # Send tool_blocked to Collector
+                if self._collector:
+                    try:
+                        await self._collector.send_tool_blocked(
+                            session_id=session_id,
+                            tool_name=event.tool_name,
+                            tool_use_id=event.tool_use_id or "",
+                            reason=event.reason,
+                            validator_name=event.validator,
+                            timestamp=event.timestamp,
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to send tool_blocked to collector: %s", e)
+
+                # Yield for SSE real-time tracking (Pattern 2)
+                yield ToolBlockedExecution(
+                    workflow_id=ctx.workflow_id,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    tool_name=event.tool_name,
+                    tool_use_id=event.tool_use_id,
+                    reason=event.reason,
+                    validator=event.validator,
+                    timestamp=event.timestamp,
                 )
 
             elif isinstance(event, TaskCompleted):

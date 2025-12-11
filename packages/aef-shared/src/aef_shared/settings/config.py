@@ -208,7 +208,27 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # HOOKS (Observability)
+    # COLLECTOR (Observability) - See ADR-017, ADR-018
+    # =========================================================================
+
+    collector_url: str | None = Field(
+        default=None,
+        description=(
+            "URL for the Collector service (Pattern 2: Event Log + CQRS). "
+            "Format: http://host:port "
+            "For local dev: http://localhost:8080 "
+            "For Docker: http://collector:8080 "
+            "When not set, tool events are not sent to collector."
+        ),
+    )
+
+    collector_api_key: SecretStr | None = Field(
+        default=None,
+        description="API key for Collector service authentication (optional).",
+    )
+
+    # =========================================================================
+    # HOOKS (Observability) - Legacy
     # =========================================================================
 
     hook_backend_url: str | None = Field(
