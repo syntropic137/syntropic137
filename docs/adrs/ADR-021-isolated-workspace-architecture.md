@@ -291,6 +291,141 @@ See: `PROJECT-PLAN_20251211_ISOLATED-WORKSPACE-ARCHITECTURE.md`
 8. **Documentation**: ADR, usage guides, runbooks
 9. **Testing**: Security tests, scale tests, benchmarks
 
+## POC Findings (2025-12-11)
+
+Proof-of-concept testing validated the isolated workspace architecture:
+
+### Test Results
+
+| Test | Status | Duration | Notes |
+|------|--------|----------|-------|
+| Network isolation (`--network=none`) | ✅ PASS | <100ms | All external access blocked |
+| Network bridge (`--network=bridge`) | ✅ PASS | <100ms | Can reach external services |
+| GitHub clone in container | ✅ PASS | ~15s | Cloned `octocat/Hello-World` successfully |
+| Claude SDK installation | ✅ PASS | ~8s | `pip install anthropic` works |
+| Package manager (apt-get) | ✅ PASS | ~10s | Can install git, curl, etc. |
+
+### Key Findings
+
+1. **Network Isolation Works**
+   - `--network=none` completely blocks all network access
+   - Agents cannot exfiltrate data when network is disabled
+
+2. **Network Access Required for Coding Agents**
+   - Claude API (`api.anthropic.com`) - for agent execution
+   - GitHub (`github.com`, `api.github.com`) - for repo cloning
+   - Package registries (`pypi.org`, `registry.npmjs.org`) - for dependencies
+
+3. **Allowlist Not Yet Enforced**
+   - Current implementation uses `--network=bridge` which allows ALL hosts
+   - **GAP**: Need egress proxy or iptables rules to enforce allowlist
+
+### Performance Benchmarks
+
+```
+Backend: docker_hardened (macOS)
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃ Metric       ┃  Mean ┃   P95 ┃   P99 ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ Create Time  │ 179ms │ 215ms │ 216ms │
+│ Destroy Time │ 5.53s │ 5.80s │ 5.85s │
+│ Parallel 10x │ 9.54x │   -   │   -   │ ← Near-linear scaling
+└──────────────┴───────┴───────┴───────┘
+```
+
+## Integration Gaps
+
+The following gaps must be closed for production readiness:
+
+### Critical (P0)
+
+| Gap | Current State | Required State | Effort |
+|-----|---------------|----------------|--------|
+| **Egress Filtering** | `--network=bridge` allows all hosts | Allowlist-only egress via proxy | Medium |
+| **API Key Injection** | Not implemented | Secure injection of ANTHROPIC_API_KEY | Small |
+| **Agent Executor Integration** | Uses `LocalWorkspace` | Use `WorkspaceRouter` | Medium |
+| **Dashboard Workspace Events** | Not shown in UI | Display workspace ID, backend, status | Medium |
+
+### High (P1)
+
+| Gap | Current State | Required State | Effort |
+|-----|---------------|----------------|--------|
+| **Pre-warmed Container Pool** | Containers created on-demand | Pool of ready containers | Large |
+| **Artifact Collection** | Basic file copy | Structured artifact extraction | Medium |
+| **Session ↔ Workspace Linkage** | Events separate | Unified session context | Small |
+
+### Medium (P2)
+
+| Gap | Current State | Required State | Effort |
+|-----|---------------|----------------|--------|
+| **Firecracker Production** | Scripts only | Automated kernel/rootfs management | Large |
+| **Container Resource Monitoring** | None | Real-time CPU/memory metrics | Medium |
+| **Workspace Timeout Enforcement** | None | Hard kill after max_execution_time | Small |
+
+## Architecture: Agent Inside Container
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AEF Control Plane (Host)                          │
+│  ┌─────────────┐    ┌──────────────┐    ┌────────────────┐                  │
+│  │ Dashboard   │◀──▶│ Workflow     │◀──▶│ Event Store    │                  │
+│  │ (UI)        │    │ Orchestrator │    │ (PostgreSQL)   │                  │
+│  └─────────────┘    └──────┬───────┘    └────────────────┘                  │
+│                            │                                                 │
+│                   ┌────────▼────────┐                                        │
+│                   │ WorkspaceRouter │                                        │
+│                   └────────┬────────┘                                        │
+└────────────────────────────┼────────────────────────────────────────────────┘
+                             │ docker exec / VM socket
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     Isolated Container / MicroVM                             │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     Claude Agent SDK                                 │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  │   │
+│  │  │ LLM Calls   │  │ Tool Calls  │  │ Hooks       │                  │   │
+│  │  │ (Anthropic) │  │ (Read/Write)│  │ (Validators)│                  │   │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                  │   │
+│  │         │                │                │                          │   │
+│  │         ▼                ▼                ▼                          │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │   │
+│  │  │                    /workspace                                │    │   │
+│  │  │  ├── .context/    (injected prompt, config)                  │    │   │
+│  │  │  ├── .claude/     (hooks, handlers)                          │    │   │
+│  │  │  ├── repo/        (cloned GitHub repository)                 │    │   │
+│  │  │  └── output/      (artifacts to collect)                     │    │   │
+│  │  └─────────────────────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Network: bridge (egress proxy) → api.anthropic.com, github.com only       │
+│  Filesystem: tmpfs with size limit                                          │
+│  Resources: --memory=512m --cpus=0.5 --pids-limit=100                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Egress Proxy Design (TODO)
+
+To enforce the network allowlist, an egress proxy sidecar is needed:
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│  Agent Container    │         │  Egress Proxy       │
+│                     │         │  (Envoy/mitmproxy)  │
+│  --network=none     │◀───────▶│                     │◀───▶ Internet
+│  BUT: connected to  │  unix   │  Allowlist:         │
+│  proxy network      │  socket │  - api.anthropic.com│
+│                     │         │  - github.com       │
+└─────────────────────┘         │  - pypi.org         │
+                                └─────────────────────┘
+```
+
+Options:
+1. **Envoy sidecar**: Full-featured but complex
+2. **mitmproxy**: Simple Python-based, good for prototyping
+3. **iptables + DNS**: Lightweight but harder to maintain
+4. **Cilium/eBPF**: Best for Kubernetes at scale
+
 ## Related ADRs
 
 - **ADR-009**: Agentic Execution Architecture (original workspace design)

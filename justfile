@@ -369,6 +369,21 @@ perf-report:
 demo-workspace-events:
     uv run python scripts/demo_workspace_events.py
 
+# Run isolation POC (tests network, GitHub clone, Claude SDK)
+poc-isolation mode="mock":
+    uv run python scripts/poc_e2e_agent_isolation.py --{{mode}}
+
+# Quick isolation tests (no API key needed)
+poc-isolation-quick:
+    @echo "=== Test 1: Network Isolation ==="
+    docker run --rm --network=none python:3.12-slim sh -c "python -c \"import socket; socket.create_connection(('8.8.8.8', 53), timeout=1)\"" 2>&1 || echo "✓ Network isolation confirmed"
+    @echo ""
+    @echo "=== Test 2: GitHub Clone ==="
+    docker run --rm --network=bridge python:3.12-slim sh -c "apt-get update -qq 2>/dev/null && apt-get install -y -qq git 2>/dev/null && git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && echo '✓ GitHub clone successful'"
+    @echo ""
+    @echo "=== Test 3: Claude SDK Install ==="
+    docker run --rm --network=bridge python:3.12-slim sh -c "pip install -q anthropic && python -c 'from anthropic import Anthropic; print(\"✓ Claude SDK installed\")'"
+
 # --- Package Management ---
 
 # Add a new package to the workspace
