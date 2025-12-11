@@ -138,7 +138,10 @@ async def stream_events(
     - phase_failed: A phase failed with an error
     - workflow_completed: Workflow finished successfully
     - workflow_failed: Workflow failed with error
-    - tool_used: A tool was executed during a phase
+    - tool_used: A tool was executed during a phase (legacy)
+    - tool_execution_started: A tool execution began (Pattern 2)
+    - tool_execution_completed: A tool execution finished (Pattern 2)
+    - tool_blocked: A tool was blocked by a validator (Pattern 2)
     - session_started: An agent session started
     - session_completed: An agent session completed
     - artifact_created: An artifact was created

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -139,6 +140,79 @@ class EventSubscriptionService:
             extra=status,
         )
         return status
+
+    async def health_check(self) -> dict:
+        """Perform health check for subscription service.
+
+        This checks for consistency between saved position and the actual
+        state of projections. Useful for detecting issues after crashes
+        or unexpected shutdowns.
+
+        Returns:
+            Dictionary with health status:
+            - healthy: bool - True if no issues detected
+            - position_saved: int - Last saved position in projection_states
+            - position_in_memory: int - Current position in memory
+            - position_gap: int - Difference between saved and in-memory
+            - warnings: list[str] - Any warnings detected
+        """
+        warnings_list: list[str] = []
+
+        # Get saved position from store
+        try:
+            saved_position = await self._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
+            if saved_position is None:
+                saved_position = 0
+        except Exception as e:
+            saved_position = -1
+            warnings_list.append(f"Failed to read saved position: {e}")
+
+        # Check for position gaps
+        position_gap = abs(self._last_position - (saved_position or 0))
+
+        # If there's a large gap between memory and saved, something might be wrong
+        if position_gap > self._batch_size * 2:
+            warnings_list.append(
+                f"Large gap between saved position ({saved_position}) "
+                f"and in-memory position ({self._last_position})"
+            )
+
+        # Check if service is running but not processing
+        if self._running and not self._caught_up:
+            time_since_event = None
+            if self._last_event_time:
+                time_since_event = (datetime.now(UTC) - self._last_event_time).total_seconds()
+                if time_since_event > 60:  # No events for 60+ seconds
+                    warnings_list.append(
+                        f"Running but no events processed for {time_since_event:.0f}s"
+                    )
+
+        # Check reconnect count (many reconnects might indicate problems)
+        if self._reconnect_count > 10:
+            warnings_list.append(
+                f"High reconnect count ({self._reconnect_count}) - "
+                "possible connectivity or event store issues"
+            )
+
+        health_status = {
+            "healthy": len(warnings_list) == 0,
+            "position_saved": saved_position,
+            "position_in_memory": self._last_position,
+            "position_gap": position_gap,
+            "events_processed": self._events_processed,
+            "reconnect_count": self._reconnect_count,
+            "is_running": self._running,
+            "is_caught_up": self._caught_up,
+            "warnings": warnings_list,
+        }
+
+        logger.log(
+            logging.WARNING if warnings_list else logging.DEBUG,
+            "[SUBSCRIPTION] Health check completed",
+            extra=health_status,
+        )
+
+        return health_status
 
     async def start(self) -> None:
         """Start the subscription service.
@@ -436,6 +510,10 @@ class EventSubscriptionService:
                 break
 
             # Process events
+            # Track the last successfully processed position for this batch
+            last_successful_position = self._last_position
+            dispatch_failed = False
+
             for idx, envelope in enumerate(events):
                 if self._stop_event.is_set():
                     logger.info("[SUBSCRIPTION] 🛑 Catch-up interrupted by stop signal")
@@ -453,16 +531,31 @@ class EventSubscriptionService:
                     },
                 )
 
-                await self._dispatch_event(envelope)
-                events_in_batch += 1
-                total_catchup_events += 1
+                success = await self._dispatch_event(envelope)
                 self._last_event_time = datetime.now(UTC)
 
-                # Update position
-                if envelope.metadata.global_nonce is not None:
-                    self._last_position = envelope.metadata.global_nonce
+                if success:
+                    events_in_batch += 1
+                    total_catchup_events += 1
+                    # ONLY advance position on successful dispatch
+                    if envelope.metadata.global_nonce is not None:
+                        self._last_position = envelope.metadata.global_nonce
+                        last_successful_position = envelope.metadata.global_nonce
+                else:
+                    # Event failed - stop processing this batch
+                    # Position will NOT advance past the failed event
+                    dispatch_failed = True
+                    logger.warning(
+                        "[SUBSCRIPTION] ⚠️ Stopping batch - event dispatch failed",
+                        extra={
+                            "failed_at_position": global_nonce,
+                            "last_successful_position": last_successful_position,
+                            "events_in_batch_before_failure": events_in_batch,
+                        },
+                    )
+                    break
 
-            # Save position periodically during catch-up
+            # Save position periodically during catch-up (only if we had successful events)
             if events_in_batch >= self._batch_size:
                 await self._save_position()
                 events_in_batch = 0
@@ -472,6 +565,22 @@ class EventSubscriptionService:
                         "position": self._last_position,
                         "events_processed": self._events_processed,
                     },
+                )
+
+            # If a dispatch failed, stop catch-up and let retry logic handle it
+            if dispatch_failed:
+                logger.warning(
+                    "[SUBSCRIPTION] ⚠️ Catch-up stopping due to dispatch failure",
+                    extra={
+                        "last_successful_position": last_successful_position,
+                        "will_retry_from": last_successful_position + 1,
+                    },
+                )
+                # Save the last successful position before exiting
+                await self._save_position()
+                raise RuntimeError(
+                    f"Event dispatch failed at position {global_nonce}. "
+                    f"Will retry from position {last_successful_position + 1}"
                 )
 
             # Use explicit end signal instead of heuristic
@@ -537,12 +646,27 @@ class EventSubscriptionService:
                     },
                 )
 
-                await self._dispatch_event(envelope)
-                events_since_save += 1
+                success = await self._dispatch_event(envelope)
 
-                # Update position
-                if envelope.metadata.global_nonce is not None:
-                    self._last_position = envelope.metadata.global_nonce
+                if success:
+                    events_since_save += 1
+                    # ONLY advance position on successful dispatch
+                    if envelope.metadata.global_nonce is not None:
+                        self._last_position = envelope.metadata.global_nonce
+                else:
+                    # Event failed - save current position and let retry logic handle it
+                    logger.warning(
+                        "[SUBSCRIPTION] ⚠️ Live event dispatch failed - triggering reconnect",
+                        extra={
+                            "failed_at_position": global_nonce,
+                            "last_successful_position": self._last_position,
+                        },
+                    )
+                    await self._save_position()
+                    raise RuntimeError(
+                        f"Live event dispatch failed at position {global_nonce}. "
+                        f"Will retry from position {self._last_position + 1}"
+                    )
 
                 # Save position periodically
                 now = datetime.now(UTC)
@@ -592,15 +716,21 @@ class EventSubscriptionService:
             )
             raise
 
-    async def _dispatch_event(self, envelope: object) -> None:
+    async def _dispatch_event(self, envelope: object) -> bool:
         """Dispatch an event to projections via validated envelope.
 
         This uses process_event_envelope() which validates that events
         came through the proper event store channel, enforcing event
         sourcing guarantees.
 
+        IMPORTANT: Position should only be advanced if this returns True.
+        Failed events should be retried on restart, not skipped.
+
         Args:
             envelope: Event envelope from the event store.
+
+        Returns:
+            True if event was successfully dispatched, False otherwise.
         """
         event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
         global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
@@ -620,23 +750,26 @@ class EventSubscriptionService:
                     "total_events_processed": self._events_processed,
                 },
             )
+            return True
 
         except ValueError as e:
-            # Invalid envelope - log but continue
+            # Invalid envelope - log but don't advance position
+            # Event is malformed and can't be processed
             logger.warning(
-                "[SUBSCRIPTION] ⚠️ Invalid event envelope skipped",
+                "[SUBSCRIPTION] ⚠️ Invalid event envelope - position NOT advanced",
                 extra={
                     "error": str(e),
                     "event_type": event_type,
                     "global_nonce": global_nonce,
                 },
             )
+            return False
 
         except Exception as e:
-            # Log error but continue processing
-            # Don't let one bad event break the entire subscription
+            # Projection handler failed - DO NOT advance position
+            # This event should be retried on restart
             logger.error(
-                "[SUBSCRIPTION] ❌ Failed to dispatch event to projections",
+                "[SUBSCRIPTION] ❌ Failed to dispatch event - position NOT advanced",
                 extra={
                     "error": str(e),
                     "error_type": type(e).__name__,
@@ -645,3 +778,4 @@ class EventSubscriptionService:
                 },
                 exc_info=True,
             )
+            return False

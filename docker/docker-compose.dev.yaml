@@ -46,6 +46,30 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  collector:
+    build:
+      context: ../packages/aef-collector
+      dockerfile: Dockerfile
+    container_name: aef-collector
+    environment:
+      EVENT_COLLECTOR_PORT: "8080"
+      EVENTSTORE_HOST: event-store
+      EVENTSTORE_PORT: "50051"
+      EVENT_BATCH_SIZE: "100"
+      EVENT_BATCH_INTERVAL_MS: "1000"
+    ports:
+      - "8080:8080"
+    depends_on:
+      event-store:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
 

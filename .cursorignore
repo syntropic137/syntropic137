@@ -6,6 +6,7 @@
 !_reference/
 # Git worktrees for parallel development
 !.workspaces/
+!worktrees/
 
 # AEF Execution Workspaces (runtime artifacts - large files, pollute context)
 .aef-workspaces/

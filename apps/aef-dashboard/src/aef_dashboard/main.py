@@ -17,6 +17,7 @@ from aef_dashboard.api import (
     execution_router,
     executions_router,
     metrics_router,
+    observability_router,
     sessions_router,
     workflows_router,
 )
@@ -213,6 +214,7 @@ def create_app() -> FastAPI:
     app.include_router(artifacts_router, prefix="/api")
     app.include_router(events_router, prefix="/api")
     app.include_router(metrics_router, prefix="/api")
+    app.include_router(observability_router, prefix="/api")  # Tool/token metrics
 
     @app.get("/")
     async def root() -> dict[str, str]:

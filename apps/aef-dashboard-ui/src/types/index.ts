@@ -85,6 +85,7 @@ export interface OperationInfo {
 export interface SessionResponse {
   id: string
   workflow_id: string | null
+  execution_id: string | null
   phase_id: string | null
   milestone_id: string | null
   agent_provider: string | null
@@ -259,9 +260,18 @@ export interface EventMessage {
   event_type: string
   timestamp: string
   workflow_id: string | null
+  execution_id: string | null
   phase_id: string | null
   session_id: string | null
   data: Record<string, unknown>
+
+  // Tool event properties (for tool_execution_started, tool_execution_completed, tool_blocked)
+  tool_name?: string
+  tool_use_id?: string
+  tool_input?: Record<string, unknown>
+  duration_ms?: number
+  success?: boolean
+  reason?: string
 }
 
 // =============================================================================

@@ -23,6 +23,8 @@ from aef_adapters.orchestration.executor import (
     PhaseCompleted,
     PhaseFailed,
     PhaseStarted,
+    ToolBlockedExecution,
+    ToolStarted,
     ToolUsed,
     WorkflowCompleted,
     WorkflowFailed,
@@ -414,7 +416,37 @@ class ExecutionService:
                 },
             )
 
+        elif isinstance(event, ToolStarted):
+            # Push tool_execution_started to SSE (Pattern 2 real-time)
+            push_event(
+                "tool_execution_started",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "tool_input": event.tool_input,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
         elif isinstance(event, ToolUsed):
+            # Push tool_execution_completed to SSE (Pattern 2 real-time)
+            push_event(
+                "tool_execution_completed",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "success": event.success,
+                    "duration_ms": event.duration_ms,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+            # Also push legacy tool_used for backward compatibility
             push_event(
                 "tool_used",
                 {
@@ -424,6 +456,22 @@ class ExecutionService:
                     "tool_name": event.tool_name,
                     "tool_use_id": event.tool_use_id,
                     "success": event.success,
+                    "timestamp": event.timestamp.isoformat(),
+                },
+            )
+
+        elif isinstance(event, ToolBlockedExecution):
+            # Push tool_blocked to SSE (Pattern 2 real-time)
+            push_event(
+                "tool_blocked",
+                {
+                    "workflow_id": event.workflow_id,
+                    "execution_id": event.execution_id,
+                    "phase_id": event.phase_id,
+                    "tool_name": event.tool_name,
+                    "tool_use_id": event.tool_use_id,
+                    "reason": event.reason,
+                    "validator": event.validator,
                     "timestamp": event.timestamp.isoformat(),
                 },
             )
@@ -527,8 +575,17 @@ class ExecutionService:
     ) -> None:
         """Record a tool completion operation on the session.
 
+        .. deprecated:: 0.3.0
+            Tool events now flow through the Collector service (ADR-018 Pattern 2).
+            Use CollectorClient.send_tool_* methods instead. This method will be
+            removed in v0.4.0. Tool data should be retrieved from ToolTimelineProjection.
+
         This creates an OperationRecordedEvent for each tool call,
         providing full observability including output and timing.
+
+        Note: When Collector is configured, tool events are sent directly
+        from the AgenticWorkflowExecutor. This method remains for backward
+        compatibility with existing sessions that don't use Collector.
 
         Args:
             session_id: The session ID.
@@ -539,6 +596,15 @@ class ExecutionService:
             duration_ms: How long the tool took in milliseconds.
             error: Error message if the tool failed.
         """
+        # TODO: Remove this method in v0.4.0 when all tool events go through Collector
+        import warnings
+
+        warnings.warn(
+            "_record_tool_operation is deprecated. Tool events now flow through "
+            "Collector → ToolTimelineProjection (ADR-018 Pattern 2).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         from aef_adapters.storage.repositories import get_session_repository
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
