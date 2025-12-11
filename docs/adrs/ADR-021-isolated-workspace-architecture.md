@@ -1,6 +1,6 @@
 # ADR-021: Isolated Workspace Architecture
 
-**Status:** Proposed
+**Status:** Accepted (Implemented)
 **Date:** 2025-12-11
 **Deciders:** @neural
 **Tags:** security, isolation, workspaces, scale, firecracker, docker
