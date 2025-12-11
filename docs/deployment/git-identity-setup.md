@@ -49,7 +49,7 @@ export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 ```bash
 # Create a Personal Access Token (PAT) at:
 # https://github.com/settings/tokens/new
-# 
+#
 # Required scopes:
 # - repo (full control)
 # - workflow (if modifying GitHub Actions)
@@ -120,14 +120,14 @@ Author: aef-bot[bot] <bot@aef.dev>
 Date:   Wed Dec 11 19:30:00 2025
 
     feat: implement code review suggestions
-    
+
     Applied by AEF agent
     - Workflow: code-review-workflow
     - Execution: exec-123456
     - Session: session-789
     - Agent: python-pro
     - Timestamp: 2025-12-11T19:30:00Z
-    
+
     Co-authored-by: NeuralEmpowerment <neuralempowerment@gmail.com>
 ```
 

@@ -525,7 +525,7 @@ class GitHubAppConfig:
     app_id: str
     installation_id: str
     private_key: str  # PEM format
-    
+
     def get_installation_token(self) -> str:
         """Get short-lived token from GitHub App."""
         # Generate JWT, exchange for installation token
@@ -546,7 +546,7 @@ Author: aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>
 Date:   Wed Dec 11 19:30:00 2025
 
     feat: implement code review suggestions
-    
+
     Applied by AEF agent in workflow execution #456
 ```
 
