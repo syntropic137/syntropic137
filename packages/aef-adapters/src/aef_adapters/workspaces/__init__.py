@@ -32,6 +32,11 @@ See ADR-021: Isolated Workspace Architecture
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace
 from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
+from aef_adapters.workspaces.events import (
+    WorkspaceEventEmitter,
+    configure_workspace_emitter,
+    get_workspace_emitter,
+)
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace, NonIsolatedWorkspaceError
@@ -56,8 +61,11 @@ __all__ = [
     "LocalWorkspace",
     "NonIsolatedWorkspaceError",
     "RouterStats",
+    "WorkspaceEventEmitter",
     "WorkspaceProtocol",
     "WorkspaceRouter",
+    "configure_workspace_emitter",
+    "get_workspace_emitter",
     "get_workspace_router",
     "reset_workspace_router",
 ]
