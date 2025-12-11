@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
 import pytest
-from fastapi.testclient import TestClient
+from starlette.testclient import TestClient
 
 from aef_adapters.control import ExecutionController, ExecutionState
 from aef_adapters.control.adapters.memory import (
@@ -13,51 +16,59 @@ from aef_adapters.control.adapters.memory import (
 from aef_dashboard.main import app
 import aef_dashboard.services.control as control_module
 
+if TYPE_CHECKING:
+    pass
 
-# In-memory adapters for testing
+
+# Module-level test adapters (reset per test)
 _test_state_adapter: InMemoryControlStateAdapter | None = None
 _test_signal_adapter: InMemorySignalQueueAdapter | None = None
-_test_controller: ExecutionController | None = None
 
 
-def _get_test_adapters() -> tuple[InMemoryControlStateAdapter, InMemorySignalQueueAdapter]:
-    """Get test adapters (creates them if needed)."""
+def _reset_test_adapters() -> tuple[InMemoryControlStateAdapter, InMemorySignalQueueAdapter]:
+    """Reset and return fresh test adapters."""
     global _test_state_adapter, _test_signal_adapter
-    if _test_state_adapter is None:
-        _test_state_adapter = InMemoryControlStateAdapter()
-    if _test_signal_adapter is None:
-        _test_signal_adapter = InMemorySignalQueueAdapter()
+    _test_state_adapter = InMemoryControlStateAdapter()
+    _test_signal_adapter = InMemorySignalQueueAdapter()
     return _test_state_adapter, _test_signal_adapter
 
 
 def _get_test_controller() -> ExecutionController:
-    """Get test controller using in-memory adapters."""
-    global _test_controller
-    if _test_controller is None:
-        state, signal = _get_test_adapters()
-        _test_controller = ExecutionController(state_port=state, signal_port=signal)
-    return _test_controller
+    """Get test controller using current test adapters."""
+    global _test_state_adapter, _test_signal_adapter
+    if _test_state_adapter is None or _test_signal_adapter is None:
+        raise RuntimeError("Test adapters not initialized - use reset_test_adapters fixture")
+    return ExecutionController(state_port=_test_state_adapter, signal_port=_test_signal_adapter)
 
 
 @pytest.fixture(autouse=True)
-def use_test_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Patch control module to use in-memory adapters for tests."""
-    global _test_state_adapter, _test_signal_adapter, _test_controller
+def reset_test_adapters() -> Iterator[None]:
+    """Reset adapters and patch control module for each test."""
+    global _test_state_adapter, _test_signal_adapter
 
-    # Clear caches and reset adapters
+    # Clear any cached controller
     control_module.get_controller.cache_clear()
-    _test_state_adapter = None
-    _test_signal_adapter = None
-    _test_controller = None
 
-    # Patch the factory functions
-    monkeypatch.setattr(control_module, "get_controller", _get_test_controller)
-    monkeypatch.setattr(
-        control_module, "get_state_adapter", lambda: _get_test_adapters()[0]
-    )
-    monkeypatch.setattr(
-        control_module, "get_signal_adapter", lambda: _get_test_adapters()[1]
-    )
+    # Create fresh adapters
+    _reset_test_adapters()
+
+    # Store original functions
+    original_get_controller = control_module.get_controller
+    original_get_state_adapter = control_module.get_state_adapter
+    original_get_signal_adapter = control_module.get_signal_adapter
+
+    # Replace with test versions
+    control_module.get_controller = _get_test_controller  # type: ignore[assignment]
+    control_module.get_state_adapter = lambda: _test_state_adapter  # type: ignore[assignment]
+    control_module.get_signal_adapter = lambda: _test_signal_adapter  # type: ignore[assignment]
+
+    yield
+
+    # Restore originals
+    control_module.get_controller = original_get_controller  # type: ignore[assignment]
+    control_module.get_state_adapter = original_get_state_adapter  # type: ignore[assignment]
+    control_module.get_signal_adapter = original_get_signal_adapter  # type: ignore[assignment]
+    control_module.get_controller.cache_clear()
 
 
 @pytest.fixture
@@ -69,18 +80,22 @@ def client() -> TestClient:
 @pytest.fixture
 async def running_execution() -> str:
     """Create an execution in running state."""
+    global _test_state_adapter
+    if _test_state_adapter is None:
+        raise RuntimeError("Test adapters not initialized")
     execution_id = "test-exec-running"
-    state_adapter, _ = _get_test_adapters()
-    await state_adapter.save_state(execution_id, ExecutionState.RUNNING)
+    await _test_state_adapter.save_state(execution_id, ExecutionState.RUNNING)
     return execution_id
 
 
 @pytest.fixture
 async def paused_execution() -> str:
     """Create an execution in paused state."""
+    global _test_state_adapter
+    if _test_state_adapter is None:
+        raise RuntimeError("Test adapters not initialized")
     execution_id = "test-exec-paused"
-    state_adapter, _ = _get_test_adapters()
-    await state_adapter.save_state(execution_id, ExecutionState.PAUSED)
+    await _test_state_adapter.save_state(execution_id, ExecutionState.PAUSED)
     return execution_id
 
 
