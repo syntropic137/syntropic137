@@ -30,6 +30,7 @@ See ADR-021: Isolated Workspace Architecture
 """
 
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace
+from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace
 from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
@@ -38,6 +39,7 @@ from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceCo
 __all__ = [
     "BaseIsolatedWorkspace",
     "GVisorWorkspace",
+    "HardenedDockerWorkspace",
     "IsolatedWorkspace",
     "IsolatedWorkspaceConfig",
     "IsolatedWorkspaceProtocol",
