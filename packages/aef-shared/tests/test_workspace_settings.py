@@ -13,6 +13,10 @@ import pytest
 
 from aef_shared.settings import (
     CloudProvider,
+    ContainerLoggingSettings,
+    GitCredentialType,
+    GitIdentityResolver,
+    GitIdentitySettings,
     IsolationBackend,
     Settings,
     WorkspaceSecuritySettings,
@@ -135,7 +139,7 @@ class TestWorkspaceSettings:
             assert settings.cloud_api_key is None
 
             # Docker settings
-            assert settings.docker_image == "aef-workspace:latest"
+            assert settings.docker_image == "python:3.12-slim"
             assert settings.docker_runtime == "runsc"
             assert settings.docker_network == "none"
 
@@ -237,3 +241,272 @@ class TestSettingsWorkspaceIntegration:
 
             assert settings.workspace.pool_size == 200
             assert settings.workspace_security.max_memory == "1Gi"
+
+
+# =============================================================================
+# Git Identity Settings Tests
+# =============================================================================
+
+
+class TestGitIdentitySettings:
+    """Test GitIdentitySettings class."""
+
+    def test_default_values(self) -> None:
+        """Default values should be None (unconfigured)."""
+        with patch.dict(os.environ, {}, clear=True):
+            git = GitIdentitySettings(_env_file=None)
+
+            assert git.user_name is None
+            assert git.user_email is None
+            assert git.token is None
+            assert git.github_app_id is None
+            assert git.is_configured is False
+            assert git.has_credentials is False
+            assert git.credential_type == GitCredentialType.NONE
+
+    def test_identity_from_env(self) -> None:
+        """Git identity should load from environment variables."""
+        env = {
+            "AEF_GIT_USER_NAME": "aef-bot[bot]",
+            "AEF_GIT_USER_EMAIL": "bot@aef.dev",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            git = GitIdentitySettings(_env_file=None)
+
+            assert git.user_name == "aef-bot[bot]"
+            assert git.user_email == "bot@aef.dev"
+            assert git.is_configured is True
+            assert git.has_credentials is False
+            assert git.credential_type == GitCredentialType.NONE
+
+    def test_https_credentials(self) -> None:
+        """HTTPS token should be detected as credential type."""
+        env = {
+            "AEF_GIT_USER_NAME": "test-user",
+            "AEF_GIT_USER_EMAIL": "test@example.com",
+            "AEF_GIT_TOKEN": "ghp_test123token",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            git = GitIdentitySettings(_env_file=None)
+
+            assert git.token is not None
+            assert git.token.get_secret_value() == "ghp_test123token"
+            assert git.has_credentials is True
+            assert git.credential_type == GitCredentialType.HTTPS
+
+    def test_github_app_credentials(self) -> None:
+        """GitHub App should be preferred over HTTPS token."""
+        env = {
+            "AEF_GIT_USER_NAME": "test-user",
+            "AEF_GIT_USER_EMAIL": "test@example.com",
+            "AEF_GIT_TOKEN": "ghp_test123token",
+            "AEF_GIT_GITHUB_APP_ID": "12345",
+            "AEF_GIT_GITHUB_APP_INSTALLATION_ID": "67890",
+            "AEF_GIT_GITHUB_APP_PRIVATE_KEY": "base64encodedkey",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            git = GitIdentitySettings(_env_file=None)
+
+            assert git.credential_type == GitCredentialType.GITHUB_APP
+            assert git.github_app_id == "12345"
+            assert git.github_app_installation_id == "67890"
+
+    def test_incomplete_github_app_fails_validation(self) -> None:
+        """Incomplete GitHub App config should raise ValueError."""
+        env = {
+            "AEF_GIT_GITHUB_APP_ID": "12345",
+            # Missing: INSTALLATION_ID and PRIVATE_KEY
+        }
+        with (
+            patch.dict(os.environ, env, clear=True),
+            pytest.raises(ValueError, match="Incomplete GitHub App config"),
+        ):
+            GitIdentitySettings(_env_file=None)
+
+    def test_settings_integration(self) -> None:
+        """Main Settings should provide git_identity property."""
+        env = {
+            "AEF_GIT_USER_NAME": "agent",
+            "AEF_GIT_USER_EMAIL": "agent@aef.dev",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            settings = Settings(_env_file=None)
+
+            assert isinstance(settings.git_identity, GitIdentitySettings)
+            assert settings.git_identity.user_name == "agent"
+
+
+# =============================================================================
+# Container Logging Settings Tests
+# =============================================================================
+
+
+class TestContainerLoggingSettings:
+    """Test ContainerLoggingSettings class."""
+
+    def test_default_values(self) -> None:
+        """Default values should be sensible for production."""
+        with patch.dict(os.environ, {}, clear=True):
+            logging = ContainerLoggingSettings(_env_file=None)
+
+            assert logging.level == "INFO"
+            assert logging.format == "json"
+            assert logging.log_commands is True
+            assert logging.log_tool_calls is True
+            assert logging.log_api_calls is False
+            assert logging.redact_secrets is True
+            assert logging.log_file_path == "/workspace/.logs/agent.jsonl"
+            assert logging.max_log_size_mb == 10
+
+    def test_environment_override(self) -> None:
+        """Environment variables should override defaults."""
+        env = {
+            "AEF_LOGGING_LEVEL": "DEBUG",
+            "AEF_LOGGING_FORMAT": "text",
+            "AEF_LOGGING_LOG_API_CALLS": "true",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            logging = ContainerLoggingSettings(_env_file=None)
+
+            assert logging.level == "DEBUG"
+            assert logging.format == "text"
+            assert logging.log_api_calls is True
+
+    def test_secret_redaction(self) -> None:
+        """redact() should remove sensitive patterns."""
+        with patch.dict(os.environ, {}, clear=True):
+            logging = ContainerLoggingSettings(_env_file=None)
+
+            # Anthropic API key
+            result = logging.redact("key=sk-ant-api03-1234567890")
+            assert "[REDACTED]" in result
+            assert "sk-ant" not in result
+
+            # GitHub PAT (classic)
+            result = logging.redact("token=ghp_1234567890abcdef")
+            assert "[REDACTED]" in result
+            assert "ghp_" not in result
+
+            # GitHub PAT (fine-grained)
+            result = logging.redact("token=github_pat_123_abc")
+            assert "[REDACTED]" in result
+
+            # Password in URL
+            result = logging.redact("postgres://user:password=secret&host=db")
+            assert "[REDACTED]" in result
+            assert "secret" not in result
+
+            # Bearer token
+            result = logging.redact("Authorization: Bearer eyJhbGc.ey.sig")
+            assert "[REDACTED]" in result
+            assert "eyJhbGc" not in result
+
+    def test_redaction_disabled(self) -> None:
+        """Redaction should be skippable (for debugging)."""
+        env = {
+            "AEF_LOGGING_REDACT_SECRETS": "false",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            logging = ContainerLoggingSettings(_env_file=None)
+
+            result = logging.redact("key=sk-ant-api03-1234567890")
+            assert "sk-ant-api03-1234567890" in result  # NOT redacted
+
+    def test_settings_integration(self) -> None:
+        """Main Settings should provide container_logging property."""
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings(_env_file=None)
+
+            assert isinstance(settings.container_logging, ContainerLoggingSettings)
+            assert settings.container_logging.level == "INFO"
+
+
+# =============================================================================
+# Git Identity Resolver Tests
+# =============================================================================
+
+
+class TestGitIdentityResolver:
+    """Test GitIdentityResolver class."""
+
+    def test_workflow_override_takes_precedence(self) -> None:
+        """Workflow override should take precedence over env vars."""
+        env = {
+            "AEF_GIT_USER_NAME": "env-user",
+            "AEF_GIT_USER_EMAIL": "env@example.com",
+        }
+        override = GitIdentitySettings(
+            user_name="workflow-user",
+            user_email="workflow@example.com",
+        )
+
+        with patch.dict(os.environ, env, clear=True):
+            resolver = GitIdentityResolver()
+            result = resolver.resolve(workflow_override=override)
+
+            assert result.user_name == "workflow-user"
+            assert result.user_email == "workflow@example.com"
+
+    def test_env_vars_used_when_no_override(self) -> None:
+        """Environment variables should be used when no override."""
+        env = {
+            "AEF_GIT_USER_NAME": "env-user",
+            "AEF_GIT_USER_EMAIL": "env@example.com",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            resolver = GitIdentityResolver()
+            result = resolver.resolve()
+
+            assert result.user_name == "env-user"
+            assert result.user_email == "env@example.com"
+
+    def test_local_git_config_in_development(self) -> None:
+        """Local git config should be used in development mode."""
+        env = {
+            "APP_ENVIRONMENT": "development",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            resolver = GitIdentityResolver()
+
+            # Mock subprocess to return git config values
+            with patch("subprocess.run") as mock_run:
+                mock_run.side_effect = [
+                    type("Result", (), {"returncode": 0, "stdout": "Local User\n"})(),
+                    type("Result", (), {"returncode": 0, "stdout": "local@dev.com\n"})(),
+                ]
+
+                result = resolver.resolve()
+
+                assert result.user_name == "Local User"
+                assert result.user_email == "local@dev.com"
+
+    def test_raises_when_not_configured_in_production(self) -> None:
+        """Should raise ValueError when not configured in production."""
+        env = {
+            "APP_ENVIRONMENT": "production",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            resolver = GitIdentityResolver()
+
+            with pytest.raises(ValueError, match="Git identity not configured"):
+                resolver.resolve()
+
+    def test_incomplete_override_falls_back(self) -> None:
+        """Incomplete override should fall back to env vars."""
+        env = {
+            "AEF_GIT_USER_NAME": "env-user",
+            "AEF_GIT_USER_EMAIL": "env@example.com",
+        }
+        # Override with only name, no email
+        override = GitIdentitySettings(user_name="partial-user")
+
+        with patch.dict(os.environ, env, clear=True):
+            resolver = GitIdentityResolver()
+            result = resolver.resolve(workflow_override=override)
+
+            # Falls back to env since override is incomplete
+            assert result.user_name == "env-user"
+            assert result.user_email == "env@example.com"

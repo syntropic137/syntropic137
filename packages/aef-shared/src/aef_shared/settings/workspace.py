@@ -9,6 +9,8 @@ See ADR-021: Isolated Workspace Architecture
 Environment Variables:
     AEF_WORKSPACE_* - Workspace backend configuration
     AEF_SECURITY_* - Security policies for all workspaces
+    AEF_GIT_* - Git identity and credentials
+    AEF_LOGGING_* - Container logging configuration
 
 Usage:
     from aef_shared.settings import get_settings
@@ -16,18 +18,25 @@ Usage:
     settings = get_settings()
     backend = settings.workspace.isolation_backend
     max_memory = settings.workspace_security.max_memory
+    git_identity = settings.git_identity
 """
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
+import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from typing import Self
 
 
 class IsolationBackend(str, Enum):
@@ -313,6 +322,390 @@ class WorkspaceSettings(BaseSettings):
             "Use 'bridge' with allowed_hosts for controlled access."
         ),
     )
+
+
+# =============================================================================
+# GIT IDENTITY SETTINGS
+# =============================================================================
+
+
+class GitCredentialType(str, Enum):
+    """Git credential types for authentication."""
+
+    HTTPS = "https"  # Personal Access Token
+    GITHUB_APP = "github_app"  # GitHub App (recommended for production)
+    NONE = "none"  # No credentials (public repos only)
+
+
+class GitIdentitySettings(BaseSettings):
+    """Git identity and credentials for workspace commits.
+
+    Controls git user.name, user.email, and authentication.
+    Agents use these settings to commit code with proper attribution.
+
+    See ADR-021: Isolated Workspace Architecture - Git Identity section.
+
+    Precedence (resolved by GitIdentityResolver):
+    1. Workflow override (if specified)
+    2. Environment variables (AEF_GIT_*)
+    3. Local git config (development only)
+
+    Override via AEF_GIT_* environment variables.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AEF_GIT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # =========================================================================
+    # IDENTITY (Required for commits)
+    # =========================================================================
+
+    user_name: str | None = Field(
+        default=None,
+        description=(
+            "Git committer name (user.name). "
+            "Example: 'aef-bot[bot]' for automated commits. "
+            "Required for commits - will fail if not configured."
+        ),
+    )
+
+    user_email: str | None = Field(
+        default=None,
+        description=(
+            "Git committer email (user.email). "
+            "Example: 'bot@aef.dev' or GitHub noreply address. "
+            "Required for commits - will fail if not configured."
+        ),
+    )
+
+    # =========================================================================
+    # CREDENTIALS (For private repos / push)
+    # =========================================================================
+
+    token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "GitHub Personal Access Token for HTTPS authentication. "
+            "Required scopes: repo (for private repos). "
+            "Get from: https://github.com/settings/tokens "
+            "Stored in ~/.git-credentials inside container."
+        ),
+    )
+
+    # =========================================================================
+    # GITHUB APP (Recommended for production)
+    # =========================================================================
+
+    github_app_id: str | None = Field(
+        default=None,
+        description=(
+            "GitHub App ID for App authentication. "
+            "Preferred for production - better security, no PAT expiry. "
+            "Get from: https://github.com/settings/apps/<app>/general"
+        ),
+    )
+
+    github_app_installation_id: str | None = Field(
+        default=None,
+        description=(
+            "GitHub App Installation ID. Get from: https://github.com/settings/installations/<id>"
+        ),
+    )
+
+    github_app_private_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "GitHub App private key (PEM format, base64-encoded). "
+            "Generate from: https://github.com/settings/apps/<app>/privatekeys "
+            "Encode: base64 -w0 private-key.pem"
+        ),
+    )
+
+    # =========================================================================
+    # COMPUTED PROPERTIES
+    # =========================================================================
+
+    @property
+    def credential_type(self) -> GitCredentialType:
+        """Determine which credential type is configured.
+
+        Returns:
+            GitCredentialType: The active credential type.
+        """
+        if self.github_app_id and self.github_app_installation_id:
+            return GitCredentialType.GITHUB_APP
+        if self.token:
+            return GitCredentialType.HTTPS
+        return GitCredentialType.NONE
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if identity is fully configured for commits."""
+        return bool(self.user_name and self.user_email)
+
+    @property
+    def has_credentials(self) -> bool:
+        """Check if credentials are configured for push."""
+        return self.credential_type != GitCredentialType.NONE
+
+    # =========================================================================
+    # VALIDATION
+    # =========================================================================
+
+    @model_validator(mode="after")
+    def validate_github_app_complete(self) -> Self:
+        """Ensure GitHub App settings are complete if any are provided."""
+        app_fields = [
+            self.github_app_id,
+            self.github_app_installation_id,
+            self.github_app_private_key,
+        ]
+        provided = sum(1 for f in app_fields if f is not None)
+
+        if 0 < provided < 3:
+            missing = []
+            if not self.github_app_id:
+                missing.append("AEF_GIT_GITHUB_APP_ID")
+            if not self.github_app_installation_id:
+                missing.append("AEF_GIT_GITHUB_APP_INSTALLATION_ID")
+            if not self.github_app_private_key:
+                missing.append("AEF_GIT_GITHUB_APP_PRIVATE_KEY")
+            msg = f"Incomplete GitHub App config. Missing: {', '.join(missing)}"
+            raise ValueError(msg)
+
+        return self
+
+
+# =============================================================================
+# CONTAINER LOGGING SETTINGS
+# =============================================================================
+
+
+class ContainerLoggingSettings(BaseSettings):
+    """Logging configuration for container observability.
+
+    Controls how operations inside containers are logged.
+    Logs are ephemeral (tmpfs) and will be streamed to centralized
+    logging service in the future.
+
+    See ADR-021: Isolated Workspace Architecture - Container Observability.
+
+    Key features:
+    - Structured JSON logging for machine parsing
+    - Secret redaction (API keys, tokens, passwords)
+    - Log levels for filtering
+
+    Override via AEF_LOGGING_* environment variables.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AEF_LOGGING_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # =========================================================================
+    # LOG FORMAT
+    # =========================================================================
+
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO",
+        description=(
+            "Minimum log level for container logs. DEBUG for development, INFO for production."
+        ),
+    )
+
+    format: Literal["json", "text"] = Field(
+        default="json",
+        description=(
+            "Log format: 'json' for structured logs (parsing), "
+            "'text' for human-readable (debugging)."
+        ),
+    )
+
+    # =========================================================================
+    # WHAT TO LOG
+    # =========================================================================
+
+    log_commands: bool = Field(
+        default=True,
+        description="Log shell commands executed in container.",
+    )
+
+    log_tool_calls: bool = Field(
+        default=True,
+        description="Log tool calls made by agents.",
+    )
+
+    log_api_calls: bool = Field(
+        default=False,
+        description=("Log API calls (Claude, GitHub, etc). Disabled by default - can be verbose."),
+    )
+
+    # =========================================================================
+    # SECURITY
+    # =========================================================================
+
+    redact_secrets: bool = Field(
+        default=True,
+        description=(
+            "Redact sensitive data in logs (API keys, tokens, passwords). "
+            "ALWAYS enabled in production. Cannot be disabled in prod."
+        ),
+    )
+
+    redaction_patterns: list[str] = Field(
+        default_factory=lambda: [
+            r"sk-ant-[a-zA-Z0-9-]+",  # Anthropic API keys
+            r"sk-[a-zA-Z0-9-]+",  # OpenAI API keys
+            r"ghp_[a-zA-Z0-9]+",  # GitHub PAT (classic)
+            r"github_pat_[a-zA-Z0-9_]+",  # GitHub PAT (fine-grained)
+            r"gho_[a-zA-Z0-9]+",  # GitHub OAuth token
+            r"ghu_[a-zA-Z0-9]+",  # GitHub user token
+            r"ghs_[a-zA-Z0-9]+",  # GitHub server token
+            r"ghr_[a-zA-Z0-9]+",  # GitHub refresh token
+            r"password=[^\s&]+",  # Password in URLs/params
+            r"token=[^\s&]+",  # Token in URLs/params
+            r"api_key=[^\s&]+",  # API key in params
+            r"Bearer [a-zA-Z0-9._-]+",  # Bearer tokens
+        ],
+        description="Regex patterns for secret redaction.",
+    )
+
+    # =========================================================================
+    # STORAGE (Ephemeral by default)
+    # =========================================================================
+
+    log_file_path: str = Field(
+        default="/workspace/.logs/agent.jsonl",
+        description=("Log file path inside container. Directory is created on workspace startup."),
+    )
+
+    max_log_size_mb: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Max log file size in MB before rotation.",
+    )
+
+    # =========================================================================
+    # HELPER METHODS
+    # =========================================================================
+
+    def redact(self, value: str) -> str:
+        """Redact sensitive patterns from a string.
+
+        Args:
+            value: String that may contain secrets.
+
+        Returns:
+            String with secrets replaced by [REDACTED].
+        """
+        if not self.redact_secrets:
+            return value
+
+        result = str(value)
+        for pattern in self.redaction_patterns:
+            result = re.sub(pattern, "[REDACTED]", result, flags=re.IGNORECASE)
+        return result
+
+
+# =============================================================================
+# GIT IDENTITY RESOLVER
+# =============================================================================
+
+
+class GitIdentityResolver:
+    """Resolve git identity using precedence rules.
+
+    Precedence:
+    1. Workflow override (if provided)
+    2. Environment variables (AEF_GIT_*)
+    3. Local git config (development only)
+
+    Usage:
+        resolver = GitIdentityResolver()
+        identity = resolver.resolve()  # From env or git config
+        identity = resolver.resolve(workflow_override)  # With override
+    """
+
+    def resolve(
+        self,
+        workflow_override: GitIdentitySettings | None = None,
+    ) -> GitIdentitySettings:
+        """Resolve git identity using precedence rules.
+
+        Args:
+            workflow_override: Optional settings from workflow definition.
+
+        Returns:
+            GitIdentitySettings with identity resolved.
+
+        Raises:
+            ValueError: If no identity is configured and not in development.
+        """
+        # 1. Workflow override takes precedence
+        if workflow_override and workflow_override.is_configured:
+            return workflow_override
+
+        # 2. Environment variables
+        env_settings = GitIdentitySettings()
+        if env_settings.is_configured:
+            return env_settings
+
+        # 3. Local git config (development only)
+        if os.getenv("APP_ENVIRONMENT", "development") == "development":
+            local_identity = self._from_local_git_config()
+            if local_identity:
+                return local_identity
+
+        # No identity configured
+        msg = (
+            "Git identity not configured. Set AEF_GIT_USER_NAME and "
+            "AEF_GIT_USER_EMAIL environment variables, or use workflow override."
+        )
+        raise ValueError(msg)
+
+    def _from_local_git_config(self) -> GitIdentitySettings | None:
+        """Read git identity from local git config.
+
+        Only used in development mode as a convenience fallback.
+
+        Returns:
+            GitIdentitySettings or None if not configured locally.
+        """
+        try:
+            name = subprocess.run(
+                ["git", "config", "--get", "user.name"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            email = subprocess.run(
+                ["git", "config", "--get", "user.email"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            if name.returncode == 0 and email.returncode == 0:
+                user_name = name.stdout.strip()
+                user_email = email.stdout.strip()
+                if user_name and user_email:
+                    return GitIdentitySettings(
+                        user_name=user_name,
+                        user_email=user_email,
+                    )
+        except FileNotFoundError:
+            # git not installed
+            pass
+
+        return None
 
 
 def get_default_isolation_backend() -> IsolationBackend:

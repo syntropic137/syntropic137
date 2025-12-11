@@ -16,6 +16,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
     from aef_shared.settings.workspace import (
+        ContainerLoggingSettings,
+        GitIdentitySettings,
         WorkspaceSecuritySettings,
         WorkspaceSettings,
     )
@@ -372,6 +374,32 @@ class Settings(BaseSettings):
         from aef_shared.settings.workspace import WorkspaceSecuritySettings
 
         return WorkspaceSecuritySettings()
+
+    @property
+    def git_identity(self) -> GitIdentitySettings:
+        """Get git identity settings for workspace commits.
+
+        Returns git user.name, user.email, and credentials for commits.
+        Agents use these to commit code with proper attribution.
+
+        See ADR-021: Isolated Workspace Architecture - Git Identity section.
+        """
+        from aef_shared.settings.workspace import GitIdentitySettings
+
+        return GitIdentitySettings()
+
+    @property
+    def container_logging(self) -> ContainerLoggingSettings:
+        """Get container logging settings for observability.
+
+        Returns logging configuration for operations inside containers.
+        Logs are ephemeral (tmpfs) with secret redaction enabled.
+
+        See ADR-021: Isolated Workspace Architecture - Container Observability.
+        """
+        from aef_shared.settings.workspace import ContainerLoggingSettings
+
+        return ContainerLoggingSettings()
 
 
 @lru_cache
