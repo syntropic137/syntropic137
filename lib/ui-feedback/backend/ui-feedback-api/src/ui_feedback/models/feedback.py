@@ -61,6 +61,12 @@ class FeedbackCreate(BaseModel):
     app_version: str | None = Field(None, description="Version of the application")
     user_agent: str | None = Field(None, description="Browser user agent")
 
+    # Environment context - for knowing where feedback came from
+    environment: str | None = Field(None, description="Environment name (development, staging, production)")
+    git_commit: str | None = Field(None, description="Git commit hash")
+    git_branch: str | None = Field(None, description="Git branch name")
+    hostname: str | None = Field(None, description="Hostname where the app is running")
+
     model_config = ConfigDict(use_enum_values=True)
 
 
@@ -101,6 +107,13 @@ class FeedbackItem(BaseModel):
     app_name: str
     app_version: str | None = None
     user_agent: str | None = None
+
+    # Environment context
+    environment: str | None = None
+    git_commit: str | None = None
+    git_branch: str | None = None
+    hostname: str | None = None
+
     created_at: datetime
     updated_at: datetime
     resolved_at: datetime | None = None
