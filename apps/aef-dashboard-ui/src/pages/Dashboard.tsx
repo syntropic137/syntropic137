@@ -123,6 +123,7 @@ export function Dashboard() {
           value={metrics?.total_artifacts ?? 0}
           icon={FileText}
           subtitle={`${((metrics?.total_artifact_bytes ?? 0) / 1024).toFixed(1)} KB`}
+          href="/artifacts"
         />
       </div>
 

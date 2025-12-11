@@ -34,7 +34,7 @@ class ArtifactListProjection(CheckpointedProjection):
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 1
+    VERSION = 2  # Bumped to include size_bytes and content fields
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -65,7 +65,7 @@ class ArtifactListProjection(CheckpointedProjection):
     ) -> ProjectionResult:
         """Handle an event and save checkpoint atomically."""
         event_type = envelope.event.event_type
-        event_data = envelope.event.payload
+        event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
 
         try:
@@ -98,6 +98,13 @@ class ArtifactListProjection(CheckpointedProjection):
     async def on_artifact_created(self, event_data: dict) -> None:
         """Handle ArtifactCreated event."""
         artifact_id = event_data.get("artifact_id", "")
+        content = event_data.get("content", "")
+        size_bytes = event_data.get("size_bytes", 0)
+
+        # If size_bytes not provided, calculate from content
+        if not size_bytes and content:
+            size_bytes = len(content.encode("utf-8")) if isinstance(content, str) else len(content)
+
         summary = ArtifactSummary(
             id=artifact_id,
             workflow_id=event_data.get("workflow_id", ""),
@@ -106,6 +113,9 @@ class ArtifactListProjection(CheckpointedProjection):
             artifact_type=event_data.get("artifact_type", "unknown"),
             name=event_data.get("title", "Untitled"),
             created_at=event_data.get("created_at"),
+            size_bytes=size_bytes,
+            content=content,
+            content_hash=event_data.get("content_hash"),
         )
         await self._store.save(self.PROJECTION_NAME, artifact_id, summary.to_dict())
 

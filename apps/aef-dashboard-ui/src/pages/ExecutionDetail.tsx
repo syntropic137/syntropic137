@@ -1,6 +1,5 @@
 import { clsx } from 'clsx'
 import {
-  ArrowLeft,
   CheckCircle2,
   Clock,
   FileText,
@@ -21,12 +20,10 @@ import {
 } from 'recharts'
 
 import { getExecution } from '../api/client'
-import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import { useExecutionStream } from '../hooks'
 import type { ExecutionDetailResponse } from '../types'
-
-// Claude's context window (approximate)
-const MAX_CONTEXT_TOKENS = 200_000
 
 const phaseStatusIcons: Record<string, typeof Play> = {
   pending: Clock,
@@ -83,7 +80,7 @@ export function ExecutionDetail() {
     },
   })
 
-  // Timer for live duration updates
+  // Timer for live duration updates (only depends on status to avoid resetting)
   useEffect(() => {
     if (!execution || execution.status !== 'running') return
 
@@ -92,7 +89,8 @@ export function ExecutionDetail() {
     }, 1000)
 
     return () => clearInterval(interval)
-  }, [execution])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally only depend on status to avoid timer reset
+  }, [execution?.status])
 
   if (loading) return <PageLoader />
 
@@ -124,9 +122,6 @@ export function ExecutionDetail() {
   const totalTokens = execution.total_input_tokens + execution.total_output_tokens
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
 
-  // Calculate context window usage percentage
-  const contextUsagePercent = Math.min(100, (totalTokens / MAX_CONTEXT_TOKENS) * 100)
-
   // Prepare phase metrics chart data
   const phaseChartData = execution.phases.map((p) => ({
     name: p.name.length > 15 ? p.name.slice(0, 12) + '...' : p.name,
@@ -135,19 +130,26 @@ export function ExecutionDetail() {
     fill: p.status === 'completed' ? '#22c55e' : p.status === 'failed' ? '#ef4444' : '#6366f1',
   }))
 
+  // Build breadcrumb trail: Workflow → Execution
+  const breadcrumbs: BreadcrumbItem[] = [
+    {
+      label: execution.workflow_name || execution.workflow_id,
+      href: `/workflows/${execution.workflow_id}`,
+    },
+    {
+      label: `Execution ${execution.execution_id.slice(0, 8)}`,
+    },
+  ]
+
   return (
     <div className="space-y-6">
+      {/* Breadcrumbs */}
+      <Breadcrumbs items={breadcrumbs} />
+
       {/* Header */}
       <div className="flex justify-between items-start">
         <div>
-          <Link
-            to={`/workflows/${execution.workflow_id}/runs`}
-            className="inline-flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back to Runs
-          </Link>
-          <div className="mt-4 flex items-start gap-4">
+          <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
               <Play className="h-6 w-6 text-emerald-400" />
             </div>
@@ -201,7 +203,7 @@ export function ExecutionDetail() {
       )}
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Phases"
           value={`${completedPhases}/${execution.phases.length}`}
@@ -215,29 +217,6 @@ export function ExecutionDetail() {
           icon={Zap}
           subtitle={`In: ${execution.total_input_tokens.toLocaleString()} / Out: ${execution.total_output_tokens.toLocaleString()}`}
         />
-        {/* Context Window Usage */}
-        <Card className="p-4">
-          <div className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
-            Context Window
-          </div>
-          <div className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
-            {contextUsagePercent.toFixed(1)}%
-          </div>
-          <div className="mt-2 h-2 bg-[var(--color-surface)] rounded-full overflow-hidden">
-            <div
-              className={clsx(
-                'h-full rounded-full transition-all',
-                contextUsagePercent < 50 && 'bg-emerald-500',
-                contextUsagePercent >= 50 && contextUsagePercent < 80 && 'bg-amber-500',
-                contextUsagePercent >= 80 && 'bg-red-500'
-              )}
-              style={{ width: `${contextUsagePercent}%` }}
-            />
-          </div>
-          <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-            {totalTokens.toLocaleString()} / {MAX_CONTEXT_TOKENS.toLocaleString()} tokens
-          </div>
-        </Card>
         <MetricCard
           title="Total Cost"
           value={`$${Number(execution.total_cost_usd).toFixed(4)}`}
@@ -249,6 +228,7 @@ export function ExecutionDetail() {
           value={execution.artifact_ids.length}
           icon={FileText}
           color="accent"
+          href="/artifacts"
         />
       </div>
 
@@ -292,7 +272,12 @@ export function ExecutionDetail() {
                       </div>
                       <div className="flex justify-between">
                         <span>Duration:</span>
-                        <span className="text-[var(--color-text-secondary)]">{phase.duration_seconds.toFixed(1)}s</span>
+                        <span className="text-[var(--color-text-secondary)]">
+                          {phase.status === 'running' && phase.started_at
+                            ? `${((now - new Date(phase.started_at).getTime()) / 1000).toFixed(1)}s`
+                            : `${phase.duration_seconds.toFixed(1)}s`
+                          }
+                        </span>
                       </div>
                     </div>
                     {phase.session_id && (

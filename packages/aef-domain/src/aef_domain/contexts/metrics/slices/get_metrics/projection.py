@@ -74,7 +74,7 @@ class DashboardMetricsProjection(CheckpointedProjection):
     ) -> ProjectionResult:
         """Handle an event and save checkpoint atomically."""
         event_type = envelope.event.event_type
-        event_data = envelope.event.payload
+        event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
 
         try:
