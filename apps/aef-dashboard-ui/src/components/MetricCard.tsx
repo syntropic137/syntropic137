@@ -1,5 +1,5 @@
 import { clsx } from 'clsx'
-import type { LucideIcon } from 'lucide-react'
+import { ArrowRight, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 interface MetricCardProps {
@@ -81,12 +81,26 @@ export function MetricCard({
             <Icon className={clsx('h-5 w-5', colors.icon)} />
           </div>
         )}
+        {href && (
+          <ArrowRight
+            className="h-4 w-4 text-[var(--color-text-muted)] ml-2 self-center"
+            aria-hidden="true"
+          />
+        )}
       </div>
     </div>
   )
 
   if (href) {
-    return <Link to={href}>{content}</Link>
+    return (
+      <Link
+        to={href}
+        aria-label={`View ${title} details`}
+        className="focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 rounded-lg"
+      >
+        {content}
+      </Link>
+    )
   }
 
   return content

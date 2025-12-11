@@ -148,6 +148,7 @@ export function useExecutionStream(
         wsRef.current = null
 
         // Auto-reconnect if enabled and under max attempts
+        // Note: reconnectAttemptsRef is reset to 0 on successful connection (see ws.onopen above)
         if (autoReconnect && !closeEvent.wasClean) {
           reconnectAttemptsRef.current += 1
           if (reconnectAttemptsRef.current <= maxReconnectAttempts) {
