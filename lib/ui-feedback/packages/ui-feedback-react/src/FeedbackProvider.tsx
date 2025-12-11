@@ -281,7 +281,8 @@ export function FeedbackProvider({
 
   return (
     <FeedbackContext.Provider value={contextValue}>
-      <div style={cssVariables} className="ui-feedback-root">
+      {/* Theme wrapper - just for CSS variables, NOT ui-feedback-root */}
+      <div style={cssVariables} className="ui-feedback-theme">
         {children}
       </div>
     </FeedbackContext.Provider>

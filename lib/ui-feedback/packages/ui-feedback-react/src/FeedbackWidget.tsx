@@ -277,8 +277,42 @@ export function FeedbackWidget() {
 
   const positionClass = position ? '' : `ui-feedback-button--${config.position || 'bottom-right'}`;
 
+  // Keyboard shortcuts for menu items
+  useEffect(() => {
+    if (config.disabled) return;
+
+    const handleMenuShortcuts = (e: KeyboardEvent) => {
+      // Only handle Ctrl+Shift combinations
+      if (!e.ctrlKey || !e.shiftKey) return;
+
+      const key = e.key.toUpperCase();
+
+      // Ctrl+Shift+Q = Quick Note
+      if (key === 'Q') {
+        e.preventDefault();
+        setShowMenu(false);
+        openQuickFeedback();
+        return;
+      }
+
+      // Ctrl+Shift+T = View Tickets
+      if (key === 'T') {
+        e.preventDefault();
+        setShowMenu(false);
+        setShowTickets(true);
+        return;
+      }
+
+      // Note: Ctrl+Shift+F (Pin to Element) is already handled in FeedbackProvider
+    };
+
+    window.addEventListener('keydown', handleMenuShortcuts);
+    return () => window.removeEventListener('keydown', handleMenuShortcuts);
+  }, [config.disabled, openQuickFeedback]);
+
   return (
-    <>
+    // Wrap all widget UI in ui-feedback-root so click handling can identify it
+    <div className="ui-feedback-root">
       {/* Floating button with menu */}
       {!isOpen && !showTickets && (
         <div
@@ -312,7 +346,7 @@ export function FeedbackWidget() {
             </>
           )}
 
-          {/* Dropdown menu */}
+          {/* Dropdown menu with hotkey hints */}
           {showMenu && !isDragging && (
             <div className="ui-feedback-menu">
               <button
@@ -323,7 +357,8 @@ export function FeedbackWidget() {
                 }}
               >
                 <NoteIcon />
-                Quick Note
+                <span className="ui-feedback-menu-label">Quick Note</span>
+                <kbd className="ui-feedback-menu-hotkey">⌃⇧Q</kbd>
               </button>
               <button
                 className="ui-feedback-menu-item"
@@ -333,7 +368,8 @@ export function FeedbackWidget() {
                 }}
               >
                 <PinSelectIcon />
-                Pin to Element
+                <span className="ui-feedback-menu-label">Pin to Element</span>
+                <kbd className="ui-feedback-menu-hotkey">⌃⇧F</kbd>
               </button>
               <button
                 className="ui-feedback-menu-item"
@@ -343,8 +379,9 @@ export function FeedbackWidget() {
                 }}
               >
                 <ListIcon />
-                View Tickets
+                <span className="ui-feedback-menu-label">View Tickets</span>
                 {openCount > 0 && <span className="ui-feedback-menu-badge">{openCount}</span>}
+                <kbd className="ui-feedback-menu-hotkey">⌃⇧T</kbd>
               </button>
             </div>
           )}
@@ -395,7 +432,7 @@ export function FeedbackWidget() {
           onClose={() => setShowTickets(false)}
         />
       )}
-    </>
+    </div>
   );
 }
 
