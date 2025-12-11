@@ -36,6 +36,12 @@ from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace
 from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
+from aef_adapters.workspaces.router import (
+    RouterStats,
+    WorkspaceRouter,
+    get_workspace_router,
+    reset_workspace_router,
+)
 from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceConfig
 
 __all__ = [
@@ -48,5 +54,9 @@ __all__ = [
     "IsolatedWorkspaceConfig",
     "IsolatedWorkspaceProtocol",
     "LocalWorkspace",
+    "RouterStats",
     "WorkspaceProtocol",
+    "WorkspaceRouter",
+    "get_workspace_router",
+    "reset_workspace_router",
 ]
