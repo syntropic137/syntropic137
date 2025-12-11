@@ -21,10 +21,22 @@ from aef_shared.settings.config import (
     get_settings,
     reset_settings,
 )
+from aef_shared.settings.workspace import (
+    CloudProvider,
+    IsolationBackend,
+    WorkspaceSecuritySettings,
+    WorkspaceSettings,
+    get_default_isolation_backend,
+)
 
 __all__ = [
     "AppEnvironment",
+    "CloudProvider",
+    "IsolationBackend",
     "Settings",
+    "WorkspaceSecuritySettings",
+    "WorkspaceSettings",
+    "get_default_isolation_backend",
     "get_settings",
     "reset_settings",
 ]
