@@ -322,6 +322,171 @@ primitives-clean:
     rm -rf build/claude
     @echo "✅ Cleaned build/claude"
 
+# --- Workspace Performance Benchmarks ---
+
+# Check available isolation backends
+perf-check:
+    uv run python -m aef_perf check
+
+# Run single workspace benchmark (5 iterations)
+perf-single iterations="5":
+    uv run python -m aef_perf single --iterations {{iterations}}
+
+# Run parallel scaling benchmark
+perf-parallel count="10":
+    uv run python -m aef_perf parallel --count {{count}}
+
+# Run throughput benchmark
+perf-throughput duration="30":
+    uv run python -m aef_perf throughput --duration {{duration}}
+
+# Compare all available backends
+perf-compare:
+    uv run python -m aef_perf compare --iterations 3
+
+# Run all benchmarks
+perf-all:
+    @echo "=== Backend Availability ==="
+    uv run python -m aef_perf check
+    @echo ""
+    @echo "=== Single Workspace Benchmark ==="
+    uv run python -m aef_perf single --iterations 5
+    @echo ""
+    @echo "=== Parallel Scaling (10 concurrent) ==="
+    uv run python -m aef_perf parallel --count 10
+    @echo ""
+    @echo "=== Throughput Test (30s) ==="
+    uv run python -m aef_perf throughput --duration 30
+
+# Run benchmark and save JSON report
+perf-report:
+    @mkdir -p reports
+    uv run python -m aef_perf single --iterations 10 --output reports/perf-single.json
+    uv run python -m aef_perf parallel --count 10 --output reports/perf-parallel.json
+    @echo "Reports saved to reports/"
+
+# Demo workspace events E2E
+demo-workspace-events:
+    uv run python scripts/demo_workspace_events.py
+
+# Run isolation POC (tests network, GitHub clone, Claude SDK)
+poc-isolation mode="mock":
+    uv run python scripts/poc_e2e_agent_isolation.py --{{mode}}
+
+# Quick isolation tests (no API key needed)
+poc-isolation-quick:
+    @echo "=== Test 1: Network Isolation ==="
+    docker run --rm --network=none python:3.12-slim sh -c "python -c \"import socket; socket.create_connection(('8.8.8.8', 53), timeout=1)\"" 2>&1 || echo "✓ Network isolation confirmed"
+    @echo ""
+    @echo "=== Test 2: GitHub Clone ==="
+    docker run --rm --network=bridge python:3.12-slim sh -c "apt-get update -qq 2>/dev/null && apt-get install -y -qq git 2>/dev/null && git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && echo '✓ GitHub clone successful'"
+    @echo ""
+    @echo "=== Test 3: Claude SDK Install ==="
+    docker run --rm --network=bridge python:3.12-slim sh -c "pip install -q anthropic && python -c 'from anthropic import Anthropic; print(\"✓ Claude SDK installed\")'"
+
+# --- Egress Proxy (Network Allowlist) ---
+
+# Build the egress proxy image
+proxy-build:
+    docker build -t aef-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
+
+# Egress proxy port (use unique port to avoid conflicts)
+PROXY_PORT := env_var_or_default("AEF_PROXY_PORT", "18080")
+
+# Start the egress proxy
+proxy-start:
+    @docker rm -f aef-egress-proxy 2>/dev/null || true
+    docker run -d --name aef-egress-proxy -p {{PROXY_PORT}}:8080 \
+        -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
+        aef-egress-proxy:latest
+    @echo "✓ Egress proxy started on port {{PROXY_PORT}}"
+
+# Stop the egress proxy
+proxy-stop:
+    docker rm -f aef-egress-proxy
+    @echo "✓ Egress proxy stopped"
+
+# View proxy logs
+proxy-logs:
+    docker logs -f aef-egress-proxy
+
+# Test network allowlist enforcement
+poc-allowlist:
+    @echo "=== Network Allowlist Test ==="
+    @echo "1. Starting egress proxy on port {{PROXY_PORT}}..."
+    @just proxy-build >/dev/null 2>&1 || true
+    @docker rm -f aef-egress-proxy 2>/dev/null || true
+    @docker run -d --name aef-egress-proxy -p {{PROXY_PORT}}:8080 \
+        -e ALLOWED_HOSTS="api.anthropic.com,github.com" \
+        aef-egress-proxy:latest >/dev/null
+    @sleep 2
+    @echo ""
+    @echo "2. Testing ALLOWED host (github.com)..."
+    @docker run --rm --add-host=host.docker.internal:host-gateway \
+        -e HTTP_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
+        -e HTTPS_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
+        curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://github.com || echo "Connection failed"
+    @echo " <- Expected: 200"
+    @echo ""
+    @echo "3. Testing BLOCKED host (evil.com)..."
+    @docker run --rm --add-host=host.docker.internal:host-gateway \
+        -e HTTP_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
+        -e HTTPS_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
+        curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://evil.com || echo "403"
+    @echo " <- Expected: 403"
+    @echo ""
+    @docker rm -f aef-egress-proxy >/dev/null
+    @echo "✓ Network allowlist test complete!"
+
+# Test container logging setup
+poc-logging:
+    @echo "=== Container Logging Test ==="
+    @echo "Testing: Create log dir → Write logs → Read logs"
+    @echo ""
+    docker run --rm python:3.12-slim sh -c '\
+        mkdir -p /workspace/.logs && \
+        echo "{\"timestamp\":\"2025-01-01T00:00:00Z\",\"level\":\"INFO\",\"message\":\"Agent started\",\"event_type\":\"info\"}" >> /workspace/.logs/agent.jsonl && \
+        echo "{\"timestamp\":\"2025-01-01T00:00:01Z\",\"level\":\"INFO\",\"message\":\"Command: git clone\",\"event_type\":\"command\",\"exit_code\":0}" >> /workspace/.logs/agent.jsonl && \
+        echo "{\"timestamp\":\"2025-01-01T00:00:02Z\",\"level\":\"ERROR\",\"message\":\"Compilation failed\",\"event_type\":\"error\"}" >> /workspace/.logs/agent.jsonl && \
+        echo "Log contents:" && \
+        cat /workspace/.logs/agent.jsonl && \
+        echo "" && \
+        echo "✓ Container logging works!"'
+
+# Test Claude API key injection in container
+poc-claude-api:
+    @echo "=== Claude API Key Injection Test ==="
+    @if [ -z "$ANTHROPIC_API_KEY" ]; then echo "❌ ANTHROPIC_API_KEY not set. Export it first."; exit 1; fi
+    @echo "Testing: Install SDK → Call Claude API → Verify Response"
+    @echo ""
+    docker run --rm --network=bridge \
+        -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+        python:3.12-slim sh -c '\
+        pip install -q anthropic && \
+        python -c "from anthropic import Anthropic; c=Anthropic(); r=c.messages.create(model=\"claude-3-5-haiku-20241022\", max_tokens=50, messages=[{\"role\":\"user\",\"content\":\"Say TEST_SUCCESS\"}]); print(r.content[0].text)" && \
+        echo "" && \
+        echo "✓ Claude API key injection successful!"'
+
+# Test git identity injection in container
+poc-git-identity:
+    @echo "=== Git Identity Injection Test ==="
+    @echo "Testing: Clone → Configure Identity → Commit → Verify Author"
+    @echo ""
+    docker run --rm --network=bridge python:3.12-slim sh -c '\
+        apt-get update -qq 2>/dev/null && apt-get install -y -qq git 2>/dev/null && \
+        git config --global user.name "aef-bot[bot]" && \
+        git config --global user.email "bot@aef.dev" && \
+        git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && \
+        cd /tmp/repo && \
+        echo "# AEF Test" >> README && \
+        git add README && \
+        git commit -m "Test commit from AEF agent" && \
+        git log -1 --format="Author: %an <%ae>" && \
+        echo "" && \
+        echo "✓ Git identity injection successful!"'
+
+# --- Package Management ---
+
 # Add a new package to the workspace
 new-package name:
     @echo "Creating package: {{name}}"

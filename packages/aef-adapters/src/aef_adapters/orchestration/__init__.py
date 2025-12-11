@@ -4,22 +4,27 @@ This module provides the AgenticWorkflowExecutor which orchestrates
 workflow execution using the new AgenticProtocol:
 
 - Multi-turn agent execution with tool use
-- Workspace isolation per phase
+- Isolated workspace per phase (via WorkspaceRouter)
 - Artifact bundles for phase-to-phase context
 - Hook event integration via EventBridge
 
 Example:
-    from aef_adapters.orchestration import AgenticWorkflowExecutor
-    from aef_adapters.agents import ClaudeAgenticAgent
-    from aef_adapters.workspaces import LocalWorkspace
+    from aef_adapters.orchestration import (
+        AgenticWorkflowExecutor,
+        get_agentic_agent,
+        get_workspace,
+    )
 
+    # Create executor with isolated workspace factory
     executor = AgenticWorkflowExecutor(
-        agent=ClaudeAgenticAgent(),
-        workspace_factory=LocalWorkspace.create,
+        agent_factory=get_agentic_agent,
+        workspace_factory=get_workspace,
     )
 
     async for event in executor.execute(workflow, inputs):
         print(f"Event: {event}")
+
+See ADR-021: Isolated Workspace Architecture
 """
 
 from aef_adapters.orchestration.executor import (
@@ -35,8 +40,10 @@ from aef_adapters.orchestration.executor import (
 from aef_adapters.orchestration.factory import (
     AgenticAgentFactory,
     WorkspaceFactory,
+    execute_in_workspace,
     get_agentic_agent,
     get_workspace,
+    get_workspace_local,
 )
 
 __all__ = [
@@ -50,6 +57,8 @@ __all__ = [
     "WorkflowFailed",
     "WorkflowStarted",
     "WorkspaceFactory",
+    "execute_in_workspace",
     "get_agentic_agent",
     "get_workspace",
+    "get_workspace_local",
 ]

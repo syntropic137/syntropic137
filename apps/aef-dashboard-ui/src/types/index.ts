@@ -253,6 +253,8 @@ export interface ExecutionDetailResponse {
   total_cost_usd: number
   artifact_ids: string[]
   error_message: string | null
+  // Workspace info (ADR-021)
+  workspace: WorkspaceInfo | null
 }
 
 // =============================================================================
@@ -275,6 +277,14 @@ export const SSE_EVENTS = {
 
   // Live streaming (control plane)
   TURN_UPDATE: 'turn_update',
+
+  // Workspace lifecycle events (ADR-021)
+  WORKSPACE_CREATING: 'workspace_creating',
+  WORKSPACE_CREATED: 'workspace_created',
+  WORKSPACE_COMMAND_EXECUTED: 'workspace_command_executed',
+  WORKSPACE_DESTROYING: 'workspace_destroying',
+  WORKSPACE_DESTROYED: 'workspace_destroyed',
+  WORKSPACE_ERROR: 'workspace_error',
 } as const
 
 export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]
@@ -295,6 +305,34 @@ export interface EventMessage {
   duration_ms?: number
   success?: boolean
   reason?: string
+}
+
+// =============================================================================
+// WORKSPACE TYPES (ADR-021: Isolated Workspace Architecture)
+// =============================================================================
+
+export type IsolationBackend =
+  | 'docker_hardened'
+  | 'gvisor'
+  | 'firecracker'
+  | 'kata'
+  | 'cloud'
+  | 'local'
+
+export interface WorkspaceInfo {
+  workspace_id: string
+  isolation_backend: IsolationBackend
+  container_id: string | null
+  vm_id: string | null
+  sandbox_id: string | null
+  workspace_path: string
+  created_at: string
+  started_at: string | null
+  terminated_at: string | null
+  memory_used_bytes: number
+  cpu_time_seconds: number
+  commands_executed: number
+  status: 'creating' | 'running' | 'stopped' | 'error'
 }
 
 // =============================================================================

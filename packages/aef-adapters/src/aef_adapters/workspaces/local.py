@@ -1,5 +1,17 @@
 """LocalWorkspace - file-based workspace implementation.
 
+WARNING: LocalWorkspace provides NO ISOLATION. It runs agents directly on the
+host filesystem. This is for TESTING and LOCAL DEVELOPMENT ONLY.
+
+For production, use the isolated backends via WorkspaceRouter:
+- GVisorWorkspace (Docker + gVisor)
+- HardenedDockerWorkspace (Docker with security hardening)
+- FirecrackerWorkspace (MicroVMs)
+- E2BWorkspace (Cloud sandboxes)
+
+See ADR-004: Environment Configuration (mock objects policy)
+See ADR-021: Isolated Workspace Architecture
+
 Creates temporary directories with:
 - .claude/settings.json for hook configuration
 - .claude/hooks/ with handlers from agentic-primitives
@@ -11,6 +23,8 @@ Creates temporary directories with:
 from __future__ import annotations
 
 import json
+import logging
+import os
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -22,13 +36,48 @@ from aef_adapters.agents.agentic_types import Workspace, WorkspaceConfig
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+logger = logging.getLogger(__name__)
+
+
+class NonIsolatedWorkspaceError(Exception):
+    """Raised when LocalWorkspace is used outside test/development environment."""
+
+    pass
+
+
+def _assert_non_production_environment() -> None:
+    """Assert we're not in production - LocalWorkspace has NO isolation.
+
+    LocalWorkspace runs agents directly on the host without any containerization
+    or sandboxing. It should NEVER be used in production environments.
+
+    Raises:
+        NonIsolatedWorkspaceError: If APP_ENVIRONMENT is 'production' or 'staging'
+    """
+    app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
+    if app_env in ("production", "staging", "prod", "stg"):
+        raise NonIsolatedWorkspaceError(
+            f"LocalWorkspace provides NO ISOLATION and cannot be used in {app_env}. "
+            f"Use WorkspaceRouter with isolated backends (GVisor, Docker, Firecracker, E2B) "
+            f"for production deployments. See ADR-021."
+        )
+    if app_env not in ("test", "testing", "development", "dev", "local"):
+        logger.warning(
+            "LocalWorkspace provides NO ISOLATION. "
+            "Consider using WorkspaceRouter for isolated agent execution. "
+            f"Current APP_ENVIRONMENT: {app_env}"
+        )
+
 
 class LocalWorkspace:
     """File-based workspace in temporary directories.
 
-    Creates an isolated workspace with hooks from agentic-primitives.
+    WARNING: This provides NO ISOLATION. For production use WorkspaceRouter.
+
+    Creates a workspace with hooks from agentic-primitives.
 
     Example:
+        # For testing only:
         config = WorkspaceConfig(session_id="my-session")
         async with LocalWorkspace.create(config) as workspace:
             # workspace.path contains:
@@ -36,6 +85,12 @@ class LocalWorkspace:
             # - .claude/hooks/handlers/ (from agentic-primitives)
             # - .claude/hooks/validators/ (from agentic-primitives)
             await agent.execute(task, workspace, config)
+
+        # For production - use isolated backends:
+        from aef_adapters.workspaces import WorkspaceRouter
+        router = WorkspaceRouter()
+        async with router.create(config) as workspace:
+            ...
     """
 
     # Default path to agentic-primitives hooks (relative to repo root)
@@ -46,12 +101,26 @@ class LocalWorkspace:
     async def create(cls, config: WorkspaceConfig) -> AsyncIterator[Workspace]:
         """Create a workspace as an async context manager.
 
+        WARNING: LocalWorkspace provides NO ISOLATION. Agents run directly on the
+        host with full filesystem and network access. This is suitable for:
+        - Unit tests
+        - Integration tests
+        - Local development
+
+        For production, use WorkspaceRouter which provides isolated backends.
+
         Args:
             config: Workspace configuration
 
         Yields:
             Configured Workspace ready for agent execution
+
+        Raises:
+            NonIsolatedWorkspaceError: If used in production environment
         """
+        # Check we're not in production - LocalWorkspace has no isolation!
+        _assert_non_production_environment()
+
         # Create temp directory
         base_dir = config.base_dir
         base_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +219,21 @@ class LocalWorkspace:
 
     @classmethod
     async def _create_stub_handlers(cls, workspace_dir: Path) -> None:
-        """Create minimal stub handlers when agentic-primitives not found."""
+        """Create minimal stub handlers when agentic-primitives not found.
+
+        WARNING: These stubs ALLOW ALL operations without validation.
+        They are suitable for testing only. In production, proper hooks
+        from agentic-primitives should always be available.
+        """
+        # Log warning about using stubs
+        app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
+        if app_env not in ("test", "testing"):
+            logger.warning(
+                "Creating stub handlers that ALLOW ALL operations. "
+                "This is insecure for production. Ensure agentic-primitives "
+                "hooks are available at: lib/agentic-primitives/primitives/v1/hooks"
+            )
+
         handlers_dir = workspace_dir / ".claude" / "hooks" / "handlers"
 
         # Pre-tool-use stub (allow all)

@@ -9,10 +9,18 @@ from __future__ import annotations
 
 from enum import Enum
 from functools import lru_cache
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from aef_shared.settings.workspace import (
+        ContainerLoggingSettings,
+        GitIdentitySettings,
+        WorkspaceSecuritySettings,
+        WorkspaceSettings,
+    )
 
 
 class AppEnvironment(str, Enum):
@@ -336,6 +344,62 @@ class Settings(BaseSettings):
         For local development, configure DATABASE_URL to use Docker PostgreSQL.
         """
         return self.database_url is None and self.is_test
+
+    # =========================================================================
+    # WORKSPACE ISOLATION - See ADR-021
+    # =========================================================================
+
+    @property
+    def workspace(self) -> WorkspaceSettings:
+        """Get workspace isolation settings.
+
+        Returns a WorkspaceSettings instance configured from AEF_WORKSPACE_* env vars.
+        All workspaces are isolated by default - this controls HOW, not WHETHER.
+
+        See ADR-021: Isolated Workspace Architecture
+        """
+        from aef_shared.settings.workspace import WorkspaceSettings
+
+        return WorkspaceSettings()
+
+    @property
+    def workspace_security(self) -> WorkspaceSecuritySettings:
+        """Get workspace security settings.
+
+        Returns security policies applied to all isolated workspaces.
+        Defaults are maximally restrictive (no network, read-only root, resource limits).
+
+        See ADR-021: Isolated Workspace Architecture
+        """
+        from aef_shared.settings.workspace import WorkspaceSecuritySettings
+
+        return WorkspaceSecuritySettings()
+
+    @property
+    def git_identity(self) -> GitIdentitySettings:
+        """Get git identity settings for workspace commits.
+
+        Returns git user.name, user.email, and credentials for commits.
+        Agents use these to commit code with proper attribution.
+
+        See ADR-021: Isolated Workspace Architecture - Git Identity section.
+        """
+        from aef_shared.settings.workspace import GitIdentitySettings
+
+        return GitIdentitySettings()
+
+    @property
+    def container_logging(self) -> ContainerLoggingSettings:
+        """Get container logging settings for observability.
+
+        Returns logging configuration for operations inside containers.
+        Logs are ephemeral (tmpfs) with secret redaction enabled.
+
+        See ADR-021: Isolated Workspace Architecture - Container Observability.
+        """
+        from aef_shared.settings.workspace import ContainerLoggingSettings
+
+        return ContainerLoggingSettings()
 
 
 @lru_cache
