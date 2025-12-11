@@ -32,6 +32,15 @@ class ArtifactSummary:
     created_at: datetime | str | None
     """When the artifact was created (datetime or ISO string)."""
 
+    size_bytes: int = 0
+    """Size of the artifact content in bytes."""
+
+    content: str | None = None
+    """The artifact content (stored for retrieval)."""
+
+    content_hash: str | None = None
+    """Hash of the content for integrity verification."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "ArtifactSummary":
         """Create from dictionary data."""
@@ -43,6 +52,9 @@ class ArtifactSummary:
             artifact_type=data.get("artifact_type", ""),
             name=data.get("name", ""),
             created_at=data.get("created_at"),
+            size_bytes=data.get("size_bytes", 0),
+            content=data.get("content"),
+            content_hash=data.get("content_hash"),
         )
 
     def to_dict(self) -> dict:
@@ -63,4 +75,7 @@ class ArtifactSummary:
             "artifact_type": self.artifact_type,
             "name": self.name,
             "created_at": created_at_str,
+            "size_bytes": self.size_bytes,
+            "content": self.content,
+            "content_hash": self.content_hash,
         }

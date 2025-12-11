@@ -85,6 +85,7 @@ export interface OperationInfo {
 export interface SessionResponse {
   id: string
   workflow_id: string | null
+  workflow_name: string | null
   execution_id: string | null
   phase_id: string | null
   milestone_id: string | null
@@ -235,6 +236,8 @@ export interface PhaseExecutionDetail {
   output_tokens: number
   duration_seconds: number
   cost_usd: number
+  started_at: string | null
+  completed_at: string | null
 }
 
 export interface ExecutionDetailResponse {

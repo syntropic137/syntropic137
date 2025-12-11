@@ -75,7 +75,7 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
         Dispatches to the appropriate on_* method based on event type.
         """
         event_type = envelope.event.event_type
-        event_data = envelope.event.payload
+        event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
 
         try:
