@@ -43,3 +43,5 @@ contexts:
     description: "Agent sessions, token tracking, and execution metrics"
   artifacts:
     description: "Artifact storage, metadata, and retrieval"
+  workspaces:
+    description: "Isolated workspace lifecycle, performance metrics, and observability"

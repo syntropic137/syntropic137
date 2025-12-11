@@ -1,6 +1,6 @@
 # ADR-021: Isolated Workspace Architecture
 
-**Status:** Proposed
+**Status:** Accepted (Implemented)
 **Date:** 2025-12-11
 **Deciders:** @neural
 **Tags:** security, isolation, workspaces, scale, firecracker, docker
@@ -291,6 +291,316 @@ See: `PROJECT-PLAN_20251211_ISOLATED-WORKSPACE-ARCHITECTURE.md`
 8. **Documentation**: ADR, usage guides, runbooks
 9. **Testing**: Security tests, scale tests, benchmarks
 
+<<<<<<< HEAD
+## POC Findings (2025-12-11)
+
+Proof-of-concept testing validated the isolated workspace architecture:
+
+### Test Results
+
+| Test | Status | Duration | Notes |
+|------|--------|----------|-------|
+| Network isolation (`--network=none`) | ✅ PASS | <100ms | All external access blocked |
+| Network bridge (`--network=bridge`) | ✅ PASS | <100ms | Can reach external services |
+| GitHub clone in container | ✅ PASS | ~15s | Cloned `octocat/Hello-World` successfully |
+| Claude SDK installation | ✅ PASS | ~8s | `pip install anthropic` works |
+| Package manager (apt-get) | ✅ PASS | ~10s | Can install git, curl, etc. |
+
+### Key Findings
+
+1. **Network Isolation Works**
+   - `--network=none` completely blocks all network access
+   - Agents cannot exfiltrate data when network is disabled
+
+2. **Network Access Required for Coding Agents**
+   - Claude API (`api.anthropic.com`) - for agent execution
+   - GitHub (`github.com`, `api.github.com`) - for repo cloning
+   - Package registries (`pypi.org`, `registry.npmjs.org`) - for dependencies
+
+3. **Allowlist Not Yet Enforced**
+   - Current implementation uses `--network=bridge` which allows ALL hosts
+   - **GAP**: Need egress proxy or iptables rules to enforce allowlist
+
+### Performance Benchmarks
+
+```
+Backend: docker_hardened (macOS)
+┏━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━┓
+┃ Metric       ┃  Mean ┃   P95 ┃   P99 ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━┩
+│ Create Time  │ 179ms │ 215ms │ 216ms │
+│ Destroy Time │ 5.53s │ 5.80s │ 5.85s │
+│ Parallel 10x │ 9.54x │   -   │   -   │ ← Near-linear scaling
+└──────────────┴───────┴───────┴───────┘
+```
+
+## Integration Gaps
+
+The following gaps must be closed for production readiness:
+
+### Critical (P0)
+
+| Gap | Current State | Required State | Effort |
+|-----|---------------|----------------|--------|
+| **Git Identity Configuration** | No git config → agent cannot commit | Inject user.name/user.email + credentials | Medium |
+| **Egress Filtering** | `--network=bridge` allows all hosts | Allowlist-only egress via proxy | Medium |
+| **API Key Injection** | Not implemented | Secure injection of ANTHROPIC_API_KEY | Small |
+| **Agent Executor Integration** | Uses `LocalWorkspace` | Use `WorkspaceRouter` | Medium |
+| **Dashboard Workspace Events** | Not shown in UI | Display workspace ID, backend, status | Medium |
+
+### High (P1)
+
+| Gap | Current State | Required State | Effort |
+|-----|---------------|----------------|--------|
+| **Pre-warmed Container Pool** | Containers created on-demand | Pool of ready containers | Large |
+| **Artifact Collection** | Basic file copy | Structured artifact extraction | Medium |
+| **Session ↔ Workspace Linkage** | Events separate | Unified session context | Small |
+
+### Medium (P2)
+
+| Gap | Current State | Required State | Effort |
+|-----|---------------|----------------|--------|
+| **Firecracker Production** | Scripts only | Automated kernel/rootfs management | Large |
+| **Container Resource Monitoring** | None | Real-time CPU/memory metrics | Medium |
+| **Workspace Timeout Enforcement** | None | Hard kill after max_execution_time | Small |
+
+## Architecture: Agent Inside Container
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           AEF Control Plane (Host)                          │
+│  ┌─────────────┐    ┌──────────────┐    ┌────────────────┐                  │
+│  │ Dashboard   │◀──▶│ Workflow     │◀──▶│ Event Store    │                  │
+│  │ (UI)        │    │ Orchestrator │    │ (PostgreSQL)   │                  │
+│  └─────────────┘    └──────┬───────┘    └────────────────┘                  │
+│                            │                                                 │
+│                   ┌────────▼────────┐                                        │
+│                   │ WorkspaceRouter │                                        │
+│                   └────────┬────────┘                                        │
+└────────────────────────────┼────────────────────────────────────────────────┘
+                             │ docker exec / VM socket
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     Isolated Container / MicroVM                             │
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │                     Claude Agent SDK                                 │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                  │   │
+│  │  │ LLM Calls   │  │ Tool Calls  │  │ Hooks       │                  │   │
+│  │  │ (Anthropic) │  │ (Read/Write)│  │ (Validators)│                  │   │
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                  │   │
+│  │         │                │                │                          │   │
+│  │         ▼                ▼                ▼                          │   │
+│  │  ┌─────────────────────────────────────────────────────────────┐    │   │
+│  │  │                    /workspace                                │    │   │
+│  │  │  ├── .context/    (injected prompt, config)                  │    │   │
+│  │  │  ├── .claude/     (hooks, handlers)                          │    │   │
+│  │  │  ├── repo/        (cloned GitHub repository)                 │    │   │
+│  │  │  └── output/      (artifacts to collect)                     │    │   │
+│  │  └─────────────────────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│                                                                             │
+│  Network: bridge (egress proxy) → api.anthropic.com, github.com only       │
+│  Filesystem: tmpfs with size limit                                          │
+│  Resources: --memory=512m --cpus=0.5 --pids-limit=100                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Egress Proxy Design (TODO)
+
+To enforce the network allowlist, an egress proxy sidecar is needed:
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│  Agent Container    │         │  Egress Proxy       │
+│                     │         │  (Envoy/mitmproxy)  │
+│  --network=none     │◀───────▶│                     │◀───▶ Internet
+│  BUT: connected to  │  unix   │  Allowlist:         │
+│  proxy network      │  socket │  - api.anthropic.com│
+│                     │         │  - github.com       │
+└─────────────────────┘         │  - pypi.org         │
+                                └─────────────────────┘
+```
+
+Options:
+1. **Envoy sidecar**: Full-featured but complex
+2. **mitmproxy**: Simple Python-based, good for prototyping
+3. **iptables + DNS**: Lightweight but harder to maintain
+4. **Cilium/eBPF**: Best for Kubernetes at scale
+
+## Git Identity & Credentials (P0 Gap)
+
+### Problem
+
+Fresh containers have **no git configuration**:
+
+```bash
+$ docker run python:3.12-slim git commit -m "test"
+Author identity unknown
+
+*** Please tell me who you are.
+
+fatal: unable to auto-detect email address
+```
+
+Agents cannot commit code without:
+1. `git config user.name`
+2. `git config user.email`
+3. Git credentials for pushing (SSH key or token)
+
+### Solution Design
+
+#### 1. Git Identity Configuration
+
+Inject git identity when creating workspace:
+
+```python
+# In WorkspaceRouter.create()
+await router.execute_command(
+    workspace,
+    ["git", "config", "--global", "user.name", git_config.name]
+)
+await router.execute_command(
+    workspace,
+    ["git", "config", "--global", "user.email", git_config.email]
+)
+```
+
+**Identity Sources** (in priority order):
+
+| Environment | Identity | Committer |
+|-------------|----------|-----------|
+| **Local Development** | User's `.gitconfig` | `NeuralEmpowerment <neuralempowerment@gmail.com>` |
+| **CI/CD** | Bot account | `aef-bot[bot] <bot@aef.dev>` |
+| **Production** | GitHub App | `aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>` |
+
+**Configuration:**
+
+```bash
+# User identity (local)
+export AEF_GIT_USER_NAME="NeuralEmpowerment"
+export AEF_GIT_USER_EMAIL="neuralempowerment@gmail.com"
+
+# Bot identity (production)
+export AEF_GIT_USER_NAME="aef-bot[bot]"
+export AEF_GIT_USER_EMAIL="bot@aef.dev"
+```
+
+#### 2. Git Credentials Injection
+
+**For HTTPS (recommended):**
+
+```python
+# Inject GitHub token
+await router.execute_command(
+    workspace,
+    ["git", "config", "--global", "credential.helper", "store"]
+)
+
+# Create .git-credentials file
+credentials = f"https://{token}:x-oauth-basic@github.com\n"
+await router.execute_command(
+    workspace,
+    ["sh", "-c", f"echo '{credentials}' > ~/.git-credentials && chmod 600 ~/.git-credentials"]
+)
+```
+
+**For SSH (more secure but complex):**
+
+```python
+# Inject SSH key
+ssh_key = os.environ["AEF_GIT_SSH_KEY"]  # Base64 encoded
+await router.execute_command(
+    workspace,
+    ["sh", "-c", f"mkdir -p ~/.ssh && echo '{ssh_key}' | base64 -d > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519"]
+)
+```
+
+#### 3. GitHub App Integration (Production)
+
+For production, use a **GitHub App** instead of personal tokens:
+
+```python
+@dataclass
+class GitHubAppConfig:
+    app_id: str
+    installation_id: str
+    private_key: str  # PEM format
+
+    def get_installation_token(self) -> str:
+        """Get short-lived token from GitHub App."""
+        # Generate JWT, exchange for installation token
+        # Token expires in 1 hour (safer than long-lived tokens)
+```
+
+**Benefits:**
+- ✅ Fine-grained permissions (only repos the app is installed on)
+- ✅ Tokens expire automatically (1 hour)
+- ✅ Audit trail (commits show as `app[bot]`)
+- ✅ No user impersonation
+
+**Example commit:**
+
+```
+commit abc123
+Author: aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>
+Date:   Wed Dec 11 19:30:00 2025
+
+    feat: implement code review suggestions
+
+    Applied by AEF agent in workflow execution #456
+```
+
+#### 4. Commit Metadata & Traceability
+
+All agent commits should include:
+
+```python
+commit_message = f"""feat: {user_provided_summary}
+
+Applied by AEF agent
+- Workflow: {workflow_id}
+- Execution: {execution_id}
+- Session: {session_id}
+- Agent: {agent_name}
+- Timestamp: {datetime.now(UTC).isoformat()}
+
+Co-authored-by: {original_user_name} <{original_user_email}>
+"""
+```
+
+This provides:
+- ✅ Full audit trail
+- ✅ Links back to workflow execution
+- ✅ Credit to human who initiated the workflow
+- ✅ Easy to filter agent commits (`git log --author="aef-app[bot]"`)
+
+### Security Considerations
+
+| Credential Type | Storage | Injection | Rotation |
+|-----------------|---------|-----------|----------|
+| **GitHub Token** | Vault/Secrets Manager | Environment variable | Manual/90 days |
+| **GitHub App** | Vault (private key) | Generate on-demand | Automatic/1 hour |
+| **SSH Key** | Vault | Base64 env var | Manual/365 days |
+
+**Recommendations:**
+1. **Local dev**: User's GitHub token (via `gh auth token`)
+2. **CI/CD**: GitHub App with installation token
+3. **Never**: Hardcode tokens in images or config files
+
+### Implementation Checklist
+
+- [ ] Add `GitConfig` to `IsolatedWorkspaceConfig`
+- [ ] Inject git identity in `WorkspaceRouter.create()`
+- [ ] Add credential injection (HTTPS token)
+- [ ] Create GitHub App for production
+- [ ] Add commit metadata template
+- [ ] Document bot account setup
+- [ ] Add integration tests for git operations
+- [ ] Add credential rotation documentation
+
+=======
+>>>>>>> origin/main
 ## Related ADRs
 
 - **ADR-009**: Agentic Execution Architecture (original workspace design)

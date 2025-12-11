@@ -9,6 +9,7 @@ members = [
     "aef-collector",
     "aef-dashboard",
     "aef-domain",
+    "aef-perf",
     "aef-shared",
     "agentic-engineering-framework",
 ]
@@ -194,6 +195,34 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
 ]
+
+[[package]]
+name = "aef-perf"
+version = "0.1.0"
+source = { editable = "packages/aef-perf" }
+dependencies = [
+    { name = "aef-adapters" },
+    { name = "aef-shared" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aef-adapters", editable = "packages/aef-adapters" },
+    { name = "aef-shared", editable = "packages/aef-shared" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "typer", specifier = ">=0.9.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "aef-shared"

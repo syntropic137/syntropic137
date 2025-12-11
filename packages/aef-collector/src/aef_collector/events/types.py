@@ -47,6 +47,14 @@ class EventType(str, Enum):
     - GIT_COMMITS_REWRITTEN: Commits rewritten (rebase/amend)
     - GIT_PUSH_STARTED: Push operation started
     - GIT_PUSH_COMPLETED: Push operation completed
+
+    Workspace lifecycle (isolated sandbox environments):
+    - WORKSPACE_CREATING: Workspace creation started
+    - WORKSPACE_CREATED: Workspace ready for use
+    - WORKSPACE_COMMAND_EXECUTED: Command executed in workspace
+    - WORKSPACE_DESTROYING: Workspace cleanup started
+    - WORKSPACE_DESTROYED: Workspace fully cleaned up
+    - WORKSPACE_ERROR: Workspace operation failed
     """
 
     # Session lifecycle
@@ -78,6 +86,14 @@ class EventType(str, Enum):
     GIT_COMMITS_REWRITTEN = "git_commits_rewritten"
     GIT_PUSH_STARTED = "git_push_started"
     GIT_PUSH_COMPLETED = "git_push_completed"
+
+    # Workspace lifecycle (isolated sandbox environments)
+    WORKSPACE_CREATING = "workspace_creating"
+    WORKSPACE_CREATED = "workspace_created"
+    WORKSPACE_COMMAND_EXECUTED = "workspace_command_executed"
+    WORKSPACE_DESTROYING = "workspace_destroying"
+    WORKSPACE_DESTROYED = "workspace_destroyed"
+    WORKSPACE_ERROR = "workspace_error"
 
 
 class CollectedEvent(BaseModel):

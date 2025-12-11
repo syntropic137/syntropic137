@@ -57,6 +57,7 @@ aef-dashboard = { workspace = true }
 aef-domain = { workspace = true }
 aef-adapters = { workspace = true }
 aef-shared = { workspace = true }
+aef-perf = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 agentic-hooks = { path = "lib/agentic-primitives/lib/python/agentic_hooks" }
@@ -93,7 +94,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["aef_cli", "aef_collector", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared"]
+known-first-party = ["aef_cli", "aef_collector", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared", "aef_perf"]
 
 [tool.mypy]
 python_version = "3.12"
