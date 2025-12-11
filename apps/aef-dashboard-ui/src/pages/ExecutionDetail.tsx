@@ -172,12 +172,7 @@ export function ExecutionDetail() {
   const displayInputTokens = liveTokens?.inputTokens ?? execution.total_input_tokens
   const displayOutputTokens = liveTokens?.outputTokens ?? execution.total_output_tokens
   const totalTokens = displayInputTokens + displayOutputTokens
-  // Check if live updating based on lastUpdate timestamp (use state to avoid impure Date.now() during render)
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [])
+  // Check if live updating based on lastUpdate timestamp (now state is declared at top of component)
   const isLiveUpdating = liveTokens !== null && now - liveTokens.lastUpdate < 5000
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
 

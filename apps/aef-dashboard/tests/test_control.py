@@ -5,9 +5,59 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from aef_adapters.control import ExecutionState
+from aef_adapters.control import ExecutionController, ExecutionState
+from aef_adapters.control.adapters.memory import (
+    InMemoryControlStateAdapter,
+    InMemorySignalQueueAdapter,
+)
 from aef_dashboard.main import app
-from aef_dashboard.services.control import get_state_adapter
+import aef_dashboard.services.control as control_module
+
+
+# In-memory adapters for testing
+_test_state_adapter: InMemoryControlStateAdapter | None = None
+_test_signal_adapter: InMemorySignalQueueAdapter | None = None
+_test_controller: ExecutionController | None = None
+
+
+def _get_test_adapters() -> tuple[InMemoryControlStateAdapter, InMemorySignalQueueAdapter]:
+    """Get test adapters (creates them if needed)."""
+    global _test_state_adapter, _test_signal_adapter
+    if _test_state_adapter is None:
+        _test_state_adapter = InMemoryControlStateAdapter()
+    if _test_signal_adapter is None:
+        _test_signal_adapter = InMemorySignalQueueAdapter()
+    return _test_state_adapter, _test_signal_adapter
+
+
+def _get_test_controller() -> ExecutionController:
+    """Get test controller using in-memory adapters."""
+    global _test_controller
+    if _test_controller is None:
+        state, signal = _get_test_adapters()
+        _test_controller = ExecutionController(state_port=state, signal_port=signal)
+    return _test_controller
+
+
+@pytest.fixture(autouse=True)
+def use_test_adapters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch control module to use in-memory adapters for tests."""
+    global _test_state_adapter, _test_signal_adapter, _test_controller
+
+    # Clear caches and reset adapters
+    control_module.get_controller.cache_clear()
+    _test_state_adapter = None
+    _test_signal_adapter = None
+    _test_controller = None
+
+    # Patch the factory functions
+    monkeypatch.setattr(control_module, "get_controller", _get_test_controller)
+    monkeypatch.setattr(
+        control_module, "get_state_adapter", lambda: _get_test_adapters()[0]
+    )
+    monkeypatch.setattr(
+        control_module, "get_signal_adapter", lambda: _get_test_adapters()[1]
+    )
 
 
 @pytest.fixture
@@ -20,7 +70,7 @@ def client() -> TestClient:
 async def running_execution() -> str:
     """Create an execution in running state."""
     execution_id = "test-exec-running"
-    state_adapter = get_state_adapter()
+    state_adapter, _ = _get_test_adapters()
     await state_adapter.save_state(execution_id, ExecutionState.RUNNING)
     return execution_id
 
@@ -29,7 +79,7 @@ async def running_execution() -> str:
 async def paused_execution() -> str:
     """Create an execution in paused state."""
     execution_id = "test-exec-paused"
-    state_adapter = get_state_adapter()
+    state_adapter, _ = _get_test_adapters()
     await state_adapter.save_state(execution_id, ExecutionState.PAUSED)
     return execution_id
 
