@@ -80,7 +80,7 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
             try:
                 # receive() will raise WebSocketDisconnect on client disconnect
                 data = await websocket.receive_json()
-                
+
                 # Future: Handle control commands
                 # command = data.get("command")
                 # if command == "pause": ...

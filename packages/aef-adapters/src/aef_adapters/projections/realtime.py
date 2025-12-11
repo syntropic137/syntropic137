@@ -112,6 +112,15 @@ class RealTimeProjection:
             event_type: The domain event type.
             data: The event data.
         """
+        logger.info(
+            "Broadcasting event to WebSocket clients",
+            extra={
+                "execution_id": execution_id,
+                "event_type": event_type,
+                "connection_count": len(self._connections.get(execution_id, [])),
+            },
+        )
+
         async with self._lock:
             connections = list(self._connections.get(execution_id, []))
 
