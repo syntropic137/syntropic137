@@ -34,7 +34,7 @@ from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
-from aef_adapters.workspaces.local import LocalWorkspace
+from aef_adapters.workspaces.local import LocalWorkspace, NonIsolatedWorkspaceError
 from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
 from aef_adapters.workspaces.router import (
     RouterStats,
@@ -54,6 +54,7 @@ __all__ = [
     "IsolatedWorkspaceConfig",
     "IsolatedWorkspaceProtocol",
     "LocalWorkspace",
+    "NonIsolatedWorkspaceError",
     "RouterStats",
     "WorkspaceProtocol",
     "WorkspaceRouter",

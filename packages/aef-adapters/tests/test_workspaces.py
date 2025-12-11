@@ -1,12 +1,14 @@
 """Tests for workspace implementations."""
 
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from aef_adapters.agents.agentic_types import WorkspaceConfig
-from aef_adapters.workspaces import LocalWorkspace
+from aef_adapters.workspaces import LocalWorkspace, NonIsolatedWorkspaceError
 
 
 class TestLocalWorkspace:
@@ -203,3 +205,60 @@ class TestLocalWorkspace:
         async with LocalWorkspace.create(workspace_config) as workspace:
             assert workspace.config == workspace_config
             assert workspace.config.session_id == "test-session"
+
+
+class TestLocalWorkspaceProductionProtection:
+    """Tests for production environment protection (ADR-004)."""
+
+    @pytest.fixture
+    def workspace_config(self, tmp_path: Path) -> WorkspaceConfig:
+        """Create a workspace config."""
+        return WorkspaceConfig(
+            session_id="test-session",
+            base_dir=tmp_path,
+        )
+
+    @pytest.mark.asyncio
+    async def test_blocks_production_environment(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should raise error in production environment."""
+        with patch.dict(os.environ, {"APP_ENVIRONMENT": "production"}):
+            with pytest.raises(NonIsolatedWorkspaceError) as exc_info:
+                async with LocalWorkspace.create(workspace_config):
+                    pass
+
+            assert "NO ISOLATION" in str(exc_info.value)
+            assert "production" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_blocks_staging_environment(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should raise error in staging environment."""
+        with patch.dict(os.environ, {"APP_ENVIRONMENT": "staging"}):
+            with pytest.raises(NonIsolatedWorkspaceError) as exc_info:
+                async with LocalWorkspace.create(workspace_config):
+                    pass
+
+            assert "NO ISOLATION" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_allows_test_environment(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should work in test environment."""
+        with patch.dict(os.environ, {"APP_ENVIRONMENT": "test"}):
+            async with LocalWorkspace.create(workspace_config) as workspace:
+                assert workspace.path.exists()
+
+    @pytest.mark.asyncio
+    async def test_allows_development_environment(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should work in development environment."""
+        with patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}):
+            async with LocalWorkspace.create(workspace_config) as workspace:
+                assert workspace.path.exists()
+
+    @pytest.mark.asyncio
+    async def test_allows_when_not_set(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should work when APP_ENVIRONMENT not set."""
+        # Clear APP_ENVIRONMENT
+        env = os.environ.copy()
+        env.pop("APP_ENVIRONMENT", None)
+        with patch.dict(os.environ, env, clear=True):
+            async with LocalWorkspace.create(workspace_config) as workspace:
+                assert workspace.path.exists()

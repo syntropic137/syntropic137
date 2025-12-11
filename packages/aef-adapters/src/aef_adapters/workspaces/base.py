@@ -12,11 +12,15 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import json
+import logging
+import os
 import shutil
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -209,7 +213,21 @@ class BaseIsolatedWorkspace(ABC):
 
     @classmethod
     async def _create_stub_handlers(cls, workspace: IsolatedWorkspace) -> None:
-        """Create minimal stub handlers when agentic-primitives not found."""
+        """Create minimal stub handlers when agentic-primitives not found.
+
+        WARNING: These stubs ALLOW ALL operations without validation.
+        They are suitable for testing only. In production, proper hooks
+        from agentic-primitives should always be available.
+        """
+        # Log warning about using stubs (per ADR-004)
+        app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
+        if app_env not in ("test", "testing"):
+            logger.warning(
+                "Creating stub handlers that ALLOW ALL operations. "
+                "This bypasses security validation. Ensure agentic-primitives "
+                "hooks are available at: lib/agentic-primitives/primitives/v1/hooks"
+            )
+
         handlers_dir = workspace.path / ".claude" / "hooks" / "handlers"
 
         # Pre-tool-use stub (allow all)
