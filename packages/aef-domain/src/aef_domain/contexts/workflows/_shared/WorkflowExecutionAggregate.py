@@ -99,6 +99,27 @@ class FailExecutionCommand:
         self.total_phases = total_phases
 
 
+class StartPhaseCommand:
+    """Command to start a phase execution."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        workflow_id: str,
+        phase_id: str,
+        phase_name: str,
+        phase_order: int,
+        session_id: str | None = None,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.workflow_id = workflow_id
+        self.phase_id = phase_id
+        self.phase_name = phase_name
+        self.phase_order = phase_order
+        self.session_id = session_id
+
+
 class CompletePhaseCommand:
     """Command to mark a phase as completed with metrics."""
 
@@ -201,6 +222,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._completed_at: datetime | None = None
         self._total_phases: int = 0
         self._completed_phases: int = 0
+        self._current_phase_order: int = 0
         self._total_tokens: int = 0
         self._artifact_ids: list[str] = []
         self._error: str | None = None
@@ -297,6 +319,28 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)  # type: ignore[arg-type]
 
+    @command_handler("StartPhaseCommand")
+    def start_phase(self, command: StartPhaseCommand) -> None:
+        """Handle StartPhaseCommand - emit PhaseStartedEvent."""
+        from aef_domain.contexts.workflows.execute_workflow.PhaseStartedEvent import (
+            PhaseStartedEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot start phase in status {self._status}"
+            raise ValueError(msg)
+
+        event = PhaseStartedEvent(
+            workflow_id=command.workflow_id,
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            phase_name=command.phase_name,
+            phase_order=command.phase_order,
+            started_at=datetime.now(UTC),
+            session_id=command.session_id,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand - emit PhaseCompletedEvent."""
@@ -375,6 +419,16 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._error = data.get("error_message")
 
         self._status = ExecutionStatus.FAILED
+
+    @event_sourcing_handler("PhaseStarted")
+    def on_phase_started(self, event: Any) -> None:
+        """Apply PhaseStartedEvent - track current phase."""
+        # Track the current phase order for ordering/validation purposes
+        if hasattr(event, "phase_order"):
+            self._current_phase_order = event.phase_order
+        else:
+            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._current_phase_order = data.get("phase_order", 0)
 
     @event_sourcing_handler("PhaseCompleted")
     def on_phase_completed(self, _event: Any) -> None:

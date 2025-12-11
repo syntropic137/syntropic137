@@ -114,9 +114,23 @@ async def get_session(session_id: str) -> SessionResponse:
             )
         )
 
+    # Get workflow name from projection if available
+    workflow_name = None
+    if session.workflow_id:
+        try:
+            # Try to get workflow from the list projection
+            workflows = await manager.workflow_list.get_all()
+            wf = next((w for w in workflows if w.id == session.workflow_id), None)
+            if wf:
+                workflow_name = wf.name
+        except Exception:
+            pass  # workflow lookup is optional
+
     return SessionResponse(
         id=session.id,
         workflow_id=session.workflow_id,
+        workflow_name=workflow_name,
+        execution_id=getattr(session, "execution_id", None),
         phase_id=session.phase_id,
         milestone_id=None,
         agent_provider=session.agent_type,

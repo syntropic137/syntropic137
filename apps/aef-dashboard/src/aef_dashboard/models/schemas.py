@@ -133,6 +133,8 @@ class SessionResponse(BaseModel):
 
     id: str
     workflow_id: str | None
+    workflow_name: str | None = None
+    execution_id: str | None = None
     phase_id: str | None
     milestone_id: str | None
     agent_provider: str | None

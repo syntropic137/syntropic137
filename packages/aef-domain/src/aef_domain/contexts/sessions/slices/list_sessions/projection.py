@@ -1,12 +1,30 @@
-"""Projection for session list view."""
+"""Projection for session list view.
 
-from datetime import datetime
+Uses CheckpointedProjection (ADR-014) for reliable position tracking.
+"""
+
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+
+from event_sourcing import (
+    CheckpointedProjection,
+    EventEnvelope,
+    ProjectionCheckpoint,
+    ProjectionCheckpointStore,
+    ProjectionResult,
+)
 
 from aef_domain.contexts.sessions.domain.read_models.session_summary import (
     SessionSummary,
 )
+
+# Event types this projection subscribes to
+_SUBSCRIBED_EVENTS = {
+    "SessionStarted",
+    "OperationRecorded",
+    "SessionCompleted",
+}
 
 
 def _calculate_duration(
@@ -31,14 +49,17 @@ def _calculate_duration(
         return None
 
 
-class SessionListProjection:
+class SessionListProjection(CheckpointedProjection):
     """Builds session list read model from events.
 
     This projection maintains a summary view of all sessions for
     efficient listing and filtering.
+
+    Implements CheckpointedProjection for per-projection position tracking.
     """
 
     PROJECTION_NAME = "session_summaries"
+    VERSION = 1
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -48,9 +69,59 @@ class SessionListProjection:
         """
         self._store = store
 
+    # === CheckpointedProjection required methods ===
+
+    def get_name(self) -> str:
+        """Unique projection name for checkpoint tracking."""
+        return self.PROJECTION_NAME
+
+    def get_version(self) -> int:
+        """Schema version - increment to trigger rebuild."""
+        return self.VERSION
+
+    def get_subscribed_event_types(self) -> set[str] | None:
+        """Event types this projection handles."""
+        return _SUBSCRIBED_EVENTS
+
+    async def handle_event(
+        self,
+        envelope: EventEnvelope[Any],
+        checkpoint_store: ProjectionCheckpointStore,
+    ) -> ProjectionResult:
+        """Handle an event and save checkpoint atomically."""
+        event_type = envelope.event.event_type
+        event_data = envelope.event.model_dump()
+        global_nonce = envelope.metadata.global_nonce or 0
+
+        try:
+            if event_type == "SessionStarted":
+                await self.on_session_started(event_data)
+            elif event_type == "OperationRecorded":
+                await self.on_operation_recorded(event_data)
+            elif event_type == "SessionCompleted":
+                await self.on_session_completed(event_data)
+
+            await checkpoint_store.save_checkpoint(
+                ProjectionCheckpoint(
+                    projection_name=self.PROJECTION_NAME,
+                    global_position=global_nonce,
+                    updated_at=datetime.now(UTC),
+                    version=self.VERSION,
+                )
+            )
+            return ProjectionResult.SUCCESS
+
+        except Exception:
+            return ProjectionResult.FAILURE
+
+    async def clear_all_data(self) -> None:
+        """Clear projection data for rebuild."""
+        if hasattr(self._store, "delete_all"):
+            await self._store.delete_all(self.PROJECTION_NAME)
+
     @property
     def name(self) -> str:
-        """Get the projection name."""
+        """Get the projection name (deprecated, use get_name())."""
         return self.PROJECTION_NAME
 
     async def on_session_started(self, event_data: dict) -> None:

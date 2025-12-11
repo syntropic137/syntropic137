@@ -1,20 +1,40 @@
-"""Projection for artifact list view."""
+"""Projection for artifact list view.
 
+Uses CheckpointedProjection (ADR-014) for reliable position tracking.
+"""
+
+from datetime import UTC, datetime
 from typing import Any
+
+from event_sourcing import (
+    CheckpointedProjection,
+    EventEnvelope,
+    ProjectionCheckpoint,
+    ProjectionCheckpointStore,
+    ProjectionResult,
+)
 
 from aef_domain.contexts.artifacts.domain.read_models.artifact_summary import (
     ArtifactSummary,
 )
 
+# Event types this projection subscribes to
+_SUBSCRIBED_EVENTS = {
+    "ArtifactCreated",
+}
 
-class ArtifactListProjection:
+
+class ArtifactListProjection(CheckpointedProjection):
     """Builds artifact list read model from events.
 
     This projection maintains a summary view of all artifacts for
     efficient listing and filtering.
+
+    Implements CheckpointedProjection for per-projection position tracking.
     """
 
     PROJECTION_NAME = "artifact_summaries"
+    VERSION = 2  # Bumped to include size_bytes and content fields
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -24,14 +44,67 @@ class ArtifactListProjection:
         """
         self._store = store
 
+    # === CheckpointedProjection required methods ===
+
+    def get_name(self) -> str:
+        """Unique projection name for checkpoint tracking."""
+        return self.PROJECTION_NAME
+
+    def get_version(self) -> int:
+        """Schema version - increment to trigger rebuild."""
+        return self.VERSION
+
+    def get_subscribed_event_types(self) -> set[str] | None:
+        """Event types this projection handles."""
+        return _SUBSCRIBED_EVENTS
+
+    async def handle_event(
+        self,
+        envelope: EventEnvelope[Any],
+        checkpoint_store: ProjectionCheckpointStore,
+    ) -> ProjectionResult:
+        """Handle an event and save checkpoint atomically."""
+        event_type = envelope.event.event_type
+        event_data = envelope.event.model_dump()
+        global_nonce = envelope.metadata.global_nonce or 0
+
+        try:
+            if event_type == "ArtifactCreated":
+                await self.on_artifact_created(event_data)
+
+            await checkpoint_store.save_checkpoint(
+                ProjectionCheckpoint(
+                    projection_name=self.PROJECTION_NAME,
+                    global_position=global_nonce,
+                    updated_at=datetime.now(UTC),
+                    version=self.VERSION,
+                )
+            )
+            return ProjectionResult.SUCCESS
+
+        except Exception:
+            return ProjectionResult.FAILURE
+
+    async def clear_all_data(self) -> None:
+        """Clear projection data for rebuild."""
+        if hasattr(self._store, "delete_all"):
+            await self._store.delete_all(self.PROJECTION_NAME)
+
     @property
     def name(self) -> str:
-        """Get the projection name."""
+        """Get the projection name (deprecated, use get_name())."""
         return self.PROJECTION_NAME
 
     async def on_artifact_created(self, event_data: dict) -> None:
         """Handle ArtifactCreated event."""
         artifact_id = event_data.get("artifact_id", "")
+        content = event_data.get("content", "")
+        size_bytes = event_data.get("size_bytes", 0)
+
+        # If size_bytes not provided, calculate from content
+        if not size_bytes and content:
+            size_bytes = len(content.encode("utf-8")) if isinstance(content, str) else len(content)
+
         summary = ArtifactSummary(
             id=artifact_id,
             workflow_id=event_data.get("workflow_id", ""),
@@ -40,6 +113,9 @@ class ArtifactListProjection:
             artifact_type=event_data.get("artifact_type", "unknown"),
             name=event_data.get("title", "Untitled"),
             created_at=event_data.get("created_at"),
+            size_bytes=size_bytes,
+            content=content,
+            content_hash=event_data.get("content_hash"),
         )
         await self._store.save(self.PROJECTION_NAME, artifact_id, summary.to_dict())
 

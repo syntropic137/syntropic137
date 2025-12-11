@@ -1,6 +1,5 @@
 import { clsx } from 'clsx'
 import {
-  ArrowLeft,
   Clipboard,
   ClipboardCheck,
   Code,
@@ -15,7 +14,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { getArtifact } from '../api/client'
-import { Card, CardContent, CardHeader, EmptyState, PageLoader } from '../components'
+import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, PageLoader } from '../components'
+import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import { MarkdownViewer } from '../components/MarkdownViewer'
 import type { ArtifactResponse } from '../types'
 
@@ -88,18 +88,32 @@ export function ArtifactDetail() {
 
   const Icon = artifactIcons[artifact.artifact_type] ?? FileText
 
+  // Build breadcrumb trail: Workflow → Session → Artifact
+  const breadcrumbs: BreadcrumbItem[] = []
+  if (artifact.workflow_id) {
+    breadcrumbs.push({
+      label: artifact.workflow_id,
+      href: `/workflows/${artifact.workflow_id}`,
+    })
+  }
+  if (artifact.session_id) {
+    breadcrumbs.push({
+      label: artifact.phase_id || 'Session',
+      href: `/sessions/${artifact.session_id}`,
+    })
+  }
+  breadcrumbs.push({
+    label: artifact.title || `Artifact ${artifact.id.slice(0, 8)}`,
+  })
+
   return (
     <div className="space-y-6">
+      {/* Breadcrumbs */}
+      <Breadcrumbs items={breadcrumbs} />
+
       {/* Header */}
       <div>
-        <Link
-          to="/artifacts"
-          className="inline-flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Artifacts
-        </Link>
-        <div className="mt-4 flex items-start justify-between">
+        <div className="flex items-start justify-between">
           <div className="flex items-start gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-orange-500/20">
               <Icon className="h-6 w-6 text-amber-400" />

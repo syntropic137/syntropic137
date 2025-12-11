@@ -141,79 +141,6 @@ class EventSubscriptionService:
         )
         return status
 
-    async def health_check(self) -> dict:
-        """Perform health check for subscription service.
-
-        This checks for consistency between saved position and the actual
-        state of projections. Useful for detecting issues after crashes
-        or unexpected shutdowns.
-
-        Returns:
-            Dictionary with health status:
-            - healthy: bool - True if no issues detected
-            - position_saved: int - Last saved position in projection_states
-            - position_in_memory: int - Current position in memory
-            - position_gap: int - Difference between saved and in-memory
-            - warnings: list[str] - Any warnings detected
-        """
-        warnings_list: list[str] = []
-
-        # Get saved position from store
-        try:
-            saved_position = await self._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
-            if saved_position is None:
-                saved_position = 0
-        except Exception as e:
-            saved_position = -1
-            warnings_list.append(f"Failed to read saved position: {e}")
-
-        # Check for position gaps
-        position_gap = abs(self._last_position - (saved_position or 0))
-
-        # If there's a large gap between memory and saved, something might be wrong
-        if position_gap > self._batch_size * 2:
-            warnings_list.append(
-                f"Large gap between saved position ({saved_position}) "
-                f"and in-memory position ({self._last_position})"
-            )
-
-        # Check if service is running but not processing
-        if self._running and not self._caught_up:
-            time_since_event = None
-            if self._last_event_time:
-                time_since_event = (datetime.now(UTC) - self._last_event_time).total_seconds()
-                if time_since_event > 60:  # No events for 60+ seconds
-                    warnings_list.append(
-                        f"Running but no events processed for {time_since_event:.0f}s"
-                    )
-
-        # Check reconnect count (many reconnects might indicate problems)
-        if self._reconnect_count > 10:
-            warnings_list.append(
-                f"High reconnect count ({self._reconnect_count}) - "
-                "possible connectivity or event store issues"
-            )
-
-        health_status = {
-            "healthy": len(warnings_list) == 0,
-            "position_saved": saved_position,
-            "position_in_memory": self._last_position,
-            "position_gap": position_gap,
-            "events_processed": self._events_processed,
-            "reconnect_count": self._reconnect_count,
-            "is_running": self._running,
-            "is_caught_up": self._caught_up,
-            "warnings": warnings_list,
-        }
-
-        logger.log(
-            logging.WARNING if warnings_list else logging.DEBUG,
-            "[SUBSCRIPTION] Health check completed",
-            extra=health_status,
-        )
-
-        return health_status
-
     async def start(self) -> None:
         """Start the subscription service.
 
@@ -296,7 +223,11 @@ class EventSubscriptionService:
         )
 
     async def _load_position(self) -> None:
-        """Load last processed position from projection store."""
+        """Load last processed position from projection store.
+
+        Also validates for position drift - when the saved position exists
+        but projection data is missing (e.g., after a database reset).
+        """
         try:
             position = await self._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
             if position is not None:
@@ -305,6 +236,9 @@ class EventSubscriptionService:
                     "Loaded subscription position",
                     extra={"position": self._last_position},
                 )
+
+                # Check for position drift by validating projections have data
+                await self._validate_position_consistency()
             else:
                 self._last_position = 0
                 logger.info("No previous subscription position found, starting from 0")
@@ -314,6 +248,62 @@ class EventSubscriptionService:
                 extra={"error": str(e)},
             )
             self._last_position = 0
+
+    async def _validate_position_consistency(self) -> None:
+        """Validate that position is consistent with projection data.
+
+        Detects position drift scenarios:
+        1. Position saved but projection store was reset (different container/DB)
+        2. Position saved but projections failed to persist
+        3. Event store and projection store using different backends
+
+        Logs a CRITICAL warning if drift is detected but does NOT reset position
+        automatically - this requires operator intervention to decide:
+        - Reset position to 0 (reprocess all events)
+        - Keep position (skip historical events)
+        """
+        if self._last_position == 0:
+            return  # Nothing to validate
+
+        # Try to get some projection data to verify consistency
+        # We check if the workflow_executions projection has any data
+        try:
+            executions = await self._projection_store.get_all("workflow_executions")
+            sessions = await self._projection_store.get_all("agent_sessions")
+
+            total_records = len(executions) + len(sessions)
+
+            if total_records == 0 and self._last_position > 10:
+                # We have a significant position but no projection data
+                # This is a strong indicator of position drift
+                logger.critical(
+                    "[SUBSCRIPTION] ⚠️ POSITION DRIFT DETECTED! "
+                    "Saved position exists but projection data is empty. "
+                    "This indicates the projection store was reset while event store wasn't. "
+                    "Consider running 'just dev-fresh' to reset both stores, "
+                    "or manually reset the subscription position to 0.",
+                    extra={
+                        "saved_position": self._last_position,
+                        "workflow_executions_count": len(executions),
+                        "agent_sessions_count": len(sessions),
+                        "action_required": "Operator intervention needed",
+                    },
+                )
+            elif total_records > 0:
+                logger.info(
+                    "[SUBSCRIPTION] ✅ Position consistency check passed",
+                    extra={
+                        "saved_position": self._last_position,
+                        "workflow_executions_count": len(executions),
+                        "agent_sessions_count": len(sessions),
+                    },
+                )
+        except Exception as e:
+            # If we can't check, log a warning but continue
+            logger.warning(
+                "[SUBSCRIPTION] ⚠️ Could not validate position consistency",
+                extra={"error": str(e), "saved_position": self._last_position},
+            )
 
     async def _save_position(self) -> None:
         """Save current position to projection store."""
@@ -510,10 +500,6 @@ class EventSubscriptionService:
                 break
 
             # Process events
-            # Track the last successfully processed position for this batch
-            last_successful_position = self._last_position
-            dispatch_failed = False
-
             for idx, envelope in enumerate(events):
                 if self._stop_event.is_set():
                     logger.info("[SUBSCRIPTION] 🛑 Catch-up interrupted by stop signal")
@@ -531,31 +517,34 @@ class EventSubscriptionService:
                     },
                 )
 
-                success = await self._dispatch_event(envelope)
+                dispatch_success = await self._dispatch_event(envelope)
                 self._last_event_time = datetime.now(UTC)
 
-                if success:
+                # CRITICAL: Only advance position if dispatch succeeded
+                # This ensures at-least-once delivery guarantee
+                if dispatch_success:
                     events_in_batch += 1
                     total_catchup_events += 1
-                    # ONLY advance position on successful dispatch
                     if envelope.metadata.global_nonce is not None:
                         self._last_position = envelope.metadata.global_nonce
-                        last_successful_position = envelope.metadata.global_nonce
                 else:
-                    # Event failed - stop processing this batch
-                    # Position will NOT advance past the failed event
-                    dispatch_failed = True
-                    logger.warning(
-                        "[SUBSCRIPTION] ⚠️ Stopping batch - event dispatch failed",
+                    # Dispatch failed - stop catch-up to prevent position drift
+                    logger.error(
+                        "[SUBSCRIPTION] 🛑 Stopping catch-up due to dispatch failure",
                         extra={
-                            "failed_at_position": global_nonce,
-                            "last_successful_position": last_successful_position,
-                            "events_in_batch_before_failure": events_in_batch,
+                            "failed_at_position": getattr(
+                                getattr(envelope, "metadata", None), "global_nonce", None
+                            ),
+                            "last_successful_position": self._last_position,
                         },
                     )
-                    break
+                    raise RuntimeError(
+                        f"Event dispatch failed at position "
+                        f"{getattr(getattr(envelope, 'metadata', None), 'global_nonce', None)}. "
+                        "Stopping to prevent position drift. Will retry on reconnect."
+                    )
 
-            # Save position periodically during catch-up (only if we had successful events)
+            # Save position periodically during catch-up
             if events_in_batch >= self._batch_size:
                 await self._save_position()
                 events_in_batch = 0
@@ -565,22 +554,6 @@ class EventSubscriptionService:
                         "position": self._last_position,
                         "events_processed": self._events_processed,
                     },
-                )
-
-            # If a dispatch failed, stop catch-up and let retry logic handle it
-            if dispatch_failed:
-                logger.warning(
-                    "[SUBSCRIPTION] ⚠️ Catch-up stopping due to dispatch failure",
-                    extra={
-                        "last_successful_position": last_successful_position,
-                        "will_retry_from": last_successful_position + 1,
-                    },
-                )
-                # Save the last successful position before exiting
-                await self._save_position()
-                raise RuntimeError(
-                    f"Event dispatch failed at position {global_nonce}. "
-                    f"Will retry from position {last_successful_position + 1}"
                 )
 
             # Use explicit end signal instead of heuristic
@@ -646,26 +619,19 @@ class EventSubscriptionService:
                     },
                 )
 
-                success = await self._dispatch_event(envelope)
+                dispatch_success = await self._dispatch_event(envelope)
 
-                if success:
+                # CRITICAL: Only advance position if dispatch succeeded
+                if dispatch_success:
                     events_since_save += 1
-                    # ONLY advance position on successful dispatch
                     if envelope.metadata.global_nonce is not None:
                         self._last_position = envelope.metadata.global_nonce
                 else:
-                    # Event failed - save current position and let retry logic handle it
-                    logger.warning(
-                        "[SUBSCRIPTION] ⚠️ Live event dispatch failed - triggering reconnect",
-                        extra={
-                            "failed_at_position": global_nonce,
-                            "last_successful_position": self._last_position,
-                        },
-                    )
-                    await self._save_position()
+                    # Dispatch failed - raise to trigger reconnect
+                    # This ensures we retry the failed event
                     raise RuntimeError(
-                        f"Live event dispatch failed at position {global_nonce}. "
-                        f"Will retry from position {self._last_position + 1}"
+                        f"Event dispatch failed at position {global_nonce}. "
+                        "Triggering reconnect to retry."
                     )
 
                 # Save position periodically
@@ -723,14 +689,12 @@ class EventSubscriptionService:
         came through the proper event store channel, enforcing event
         sourcing guarantees.
 
-        IMPORTANT: Position should only be advanced if this returns True.
-        Failed events should be retried on restart, not skipped.
-
         Args:
             envelope: Event envelope from the event store.
 
         Returns:
-            True if event was successfully dispatched, False otherwise.
+            True if event was successfully dispatched, False if it failed.
+            Position should only be advanced if this returns True.
         """
         event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
         global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
@@ -753,10 +717,10 @@ class EventSubscriptionService:
             return True
 
         except ValueError as e:
-            # Invalid envelope - log but don't advance position
-            # Event is malformed and can't be processed
-            logger.warning(
-                "[SUBSCRIPTION] ⚠️ Invalid event envelope - position NOT advanced",
+            # Invalid envelope - log but DON'T advance position
+            # This event needs to be investigated, not skipped
+            logger.error(
+                "[SUBSCRIPTION] ❌ Invalid event envelope - NOT advancing position",
                 extra={
                     "error": str(e),
                     "event_type": event_type,
@@ -766,10 +730,10 @@ class EventSubscriptionService:
             return False
 
         except Exception as e:
-            # Projection handler failed - DO NOT advance position
-            # This event should be retried on restart
+            # Dispatch failed - DON'T advance position
+            # Event will be retried on next restart
             logger.error(
-                "[SUBSCRIPTION] ❌ Failed to dispatch event - position NOT advanced",
+                "[SUBSCRIPTION] ❌ Failed to dispatch event - NOT advancing position",
                 extra={
                     "error": str(e),
                     "error_type": type(e).__name__,
@@ -779,3 +743,76 @@ class EventSubscriptionService:
                 exc_info=True,
             )
             return False
+
+    async def health_check(self) -> dict:
+        """Perform health check for subscription service.
+
+        This checks for consistency between saved position and the actual
+        state of projections. Useful for detecting issues after crashes
+        or unexpected shutdowns.
+
+        Returns:
+            Dictionary with health status:
+            - healthy: bool - True if no issues detected
+            - position_saved: int - Last saved position in projection_states
+            - position_in_memory: int - Current position in memory
+            - position_gap: int - Difference between saved and in-memory
+            - warnings: list[str] - Any warnings detected
+        """
+        warnings_list: list[str] = []
+
+        # Get saved position from store
+        try:
+            saved_position = await self._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
+            if saved_position is None:
+                saved_position = 0
+        except Exception as e:
+            saved_position = -1
+            warnings_list.append(f"Failed to read saved position: {e}")
+
+        # Check for position gaps
+        position_gap = abs(self._last_position - (saved_position or 0))
+
+        # If there's a large gap between memory and saved, something might be wrong
+        if position_gap > self._batch_size * 2:
+            warnings_list.append(
+                f"Large gap between saved position ({saved_position}) "
+                f"and in-memory position ({self._last_position})"
+            )
+
+        # Check if service is running but not processing
+        if self._running and not self._caught_up:
+            time_since_event = None
+            if self._last_event_time:
+                time_since_event = (datetime.now(UTC) - self._last_event_time).total_seconds()
+                if time_since_event > 60:  # No events for 60+ seconds
+                    warnings_list.append(
+                        f"Running but no events processed for {time_since_event:.0f}s"
+                    )
+
+        # Check reconnect count (many reconnects might indicate problems)
+        if self._reconnect_count > 10:
+            warnings_list.append(
+                f"High reconnect count ({self._reconnect_count}) - "
+                "possible connectivity or event store issues"
+            )
+
+        health_status = {
+            "healthy": len(warnings_list) == 0,
+            "position_saved": saved_position,
+            "position_in_memory": self._last_position,
+            "position_gap": position_gap,
+            "events_processed": self._events_processed,
+            "reconnect_count": self._reconnect_count,
+            "is_running": self._running,
+            "is_caught_up": self._caught_up,
+            "warnings": warnings_list,
+        }
+
+        logger.log(
+            logging.WARNING if warnings_list else logging.DEBUG,
+            "[SUBSCRIPTION] Health check completed",
+            extra=health_status,
+        )
+
+        return health_status
