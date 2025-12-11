@@ -1,9 +1,9 @@
 import { clsx } from 'clsx'
-import type { LucideIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { ArrowRight, type LucideIcon } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 interface MetricCardProps {
-  title: ReactNode
+  title: string
   value: string | number
   subtitle?: string
   icon?: LucideIcon
@@ -12,6 +12,7 @@ interface MetricCardProps {
     isPositive: boolean
   }
   color?: 'default' | 'accent' | 'success' | 'warning' | 'error'
+  href?: string
 }
 
 const colorClasses = {
@@ -44,11 +45,15 @@ export function MetricCard({
   icon: Icon,
   trend,
   color = 'default',
+  href,
 }: MetricCardProps) {
   const colors = colorClasses[color]
 
-  return (
-    <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+  const content = (
+    <div className={clsx(
+      'rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4',
+      href && 'cursor-pointer hover:border-[var(--color-accent)] hover:bg-[var(--color-surface-elevated)] transition-colors'
+    )}>
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <p className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
@@ -76,7 +81,27 @@ export function MetricCard({
             <Icon className={clsx('h-5 w-5', colors.icon)} />
           </div>
         )}
+        {href && (
+          <ArrowRight
+            className="h-4 w-4 text-[var(--color-text-muted)] ml-2 self-center"
+            aria-hidden="true"
+          />
+        )}
       </div>
     </div>
   )
+
+  if (href) {
+    return (
+      <Link
+        to={href}
+        aria-label={`View ${title} details`}
+        className="focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:ring-offset-2 rounded-lg"
+      >
+        {content}
+      </Link>
+    )
+  }
+
+  return content
 }

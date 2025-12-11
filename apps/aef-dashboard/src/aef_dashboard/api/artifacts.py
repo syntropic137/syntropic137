@@ -59,7 +59,7 @@ def _domain_artifact_to_api(artifact: DomainArtifactSummary) -> ArtifactSummary:
         phase_id=artifact.phase_id,
         artifact_type=artifact.artifact_type,
         title=artifact.name,
-        size_bytes=0,  # Not tracked in current domain model
+        size_bytes=artifact.size_bytes,
         created_at=_parse_datetime(artifact.created_at),
     )
 
@@ -91,7 +91,7 @@ async def list_artifacts(
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(
     artifact_id: str,
-    include_content: bool = Query(False, description="Include artifact content in response"),
+    include_content: bool = Query(True, description="Include artifact content in response"),
 ) -> ArtifactResponse:
     """Get artifact details by ID."""
     # Get projection manager and create handler
@@ -107,11 +107,17 @@ async def get_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
-    # Try to load content from workspace if requested
-    content = None
-    size_bytes = 0
-    if include_content:
-        content, size_bytes = _load_artifact_content(artifact_id, artifact.phase_id)
+    # Get content from projection (stored in event store)
+    content = artifact.content if include_content else None
+    size_bytes = artifact.size_bytes
+
+    # Fail fast if content requested but not available in projection
+    if include_content and not content:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact {artifact_id} content not found in projection. "
+            "This may indicate the artifact was not properly stored.",
+        )
 
     return ArtifactResponse(
         id=artifact.id,
@@ -119,10 +125,10 @@ async def get_artifact(
         phase_id=artifact.phase_id,
         session_id=artifact.session_id,
         artifact_type=artifact.artifact_type,
-        is_primary_deliverable=False,
+        is_primary_deliverable=True,
         content=content,
         content_type="text/markdown",
-        content_hash=None,
+        content_hash=artifact.content_hash,
         size_bytes=size_bytes,
         title=artifact.name,
         derived_from=[],
@@ -147,8 +153,13 @@ async def get_artifact_content(artifact_id: str) -> dict[str, str | int | None]:
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
-    # Load content from workspace
-    content, size_bytes = _load_artifact_content(artifact_id, artifact.phase_id)
+    # Get content from projection first
+    content = artifact.content
+    size_bytes = artifact.size_bytes
+
+    # Fallback to filesystem if no content in projection
+    if not content:
+        content, size_bytes = _load_artifact_content(artifact_id, artifact.phase_id)
 
     return {
         "artifact_id": artifact_id,

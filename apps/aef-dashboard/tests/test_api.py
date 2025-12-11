@@ -20,7 +20,6 @@ from aef_adapters.storage import (
     get_workflow_repository,
     reset_storage,
 )
-from aef_dashboard.api.events import clear_events, push_event
 from aef_dashboard.main import app
 from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
@@ -70,7 +69,6 @@ def reset_storage_fixture() -> None:
     reset_storage()
     reset_projection_store()
     reset_projection_manager()
-    clear_events()
 
 
 async def create_test_workflow(workflow_id: str = "test-wf-1") -> WorkflowAggregate:
@@ -451,11 +449,12 @@ class TestArtifactEndpoints:
         await create_test_workflow("wf-1")
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/artifacts/art-1")
+        # Explicitly request without content (default is now True in this branch)
+        response = await client.get("/api/artifacts/art-1?include_content=false")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "art-1"
-        assert data["content"] is None  # Not included by default
+        assert data["content"] is None  # Not included when explicitly requested
 
     @pytest.mark.asyncio
     @pytest.mark.xfail(reason="Artifact content storage not yet implemented in projection")
@@ -539,59 +538,6 @@ class TestMetricsEndpoints:
         assert data["total_sessions"] == 2
         assert len(data["phases"]) == 2
         assert data["phases"][0]["phase_name"] == "Research Phase"
-
-
-# =============================================================================
-# EVENTS ENDPOINTS
-# =============================================================================
-
-
-class TestEventsEndpoints:
-    """Test events API endpoints."""
-
-    @pytest.mark.asyncio
-    async def test_get_recent_events_empty(self, client: httpx.AsyncClient) -> None:
-        """Test getting recent events when none exist."""
-        response = await client.get("/api/events/recent")
-        assert response.status_code == 200
-        assert response.json() == []
-
-    @pytest.mark.asyncio
-    async def test_get_recent_events(self, client: httpx.AsyncClient) -> None:
-        """Test getting recent events."""
-        push_event("workflow_started", {"workflow_id": "wf-1"})
-        push_event("phase_started", {"workflow_id": "wf-1", "phase_id": "p-1"})
-
-        response = await client.get("/api/events/recent")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 2
-        assert data[0]["event_type"] == "workflow_started"
-
-    @pytest.mark.asyncio
-    async def test_get_recent_events_filtered(self, client: httpx.AsyncClient) -> None:
-        """Test filtering events by workflow."""
-        push_event("workflow_started", {"workflow_id": "wf-1"})
-        push_event("workflow_started", {"workflow_id": "wf-2"})
-
-        response = await client.get("/api/events/recent?workflow_id=wf-1")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["data"]["workflow_id"] == "wf-1"
-
-    @pytest.mark.asyncio
-    async def test_push_event(self, client: httpx.AsyncClient) -> None:
-        """Test pushing a custom event."""
-        response = await client.post("/api/events/push?event_type=test_event&workflow_id=wf-1")
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-
-        # Verify event was pushed
-        response = await client.get("/api/events/recent")
-        data = response.json()
-        assert len(data) == 1
-        assert data[0]["event_type"] == "test_event"
 
 
 # =============================================================================

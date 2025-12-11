@@ -3,26 +3,49 @@
 This projection maintains detailed execution state including per-phase metrics.
 It's updated by WorkflowExecutionStarted, PhaseStarted, PhaseCompleted,
 WorkflowCompleted, and WorkflowFailed events.
+
+Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
+
+from event_sourcing import (
+    CheckpointedProjection,
+    EventEnvelope,
+    ProjectionCheckpoint,
+    ProjectionCheckpointStore,
+    ProjectionResult,
+)
 
 from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
 
+# Event types this projection subscribes to
+_SUBSCRIBED_EVENTS = {
+    "WorkflowExecutionStarted",
+    "PhaseStarted",
+    "PhaseCompleted",
+    "WorkflowCompleted",
+    "WorkflowFailed",
+}
 
-class WorkflowExecutionDetailProjection:
+
+class WorkflowExecutionDetailProjection(CheckpointedProjection):
     """Builds workflow execution detail read model from events.
 
     This projection maintains detailed execution state including:
     - Overall execution status and metrics
     - Per-phase execution details with individual metrics
     - Artifact references
+
+    Implements CheckpointedProjection for per-projection position tracking.
     """
 
     PROJECTION_NAME = "workflow_execution_details"
+    VERSION = 1
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -32,9 +55,63 @@ class WorkflowExecutionDetailProjection:
         """
         self._store = store
 
+    # === CheckpointedProjection required methods ===
+
+    def get_name(self) -> str:
+        """Unique projection name for checkpoint tracking."""
+        return self.PROJECTION_NAME
+
+    def get_version(self) -> int:
+        """Schema version - increment to trigger rebuild."""
+        return self.VERSION
+
+    def get_subscribed_event_types(self) -> set[str] | None:
+        """Event types this projection handles."""
+        return _SUBSCRIBED_EVENTS
+
+    async def handle_event(
+        self,
+        envelope: EventEnvelope[Any],
+        checkpoint_store: ProjectionCheckpointStore,
+    ) -> ProjectionResult:
+        """Handle an event and save checkpoint atomically."""
+        event_type = envelope.event.event_type
+        event_data = envelope.event.model_dump()
+        global_nonce = envelope.metadata.global_nonce or 0
+
+        try:
+            if event_type == "WorkflowExecutionStarted":
+                await self.on_workflow_execution_started(event_data)
+            elif event_type == "PhaseStarted":
+                await self.on_phase_started(event_data)
+            elif event_type == "PhaseCompleted":
+                await self.on_phase_completed(event_data)
+            elif event_type == "WorkflowCompleted":
+                await self.on_workflow_completed(event_data)
+            elif event_type == "WorkflowFailed":
+                await self.on_workflow_failed(event_data)
+
+            await checkpoint_store.save_checkpoint(
+                ProjectionCheckpoint(
+                    projection_name=self.PROJECTION_NAME,
+                    global_position=global_nonce,
+                    updated_at=datetime.now(UTC),
+                    version=self.VERSION,
+                )
+            )
+            return ProjectionResult.SUCCESS
+
+        except Exception:
+            return ProjectionResult.FAILURE
+
+    async def clear_all_data(self) -> None:
+        """Clear projection data for rebuild."""
+        if hasattr(self._store, "delete_all"):
+            await self._store.delete_all(self.PROJECTION_NAME)
+
     @property
     def name(self) -> str:
-        """Get the projection name."""
+        """Get the projection name (deprecated, use get_name())."""
         return self.PROJECTION_NAME
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:

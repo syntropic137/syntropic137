@@ -1,7 +1,8 @@
 # ADR-010: Event Subscription Architecture for Projections
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2025-12-03
+**Updated:** 2025-12-09
 **Deciders:** Engineering Team
 **Related:** ADR-007 (Event Store Integration)
 
@@ -98,6 +99,43 @@ We will implement a **catch-up subscription with live tailing** pattern:
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### RealTimeProjection for UI Streaming (Added 2025-12-09)
+
+In addition to persisting projections, the architecture supports a **RealTimeProjection** for streaming domain events to UI clients via WebSocket:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    REAL-TIME UI STREAMING                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Event Store → Subscription → ProjectionManager                            │
+│                                      │                                       │
+│       ┌──────────────────────────────┼──────────────────────────────────┐   │
+│       ▼                              ▼                                  ▼   │
+│   [Persisting                   [Persisting                    [RealTime   │
+│    Projections]                  Projections]                   Projection] │
+│   (WorkflowList,                (ArtifactList,                      │       │
+│    WorkflowDetail)               SessionList)                       │       │
+│       │                              │                              │       │
+│       ▼                              ▼                              ▼       │
+│   PostgreSQL                    PostgreSQL                   WebSocket     │
+│   (Read Models)                 (Read Models)                Clients (UI)  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+The `RealTimeProjection`:
+- Is a **non-persisting** projection that maintains WebSocket connections
+- Receives events from the same `ProjectionManager` as persisting projections
+- Broadcasts events to connected UI clients for that execution
+- Connects via `/ws/executions/{execution_id}` endpoint
+- Uses the `useExecutionStream` React hook on the frontend
+
+This pattern ensures:
+1. **Single event source:** All UI updates come from the Event Store
+2. **No parallel paths:** No SSE or separate event systems
+3. **Consistent with ES principles:** Projections (including real-time) are consumers of the event stream
 
 ## Consequences
 

@@ -8,10 +8,14 @@ import {
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { listAllExecutions, subscribeToEvents } from '../api/client'
+import { listAllExecutions } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, PageLoader, StatusBadge } from '../components'
-import type { EventMessage, ExecutionListItem } from '../types'
+import type { ExecutionListItem } from '../types'
 
+// Polling interval when executions are running (5 seconds)
+const POLL_INTERVAL_RUNNING = 5000
+// Polling interval when no executions are running (30 seconds)
+const POLL_INTERVAL_IDLE = 30000
 
 export function ExecutionList() {
   const [executions, setExecutions] = useState<ExecutionListItem[]>([])
@@ -20,8 +24,10 @@ export function ExecutionList() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [page, setPage] = useState(1)
   const [now, setNow] = useState(() => Date.now())
-  const [isConnected, setIsConnected] = useState(false)
   const pageSize = 50
+
+  // Check if any executions are running
+  const hasRunning = executions.some((e) => e.status === 'running')
 
   // Refresh the executions list
   const refreshExecutions = useCallback(() => {
@@ -45,78 +51,14 @@ export function ExecutionList() {
     refreshExecutions()
   }, [refreshExecutions])
 
-  // SSE subscription for live updates
+  // Polling for live updates (faster when executions are running)
   useEffect(() => {
-    const handleEvent = (event: EventMessage) => {
-      const eventType = event.event_type
-      const executionId = event.data?.execution_id as string | undefined
-
-      if (!executionId) return
-
-      // Handle different event types
-      if (eventType === 'workflow_started') {
-        // Refresh to get the new execution
-        refreshExecutions()
-      } else if (eventType === 'phase_completed') {
-        // Update the specific execution
-        setExecutions((prev) =>
-          prev.map((exec) => {
-            if (exec.execution_id !== executionId) return exec
-            return {
-              ...exec,
-              completed_phases: (event.data?.completed_phases as number) ?? exec.completed_phases + 1,
-              total_tokens: (event.data?.tokens as number) ?? exec.total_tokens,
-              tool_call_count: (event.data?.tool_call_count as number) ?? exec.tool_call_count,
-            }
-          })
-        )
-      } else if (eventType === 'workflow_completed') {
-        // Update status to completed
-        setExecutions((prev) =>
-          prev.map((exec) => {
-            if (exec.execution_id !== executionId) return exec
-            return {
-              ...exec,
-              status: 'completed',
-              completed_at: new Date().toISOString(),
-              total_tokens: (event.data?.total_tokens as number) ?? exec.total_tokens,
-            }
-          })
-        )
-      } else if (eventType === 'workflow_failed') {
-        // Update status to failed
-        setExecutions((prev) =>
-          prev.map((exec) => {
-            if (exec.execution_id !== executionId) return exec
-            return {
-              ...exec,
-              status: 'failed',
-              completed_at: new Date().toISOString(),
-            }
-          })
-        )
-      } else if (eventType === 'tool_used') {
-        // Increment tool call count
-        setExecutions((prev) =>
-          prev.map((exec) => {
-            if (exec.execution_id !== executionId) return exec
-            return {
-              ...exec,
-              tool_call_count: exec.tool_call_count + 1,
-            }
-          })
-        )
-      }
-    }
-
-    const unsubscribe = subscribeToEvents(
-      handleEvent,
-      () => setIsConnected(false),
-      () => setIsConnected(true)
+    const interval = setInterval(
+      refreshExecutions,
+      hasRunning ? POLL_INTERVAL_RUNNING : POLL_INTERVAL_IDLE
     )
-
-    return unsubscribe
-  }, [refreshExecutions])
+    return () => clearInterval(interval)
+  }, [refreshExecutions, hasRunning])
 
   // Timer for live duration updates (every second when there are running executions)
   useEffect(() => {
@@ -173,16 +115,16 @@ export function ExecutionList() {
             All workflow executions across all workflows
           </p>
         </div>
-        {/* Connection status indicator */}
+        {/* Polling status indicator */}
         <div className="flex items-center gap-2 text-sm">
           <span
             className={clsx(
               'h-2 w-2 rounded-full',
-              isConnected ? 'bg-emerald-500' : 'bg-slate-400'
+              hasRunning ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
             )}
           />
           <span className="text-[var(--color-text-muted)]">
-            {isConnected ? 'Live' : 'Connecting...'}
+            {hasRunning ? 'Auto-refresh (5s)' : 'Idle'}
           </span>
         </div>
       </div>

@@ -1,3 +1,4 @@
+export { Breadcrumbs } from './Breadcrumbs'
 export { Card, CardContent, CardHeader } from './Card'
 export { EmptyState } from './EmptyState'
 export { EventFeed } from './EventFeed'

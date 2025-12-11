@@ -3,23 +3,45 @@
 This projection maintains a list of workflow executions (runs),
 updated by WorkflowExecutionStarted, PhaseCompleted, WorkflowCompleted,
 and WorkflowFailed events from the WorkflowExecutionAggregate.
+
+Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
+from datetime import UTC, datetime
 from typing import Any
+
+from event_sourcing import (
+    CheckpointedProjection,
+    EventEnvelope,
+    ProjectionCheckpoint,
+    ProjectionCheckpointStore,
+    ProjectionResult,
+)
 
 from aef_domain.contexts.workflows.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
 
+# Event types this projection subscribes to
+_SUBSCRIBED_EVENTS = {
+    "WorkflowExecutionStarted",
+    "PhaseCompleted",
+    "WorkflowCompleted",
+    "WorkflowFailed",
+}
 
-class WorkflowExecutionListProjection:
+
+class WorkflowExecutionListProjection(CheckpointedProjection):
     """Builds workflow execution list read model from events.
 
     This projection maintains execution summaries for listing runs
     of workflow templates. Each execution is keyed by execution_id.
+
+    Implements CheckpointedProjection for per-projection position tracking.
     """
 
     PROJECTION_NAME = "workflow_executions"
+    VERSION = 1  # Increment to trigger rebuild on schema change
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -29,9 +51,74 @@ class WorkflowExecutionListProjection:
         """
         self._store = store
 
+    # === CheckpointedProjection required methods ===
+
+    def get_name(self) -> str:
+        """Unique projection name for checkpoint tracking."""
+        return self.PROJECTION_NAME
+
+    def get_version(self) -> int:
+        """Schema version - increment to trigger rebuild."""
+        return self.VERSION
+
+    def get_subscribed_event_types(self) -> set[str] | None:
+        """Event types this projection handles."""
+        return _SUBSCRIBED_EVENTS
+
+    async def handle_event(
+        self,
+        envelope: EventEnvelope[Any],
+        checkpoint_store: ProjectionCheckpointStore,
+    ) -> ProjectionResult:
+        """Handle an event and save checkpoint atomically.
+
+        Dispatches to the appropriate on_* method based on event type.
+        """
+        event_type = envelope.event.event_type
+        event_data = envelope.event.model_dump()
+        global_nonce = envelope.metadata.global_nonce or 0
+
+        try:
+            # Dispatch to the appropriate handler
+            if event_type == "WorkflowExecutionStarted":
+                await self.on_workflow_execution_started(event_data)
+            elif event_type == "PhaseCompleted":
+                await self.on_phase_completed(event_data)
+            elif event_type == "WorkflowCompleted":
+                await self.on_workflow_completed(event_data)
+            elif event_type == "WorkflowFailed":
+                await self.on_workflow_failed(event_data)
+            else:
+                # Unknown event type - skip but advance checkpoint
+                pass
+
+            # Save checkpoint after successful processing
+            await checkpoint_store.save_checkpoint(
+                ProjectionCheckpoint(
+                    projection_name=self.PROJECTION_NAME,
+                    global_position=global_nonce,
+                    updated_at=datetime.now(UTC),
+                    version=self.VERSION,
+                )
+            )
+            return ProjectionResult.SUCCESS
+
+        except Exception:
+            # Let the exception propagate for logging by coordinator
+            return ProjectionResult.FAILURE
+
+    async def clear_all_data(self) -> None:
+        """Clear projection data for rebuild."""
+        # Clear all workflow execution summaries
+        # This depends on the store implementation supporting delete_all
+        if hasattr(self._store, "delete_all"):
+            await self._store.delete_all(self.PROJECTION_NAME)
+
+    # === Legacy property for backward compatibility ===
+
     @property
     def name(self) -> str:
-        """Get the projection name."""
+        """Get the projection name (deprecated, use get_name())."""
         return self.PROJECTION_NAME
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
