@@ -180,7 +180,11 @@ class POCRunner:
                 # (Note: In real implementation, this would go through egress proxy)
                 exit_code, _stdout, _stderr = await self.router.execute_command(
                     workspace,
-                    ["sh", "-c", "command -v curl >/dev/null || apt-get update && apt-get install -y curl"],
+                    [
+                        "sh",
+                        "-c",
+                        "command -v curl >/dev/null || apt-get update && apt-get install -y curl",
+                    ],
                     timeout=60,
                 )
 
@@ -267,7 +271,11 @@ class POCRunner:
                 console.print("  Installing git...")
                 exit_code, _stdout, stderr = await self.router.execute_command(
                     workspace,
-                    ["sh", "-c", "command -v git >/dev/null || (apt-get update && apt-get install -y git)"],
+                    [
+                        "sh",
+                        "-c",
+                        "command -v git >/dev/null || (apt-get update && apt-get install -y git)",
+                    ],
                     timeout=60,
                 )
 
@@ -281,7 +289,12 @@ class POCRunner:
                 console.print("  Cloning test repository...")
                 exit_code, stdout, stderr = await self.router.execute_command(
                     workspace,
-                    ["git", "clone", "https://github.com/octocat/Hello-World.git", "/workspace/repo"],
+                    [
+                        "git",
+                        "clone",
+                        "https://github.com/octocat/Hello-World.git",
+                        "/workspace/repo",
+                    ],
                     timeout=30,
                 )
 
@@ -342,7 +355,9 @@ class POCRunner:
         findings = []
 
         os.environ["AEF_SECURITY_ALLOW_NETWORK"] = "true"
-        os.environ["AEF_SECURITY_ALLOWED_HOSTS"] = "api.anthropic.com,pypi.org,files.pythonhosted.org"
+        os.environ["AEF_SECURITY_ALLOWED_HOSTS"] = (
+            "api.anthropic.com,pypi.org,files.pythonhosted.org"
+        )
 
         base_config = WorkspaceConfig(session_id="poc-agent-execution")
         config = IsolatedWorkspaceConfig(base_config=base_config)
@@ -392,7 +407,11 @@ print(message.content[0].text)
                     # Write script to container
                     exit_code, _stdout, _stderr = await self.router.execute_command(
                         workspace,
-                        ["sh", "-c", f"cat > /workspace/test_agent.py << 'EOF'\n{test_script}\nEOF"],
+                        [
+                            "sh",
+                            "-c",
+                            f"cat > /workspace/test_agent.py << 'EOF'\n{test_script}\nEOF",
+                        ],
                     )
 
                     # Execute script
@@ -544,10 +563,14 @@ print(message.content[0].text)
 async def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(description="POC: E2E Agent Isolation Test")
-    parser.add_argument("--real", action="store_true", help="Use real Claude API (requires ANTHROPIC_API_KEY)")
+    parser.add_argument(
+        "--real", action="store_true", help="Use real Claude API (requires ANTHROPIC_API_KEY)"
+    )
     parser.add_argument("--mock", action="store_true", help="Use mock agent (default)")
     parser.add_argument("--test-network", action="store_true", help="Only test network isolation")
-    parser.add_argument("--output", type=Path, default=Path("poc_findings.json"), help="Output file for findings")
+    parser.add_argument(
+        "--output", type=Path, default=Path("poc_findings.json"), help="Output file for findings"
+    )
 
     args = parser.parse_args()
 

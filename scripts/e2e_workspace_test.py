@@ -276,9 +276,7 @@ print("Output written to /workspace/output.json")
         self.log(f"✅ Process isolation: only {len(procs)} processes visible")
 
         # Check capabilities are dropped
-        exit_code, stdout, _ = await self.run_container(
-            ["cat", "/proc/self/status"], check=False
-        )
+        exit_code, stdout, _ = await self.run_container(["cat", "/proc/self/status"], check=False)
         if "CapEff:\t0000000000000000" in stdout:
             self.log("✅ Capabilities dropped")
         else:

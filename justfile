@@ -390,13 +390,16 @@ poc-isolation-quick:
 proxy-build:
     docker build -t aef-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
 
+# Egress proxy port (use unique port to avoid conflicts)
+PROXY_PORT := env_var_or_default("AEF_PROXY_PORT", "18080")
+
 # Start the egress proxy
 proxy-start:
     @docker rm -f aef-egress-proxy 2>/dev/null || true
-    docker run -d --name aef-egress-proxy -p 8080:8080 \
+    docker run -d --name aef-egress-proxy -p {{PROXY_PORT}}:8080 \
         -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
         aef-egress-proxy:latest
-    @echo "✓ Egress proxy started on port 8080"
+    @echo "✓ Egress proxy started on port {{PROXY_PORT}}"
 
 # Stop the egress proxy
 proxy-stop:
@@ -410,25 +413,25 @@ proxy-logs:
 # Test network allowlist enforcement
 poc-allowlist:
     @echo "=== Network Allowlist Test ==="
-    @echo "1. Starting egress proxy..."
+    @echo "1. Starting egress proxy on port {{PROXY_PORT}}..."
     @just proxy-build >/dev/null 2>&1 || true
     @docker rm -f aef-egress-proxy 2>/dev/null || true
-    @docker run -d --name aef-egress-proxy -p 8080:8080 \
+    @docker run -d --name aef-egress-proxy -p {{PROXY_PORT}}:8080 \
         -e ALLOWED_HOSTS="api.anthropic.com,github.com" \
         aef-egress-proxy:latest >/dev/null
     @sleep 2
     @echo ""
     @echo "2. Testing ALLOWED host (github.com)..."
     @docker run --rm --add-host=host.docker.internal:host-gateway \
-        -e HTTP_PROXY=http://host.docker.internal:8080 \
-        -e HTTPS_PROXY=http://host.docker.internal:8080 \
+        -e HTTP_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
+        -e HTTPS_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
         curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://github.com || echo "Connection failed"
     @echo " <- Expected: 200"
     @echo ""
     @echo "3. Testing BLOCKED host (evil.com)..."
     @docker run --rm --add-host=host.docker.internal:host-gateway \
-        -e HTTP_PROXY=http://host.docker.internal:8080 \
-        -e HTTPS_PROXY=http://host.docker.internal:8080 \
+        -e HTTP_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
+        -e HTTPS_PROXY=http://host.docker.internal:{{PROXY_PORT}} \
         curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://evil.com || echo "403"
     @echo " <- Expected: 403"
     @echo ""
