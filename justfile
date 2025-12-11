@@ -384,6 +384,24 @@ poc-isolation-quick:
     @echo "=== Test 3: Claude SDK Install ==="
     docker run --rm --network=bridge python:3.12-slim sh -c "pip install -q anthropic && python -c 'from anthropic import Anthropic; print(\"✓ Claude SDK installed\")'"
 
+# Test git identity injection in container
+poc-git-identity:
+    @echo "=== Git Identity Injection Test ==="
+    @echo "Testing: Clone → Configure Identity → Commit → Verify Author"
+    @echo ""
+    docker run --rm --network=bridge python:3.12-slim sh -c '\
+        apt-get update -qq 2>/dev/null && apt-get install -y -qq git 2>/dev/null && \
+        git config --global user.name "aef-bot[bot]" && \
+        git config --global user.email "bot@aef.dev" && \
+        git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && \
+        cd /tmp/repo && \
+        echo "# AEF Test" >> README && \
+        git add README && \
+        git commit -m "Test commit from AEF agent" && \
+        git log -1 --format="Author: %an <%ae>" && \
+        echo "" && \
+        echo "✓ Git identity injection successful!"'
+
 # --- Package Management ---
 
 # Add a new package to the workspace

@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from aef_adapters.agents.agentic_types import WorkspaceConfig
     from aef_shared.settings import IsolationBackend, WorkspaceSecuritySettings
+    from aef_shared.settings.workspace import GitIdentitySettings
 
 
 @dataclass
@@ -124,11 +125,19 @@ class IsolatedWorkspaceConfig:
     """Extended workspace configuration with isolation settings.
 
     Wraps a WorkspaceConfig with additional isolation-specific settings.
+
+    Attributes:
+        base_config: The underlying workspace configuration
+        security: Optional security settings override
+        isolation_backend: Optional backend override (None = use default)
+        git_identity_override: Optional git identity override for this workflow.
+            If set, takes precedence over environment variables.
     """
 
     base_config: WorkspaceConfig
     security: WorkspaceSecuritySettings | None = None
     isolation_backend: IsolationBackend | None = None  # None = use default
+    git_identity_override: GitIdentitySettings | None = None  # Workflow override
 
     @property
     def session_id(self) -> str:

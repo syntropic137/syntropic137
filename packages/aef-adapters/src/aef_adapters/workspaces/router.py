@@ -20,6 +20,7 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -32,6 +33,7 @@ from aef_adapters.workspaces.docker_hardened import HardenedDockerWorkspace
 from aef_adapters.workspaces.e2b import E2BWorkspace
 from aef_adapters.workspaces.events import get_workspace_emitter
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
+from aef_adapters.workspaces.git import get_git_injector
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.types import (  # noqa: TC001
     IsolatedWorkspace,
@@ -229,6 +231,9 @@ class WorkspaceRouter:
                 # Emit created event
                 await emitter.workspace_created(workspace, config)
 
+                # Inject git identity if configured
+                await self._inject_git_identity(workspace, backend_class, config)
+
                 commands_executed = 0
                 try:
                     # Track command count in workspace metadata
@@ -262,6 +267,39 @@ class WorkspaceRouter:
                 isolation_backend=backend.value if backend else None,
             )
             raise RuntimeError(f"Failed to create workspace with {backend}: {e}") from e
+
+    async def _inject_git_identity(
+        self,
+        workspace: IsolatedWorkspace,
+        backend_class: type[BaseIsolatedWorkspace],
+        config: IsolatedWorkspaceConfig,
+    ) -> None:
+        """Inject git identity and credentials into workspace.
+
+        Args:
+            workspace: The workspace to configure
+            backend_class: Backend class for command execution
+            config: Workspace configuration
+        """
+        injector = get_git_injector()
+
+        # Create executor function for the injector
+        async def executor(
+            ws: IsolatedWorkspace,
+            cmd: list[str],
+        ) -> tuple[int, str, str]:
+            return await backend_class.execute_command(ws, cmd)
+
+        # Get workflow override from config
+        workflow_override = config.git_identity_override
+
+        # Git identity not configured is OK for workspaces that don't need git
+        with contextlib.suppress(ValueError):
+            await injector.inject_identity(
+                workspace,
+                executor,
+                workflow_override=workflow_override,
+            )
 
     def _get_available_backend_class(
         self, preferred: IsolationBackend

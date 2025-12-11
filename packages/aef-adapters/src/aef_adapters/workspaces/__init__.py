@@ -42,6 +42,12 @@ from aef_adapters.workspaces.events import (
     get_workspace_emitter,
 )
 from aef_adapters.workspaces.firecracker import FirecrackerWorkspace
+from aef_adapters.workspaces.git import (
+    ExecutionContext,
+    GitInjector,
+    build_commit_message,
+    get_git_injector,
+)
 from aef_adapters.workspaces.gvisor import GVisorWorkspace
 from aef_adapters.workspaces.local import LocalWorkspace, NonIsolatedWorkspaceError
 from aef_adapters.workspaces.protocol import IsolatedWorkspaceProtocol, WorkspaceProtocol
@@ -57,8 +63,10 @@ __all__ = [
     "BaseIsolatedWorkspace",
     "CollectorEmitter",
     "E2BWorkspace",
+    "ExecutionContext",
     "FirecrackerWorkspace",
     "GVisorWorkspace",
+    "GitInjector",
     "HardenedDockerWorkspace",
     "InMemoryCollectorEmitter",
     "IsolatedWorkspace",
@@ -70,7 +78,9 @@ __all__ = [
     "WorkspaceEventEmitter",
     "WorkspaceProtocol",
     "WorkspaceRouter",
+    "build_commit_message",
     "configure_workspace_emitter",
+    "get_git_injector",
     "get_workspace_emitter",
     "get_workspace_router",
     "reset_workspace_router",
