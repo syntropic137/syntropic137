@@ -341,6 +341,7 @@ The following gaps must be closed for production readiness:
 
 | Gap | Current State | Required State | Effort |
 |-----|---------------|----------------|--------|
+| **Git Identity Configuration** | No git config → agent cannot commit | Inject user.name/user.email + credentials | Medium |
 | **Egress Filtering** | `--network=bridge` allows all hosts | Allowlist-only egress via proxy | Medium |
 | **API Key Injection** | Not implemented | Secure injection of ANTHROPIC_API_KEY | Small |
 | **Agent Executor Integration** | Uses `LocalWorkspace` | Use `WorkspaceRouter` | Medium |
@@ -425,6 +426,177 @@ Options:
 2. **mitmproxy**: Simple Python-based, good for prototyping
 3. **iptables + DNS**: Lightweight but harder to maintain
 4. **Cilium/eBPF**: Best for Kubernetes at scale
+
+## Git Identity & Credentials (P0 Gap)
+
+### Problem
+
+Fresh containers have **no git configuration**:
+
+```bash
+$ docker run python:3.12-slim git commit -m "test"
+Author identity unknown
+
+*** Please tell me who you are.
+
+fatal: unable to auto-detect email address
+```
+
+Agents cannot commit code without:
+1. `git config user.name`
+2. `git config user.email`
+3. Git credentials for pushing (SSH key or token)
+
+### Solution Design
+
+#### 1. Git Identity Configuration
+
+Inject git identity when creating workspace:
+
+```python
+# In WorkspaceRouter.create()
+await router.execute_command(
+    workspace,
+    ["git", "config", "--global", "user.name", git_config.name]
+)
+await router.execute_command(
+    workspace,
+    ["git", "config", "--global", "user.email", git_config.email]
+)
+```
+
+**Identity Sources** (in priority order):
+
+| Environment | Identity | Committer |
+|-------------|----------|-----------|
+| **Local Development** | User's `.gitconfig` | `NeuralEmpowerment <neuralempowerment@gmail.com>` |
+| **CI/CD** | Bot account | `aef-bot[bot] <bot@aef.dev>` |
+| **Production** | GitHub App | `aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>` |
+
+**Configuration:**
+
+```bash
+# User identity (local)
+export AEF_GIT_USER_NAME="NeuralEmpowerment"
+export AEF_GIT_USER_EMAIL="neuralempowerment@gmail.com"
+
+# Bot identity (production)
+export AEF_GIT_USER_NAME="aef-bot[bot]"
+export AEF_GIT_USER_EMAIL="bot@aef.dev"
+```
+
+#### 2. Git Credentials Injection
+
+**For HTTPS (recommended):**
+
+```python
+# Inject GitHub token
+await router.execute_command(
+    workspace,
+    ["git", "config", "--global", "credential.helper", "store"]
+)
+
+# Create .git-credentials file
+credentials = f"https://{token}:x-oauth-basic@github.com\n"
+await router.execute_command(
+    workspace,
+    ["sh", "-c", f"echo '{credentials}' > ~/.git-credentials && chmod 600 ~/.git-credentials"]
+)
+```
+
+**For SSH (more secure but complex):**
+
+```python
+# Inject SSH key
+ssh_key = os.environ["AEF_GIT_SSH_KEY"]  # Base64 encoded
+await router.execute_command(
+    workspace,
+    ["sh", "-c", f"mkdir -p ~/.ssh && echo '{ssh_key}' | base64 -d > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519"]
+)
+```
+
+#### 3. GitHub App Integration (Production)
+
+For production, use a **GitHub App** instead of personal tokens:
+
+```python
+@dataclass
+class GitHubAppConfig:
+    app_id: str
+    installation_id: str
+    private_key: str  # PEM format
+    
+    def get_installation_token(self) -> str:
+        """Get short-lived token from GitHub App."""
+        # Generate JWT, exchange for installation token
+        # Token expires in 1 hour (safer than long-lived tokens)
+```
+
+**Benefits:**
+- ✅ Fine-grained permissions (only repos the app is installed on)
+- ✅ Tokens expire automatically (1 hour)
+- ✅ Audit trail (commits show as `app[bot]`)
+- ✅ No user impersonation
+
+**Example commit:**
+
+```
+commit abc123
+Author: aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>
+Date:   Wed Dec 11 19:30:00 2025
+
+    feat: implement code review suggestions
+    
+    Applied by AEF agent in workflow execution #456
+```
+
+#### 4. Commit Metadata & Traceability
+
+All agent commits should include:
+
+```python
+commit_message = f"""feat: {user_provided_summary}
+
+Applied by AEF agent
+- Workflow: {workflow_id}
+- Execution: {execution_id}
+- Session: {session_id}
+- Agent: {agent_name}
+- Timestamp: {datetime.now(UTC).isoformat()}
+
+Co-authored-by: {original_user_name} <{original_user_email}>
+"""
+```
+
+This provides:
+- ✅ Full audit trail
+- ✅ Links back to workflow execution
+- ✅ Credit to human who initiated the workflow
+- ✅ Easy to filter agent commits (`git log --author="aef-app[bot]"`)
+
+### Security Considerations
+
+| Credential Type | Storage | Injection | Rotation |
+|-----------------|---------|-----------|----------|
+| **GitHub Token** | Vault/Secrets Manager | Environment variable | Manual/90 days |
+| **GitHub App** | Vault (private key) | Generate on-demand | Automatic/1 hour |
+| **SSH Key** | Vault | Base64 env var | Manual/365 days |
+
+**Recommendations:**
+1. **Local dev**: User's GitHub token (via `gh auth token`)
+2. **CI/CD**: GitHub App with installation token
+3. **Never**: Hardcode tokens in images or config files
+
+### Implementation Checklist
+
+- [ ] Add `GitConfig` to `IsolatedWorkspaceConfig`
+- [ ] Inject git identity in `WorkspaceRouter.create()`
+- [ ] Add credential injection (HTTPS token)
+- [ ] Create GitHub App for production
+- [ ] Add commit metadata template
+- [ ] Document bot account setup
+- [ ] Add integration tests for git operations
+- [ ] Add credential rotation documentation
 
 ## Related ADRs
 
