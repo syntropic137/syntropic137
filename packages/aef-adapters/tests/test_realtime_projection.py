@@ -8,9 +8,7 @@ Tests verify that:
 
 from __future__ import annotations
 
-import asyncio
 import json
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -158,9 +156,7 @@ class TestRealTimeProjectionBroadcast:
         assert ws2.send_text.call_count == 0
 
     @pytest.mark.asyncio
-    async def test_broadcast_cleans_dead_connections(
-        self, projection: RealTimeProjection
-    ) -> None:
+    async def test_broadcast_cleans_dead_connections(self, projection: RealTimeProjection) -> None:
         """Test that dead connections are cleaned up after failed send."""
         # Create a mock that fails on send
         dead_ws = MagicMock()
@@ -184,10 +180,12 @@ class TestRealTimeProjectionEventHandlers:
     ) -> None:
         """Test handling WorkflowExecutionStarted event."""
         await projection.connect("exec-1", mock_websocket)
-        await projection.on_workflow_execution_started({
-            "execution_id": "exec-1",
-            "workflow_id": "wf-1",
-        })
+        await projection.on_workflow_execution_started(
+            {
+                "execution_id": "exec-1",
+                "workflow_id": "wf-1",
+            }
+        )
 
         mock_websocket.send_text.assert_called_once()
         message = json.loads(mock_websocket.send_text.call_args[0][0])
@@ -199,10 +197,12 @@ class TestRealTimeProjectionEventHandlers:
     ) -> None:
         """Test handling PhaseStarted event."""
         await projection.connect("exec-1", mock_websocket)
-        await projection.on_phase_started({
-            "execution_id": "exec-1",
-            "phase_id": "phase-1",
-        })
+        await projection.on_phase_started(
+            {
+                "execution_id": "exec-1",
+                "phase_id": "phase-1",
+            }
+        )
 
         mock_websocket.send_text.assert_called_once()
         message = json.loads(mock_websocket.send_text.call_args[0][0])
@@ -214,11 +214,13 @@ class TestRealTimeProjectionEventHandlers:
     ) -> None:
         """Test handling OperationRecorded event."""
         await projection.connect("exec-1", mock_websocket)
-        await projection.on_operation_recorded({
-            "execution_id": "exec-1",
-            "operation_type": "tool_completed",
-            "tool_name": "Read",
-        })
+        await projection.on_operation_recorded(
+            {
+                "execution_id": "exec-1",
+                "operation_type": "tool_completed",
+                "tool_name": "Read",
+            }
+        )
 
         mock_websocket.send_text.assert_called_once()
         message = json.loads(mock_websocket.send_text.call_args[0][0])

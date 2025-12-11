@@ -25,6 +25,8 @@ export function Dashboard() {
   const [metrics, setMetrics] = useState<MetricsResponse | null>(null)
   const [recentWorkflows, setRecentWorkflows] = useState<WorkflowSummary[]>([])
   const [loading, setLoading] = useState(true)
+  // Connection status (for live updates indicator)
+  const isConnected = !loading // Consider connected once initial data is loaded
 
   // Refresh metrics
   const refreshMetrics = useCallback(() => {

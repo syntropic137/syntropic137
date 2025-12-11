@@ -193,9 +193,8 @@ class CoordinatorSubscriptionService:
         )
         logger.info("Database pool created for checkpoint store")
 
-        # Create checkpoint store
+        # Create checkpoint store (table is created on first operation)
         self._checkpoint_store = PostgresCheckpointStore(self._db_pool)
-        await self._checkpoint_store.ensure_table()
         logger.info("Checkpoint store initialized")
 
         # Build projection list (add realtime adapter if configured)
@@ -226,6 +225,7 @@ class CoordinatorSubscriptionService:
 
     async def _run_coordinator(self) -> None:
         """Run the coordinator with error handling."""
+        assert self._coordinator is not None, "Coordinator not initialized"
         try:
             await self._coordinator.start()
         except asyncio.CancelledError:
