@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 4.0.0
+**Version:** 5.0.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-09
+**Updated:** 2025-12-11
 **Status:** Active
 
 ---
@@ -10,6 +10,14 @@
 ## Overview
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+
+**Version 5.0** adds:
+- **Isolated Workspace Architecture** - Docker/gVisor isolation for all agent workspaces
+- **Git Identity Injection** - Configure commit author in containers
+- **API Key Injection** - ANTHROPIC_API_KEY automatically available
+- **Container Logging** - Structured JSON logs with secret redaction
+- **Network Allowlist** - mitmproxy-based egress control
+- **Dashboard Workspace Display** - Real-time workspace info in UI
 
 **Version 4.0** adds:
 - **WebSocket Control Plane** - Real-time execution control (pause/resume/cancel)
@@ -1623,6 +1631,260 @@ test('execution control flow', async ({ page }) => {
 
 ---
 
+## Feature 14: Isolated Workspace Architecture ⭐ NEW
+
+> **ADR:** [ADR-021: Isolated Workspace Architecture](/docs/adrs/ADR-021-isolated-workspace-architecture.md)
+
+### Overview
+
+All agent workspaces run in isolated containers/VMs. This feature tests:
+- Workspace creation with isolation backends
+- Git identity injection
+- API key injection
+- Container logging with secret redaction
+- Network allowlist enforcement
+- Dashboard workspace info display
+
+### F14.1 Workspace Router & Backend Selection
+
+**Given** the system is configured
+**When** I create a workspace via WorkspaceRouter
+**Then** the best available backend is selected
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.1.1 | WorkspaceRouter.get_available_backends() returns list | ⬜ |
+| 14.1.2 | At least one backend available (docker_hardened fallback) | ⬜ |
+| 14.1.3 | get_best_backend() returns highest priority available | ⬜ |
+| 14.1.4 | WorkspaceCreating event emitted before creation | ⬜ |
+| 14.1.5 | WorkspaceCreated event emitted after creation | ⬜ |
+| 14.1.6 | Workspace has isolation_id (container/vm/sandbox ID) | ⬜ |
+| 14.1.7 | Workspace can execute commands | ⬜ |
+| 14.1.8 | WorkspaceDestroyed event emitted on cleanup | ⬜ |
+
+**Validation Commands:**
+```bash
+# Check available backends
+uv run python -m aef_perf check
+
+# Run workspace router tests
+uv run pytest packages/aef-adapters/tests/test_workspace_router.py -v
+```
+
+### F14.2 Git Identity Injection
+
+**Given** AEF_GIT_* environment variables are set
+**When** a workspace is created
+**Then** git identity is configured inside the container
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.2.1 | GitIdentitySettings reads from AEF_GIT_* env vars | ⬜ |
+| 14.2.2 | GitIdentityResolver follows precedence: workflow > env > local | ⬜ |
+| 14.2.3 | git config user.name set in container | ⬜ |
+| 14.2.4 | git config user.email set in container | ⬜ |
+| 14.2.5 | HTTPS credentials stored in ~/.git-credentials | ⬜ |
+| 14.2.6 | Git clone works inside container | ⬜ |
+| 14.2.7 | Git commit has correct author | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run POC test
+just poc-git-identity
+
+# Expected output:
+# Author: aef-bot[bot] <bot@aef.dev>
+# ✓ Git identity injection successful!
+```
+
+### F14.3 API Key Injection
+
+**Given** ANTHROPIC_API_KEY is set
+**When** a workspace is created
+**Then** API keys are available inside the container
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.3.1 | EnvInjector detects configured API keys | ⬜ |
+| 14.3.2 | ANTHROPIC_API_KEY written to ~/.bashrc | ⬜ |
+| 14.3.3 | OPENAI_API_KEY written if configured | ⬜ |
+| 14.3.4 | Python can import anthropic SDK in container | ⬜ |
+| 14.3.5 | Claude API call succeeds from container | ⬜ |
+
+**Validation Commands:**
+```bash
+# Set API key and run POC
+export ANTHROPIC_API_KEY=sk-ant-xxx
+just poc-claude-api
+
+# Expected output:
+# Claude API test response: ...
+# ✓ Claude API works from container!
+```
+
+### F14.4 Container Logging
+
+**Given** logging is configured
+**When** agent executes commands
+**Then** structured logs are written with secret redaction
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.4.1 | Log directory /workspace/.logs created | ⬜ |
+| 14.4.2 | agent.jsonl file created | ⬜ |
+| 14.4.3 | LogEntry has timestamp, level, message, event_type | ⬜ |
+| 14.4.4 | Command logs include exit_code and duration_ms | ⬜ |
+| 14.4.5 | Error logs include exception_type and exception_message | ⬜ |
+| 14.4.6 | Secrets are redacted (API keys, tokens) | ⬜ |
+| 14.4.7 | ContainerLogStreamer can read logs from outside | ⬜ |
+| 14.4.8 | ViewContainerLogsTool works for inner agent | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run POC test
+just poc-logging
+
+# Expected output:
+# {"timestamp":"...","level":"INFO","message":"Agent started",...}
+# ✓ Container logging works!
+```
+
+### F14.5 Network Allowlist (Egress Proxy)
+
+**Given** egress proxy is running
+**When** container makes outbound requests
+**Then** only allowed hosts succeed
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.5.1 | Egress proxy image builds successfully | ⬜ |
+| 14.5.2 | Proxy starts on port 8080 | ⬜ |
+| 14.5.3 | AllowlistAddon loads from ALLOWED_HOSTS | ⬜ |
+| 14.5.4 | Request to allowed host (github.com) returns 200 | ⬜ |
+| 14.5.5 | Request to blocked host (evil.com) returns 403 | ⬜ |
+| 14.5.6 | Wildcard patterns work (*.github.com) | ⬜ |
+| 14.5.7 | Blocked requests logged for audit | ⬜ |
+| 14.5.8 | Container proxy env vars set automatically | ⬜ |
+
+**Validation Commands:**
+```bash
+# Build and test proxy
+just proxy-build
+just poc-allowlist
+
+# Expected output:
+# 2. Testing ALLOWED host (github.com)...
+# 200 <- Expected: 200
+# 3. Testing BLOCKED host (evil.com)...
+# 403 <- Expected: 403
+# ✓ Network allowlist test complete!
+```
+
+### F14.6 Orchestration Integration
+
+**Given** get_workspace() is called
+**When** agent executes via executor
+**Then** isolated workspace is used
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.6.1 | get_workspace() returns isolated workspace | ⬜ |
+| 14.6.2 | Workspace has _router reference | ⬜ |
+| 14.6.3 | execute_in_workspace() works correctly | ⬜ |
+| 14.6.4 | LocalWorkspace raises error in production | ⬜ |
+| 14.6.5 | get_workspace_local() explicitly available for dev/test | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run orchestration factory tests
+uv run pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
+```
+
+### F14.7 Dashboard Workspace Display
+
+**Given** an execution has a workspace
+**When** I view the execution detail page
+**Then** I see workspace information
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.7.1 | ExecutionDetail includes WorkspaceInfoCard | ⬜ |
+| 14.7.2 | Card shows isolation backend (Docker, gVisor, etc.) | ⬜ |
+| 14.7.3 | Card shows container/VM/sandbox ID | ⬜ |
+| 14.7.4 | Card shows status (creating/running/stopped/error) | ⬜ |
+| 14.7.5 | Card shows memory usage | ⬜ |
+| 14.7.6 | Card shows CPU time | ⬜ |
+| 14.7.7 | Card shows commands executed count | ⬜ |
+| 14.7.8 | Workspace events refresh UI via WebSocket | ⬜ |
+
+**Validation Steps:**
+1. Start a workflow execution
+2. Navigate to execution detail page
+3. Verify WorkspaceInfoCard appears
+4. Verify isolation backend and container ID shown
+5. Watch for status updates as execution progresses
+
+### F14.8 End-to-End Isolated Execution ⭐ CRITICAL
+
+**Given** all components are configured
+**When** I execute a workflow that clones, modifies, and commits
+**Then** the entire flow works in isolation
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.8.1 | Workspace created with Docker/gVisor backend | ⬜ |
+| 14.8.2 | Git identity injected (commit author correct) | ⬜ |
+| 14.8.3 | API key available (Claude calls work) | ⬜ |
+| 14.8.4 | Commands logged to /workspace/.logs/agent.jsonl | ⬜ |
+| 14.8.5 | Network restricted to allowed hosts | ⬜ |
+| 14.8.6 | Workspace destroyed on completion | ⬜ |
+| 14.8.7 | Dashboard shows workspace info during execution | ⬜ |
+| 14.8.8 | All 95+ unit tests pass | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run all POC tests
+just poc-git-identity
+just poc-logging
+just poc-allowlist
+
+# Run full test suite
+uv run pytest packages/aef-adapters/tests/workspaces/ \
+  packages/aef-adapters/tests/test_orchestration_factory.py \
+  packages/aef-shared/tests/test_workspace_settings.py -v
+
+# Expected: 95+ tests pass
+```
+
+### F14.9 Performance Benchmarks
+
+**Given** the isolated workspace system is running
+**When** I run benchmarks
+**Then** performance meets targets
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 14.9.1 | Container create time < 500ms | ⬜ |
+| 14.9.2 | Parallel speedup > 9x for 10 containers | ⬜ |
+| 14.9.3 | Throughput > 3 workspaces/min | ⬜ |
+| 14.9.4 | Memory overhead < 100MB per container | ⬜ |
+
+**Validation Commands:**
+```bash
+# Quick performance check
+just perf-check
+
+# Full benchmark suite
+just perf-all
+
+# Expected output:
+# Create Time:  ~170ms
+# Speedup (10x): ~9.5x
+# Throughput:    ~5 workspaces/min
+```
+
+---
+
 ## Test Execution Checklist
 
 ### Pre-Test Setup
@@ -1654,8 +1916,11 @@ test('execution control flow', async ({ page }) => {
 11. [ ] **F11: Event Bridge** - Hook-to-domain events
 12. [ ] **F12: Providers** - Agent factory and availability
 
-**WebSocket Control Plane (F13) ⭐ NEW:**
+**WebSocket Control Plane (F13) ⭐:**
 13. [ ] **F13: WebSocket Control Plane** - Pause/Resume/Cancel with browser automation
+
+**Isolated Workspace Architecture (F14) ⭐ NEW:**
+14. [ ] **F14: Isolated Workspaces** - Docker isolation, git identity, logging, network allowlist
 
 ### Quick Pytest Commands
 
@@ -1675,6 +1940,17 @@ pytest packages/aef-adapters/tests/test_workspaces.py -v         # F9
 pytest packages/aef-adapters/tests/test_artifacts.py -v          # F10
 pytest packages/aef-adapters/tests/test_events.py -v             # F11
 pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
+
+# Run isolated workspace tests (F14)
+pytest packages/aef-adapters/tests/workspaces/ -v
+pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
+pytest packages/aef-shared/tests/test_workspace_settings.py -v
+
+# F14 POC validation (manual)
+just poc-git-identity   # Git identity injection
+just poc-claude-api     # Claude API connectivity
+just poc-logging        # Container logging
+just poc-allowlist      # Network allowlist
 
 # Full QA check (lint + type + test)
 poetry run poe check-fix
@@ -1707,7 +1983,8 @@ poetry run poe check-fix
 | **F11** | **Event Bridge** | **12** | ⬜ | ⬜ | ⬜ |
 | **F12** | **Agent Provider Management** | **9** | ⬜ | ⬜ | ⬜ |
 | **F13** | **WebSocket Control Plane** ⭐ | **55** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **271** | ⬜ | ⬜ | ⬜ |
+| **F14** | **Isolated Workspace Architecture** ⭐ | **52** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **323** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -1722,6 +1999,19 @@ poetry run poe check-fix
 ## Notes
 
 _Add any observations, recommendations, or follow-up items here._
+
+### Migration Notes (v4.0 → v5.0)
+
+- **Isolated Workspace Architecture:** New F14 tests for workspace isolation
+- **ADR-021:** Isolated Workspace Architecture design decisions
+- **WorkspaceRouter:** Automatic backend selection (Firecracker > gVisor > Docker)
+- **Git Identity:** `AEF_GIT_USER_NAME`, `AEF_GIT_USER_EMAIL`, `AEF_GIT_TOKEN` env vars
+- **API Keys:** Automatic injection of `ANTHROPIC_API_KEY` into containers
+- **Container Logging:** JSON logs at `/workspace/.logs/agent.jsonl`
+- **Egress Proxy:** mitmproxy at `docker/egress-proxy/`
+- **New POC Commands:** `just poc-git-identity`, `just poc-logging`, `just poc-allowlist`
+- **Test Count:** Increased from 271 to 323 criteria
+- **Unit Tests:** 95+ new tests for workspace isolation
 
 ### Migration Notes (v3.0 → v4.0)
 
@@ -1763,6 +2053,7 @@ _Add any observations, recommendations, or follow-up items here._
 | **Execution Model** ⭐ | **F7.6** | **API + Browser** |
 | **Agentic** | **F8-F12** | **pytest (automated)** |
 | **Control Plane** ⭐ | **F13** | **Browser automation (Playwright)** |
+| **Isolated Workspaces** ⭐ | **F14** | **pytest + just POC commands** |
 
 ### Known Issues & Learnings
 

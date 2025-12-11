@@ -412,18 +412,138 @@ uv run python -m aef_perf compare
 uv run python -m aef_perf single --output results.json
 ```
 
+## Git Identity Injection
+
+Workspaces automatically configure Git identity for commits:
+
+```bash
+# Environment variables (set these for commit author)
+export AEF_GIT_USER_NAME="AEF Bot"
+export AEF_GIT_USER_EMAIL="aef-bot@example.com"
+export AEF_GIT_TOKEN=ghp_xxx  # GitHub PAT for HTTPS auth
+```
+
+**Precedence Order:**
+1. Workflow override (per-workflow config)
+2. Environment variables (`AEF_GIT_*`)
+3. Local git config (dev/test only)
+
+```python
+from aef_shared.settings.workspace import GitIdentitySettings
+
+# Override for specific workflow
+git_override = GitIdentitySettings(
+    user_name="Workflow Bot",
+    user_email="workflow@example.com",
+)
+
+config = IsolatedWorkspaceConfig(
+    base_config=base_config,
+    git_identity_override=git_override,
+)
+```
+
+## API Key Injection
+
+LLM API keys are automatically injected into containers:
+
+```bash
+# Set API keys
+export ANTHROPIC_API_KEY=sk-ant-xxx
+export OPENAI_API_KEY=sk-xxx
+
+# POC test
+just poc-claude-api
+```
+
+Keys are written to `~/.bashrc` and `~/.profile` inside the container.
+
+## Container Logging
+
+Structured JSON logging inside containers with secret redaction:
+
+```bash
+# Configuration
+export AEF_LOGGING_LEVEL=INFO
+export AEF_LOGGING_FORMAT=json
+export AEF_LOGGING_REDACT_SECRETS=true
+export AEF_LOGGING_LOG_FILE_PATH=/workspace/.logs/agent.jsonl
+```
+
+### Reading Logs (Orchestrator)
+
+```python
+from aef_adapters.workspaces.logging import ContainerLogStreamer
+
+streamer = ContainerLogStreamer(container_id="abc123")
+logs = await streamer.get_recent_logs(lines=100)
+
+# Stream logs (like tail -f)
+async for log_entry in streamer.stream_logs():
+    print(f"[{log_entry.level}] {log_entry.message}")
+```
+
+### Reading Logs (Inner Agent)
+
+```python
+from aef_adapters.workspaces.logging import ViewContainerLogsTool
+
+tool = ViewContainerLogsTool()
+output = await tool.execute(lines=50, level="ERROR")
+```
+
+## Network Allowlist (Egress Proxy)
+
+Control outbound network access via mitmproxy:
+
+```bash
+# Build and start egress proxy
+just proxy-build
+just proxy-start
+
+# Test allowlist enforcement
+just poc-allowlist
+```
+
+### Default Allowed Hosts
+
+| Host | Purpose |
+|------|---------|
+| api.anthropic.com | Claude API |
+| api.openai.com | OpenAI API |
+| github.com | Git operations |
+| api.github.com | GitHub API |
+| pypi.org | Python packages |
+| files.pythonhosted.org | Package files |
+| registry.npmjs.org | npm packages |
+
+### Custom Allowlist
+
+```bash
+# Set custom allowlist
+export ALLOWED_HOSTS="api.anthropic.com,github.com,custom.api.com"
+
+# Wildcard subdomains
+export ALLOWED_HOSTS="*.github.com,*.anthropic.com"
+```
+
 ## Testing
 
 ```bash
 # Run all workspace tests
-uv run pytest packages/aef-adapters/tests/test_*workspace*.py -v
+uv run pytest packages/aef-adapters/tests/workspaces/ -v
 
-# Run specific backend tests
-uv run pytest packages/aef-adapters/tests/test_gvisor_workspace.py -v
-uv run pytest packages/aef-adapters/tests/test_firecracker_workspace.py -v
+# Run orchestration factory tests
+uv run pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
 
 # Run with Docker integration (requires Docker)
 AEF_RUN_DOCKER_TESTS=1 uv run pytest packages/aef-adapters/tests/ -v -m docker
+
+# POC validation commands
+just poc-git-identity  # Test git identity injection
+just poc-claude-api    # Test API key injection
+just poc-logging       # Test container logging
+just poc-allowlist     # Test network allowlist
 ```
 
 ## Troubleshooting

@@ -53,9 +53,9 @@ done
 
 check_requirements() {
     info "Checking requirements..."
-    
+
     local failed=false
-    
+
     # Check Linux
     if [[ "$(uname -s)" != "Linux" ]]; then
         error "Firecracker requires Linux. Your OS: $(uname -s)"
@@ -63,7 +63,7 @@ check_requirements() {
     else
         info "✓ Linux detected"
     fi
-    
+
     # Check KVM
     if [[ ! -e /dev/kvm ]]; then
         error "/dev/kvm not found. Enable virtualization in BIOS."
@@ -74,7 +74,7 @@ check_requirements() {
     else
         info "✓ KVM accessible"
     fi
-    
+
     # Check CPU virtualization
     if ! grep -qE 'vmx|svm' /proc/cpuinfo 2>/dev/null; then
         error "CPU virtualization not detected. Enable VT-x/AMD-V in BIOS."
@@ -88,7 +88,7 @@ check_requirements() {
         fi
         info "✓ CPU virtualization: $virt_type"
     fi
-    
+
     # Check kernel version
     local kernel_version
     kernel_version=$(uname -r | cut -d. -f1-2)
@@ -97,7 +97,7 @@ check_requirements() {
     else
         info "✓ Kernel version: $(uname -r)"
     fi
-    
+
     # Check required tools
     for tool in curl tar docker; do
         if command -v $tool &>/dev/null; then
@@ -107,12 +107,12 @@ check_requirements() {
             failed=true
         fi
     done
-    
+
     if [[ "$failed" == "true" ]]; then
         error "Requirements check failed"
         return 1
     fi
-    
+
     info "All requirements met!"
     return 0
 }
@@ -123,7 +123,7 @@ check_requirements() {
 
 install_firecracker() {
     info "Installing Firecracker ${FIRECRACKER_VERSION}..."
-    
+
     local arch
     arch=$(uname -m)
     if [[ "$arch" == "x86_64" ]]; then
@@ -134,30 +134,30 @@ install_firecracker() {
         error "Unsupported architecture: $arch"
         return 1
     fi
-    
+
     local download_url="https://github.com/firecracker-microvm/firecracker/releases/download/${FIRECRACKER_VERSION}/firecracker-${FIRECRACKER_VERSION}-${arch}.tgz"
     local temp_dir
     temp_dir=$(mktemp -d)
-    
+
     info "Downloading from: $download_url"
     curl -L "$download_url" | tar xz -C "$temp_dir"
-    
+
     # Find and install binaries
     local release_dir
     release_dir=$(find "$temp_dir" -type d -name "release-*" | head -1)
-    
+
     if [[ -z "$release_dir" ]]; then
         error "Could not find release directory in archive"
         rm -rf "$temp_dir"
         return 1
     fi
-    
+
     sudo mv "$release_dir/firecracker-${FIRECRACKER_VERSION}-${arch}" /usr/local/bin/firecracker
     sudo mv "$release_dir/jailer-${FIRECRACKER_VERSION}-${arch}" /usr/local/bin/jailer
     sudo chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer
-    
+
     rm -rf "$temp_dir"
-    
+
     # Verify installation
     if firecracker --version &>/dev/null; then
         info "✓ Firecracker installed: $(firecracker --version)"
@@ -169,36 +169,36 @@ install_firecracker() {
 
 setup_directories() {
     info "Setting up directories..."
-    
+
     sudo mkdir -p "${INSTALL_DIR}"/{config,sockets}
     sudo chown -R "$(id -u):$(id -g)" "${INSTALL_DIR}"
-    
+
     info "✓ Created ${INSTALL_DIR}"
 }
 
 download_kernel() {
     info "Downloading kernel image..."
-    
+
     local kernel_url="https://s3.amazonaws.com/spec.ccfc.min/ci-artifacts/kernels/x86_64/vmlinux-5.10.204"
     local kernel_path="${INSTALL_DIR}/vmlinux"
-    
+
     if [[ -f "$kernel_path" ]]; then
         info "Kernel already exists at ${kernel_path}"
         return 0
     fi
-    
+
     curl -L "$kernel_url" -o "$kernel_path"
     chmod 644 "$kernel_path"
-    
+
     info "✓ Kernel downloaded to ${kernel_path}"
 }
 
 build_rootfs() {
     info "Building rootfs from workspace Dockerfile..."
-    
+
     local rootfs_path="${INSTALL_DIR}/rootfs.ext4"
     local rootfs_size="${AEF_ROOTFS_SIZE:-2G}"
-    
+
     if [[ -f "$rootfs_path" ]]; then
         info "Rootfs already exists at ${rootfs_path}"
         read -p "Rebuild? [y/N] " -n 1 -r
@@ -207,31 +207,31 @@ build_rootfs() {
             return 0
         fi
     fi
-    
+
     # Build workspace Docker image
     info "Building workspace Docker image..."
     docker build -t aef-workspace:latest -f "${SCRIPT_DIR}/../workspace/Dockerfile" "${SCRIPT_DIR}/../.."
-    
+
     # Create container and export filesystem
     info "Exporting filesystem..."
     local container_id
     container_id=$(docker create aef-workspace:latest)
-    
+
     # Create empty ext4 image
     dd if=/dev/zero of="$rootfs_path" bs=1 count=0 seek="$rootfs_size" 2>/dev/null
     mkfs.ext4 -F "$rootfs_path"
-    
+
     # Mount and copy filesystem
     local mount_point
     mount_point=$(mktemp -d)
     sudo mount -o loop "$rootfs_path" "$mount_point"
-    
+
     docker export "$container_id" | sudo tar -x -C "$mount_point"
-    
+
     sudo umount "$mount_point"
     rmdir "$mount_point"
     docker rm "$container_id"
-    
+
     info "✓ Rootfs created at ${rootfs_path} (${rootfs_size})"
 }
 
@@ -245,14 +245,14 @@ main() {
     echo "║         Firecracker Setup for AEF Isolated Workspaces        ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
-    
+
     check_requirements || exit 1
-    
+
     if [[ "$CHECK_ONLY" == "true" ]]; then
         info "Check complete. Run without --check to install."
         exit 0
     fi
-    
+
     echo ""
     read -p "Continue with installation? [Y/n] " -n 1 -r
     echo
@@ -260,23 +260,23 @@ main() {
         info "Installation cancelled"
         exit 0
     fi
-    
+
     # Check if already installed
     if command -v firecracker &>/dev/null; then
         info "Firecracker already installed: $(firecracker --version)"
     else
         install_firecracker
     fi
-    
+
     setup_directories
     download_kernel
-    
+
     if [[ "$SKIP_ROOTFS" != "true" ]]; then
         build_rootfs
     else
         info "Skipping rootfs build (--skip-rootfs)"
     fi
-    
+
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║                    Setup Complete! 🎉                         ║"

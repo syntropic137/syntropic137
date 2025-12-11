@@ -196,13 +196,13 @@ upstream aef_servers {
 server {
     listen 443 ssl;
     server_name aef.example.com;
-    
+
     location / {
         proxy_pass http://aef_servers;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
-    
+
     # WebSocket for real-time updates
     location /ws {
         proxy_pass http://aef_servers;
@@ -250,14 +250,14 @@ workspace:
   isolationBackend: kata  # Kata Containers for K8s
   poolSize: 50
   maxConcurrent: 500
-  
+
   security:
     allowNetwork: false
     readOnlyRoot: true
     maxMemory: "1Gi"
     maxCpu: "1000m"
     maxPids: 100
-  
+
   # RuntimeClass for Kata Containers
   runtimeClassName: kata
 

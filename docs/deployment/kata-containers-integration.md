@@ -1,7 +1,7 @@
 # Kata Containers Integration Path
 
 > **Status**: Planned (Not Yet Implemented)
-> 
+>
 > This document outlines how to integrate Kata Containers for Kubernetes deployments.
 > Kata provides VM-level isolation with a container-like interface.
 
@@ -73,18 +73,18 @@ if TYPE_CHECKING:
 
 class KataWorkspace(BaseIsolatedWorkspace):
     """Kata Containers workspace for Kubernetes.
-    
+
     Uses Kubernetes pod with RuntimeClass=kata for VM isolation.
     Each workspace runs in its own lightweight VM.
     """
-    
+
     isolation_backend: ClassVar[IsolationBackend] = IsolationBackend.KATA
     RUNTIME_CLASS: ClassVar[str] = "kata"
-    
+
     @classmethod
     def is_available(cls) -> bool:
         """Check if Kata is available.
-        
+
         Returns True if:
         1. Running inside Kubernetes cluster
         2. Kata RuntimeClass exists
@@ -95,7 +95,7 @@ class KataWorkspace(BaseIsolatedWorkspace):
         # - Verify RuntimeClass exists
         # - Check RBAC permissions
         return False
-    
+
     @classmethod
     async def _create_isolation(
         cls,
@@ -103,7 +103,7 @@ class KataWorkspace(BaseIsolatedWorkspace):
         security: WorkspaceSecuritySettings,
     ) -> IsolatedWorkspace:
         """Create Kata pod for workspace.
-        
+
         Creates a Kubernetes pod with:
         - RuntimeClassName: kata
         - Security context matching our settings
@@ -116,13 +116,13 @@ class KataWorkspace(BaseIsolatedWorkspace):
         # 3. Wait for pod to be running
         # 4. Return IsolatedWorkspace with pod_id
         raise NotImplementedError("Kata workspace not yet implemented")
-    
+
     @classmethod
     async def _destroy_isolation(cls, workspace: IsolatedWorkspace) -> None:
         """Delete Kata pod."""
         # TODO: Delete pod via kubernetes.client
         raise NotImplementedError("Kata workspace not yet implemented")
-    
+
     @classmethod
     async def execute_command(
         cls,
@@ -132,7 +132,7 @@ class KataWorkspace(BaseIsolatedWorkspace):
         cwd: str | None = None,
     ) -> tuple[int, str, str]:
         """Execute command in Kata pod.
-        
+
         Uses kubectl exec or kubernetes.client exec.
         """
         # TODO: Implement kubectl exec
