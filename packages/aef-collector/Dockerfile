@@ -1,5 +1,6 @@
 # AEF Event Collector - Production Dockerfile
 # Multi-stage build for minimal image size
+# Build context: repo root (not packages/aef-collector)
 
 # Build stage
 FROM python:3.12-slim as builder
@@ -9,14 +10,22 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy project files
-COPY pyproject.toml README.md ./
-COPY src/ ./src/
+# Copy local dependencies first (for layer caching)
+COPY packages/aef-shared/ ./packages/aef-shared/
+COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
+
+# Copy collector project files
+COPY packages/aef-collector/pyproject.toml packages/aef-collector/README.md ./packages/aef-collector/
+COPY packages/aef-collector/src/ ./packages/aef-collector/src/
 
 # Create virtual environment and install dependencies
 RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
-RUN uv pip install -e .
+
+# Install local dependencies first
+RUN uv pip install ./packages/aef-shared
+RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
+RUN uv pip install ./packages/aef-collector
 
 # Runtime stage
 FROM python:3.12-slim as runtime
@@ -25,7 +34,7 @@ WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/src /app/src
+COPY --from=builder /app/packages/aef-collector/src /app/src
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1

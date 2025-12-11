@@ -169,6 +169,28 @@ class PostgresProjectionStore:
         async with pool.acquire() as conn:
             await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", key)
 
+    async def delete_all(self, projection: str) -> None:
+        """Delete all records for a projection.
+
+        Used during projection rebuild when version changes.
+        """
+        await self._ensure_table(projection)
+        pool = await self._get_pool()
+        table_name = self._table_name(projection)
+
+        async with pool.acquire() as conn:
+            result = await conn.execute(f"DELETE FROM {table_name}")
+            # Extract count from result string like "DELETE 6"
+            count = int(result.split()[-1]) if result else 0
+
+        from aef_shared.logging import get_logger
+
+        logger = get_logger(__name__)
+        logger.info(
+            "Deleted all projection records",
+            extra={"projection": projection, "count": count},
+        )
+
     async def query(
         self,
         projection: str,

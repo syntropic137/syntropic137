@@ -50,7 +50,7 @@ dev-force:
     @echo "Starting feedback API on :8001..."
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
     cd lib/ui-feedback/backend/ui-feedback-api && \
-    UI_FEEDBACK_DATABASE_URL=$AEF_PROJECTIONS_DATABASE_URL \
+    UI_FEEDBACK_DATABASE_URL=$DATABASE_URL \
     uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
     @sleep 2
     @echo "Starting dashboard frontend on :5173..."
@@ -87,7 +87,7 @@ dev-fresh:
     @echo "Starting feedback API on :8001..."
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
     cd lib/ui-feedback/backend/ui-feedback-api && \
-    UI_FEEDBACK_DATABASE_URL=$AEF_PROJECTIONS_DATABASE_URL \
+    UI_FEEDBACK_DATABASE_URL=$DATABASE_URL \
     uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
     @sleep 2
     @echo "Starting dashboard frontend on :5173..."
@@ -133,13 +133,13 @@ dashboard-lint:
 feedback-backend:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
     cd lib/ui-feedback/backend/ui-feedback-api && \
-    UI_FEEDBACK_DATABASE_URL=$AEF_PROJECTIONS_DATABASE_URL \
+    UI_FEEDBACK_DATABASE_URL=$DATABASE_URL \
     uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload
 
 # Run feedback database migrations
 feedback-migrate:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    psql $AEF_PROJECTIONS_DATABASE_URL -f lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/migrations/001_feedback_tables.sql
+    psql $DATABASE_URL -f lib/ui-feedback/backend/ui-feedback-api/src/ui_feedback/migrations/001_feedback_tables.sql
 
 # Install feedback widget dependencies
 feedback-install:

@@ -1,4 +1,4 @@
-# ADR-013: Event Sourcing Projection Consistency
+# ADR-020: Event Sourcing Projection Consistency
 
 ## Status
 Accepted
@@ -116,10 +116,9 @@ To maintain compliance:
 
 ## Related ADRs
 - ADR-012: Artifact Storage (event store integration)
-- (Future) ADR-014: Workflow Execution vs Template modeling
+- ADR-014: Workflow Execution Model
 
 ## Files Changed
 - `packages/aef-domain/tests/integration/test_event_projection_consistency.py` - Regression tests
 - `apps/aef-dashboard/src/aef_dashboard/services/execution.py` - Added `_complete_phase()`
 - `packages/aef-domain/.../WorkflowExecutionAggregate.py` - Added `CompletePhaseCommand`
-
