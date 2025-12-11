@@ -7,7 +7,7 @@ How AI agents can integrate with the feedback system for automated triage and re
 The UI Feedback API is designed to be **token-efficient** and **agent-friendly**. Agents can:
 
 1. **List and triage** - Get open tickets with minimal context
-2. **Get details progressively** - Fetch full context only when needed  
+2. **Get details progressively** - Fetch full context only when needed
 3. **Update status** - Mark tickets as in-progress or resolved
 4. **Search and filter** - Find relevant tickets efficiently
 
@@ -140,13 +140,13 @@ for ticket in tickets['items']:
             "status": "in_progress",
             "assigned_to": "agent:my-agent"
         })
-        
+
         # Get full context only if needed
         if needs_more_context(ticket):
             details = api.get(f"/feedback/{ticket['id']}")
-            
+
         # Work on the issue...
-        
+
         # Mark resolved
         api.patch(f"/feedback/{ticket['id']}", {
             "status": "resolved",

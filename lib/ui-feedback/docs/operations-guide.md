@@ -149,12 +149,12 @@ psql $UI_FEEDBACK_DATABASE_URL < feedback_backup.sql
 
 ```sql
 -- Delete resolved tickets older than 90 days
-DELETE FROM feedback_items 
-WHERE status IN ('closed', 'wont_fix') 
+DELETE FROM feedback_items
+WHERE status IN ('closed', 'wont_fix')
 AND updated_at < NOW() - INTERVAL '90 days';
 
 -- Also clean up orphaned media
-DELETE FROM feedback_media 
+DELETE FROM feedback_media
 WHERE feedback_id NOT IN (SELECT id FROM feedback_items);
 ```
 

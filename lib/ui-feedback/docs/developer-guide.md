@@ -68,17 +68,17 @@ interface FeedbackProviderConfig {
 
   // Optional - App info
   appVersion?: string;      // Semantic version
-  
+
   // Optional - Environment context
   environment?: string;     // 'development' | 'staging' | 'production'
   gitCommit?: string;       // Git commit hash
   gitBranch?: string;       // Git branch name
   hostname?: string;        // Server hostname
-  
+
   // Optional - Widget behavior
   keyboardShortcut?: string;  // Default: 'Ctrl+Shift+F'
   position?: 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
-  
+
   // Optional - Theming
   primaryColor?: string;    // Brand color
   accentColor?: string;     // Secondary color
@@ -175,7 +175,7 @@ import { useFeedback } from '@aef/ui-feedback-react';
 
 function MyComponent() {
   const { openFeedback, openQuickFeedback } = useFeedback();
-  
+
   return (
     <button onClick={() => openQuickFeedback()}>
       Report Issue
