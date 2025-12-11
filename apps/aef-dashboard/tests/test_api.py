@@ -449,11 +449,12 @@ class TestArtifactEndpoints:
         await create_test_workflow("wf-1")
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/artifacts/art-1")
+        # Explicitly request without content (default is now True in this branch)
+        response = await client.get("/api/artifacts/art-1?include_content=false")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "art-1"
-        assert data["content"] is None  # Not included by default
+        assert data["content"] is None  # Not included when explicitly requested
 
     @pytest.mark.asyncio
     @pytest.mark.xfail(reason="Artifact content storage not yet implemented in projection")
