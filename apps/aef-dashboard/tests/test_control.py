@@ -14,6 +14,7 @@ from aef_adapters.control.adapters.memory import (
     InMemorySignalQueueAdapter,
 )
 from aef_dashboard.main import app
+import aef_dashboard.api.control as control_api_module
 import aef_dashboard.services.control as control_module
 
 if TYPE_CHECKING:
@@ -57,10 +58,14 @@ def reset_test_adapters() -> Iterator[None]:
     original_get_state_adapter = control_module.get_state_adapter
     original_get_signal_adapter = control_module.get_signal_adapter
 
-    # Replace with test versions
+    # Replace with test versions - patch BOTH the source module and where it's imported
     control_module.get_controller = _get_test_controller  # type: ignore[assignment]
     control_module.get_state_adapter = lambda: _test_state_adapter  # type: ignore[assignment]
     control_module.get_signal_adapter = lambda: _test_signal_adapter  # type: ignore[assignment]
+
+    # Also patch in the API module where it's imported and used
+    original_api_get_controller = control_api_module.get_controller
+    control_api_module.get_controller = _get_test_controller  # type: ignore[assignment]
 
     yield
 
@@ -68,6 +73,7 @@ def reset_test_adapters() -> Iterator[None]:
     control_module.get_controller = original_get_controller  # type: ignore[assignment]
     control_module.get_state_adapter = original_get_state_adapter  # type: ignore[assignment]
     control_module.get_signal_adapter = original_get_signal_adapter  # type: ignore[assignment]
+    control_api_module.get_controller = original_api_get_controller  # type: ignore[assignment]
     control_module.get_controller.cache_clear()
 
 
