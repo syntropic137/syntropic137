@@ -1,12 +1,12 @@
 ---
-title: "ADR-019: Execution Control Plane Architecture"
+title: "ADR-021: Execution Control Plane Architecture"
 status: accepted
 created: 2024-12-09
 updated: 2024-12-09
 author: Agent
 ---
 
-# ADR-019: Execution Control Plane Architecture
+# ADR-021: Execution Control Plane Architecture
 
 ## Status
 
