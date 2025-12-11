@@ -107,13 +107,17 @@ async def get_artifact(
     if artifact is None:
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
-    # Get content from projection first (stored in event store)
+    # Get content from projection (stored in event store)
     content = artifact.content if include_content else None
     size_bytes = artifact.size_bytes
 
-    # Fallback to filesystem if no content in projection (legacy artifacts)
+    # Fail fast if content requested but not available in projection
     if include_content and not content:
-        content, size_bytes = _load_artifact_content(artifact_id, artifact.phase_id)
+        raise HTTPException(
+            status_code=404,
+            detail=f"Artifact {artifact_id} content not found in projection. "
+            "This may indicate the artifact was not properly stored.",
+        )
 
     return ArtifactResponse(
         id=artifact.id,
