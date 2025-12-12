@@ -109,6 +109,7 @@ We adopt **two distinct event patterns** based on the nature of the data:
 | Tool execution tracking | **Pattern 2** | Observation of external fact |
 | Token usage tracking | **Pattern 2** | High-volume telemetry |
 | User prompt events | **Pattern 2** | Observation (prompt already submitted) |
+| **Cost tracking** | **Pattern 2** | Derived from token/tool observations, aggregated via projections |
 
 ## Deduplication Invariant
 
@@ -279,6 +280,66 @@ observation = ToolExecutionObserved(
 # Validate schema + dedup + append (no aggregate)
 await collector.ingest(observation)
 ```
+
+## Pattern 2 Implementation: Cost Tracking
+
+The `costs` VSA context is a complete implementation of Pattern 2, demonstrating how to:
+
+1. **Derive events** from existing observations (token usage → cost calculation)
+2. **Aggregate via projections** (session costs → execution costs)
+3. **Build read models** for efficient querying
+
+### Cost Tracking Architecture
+
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│  token_usage event  │ ──► │   CostCalculator    │ ──► │  CostRecordedEvent  │
+│  (from collector)   │     │   (applies pricing) │     │   (per LLM call)    │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+                                                                  │
+┌─────────────────────┐                                          │
+│ tool_execution event│ ──► CostCalculator ──► CostRecordedEvent─┘
+└─────────────────────┘                                          │
+                                                                  ▼
+                                                        ┌─────────────────────┐
+                                                        │    Event Store      │
+                                                        └─────────────────────┘
+                                                                  │
+                          ┌───────────────────────────────────────┤
+                          ▼                                       ▼
+                ┌─────────────────────┐             ┌─────────────────────┐
+                │ SessionCostProjection│             │ExecutionCostProjection│
+                │   (per-session)      │             │   (aggregates)      │
+                └─────────────────────┘             └─────────────────────┘
+                          │                                       │
+                          ▼                                       ▼
+                ┌─────────────────────┐             ┌─────────────────────┐
+                │   SessionCost       │             │   ExecutionCost     │
+                │   (read model)      │             │   (read model)      │
+                └─────────────────────┘             └─────────────────────┘
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Session as atomic unit** | Costs are tracked per-session, then aggregated upward |
+| **CostRecordedEvent per cost** | Fine-grained events enable rich analytics |
+| **SessionCostFinalizedEvent** | Captures final totals when session ends |
+| **Decimal precision** | USD amounts stored as `Decimal` to avoid float errors |
+| **Model pricing lookup** | `ModelPricing` value objects with per-model rates |
+
+### Cost Hierarchy
+
+```
+ExecutionCost (aggregated)
+    └── SessionCost (atomic unit)
+            └── CostRecordedEvent (individual cost)
+                    ├── llm_tokens (from token_usage)
+                    └── tool_execution (from tool events)
+```
+
+This demonstrates Pattern 2's power: deriving business value (cost tracking) from raw observations (token usage) without requiring aggregates.
 
 ## Related ADRs
 
