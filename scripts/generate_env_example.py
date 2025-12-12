@@ -29,18 +29,29 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "packages" / "aef-shared" / "src"))
 
 from aef_shared.settings.config import Settings  # noqa: E402
+from aef_shared.settings.github import GitHubAppSettings  # noqa: E402
+from aef_shared.settings.workspace import (  # noqa: E402
+    ContainerLoggingSettings,
+    GitIdentitySettings,
+    WorkspaceSecuritySettings,
+    WorkspaceSettings,
+)
 
 
-def get_env_var_name(field_name: str) -> str:
+def get_env_var_name(field_name: str, prefix: str = "") -> str:
     """Convert field name to environment variable name."""
+    if prefix:
+        return f"{prefix}{field_name.upper()}"
     return field_name.upper()
 
 
 def get_default_value(field_info: FieldInfo) -> str:
     """Get the default value as a string for .env file."""
+    from pydantic_core import PydanticUndefined
+
     default = field_info.default
 
-    if default is None:
+    if default is None or default is PydanticUndefined:
         return ""
 
     # Handle enums
@@ -50,6 +61,10 @@ def get_default_value(field_info: FieldInfo) -> str:
     # Handle booleans
     if isinstance(default, bool):
         return str(default).lower()
+
+    # Handle lists/tuples (e.g., regex patterns)
+    if isinstance(default, list | tuple):
+        return ""  # Empty for complex defaults
 
     return str(default)
 
@@ -107,8 +122,63 @@ def get_section_from_field_name(field_name: str) -> str:
     return "OTHER"
 
 
+def generate_settings_section(
+    settings_class: type,
+    section_name: str,
+    prefix: str = "",
+    description: str | None = None,
+) -> list[str]:
+    """Generate env vars for a settings class."""
+    lines: list[str] = []
+
+    # Section header
+    lines.extend(
+        [
+            "# " + "=" * 76,
+            f"# {section_name}",
+            "# " + "=" * 76,
+        ]
+    )
+
+    if description:
+        lines.append(f"# {description}")
+
+    lines.append("")
+
+    for field_name, field_info in settings_class.model_fields.items():
+        # Get field type from annotations
+        field_type = settings_class.__annotations__.get(field_name, str)
+
+        env_name = get_env_var_name(field_name, prefix)
+        default = get_default_value(field_info)
+        field_description = field_info.description
+
+        # Add required marker to description
+        required_marker = ""
+        if is_required(field_info):
+            required_marker = "[REQUIRED] "
+        elif is_secret_type(field_type) and default == "":
+            required_marker = "[REQUIRED when using this feature] "
+
+        # Format description
+        if field_description:
+            full_description = required_marker + field_description
+            desc_lines = format_description(full_description)
+            lines.extend(desc_lines)
+
+        # Add the variable
+        if is_secret_type(field_type):
+            lines.append(f"{env_name}=")
+        else:
+            lines.append(f"{env_name}={default}")
+
+        lines.append("")
+
+    return lines
+
+
 def generate_env_example() -> str:
-    """Generate .env.example content from Settings class."""
+    """Generate .env.example content from all Settings classes."""
     lines: list[str] = []
 
     # Header
@@ -118,7 +188,7 @@ def generate_env_example() -> str:
             "# AGENTIC ENGINEERING FRAMEWORK - ENVIRONMENT CONFIGURATION",
             "# " + "=" * 76,
             "#",
-            "# This file is AUTO-GENERATED from the Settings class.",
+            "# This file is AUTO-GENERATED from the Settings classes.",
             "# Do not edit manually - run: just gen-env",
             "#",
             "# Copy this file to .env and fill in your values.",
@@ -128,19 +198,17 @@ def generate_env_example() -> str:
         ]
     )
 
-    # Group fields by section
+    # Group main Settings fields by section
     sections: dict[str, list[tuple[str, FieldInfo, type[Any]]]] = {}
 
     for field_name, field_info in Settings.model_fields.items():
-        # Get field type from annotations
         field_type = Settings.__annotations__.get(field_name, str)
-
         section = get_section_from_field_name(field_name)
         if section not in sections:
             sections[section] = []
         sections[section].append((field_name, field_info, field_type))
 
-    # Define section order
+    # Define section order for main Settings
     section_order = [
         "APPLICATION",
         "DATABASE",
@@ -151,14 +219,13 @@ def generate_env_example() -> str:
         "OTHER",
     ]
 
-    # Generate each section
+    # Generate main Settings sections
     for section in section_order:
         if section not in sections:
             continue
 
         fields = sections[section]
 
-        # Section header
         lines.extend(
             [
                 "# " + "=" * 76,
@@ -173,28 +240,73 @@ def generate_env_example() -> str:
             default = get_default_value(field_info)
             description = field_info.description
 
-            # Add required marker to description
             required_marker = ""
             if is_required(field_info):
                 required_marker = "[REQUIRED] "
             elif is_secret_type(field_type) and default == "":
-                # Secrets without defaults are typically required when used
                 required_marker = "[REQUIRED when using this feature] "
 
-            # Format description
             if description:
                 full_description = required_marker + description
                 desc_lines = format_description(full_description)
                 lines.extend(desc_lines)
 
-            # Add the variable
             if is_secret_type(field_type):
-                # Don't show secret values, even defaults
                 lines.append(f"{env_name}=")
             else:
                 lines.append(f"{env_name}={default}")
 
             lines.append("")
+
+    # Add GitHub App Settings (AEF_GITHUB_* prefix)
+    lines.extend(
+        generate_settings_section(
+            GitHubAppSettings,
+            "GITHUB APP (Secure Authentication)",
+            prefix="AEF_GITHUB_",
+            description="GitHub App for secure API access. See docs/deployment/github-app-setup.md",
+        )
+    )
+
+    # Add Workspace Settings (AEF_WORKSPACE_* prefix)
+    lines.extend(
+        generate_settings_section(
+            WorkspaceSettings,
+            "WORKSPACE ISOLATION (ADR-021)",
+            prefix="AEF_WORKSPACE_",
+            description="All workspaces are isolated by default. These settings control HOW.",
+        )
+    )
+
+    # Add Workspace Security Settings (AEF_SECURITY_* prefix)
+    lines.extend(
+        generate_settings_section(
+            WorkspaceSecuritySettings,
+            "WORKSPACE SECURITY POLICIES",
+            prefix="AEF_SECURITY_",
+            description="Defaults are maximally restrictive for compromised agent protection.",
+        )
+    )
+
+    # Add Git Identity Settings (AEF_GIT_* prefix)
+    lines.extend(
+        generate_settings_section(
+            GitIdentitySettings,
+            "GIT IDENTITY FOR WORKSPACE COMMITS",
+            prefix="AEF_GIT_",
+            description="Git identity for agent commits. Prefer GitHub App for authentication.",
+        )
+    )
+
+    # Add Container Logging Settings (AEF_LOGGING_* prefix)
+    lines.extend(
+        generate_settings_section(
+            ContainerLoggingSettings,
+            "CONTAINER LOGGING (ADR-021)",
+            prefix="AEF_LOGGING_",
+            description="Controls logging inside isolated containers for observability.",
+        )
+    )
 
     return "\n".join(lines)
 
