@@ -1,13 +1,17 @@
 """Object storage adapters for artifact storage.
 
 This module provides storage adapters for storing and retrieving agent artifacts.
-Supports local filesystem (development) and Supabase Storage (production).
+Supports local filesystem, Supabase Storage, and MinIO.
 
 See ADR-012: Artifact Storage
 
 Environment-based selection via AEF_STORAGE_* variables:
-- **LOCAL** (default): Uses filesystem at AEF_STORAGE_LOCAL_PATH
-  Fast, simple, no external dependencies. For development.
+- **LOCAL**: Uses filesystem at AEF_STORAGE_LOCAL_PATH
+  Fast, simple, no external dependencies. For testing.
+
+- **MINIO** (default for `just dev`): Uses MinIO (S3-compatible)
+  Requires AEF_STORAGE_MINIO_ENDPOINT, ACCESS_KEY, SECRET_KEY.
+  For local development with S3 API.
 
 - **SUPABASE**: Uses Supabase Storage (S3-compatible)
   Requires AEF_STORAGE_SUPABASE_URL and AEF_STORAGE_SUPABASE_KEY.
@@ -34,6 +38,7 @@ Usage:
 
 from aef_adapters.object_storage.factory import get_storage, reset_storage
 from aef_adapters.object_storage.local import LocalStorage
+from aef_adapters.object_storage.minio import MinioStorage
 from aef_adapters.object_storage.protocol import (
     DownloadError,
     ListResult,
@@ -51,6 +56,7 @@ __all__ = [
     "DownloadError",
     "ListResult",
     "LocalStorage",
+    "MinioStorage",
     "ObjectNotFoundError",
     "StorageConfigurationError",
     "StorageError",

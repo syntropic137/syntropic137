@@ -15,13 +15,14 @@ from __future__ import annotations
 from functools import lru_cache
 
 from aef_adapters.object_storage.local import LocalStorage
+from aef_adapters.object_storage.minio import MinioStorage
 from aef_adapters.object_storage.supabase import SupabaseStorage
 from aef_shared.settings import get_settings
 from aef_shared.settings.storage import StorageProvider
 
 
 @lru_cache
-def _get_storage_instance() -> LocalStorage | SupabaseStorage:
+def _get_storage_instance() -> LocalStorage | SupabaseStorage | MinioStorage:
     """Get cached storage instance based on configuration.
 
     Returns:
@@ -37,11 +38,20 @@ def _get_storage_instance() -> LocalStorage | SupabaseStorage:
             bucket_name=storage_settings.bucket_name,
         )
 
+    if storage_settings.provider == StorageProvider.MINIO:
+        return MinioStorage(
+            endpoint=storage_settings.minio_endpoint,
+            access_key=storage_settings.minio_access_key,
+            secret_key=storage_settings.minio_secret_key.get_secret_value(),
+            bucket_name=storage_settings.bucket_name,
+            secure=storage_settings.minio_secure,
+        )
+
     # Default to local storage
     return LocalStorage(base_path=storage_settings.local_path)
 
 
-async def get_storage() -> LocalStorage | SupabaseStorage:
+async def get_storage() -> LocalStorage | SupabaseStorage | MinioStorage:
     """Get storage adapter based on configuration.
 
     Creates and returns the appropriate storage adapter based on

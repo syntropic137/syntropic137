@@ -13,6 +13,7 @@ import pytest
 
 from aef_adapters.object_storage import (
     LocalStorage,
+    MinioStorage,
     ObjectNotFoundError,
     StorageProtocol,
     get_storage,
@@ -185,6 +186,71 @@ class TestStorageSettings:
         settings = StorageSettings(max_file_size_mb=100)
         assert settings.max_file_size_bytes == 100 * 1024 * 1024
 
+    def test_minio_settings_validation(self) -> None:
+        """Test that MinIO settings require endpoint and credentials."""
+        with pytest.raises(ValueError, match="MinIO storage requires"):
+            StorageSettings(provider=StorageProvider.MINIO)
+
+    def test_minio_settings_valid(self) -> None:
+        """Test valid MinIO settings."""
+        settings = StorageSettings(
+            provider=StorageProvider.MINIO,
+            minio_endpoint="localhost:9000",
+            minio_access_key="minioadmin",
+            minio_secret_key="minioadmin",
+            minio_secure=False,
+        )
+        assert settings.is_minio is True
+        assert settings.is_configured is True
+        assert settings.minio_secure is False
+
+    def test_minio_settings_partial_missing(self) -> None:
+        """Test MinIO with partially missing credentials."""
+        with pytest.raises(ValueError, match="AEF_STORAGE_MINIO_SECRET_KEY"):
+            StorageSettings(
+                provider=StorageProvider.MINIO,
+                minio_endpoint="localhost:9000",
+                minio_access_key="minioadmin",
+                # Missing secret key
+            )
+
+
+class TestMinioStorage:
+    """Tests for MinioStorage adapter."""
+
+    def test_provider_property(self) -> None:
+        """Test provider property."""
+        storage = MinioStorage(
+            endpoint="localhost:9000",
+            access_key="test",
+            secret_key="test",
+            bucket_name="test-bucket",
+            secure=False,
+        )
+        assert storage.provider == StorageProvider.MINIO
+
+    def test_bucket_name_property(self) -> None:
+        """Test bucket_name property."""
+        storage = MinioStorage(
+            endpoint="localhost:9000",
+            access_key="test",
+            secret_key="test",
+            bucket_name="my-bucket",
+            secure=False,
+        )
+        assert storage.bucket_name == "my-bucket"
+
+    def test_implements_protocol(self) -> None:
+        """Test that MinioStorage implements StorageProtocol."""
+        storage = MinioStorage(
+            endpoint="localhost:9000",
+            access_key="test",
+            secret_key="test",
+            bucket_name="test-bucket",
+            secure=False,
+        )
+        assert isinstance(storage, StorageProtocol)
+
 
 class TestStorageFactory:
     """Tests for get_storage factory."""
@@ -210,6 +276,20 @@ class TestStorageFactory:
         storage1 = await get_storage()
         storage2 = await get_storage()
         assert storage1 is storage2
+
+    @pytest.mark.asyncio
+    async def test_get_storage_minio(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test factory returns MinioStorage for minio provider."""
+        monkeypatch.setenv("AEF_STORAGE_PROVIDER", "minio")
+        monkeypatch.setenv("AEF_STORAGE_MINIO_ENDPOINT", "localhost:9000")
+        monkeypatch.setenv("AEF_STORAGE_MINIO_ACCESS_KEY", "minioadmin")
+        monkeypatch.setenv("AEF_STORAGE_MINIO_SECRET_KEY", "minioadmin")
+        monkeypatch.setenv("AEF_STORAGE_MINIO_SECURE", "false")
+        reset_storage()
+
+        storage = await get_storage()
+        assert isinstance(storage, MinioStorage)
+        assert storage.provider == StorageProvider.MINIO
 
 
 class TestStorageProtocol:
