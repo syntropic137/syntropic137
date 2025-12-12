@@ -1,0 +1,139 @@
+---
+description: Review GitHub Actions status and PR review comments
+globs: 
+alwaysApply: false
+---
+
+# /review-pr-status - PR Status Review Command
+
+Review the current PR's GitHub Actions status and Copilot/reviewer comments.
+
+## Usage
+
+Invoke with: `/review-pr-status` or `/review-pr-status PR_NUMBER`
+
+## Workflow
+
+### Step 1: Identify the PR
+
+If no PR number provided, detect from current branch:
+
+```bash
+# Get current branch and find associated PR
+gh pr view --json number,title,url,state,headRefName
+```
+
+### Step 2: Check GitHub Actions Status
+
+```bash
+# Get all CI check statuses
+gh pr checks <PR_NUMBER>
+```
+
+Present results in a table:
+
+| Check | Status | Duration | Link |
+|-------|--------|----------|------|
+| Python Tests | ✅ pass | 2m30s | [link] |
+| Python QA | ❌ fail | 45s | [link] |
+
+### Step 3: If Any Checks Failed, Get Details
+
+```bash
+# Get the failed job logs (last 100 lines)
+gh run view <RUN_ID> --log-failed | tail -100
+```
+
+### Step 4: Get Review Comments
+
+```bash
+# Get all PR reviews
+gh api repos/{owner}/{repo}/pulls/{PR_NUMBER}/reviews \
+  --jq '.[] | {user: .user.login, state: .state, body: .body[0:200]}'
+
+# Get inline comments with thread resolution status
+gh api graphql -f query='
+query {
+  repository(owner: "{owner}", name: "{repo}") {
+    pullRequest(number: {PR_NUMBER}) {
+      reviewThreads(first: 50) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 1) {
+            nodes {
+              author { login }
+              body
+              path
+              line
+            }
+          }
+        }
+      }
+    }
+  }
+}'
+```
+
+### Step 5: Categorize Comments
+
+Organize comments by:
+
+1. **🔴 Unresolved & Current** - Active comments that need attention
+2. **🟡 Unresolved & Outdated** - Comments on changed code (may be fixed)
+3. **✅ Resolved** - Already addressed
+
+### Step 6: Present Summary
+
+```markdown
+## PR #XX Status Summary
+
+### CI Status
+| Check | Status |
+|-------|--------|
+| ... | ... |
+
+### Review Comments
+- **Unresolved (current):** X comments
+- **Unresolved (outdated):** Y comments  
+- **Resolved:** Z comments
+
+### Unresolved Comments Detail
+
+#### 🔴 High Priority (Security/Bugs)
+| File | Line | Issue |
+|------|------|-------|
+| ... | ... | ... |
+
+#### 🟡 Medium Priority (Performance/Best Practices)
+| File | Line | Issue |
+|------|------|-------|
+| ... | ... | ... |
+
+#### 🟢 Low Priority (Style/Info)
+| File | Line | Issue |
+|------|------|-------|
+| ... | ... | ... |
+```
+
+## Priority Classification
+
+Classify comments by keywords:
+
+- **🔴 High**: security, vulnerability, bug, crash, data loss, auth, injection, XSS, CSRF
+- **🟡 Medium**: performance, blocking, async, memory, leak, race condition, deprecated
+- **🟢 Low**: style, naming, comment, documentation, typo, formatting, suggestion
+
+## Output
+
+Always end with actionable next steps:
+
+```markdown
+## Recommended Actions
+
+1. [If CI failed] Fix CI failure in `{file}`: {error summary}
+2. [If high priority comments] Address security issue in `{file}:{line}`
+3. [If medium priority] Consider performance fix in `{file}:{line}`
+4. [If low priority only] Run `/fix-pr-review` to handle remaining comments
+```
