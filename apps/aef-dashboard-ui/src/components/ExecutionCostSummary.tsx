@@ -1,3 +1,4 @@
+import { clsx } from 'clsx'
 import { Clock, DollarSign, Layers, MessageSquare, TrendingUp, Zap } from 'lucide-react'
 import type { ExecutionCost } from '../types'
 import { formatCost, formatDuration, formatTokens } from '../utils/formatters'
