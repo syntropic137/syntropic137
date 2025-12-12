@@ -7,7 +7,7 @@ emitting CostRecordedEvents to the event store.
 from __future__ import annotations
 
 import contextlib
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
@@ -159,14 +159,14 @@ class CostCalculator:
         # Calculate compute cost based on duration
         cost_amount = Decimal(str(duration_ms)) * self._compute_cost_per_ms
 
-        # Parse timestamp
+        # Parse timestamp (always use UTC for consistency)
         timestamp = None
         ts_str = event_data.get("timestamp")
         if ts_str:
             try:
                 timestamp = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
             except ValueError:
-                timestamp = datetime.now()
+                timestamp = datetime.now(UTC)
 
         # Create event
         cost_event = CostRecordedEvent(
@@ -213,15 +213,15 @@ class CostCalculator:
             with contextlib.suppress(ValueError):
                 started_at = datetime.fromisoformat(sa_str.replace("Z", "+00:00"))
 
+        # Parse completed_at (always use UTC for consistency)
         completed_at = None
         ca_str = session_data.get("completed_at")
         if ca_str:
-            try:
+            with contextlib.suppress(ValueError):
                 completed_at = datetime.fromisoformat(ca_str.replace("Z", "+00:00"))
-            except ValueError:
-                completed_at = datetime.now()
-        else:
-            completed_at = datetime.now()
+        # Default to UTC now if not provided or parse failed
+        if completed_at is None:
+            completed_at = datetime.now(UTC)
 
         # Parse cost fields
         total_cost = Decimal(str(session_data.get("total_cost_usd", "0")))

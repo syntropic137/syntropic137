@@ -1,42 +1,11 @@
 import { Clock, DollarSign, MessageSquare, Zap } from 'lucide-react'
 import type { SessionCost } from '../types'
+import { formatCost, formatDuration, formatTokens } from '../utils/formatters'
 
 interface SessionCostCardProps {
   cost: SessionCost
   showBreakdown?: boolean
   compact?: boolean
-}
-
-function formatCost(value: number): string {
-  if (value < 0.01) {
-    return `$${value.toFixed(6)}`
-  }
-  if (value < 1) {
-    return `$${value.toFixed(4)}`
-  }
-  return `$${value.toFixed(2)}`
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) {
-    return `${Math.round(ms)}ms`
-  }
-  const seconds = ms / 1000
-  if (seconds < 60) {
-    return `${seconds.toFixed(1)}s`
-  }
-  const minutes = seconds / 60
-  return `${minutes.toFixed(1)}m`
-}
-
-function formatTokens(count: number): string {
-  if (count >= 1000000) {
-    return `${(count / 1000000).toFixed(1)}M`
-  }
-  if (count >= 1000) {
-    return `${(count / 1000).toFixed(1)}K`
-  }
-  return String(count)
 }
 
 export function SessionCostCard({ cost, showBreakdown = false, compact = false }: SessionCostCardProps) {

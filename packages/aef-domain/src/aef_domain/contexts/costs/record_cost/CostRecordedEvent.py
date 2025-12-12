@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import field
 from datetime import datetime  # noqa: TC003 - needed at runtime for DomainEvent
 from decimal import Decimal  # noqa: TC003 - needed at runtime for DomainEvent
 from typing import Any
@@ -62,7 +63,7 @@ class CostRecordedEvent(DomainEvent):
     timestamp: datetime | None = None
 
     # Generic metadata
-    metadata: dict[str, Any] = {}  # noqa: RUF012
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""

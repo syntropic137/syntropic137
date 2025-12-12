@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import field
 from datetime import datetime  # noqa: TC003 - needed at runtime for DomainEvent
 from decimal import Decimal
 from typing import Any
@@ -62,8 +63,8 @@ class SessionCostFinalizedEvent(DomainEvent):
     duration_ms: float = 0
 
     # Breakdowns
-    cost_by_model: dict[str, str] = {}  # noqa: RUF012  # Model -> USD as string
-    cost_by_tool: dict[str, str] = {}  # noqa: RUF012  # Tool -> USD as string
+    cost_by_model: dict[str, str] = field(default_factory=dict)  # Model -> USD as string
+    cost_by_tool: dict[str, str] = field(default_factory=dict)  # Tool -> USD as string
 
     # Timing
     started_at: datetime | None = None

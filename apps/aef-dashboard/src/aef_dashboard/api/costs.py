@@ -112,11 +112,13 @@ async def get_session_cost(
             detail=f"Session cost not found for session {session_id}",
         )
 
+    # Convert to API response, optionally excluding breakdown
+    response = _domain_session_cost_to_api(session_cost)
     if not include_breakdown:
-        session_cost.cost_by_model = {}
-        session_cost.cost_by_tool = {}
+        response.cost_by_model = {}
+        response.cost_by_tool = {}
 
-    return _domain_session_cost_to_api(session_cost)
+    return response
 
 
 @router.get("/executions", response_model=list[ExecutionCostResponse])
@@ -153,15 +155,17 @@ async def get_execution_cost(
             detail=f"Execution cost not found for execution {execution_id}",
         )
 
+    # Convert to API response, optionally excluding breakdown and session IDs
+    response = _domain_execution_cost_to_api(execution_cost)
     if not include_breakdown:
-        execution_cost.cost_by_phase = {}
-        execution_cost.cost_by_model = {}
-        execution_cost.cost_by_tool = {}
+        response.cost_by_phase = {}
+        response.cost_by_model = {}
+        response.cost_by_tool = {}
 
     if not include_session_ids:
-        execution_cost.session_ids = []
+        response.session_ids = []
 
-    return _domain_execution_cost_to_api(execution_cost)
+    return response
 
 
 @router.get("/summary", response_model=CostSummaryResponse)
