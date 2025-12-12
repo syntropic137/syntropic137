@@ -313,26 +313,26 @@ def generate_env_example() -> str:
 
 def parse_env_file(path: Path) -> dict[str, str]:
     """Parse an existing .env file into a dict of key=value pairs.
-    
+
     Preserves values exactly as written (including quoted multi-line values).
     """
     if not path.exists():
         return {}
-    
+
     env_vars: dict[str, str] = {}
     content = path.read_text()
-    
+
     current_key: str | None = None
     current_value_lines: list[str] = []
     in_multiline = False
-    
+
     for line in content.split("\n"):
         # Skip comments and empty lines (unless in multiline)
         if not in_multiline:
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
-        
+
         if in_multiline:
             current_value_lines.append(line)
             # Check if this line ends the multiline value
@@ -345,13 +345,13 @@ def parse_env_file(path: Path) -> dict[str, str]:
                 current_value_lines = []
                 in_multiline = False
             continue
-        
+
         # Parse KEY=VALUE
         if "=" in line:
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip()
-            
+
             # Check if this starts a multiline value (starts with " but doesn't end with ")
             if value.startswith('"') and not value.endswith('"'):
                 in_multiline = True
@@ -359,43 +359,46 @@ def parse_env_file(path: Path) -> dict[str, str]:
                 current_value_lines = [value]
             else:
                 env_vars[key] = value
-    
+
     return env_vars
 
 
-def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int]:
+def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, list[str]]:
     """Sync .env with .env.example idempotently.
-    
+
     - Preserves existing values in .env
     - Adds new variables from .env.example with default values
+    - Preserves extra variables not in .env.example (with warning)
     - Never overwrites user-configured values
-    - Returns (existing_count, new_count, total_count)
+    - Returns (existing_count, new_count, total_count, extra_vars)
     """
     # Parse existing .env
     existing_vars = parse_env_file(env_path)
-    
+
     # Parse .env.example to get structure and defaults
     example_content = example_path.read_text()
-    
-    # Track what we're adding
+
+    # Track what we're adding and what's in the template
     new_vars: list[str] = []
-    
+    template_keys: set[str] = set()
+
     output_lines: list[str] = []
-    
+
     for line in example_content.split("\n"):
         stripped = line.strip()
-        
+
         # Keep comments and section headers as-is
         if not stripped or stripped.startswith("#"):
             output_lines.append(line)
             continue
-        
+
         # Parse KEY=VALUE
         if "=" in line:
             key, _, default_value = line.partition("=")
             key = key.strip()
             default_value = default_value.strip()
-            
+            template_keys.add(key)
+
             if key in existing_vars:
                 # Preserve existing value
                 output_lines.append(f"{key}={existing_vars[key]}")
@@ -405,15 +408,34 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int]:
                 new_vars.append(key)
         else:
             output_lines.append(line)
-    
+
+    # Find extra variables in .env that aren't in the template
+    extra_vars = [key for key in existing_vars if key not in template_keys]
+
+    # Append extra variables in a separate section
+    if extra_vars:
+        output_lines.extend([
+            "",
+            "# " + "=" * 76,
+            "# EXTERNAL / UNKNOWN VARIABLES",
+            "# " + "=" * 76,
+            "# These variables are not defined in the AEF settings classes.",
+            "# They may come from external tools, plugins, or manual additions.",
+            "# Review periodically - remove if no longer needed.",
+            "",
+        ])
+        for key in sorted(extra_vars):
+            output_lines.append(f"{key}={existing_vars[key]}")
+        output_lines.append("")
+
     # Write the synced .env
     env_path.write_text("\n".join(output_lines))
-    
-    existing_count = len(existing_vars)
+
+    existing_count = len([k for k in existing_vars if k in template_keys])
     new_count = len(new_vars)
-    total_count = existing_count + new_count
-    
-    return existing_count, new_count, total_count
+    total_count = len(template_keys)
+
+    return existing_count, new_count, total_count, extra_vars
 
 
 def main() -> None:
@@ -426,21 +448,28 @@ def main() -> None:
     # Write .env.example
     example_path.write_text(content)
     print(f"✅ Generated {example_path}")
-    
+
     # Count total env vars (rough count from lines with = that aren't comments)
-    total_vars = sum(1 for line in content.split("\n") 
+    total_vars = sum(1 for line in content.split("\n")
                      if "=" in line and not line.strip().startswith("#"))
     print(f"   {total_vars} environment variables documented")
-    
+
     # Sync .env idempotently
     if env_path.exists():
-        existing, new, total = sync_env_file(example_path, env_path)
+        existing, new, total, extra = sync_env_file(example_path, env_path)
         if new > 0:
             print(f"✅ Synced {env_path}")
             print(f"   {existing} existing values preserved")
             print(f"   {new} new variables added")
         else:
             print(f"✅ {env_path} is up to date ({existing} variables)")
+
+        # Warn about external/unknown variables
+        if extra:
+            print(f"⚠️  {len(extra)} external variables found (not in AEF settings):")
+            for var in sorted(extra):
+                print(f"   - {var}")
+            print("   These are preserved in 'EXTERNAL / UNKNOWN VARIABLES' section.")
     else:
         # Create .env from .env.example
         env_path.write_text(content)
