@@ -10,6 +10,11 @@ Usage:
     settings = get_settings()
     print(settings.database_url)
 
+    # GitHub App for secure API access
+    github = settings.github
+    if github.is_configured:
+        print(f"GitHub App: {github.app_name}")
+
     # Git identity for workspace commits
     git = settings.git_identity
     print(f"Commits as: {git.user_name} <{git.user_email}>")
@@ -22,6 +27,7 @@ Environment Variables:
     See Settings class for full list with descriptions.
     Required vars will cause immediate failure if missing.
 
+    AEF_GITHUB_* - GitHub App authentication
     AEF_GIT_* - Git identity and credentials
     AEF_LOGGING_* - Container logging configuration
 """
@@ -32,6 +38,7 @@ from aef_shared.settings.config import (
     get_settings,
     reset_settings,
 )
+from aef_shared.settings.github import GitHubAppSettings
 from aef_shared.settings.workspace import (
     CloudProvider,
     ContainerLoggingSettings,
@@ -49,6 +56,7 @@ __all__ = [
     "CloudProvider",
     "ContainerLoggingSettings",
     "GitCredentialType",
+    "GitHubAppSettings",
     "GitIdentityResolver",
     "GitIdentitySettings",
     "IsolationBackend",

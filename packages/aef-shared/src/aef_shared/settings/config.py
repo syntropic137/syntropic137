@@ -15,6 +15,7 @@ from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from aef_shared.settings.github import GitHubAppSettings
     from aef_shared.settings.workspace import (
         ContainerLoggingSettings,
         GitIdentitySettings,
@@ -344,6 +345,23 @@ class Settings(BaseSettings):
         For local development, configure DATABASE_URL to use Docker PostgreSQL.
         """
         return self.database_url is None and self.is_test
+
+    # =========================================================================
+    # GITHUB APP - See docs/deployment/github-app-setup.md
+    # =========================================================================
+
+    @property
+    def github(self) -> GitHubAppSettings:
+        """Get GitHub App settings for secure API authentication.
+
+        Returns a GitHubAppSettings instance configured from AEF_GITHUB_* env vars.
+        Used for installation token generation, webhook verification, and commit attribution.
+
+        See docs/deployment/github-app-setup.md for setup instructions.
+        """
+        from aef_shared.settings.github import GitHubAppSettings
+
+        return GitHubAppSettings()
 
     # =========================================================================
     # WORKSPACE ISOLATION - See ADR-021
