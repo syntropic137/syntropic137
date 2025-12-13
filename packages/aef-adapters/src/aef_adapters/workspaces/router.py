@@ -6,14 +6,19 @@ It automatically:
 2. Falls back to alternatives if preferred backend unavailable
 3. Overflows to cloud backends when local capacity is exceeded
 
-Usage:
-    from aef_adapters.workspaces import WorkspaceRouter
+IMPORTANT (ADR-023): WorkspaceRouter enforces isolation requirements:
+- In TEST environment: Falls back to InMemoryWorkspace if no backend available
+- In DEV/PROD: FAILS if no isolated backend is available
 
-    router = WorkspaceRouter()
+Usage:
+    from aef_adapters.workspaces import get_workspace_router
+
+    router = get_workspace_router()
     async with router.create(config) as workspace:
         # workspace is isolated with the best available backend
-        ...
+        await router.execute_command(workspace, ["python", "script.py"])
 
+See ADR-023: Workspace-First Execution Model
 See ADR-021: Isolated Workspace Architecture
 """
 
@@ -21,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -47,6 +54,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from aef_adapters.artifacts.bundle import ArtifactBundle, ArtifactType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -132,24 +141,45 @@ class WorkspaceRouter:
                 available.append(backend)
         return available
 
-    def get_best_backend(self) -> IsolationBackend:
+    def _is_test_environment(self) -> bool:
+        """Check if we're in a test environment."""
+        app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
+        return app_env in ("test", "testing")
+
+    def get_best_backend(self) -> IsolationBackend | None:
         """Get the best available backend for this platform.
 
         Follows priority order and returns first available.
+        In test environment, returns None if no backend (allows InMemoryWorkspace).
+        In non-test environment, raises RuntimeError.
 
         Returns:
-            Best available IsolationBackend
+            Best available IsolationBackend, or None in test environment
 
         Raises:
-            RuntimeError: If no backend is available
+            RuntimeError: If no backend is available in non-test environment
         """
         available = self.get_available_backends()
-        if not available:
-            raise RuntimeError(
-                "No isolation backend available. "
-                "Install Docker, Firecracker, or configure E2B API key."
-            )
-        return available[0]
+        if available:
+            return available[0]
+
+        # No backends available
+        if self._is_test_environment():
+            # In tests, we allow InMemoryWorkspace as fallback
+            logger.debug("No isolation backends available in test environment")
+            return None
+
+        # In dev/prod, we MUST have isolation (ADR-023)
+        raise RuntimeError(
+            "No isolation backend available for agent execution.\n\n"
+            "Agents MUST run in isolated environments (ADR-023).\n\n"
+            "Available options:\n"
+            "  1. Install Docker: brew install docker (macOS) or apt install docker.io (Linux)\n"
+            "  2. Configure E2B cloud: set AEF_WORKSPACE_CLOUD_API_KEY\n"
+            "  3. Install Firecracker (Linux only): see docs/deployment/firecracker-setup.md\n\n"
+            "See ADR-021: Isolated Workspace Architecture\n"
+            "See ADR-023: Workspace-First Execution Model"
+        )
 
     def get_backend_class(self, backend: IsolationBackend) -> type[BaseIsolatedWorkspace]:
         """Get the implementation class for a backend.
@@ -178,6 +208,9 @@ class WorkspaceRouter:
     ) -> AsyncIterator[IsolatedWorkspace]:
         """Create an isolated workspace with automatic backend selection.
 
+        In test environments, falls back to InMemoryWorkspace if no backends available.
+        In dev/prod, raises RuntimeError if no backends available (ADR-023).
+
         Args:
             config: Workspace configuration
             backend: Force specific backend (None = auto-select)
@@ -187,12 +220,22 @@ class WorkspaceRouter:
             IsolatedWorkspace ready for use
 
         Raises:
-            RuntimeError: If no backend available or capacity exceeded
+            RuntimeError: If no backend available (non-test) or capacity exceeded
         """
         from aef_shared.settings import get_settings
 
         settings = get_settings()
         workspace_settings = settings.workspace
+
+        # Check if we need to use InMemoryWorkspace (tests only)
+        if self._is_test_environment() and not self.get_available_backends():
+            # In test environment with no backends, use InMemoryWorkspace
+            from aef_adapters.workspaces.memory import InMemoryWorkspace
+
+            logger.debug("Using InMemoryWorkspace in test environment (no backends available)")
+            async with InMemoryWorkspace.create(config) as workspace:
+                yield workspace  # type: ignore[misc]
+            return
 
         # Determine which backend to use
         if backend is None:
@@ -381,7 +424,7 @@ class WorkspaceRouter:
             Available backend class
 
         Raises:
-            RuntimeError: If no backend available
+            RuntimeError: If no backend available in non-test environment
         """
         # Try preferred backend first
         backend_class = self.BACKEND_CLASSES.get(preferred)
@@ -394,7 +437,26 @@ class WorkspaceRouter:
             if backend_class and backend_class.is_available():
                 return backend_class
 
-        raise RuntimeError("No isolation backend available")
+        # No backends available - check environment
+        if self._is_test_environment():
+            # In tests, this should not happen as we handle it in create()
+            # But provide a clear error message
+            raise RuntimeError(
+                "No isolation backend available. "
+                "In tests, use InMemoryWorkspace directly or mock the router."
+            )
+
+        # In dev/prod, we MUST have isolation (ADR-023)
+        raise RuntimeError(
+            "No isolation backend available for agent execution.\n\n"
+            "Agents MUST run in isolated environments (ADR-023).\n\n"
+            "Available options:\n"
+            "  1. Install Docker: brew install docker (macOS) or apt install docker.io (Linux)\n"
+            "  2. Configure E2B cloud: set AEF_WORKSPACE_CLOUD_API_KEY\n"
+            "  3. Install Firecracker (Linux only): see docs/deployment/firecracker-setup.md\n\n"
+            "See ADR-021: Isolated Workspace Architecture\n"
+            "See ADR-023: Workspace-First Execution Model"
+        )
 
     async def execute_command(
         self,

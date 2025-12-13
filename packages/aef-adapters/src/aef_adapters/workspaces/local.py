@@ -1,16 +1,20 @@
 """LocalWorkspace - file-based workspace implementation.
 
 WARNING: LocalWorkspace provides NO ISOLATION. It runs agents directly on the
-host filesystem. This is for TESTING and LOCAL DEVELOPMENT ONLY.
+host filesystem. This is for TESTING ONLY.
 
-For production, use the isolated backends via WorkspaceRouter:
+As of ADR-023 (Workspace-First Execution Model), LocalWorkspace will FAIL
+if used outside of test environments (APP_ENVIRONMENT != 'test').
+
+For development and production, use WorkspaceRouter which provides isolated backends:
 - GVisorWorkspace (Docker + gVisor)
 - HardenedDockerWorkspace (Docker with security hardening)
 - FirecrackerWorkspace (MicroVMs)
 - E2BWorkspace (Cloud sandboxes)
 
+See ADR-023: Workspace-First Execution Model (enforcement)
+See ADR-021: Isolated Workspace Architecture (backends)
 See ADR-004: Environment Configuration (mock objects policy)
-See ADR-021: Isolated Workspace Architecture
 
 Creates temporary directories with:
 - .claude/settings.json for hook configuration
@@ -40,44 +44,57 @@ logger = logging.getLogger(__name__)
 
 
 class NonIsolatedWorkspaceError(Exception):
-    """Raised when LocalWorkspace is used outside test/development environment."""
+    """Raised when LocalWorkspace is used outside test environment."""
 
     pass
 
 
-def _assert_non_production_environment() -> None:
-    """Assert we're not in production - LocalWorkspace has NO isolation.
+def _assert_test_environment() -> None:
+    """Assert we're in test environment - LocalWorkspace is TEST-ONLY.
 
     LocalWorkspace runs agents directly on the host without any containerization
-    or sandboxing. It should NEVER be used in production environments.
+    or sandboxing. It should ONLY be used in TEST environments.
+
+    For development and production, use WorkspaceRouter which provides
+    isolated backends (Docker, gVisor, Firecracker, E2B).
+
+    See ADR-023: Workspace-First Execution Model
 
     Raises:
-        NonIsolatedWorkspaceError: If APP_ENVIRONMENT is 'production' or 'staging'
+        NonIsolatedWorkspaceError: If APP_ENVIRONMENT is not 'test' or 'testing'
     """
     app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
-    if app_env in ("production", "staging", "prod", "stg"):
-        raise NonIsolatedWorkspaceError(
-            f"LocalWorkspace provides NO ISOLATION and cannot be used in {app_env}. "
-            f"Use WorkspaceRouter with isolated backends (GVisor, Docker, Firecracker, E2B) "
-            f"for production deployments. See ADR-021."
-        )
-    if app_env not in ("test", "testing", "development", "dev", "local"):
-        logger.warning(
-            "LocalWorkspace provides NO ISOLATION. "
-            "Consider using WorkspaceRouter for isolated agent execution. "
-            f"Current APP_ENVIRONMENT: {app_env}"
-        )
+
+    # Only allow in test environments
+    if app_env in ("test", "testing"):
+        return  # OK
+
+    # All other environments must use isolated workspaces
+    raise NonIsolatedWorkspaceError(
+        f"LocalWorkspace cannot be used in '{app_env}' environment. "
+        f"LocalWorkspace provides NO ISOLATION and is for TESTS ONLY.\n\n"
+        f"Use WorkspaceRouter.create() for isolated execution:\n"
+        f"  from aef_adapters.workspaces import get_workspace_router\n"
+        f"  router = get_workspace_router()\n"
+        f"  async with router.create(config) as workspace:\n"
+        f"      ...\n\n"
+        f"See ADR-023: Workspace-First Execution Model\n"
+        f"See ADR-021: Isolated Workspace Architecture"
+    )
 
 
 class LocalWorkspace:
-    """File-based workspace in temporary directories.
+    """File-based workspace in temporary directories - TEST ENVIRONMENT ONLY.
 
-    WARNING: This provides NO ISOLATION. For production use WorkspaceRouter.
+    WARNING: This provides NO ISOLATION and will FAIL outside test environments.
+
+    As of ADR-023, LocalWorkspace raises NonIsolatedWorkspaceError if
+    APP_ENVIRONMENT is not 'test' or 'testing'.
 
     Creates a workspace with hooks from agentic-primitives.
 
     Example:
-        # For testing only:
+        # For testing only (APP_ENVIRONMENT=test):
         config = WorkspaceConfig(session_id="my-session")
         async with LocalWorkspace.create(config) as workspace:
             # workspace.path contains:
@@ -86,11 +103,13 @@ class LocalWorkspace:
             # - .claude/hooks/validators/ (from agentic-primitives)
             await agent.execute(task, workspace, config)
 
-        # For production - use isolated backends:
-        from aef_adapters.workspaces import WorkspaceRouter
-        router = WorkspaceRouter()
+        # For development/production - use isolated backends:
+        from aef_adapters.workspaces import get_workspace_router
+        router = get_workspace_router()
         async with router.create(config) as workspace:
             ...
+
+    See ADR-023: Workspace-First Execution Model
     """
 
     # Default path to agentic-primitives hooks (relative to repo root)
@@ -99,15 +118,16 @@ class LocalWorkspace:
     @classmethod
     @asynccontextmanager
     async def create(cls, config: WorkspaceConfig) -> AsyncIterator[Workspace]:
-        """Create a workspace as an async context manager.
+        """Create a workspace as an async context manager - TEST ONLY.
 
-        WARNING: LocalWorkspace provides NO ISOLATION. Agents run directly on the
-        host with full filesystem and network access. This is suitable for:
-        - Unit tests
-        - Integration tests
-        - Local development
+        WARNING: LocalWorkspace provides NO ISOLATION and is TEST ONLY.
+        This will FAIL (raise NonIsolatedWorkspaceError) if APP_ENVIRONMENT
+        is not 'test' or 'testing'.
 
-        For production, use WorkspaceRouter which provides isolated backends.
+        For development and production, use WorkspaceRouter:
+            router = get_workspace_router()
+            async with router.create(config) as workspace:
+                ...
 
         Args:
             config: Workspace configuration
@@ -116,10 +136,14 @@ class LocalWorkspace:
             Configured Workspace ready for agent execution
 
         Raises:
-            NonIsolatedWorkspaceError: If used in production environment
+            NonIsolatedWorkspaceError: If APP_ENVIRONMENT is not 'test'
+
+        See:
+            ADR-023: Workspace-First Execution Model
         """
-        # Check we're not in production - LocalWorkspace has no isolation!
-        _assert_non_production_environment()
+        # Check we're in test environment - LocalWorkspace is TEST ONLY!
+        # See ADR-023: Workspace-First Execution Model
+        _assert_test_environment()
 
         # Create temp directory
         base_dir = config.base_dir

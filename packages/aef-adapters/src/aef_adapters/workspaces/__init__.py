@@ -1,32 +1,38 @@
 """Workspace adapters - isolated execution environments for agents.
 
-This module provides workspace implementations for agentic execution:
-- LocalWorkspace: File-based workspace in temp directories (development/testing)
-- BaseIsolatedWorkspace: Abstract base for all isolated backends (ADR-021)
+This module provides workspace implementations for agentic execution.
 
-Isolated Backends (all production use - agents are isolated by default):
-- GVisorWorkspace: Docker + gVisor runtime (Milestone 3)
-- HardenedDockerWorkspace: Docker with security hardening (Milestone 4)
-- FirecrackerWorkspace: Firecracker MicroVMs (Milestone 5)
-- E2BWorkspace: E2B cloud sandboxes (Milestone 6)
+IMPORTANT (ADR-023): LocalWorkspace is TEST ONLY and will FAIL in other environments.
+Use WorkspaceRouter for development and production.
 
-Quick Start (Development):
-    from aef_adapters.workspaces import LocalWorkspace
-    from aef_adapters.agents.agentic_types import WorkspaceConfig
+Test-Only Workspaces:
+- LocalWorkspace: File-based workspace in temp directories (TEST ONLY)
+- InMemoryWorkspace: Pure in-memory workspace for fast tests (TEST ONLY)
 
-    config = WorkspaceConfig(session_id="my-session")
-    async with LocalWorkspace.create(config) as workspace:
-        # Workspace has hooks configured from agentic-primitives
-        # Execute agent in workspace.path
-        ...
-        # Artifacts collected on exit
+Isolated Backends (development and production):
+- GVisorWorkspace: Docker + gVisor runtime
+- HardenedDockerWorkspace: Docker with security hardening
+- FirecrackerWorkspace: Firecracker MicroVMs
+- E2BWorkspace: E2B cloud sandboxes
 
-Production (with isolation):
-    from aef_adapters.workspaces import BaseIsolatedWorkspace, IsolatedWorkspaceConfig
+Quick Start (Development/Production - use WorkspaceRouter):
+    from aef_adapters.workspaces import get_workspace_router
 
-    # See WorkspaceRouter for automatic backend selection (Milestone 7)
+    router = get_workspace_router()
+    async with router.create(config) as workspace:
+        # Workspace is isolated (Docker, gVisor, etc.)
+        await router.execute_command(workspace, ["python", "script.py"])
+        artifacts = await router.collect_artifacts(workspace)
 
-See ADR-021: Isolated Workspace Architecture
+Quick Start (Tests only):
+    from aef_adapters.workspaces import InMemoryWorkspace
+
+    # Only works when APP_ENVIRONMENT=test
+    async with InMemoryWorkspace.create(config) as workspace:
+        await workspace.write_file("test.txt", b"hello")
+
+See ADR-023: Workspace-First Execution Model (enforcement)
+See ADR-021: Isolated Workspace Architecture (backends)
 """
 
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace
@@ -63,6 +69,10 @@ from aef_adapters.workspaces.logging import (
     ViewContainerLogsTool,
     create_container_logger,
 )
+from aef_adapters.workspaces.memory import (
+    InMemoryWorkspace,
+    TestEnvironmentRequiredError,
+)
 from aef_adapters.workspaces.network import (
     DEFAULT_ALLOWED_HOSTS,
     EgressProxy,
@@ -94,6 +104,7 @@ __all__ = [
     "GitInjector",
     "HardenedDockerWorkspace",
     "InMemoryCollectorEmitter",
+    "InMemoryWorkspace",
     "InjectedEnvVar",
     "IsolatedWorkspace",
     "IsolatedWorkspaceConfig",
@@ -105,6 +116,7 @@ __all__ = [
     "NonIsolatedWorkspaceError",
     "RouterStats",
     "StructuredLogger",
+    "TestEnvironmentRequiredError",
     "ViewContainerLogsTool",
     "WorkspaceEventEmitter",
     "WorkspaceProtocol",
