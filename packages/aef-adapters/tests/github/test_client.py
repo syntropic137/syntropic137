@@ -63,7 +63,7 @@ def mock_github_settings() -> MagicMock:
     settings.private_key = MagicMock()
     settings.private_key.get_secret_value.return_value = TEST_PRIVATE_KEY_B64
     settings.is_configured = True
-    settings.bot_username = "test-app[bot]"
+    settings.bot_name = "test-app[bot]"
     settings.bot_email = "12345+test-app[bot]@users.noreply.github.com"
     return settings
 
