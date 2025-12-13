@@ -242,13 +242,15 @@ class GitHubAppClient:
         # Return cached token if valid
         if not force_refresh and self._cached_token and not self._cached_token.is_expired:
             logger.debug(
-                "Using cached installation token",
-                expires_in=f"{self._cached_token.seconds_until_expiry:.0f}s",
+                "Using cached installation token (expires_in=%ss)",
+                f"{self._cached_token.seconds_until_expiry:.0f}",
             )
             return self._cached_token.token
 
         # Generate new token
-        logger.info("Generating new installation token", installation_id=self.installation_id)
+        logger.info(
+            "Generating new installation token for installation_id=%s", self.installation_id
+        )
 
         jwt_token = self._generate_jwt()
 
@@ -292,9 +294,9 @@ class GitHubAppClient:
             )
 
             logger.info(
-                "Installation token generated",
-                expires_at=expires_at.isoformat(),
-                permissions=list(self._cached_token.permissions.keys()),
+                "Installation token generated (expires_at=%s, permissions=%s)",
+                expires_at.isoformat(),
+                list(self._cached_token.permissions.keys()),
             )
 
             return self._cached_token.token
@@ -473,9 +475,9 @@ def get_github_client() -> GitHubAppClient:
 
     _github_client = GitHubAppClient(settings.github)
     logger.info(
-        "GitHub App client initialized",
-        app_id=settings.github.app_id,
-        installation_id=settings.github.installation_id,
+        "GitHub App client initialized (app_id=%s, installation_id=%s)",
+        settings.github.app_id,
+        settings.github.installation_id,
     )
 
     return _github_client
