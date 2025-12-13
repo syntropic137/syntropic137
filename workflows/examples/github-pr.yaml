@@ -1,0 +1,153 @@
+# GitHub Pull Request Workflow
+# A workflow that demonstrates agent-driven PR creation using git and gh CLI.
+#
+# This workflow is the canonical example of a true E2E agentic workflow:
+# 1. Agent runs in isolated Docker container
+# 2. GitHub credentials are injected via TokenVendingService (5-min TTL)
+# 3. Agent uses standard git and gh CLI commands
+# 4. All operations are observable in the event store
+
+id: github-pr-workflow
+name: GitHub PR Workflow
+description: |
+  Creates a Pull Request with agent-generated changes using standard git
+  and GitHub CLI tools. Demonstrates true end-to-end agentic workflow with
+  full observability and secure token injection.
+
+type: implementation
+classification: standard
+
+# Default repository context (should be overridden at runtime)
+repository:
+  url: https://github.com/AgentParadise/sandbox_aef-engineer-beta
+  ref: main
+
+# Project association (optional)
+project_name: null
+
+phases:
+  - id: create-pr
+    name: Create Pull Request
+    order: 1
+    execution_type: sequential
+    description: |
+      Clone repository, create a branch, make changes, and open a PR.
+      Uses injected GitHub credentials for authentication.
+    input_artifacts: []
+    output_artifacts:
+      - pr_metadata
+      - changes_summary
+    max_tokens: 8192
+    timeout_seconds: 600
+    
+    # Tools available for this phase
+    tools:
+      - bash
+      - computer
+    
+    prompt_template: |
+      You are a software engineer with access to git and the GitHub CLI (gh).
+      
+      ## Your Task
+      
+      Create a meaningful code change and open a Pull Request for it.
+      
+      ### Context
+      - **Repository:** {{repo_url}}
+      - **Change Description:** {{change_description}}
+      - **Execution ID:** {{execution_id}}
+      
+      ### Instructions
+      
+      1. **Clone the repository:**
+         ```bash
+         git clone {{repo_url}} /workspace/repo
+         cd /workspace/repo
+         ```
+      
+      2. **Create a feature branch:**
+         ```bash
+         git checkout -b feat/agent-{{execution_id}}
+         ```
+      
+      3. **Make the requested change:**
+         - Create or modify files based on the change description
+         - Write clean, well-documented code
+         - Follow existing project conventions
+      
+      4. **Commit your changes:**
+         ```bash
+         git add .
+         git commit -m "feat: {{change_description}}"
+         ```
+      
+      5. **Push and create PR:**
+         ```bash
+         git push origin feat/agent-{{execution_id}}
+         gh pr create --title "🤖 Agent: {{change_description}}" --body "$(cat <<'BODY'
+         ## Summary
+         
+         This PR was created by an AEF agent.
+         
+         **Change:** {{change_description}}
+         **Execution ID:** {{execution_id}}
+         
+         ## Details
+         
+         [Describe the changes you made]
+         
+         ---
+         *Automated PR by aef-engineer-beta[bot]*
+         BODY
+         )"
+         ```
+      
+      6. **Output the PR URL:**
+         After creating the PR, output the URL so it can be captured as an artifact.
+      
+      ### Important Notes
+      
+      - The `GITHUB_TOKEN` and `GH_TOKEN` environment variables are pre-configured
+      - Git user.name and user.email are pre-configured
+      - You have full access to bash commands in the workspace
+      - Work inside `/workspace/repo` after cloning
+
+  - id: verify-pr
+    name: Verify Pull Request
+    order: 2
+    execution_type: sequential
+    description: |
+      Verify the PR was created successfully and collect metadata.
+    input_artifacts:
+      - pr_metadata
+    output_artifacts:
+      - verification_report
+    max_tokens: 2048
+    timeout_seconds: 120
+    
+    tools:
+      - bash
+    
+    prompt_template: |
+      You are verifying that the Pull Request was created successfully.
+      
+      ## Previous Phase Output
+      {{create-pr}}
+      
+      ## Instructions
+      
+      1. Extract the PR URL from the previous phase output
+      2. Use `gh pr view` to verify the PR exists and get its details
+      3. Create a verification report with:
+         - PR URL
+         - PR Number
+         - PR State (open/closed)
+         - Branch name
+         - Files changed
+      
+      ```bash
+      cd /workspace/repo
+      gh pr view --json url,number,state,headRefName,files
+      ```
+      
+      Output a JSON verification report.
