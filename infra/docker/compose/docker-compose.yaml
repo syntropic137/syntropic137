@@ -44,7 +44,13 @@ services:
     volumes:
       - dashboard_logs:/app/logs
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -103,7 +109,11 @@ services:
     secrets:
       - db_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aef} -d ${POSTGRES_DB:-aef}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-aef} -d ${POSTGRES_DB:-aef}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -154,7 +164,13 @@ services:
       - EVENT_BATCH_SIZE=${ES_BATCH_SIZE:-100}
       - EVENT_BATCH_INTERVAL_MS=1000
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
