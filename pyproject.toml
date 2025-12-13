@@ -93,6 +93,15 @@ ignore = [
     "B008",   # do not perform function calls in argument defaults
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Test files often have unused args in mocks implementing interfaces
+"**/test_*.py" = ["ARG001", "ARG002"]
+"**/tests/**" = ["ARG001", "ARG002"]
+# Scripts may have planned-but-not-implemented params
+"scripts/*.py" = ["ARG001"]
+# gRPC handlers require context param even if unused
+"**/token_injector.py" = ["ARG002"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["aef_cli", "aef_collector", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared", "aef_perf"]
 

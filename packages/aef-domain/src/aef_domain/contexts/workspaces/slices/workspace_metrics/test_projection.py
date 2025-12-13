@@ -33,7 +33,7 @@ class MockProjectionStore:
         self,
         collection: str,
         filters: dict | None = None,
-        order_by: str | None = None,  # noqa: ARG002
+        order_by: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
@@ -232,7 +232,7 @@ class TestWorkspaceMetricsProjection:
     async def test_get_summary(
         self,
         projection: WorkspaceMetricsProjection,
-        store: MockProjectionStore,  # noqa: ARG002
+        store: MockProjectionStore,
     ) -> None:
         """Test aggregated summary calculation."""
         # Create multiple workspaces with different backends
@@ -287,7 +287,7 @@ class TestWorkspaceMetricsProjection:
     async def test_get_by_session(
         self,
         projection: WorkspaceMetricsProjection,
-        store: MockProjectionStore,  # noqa: ARG002
+        store: MockProjectionStore,
     ) -> None:
         """Test querying by session ID."""
         # Create workspaces for different sessions

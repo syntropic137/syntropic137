@@ -209,7 +209,7 @@ class MockArtifactQueryService:
 
     async def get_by_execution(self, execution_id: str) -> list[Any]:
         """Get artifacts for an execution."""
-        return []  # Not used in current tests
+        return []  # Mock returns empty - could filter by execution_id if needed
 
     async def get_for_phase_injection(
         self,
@@ -444,7 +444,7 @@ class TestWorkflowExecutionEngine:
         self,
         engine: WorkflowExecutionEngine,
         workflow_repo: MockWorkflowRepository,
-        artifact_repo: MockArtifactRepository,  # noqa: ARG002 - needed by fixture
+        artifact_repo: MockArtifactRepository,
         mock_agent: MockInstrumentedAgent,
     ) -> None:
         """Test executing a simple 2-phase workflow."""
@@ -597,9 +597,12 @@ class TestWorkflowExecutionEngine:
                 # Query the artifact repo for artifacts matching these phases
                 result = {}
                 for artifact in self._artifact_repo._artifacts.values():
-                    if artifact.phase_id in completed_phase_ids and artifact.content:
-                        if artifact.phase_id not in result:
-                            result[artifact.phase_id] = artifact.content
+                    if (
+                        artifact.phase_id in completed_phase_ids
+                        and artifact.content
+                        and artifact.phase_id not in result
+                    ):
+                        result[artifact.phase_id] = artifact.content
                 return result
 
         dynamic_query_service = DynamicMockQueryService(artifact_repo)
@@ -708,8 +711,8 @@ class TestWorkflowExecutionFailure:
         class FailingAgent(MockInstrumentedAgent):
             async def complete(
                 self,
-                messages: list[Any],  # noqa: ARG002
-                config: Any,  # noqa: ARG002
+                messages: list[Any],
+                config: Any,
             ) -> Any:
                 raise RuntimeError("Agent failed!")
 
@@ -767,8 +770,8 @@ class TestWorkflowExecutionFailure:
         class PartialFailAgent(MockInstrumentedAgent):
             async def complete(
                 self,
-                messages: list[Any],  # noqa: ARG002
-                config: Any,  # noqa: ARG002
+                messages: list[Any],
+                config: Any,
             ) -> Any:
                 nonlocal call_count
                 call_count += 1

@@ -132,8 +132,16 @@ async def check_prerequisites() -> bool:
 async def run_phase1_workflow(live: bool = False) -> dict:
     """Run Phase 1: Programmatic workflow execution.
 
+    Args:
+        live: If True, use real Claude agent (not yet implemented).
+              Currently this script tests GitHub App integration directly,
+              not agent-driven workflows. See scripts/e2e_true_agentic_workflow.py
+              for full agent-driven E2E testing.
+
     Returns:
         Dict with execution results (execution_id, branch, pr_url, etc.)
+
+    TODO: Implement live mode to use ClaudeAgentExecutor for workflow steps.
     """
     print_header("🚀 Phase 1: Programmatic Workflow Execution")
 
