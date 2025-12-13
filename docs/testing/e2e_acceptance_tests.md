@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 6.0.0
+**Version:** 6.1.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-13
+**Updated:** 2025-12-11
 **Status:** Active
 
 ---
@@ -10,6 +10,13 @@
 ## Overview
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+
+**Version 6.1** adds:
+- **Workspace-First Execution (F16)** - ADR-023 enforcement (LocalWorkspace test-only, WorkspaceRouter required)
+- **AgentExecutor Protocol** - Abstraction for running agents in isolated workspaces
+- **InMemoryWorkspace** - Fast in-memory workspace for unit tests
+- **Required DI** - WorkflowExecutionEngine requires execution_repository and workspace_router
+- **Full Isolation Plan** - `docs/PLAN-FULL-WORKSPACE-ISOLATION.md`
 
 **Version 6.0** adds:
 - **GitHub App Integration** - Secure bot authentication with short-lived tokens
@@ -2096,6 +2103,162 @@ docker exec aef-postgres psql -U aef -d aef -c \
 
 ---
 
+## Feature 16: Workspace-First Execution Architecture ⭐ NEW
+
+> **ADR:** [ADR-023: Workspace-First Execution Model](/docs/adrs/ADR-023-workspace-first-execution-model.md)
+> **Plan:** [Full Workspace Isolation Plan](/docs/PLAN-FULL-WORKSPACE-ISOLATION.md)
+
+### Overview
+
+Enforces that all agent execution flows through isolated workspaces:
+- `LocalWorkspace` and `InMemoryWorkspace` are TEST ONLY
+- `WorkspaceRouter` required for development/production
+- `WorkflowExecutionEngine` requires DI for `WorkspaceRouter` and `WorkflowExecutionRepository`
+- `AgentExecutor` abstraction for running agents in isolation
+
+### F16.1 LocalWorkspace Test-Only Enforcement
+
+**Given** `APP_ENVIRONMENT` is not `test`
+**When** I try to create a LocalWorkspace
+**Then** it raises `NonIsolatedWorkspaceError`
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 16.1.1 | LocalWorkspace works in `test` environment | ⬜ |
+| 16.1.2 | LocalWorkspace works in `testing` environment | ⬜ |
+| 16.1.3 | LocalWorkspace raises error in `development` | ⬜ |
+| 16.1.4 | LocalWorkspace raises error in `production` | ⬜ |
+| 16.1.5 | Error message references WorkspaceRouter | ⬜ |
+| 16.1.6 | Error message references ADR-023 | ⬜ |
+
+**Validation Commands:**
+```bash
+# Should PASS (test environment)
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "local"
+
+# Should FAIL if you manually test in dev
+APP_ENVIRONMENT=development python -c "from aef_adapters.workspaces import LocalWorkspace"
+```
+
+### F16.2 InMemoryWorkspace Test-Only Enforcement
+
+**Given** `APP_ENVIRONMENT` is not `test`
+**When** I try to create an InMemoryWorkspace
+**Then** it raises `TestEnvironmentRequiredError`
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 16.2.1 | InMemoryWorkspace works in `test` environment | ⬜ |
+| 16.2.2 | InMemoryWorkspace raises error in `development` | ⬜ |
+| 16.2.3 | File operations work in memory (no disk) | ⬜ |
+| 16.2.4 | Command execution is mocked | ⬜ |
+| 16.2.5 | Artifact collection works correctly | ⬜ |
+
+**Validation Commands:**
+```bash
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "inmemory"
+```
+
+### F16.3 WorkspaceRouter Enforcement
+
+**Given** no isolated backend is available
+**When** I call `get_best_backend()` in non-test environment
+**Then** it raises `RuntimeError` with install instructions
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 16.3.1 | Returns backend when Docker available | ⬜ |
+| 16.3.2 | Returns backend when gVisor available | ⬜ |
+| 16.3.3 | Returns None in test env if no backend | ⬜ |
+| 16.3.4 | Raises RuntimeError in dev if no backend | ⬜ |
+| 16.3.5 | Error includes Docker install instructions | ⬜ |
+| 16.3.6 | Error includes E2B config instructions | ⬜ |
+| 16.3.7 | Router creates InMemoryWorkspace in test fallback | ⬜ |
+
+**Validation Commands:**
+```bash
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "router"
+```
+
+### F16.4 WorkflowExecutionEngine Required Dependencies
+
+**Given** I create a WorkflowExecutionEngine
+**When** `execution_repository` or `workspace_router` is None
+**Then** it raises `ValueError` immediately
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 16.4.1 | Engine requires `execution_repository` (not None) | ⬜ |
+| 16.4.2 | Engine requires `workspace_router` (not None) | ⬜ |
+| 16.4.3 | ValueError references ADR-023 | ⬜ |
+| 16.4.4 | Engine works with both dependencies provided | ⬜ |
+| 16.4.5 | Engine saves aggregate after each phase | ⬜ |
+| 16.4.6 | Events emitted via aggregate commands | ⬜ |
+
+**Validation Commands:**
+```bash
+APP_ENVIRONMENT=test uv run pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/ -v
+```
+
+### F16.5 AgentExecutor Protocol
+
+**Given** I have an isolated workspace
+**When** I execute a task via AgentExecutor
+**Then** events stream correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 16.5.1 | AgentExecutor protocol defined | ⬜ |
+| 16.5.2 | ClaudeAgentExecutor implements protocol | ⬜ |
+| 16.5.3 | ExecutionStarted event emitted | ⬜ |
+| 16.5.4 | ExecutionProgress events stream | ⬜ |
+| 16.5.5 | ExecutionOutput events stream | ⬜ |
+| 16.5.6 | ExecutionToolUse events stream | ⬜ |
+| 16.5.7 | ExecutionCompleted event with result | ⬜ |
+| 16.5.8 | WorkspaceExecutionResult contains metrics | ⬜ |
+| 16.5.9 | get_claude_executor() factory works | ⬜ |
+| 16.5.10 | AgentNotAvailableError if no API key | ⬜ |
+
+**Validation Commands:**
+```bash
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/agents/test_executor.py -v
+```
+
+### F16.6 Full Enforcement Test Suite
+
+**Given** all enforcement rules are in place
+**When** I run the full test suite
+**Then** all 40+ tests pass
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 16.6.1 | LocalWorkspace enforcement tests pass (6 tests) | ⬜ |
+| 16.6.2 | InMemoryWorkspace enforcement tests pass (4 tests) | ⬜ |
+| 16.6.3 | WorkspaceRouter enforcement tests pass (4 tests) | ⬜ |
+| 16.6.4 | InMemoryWorkspace integration tests pass (2 tests) | ⬜ |
+| 16.6.5 | AgentExecutor tests pass (15 tests) | ⬜ |
+| 16.6.6 | WorkflowExecutionEngine DI tests pass (3 tests) | ⬜ |
+| 16.6.7 | WorkflowExecutionEngine execution tests pass (17 tests) | ⬜ |
+| 16.6.8 | All aef-domain tests pass (183+ tests) | ⬜ |
+| 16.6.9 | All workspace tests pass (95+ tests) | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run all enforcement tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v
+
+# Run all executor tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/agents/test_executor.py -v
+
+# Run all workflow engine tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/ -v
+
+# Full domain test suite
+APP_ENVIRONMENT=test uv run pytest packages/aef-domain/ -v --tb=short
+```
+
+---
+
 ## Test Execution Checklist
 
 ### Pre-Test Setup
@@ -2133,8 +2296,11 @@ docker exec aef-postgres psql -U aef -d aef -c \
 **Isolated Workspace Architecture (F14) ⭐:**
 14. [ ] **F14: Isolated Workspaces** - Docker isolation, git identity, logging, network allowlist
 
-**GitHub App & Secure Token Architecture (F15) ⭐ NEW:**
+**GitHub App & Secure Token Architecture (F15) ⭐:**
 15. [ ] **F15: Secure Tokens** - GitHub App auth, token vending, spend tracking, sidecar proxy
+
+**Workspace-First Execution Architecture (F16) ⭐ NEW:**
+16. [ ] **F16: Workspace-First Execution** - LocalWorkspace/InMemoryWorkspace test-only, WorkspaceRouter enforcement, AgentExecutor
 ### Quick Pytest Commands
 
 ```bash
@@ -2202,7 +2368,8 @@ poetry run poe check-fix
 | **F13** | **WebSocket Control Plane** ⭐ | **55** | ⬜ | ⬜ | ⬜ |
 | **F14** | **Isolated Workspace Architecture** ⭐ | **52** | ⬜ | ⬜ | ⬜ |
 | **F15** | **GitHub App & Secure Tokens** ⭐ | **50** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **373** | ⬜ | ⬜ | ⬜ |
+| **F16** | **Workspace-First Execution** ⭐ | **51** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **424** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -2217,6 +2384,23 @@ poetry run poe check-fix
 ## Notes
 
 _Add any observations, recommendations, or follow-up items here._
+
+### Migration Notes (v6.0 → v6.1)
+
+- **Workspace-First Execution:** New F16 tests for ADR-023 enforcement
+- **ADR-023:** Workspace-First Execution Model design decisions
+- **LocalWorkspace:** Now TEST ONLY - raises `NonIsolatedWorkspaceError` in dev/prod
+- **InMemoryWorkspace:** New fast test-only workspace (no disk I/O)
+- **WorkspaceRouter:** Now enforces isolation in non-test environments
+- **WorkflowExecutionEngine:** Requires `execution_repository` and `workspace_router` as DI
+- **AgentExecutor Protocol:** New abstraction for running agents in isolated workspaces
+- **ClaudeAgentExecutor:** Implementation that wraps ClaudeAgenticAgent
+- **Test Count:** Increased from 373 to 424 criteria
+- **New Files:**
+  - `packages/aef-adapters/src/aef_adapters/agents/executor.py`
+  - `packages/aef-adapters/src/aef_adapters/agents/claude_executor.py`
+  - `packages/aef-adapters/src/aef_adapters/workspaces/memory.py`
+  - `docs/PLAN-FULL-WORKSPACE-ISOLATION.md`
 
 ### Migration Notes (v5.0 → v6.0)
 
@@ -2282,6 +2466,8 @@ _Add any observations, recommendations, or follow-up items here._
 | **Agentic** | **F8-F12** | **pytest (automated)** |
 | **Control Plane** ⭐ | **F13** | **Browser automation (Playwright)** |
 | **Isolated Workspaces** ⭐ | **F14** | **pytest + just POC commands** |
+| **Secure Tokens** ⭐ | **F15** | **pytest + e2e script** |
+| **Workspace-First** ⭐ | **F16** | **pytest (fully automated)** |
 
 ### Known Issues & Learnings
 
