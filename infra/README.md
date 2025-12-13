@@ -79,3 +79,30 @@ Secrets are stored as files in `docker/secrets/` (gitignored):
 - [Secrets Management](docs/secrets-management.md)
 - [Cloudflare Tunnel Setup](cloudflare/README.md)
 - [Troubleshooting](docs/troubleshooting.md)
+
+## Roadmap
+
+### ✅ Phase 1: Docker Foundation (Complete)
+- Production Docker Compose with all services
+- Multi-stage Dockerfiles (dashboard, UI)
+- Docker secrets management
+- Health check scripts
+
+### ✅ Phase 2: Homelab Deployment (Complete)
+- Cloudflare Tunnel integration
+- Homelab compose overrides
+- Just recipes for turn-key operations
+- Deployment documentation
+
+### 🔲 Phase 3: Cloud Infrastructure (Future)
+- Terraform networking module (VPC, subnets)
+- Terraform database module (RDS/Cloud SQL)
+- Terraform compute module (ECS/Fargate or Cloud Run)
+- Terraform secrets module (AWS Secrets Manager)
+- CI/CD pipeline (GitHub Actions)
+
+### 🔲 Phase 4: Observability (Future)
+- Centralized logging (CloudWatch/Loki)
+- Metrics collection (Prometheus/CloudWatch)
+- Alerting setup
+- Grafana dashboards
