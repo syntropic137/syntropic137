@@ -15,7 +15,7 @@ See Also:
     - docs/deployment/claude-api-security.md
 """
 
-from aef_tokens.models import ScopedToken, SpendBudget, TokenScope
+from aef_tokens.models import ScopedToken, SpendBudget, TokenScope, TokenType, WorkflowType
 from aef_tokens.spend import SpendTracker, get_spend_tracker
 from aef_tokens.vending import TokenVendingService, get_token_vending_service
 
@@ -24,7 +24,9 @@ __all__ = [
     "SpendBudget",
     "SpendTracker",
     "TokenScope",
+    "TokenType",
     "TokenVendingService",
+    "WorkflowType",
     "get_spend_tracker",
     "get_token_vending_service",
 ]
