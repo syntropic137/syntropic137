@@ -42,6 +42,7 @@ class TokenVendingProtocol(Protocol):
         """Vend a short-lived GitHub token for the execution."""
         ...
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -353,17 +354,13 @@ class GitInjector:
                         ttl="5 minutes",
                     )
                 except Exception as e:
-                    logger.warning(
-                        f"TokenVendingService failed, falling back to direct token: {e}"
-                    )
+                    logger.warning(f"TokenVendingService failed, falling back to direct token: {e}")
                     token = await client.get_installation_token()
             else:
                 # Fallback: get raw installation token (1 hour TTL)
                 token = await client.get_installation_token()
                 if execution_id:
-                    logger.debug(
-                        "No TokenVendingService provided, using direct installation token"
-                    )
+                    logger.debug("No TokenVendingService provided, using direct installation token")
 
             # Configure git to use the token
             # Format: https://x-access-token:TOKEN@github.com

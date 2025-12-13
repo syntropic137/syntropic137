@@ -19,7 +19,6 @@ Environment:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from concurrent import futures
@@ -101,7 +100,6 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
 
         # Inject authorization header
         ok_response = response.ok_response
-        headers_to_add = ok_response.headers
 
         if token_type == "anthropic":
             # Anthropic uses x-api-key header

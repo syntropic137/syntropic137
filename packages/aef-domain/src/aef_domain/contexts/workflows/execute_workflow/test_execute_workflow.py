@@ -574,7 +574,7 @@ class TestWorkflowExecutionEngine:
             result = await original_complete(messages, config)
             # After phase1 completes, its output should be available for phase2
             # The execution_id isn't known here, but we use a wildcard approach
-            for exec_id in mock_query_service._artifacts.keys():
+            for _exec_id in mock_query_service._artifacts:
                 pass  # Already added
             return result
 

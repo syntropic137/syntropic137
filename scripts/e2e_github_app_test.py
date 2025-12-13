@@ -71,8 +71,8 @@ async def main() -> int:
 
     try:
         # Get installation token (this proves the app is working)
-        token = await github_client.get_installation_token()
-        print(f"   ✅ Installation token obtained (expires in 1 hour)")
+        await github_client.get_installation_token()
+        print("   ✅ Installation token obtained (expires in 1 hour)")
         print(f"   Bot username: {github_client.bot_username}")
 
         # Get app info
@@ -158,9 +158,7 @@ This file was created by the AEF E2E test script to verify:
     try:
         # Step 6a: Get the SHA of main branch
         print("   Creating branch...")
-        ref_result = await github_client.api_get(
-            f"/repos/{sandbox_repo}/git/ref/heads/main"
-        )
+        ref_result = await github_client.api_get(f"/repos/{sandbox_repo}/git/ref/heads/main")
         main_sha = ref_result["object"]["sha"]
 
         # Step 6b: Create new branch
@@ -235,8 +233,12 @@ This PR was created automatically by the AEF E2E test script.
     )
 
     summary = await spend_tracker.get_usage_summary(execution_id)
-    print(f"   Input tokens used: {summary['input_tokens']['used']:,} / {summary['input_tokens']['max']:,}")
-    print(f"   Output tokens used: {summary['output_tokens']['used']:,} / {summary['output_tokens']['max']:,}")
+    print(
+        f"   Input tokens used: {summary['input_tokens']['used']:,} / {summary['input_tokens']['max']:,}"
+    )
+    print(
+        f"   Output tokens used: {summary['output_tokens']['used']:,} / {summary['output_tokens']['max']:,}"
+    )
     print(f"   Cost: ${summary['cost_usd']['used']} / ${summary['cost_usd']['max']}")
     print(f"   Budget exhausted: {summary['is_exhausted']}")
 
@@ -253,7 +255,7 @@ This PR was created automatically by the AEF E2E test script.
     print("\n" + "=" * 60)
     print("🎉 E2E Test Complete!")
     print("=" * 60)
-    print(f"\nCheck the sandbox repo:")
+    print("\nCheck the sandbox repo:")
     print(f"  https://github.com/{sandbox_repo}/tree/main/e2e-tests")
 
     return 0

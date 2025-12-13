@@ -178,8 +178,7 @@ class ClaudeAgentExecutor:
                     yield ExecutionProgress(
                         message=f"Turn {event.turn_number} completed",
                         turn_number=event.turn_number,
-                        tokens_used=event.cumulative_input_tokens
-                        + event.cumulative_output_tokens,
+                        tokens_used=event.cumulative_input_tokens + event.cumulative_output_tokens,
                     )
                     metrics.turns_used = event.turn_number
 
@@ -192,9 +191,7 @@ class ClaudeAgentExecutor:
                     metrics.turns_used = event.turns_used
                     metrics.duration_seconds = event.duration_ms / 1000.0
                     if event.estimated_cost_usd is not None:
-                        metrics.estimated_cost_usd = Decimal(
-                            str(event.estimated_cost_usd)
-                        )
+                        metrics.estimated_cost_usd = Decimal(str(event.estimated_cost_usd))
 
                 elif isinstance(event, TaskFailed):
                     success = False

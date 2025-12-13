@@ -56,10 +56,18 @@ def run_psql(query: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(
             [
-                "docker", "exec", POSTGRES_CONTAINER,
-                "psql", "-U", POSTGRES_USER, "-d", POSTGRES_DB,
-                "-t", "-A",  # Tuples only, unaligned
-                "-c", query,
+                "docker",
+                "exec",
+                POSTGRES_CONTAINER,
+                "psql",
+                "-U",
+                POSTGRES_USER,
+                "-d",
+                POSTGRES_DB,
+                "-t",
+                "-A",  # Tuples only, unaligned
+                "-c",
+                query,
             ],
             capture_output=True,
             text=True,
@@ -130,11 +138,13 @@ async def check_prerequisites() -> bool:
     required_vars = [("ANTHROPIC_API_KEY", "Anthropic API Key", True)]  # Always required
 
     if is_github_workflow:
-        required_vars.extend([
-            ("AEF_GITHUB_APP_ID", "GitHub App ID", True),
-            ("AEF_GITHUB_INSTALLATION_ID", "GitHub Installation ID", True),
-            ("AEF_GITHUB_PRIVATE_KEY", "GitHub Private Key", True),
-        ])
+        required_vars.extend(
+            [
+                ("AEF_GITHUB_APP_ID", "GitHub App ID", True),
+                ("AEF_GITHUB_INSTALLATION_ID", "GitHub Installation ID", True),
+                ("AEF_GITHUB_PRIVATE_KEY", "GitHub Private Key", True),
+            ]
+        )
 
     for var, desc, required in required_vars:
         if os.getenv(var):
@@ -148,7 +158,7 @@ async def check_prerequisites() -> bool:
         else:
             if required:
                 print(f"   ⚠️ {var} ({desc}) not set in test env")
-                print(f"      (Dashboard may have it, continuing...)")
+                print("      (Dashboard may have it, continuing...)")
             else:
                 print(f"   ⚠️ {var} ({desc}) is not set (optional)")
             # Don't fail - Dashboard process may have these
@@ -267,11 +277,13 @@ def validate_events_in_db(session_id: str) -> dict[str, Any]:
             if "|" in line:
                 parts = line.split("|")
                 if len(parts) >= 3:
-                    events.append({
-                        "event_type": parts[0],
-                        "aggregate_type": parts[1],
-                        "global_nonce": int(parts[2]) if parts[2].isdigit() else 0,
-                    })
+                    events.append(
+                        {
+                            "event_type": parts[0],
+                            "aggregate_type": parts[1],
+                            "global_nonce": int(parts[2]) if parts[2].isdigit() else 0,
+                        }
+                    )
 
     result["total_events"] = len(events)
     result["event_types"] = [e["event_type"] for e in events]
@@ -333,10 +345,15 @@ def check_pr_on_github(execution_id: str) -> dict | None:
     try:
         result = subprocess.run(
             [
-                "gh", "pr", "list",
-                "--repo", SANDBOX_REPO,
-                "--search", f"agent-{execution_id}",
-                "--json", "number,title,url,state,headRefName,author",
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                SANDBOX_REPO,
+                "--search",
+                f"agent-{execution_id}",
+                "--json",
+                "number,title,url,state,headRefName,author",
             ],
             capture_output=True,
             text=True,
@@ -372,9 +389,11 @@ def check_branch_on_github(execution_id: str) -> bool:
     try:
         result = subprocess.run(
             [
-                "gh", "api",
+                "gh",
+                "api",
                 f"repos/{SANDBOX_REPO}/branches",
-                "--jq", f'.[].name | select(contains("agent-{execution_id}"))',
+                "--jq",
+                f'.[].name | select(contains("agent-{execution_id}"))',
             ],
             capture_output=True,
             text=True,
