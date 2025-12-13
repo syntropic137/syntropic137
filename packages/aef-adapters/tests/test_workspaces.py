@@ -247,18 +247,24 @@ class TestLocalWorkspaceProductionProtection:
                 assert workspace.path.exists()
 
     @pytest.mark.asyncio
-    async def test_allows_development_environment(self, workspace_config: WorkspaceConfig) -> None:
-        """LocalWorkspace should work in development environment."""
+    async def test_blocks_development_environment(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should BLOCK in development environment (ADR-023)."""
         with patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}):
-            async with LocalWorkspace.create(workspace_config) as workspace:
-                assert workspace.path.exists()
+            with pytest.raises(NonIsolatedWorkspaceError) as exc_info:
+                async with LocalWorkspace.create(workspace_config):
+                    pass
+            assert "development" in str(exc_info.value)
+            assert "NO ISOLATION" in str(exc_info.value)
 
     @pytest.mark.asyncio
-    async def test_allows_when_not_set(self, workspace_config: WorkspaceConfig) -> None:
-        """LocalWorkspace should work when APP_ENVIRONMENT not set."""
-        # Clear APP_ENVIRONMENT
+    async def test_blocks_when_not_set(self, workspace_config: WorkspaceConfig) -> None:
+        """LocalWorkspace should BLOCK when APP_ENVIRONMENT not set (defaults to development)."""
+        # Clear APP_ENVIRONMENT - should default to 'development' which is blocked
         env = os.environ.copy()
         env.pop("APP_ENVIRONMENT", None)
         with patch.dict(os.environ, env, clear=True):
-            async with LocalWorkspace.create(workspace_config) as workspace:
-                assert workspace.path.exists()
+            with pytest.raises(NonIsolatedWorkspaceError) as exc_info:
+                async with LocalWorkspace.create(workspace_config):
+                    pass
+            assert "development" in str(exc_info.value)
+            assert "NO ISOLATION" in str(exc_info.value)
