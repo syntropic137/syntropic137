@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Protocol
 from aef_tokens.models import DEFAULT_BUDGETS, SpendBudget, WorkflowType
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
@@ -204,7 +206,7 @@ class SpendTracker:
     def __init__(
         self,
         store: BudgetStore,
-        alert_callback: callable | None = None,
+        alert_callback: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         """Initialize the spend tracker.
 
@@ -262,12 +264,12 @@ class SpendTracker:
         await self._store.store(budget)
 
         logger.info(
-            "Budget allocated",
-            execution_id=execution_id,
-            workflow_type=workflow_type.value,
-            max_input_tokens=budget.max_input_tokens,
-            max_output_tokens=budget.max_output_tokens,
-            max_cost_usd=str(budget.max_cost_usd),
+            "Budget allocated (execution_id=%s, workflow=%s, max_in=%d, max_out=%d, max_cost=$%s)",
+            execution_id,
+            workflow_type.value,
+            budget.max_input_tokens,
+            budget.max_output_tokens,
+            budget.max_cost_usd,
         )
 
         return budget
@@ -363,12 +365,12 @@ class SpendTracker:
         await self._store.update(budget)
 
         logger.debug(
-            "Usage recorded",
-            execution_id=execution_id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost=str(cost),
-            total_cost=str(budget.used_cost_usd),
+            "Usage recorded (execution_id=%s, input=%d, output=%d, cost=$%s, total=$%s)",
+            execution_id,
+            input_tokens,
+            output_tokens,
+            cost,
+            budget.used_cost_usd,
         )
 
         # Check for alert thresholds
@@ -388,7 +390,7 @@ class SpendTracker:
         deleted = await self._store.delete(execution_id)
 
         if deleted:
-            logger.info("Budget released", execution_id=execution_id)
+            logger.info("Budget released (execution_id=%s)", execution_id)
 
         return deleted
 
