@@ -495,3 +495,145 @@ new-package name:
     echo "[project]\nname = \"{{name}}\"\nversion = \"0.1.0\"\nrequires-python = \">=3.12\"\ndependencies = []\n\n[build-system]\nrequires = [\"uv_build>=0.9.13\"]\nbuild-backend = \"uv_build\"" > packages/{{name}}/pyproject.toml
     echo "\"\"\"{{name}} package.\"\"\"" > packages/{{name}}/src/$(echo {{name}} | tr '-' '_')/__init__.py
     @echo "Package created at packages/{{name}}"
+
+# ============================================================================
+# INFRASTRUCTURE DEPLOYMENT
+# ============================================================================
+
+# Infrastructure compose directory
+_infra_compose := "infra/docker/compose"
+
+# --- Homelab Deployment (with Cloudflare Tunnel) ---
+
+# Start AEF stack with Cloudflare Tunnel (homelab)
+homelab-up:
+    @echo "🚀 Starting AEF homelab stack..."
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
+    @echo ""
+    @echo "⏳ Waiting for services to be ready..."
+    @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
+    @echo ""
+    @just homelab-status
+
+# Stop homelab stack
+homelab-down:
+    @echo "Stopping AEF homelab stack..."
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml down
+
+# View homelab logs (all services or specific service)
+homelab-logs *service:
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml logs -f {{service}}
+
+# Check homelab stack status
+homelab-status:
+    @echo "📊 AEF Homelab Status"
+    @echo "===================="
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml ps
+    @echo ""
+    @echo "🔗 Access Points:"
+    @if [ -n "${AEF_DOMAIN:-}" ]; then \
+        echo "   UI:  https://${AEF_DOMAIN}"; \
+        echo "   API: https://api.${AEF_DOMAIN}"; \
+    else \
+        echo "   UI:  http://localhost:80"; \
+        echo "   API: http://localhost:8000"; \
+        echo "   (Set AEF_DOMAIN in .env for external access)"; \
+    fi
+
+# Check Cloudflare tunnel status
+homelab-tunnel-status:
+    @echo "🚇 Cloudflare Tunnel Status"
+    @echo "==========================="
+    @docker logs aef-cloudflared 2>&1 | tail -20
+
+# Restart specific homelab service
+homelab-restart service:
+    @echo "Restarting {{service}}..."
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml restart {{service}}
+
+# Pull latest images and restart homelab
+homelab-upgrade:
+    @echo "⬆️ Upgrading AEF homelab..."
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml pull
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
+    @echo "✅ Upgrade complete!"
+
+# Full homelab reset (removes volumes - DATA LOSS!)
+homelab-reset:
+    @echo "⚠️  WARNING: This will delete ALL data including the database!"
+    @echo "Press Ctrl+C within 5 seconds to cancel..."
+    @sleep 5
+    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml down -v
+    @just homelab-up
+
+# --- Local Infrastructure (No Cloudflare) ---
+
+# Start infrastructure stack locally
+infra-up:
+    @echo "🚀 Starting AEF infrastructure stack..."
+    @cd {{_infra_compose}} && docker compose up -d --build
+    @echo ""
+    @echo "⏳ Waiting for services..."
+    @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
+    @echo ""
+    @echo "✅ Infrastructure stack started!"
+    @echo "   Dashboard: http://localhost:8000"
+    @echo "   UI:        http://localhost:80"
+    @echo "   API Docs:  http://localhost:8000/docs"
+
+# Stop infrastructure stack
+infra-down:
+    @cd {{_infra_compose}} && docker compose down
+
+# View infrastructure logs
+infra-logs *service:
+    @cd {{_infra_compose}} && docker compose logs -f {{service}}
+
+# Check infrastructure status
+infra-status:
+    @cd {{_infra_compose}} && docker compose ps
+
+# --- Secrets Management ---
+
+# Generate new secrets for deployment
+secrets-generate:
+    @echo "🔐 Generating deployment secrets..."
+    @uv run python infra/scripts/secrets_setup.py generate
+
+# Rotate all secrets (regenerates - requires restart)
+secrets-rotate:
+    @echo "🔄 Rotating secrets..."
+    @uv run python infra/scripts/secrets_setup.py rotate
+    @echo ""
+    @echo "⚠️  Restart services to apply new secrets:"
+    @echo "   just homelab-restart aef-dashboard"
+
+# Verify secrets are configured
+secrets-check:
+    @uv run python infra/scripts/secrets_setup.py check
+
+# --- Health Checks ---
+
+# Run health checks on all services
+health-check:
+    @uv run python infra/scripts/health_check.py
+
+# Wait for all services to be ready
+health-wait timeout="120":
+    @uv run python infra/scripts/health_check.py --wait --timeout {{timeout}}
+
+# Health check with JSON output (for CI/CD)
+health-json:
+    @uv run python infra/scripts/health_check.py --json
+
+# --- Infrastructure Build ---
+
+# Build all Docker images
+infra-build:
+    @echo "🔨 Building Docker images..."
+    @cd {{_infra_compose}} && docker compose build
+
+# Build specific image
+infra-build-image image:
+    @echo "🔨 Building {{image}}..."
+    @cd {{_infra_compose}} && docker compose build {{image}}
