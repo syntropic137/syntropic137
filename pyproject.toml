@@ -137,6 +137,10 @@ module = [
     "uvicorn.*",
     "grpc",
     "grpc.*",
+    "supabase",
+    "supabase.*",
+    "minio",
+    "minio.*",
 ]
 ignore_missing_imports = true
 

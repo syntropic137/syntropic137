@@ -38,12 +38,17 @@ agents = [
 agentic = [
     "claude-agent-sdk>=0.1.9",
 ]
+# MinIO storage adapter
+minio = [
+    "minio>=7.2.0",
+]
 # Install everything
 all = [
     "asyncpg>=0.30.0",
     "anthropic>=0.42.0",
     "openai>=1.59.0",
     "claude-agent-sdk>=0.1.9",
+    "minio>=7.2.0",
 ]
 
 [build-system]

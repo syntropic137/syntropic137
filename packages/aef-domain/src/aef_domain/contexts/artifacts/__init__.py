@@ -31,12 +31,18 @@ from aef_domain.contexts.artifacts.create_artifact import (
     ArtifactCreatedEvent,
     CreateArtifactCommand,
 )
+from aef_domain.contexts.artifacts.upload_artifact import (
+    ArtifactUploadedEvent,
+    UploadArtifactCommand,
+)
 
 __all__ = [
     "ArtifactAggregate",
     "ArtifactCreatedEvent",
     "ArtifactType",
+    "ArtifactUploadedEvent",
     "ContentType",
     "CreateArtifactCommand",
+    "UploadArtifactCommand",
     "compute_content_hash",
 ]

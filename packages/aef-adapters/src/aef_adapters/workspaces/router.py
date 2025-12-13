@@ -46,6 +46,8 @@ from aef_shared.settings import IsolationBackend
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from aef_adapters.artifacts.bundle import ArtifactBundle, ArtifactType
+
 
 @dataclass
 class RouterStats:
@@ -512,6 +514,132 @@ class WorkspaceRouter:
         _, backend_class = entry
         artifacts = await backend_class.collect_artifacts(workspace, patterns)
         return [(str(p), content) for p, content in artifacts]
+
+    async def collect_and_store_artifacts(
+        self,
+        workspace: IsolatedWorkspace,
+        bundle_id: str,
+        phase_id: str,
+        *,
+        patterns: list[str] | None = None,
+        workflow_id: str | None = None,
+        session_id: str | None = None,
+        store_to_storage: bool = True,
+    ) -> ArtifactBundle:
+        """Collect artifacts from workspace and optionally store to object storage.
+
+        Combines artifact collection with bundling and optional storage upload.
+        This is the recommended way to collect outputs from a phase execution.
+
+        Args:
+            workspace: The workspace to collect from.
+            bundle_id: Unique identifier for this bundle.
+            phase_id: Phase that produced these artifacts.
+            patterns: Optional glob patterns to filter files.
+            workflow_id: Workflow ID for storage organization.
+            session_id: Session ID for storage organization.
+            store_to_storage: Whether to upload to object storage.
+
+        Returns:
+            ArtifactBundle containing all collected files.
+
+        Example:
+            async with router.create(config) as workspace:
+                # ... agent execution ...
+
+                bundle = await router.collect_and_store_artifacts(
+                    workspace,
+                    bundle_id="research-001",
+                    phase_id="research",
+                    workflow_id=workflow_id,
+                )
+                # bundle is now saved to object storage
+        """
+        from aef_adapters.artifacts.bundle import ArtifactBundle
+
+        # Collect artifacts from workspace
+        artifacts = await self.collect_artifacts(workspace, patterns)
+
+        # Create bundle
+        bundle = ArtifactBundle(
+            bundle_id=bundle_id,
+            phase_id=phase_id,
+            session_id=session_id,
+            workflow_id=workflow_id,
+        )
+
+        # Add each artifact to bundle
+        for path_str, content in artifacts:
+            path = Path(path_str)
+
+            # Infer artifact type from extension
+            artifact_type = self._infer_artifact_type(path)
+
+            bundle.add_file(
+                path=path,
+                content=content,
+                artifact_type=artifact_type,
+            )
+
+        # Store to object storage if configured
+        if store_to_storage:
+            from aef_adapters.object_storage import get_storage
+
+            storage = await get_storage()
+            await bundle.save_to_storage(storage)
+
+            # Emit event for artifact upload
+            emitter = get_workspace_emitter()
+            await emitter.artifacts_stored(
+                workspace=workspace,
+                bundle_id=bundle_id,
+                file_count=bundle.file_count,
+                total_size_bytes=bundle.total_size_bytes,
+                storage_prefix=bundle.get_storage_prefix(),
+            )
+
+        return bundle
+
+    def _infer_artifact_type(self, path: Path) -> ArtifactType:
+        """Infer artifact type from file extension.
+
+        Args:
+            path: File path to analyze.
+
+        Returns:
+            Inferred ArtifactType.
+        """
+        from aef_adapters.artifacts.bundle import ArtifactType
+
+        ext = path.suffix.lower()
+        name = path.stem.lower()
+
+        # Match by extension
+        type_map = {
+            ".md": ArtifactType.MARKDOWN,
+            ".json": ArtifactType.JSON,
+            ".yaml": ArtifactType.YAML,
+            ".yml": ArtifactType.YAML,
+            ".py": ArtifactType.CODE,
+            ".js": ArtifactType.CODE,
+            ".ts": ArtifactType.CODE,
+            ".txt": ArtifactType.TEXT,
+        }
+
+        if ext in type_map:
+            return type_map[ext]
+
+        # Match by name patterns
+        if "readme" in name:
+            return ArtifactType.README
+        if "plan" in name:
+            return ArtifactType.PLAN
+        if "test" in name:
+            return ArtifactType.TEST_RESULTS
+        if "report" in name:
+            return ArtifactType.ANALYSIS_REPORT
+
+        return ArtifactType.OTHER
 
 
 # Singleton router instance for convenience
