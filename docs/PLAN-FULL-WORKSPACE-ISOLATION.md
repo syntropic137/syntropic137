@@ -34,6 +34,21 @@ Each phase is independent:
 - Produces **artifacts as output** (for next phases)
 - Workspace is **destroyed** after phase completes
 
+### Artifact Types
+
+Artifacts stored in the artifact DB can be:
+
+| Type | Description | Example |
+|------|-------------|---------|
+| **Content** | Actual file content | `code`, `markdown`, `json` |
+| **GitHub Commit** | Reference to commit SHA | `github_commit` → `abc123` |
+| **GitHub PR** | Reference to pull request | `github_pr` → `#42` |
+| **GitHub File** | File at specific commit | `github_file` → `src/main.py@abc123` |
+| **URL** | External resource link | `url` → `https://docs.example.com` |
+
+This allows agents to pass context like "I created PR #42" to the next phase without
+duplicating all the code - just the reference for additional context.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                         Orchestrator (Host)                              │
