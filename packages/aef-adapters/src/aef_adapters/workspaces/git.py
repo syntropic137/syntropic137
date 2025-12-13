@@ -264,8 +264,8 @@ class GitInjector:
 
     async def _inject_github_app_credentials(
         self,
-        _workspace: IsolatedWorkspace,
-        _executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
+        workspace: IsolatedWorkspace,
+        executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         _git_settings: GitIdentitySettings,
     ) -> bool:
         """Inject GitHub App credentials.
@@ -281,19 +281,70 @@ class GitInjector:
         Returns:
             True if credentials were injected successfully
         """
-        # TODO: Implement GitHub App token generation
-        # This requires:
-        # 1. Decode the base64-encoded private key
-        # 2. Generate a JWT signed with the private key
-        # 3. Exchange JWT for an installation access token
-        # 4. Use the token for git operations
-        #
-        # For now, log a warning and skip
-        logger.warning(
-            "GitHub App credential injection not yet implemented. "
-            "Use HTTPS token (AEF_GIT_TOKEN) for now."
-        )
-        return True
+        try:
+            credentials = await get_github_credentials()
+            if credentials is None:
+                logger.warning(
+                    "GitHub App not configured or token generation failed. "
+                    "Falling back to no credentials."
+                )
+                return True
+
+            token, user_name, user_email = credentials
+
+            # Override git identity with bot identity
+            exit_code, _stdout, stderr = await executor(
+                workspace,
+                ["git", "config", "--global", "user.name", user_name],
+            )
+            if exit_code != 0:
+                logger.error(f"Failed to set GitHub App bot name: {stderr}")
+                return False
+
+            exit_code, _stdout, stderr = await executor(
+                workspace,
+                ["git", "config", "--global", "user.email", user_email],
+            )
+            if exit_code != 0:
+                logger.error(f"Failed to set GitHub App bot email: {stderr}")
+                return False
+
+            # Create credentials file with the installation token
+            # Format: https://x-access-token:TOKEN@github.com
+            # Use base64 encoding to avoid shell injection risks
+            import base64
+
+            cred_line = f"https://x-access-token:{token}@github.com"
+            cred_b64 = base64.b64encode(cred_line.encode()).decode()
+
+            # Write credentials file with proper permissions using base64 decode
+            # This avoids shell injection since base64 is safe for shell interpolation
+            write_cmd = [
+                "sh",
+                "-c",
+                f"echo '{cred_b64}' | base64 -d > ~/.git-credentials && chmod 600 ~/.git-credentials",
+            ]
+
+            exit_code, _stdout, stderr = await executor(workspace, write_cmd)
+            if exit_code != 0:
+                logger.error(f"Failed to write GitHub App credentials: {stderr}")
+                return False
+
+            # Configure git to use the credential store
+            exit_code, _stdout, stderr = await executor(
+                workspace,
+                ["git", "config", "--global", "credential.helper", "store"],
+            )
+            if exit_code != 0:
+                logger.error(f"Failed to configure credential helper: {stderr}")
+                return False
+
+            logger.info(f"GitHub App credentials injected: {user_name}")
+            return True
+
+        except Exception:
+            logger.exception("Failed to inject GitHub App credentials")
+            return False
 
 
 # Singleton instance
@@ -306,3 +357,49 @@ def get_git_injector() -> GitInjector:
     if _git_injector is None:
         _git_injector = GitInjector()
     return _git_injector
+
+
+async def get_github_credentials() -> tuple[str, str, str] | None:
+    """Get GitHub App credentials for workspace injection.
+
+    Fetches an installation token from the configured GitHub App
+    and returns it along with the bot identity.
+
+    Returns:
+        Tuple of (token, user_name, user_email) if GitHub App is configured,
+        None otherwise.
+
+    Usage:
+        credentials = await get_github_credentials()
+        if credentials:
+            token, user_name, user_email = credentials
+            # Use token for git operations
+    """
+    try:
+        from aef_shared.settings.github import get_github_settings
+    except ImportError:
+        logger.debug("GitHub settings not available")
+        return None
+
+    settings = get_github_settings()
+
+    if not settings.is_configured:
+        logger.debug("GitHub App not configured")
+        return None
+
+    try:
+        from aef_domain.contexts.github._shared.github_client import (
+            GitHubAppClient,
+        )
+
+        client = GitHubAppClient(settings)
+        token_response = await client.get_installation_token()
+
+        return (
+            token_response.token,
+            settings.bot_name,
+            settings.bot_email,
+        )
+    except Exception:
+        logger.exception("Failed to get GitHub App token")
+        return None

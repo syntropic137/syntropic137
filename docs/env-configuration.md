@@ -70,6 +70,20 @@ Never edit `.env.example` manually - update `packages/aef-shared/src/aef_shared/
 | `S3_ACCESS_KEY_ID` | For S3 | None | S3 access key |
 | `S3_SECRET_ACCESS_KEY` | For S3 | None | S3 secret key |
 
+### GitHub App (Secure Agent Commits)
+
+For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup Guide](deployment/github-app-setup.md).
+
+| Variable | Required | Default | Description | Where to Get |
+|----------|----------|---------|-------------|--------------|
+| `AEF_GITHUB_APP_ID` | For GitHub App | None | GitHub App ID | [github.com/settings/apps](https://github.com/settings/apps) |
+| `AEF_GITHUB_APP_NAME` | No | `aef-app` | App name for commit attribution (shows as `<name>[bot]`) | Your app's slug |
+| `AEF_GITHUB_PRIVATE_KEY` | For GitHub App | None | PEM-format private key | Generate from app settings |
+| `AEF_GITHUB_INSTALLATION_ID` | For GitHub App | None | Installation ID | From installation URL |
+| `AEF_GITHUB_WEBHOOK_SECRET` | For webhooks | None | Webhook signature secret | Set during app creation |
+
+> **Note:** If any of `AEF_GITHUB_APP_ID`, `AEF_GITHUB_PRIVATE_KEY`, or `AEF_GITHUB_INSTALLATION_ID` is set, all three are required.
+
 ## Example .env File
 
 ```bash
@@ -93,6 +107,13 @@ OPENAI_API_KEY=
 
 # Storage
 ARTIFACT_STORAGE_TYPE=database
+
+# GitHub App (optional - for secure agent commits)
+# AEF_GITHUB_APP_ID=123456
+# AEF_GITHUB_APP_NAME=aef-app
+# AEF_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."
+# AEF_GITHUB_INSTALLATION_ID=12345678
+# AEF_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ```
 
 ## Usage in Code
@@ -117,6 +138,10 @@ else:
 # Secrets are protected
 if settings.anthropic_api_key:
     api_key = settings.anthropic_api_key.get_secret_value()
+
+# GitHub App settings
+if settings.github.is_configured:
+    print(f"Commits will show as: {settings.github.bot_name}")
 ```
 
 ## Validation

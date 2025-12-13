@@ -1,0 +1,181 @@
+"""GitHub App settings for secure agent authentication.
+
+This module provides configuration for GitHub App integration.
+GitHub Apps provide secure, auto-rotating tokens with fine-grained permissions.
+
+See HANDOFF-GITHUB-APP.md for architecture details.
+
+Environment Variables:
+    AEF_GITHUB_* - GitHub App configuration
+
+Usage:
+    from aef_shared.settings.github import GitHubAppSettings
+
+    settings = GitHubAppSettings()
+    if settings.is_configured:
+        client = GitHubAppClient(settings)
+        token = await client.get_installation_token()
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import TYPE_CHECKING
+
+from pydantic import Field, SecretStr, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from typing import Self
+
+
+class GitHubAppSettings(BaseSettings):
+    """GitHub App configuration for secure authentication.
+
+    Commits from agents show as `<app_name>[bot]` with full audit trail.
+    Installation tokens are auto-rotated (1-hour lifetime).
+
+    Override via AEF_GITHUB_* environment variables.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="AEF_GITHUB_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # =========================================================================
+    # APP IDENTITY
+    # =========================================================================
+
+    app_id: str = Field(
+        default="",
+        description=("GitHub App ID. Get from: https://github.com/settings/apps/<app>/general"),
+    )
+
+    app_name: str = Field(
+        default="aef-app",
+        description=(
+            "GitHub App name (slug). Used in commit attribution. "
+            "Commits will show as '<app_name>[bot]'."
+        ),
+    )
+
+    # =========================================================================
+    # AUTHENTICATION
+    # =========================================================================
+
+    private_key: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "GitHub App private key in PEM format. "
+            "Generate from: https://github.com/settings/apps/<app>/privatekeys "
+            "Store securely - never commit to git!"
+        ),
+    )
+
+    installation_id: str = Field(
+        default="",
+        description=(
+            "GitHub App Installation ID. "
+            "Get from: https://github.com/settings/installations "
+            "or from webhook payload when app is installed."
+        ),
+    )
+
+    # =========================================================================
+    # WEBHOOK SECURITY
+    # =========================================================================
+
+    webhook_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "Webhook secret for validating GitHub webhook payloads. "
+            "Set when configuring the GitHub App webhook URL. "
+            "Used to verify webhook signatures (X-Hub-Signature-256)."
+        ),
+    )
+
+    # =========================================================================
+    # COMPUTED PROPERTIES
+    # =========================================================================
+
+    @property
+    def is_configured(self) -> bool:
+        """Check if GitHub App is fully configured.
+
+        Returns True if all required fields are set:
+        - app_id
+        - private_key (non-empty)
+        - installation_id
+        """
+        return bool(self.app_id and self.private_key.get_secret_value() and self.installation_id)
+
+    @property
+    def bot_name(self) -> str:
+        """Get the bot username for commits.
+
+        Returns:
+            Bot username in format '<app_name>[bot]'.
+        """
+        return f"{self.app_name}[bot]"
+
+    @property
+    def bot_email(self) -> str:
+        """Get the bot email for commits.
+
+        GitHub uses a special noreply email format for app commits.
+
+        Returns:
+            Bot email in format '<app_id>+<app_name>[bot]@users.noreply.github.com'.
+        """
+        return f"{self.app_id}+{self.app_name}[bot]@users.noreply.github.com"
+
+    # =========================================================================
+    # VALIDATION
+    # =========================================================================
+
+    @model_validator(mode="after")
+    def validate_complete_config(self) -> Self:
+        """Ensure GitHub App settings are complete if any are provided.
+
+        If any of app_id, private_key, or installation_id is set,
+        all three must be provided.
+        """
+        fields = [
+            self.app_id,
+            self.private_key.get_secret_value(),
+            self.installation_id,
+        ]
+        provided = sum(1 for f in fields if f)
+
+        if 0 < provided < 3:
+            missing = []
+            if not self.app_id:
+                missing.append("AEF_GITHUB_APP_ID")
+            if not self.private_key.get_secret_value():
+                missing.append("AEF_GITHUB_PRIVATE_KEY")
+            if not self.installation_id:
+                missing.append("AEF_GITHUB_INSTALLATION_ID")
+            msg = f"Incomplete GitHub App config. Missing: {', '.join(missing)}"
+            raise ValueError(msg)
+
+        return self
+
+
+@lru_cache
+def get_github_settings() -> GitHubAppSettings:
+    """Get cached GitHub App settings.
+
+    Settings are loaded once on first call and cached.
+
+    Returns:
+        Validated GitHubAppSettings instance.
+    """
+    return GitHubAppSettings()
+
+
+def reset_github_settings() -> None:
+    """Clear GitHub settings cache (for testing)."""
+    get_github_settings.cache_clear()
