@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 5.0.0
+**Version:** 6.0.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-11
+**Updated:** 2025-12-13
 **Status:** Active
 
 ---
@@ -10,6 +10,13 @@
 ## Overview
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+
+**Version 6.0** adds:
+- **GitHub App Integration** - Secure bot authentication with short-lived tokens
+- **Token Vending Service** - Scoped, 5-minute TTL tokens per execution
+- **Spend Tracker** - Budget allocation and cost limits per workflow
+- **Sidecar Proxy** - Envoy-based token injection and request logging
+- **E2E Test Script** - `scripts/e2e_github_app_test.py` for full flow testing
 
 **Version 5.0** adds:
 - **Isolated Workspace Architecture** - Docker/gVisor isolation for all agent workspaces
@@ -1631,7 +1638,6 @@ test('execution control flow', async ({ page }) => {
 
 ---
 
-<<<<<<< HEAD
 ## Feature 14: Isolated Workspace Architecture ⭐ NEW
 
 > **ADR:** [ADR-021: Isolated Workspace Architecture](/docs/adrs/ADR-021-isolated-workspace-architecture.md)
@@ -1886,8 +1892,210 @@ just perf-all
 
 ---
 
-=======
->>>>>>> origin/main
+## Feature 15: GitHub App & Secure Token Architecture ⭐ NEW
+
+> **ADR:** [ADR-022: Secure Token Architecture](/docs/adrs/ADR-022-secure-token-architecture.md)
+> **Docs:** [GitHub App Security](/docs/deployment/github-app-security.md), [Claude API Security](/docs/deployment/claude-api-security.md)
+
+### Overview
+
+Secure token management for agentic operations at scale:
+- GitHub App authentication (JWT → Installation Token)
+- Token Vending Service (short-lived, scoped tokens)
+- Spend Tracker (budget allocation, usage limits)
+- Sidecar Proxy (token injection, audit trail)
+
+### Prerequisites
+
+```bash
+# GitHub App environment variables
+export AEF_GITHUB_APP_ID=2461312
+export AEF_GITHUB_INSTALLATION_ID=99311335
+export AEF_GITHUB_APP_NAME=aef-engineer-beta
+export AEF_GITHUB_PRIVATE_KEY=$(cat path/to/private-key.pem | base64)
+
+# Verify configuration
+just cli config show | grep GITHUB
+```
+
+### F15.1 GitHub App Authentication
+
+**Given** GitHub App credentials are configured
+**When** I authenticate with the GitHub App
+**Then** I get a valid installation token
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 15.1.1 | GitHubAppSettings reads from AEF_GITHUB_* env vars | ⬜ |
+| 15.1.2 | Private key is base64 decoded correctly | ⬜ |
+| 15.1.3 | JWT generated with correct claims (iss, iat, exp) | ⬜ |
+| 15.1.4 | JWT expires in 10 minutes | ⬜ |
+| 15.1.5 | Installation token obtained via GitHub API | ⬜ |
+| 15.1.6 | Installation token has 1-hour TTL | ⬜ |
+| 15.1.7 | Token cached until 5 min before expiry | ⬜ |
+| 15.1.8 | Bot username is `{app_name}[bot]` | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run GitHub App client tests
+uv run pytest packages/aef-adapters/tests/github/test_client.py -v
+
+# Manual verification
+uv run python scripts/e2e_github_app_test.py
+```
+
+### F15.2 Token Vending Service
+
+**Given** TokenVendingService is initialized
+**When** I vend tokens for an execution
+**Then** tokens are scoped and short-lived
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 15.2.1 | TokenVendingService accepts in-memory or Redis store | ⬜ |
+| 15.2.2 | vend_token() generates unique token ID | ⬜ |
+| 15.2.3 | Token has 5-minute default TTL | ⬜ |
+| 15.2.4 | Token scope includes allowed_apis, allowed_repos | ⬜ |
+| 15.2.5 | Token scope includes max_cost_usd limit | ⬜ |
+| 15.2.6 | validate_token() returns (True, None) for valid tokens | ⬜ |
+| 15.2.7 | validate_token() returns (False, reason) for expired | ⬜ |
+| 15.2.8 | revoke_token() deletes single token | ⬜ |
+| 15.2.9 | revoke_tokens(execution_id) deletes all for execution | ⬜ |
+| 15.2.10 | get_active_tokens() lists non-expired tokens | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run token vending tests
+uv run pytest packages/aef-tokens/tests/test_vending.py -v
+```
+
+### F15.3 Spend Tracker
+
+**Given** SpendTracker is initialized
+**When** I allocate and track budget
+**Then** usage is monitored with alerts
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 15.3.1 | allocate_budget() creates budget for workflow type | ⬜ |
+| 15.3.2 | Research budget: 100k input, 50k output, $10 | ⬜ |
+| 15.3.3 | Implementation budget: 500k input, 200k output, $50 | ⬜ |
+| 15.3.4 | Review budget: 50k input, 20k output, $5 | ⬜ |
+| 15.3.5 | Quick Fix budget: 10k input, 5k output, $1 | ⬜ |
+| 15.3.6 | check_budget() returns allowed=True within limits | ⬜ |
+| 15.3.7 | check_budget() returns allowed=False when exhausted | ⬜ |
+| 15.3.8 | record_usage() updates used_input_tokens | ⬜ |
+| 15.3.9 | record_usage() updates used_output_tokens | ⬜ |
+| 15.3.10 | record_usage() calculates cost_usd correctly | ⬜ |
+| 15.3.11 | Alert at 80% usage (warning threshold) | ⬜ |
+| 15.3.12 | Alert at 95% usage (critical threshold) | ⬜ |
+| 15.3.13 | release_budget() cleans up after execution | ⬜ |
+| 15.3.14 | get_usage_summary() returns detailed stats | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run spend tracker tests
+uv run pytest packages/aef-tokens/tests/test_spend.py -v
+```
+
+### F15.4 Git Credential Injection via GitHub App
+
+**Given** GitHub App is configured
+**When** workspace is created
+**Then** Git credentials are injected for bot identity
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 15.4.1 | _inject_github_app_credentials() fetches installation token | ⬜ |
+| 15.4.2 | Token written to ~/.git-credentials | ⬜ |
+| 15.4.3 | Credential format: `https://x-access-token:TOKEN@github.com` | ⬜ |
+| 15.4.4 | git config credential.helper set to "store" | ⬜ |
+| 15.4.5 | git clone works with injected credentials | ⬜ |
+| 15.4.6 | git push works with injected credentials | ⬜ |
+| 15.4.7 | Commits attributed to `{app_name}[bot]` | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run git injection tests
+uv run pytest packages/aef-adapters/tests/workspaces/test_git.py -v
+```
+
+### F15.5 Sidecar Proxy Configuration
+
+**Given** Envoy sidecar is configured
+**When** agent makes outbound requests
+**Then** tokens are injected and requests logged
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 15.5.1 | Envoy config routes api.anthropic.com | ⬜ |
+| 15.5.2 | Envoy config routes api.github.com | ⬜ |
+| 15.5.3 | Envoy config routes raw.githubusercontent.com | ⬜ |
+| 15.5.4 | All other hosts blocked with 403 | ⬜ |
+| 15.5.5 | ext_authz filter configured for token injection | ⬜ |
+| 15.5.6 | JSON access logs include execution_id | ⬜ |
+| 15.5.7 | Rate limiter: 100 tokens, 10/s refill | ⬜ |
+| 15.5.8 | token_injector.py injects x-api-key for Anthropic | ⬜ |
+| 15.5.9 | token_injector.py injects Bearer for GitHub | ⬜ |
+
+**Validation Commands:**
+```bash
+# Build sidecar
+docker build -t aef-sidecar:latest docker/sidecar-proxy/
+
+# Start with profile
+docker compose -f docker/docker-compose.dev.yaml --profile sidecar up -d
+```
+
+### F15.6 E2E: Full Stack with Secure Tokens ⭐ CRITICAL
+
+**Given** full stack is running (Docker + Event Store + Dashboard)
+**When** I execute a workflow with GitHub App
+**Then** events flow through the system correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 15.6.1 | Start Docker stack with `just dev` | ⬜ |
+| 15.6.2 | Event Store healthy on localhost:50051 | ⬜ |
+| 15.6.3 | Dashboard API healthy on localhost:8000 | ⬜ |
+| 15.6.4 | GitHub App configured (AEF_GITHUB_* vars) | ⬜ |
+| 15.6.5 | Execute workflow via CLI or API | ⬜ |
+| 15.6.6 | WorkflowExecutionStarted event in Event Store | ⬜ |
+| 15.6.7 | Spend budget allocated for execution | ⬜ |
+| 15.6.8 | Scoped token vended for execution | ⬜ |
+| 15.6.9 | GitHub App token obtained (1-hour TTL) | ⬜ |
+| 15.6.10 | Agent clones repo via bot credentials | ⬜ |
+| 15.6.11 | Agent makes code changes | ⬜ |
+| 15.6.12 | Agent commits with bot author | ⬜ |
+| 15.6.13 | Agent pushes to remote | ⬜ |
+| 15.6.14 | PhaseCompleted events in Event Store | ⬜ |
+| 15.6.15 | WorkflowCompleted event in Event Store | ⬜ |
+| 15.6.16 | Token usage recorded in spend tracker | ⬜ |
+| 15.6.17 | Tokens revoked after execution completes | ⬜ |
+| 15.6.18 | Budget released after execution | ⬜ |
+| 15.6.19 | Dashboard shows execution with correct status | ⬜ |
+| 15.6.20 | Dashboard shows token usage metrics | ⬜ |
+
+**Validation Commands:**
+```bash
+# Full stack startup
+just dev
+sleep 30  # Wait for services
+
+# Verify all healthy
+docker ps --format "table {{.Names}}\t{{.Status}}"
+curl -s http://localhost:8000/health | jq
+
+# Run full e2e test
+uv run python scripts/e2e_github_app_test.py
+
+# Verify events in store
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
+```
+
+---
+
 ## Test Execution Checklist
 
 ### Pre-Test Setup
@@ -1919,18 +2127,14 @@ just perf-all
 11. [ ] **F11: Event Bridge** - Hook-to-domain events
 12. [ ] **F12: Providers** - Agent factory and availability
 
-<<<<<<< HEAD
 **WebSocket Control Plane (F13) ⭐:**
 13. [ ] **F13: WebSocket Control Plane** - Pause/Resume/Cancel with browser automation
 
-**Isolated Workspace Architecture (F14) ⭐ NEW:**
+**Isolated Workspace Architecture (F14) ⭐:**
 14. [ ] **F14: Isolated Workspaces** - Docker isolation, git identity, logging, network allowlist
 
-=======
-**WebSocket Control Plane (F13) ⭐ NEW:**
-13. [ ] **F13: WebSocket Control Plane** - Pause/Resume/Cancel with browser automation
-
->>>>>>> origin/main
+**GitHub App & Secure Token Architecture (F15) ⭐ NEW:**
+15. [ ] **F15: Secure Tokens** - GitHub App auth, token vending, spend tracking, sidecar proxy
 ### Quick Pytest Commands
 
 ```bash
@@ -1950,7 +2154,6 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v          # F10
 pytest packages/aef-adapters/tests/test_events.py -v             # F11
 pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
 
-<<<<<<< HEAD
 # Run isolated workspace tests (F14)
 pytest packages/aef-adapters/tests/workspaces/ -v
 pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
@@ -1962,8 +2165,10 @@ just poc-claude-api     # Claude API connectivity
 just poc-logging        # Container logging
 just poc-allowlist      # Network allowlist
 
-=======
->>>>>>> origin/main
+# Run GitHub App & Secure Token tests (F15)
+pytest packages/aef-tokens/tests/ -v
+pytest packages/aef-adapters/tests/github/ -v
+uv run python scripts/e2e_github_app_test.py
 # Full QA check (lint + type + test)
 poetry run poe check-fix
 ```
@@ -1995,12 +2200,9 @@ poetry run poe check-fix
 | **F11** | **Event Bridge** | **12** | ⬜ | ⬜ | ⬜ |
 | **F12** | **Agent Provider Management** | **9** | ⬜ | ⬜ | ⬜ |
 | **F13** | **WebSocket Control Plane** ⭐ | **55** | ⬜ | ⬜ | ⬜ |
-<<<<<<< HEAD
 | **F14** | **Isolated Workspace Architecture** ⭐ | **52** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **323** | ⬜ | ⬜ | ⬜ |
-=======
-| **TOTAL** | | **271** | ⬜ | ⬜ | ⬜ |
->>>>>>> origin/main
+| **F15** | **GitHub App & Secure Tokens** ⭐ | **50** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **373** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -2016,7 +2218,17 @@ poetry run poe check-fix
 
 _Add any observations, recommendations, or follow-up items here._
 
-<<<<<<< HEAD
+### Migration Notes (v5.0 → v6.0)
+
+- **GitHub App Integration:** New F15 tests for secure authentication
+- **ADR-022:** Secure Token Architecture design decisions
+- **Token Vending:** Short-lived, scoped tokens (5-min TTL)
+- **Spend Tracking:** Budget allocation per workflow type
+- **Sidecar Proxy:** Envoy config for token injection
+- **GitHub App Env Vars:** `AEF_GITHUB_APP_ID`, `AEF_GITHUB_PRIVATE_KEY`, etc.
+- **Test Count:** Increased from 323 to 373 criteria
+- **New E2E Script:** `scripts/e2e_github_app_test.py`
+
 ### Migration Notes (v4.0 → v5.0)
 
 - **Isolated Workspace Architecture:** New F14 tests for workspace isolation
@@ -2029,9 +2241,6 @@ _Add any observations, recommendations, or follow-up items here._
 - **New POC Commands:** `just poc-git-identity`, `just poc-logging`, `just poc-allowlist`
 - **Test Count:** Increased from 271 to 323 criteria
 - **Unit Tests:** 95+ new tests for workspace isolation
-
-=======
->>>>>>> origin/main
 ### Migration Notes (v3.0 → v4.0)
 
 - **WebSocket Control Plane:** New F13 tests for real-time execution control
@@ -2072,10 +2281,7 @@ _Add any observations, recommendations, or follow-up items here._
 | **Execution Model** ⭐ | **F7.6** | **API + Browser** |
 | **Agentic** | **F8-F12** | **pytest (automated)** |
 | **Control Plane** ⭐ | **F13** | **Browser automation (Playwright)** |
-<<<<<<< HEAD
 | **Isolated Workspaces** ⭐ | **F14** | **pytest + just POC commands** |
-=======
->>>>>>> origin/main
 
 ### Known Issues & Learnings
 
