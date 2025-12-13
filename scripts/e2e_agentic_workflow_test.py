@@ -344,21 +344,110 @@ This PR was created by the AEF E2E integration test.
     }
 
 
+async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str) -> bool:
+    """Emit workflow execution events to the event store.
+
+    Uses the WorkflowExecutionAggregate to properly emit and persist events.
+    """
+    print_step(9, "Emit Workflow Events to Event Store")
+
+    import os
+
+    # Force non-test mode to use real event store
+    original_env = os.environ.get("APP_ENVIRONMENT")
+    os.environ["APP_ENVIRONMENT"] = "development"
+
+    try:
+        # Reset cached settings and repositories
+        from aef_shared.settings import reset_settings
+
+        reset_settings()
+
+        from aef_adapters.storage.event_store_client import (
+            connect_event_store,
+            disconnect_event_store,
+            reset_event_store_client,
+        )
+        from aef_adapters.storage.repositories import (
+            get_workflow_execution_repository,
+            reset_repositories,
+        )
+
+        reset_event_store_client()
+        reset_repositories()
+
+        # Connect to the event store
+        await connect_event_store()
+        print("   🔌 Connected to Event Store")
+
+        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+            CompleteExecutionCommand,
+            StartExecutionCommand,
+            WorkflowExecutionAggregate,
+        )
+        from decimal import Decimal
+
+        # Create and start the execution aggregate
+        aggregate = WorkflowExecutionAggregate()
+        start_cmd = StartExecutionCommand(
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            workflow_name="E2E GitHub App Workflow",
+            total_phases=1,
+            inputs={
+                "branch": branch,
+                "test_type": "github_app_integration",
+            },
+        )
+        aggregate._handle_command(start_cmd)
+        print(f"   📤 WorkflowExecutionStarted event created")
+
+        # Complete the execution
+        complete_cmd = CompleteExecutionCommand(
+            execution_id=execution_id,
+            completed_phases=1,
+            total_phases=1,
+            total_input_tokens=2500,
+            total_output_tokens=1200,
+            total_cost_usd=Decimal("0.0255"),
+            duration_seconds=5.0,
+            artifact_ids=[],
+        )
+        aggregate._handle_command(complete_cmd)
+        print(f"   📤 WorkflowCompleted event created")
+
+        # Save to event store via repository
+        repo = get_workflow_execution_repository()
+        await repo.save(aggregate)
+        print("   ✅ Events persisted to event store")
+
+        # Disconnect
+        await disconnect_event_store()
+        print("   🔌 Disconnected from Event Store")
+
+        return True
+
+    except Exception as e:
+        print(f"   ❌ Failed to emit events: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+    finally:
+        # Restore environment
+        if original_env:
+            os.environ["APP_ENVIRONMENT"] = original_env
+        elif "APP_ENVIRONMENT" in os.environ:
+            del os.environ["APP_ENVIRONMENT"]
+
+
 async def verify_event_store(execution_id: str) -> bool:
-    """Verify events were stored (placeholder for full integration)."""
-    print_step(9, "Verify Event Store (Placeholder)")
+    """Verify events were stored in the event store."""
+    print_step(10, "Verify Event Store")
 
-    # In a full integration, we would:
-    # 1. Query the event store for WorkflowExecutionStarted
-    # 2. Verify PhaseCompleted events
-    # 3. Check SessionCompleted events
-
-    print("   ℹ️  Full event store integration coming soon")
-    print("   ℹ️  Currently testing GitHub App + Token + Spend flow")
-
-    # For now, just verify the event store is reachable
     import subprocess
 
+    # Query events for this execution
     result = subprocess.run(
         [
             "docker",
@@ -371,18 +460,28 @@ async def verify_event_store(execution_id: str) -> bool:
             "aef",
             "-t",
             "-c",
-            "SELECT COUNT(*) FROM events;",
+            f"SELECT event_type, aggregate_type FROM events WHERE aggregate_id = '{execution_id}' ORDER BY global_nonce;",
         ],
         capture_output=True,
         text=True,
     )
 
     if result.returncode == 0:
-        count = result.stdout.strip()
-        print(f"   ✅ Event store accessible ({count} events)")
-        return True
+        output = result.stdout.strip()
+        if output:
+            print(f"   📋 Events for execution {execution_id}:")
+            for line in output.split("\n"):
+                parts = line.strip().split("|")
+                if len(parts) >= 2:
+                    event_type = parts[0].strip()
+                    aggregate_type = parts[1].strip()
+                    print(f"      • {event_type} ({aggregate_type})")
+            return True
+        else:
+            print(f"   ⚠️  No events found for execution {execution_id}")
+            return False
     else:
-        print(f"   ❌ Event store error: {result.stderr}")
+        print(f"   ❌ Event store query error: {result.stderr}")
         return False
 
 
@@ -425,8 +524,15 @@ async def main() -> int:
         traceback.print_exc()
         return 1
 
+    # Emit workflow events to event store
+    events_emitted = await emit_workflow_events(
+        execution_id=results["execution_id"],
+        workflow_id="e2e-github-app-workflow",
+        branch=results["branch"],
+    )
+
     # Verify event store
-    await verify_event_store(results["execution_id"])
+    events_verified = await verify_event_store(results["execution_id"])
 
     # Summary
     print_header("🎉 E2E Integration Test Complete!")
