@@ -23,7 +23,9 @@ services:
     image: ${CONTAINER_REGISTRY:-}aef-dashboard:${IMAGE_TAG:-latest}
     container_name: ${COMPOSE_PROJECT_NAME:-aef}-dashboard
     environment:
-      # Database
+      # Database connection
+      # Note: POSTGRES_PASSWORD here must match the value in secrets/db-password.txt
+      # For production, ensure both are set to the same secure value
       - DATABASE_URL=postgresql://${POSTGRES_USER:-aef}:${POSTGRES_PASSWORD:-aef_dev_password}@postgres:5432/${POSTGRES_DB:-aef}
       # Event Store
       - EVENT_STORE_HOST=event-store

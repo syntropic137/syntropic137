@@ -182,8 +182,12 @@ This file was created by the AEF E2E test script to verify:
     )
 
     summary = await spend_tracker.get_usage_summary(execution_id)
-    print(f"   Input tokens used: {summary['input_tokens']['used']:,} / {summary['input_tokens']['max']:,}")
-    print(f"   Output tokens used: {summary['output_tokens']['used']:,} / {summary['output_tokens']['max']:,}")
+    print(
+        f"   Input tokens used: {summary['input_tokens']['used']:,} / {summary['input_tokens']['max']:,}"
+    )
+    print(
+        f"   Output tokens used: {summary['output_tokens']['used']:,} / {summary['output_tokens']['max']:,}"
+    )
     print(f"   Cost: ${summary['cost_usd']['used']} / ${summary['cost_usd']['max']}")
     print(f"   Budget exhausted: {summary['is_exhausted']}")
 

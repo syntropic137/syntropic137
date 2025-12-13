@@ -414,16 +414,18 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
 
     # Append extra variables in a separate section
     if extra_vars:
-        output_lines.extend([
-            "",
-            "# " + "=" * 76,
-            "# EXTERNAL / UNKNOWN VARIABLES",
-            "# " + "=" * 76,
-            "# These variables are not defined in the AEF settings classes.",
-            "# They may come from external tools, plugins, or manual additions.",
-            "# Review periodically - remove if no longer needed.",
-            "",
-        ])
+        output_lines.extend(
+            [
+                "",
+                "# " + "=" * 76,
+                "# EXTERNAL / UNKNOWN VARIABLES",
+                "# " + "=" * 76,
+                "# These variables are not defined in the AEF settings classes.",
+                "# They may come from external tools, plugins, or manual additions.",
+                "# Review periodically - remove if no longer needed.",
+                "",
+            ]
+        )
         for key in sorted(extra_vars):
             output_lines.append(f"{key}={existing_vars[key]}")
         output_lines.append("")
@@ -450,8 +452,9 @@ def main() -> None:
     print(f"✅ Generated {example_path}")
 
     # Count total env vars (rough count from lines with = that aren't comments)
-    total_vars = sum(1 for line in content.split("\n")
-                     if "=" in line and not line.strip().startswith("#"))
+    total_vars = sum(
+        1 for line in content.split("\n") if "=" in line and not line.strip().startswith("#")
+    )
     print(f"   {total_vars} environment variables documented")
 
     # Sync .env idempotently

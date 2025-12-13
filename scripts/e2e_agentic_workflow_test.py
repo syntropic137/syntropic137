@@ -323,7 +323,9 @@ This PR was created by the AEF E2E integration test.
     )
     summary = await spend_tracker.get_usage_summary(execution_id)
     print(f"   📊 Input: {summary['input_tokens']['used']:,} / {summary['input_tokens']['max']:,}")
-    print(f"   📊 Output: {summary['output_tokens']['used']:,} / {summary['output_tokens']['max']:,}")
+    print(
+        f"   📊 Output: {summary['output_tokens']['used']:,} / {summary['output_tokens']['max']:,}"
+    )
     print(f"   💵 Cost: ${summary['cost_usd']['used']} / ${summary['cost_usd']['max']}")
 
     # Cleanup

@@ -90,4 +90,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 EXPOSE 8000
 
 # Start the dashboard
-CMD ["uvicorn", "aef_dashboard.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use shell form to respect environment variables
+CMD ["sh", "-c", "uvicorn aef_dashboard.main:app --host $DASHBOARD_HOST --port $DASHBOARD_PORT"]
