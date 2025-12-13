@@ -15,6 +15,7 @@ from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from aef_shared.settings.storage import StorageSettings
     from aef_shared.settings.workspace import (
         ContainerLoggingSettings,
         GitIdentitySettings,
@@ -400,6 +401,23 @@ class Settings(BaseSettings):
         from aef_shared.settings.workspace import ContainerLoggingSettings
 
         return ContainerLoggingSettings()
+
+    # =========================================================================
+    # OBJECT STORAGE - See ADR-012
+    # =========================================================================
+
+    @property
+    def storage(self) -> StorageSettings:
+        """Get object storage settings for artifacts.
+
+        Returns a StorageSettings instance configured from AEF_STORAGE_* env vars.
+        Supports local filesystem (development) and Supabase (production).
+
+        See ADR-012: Artifact Storage
+        """
+        from aef_shared.settings.storage import StorageSettings
+
+        return StorageSettings()
 
 
 @lru_cache

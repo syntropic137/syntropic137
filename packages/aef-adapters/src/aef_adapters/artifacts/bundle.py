@@ -23,7 +23,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from aef_adapters.object_storage.protocol import StorageProtocol
 
 
 class ArtifactType(str, Enum):
@@ -256,6 +259,190 @@ class ArtifactBundle:
     def to_json(self) -> str:
         """Serialize to JSON string."""
         return json.dumps(self.to_dict(), indent=2)
+
+    def get_storage_prefix(self) -> str:
+        """Get the storage key prefix for this bundle.
+
+        Returns:
+            Storage prefix like 'workflows/{workflow_id}/bundles/{bundle_id}/'
+        """
+        parts = []
+        if self.workflow_id:
+            parts.append(f"workflows/{self.workflow_id}")
+        if self.session_id:
+            parts.append(f"sessions/{self.session_id}")
+        parts.append(f"bundles/{self.bundle_id}")
+        return "/".join(parts) + "/"
+
+    async def save_to_storage(
+        self,
+        storage: StorageProtocol,
+        *,
+        prefix: str | None = None,
+    ) -> list[str]:
+        """Save all bundle files to object storage.
+
+        Uploads all files in the bundle to storage, organized under
+        a prefix based on workflow/session/bundle IDs.
+
+        Args:
+            storage: Storage adapter to use.
+            prefix: Optional custom prefix. If not provided, uses
+                   get_storage_prefix() to generate one.
+
+        Returns:
+            List of storage keys where files were uploaded.
+
+        Example:
+            from aef_adapters.object_storage import get_storage
+
+            storage = await get_storage()
+            keys = await bundle.save_to_storage(storage)
+            # keys = ['workflows/123/bundles/abc/report.md', ...]
+        """
+
+        storage_prefix = prefix or self.get_storage_prefix()
+        uploaded_keys: list[str] = []
+
+        # Upload each file
+        for artifact_file in self.files:
+            key = storage_prefix + str(artifact_file.path).replace("\\", "/")
+
+            # Determine content type from extension
+            import mimetypes
+
+            content_type, _ = mimetypes.guess_type(str(artifact_file.path))
+
+            await storage.upload(
+                key,
+                artifact_file.content,
+                content_type=content_type,
+                metadata={
+                    "artifact_type": artifact_file.metadata.artifact_type.value,
+                    "bundle_id": self.bundle_id,
+                    "phase_id": self.phase_id,
+                    "content_hash": artifact_file.content_hash,
+                },
+            )
+            uploaded_keys.append(key)
+
+        # Upload bundle manifest
+        manifest_key = storage_prefix + "manifest.json"
+        await storage.upload(
+            manifest_key,
+            self.to_json().encode("utf-8"),
+            content_type="application/json",
+        )
+        uploaded_keys.append(manifest_key)
+
+        return uploaded_keys
+
+    @classmethod
+    async def load_from_storage(
+        cls,
+        storage: StorageProtocol,
+        bundle_id: str,
+        *,
+        prefix: str | None = None,
+        workflow_id: str | None = None,
+        session_id: str | None = None,
+    ) -> ArtifactBundle:
+        """Load a bundle from object storage.
+
+        Downloads the manifest and all files for a bundle.
+
+        Args:
+            storage: Storage adapter to use.
+            bundle_id: The bundle ID to load.
+            prefix: Custom prefix if bundle was saved with one.
+            workflow_id: Workflow ID (used to construct prefix if not provided).
+            session_id: Session ID (used to construct prefix if not provided).
+
+        Returns:
+            Reconstructed ArtifactBundle with all files.
+
+        Raises:
+            ObjectNotFoundError: If bundle manifest not found.
+
+        Example:
+            from aef_adapters.object_storage import get_storage
+
+            storage = await get_storage()
+            bundle = await ArtifactBundle.load_from_storage(
+                storage,
+                bundle_id="abc",
+                workflow_id="123"
+            )
+        """
+        from aef_adapters.object_storage.protocol import DownloadError, ObjectNotFoundError
+
+        # Construct prefix
+        if prefix:
+            storage_prefix = prefix
+        else:
+            parts = []
+            if workflow_id:
+                parts.append(f"workflows/{workflow_id}")
+            if session_id:
+                parts.append(f"sessions/{session_id}")
+            parts.append(f"bundles/{bundle_id}")
+            storage_prefix = "/".join(parts) + "/"
+
+        # Load manifest
+        manifest_key = storage_prefix + "manifest.json"
+        try:
+            manifest_bytes = await storage.download(manifest_key)
+        except ObjectNotFoundError:
+            raise
+        except (DownloadError, OSError) as e:
+            raise ObjectNotFoundError(manifest_key) from e
+
+        manifest = json.loads(manifest_bytes.decode("utf-8"))
+
+        # Reconstruct bundle
+        bundle = cls(
+            bundle_id=manifest["bundle_id"],
+            phase_id=manifest["phase_id"],
+            session_id=manifest.get("session_id"),
+            workflow_id=manifest.get("workflow_id"),
+            title=manifest.get("title"),
+            description=manifest.get("description"),
+            is_primary=manifest.get("is_primary", True),
+            created_at=datetime.fromisoformat(manifest["created_at"]),
+        )
+
+        # Load each file
+        for file_info in manifest.get("files", []):
+            file_path = file_info["path"]
+            file_key = storage_prefix + file_path
+
+            content = await storage.download(file_key)
+
+            # Reconstruct metadata
+            meta_dict = file_info.get("metadata", {})
+            metadata = ArtifactMetadata(
+                workflow_id=meta_dict.get("workflow_id"),
+                phase_id=meta_dict.get("phase_id"),
+                session_id=meta_dict.get("session_id"),
+                artifact_type=ArtifactType(meta_dict.get("artifact_type", "other")),
+                title=meta_dict.get("title"),
+                description=meta_dict.get("description"),
+                is_primary=meta_dict.get("is_primary", False),
+                derived_from=tuple(meta_dict.get("derived_from", [])),
+                extra=meta_dict.get("extra", {}),
+            )
+
+            artifact_file = ArtifactFile(
+                path=Path(file_path),
+                content=content,
+                content_hash=file_info.get("content_hash", ""),
+                metadata=metadata,
+                created_at=datetime.fromisoformat(file_info["created_at"]),
+            )
+
+            bundle.files.append(artifact_file)
+
+        return bundle
 
 
 @dataclass

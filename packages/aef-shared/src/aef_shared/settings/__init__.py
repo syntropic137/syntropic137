@@ -18,12 +18,17 @@ Usage:
     logging = settings.container_logging
     print(f"Log level: {logging.level}")
 
+    # Object storage settings
+    storage = settings.storage
+    print(f"Storage provider: {storage.provider}")
+
 Environment Variables:
     See Settings class for full list with descriptions.
     Required vars will cause immediate failure if missing.
 
     AEF_GIT_* - Git identity and credentials
     AEF_LOGGING_* - Container logging configuration
+    AEF_STORAGE_* - Object storage configuration
 """
 
 from aef_shared.settings.config import (
@@ -31,6 +36,10 @@ from aef_shared.settings.config import (
     Settings,
     get_settings,
     reset_settings,
+)
+from aef_shared.settings.storage import (
+    StorageProvider,
+    StorageSettings,
 )
 from aef_shared.settings.workspace import (
     CloudProvider,
@@ -53,6 +62,8 @@ __all__ = [
     "GitIdentitySettings",
     "IsolationBackend",
     "Settings",
+    "StorageProvider",
+    "StorageSettings",
     "WorkspaceSecuritySettings",
     "WorkspaceSettings",
     "get_default_isolation_backend",

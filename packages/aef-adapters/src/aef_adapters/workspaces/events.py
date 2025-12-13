@@ -217,6 +217,41 @@ class WorkspaceEventEmitter:
             },
         )
 
+    async def artifacts_stored(
+        self,
+        workspace: IsolatedWorkspace,
+        bundle_id: str,
+        file_count: int,
+        total_size_bytes: int,
+        storage_prefix: str,
+    ) -> None:
+        """Emit ArtifactsStored event when artifacts are uploaded to storage.
+
+        Args:
+            workspace: The workspace artifacts were collected from.
+            bundle_id: ID of the artifact bundle.
+            file_count: Number of files stored.
+            total_size_bytes: Total size of all files in bytes.
+            storage_prefix: Storage key prefix where files were stored.
+        """
+        if not self.enabled:
+            return
+
+        workspace_id = getattr(workspace, "container_id", None) or "unknown"
+
+        await self._emit(
+            "ArtifactsStored",
+            {
+                "workspace_id": workspace_id,
+                "session_id": workspace.config.session_id,
+                "bundle_id": bundle_id,
+                "file_count": file_count,
+                "total_size_bytes": total_size_bytes,
+                "storage_prefix": storage_prefix,
+                "stored_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
     async def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         """Emit an event through the configured emitter."""
         if self.emitter:
