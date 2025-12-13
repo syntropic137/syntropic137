@@ -146,14 +146,44 @@ class MockArtifactRepository:
         return self._artifacts.get(artifact_id)
 
 
-class MockEventPublisher:
-    """Mock event publisher for testing."""
+class MockWorkflowExecutionRepository:
+    """Mock workflow execution repository for testing (ADR-023)."""
 
     def __init__(self) -> None:
-        self._events: list[Any] = []
+        self._executions: dict[str, Any] = {}
 
-    async def publish(self, events: list[Any]) -> None:
-        self._events.extend(events)
+    async def get_by_id(self, execution_id: str) -> Any | None:
+        return self._executions.get(execution_id)
+
+    async def save(self, aggregate: Any) -> None:
+        if hasattr(aggregate, "id") and aggregate.id:
+            self._executions[aggregate.id] = aggregate
+
+
+class MockWorkspaceRouter:
+    """Mock workspace router for testing (ADR-023)."""
+
+    def __init__(self) -> None:
+        self._workspaces_created: list[Any] = []
+        self._commands_executed: list[tuple[Any, list[str]]] = []
+
+    async def create(self, config: Any) -> Any:
+        """Mock workspace creation - returns async context manager."""
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _mock_workspace() -> Any:
+            self._workspaces_created.append(config)
+            yield MockWorkspace()
+
+        return _mock_workspace()
+
+
+class MockWorkspace:
+    """Mock isolated workspace for testing."""
+
+    isolation_id: str = "mock-workspace-123"
+    workspace_path: str = "/tmp/mock-workspace"
 
 
 def create_test_workflow(
@@ -336,17 +366,11 @@ class TestWorkflowExecutionEngine:
         return MockArtifactRepository()
 
     @pytest.fixture
-    def event_publisher(self) -> MockEventPublisher:
-        """Create mock event publisher."""
-        return MockEventPublisher()
-
-    @pytest.fixture
     def engine(
         self,
         workflow_repo: MockWorkflowRepository,
         session_repo: MockSessionRepository,
         artifact_repo: MockArtifactRepository,
-        event_publisher: MockEventPublisher,
         mock_agent: MockInstrumentedAgent,
     ) -> WorkflowExecutionEngine:
         """Create execution engine with mock dependencies."""
@@ -356,10 +380,11 @@ class TestWorkflowExecutionEngine:
 
         return WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
-            event_publisher=event_publisher,
         )
 
     @pytest.mark.asyncio
@@ -593,7 +618,6 @@ class TestWorkflowExecutionFailure:
         workflow_repo = MockWorkflowRepository()
         session_repo = MockSessionRepository()
         artifact_repo = MockArtifactRepository()
-        event_publisher = MockEventPublisher()
 
         # Add test workflow
         workflow = create_test_workflow()
@@ -604,10 +628,11 @@ class TestWorkflowExecutionFailure:
 
         return WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
-            event_publisher=event_publisher,
         )
 
     @pytest.mark.asyncio
@@ -652,10 +677,11 @@ class TestWorkflowExecutionFailure:
 
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
             session_repository=MockSessionRepository(),
             artifact_repository=MockArtifactRepository(),
             agent_factory=cast("Any", lambda _p: agent),
-            event_publisher=MockEventPublisher(),
         )
 
         result = await engine.execute(
@@ -667,6 +693,53 @@ class TestWorkflowExecutionFailure:
         assert len(result.phase_results) == 2
         assert result.phase_results[0].status == PhaseStatus.COMPLETED
         assert result.phase_results[1].status == PhaseStatus.FAILED
+
+
+class TestDependencyInjectionEnforcement:
+    """Tests for ADR-023 DI enforcement in WorkflowExecutionEngine."""
+
+    def test_engine_fails_without_execution_repository(self) -> None:
+        """Engine should fail if execution_repository is None."""
+        with pytest.raises(ValueError) as exc_info:
+            WorkflowExecutionEngine(
+                workflow_repository=MockWorkflowRepository(),
+                execution_repository=None,  # type: ignore[arg-type]
+                workspace_router=cast("Any", MockWorkspaceRouter()),
+                session_repository=MockSessionRepository(),
+                artifact_repository=MockArtifactRepository(),
+                agent_factory=cast("Any", lambda _p: None),
+            )
+
+        assert "execution_repository is required" in str(exc_info.value)
+        assert "ADR-023" in str(exc_info.value)
+
+    def test_engine_fails_without_workspace_router(self) -> None:
+        """Engine should fail if workspace_router is None."""
+        with pytest.raises(ValueError) as exc_info:
+            WorkflowExecutionEngine(
+                workflow_repository=MockWorkflowRepository(),
+                execution_repository=MockWorkflowExecutionRepository(),
+                workspace_router=None,  # type: ignore[arg-type]
+                session_repository=MockSessionRepository(),
+                artifact_repository=MockArtifactRepository(),
+                agent_factory=cast("Any", lambda _p: None),
+            )
+
+        assert "workspace_router is required" in str(exc_info.value)
+        assert "ADR-023" in str(exc_info.value)
+
+    def test_engine_succeeds_with_all_dependencies(self) -> None:
+        """Engine should succeed when all dependencies provided."""
+        # Should not raise
+        engine = WorkflowExecutionEngine(
+            workflow_repository=MockWorkflowRepository(),
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
+            session_repository=MockSessionRepository(),
+            artifact_repository=MockArtifactRepository(),
+            agent_factory=cast("Any", lambda _p: None),
+        )
+        assert engine is not None
 
 
 class TestExecutionContext:
