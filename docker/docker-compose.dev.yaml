@@ -74,8 +74,40 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: aef-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Example sidecar proxy for agent containers
+  # This is a template - actual sidecars are deployed per-execution
+  sidecar-proxy:
+    build:
+      context: ./sidecar-proxy
+      dockerfile: Dockerfile
+    container_name: aef-sidecar-example
+    environment:
+      AEF_EXECUTION_ID: "dev-local"
+    ports:
+      - "8081:8081"
+      - "9901:9901"  # Envoy admin
+    profiles:
+      - sidecar  # Only start with: docker compose --profile sidecar up
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   default:
