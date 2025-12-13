@@ -296,6 +296,10 @@ class WorkflowExecutionEngine:
         )
 
         # 4. Execute phases
+        # TODO: Create isolated workspace via self._router.create() and
+        # execute all phases inside it. For now, we use the router for DI
+        # enforcement but agent execution happens in host process.
+        # See ADR-023 for full isolation architecture.
         try:
             phases = self._get_executable_phases(workflow)
             for phase in sorted(phases, key=lambda p: p.order):

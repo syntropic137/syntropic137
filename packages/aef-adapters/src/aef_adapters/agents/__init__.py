@@ -79,6 +79,20 @@ from aef_adapters.agents.agentic_types import (
     Workspace,
     WorkspaceConfig,
 )
+from aef_adapters.agents.executor import (
+    AgentBudgetExceededError,
+    AgentExecutionError,
+    AgentExecutionMetrics,
+    AgentExecutor,
+    AgentNotAvailableError,
+    ExecutionCompleted,
+    ExecutionEvent,
+    ExecutionOutput,
+    ExecutionProgress,
+    ExecutionStarted,
+    ExecutionToolUse,
+    WorkspaceExecutionResult,
+)
 from aef_adapters.agents.factory import (
     get_agent,
     get_available_agents,
@@ -108,20 +122,38 @@ try:
 except ImportError:
     ClaudeAgenticAgent = None  # type: ignore[assignment, misc]
 
+# Agent executors (ADR-023)
+try:
+    from aef_adapters.agents.claude_executor import (
+        ClaudeAgentExecutor,
+        get_claude_executor,
+        reset_claude_executor,
+    )
+except ImportError:
+    ClaudeAgentExecutor = None  # type: ignore[assignment, misc]
+    get_claude_executor = None  # type: ignore[assignment]
+    reset_claude_executor = None  # type: ignore[assignment]
+
 # Lazy imports for legacy adapters to avoid requiring their dependencies
 # Use get_agent(AgentProvider.CLAUDE) or import directly when needed
 
 __all__ = [
     # Chat Completion Protocol (legacy)
     "AgentAuthenticationError",
+    # Agent Executor (ADR-023)
+    "AgentBudgetExceededError",
     "AgentConfig",
     "AgentError",
     # Agentic Types
     "AgentEvent",
     "AgentExecutionConfig",
+    "AgentExecutionError",
+    "AgentExecutionMetrics",
     "AgentExecutionResult",
+    "AgentExecutor",
     "AgentMessage",
     "AgentMetrics",
+    "AgentNotAvailableError",
     "AgentProtocol",
     "AgentProvider",
     "AgentRateLimitError",
@@ -136,7 +168,14 @@ __all__ = [
     "AgenticSDKError",
     "AgenticTimeoutError",
     "AgenticTurnsExceededError",
+    "ClaudeAgentExecutor",
     "ClaudeAgenticAgent",
+    "ExecutionCompleted",
+    "ExecutionEvent",
+    "ExecutionOutput",
+    "ExecutionProgress",
+    "ExecutionStarted",
+    "ExecutionToolUse",
     # Instrumented & Mock
     "InstrumentedAgent",
     "MockAgent",
@@ -152,8 +191,11 @@ __all__ = [
     "ToolUseStarted",
     "Workspace",
     "WorkspaceConfig",
+    "WorkspaceExecutionResult",
     # Factory
     "get_agent",
     "get_available_agents",
+    "get_claude_executor",
     "is_agent_available",
+    "reset_claude_executor",
 ]
