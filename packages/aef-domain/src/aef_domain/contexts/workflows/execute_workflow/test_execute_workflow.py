@@ -186,6 +186,47 @@ class MockWorkspace:
     workspace_path: str = "/tmp/mock-workspace"
 
 
+class MockArtifactQueryService:
+    """Mock artifact query service for testing phase chaining.
+
+    This simulates the DB-backed artifact query that replaces
+    in-memory phase_outputs.
+    """
+
+    def __init__(self) -> None:
+        self._artifacts: dict[str, dict[str, str]] = {}  # execution_id -> {phase_id -> content}
+
+    def add_artifact(
+        self,
+        execution_id: str,
+        phase_id: str,
+        content: str,
+    ) -> None:
+        """Add an artifact to the mock store."""
+        if execution_id not in self._artifacts:
+            self._artifacts[execution_id] = {}
+        self._artifacts[execution_id][phase_id] = content
+
+    async def get_by_execution(self, execution_id: str) -> list[Any]:
+        """Get artifacts for an execution."""
+        return []  # Not used in current tests
+
+    async def get_for_phase_injection(
+        self,
+        execution_id: str,
+        completed_phase_ids: list[str],
+    ) -> dict[str, str]:
+        """Get phase outputs for prompt injection."""
+        if execution_id not in self._artifacts:
+            return {}
+
+        result = {}
+        for phase_id in completed_phase_ids:
+            if phase_id in self._artifacts[execution_id]:
+                result[phase_id] = self._artifacts[execution_id][phase_id]
+        return result
+
+
 def create_test_workflow(
     workflow_id: str = "test-workflow-123",
     name: str = "Test Workflow",
@@ -482,11 +523,17 @@ class TestWorkflowExecutionEngine:
     @pytest.mark.asyncio
     async def test_phase_chaining_with_previous_output(
         self,
-        engine: WorkflowExecutionEngine,
         workflow_repo: MockWorkflowRepository,
+        session_repo: MockSessionRepository,
+        artifact_repo: MockArtifactRepository,
         mock_agent: MockInstrumentedAgent,
     ) -> None:
-        """Test that phase output is available to next phase."""
+        """Test that phase output is available to next phase.
+
+        Note: Phase outputs are now retrieved from the ArtifactQueryService
+        (DB-backed) rather than in-memory. This test uses a mock query
+        service that simulates the artifact lookup.
+        """
         phases = [
             PhaseDefinition(
                 phase_id="phase1",
@@ -510,6 +557,65 @@ class TestWorkflowExecutionEngine:
             "Output from phase 1",
             "Output from phase 2",
         ]
+
+        # Create a mock query service that returns the expected phase1 output
+        # This simulates artifacts being persisted and queried from DB
+        mock_query_service = MockArtifactQueryService()
+
+        # We need to inject the phase1 output AFTER it's created but BEFORE phase2 runs
+        # The cleanest way is to use a smarter mock that intercepts artifact saves
+        # For now, we use a hook approach by patching the mock agent
+
+        original_complete = mock_agent.complete
+
+        async def complete_with_artifact_tracking(
+            messages: list[Any], config: Any
+        ) -> MockAgentResponse:
+            result = await original_complete(messages, config)
+            # After phase1 completes, its output should be available for phase2
+            # The execution_id isn't known here, but we use a wildcard approach
+            for exec_id in mock_query_service._artifacts.keys():
+                pass  # Already added
+            return result
+
+        # Simpler approach: pre-populate with expected output
+        # The mock query service will return this for any execution
+        class DynamicMockQueryService:
+            """Mock that returns artifacts based on what was saved."""
+
+            def __init__(self, artifact_repo: MockArtifactRepository) -> None:
+                self._artifact_repo = artifact_repo
+
+            async def get_by_execution(self, execution_id: str) -> list[Any]:
+                return []
+
+            async def get_for_phase_injection(
+                self,
+                execution_id: str,
+                completed_phase_ids: list[str],
+            ) -> dict[str, str]:
+                # Query the artifact repo for artifacts matching these phases
+                result = {}
+                for artifact in self._artifact_repo._artifacts.values():
+                    if artifact.phase_id in completed_phase_ids and artifact.content:
+                        if artifact.phase_id not in result:
+                            result[artifact.phase_id] = artifact.content
+                return result
+
+        dynamic_query_service = DynamicMockQueryService(artifact_repo)
+
+        def agent_factory(_provider: str) -> Any:
+            return mock_agent
+
+        engine = WorkflowExecutionEngine(
+            workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
+            session_repository=session_repo,
+            artifact_repository=artifact_repo,
+            agent_factory=cast("Any", agent_factory),
+            artifact_query_service=cast("Any", dynamic_query_service),
+        )
 
         await engine.execute(
             workflow_id=get_workflow_id(workflow),
@@ -745,8 +851,13 @@ class TestDependencyInjectionEnforcement:
 class TestExecutionContext:
     """Tests for ExecutionContext."""
 
-    def test_context_tracks_phase_outputs(self) -> None:
-        """Test context stores phase outputs."""
+    def test_context_tracks_completed_phase_ids(self) -> None:
+        """Test context stores completed phase IDs.
+
+        Note: Phase CONTENT is no longer stored in-memory.
+        Content is persisted to DB as artifacts and queried via
+        ArtifactQueryService when needed (ADR-012).
+        """
         ctx = ExecutionContext(
             workflow_id="wf-123",
             execution_id="exec-123",
@@ -754,11 +865,12 @@ class TestExecutionContext:
             inputs={"topic": "test"},
         )
 
-        ctx.phase_outputs["phase-1"] = "Output from phase 1"
-        ctx.phase_outputs["phase-2"] = "Output from phase 2"
+        ctx.completed_phase_ids.append("phase-1")
+        ctx.completed_phase_ids.append("phase-2")
 
-        assert len(ctx.phase_outputs) == 2
-        assert "Output from phase 1" in ctx.phase_outputs["phase-1"]
+        assert len(ctx.completed_phase_ids) == 2
+        assert "phase-1" in ctx.completed_phase_ids
+        assert "phase-2" in ctx.completed_phase_ids
 
     def test_context_tracks_artifacts(self) -> None:
         """Test context stores artifact IDs."""

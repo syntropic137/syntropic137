@@ -31,6 +31,10 @@ from aef_domain.contexts.artifacts.create_artifact import (
     ArtifactCreatedEvent,
     CreateArtifactCommand,
 )
+from aef_domain.contexts.artifacts.domain.services import (
+    ArtifactQueryService,
+    ArtifactQueryServiceProtocol,
+)
 from aef_domain.contexts.artifacts.upload_artifact import (
     ArtifactUploadedEvent,
     UploadArtifactCommand,
@@ -39,6 +43,8 @@ from aef_domain.contexts.artifacts.upload_artifact import (
 __all__ = [
     "ArtifactAggregate",
     "ArtifactCreatedEvent",
+    "ArtifactQueryService",
+    "ArtifactQueryServiceProtocol",
     "ArtifactType",
     "ArtifactUploadedEvent",
     "ContentType",

@@ -42,6 +42,9 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
     )
+    from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
+        ArtifactQueryServiceProtocol,
+    )
     from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
@@ -154,7 +157,12 @@ class WorkflowExecutionResult:
 
 @dataclass
 class ExecutionContext:
-    """Mutable context for tracking execution state."""
+    """Mutable context for tracking execution state.
+
+    Note: Phase outputs are NO LONGER stored in-memory. They are persisted
+    as artifacts and queried from the artifact projection when needed.
+    This ensures crash recovery and audit trail (ADR-012, ADR-023).
+    """
 
     workflow_id: str
     execution_id: str
@@ -162,7 +170,7 @@ class ExecutionContext:
     inputs: dict[str, Any]
     phase_results: list[PhaseResult] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
-    phase_outputs: dict[str, str] = field(default_factory=dict)  # phase_id -> artifact content
+    completed_phase_ids: list[str] = field(default_factory=list)  # For querying artifacts
 
 
 class WorkflowExecutionEngine:
@@ -207,6 +215,7 @@ class WorkflowExecutionEngine:
         session_repository: SessionRepository,
         artifact_repository: ArtifactRepository,
         agent_factory: AgentFactory,
+        artifact_query_service: ArtifactQueryServiceProtocol | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
@@ -217,6 +226,9 @@ class WorkflowExecutionEngine:
             session_repository: Repository for AgentSession aggregates
             artifact_repository: Repository for Artifact aggregates
             agent_factory: Factory for creating instrumented agents
+            artifact_query_service: Service for querying artifacts (REQUIRED for
+                multi-phase workflows). If None, phase outputs cannot be injected
+                into subsequent phase prompts.
 
         Raises:
             ValueError: If execution_repository or workspace_router is None
@@ -238,6 +250,7 @@ class WorkflowExecutionEngine:
         self._sessions = session_repository
         self._artifacts = artifact_repository
         self._agent_factory = agent_factory
+        self._artifact_query = artifact_query_service
 
     async def execute(
         self,
@@ -443,8 +456,8 @@ class WorkflowExecutionEngine:
                 phase_id=phase.phase_id,
             )
 
-            # Build prompt
-            prompt = self._build_prompt(phase, ctx)
+            # Build prompt (queries previous phase artifacts from DB)
+            prompt = await self._build_prompt(phase, ctx)
 
             # Import here to avoid circular imports
             from aef_adapters.agents import AgentConfig, AgentMessage, AgentRole
@@ -495,8 +508,8 @@ class WorkflowExecutionEngine:
                 title=f"{phase.name} Output",
             )
 
-            # Store output for next phase
-            ctx.phase_outputs[phase.phase_id] = response.content
+            # Track completed phase for artifact queries (DB-backed, not in-memory)
+            ctx.completed_phase_ids.append(phase.phase_id)
             ctx.artifact_ids.append(artifact_id)
 
             # Record phase result
@@ -568,12 +581,15 @@ class WorkflowExecutionEngine:
                 cause=e,
             ) from e
 
-    def _build_prompt(self, phase: ExecutablePhase, ctx: ExecutionContext) -> str:
+    async def _build_prompt(self, phase: ExecutablePhase, ctx: ExecutionContext) -> str:
         """Build the prompt for a phase.
 
         Substitutes template variables with:
         - Initial workflow inputs
-        - Previous phase outputs
+        - Previous phase outputs (queried from DB via ArtifactQueryService)
+
+        Note: Phase outputs are retrieved from the artifact projection, NOT from
+        an in-memory dict. This ensures crash recovery and audit trail.
         """
         prompt = phase.prompt_template
 
@@ -581,11 +597,23 @@ class WorkflowExecutionEngine:
         for key, value in ctx.inputs.items():
             prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
 
-        # Substitute previous phase outputs
-        for phase_id, content in ctx.phase_outputs.items():
-            # Support both {{phase_id}} and {{phase_id_output}} patterns
-            prompt = prompt.replace(f"{{{{{phase_id}}}}}", content)
-            prompt = prompt.replace(f"{{{{{phase_id}_output}}}}", content)
+        # Substitute previous phase outputs from DB
+        if self._artifact_query and ctx.completed_phase_ids:
+            phase_outputs = await self._artifact_query.get_for_phase_injection(
+                execution_id=ctx.execution_id,
+                completed_phase_ids=ctx.completed_phase_ids,
+            )
+            for phase_id, content in phase_outputs.items():
+                # Support both {{phase_id}} and {{phase_id_output}} patterns
+                prompt = prompt.replace(f"{{{{{phase_id}}}}}", content)
+                prompt = prompt.replace(f"{{{{{phase_id}_output}}}}", content)
+        elif ctx.completed_phase_ids and not self._artifact_query:
+            logger.warning(
+                "artifact_query_service not configured - phase outputs cannot be "
+                "injected into prompt for phase %s. Configure ArtifactQueryService "
+                "for multi-phase workflows.",
+                phase.phase_id,
+            )
 
         return prompt
 
