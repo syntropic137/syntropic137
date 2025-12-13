@@ -264,36 +264,76 @@ class GitInjector:
 
     async def _inject_github_app_credentials(
         self,
-        _workspace: IsolatedWorkspace,
-        _executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
+        workspace: IsolatedWorkspace,
+        executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         _git_settings: GitIdentitySettings,
     ) -> bool:
         """Inject GitHub App credentials.
 
         This generates a short-lived installation token from the App credentials
-        and uses it for git operations.
+        and uses it for git operations. The token is valid for 1 hour.
+
+        Flow:
+        1. Get GitHubAppClient singleton
+        2. Generate installation token (JWT → Installation Token)
+        3. Configure git credential helper with token
+        4. Token auto-expires in 1 hour (GitHub's limit)
 
         Args:
             workspace: The isolated workspace
             executor: Command executor function
-            git_settings: Git settings with GitHub App credentials
+            _git_settings: Git settings (GitHub App config comes from settings.github)
 
         Returns:
             True if credentials were injected successfully
         """
-        # TODO: Implement GitHub App token generation
-        # This requires:
-        # 1. Decode the base64-encoded private key
-        # 2. Generate a JWT signed with the private key
-        # 3. Exchange JWT for an installation access token
-        # 4. Use the token for git operations
-        #
-        # For now, log a warning and skip
-        logger.warning(
-            "GitHub App credential injection not yet implemented. "
-            "Use HTTPS token (AEF_GIT_TOKEN) for now."
-        )
-        return True
+        try:
+            from aef_adapters.github import GitHubAppError, get_github_client
+
+            client = get_github_client()
+
+            # Get short-lived installation token (1 hour TTL)
+            token = await client.get_installation_token()
+
+            # Configure git to use the token
+            # Format: https://x-access-token:TOKEN@github.com
+            credentials = f"https://x-access-token:{token}@github.com"
+
+            # Write credentials file with proper permissions
+            write_cmd = [
+                "sh",
+                "-c",
+                f'echo "{credentials}" > ~/.git-credentials && chmod 600 ~/.git-credentials',
+            ]
+
+            exit_code, _stdout, stderr = await executor(workspace, write_cmd)
+            if exit_code != 0:
+                logger.error(f"Failed to write git credentials: {stderr}")
+                return False
+
+            # Configure git to use the credential store
+            exit_code, _stdout, stderr = await executor(
+                workspace,
+                ["git", "config", "--global", "credential.helper", "store"],
+            )
+            if exit_code != 0:
+                logger.error(f"Failed to configure credential helper: {stderr}")
+                return False
+
+            logger.info(
+                "GitHub App credentials injected",
+                bot_username=client.bot_username,
+                token_ttl="1 hour",
+            )
+            return True
+
+        except GitHubAppError as e:
+            logger.error(f"GitHub App authentication failed: {e}")
+            return False
+        except ValueError as e:
+            # GitHub App not configured
+            logger.warning(f"GitHub App not configured, skipping: {e}")
+            return True
 
 
 # Singleton instance
