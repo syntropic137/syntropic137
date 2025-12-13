@@ -218,15 +218,19 @@ class TestStorageSettings:
 class TestMinioStorage:
     """Tests for MinioStorage adapter."""
 
-    def test_provider_property(self) -> None:
-        """Test provider property."""
-        storage = MinioStorage(
+    @pytest.fixture
+    def storage(self) -> MinioStorage:
+        """Create a MinioStorage instance."""
+        return MinioStorage(
             endpoint="localhost:9000",
             access_key="test",
             secret_key="test",
             bucket_name="test-bucket",
             secure=False,
         )
+
+    def test_provider_property(self, storage: MinioStorage) -> None:
+        """Test provider property."""
         assert storage.provider == StorageProvider.MINIO
 
     def test_bucket_name_property(self) -> None:
@@ -240,16 +244,277 @@ class TestMinioStorage:
         )
         assert storage.bucket_name == "my-bucket"
 
-    def test_implements_protocol(self) -> None:
+    def test_implements_protocol(self, storage: MinioStorage) -> None:
         """Test that MinioStorage implements StorageProtocol."""
-        storage = MinioStorage(
-            endpoint="localhost:9000",
-            access_key="test",
-            secret_key="test",
-            bucket_name="test-bucket",
-            secure=False,
-        )
         assert isinstance(storage, StorageProtocol)
+
+    @pytest.mark.asyncio
+    async def test_upload_success(self, storage: MinioStorage) -> None:
+        """Test successful upload with mocked client."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.bucket_exists.return_value = True
+        mock_result = MagicMock()
+        mock_result.etag = "abc123"
+        mock_client.put_object.return_value = mock_result
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.upload("test.txt", b"hello world")
+
+        assert result.key == "test.txt"
+        assert result.size_bytes == 11
+        assert result.etag == "abc123"
+        mock_client.put_object.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_upload_creates_bucket(self, storage: MinioStorage) -> None:
+        """Test upload creates bucket if not exists."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.bucket_exists.return_value = False  # Bucket doesn't exist
+        mock_result = MagicMock()
+        mock_result.etag = "xyz789"
+        mock_client.put_object.return_value = mock_result
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.upload("file.txt", b"content")
+
+        mock_client.make_bucket.assert_called_once_with("test-bucket")
+        assert result.key == "file.txt"
+
+    @pytest.mark.asyncio
+    async def test_upload_error(self, storage: MinioStorage) -> None:
+        """Test upload failure raises UploadError."""
+        from unittest.mock import MagicMock, patch
+
+        from aef_adapters.object_storage import UploadError
+
+        mock_client = MagicMock()
+        mock_client.bucket_exists.return_value = True
+        mock_client.put_object.side_effect = Exception("Network error")
+
+        with (
+            patch.object(storage, "_get_client", return_value=mock_client),
+            pytest.raises(UploadError, match="Network error"),
+        ):
+            await storage.upload("test.txt", b"data")
+
+    @pytest.mark.asyncio
+    async def test_download_success(self, storage: MinioStorage) -> None:
+        """Test successful download."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.read.return_value = b"file content"
+        mock_client.get_object.return_value = mock_response
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            content = await storage.download("test.txt")
+
+        assert content == b"file content"
+        mock_response.close.assert_called_once()
+        mock_response.release_conn.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_download_not_found(self, storage: MinioStorage) -> None:
+        """Test download of non-existent object."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.get_object.side_effect = Exception("NoSuchKey: not found")
+
+        with (
+            patch.object(storage, "_get_client", return_value=mock_client),
+            pytest.raises(ObjectNotFoundError),
+        ):
+            await storage.download("nonexistent.txt")
+
+    @pytest.mark.asyncio
+    async def test_download_error(self, storage: MinioStorage) -> None:
+        """Test download failure raises DownloadError."""
+        from unittest.mock import MagicMock, patch
+
+        from aef_adapters.object_storage import DownloadError
+
+        mock_client = MagicMock()
+        mock_client.get_object.side_effect = Exception("Connection refused")
+
+        with (
+            patch.object(storage, "_get_client", return_value=mock_client),
+            pytest.raises(DownloadError, match="Connection refused"),
+        ):
+            await storage.download("test.txt")
+
+    @pytest.mark.asyncio
+    async def test_delete_success(self, storage: MinioStorage) -> None:
+        """Test successful deletion."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.delete("test.txt")
+
+        assert result is True
+        mock_client.remove_object.assert_called_once_with("test-bucket", "test.txt")
+
+    @pytest.mark.asyncio
+    async def test_delete_failure(self, storage: MinioStorage) -> None:
+        """Test deletion failure returns False."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.remove_object.side_effect = Exception("Permission denied")
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.delete("test.txt")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_exists_true(self, storage: MinioStorage) -> None:
+        """Test exists returns True for existing object."""
+        from datetime import datetime
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_stat = MagicMock()
+        mock_stat.size = 100
+        mock_stat.content_type = "text/plain"
+        mock_stat.etag = "abc"
+        mock_stat.last_modified = datetime.now()
+        mock_client.stat_object.return_value = mock_stat
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.exists("test.txt")
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_exists_false(self, storage: MinioStorage) -> None:
+        """Test exists returns False for non-existent object."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.stat_object.side_effect = Exception("NoSuchKey")
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.exists("nonexistent.txt")
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_get_object_info(self, storage: MinioStorage) -> None:
+        """Test getting object metadata."""
+        from datetime import datetime
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_stat = MagicMock()
+        mock_stat.size = 1024
+        mock_stat.content_type = "application/json"
+        mock_stat.etag = "etag123"
+        mock_stat.last_modified = datetime(2024, 1, 1, 12, 0, 0)
+        mock_client.stat_object.return_value = mock_stat
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            info = await storage.get_object_info("data.json")
+
+        assert info is not None
+        assert info.key == "data.json"
+        assert info.size_bytes == 1024
+        assert info.content_type == "application/json"
+        assert info.etag == "etag123"
+
+    @pytest.mark.asyncio
+    async def test_get_object_info_not_found(self, storage: MinioStorage) -> None:
+        """Test get_object_info returns None for non-existent object."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.stat_object.side_effect = Exception("not found")
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            info = await storage.get_object_info("nonexistent.txt")
+
+        assert info is None
+
+    @pytest.mark.asyncio
+    async def test_list_objects(self, storage: MinioStorage) -> None:
+        """Test listing objects."""
+        from datetime import datetime
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_obj1 = MagicMock()
+        mock_obj1.object_name = "file1.txt"
+        mock_obj1.size = 100
+        mock_obj1.etag = "etag1"
+        mock_obj1.last_modified = datetime.now()
+
+        mock_obj2 = MagicMock()
+        mock_obj2.object_name = "file2.txt"
+        mock_obj2.size = 200
+        mock_obj2.etag = "etag2"
+        mock_obj2.last_modified = datetime.now()
+
+        mock_client.list_objects.return_value = [mock_obj1, mock_obj2]
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.list_objects("prefix/")
+
+        assert len(result.objects) == 2
+        assert result.objects[0].key == "file1.txt"
+        assert result.objects[1].key == "file2.txt"
+        assert result.prefix == "prefix/"
+
+    @pytest.mark.asyncio
+    async def test_list_objects_empty(self, storage: MinioStorage) -> None:
+        """Test listing objects returns empty for no matches."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.list_objects.return_value = []
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            result = await storage.list_objects("nonexistent/")
+
+        assert len(result.objects) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_presigned_url(self, storage: MinioStorage) -> None:
+        """Test generating presigned URL."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.presigned_get_object.return_value = (
+            "https://minio:9000/bucket/key?signature=xyz"
+        )
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            url = await storage.get_presigned_url("test.txt", expires_in=3600)
+
+        assert "minio" in url or "bucket" in url
+        mock_client.presigned_get_object.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_presigned_url_fallback(self, storage: MinioStorage) -> None:
+        """Test presigned URL fallback on error."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        mock_client.presigned_get_object.side_effect = Exception("Error")
+
+        with patch.object(storage, "_get_client", return_value=mock_client):
+            url = await storage.get_presigned_url("test.txt")
+
+        # Should return a basic URL as fallback
+        assert "localhost:9000" in url
+        assert "test-bucket" in url
+        assert "test.txt" in url
 
 
 class TestStorageFactory:
