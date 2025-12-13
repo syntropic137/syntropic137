@@ -349,6 +349,30 @@ class GitHubAppClient:
         self._check_response(response)
         return response.json()
 
+    async def api_put(self, path: str, json: dict | None = None) -> dict:
+        """Make an authenticated PUT request to the GitHub API.
+
+        Args:
+            path: API path.
+            json: Request body.
+
+        Returns:
+            Response JSON as dictionary.
+
+        Raises:
+            GitHubAppError: On API errors.
+        """
+        token = await self.get_installation_token()
+
+        response = await self._http.put(
+            path,
+            headers={"Authorization": f"Bearer {token}"},
+            json=json,
+        )
+
+        self._check_response(response)
+        return response.json()
+
     def _check_response(self, response: httpx.Response) -> None:
         """Check response for errors.
 

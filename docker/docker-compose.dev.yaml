@@ -137,9 +137,9 @@ services:
       AEF_EXECUTION_ID: "dev-local"
     ports:
       - "8081:8081"
-      - "9901:9901"  # Envoy admin
+      - "9901:9901" # Envoy admin
     profiles:
-      - sidecar  # Only start with: docker compose --profile sidecar up
+      - sidecar # Only start with: docker compose --profile sidecar up
     restart: unless-stopped
 
 volumes:

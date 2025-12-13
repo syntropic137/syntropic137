@@ -55,7 +55,7 @@ static_resources:
                             prefix: "/"
                           route:
                             cluster: anthropic_api
-                            timeout: 300s  # Long timeout for streaming
+                            timeout: 300s # Long timeout for streaming
                           request_headers_to_add:
                             - header:
                                 key: "anthropic-version"
