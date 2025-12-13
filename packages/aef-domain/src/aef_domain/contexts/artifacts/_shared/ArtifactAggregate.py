@@ -41,6 +41,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         super().__init__()
         self._workflow_id: str | None = None
         self._phase_id: str | None = None
+        self._execution_id: str | None = None  # Links to specific execution run
         self._session_id: str | None = None
         self._artifact_type: ArtifactType | None = None
         self._content_type: ContentType = ContentType.TEXT_MARKDOWN
@@ -69,6 +70,11 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
     def phase_id(self) -> str | None:
         """Get the phase that produced this artifact."""
         return self._phase_id
+
+    @property
+    def execution_id(self) -> str | None:
+        """Get the execution run that produced this artifact."""
+        return self._execution_id
 
     @property
     def session_id(self) -> str | None:
@@ -154,6 +160,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             artifact_id=artifact_id,
             workflow_id=command.workflow_id,
             phase_id=command.phase_id,
+            execution_id=command.execution_id,  # Link to execution run
             session_id=command.session_id,
             artifact_type=command.artifact_type,
             content_type=command.content_type or ContentType.TEXT_MARKDOWN,
@@ -177,6 +184,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         """Apply ArtifactCreatedEvent."""
         self._workflow_id = event.workflow_id
         self._phase_id = event.phase_id
+        self._execution_id = event.execution_id  # Capture execution context
         self._session_id = event.session_id
         self._artifact_type = event.artifact_type
         self._content_type = event.content_type

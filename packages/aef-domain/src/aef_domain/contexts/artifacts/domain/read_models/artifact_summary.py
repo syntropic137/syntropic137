@@ -17,6 +17,9 @@ class ArtifactSummary:
     workflow_id: str
     """ID of the workflow this artifact belongs to."""
 
+    execution_id: str | None
+    """ID of the execution run that created this artifact (v2)."""
+
     session_id: str | None
     """ID of the session that created this artifact."""
 
@@ -47,6 +50,7 @@ class ArtifactSummary:
         return cls(
             id=data["id"],
             workflow_id=data["workflow_id"],
+            execution_id=data.get("execution_id"),  # v2 field
             session_id=data.get("session_id"),
             phase_id=data.get("phase_id"),
             artifact_type=data.get("artifact_type", ""),
@@ -70,6 +74,7 @@ class ArtifactSummary:
         return {
             "id": self.id,
             "workflow_id": self.workflow_id,
+            "execution_id": self.execution_id,  # v2 field
             "session_id": self.session_id,
             "phase_id": self.phase_id,
             "artifact_type": self.artifact_type,

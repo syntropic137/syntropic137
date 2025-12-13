@@ -482,12 +482,13 @@ class WorkflowExecutionEngine:
                 ),
             )
 
-            # Create artifact
+            # Create artifact linked to this execution run
             artifact_id = str(uuid4())
             await self._create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,
+                execution_id=ctx.execution_id,  # Link to execution run for retrieval
                 session_id=session_id,
                 artifact_type=phase.output_artifact_type,
                 content=response.content,
@@ -593,12 +594,24 @@ class WorkflowExecutionEngine:
         artifact_id: str,
         workflow_id: str,
         phase_id: str,
+        execution_id: str,
         session_id: str,
         artifact_type: str,
         content: str,
         title: str,
     ) -> None:
-        """Create and save an artifact."""
+        """Create and save an artifact.
+
+        Args:
+            artifact_id: Unique artifact identifier
+            workflow_id: Parent workflow ID
+            phase_id: Phase that produced this artifact
+            execution_id: Execution run ID (links to WorkflowExecution aggregate)
+            session_id: Agent session ID
+            artifact_type: Type of artifact (string, mapped to enum)
+            content: Artifact content
+            title: Human-readable title
+        """
         from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
             ArtifactAggregate,
         )
@@ -614,6 +627,7 @@ class WorkflowExecutionEngine:
             aggregate_id=artifact_id,
             workflow_id=workflow_id,
             phase_id=phase_id,
+            execution_id=execution_id,  # Links artifact to specific execution run
             session_id=session_id,
             artifact_type=artifact_type_enum,
             content=content,
