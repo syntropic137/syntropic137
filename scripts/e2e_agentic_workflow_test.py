@@ -129,7 +129,7 @@ async def check_prerequisites() -> bool:
     return all_ok
 
 
-async def run_phase1_workflow(live: bool = False) -> dict:
+async def run_phase1_workflow(_live: bool = False) -> dict:
     """Run Phase 1: Programmatic workflow execution.
 
     Returns:
@@ -188,8 +188,8 @@ async def run_phase1_workflow(live: bool = False) -> dict:
     # Get installation token for Git operations
     print_step(4, "Get GitHub Installation Token")
 
-    install_token = await github_client.get_installation_token()
-    print(f"   🔑 Installation token obtained (1-hour TTL)")
+    _ = await github_client.get_installation_token()  # Validates token generation
+    print("   🔑 Installation token obtained (1-hour TTL)")
 
     # Create a branch and file via GitHub API
     print_step(5, "Create Branch and Code Changes")
@@ -382,12 +382,13 @@ async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str)
         await connect_event_store()
         print("   🔌 Connected to Event Store")
 
+        from decimal import Decimal
+
         from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
-        from decimal import Decimal
 
         # Create and start the execution aggregate
         aggregate = WorkflowExecutionAggregate()
@@ -402,7 +403,7 @@ async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str)
             },
         )
         aggregate._handle_command(start_cmd)
-        print(f"   📤 WorkflowExecutionStarted event created")
+        print("   📤 WorkflowExecutionStarted event created")
 
         # Complete the execution
         complete_cmd = CompleteExecutionCommand(
@@ -416,7 +417,7 @@ async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str)
             artifact_ids=[],
         )
         aggregate._handle_command(complete_cmd)
-        print(f"   📤 WorkflowCompleted event created")
+        print("   📤 WorkflowCompleted event created")
 
         # Save to event store via repository
         repo = get_workflow_execution_repository()
@@ -527,14 +528,14 @@ async def main() -> int:
         return 1
 
     # Emit workflow events to event store
-    events_emitted = await emit_workflow_events(
+    await emit_workflow_events(
         execution_id=results["execution_id"],
         workflow_id="e2e-github-app-workflow",
         branch=results["branch"],
     )
 
     # Verify event store
-    events_verified = await verify_event_store(results["execution_id"])
+    _ = await verify_event_store(results["execution_id"])  # Validates store
 
     # Summary
     print_header("🎉 E2E Integration Test Complete!")
@@ -545,7 +546,7 @@ async def main() -> int:
     print(f"   PR: #{results['pr_number']}")
     print(f"   Cost: ${results['cost_usd']}")
 
-    print(f"\n🔗 Pull Request:")
+    print("\n🔗 Pull Request:")
     print(f"   {results['pr_url']}")
 
     print("\n📌 Next Steps:")

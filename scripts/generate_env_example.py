@@ -459,7 +459,7 @@ def main() -> None:
 
     # Sync .env idempotently
     if env_path.exists():
-        existing, new, total, extra = sync_env_file(example_path, env_path)
+        existing, new, _total, extra = sync_env_file(example_path, env_path)
         if new > 0:
             print(f"✅ Synced {env_path}")
             print(f"   {existing} existing values preserved")

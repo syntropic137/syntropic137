@@ -19,7 +19,6 @@ Environment:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 from concurrent import futures
@@ -64,7 +63,7 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
             logger.info("Loaded GitHub credentials from environment")
 
     def Check(
-        self, request: auth_pb2.CheckRequest, context: grpc.ServicerContext
+        self, request: auth_pb2.CheckRequest, _context: grpc.ServicerContext
     ) -> auth_pb2.CheckResponse:
         """Handle ext_authz check request.
 
@@ -101,7 +100,7 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
 
         # Inject authorization header
         ok_response = response.ok_response
-        headers_to_add = ok_response.headers
+        _ = ok_response.headers  # Headers are modified in-place below
 
         if token_type == "anthropic":
             # Anthropic uses x-api-key header

@@ -71,8 +71,8 @@ async def main() -> int:
 
     try:
         # Get installation token (this proves the app is working)
-        token = await github_client.get_installation_token()
-        print(f"   ✅ Installation token obtained (expires in 1 hour)")
+        _ = await github_client.get_installation_token()  # Validates token flow
+        print("   ✅ Installation token obtained (expires in 1 hour)")
         print(f"   Bot username: {github_client.bot_username}")
 
         # Get app info
@@ -163,7 +163,7 @@ This file was created by the AEF E2E test script to verify:
         )
 
         commit_sha = result.get("commit", {}).get("sha", "unknown")[:7]
-        print(f"   ✅ File created successfully!")
+        print("   ✅ File created successfully!")
         print(f"   Path: {test_file_path}")
         print(f"   Commit: {commit_sha}")
         print(f"   URL: https://github.com/{sandbox_repo}/blob/main/{test_file_path}")
@@ -204,7 +204,7 @@ This file was created by the AEF E2E test script to verify:
     print("\n" + "=" * 60)
     print("🎉 E2E Test Complete!")
     print("=" * 60)
-    print(f"\nCheck the sandbox repo:")
+    print("\nCheck the sandbox repo:")
     print(f"  https://github.com/{sandbox_repo}/tree/main/e2e-tests")
 
     return 0
