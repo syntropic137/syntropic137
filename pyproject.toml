@@ -137,6 +137,8 @@ module = [
     "uvicorn.*",
     "grpc",
     "grpc.*",
+    "redis",
+    "redis.*",
 ]
 ignore_missing_imports = true
 
