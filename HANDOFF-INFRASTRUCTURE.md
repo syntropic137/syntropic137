@@ -391,19 +391,19 @@ terraform destroy -var-file=terraform.tfvars
 
 ## Milestones
 
-### Phase 1: Docker Foundation
-- [ ] **M4.1** Create `infra-as-code/` directory structure + justfile
-- [ ] **M4.2** Production `docker-compose.yaml` with all services
-- [ ] **M4.3** Dashboard Dockerfile (multi-stage build)
-- [ ] **M4.4** Secrets management (Python scripts, Docker secrets)
-- [ ] **M4.5** Health check (Python script, cross-platform)
+### Phase 1: Docker Foundation ✅
+- [x] **M4.1** Create `infra/` directory structure + justfile
+- [x] **M4.2** Production `docker-compose.yaml` with all services
+- [x] **M4.3** Dashboard Dockerfile (multi-stage build)
+- [x] **M4.4** Secrets management (Python scripts, Docker secrets)
+- [x] **M4.5** Health check (Python script, cross-platform)
 
-### Phase 2: Homelab Deployment
-- [ ] **M4.6** Cloudflare Tunnel integration
-- [ ] **M4.7** `docker-compose.homelab.yaml` overrides
-- [ ] **M4.8** Terraform module for Cloudflare Tunnel
-- [ ] **M4.9** Deployment documentation
-- [ ] **M4.10** Backup/restore (Python scripts + just recipes)
+### Phase 2: Homelab Deployment ✅
+- [x] **M4.6** Cloudflare Tunnel integration
+- [x] **M4.7** `docker-compose.homelab.yaml` overrides
+- [ ] **M4.8** Terraform module for Cloudflare Tunnel (deferred - using Docker approach)
+- [x] **M4.9** Deployment documentation
+- [ ] **M4.10** Backup/restore (Python scripts + just recipes) (future)
 
 ### Phase 3: Cloud Infrastructure
 - [ ] **M4.11** Terraform networking module (VPC, subnets)

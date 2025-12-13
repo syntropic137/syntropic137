@@ -9,18 +9,25 @@
 # =============================================================================
 FROM node:20-alpine AS builder
 
-WORKDIR /app
-
-# Install pnpm
+# Install pnpm globally
 RUN npm install -g pnpm
 
-# Copy package files for dependency installation
-COPY apps/aef-dashboard-ui/package.json apps/aef-dashboard-ui/pnpm-lock.yaml ./
+# Set up workspace structure matching the monorepo layout
+# This is required because vite.config.ts uses relative paths like:
+# path.resolve(__dirname, '../../lib/ui-feedback/...')
+WORKDIR /workspace
 
-# Install dependencies
+# Copy ui-feedback package (dependency referenced in vite.config.ts)
+COPY lib/ui-feedback/packages/ui-feedback-react/ ./lib/ui-feedback/packages/ui-feedback-react/
+
+# Copy app package files for dependency installation
+COPY apps/aef-dashboard-ui/package.json apps/aef-dashboard-ui/pnpm-lock.yaml ./apps/aef-dashboard-ui/
+
+# Install dependencies from the app directory
+WORKDIR /workspace/apps/aef-dashboard-ui
 RUN pnpm install --frozen-lockfile
 
-# Copy source files
+# Copy app source files
 COPY apps/aef-dashboard-ui/ ./
 
 # Build for production
@@ -34,7 +41,7 @@ RUN pnpm run build
 FROM nginx:alpine AS runtime
 
 # Copy built assets to nginx
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --from=builder /workspace/apps/aef-dashboard-ui/dist /usr/share/nginx/html
 
 # Copy nginx configuration
 COPY infra/docker/images/aef-ui/nginx.conf /etc/nginx/conf.d/default.conf
