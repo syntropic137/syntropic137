@@ -296,10 +296,14 @@ class WorkflowExecutionEngine:
         )
 
         # 4. Execute phases
-        # TODO: Create isolated workspace via self._router.create() and
-        # execute all phases inside it. For now, we use the router for DI
-        # enforcement but agent execution happens in host process.
-        # See ADR-023 for full isolation architecture.
+        # TODO: Each phase should create its own isolated workspace:
+        #   1. Create workspace via self._router.create()
+        #   2. Inject artifacts from previous phases
+        #   3. Execute agent inside workspace (subprocess or SDK)
+        #   4. Collect artifacts for next phase
+        #   5. Destroy workspace (stateless)
+        # For now, router is DI-enforced but agent runs in host process.
+        # See ADR-023 and docs/PLAN-FULL-WORKSPACE-ISOLATION.md
         try:
             phases = self._get_executable_phases(workflow)
             for phase in sorted(phases, key=lambda p: p.order):

@@ -1,9 +1,9 @@
 # Plan: Full Workspace Isolation for Agent Execution
 
-**Status**: Planning  
-**Created**: 2024-12-11  
-**Related**: ADR-023, ADR-021  
-**Priority**: High  
+**Status**: Planning
+**Created**: 2024-12-11
+**Related**: ADR-023, ADR-021
+**Priority**: High
 
 ## Problem Statement
 
@@ -24,26 +24,46 @@ This means:
 
 ## Goal
 
-Execute agents **inside** the workspace container/VM, not in the host process.
+Execute agents **inside** isolated workspace containers, with **one workspace per phase** (stateless agents).
+
+### Key Principle: Stateless Phases
+
+Each phase is independent:
+- Gets a **fresh workspace** (no shared state)
+- Receives **artifacts as input** (from previous phases)
+- Produces **artifacts as output** (for next phases)
+- Workspace is **destroyed** after phase completes
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Orchestrator (Host)                       │
-│                                                              │
-│  ┌──────────────────┐     ┌──────────────────────────────┐  │
-│  │ WorkflowExecution │     │      Isolated Workspace       │  │
-│  │     Engine        │────▶│  ┌────────────────────────┐  │  │
-│  │                   │     │  │     Agent Process       │  │  │
-│  │  - Start/Stop    │     │  │  - claude-agent-sdk     │  │  │
-│  │  - Stream Events  │     │  │  - File access          │  │  │
-│  │  - Collect Artifacts│   │  │  - API keys injected    │  │  │
-│  └──────────────────┘     │  └────────────────────────┘  │  │
-│                            │                              │  │
-│                            │  Resource Limits:            │  │
-│                            │  - 512MB RAM, 0.5 CPU        │  │
-│                            │  - Network allowlist only    │  │
-│                            └──────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Orchestrator (Host)                              │
+│                                                                          │
+│   Phase 1                    Phase 2                    Phase 3          │
+│   ┌──────────────────┐      ┌──────────────────┐      ┌──────────────┐  │
+│   │ Workspace A      │      │ Workspace B      │      │ Workspace C  │  │
+│   │ ┌──────────────┐ │      │ ┌──────────────┐ │      │ ┌──────────┐ │  │
+│   │ │ Agent        │ │      │ │ Agent        │ │      │ │ Agent    │ │  │
+│   │ │ (Research)   │ │─────▶│ │ (Implement)  │ │─────▶│ │ (Review) │ │  │
+│   │ └──────────────┘ │      │ └──────────────┘ │      │ └──────────┘ │  │
+│   │                  │      │                  │      │              │  │
+│   │ Artifacts OUT ───┼──────┼▶ Artifacts IN   │      │              │  │
+│   └──────────────────┘      │ Artifacts OUT ──┼──────┼▶ Artifacts   │  │
+│         ↓ destroy           └──────────────────┘      └──────────────┘  │
+│                                   ↓ destroy                ↓ destroy    │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Per-Phase Flow
+
+```
+1. Create isolated workspace (Docker/gVisor/Firecracker)
+2. Inject artifacts from previous phases
+3. Inject credentials (GitHub token, API keys)
+4. Execute agent inside workspace
+5. Stream events to aggregate
+6. Collect output artifacts
+7. Destroy workspace
+8. Next phase...
 ```
 
 ## Proposed Solution
@@ -67,21 +87,21 @@ async def _execute_phase_isolated(
             files=[("task.json", task_json_bytes)],
             metadata={"phase": phase.name},
         )
-        
+
         # 3. Execute agent subprocess INSIDE workspace
         exit_code, stdout, stderr = await workspace.execute_command([
             "python", "-m", "aef_agent_runner",
             "--task-file", "/workspace/task.json",
             "--output-dir", "/workspace/output",
         ])
-        
+
         # 4. Stream events from agent (via file or socket)
         async for event in self._stream_agent_events(workspace):
             yield event
-        
+
         # 5. Collect artifacts
         artifacts = await workspace.collect_artifacts(["output/*"])
-        
+
         return PhaseResult(success=exit_code == 0, artifacts=artifacts)
 ```
 
@@ -160,14 +180,14 @@ from pathlib import Path
 def main():
     task_file = Path(sys.argv[1])
     output_dir = Path(sys.argv[2])
-    
+
     task = json.loads(task_file.read_text())
-    
+
     # Execute with claude-agent-sdk
     for event in execute_task(task):
         # Write event as JSONL to stdout
         print(json.dumps(event.to_dict()), flush=True)
-    
+
     # Artifacts are already in output_dir
 ```
 
@@ -187,7 +207,7 @@ ENTRYPOINT ["python", "-m", "aef_agent_runner"]
 
 ### Phase 3: Engine Integration
 
-Update `WorkflowExecutionEngine._execute_phase`:
+Update `WorkflowExecutionEngine._execute_phase` to create **one workspace per phase**:
 
 ```python
 async def _execute_phase(
@@ -197,39 +217,63 @@ async def _execute_phase(
     ctx: ExecutionContext,
     aggregate: WorkflowExecutionAggregate,
 ) -> None:
-    # Create workspace config
+    """Execute a single phase in its own isolated workspace.
+
+    Each phase is stateless:
+    - Fresh workspace created
+    - Previous artifacts injected as input
+    - Agent executes
+    - Output artifacts collected
+    - Workspace destroyed
+    """
+    # 1. Create workspace config for THIS phase
     config = IsolatedWorkspaceConfig(
-        base_config=WorkspaceConfig(session_id=ctx.execution_id),
+        base_config=WorkspaceConfig(
+            session_id=f"{ctx.execution_id}-{phase.phase_id}",
+            phase_id=phase.phase_id,
+        ),
         security=self._get_security_settings(phase),
     )
-    
-    # Create isolated workspace
+
+    # 2. Create isolated workspace (destroyed on exit)
     async with self._router.create(config) as workspace:
-        # Inject task and credentials
-        task_data = self._prepare_task(phase, ctx)
+        # 3. Inject artifacts from PREVIOUS phases
+        previous_artifacts = self._get_previous_phase_artifacts(ctx, phase)
         await workspace.inject_context(
-            files=[("task.json", json.dumps(task_data).encode())],
+            files=previous_artifacts,
+            metadata={"phase": phase.name, "inputs": ctx.inputs},
         )
-        
-        # Execute agent in workspace
+
+        # 4. Prepare task with phase prompt
+        task_data = self._prepare_task(phase, ctx)
+        await workspace.write_file(
+            "task.json",
+            json.dumps(task_data).encode(),
+        )
+
+        # 5. Execute agent INSIDE workspace
         process = await workspace.execute_streaming([
             "python", "-m", "aef_agent_runner",
             "--task", "/workspace/task.json",
             "--output", "/workspace/output",
         ])
-        
-        # Stream events from stdout
+
+        # 6. Stream events from stdout (JSONL)
         async for line in process.stdout:
             event = json.loads(line)
-            # Update aggregate with event
             self._handle_agent_event(event, aggregate)
-        
-        # Wait for completion
+
+        # 7. Wait for completion
         exit_code = await process.wait()
-        
-        # Collect artifacts
-        artifacts = await workspace.collect_artifacts()
+
+        # 8. Collect OUTPUT artifacts for next phases
+        artifacts = await workspace.collect_artifacts(
+            patterns=["output/**/*"],
+        )
+        ctx.phase_artifacts[phase.phase_id] = artifacts
         ctx.artifact_ids.extend(a.id for a in artifacts)
+
+    # Workspace is now destroyed (stateless)
 ```
 
 ## Milestones
