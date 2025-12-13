@@ -329,6 +329,8 @@ class WorkspaceRouter:
     ) -> None:
         """Inject git identity and credentials into workspace.
 
+        Uses TokenVendingService when available for short-lived, tracked tokens.
+
         Args:
             workspace: The workspace to configure
             backend_class: Backend class for command execution
@@ -346,12 +348,27 @@ class WorkspaceRouter:
         # Get workflow override from config
         workflow_override = config.git_identity_override
 
+        # Get execution_id for token tracking
+        execution_id = config.effective_execution_id
+
+        # Try to get TokenVendingService for short-lived tokens
+        token_vending_service = None
+        try:
+            from aef_tokens import get_token_vending_service
+
+            token_vending_service = get_token_vending_service()
+            logger.debug("Using TokenVendingService for git credentials")
+        except ImportError:
+            logger.debug("aef_tokens not available, using direct installation token")
+
         # Git identity not configured is OK for workspaces that don't need git
         with contextlib.suppress(ValueError):
             await injector.inject_identity(
                 workspace,
                 executor,
                 workflow_override=workflow_override,
+                execution_id=execution_id,
+                token_vending_service=token_vending_service,
             )
 
     async def _inject_api_keys(

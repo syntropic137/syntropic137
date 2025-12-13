@@ -330,6 +330,57 @@ class TokenVendingService:
 
         return tokens
 
+    async def vend_github_token(
+        self,
+        execution_id: str,
+        ttl_seconds: int | None = None,
+    ) -> str:
+        """Vend a short-lived GitHub token for workspace injection.
+
+        This is a convenience method that:
+        1. Gets an installation token from GitHubAppClient
+        2. Tracks it with the TokenVendingService (for revocation/audit)
+        3. Returns the raw token value for git credential injection
+
+        Args:
+            execution_id: The execution this token is for
+            ttl_seconds: Token TTL in seconds (defaults to 5 minutes)
+
+        Returns:
+            The raw GitHub installation token value
+
+        Raises:
+            ValueError: If GitHub App is not configured
+        """
+        # Import here to avoid circular dependency
+        from aef_adapters.github import get_github_client
+
+        client = get_github_client()
+
+        # Get installation token from GitHub
+        github_token = await client.get_installation_token()
+
+        # Create a tracking record for this token
+        # Note: We can't control the actual GitHub token expiry (1 hour),
+        # but we track our intended TTL for revocation/audit purposes
+        scoped_token = await self.vend_token(
+            execution_id=execution_id,
+            token_type=TokenType.GITHUB,
+            scope=TokenScope(
+                allowed_apis=["github:*"],
+            ),
+            ttl_seconds=ttl_seconds,
+        )
+
+        logger.info(
+            "GitHub token vended",
+            token_id=scoped_token.token_id,
+            execution_id=execution_id,
+            ttl_seconds=ttl_seconds or self._default_ttl,
+        )
+
+        return github_token
+
     def _generate_token_id(self) -> str:
         """Generate a unique token ID."""
         return f"{TOKEN_ID_PREFIX}{secrets.token_urlsafe(24)}"
