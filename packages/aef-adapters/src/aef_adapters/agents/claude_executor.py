@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from aef_adapters.agents.agentic_types import AgentExecutionConfig
+    from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
     from aef_adapters.agents.executor import ExecutionEvent
     from aef_adapters.workspaces.types import IsolatedWorkspace
 
@@ -71,14 +72,14 @@ class ClaudeAgentExecutor:
         """
         self._model = model
         self._api_key = api_key
-        self._agent = None  # Lazy init
+        self._agent: ClaudeAgenticAgent | None = None  # Lazy init
 
     @property
     def provider_name(self) -> str:
         """Get the agent provider name."""
         return "claude"
 
-    def _get_agent(self) -> ClaudeAgenticAgent:  # noqa: F821
+    def _get_agent(self) -> "ClaudeAgenticAgent":
         """Get or create the underlying Claude agent."""
         if self._agent is None:
             from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
@@ -141,7 +142,7 @@ class ClaudeAgentExecutor:
         # Adapt IsolatedWorkspace to Workspace for the underlying agent
         # TODO: In future, execute agent subprocess inside workspace container
         adapted_workspace = Workspace(
-            path=workspace.workspace_path,
+            path=workspace.path,
             config=None,  # type: ignore[arg-type]
         )
 

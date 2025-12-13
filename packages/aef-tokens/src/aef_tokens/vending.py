@@ -127,15 +127,15 @@ class RedisTokenStore:
         )
 
         # Add to execution's token set
-        await self._redis.sadd(exec_key, token.token_id)
+        await self._redis.sadd(exec_key, token.token_id)  # type: ignore[misc]
         # Set expiry on the set slightly longer than token TTL
         await self._redis.expire(exec_key, token.ttl_seconds + 60)
 
         logger.debug(
-            "Token stored",
-            token_id=token.token_id,
-            execution_id=token.execution_id,
-            ttl=token.ttl_seconds,
+            "Token stored: id=%s, execution=%s, ttl=%ds",
+            token.token_id,
+            token.execution_id,
+            token.ttl_seconds,
         )
 
     async def get(self, token_id: str) -> ScopedToken | None:
@@ -157,7 +157,7 @@ class RedisTokenStore:
     async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
         """Get all token IDs for an execution."""
         exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{execution_id}"
-        members = await self._redis.smembers(exec_key)
+        members = await self._redis.smembers(exec_key)  # type: ignore[misc]
         return [m.decode() if isinstance(m, bytes) else m for m in members]
 
     async def delete_tokens_for_execution(self, execution_id: str) -> int:
@@ -176,9 +176,9 @@ class RedisTokenStore:
         await self._redis.delete(exec_key)
 
         logger.info(
-            "Tokens revoked for execution",
-            execution_id=execution_id,
-            count=len(token_ids),
+            "Tokens revoked for execution: execution=%s, count=%d",
+            execution_id,
+            len(token_ids),
         )
 
         return len(token_ids)
@@ -263,11 +263,11 @@ class TokenVendingService:
         await self._store.store(token)
 
         logger.info(
-            "Token vended",
-            token_id=token.token_id,
-            execution_id=execution_id,
-            token_type=token_type.value,
-            ttl_seconds=ttl,
+            "Token vended: id=%s, execution=%s, type=%s, ttl=%ds",
+            token.token_id,
+            execution_id,
+            token_type.value,
+            ttl,
         )
 
         return token
@@ -302,7 +302,7 @@ class TokenVendingService:
         """
         deleted = await self._store.delete(token_id)
         if deleted:
-            logger.info("Token revoked", token_id=token_id)
+            logger.info("Token revoked: id=%s", token_id)
         return deleted
 
     async def revoke_tokens(self, execution_id: str) -> int:
@@ -373,10 +373,10 @@ class TokenVendingService:
         )
 
         logger.info(
-            "GitHub token vended",
-            token_id=scoped_token.token_id,
-            execution_id=execution_id,
-            ttl_seconds=ttl_seconds or self._default_ttl,
+            "GitHub token vended: id=%s, execution=%s, ttl=%ds",
+            scoped_token.token_id,
+            execution_id,
+            ttl_seconds or self._default_ttl,
         )
 
         return github_token

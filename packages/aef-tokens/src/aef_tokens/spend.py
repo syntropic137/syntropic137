@@ -262,12 +262,12 @@ class SpendTracker:
         await self._store.store(budget)
 
         logger.info(
-            "Budget allocated",
-            execution_id=execution_id,
-            workflow_type=workflow_type.value,
-            max_input_tokens=budget.max_input_tokens,
-            max_output_tokens=budget.max_output_tokens,
-            max_cost_usd=str(budget.max_cost_usd),
+            "Budget allocated: execution=%s, type=%s, max_input=%d, max_output=%d, max_cost=$%s",
+            execution_id,
+            workflow_type.value,
+            budget.max_input_tokens,
+            budget.max_output_tokens,
+            budget.max_cost_usd,
         )
 
         return budget
@@ -363,12 +363,12 @@ class SpendTracker:
         await self._store.update(budget)
 
         logger.debug(
-            "Usage recorded",
-            execution_id=execution_id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost=str(cost),
-            total_cost=str(budget.used_cost_usd),
+            "Usage recorded: execution=%s, input=%d, output=%d, cost=$%s, total=$%s",
+            execution_id,
+            input_tokens,
+            output_tokens,
+            cost,
+            budget.used_cost_usd,
         )
 
         # Check for alert thresholds
@@ -388,7 +388,7 @@ class SpendTracker:
         deleted = await self._store.delete(execution_id)
 
         if deleted:
-            logger.info("Budget released", execution_id=execution_id)
+            logger.info("Budget released: execution=%s", execution_id)
 
         return deleted
 

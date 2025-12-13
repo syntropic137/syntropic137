@@ -162,7 +162,7 @@ class GitHubAppClient:
     @property
     def bot_username(self) -> str | None:
         """Get the bot username for commits."""
-        return self._settings.bot_username
+        return self._settings.bot_name
 
     @property
     def bot_email(self) -> str | None:

@@ -349,9 +349,8 @@ class GitInjector:
                     )
                     token_ttl = "5 minutes (vended)"
                     logger.info(
-                        "Using vended GitHub token",
-                        execution_id=execution_id,
-                        ttl="5 minutes",
+                        "Using vended GitHub token: execution=%s, ttl=5min",
+                        execution_id,
                     )
                 except Exception as e:
                     logger.warning(f"TokenVendingService failed, falling back to direct token: {e}")
@@ -397,10 +396,10 @@ class GitInjector:
             await executor(workspace, gh_token_cmd)
 
             logger.info(
-                "GitHub App credentials injected",
-                bot_username=client.bot_username,
-                token_ttl=token_ttl,
-                execution_id=execution_id,
+                "GitHub App credentials injected: bot=%s, ttl=%s, execution=%s",
+                client.bot_username,
+                token_ttl,
+                execution_id,
             )
             return True
 
