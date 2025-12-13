@@ -93,7 +93,7 @@ Adopt a **Workspace-First Execution Model** where:
 ```python
 class LocalWorkspace(WorkspaceProtocol):
     """Workspace using local filesystem - TEST ENVIRONMENT ONLY."""
-    
+
     def __init__(self, path: Path) -> None:
         settings = get_settings()
         if not settings.is_test:
@@ -126,7 +126,7 @@ class WorkflowExecutionEngine:
                 "execution_repository is required - events MUST be persisted. "
                 "See ADR-023: Workspace-First Execution Model."
             )
-        
+
         self._workspace_router = workspace_router
         self._executions = execution_repository
 ```
@@ -137,22 +137,22 @@ class WorkflowExecutionEngine:
 async def execute(self, workflow_id: str, inputs: dict) -> ExecutionResult:
     # Create aggregate
     execution = WorkflowExecutionAggregate()
-    
+
     # Start execution (emits WorkflowExecutionStarted)
     execution._handle_command(StartExecutionCommand(
         execution_id=execution_id,
         workflow_id=workflow_id,
         ...
     ))
-    
+
     # PERSIST immediately - no silent drops
     await self._executions.save(execution)
-    
+
     for phase in workflow.phases:
         await self._execute_phase(execution, phase, ctx)
         # PERSIST after each phase
         await self._executions.save(execution)
-    
+
     # Complete execution (emits WorkflowCompleted)
     execution._handle_command(CompleteExecutionCommand(...))
     await self._executions.save(execution)
@@ -166,19 +166,19 @@ async def _execute_phase(self, execution, phase, ctx):
         execution_id=execution.id,
         phase_id=phase.phase_id,
     )
-    
+
     # Get isolated workspace
     async with self._workspace_router.get_workspace(config) as workspace:
         # Inject credentials (from ADR-022)
         await self._inject_credentials(workspace)
-        
+
         # Run agent INSIDE workspace
         result = await workspace.execute([
             "python", "-m", "claude_agent",
             "--task", phase.prompt,
             "--workspace", "/workspace",
         ])
-        
+
         # Collect artifacts
         artifacts = await workspace.collect_artifacts("/workspace/output")
 ```
