@@ -19,6 +19,7 @@ from aef_dashboard.api import (
     metrics_router,
     observability_router,
     sessions_router,
+    webhooks_router,
     websocket_router,
     workflows_router,
 )
@@ -215,6 +216,9 @@ def create_app() -> FastAPI:
     app.include_router(metrics_router, prefix="/api")
     app.include_router(observability_router, prefix="/api")  # Tool/token metrics
     app.include_router(control_router, prefix="/api")  # Execution control (pause/resume/cancel)
+
+    # Webhooks (no /api prefix - must match GitHub's webhook URL exactly)
+    app.include_router(webhooks_router)
 
     # WebSocket endpoint for real-time events (no /api prefix)
     app.include_router(websocket_router)

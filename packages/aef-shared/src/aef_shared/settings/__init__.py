@@ -14,6 +14,11 @@ Usage:
     git = settings.git_identity
     print(f"Commits as: {git.user_name} <{git.user_email}>")
 
+    # GitHub App settings
+    github = settings.github
+    if github.is_configured:
+        print(f"GitHub App: {github.app_name}")
+
     # Container logging settings
     logging = settings.container_logging
     print(f"Log level: {logging.level}")
@@ -27,6 +32,7 @@ Environment Variables:
     Required vars will cause immediate failure if missing.
 
     AEF_GIT_* - Git identity and credentials
+    AEF_GITHUB_* - GitHub App configuration
     AEF_LOGGING_* - Container logging configuration
     AEF_STORAGE_* - Object storage configuration
 """
@@ -36,6 +42,11 @@ from aef_shared.settings.config import (
     Settings,
     get_settings,
     reset_settings,
+)
+from aef_shared.settings.github import (
+    GitHubAppSettings,
+    get_github_settings,
+    reset_github_settings,
 )
 from aef_shared.settings.storage import (
     StorageProvider,
@@ -58,6 +69,7 @@ __all__ = [
     "CloudProvider",
     "ContainerLoggingSettings",
     "GitCredentialType",
+    "GitHubAppSettings",
     "GitIdentityResolver",
     "GitIdentitySettings",
     "IsolationBackend",
@@ -67,6 +79,8 @@ __all__ = [
     "WorkspaceSecuritySettings",
     "WorkspaceSettings",
     "get_default_isolation_backend",
+    "get_github_settings",
     "get_settings",
+    "reset_github_settings",
     "reset_settings",
 ]

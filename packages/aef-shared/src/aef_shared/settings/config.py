@@ -15,6 +15,7 @@ from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from aef_shared.settings.github import GitHubAppSettings
     from aef_shared.settings.storage import StorageSettings
     from aef_shared.settings.workspace import (
         ContainerLoggingSettings,
@@ -418,6 +419,23 @@ class Settings(BaseSettings):
         from aef_shared.settings.storage import StorageSettings
 
         return StorageSettings()
+
+    # =========================================================================
+    # GITHUB APP - See HANDOFF-GITHUB-APP.md
+    # =========================================================================
+
+    @property
+    def github(self) -> GitHubAppSettings:
+        """Get GitHub App settings for secure authentication.
+
+        Returns GitHub App configuration for auto-rotating tokens.
+        Commits from agents show as '<app_name>[bot]'.
+
+        See HANDOFF-GITHUB-APP.md for architecture details.
+        """
+        from aef_shared.settings.github import GitHubAppSettings
+
+        return GitHubAppSettings()
 
 
 @lru_cache
