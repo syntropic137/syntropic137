@@ -321,9 +321,8 @@ class GitInjector:
                 return False
 
             logger.info(
-                "GitHub App credentials injected",
-                bot_username=client.bot_username,
-                token_ttl="1 hour",
+                "GitHub App credentials injected (bot=%s, ttl=1 hour)",
+                client.bot_username,
             )
             return True
 
