@@ -1,0 +1,18 @@
+[project]
+name = "aef-tokens"
+version = "0.1.0"
+description = "Token vending and spend tracking for Agentic Engineering Framework"
+requires-python = ">=3.12"
+
+dependencies = [
+    "pydantic>=2.12.5",
+    "redis>=5.0.0",
+    "aef-shared",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
