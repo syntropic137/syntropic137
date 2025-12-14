@@ -16,12 +16,13 @@ import json
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Protocol
 
 from aef_tokens.models import DEFAULT_BUDGETS, SpendBudget, WorkflowType
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
