@@ -160,12 +160,12 @@ class GitHubAppClient:
         return self._settings.installation_id
 
     @property
-    def bot_username(self) -> str | None:
+    def bot_username(self) -> str:
         """Get the bot username for commits."""
-        return self._settings.bot_username
+        return self._settings.bot_name
 
     @property
-    def bot_email(self) -> str | None:
+    def bot_email(self) -> str:
         """Get the bot email for commits."""
         return self._settings.bot_email
 

@@ -127,6 +127,9 @@ class GitInjector:
         workspace: IsolatedWorkspace,
         executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         workflow_override: GitIdentitySettings | None = None,
+        *,
+        execution_id: str | None = None,
+        token_vending_service: object | None = None,
     ) -> bool:
         """Inject git identity into a workspace.
 
@@ -137,6 +140,8 @@ class GitInjector:
             executor: Async function to execute commands:
                       (workspace, command) -> (exit_code, stdout, stderr)
             workflow_override: Optional workflow-specific git settings
+            execution_id: Optional execution identifier for tracing
+            token_vending_service: Optional token vending service (reserved for future use)
 
         Returns:
             True if identity was injected successfully
@@ -144,6 +149,9 @@ class GitInjector:
         Raises:
             ValueError: If git identity cannot be resolved
         """
+        # execution_id and token_vending_service reserved for future token integration
+        _ = execution_id
+        _ = token_vending_service
         try:
             git_settings = self._resolver.resolve(workflow_override)
         except ValueError:

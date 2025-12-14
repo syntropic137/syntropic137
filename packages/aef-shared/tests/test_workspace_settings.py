@@ -328,7 +328,7 @@ class TestGitIdentitySettings:
         }
         with (
             patch.dict(os.environ, env, clear=True),
-            pytest.raises(ValueError, match="Incomplete GitHub App configuration"),
+            pytest.raises(ValueError, match="Incomplete GitHub App config"),
         ):
             GitHubAppSettings(_env_file=None)
 
