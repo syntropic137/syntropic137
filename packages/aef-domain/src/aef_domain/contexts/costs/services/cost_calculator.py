@@ -19,6 +19,7 @@ from aef_domain.contexts.costs.record_cost.CostRecordedEvent import CostRecorded
 from aef_domain.contexts.costs.record_cost.SessionCostFinalizedEvent import (
     SessionCostFinalizedEvent,
 )
+from aef_domain.contexts.costs.services.tool_token_estimator import ToolTokenEstimator
 
 
 class EventEmitter(Protocol):
@@ -49,15 +50,18 @@ class CostCalculator:
         self,
         emitter: EventEmitter | None = None,
         compute_cost_per_ms: Decimal | None = None,
+        tool_token_estimator: ToolTokenEstimator | None = None,
     ):
         """Initialize the cost calculator.
 
         Args:
             emitter: Event emitter for domain events (optional for testing).
             compute_cost_per_ms: Cost per millisecond of tool execution.
+            tool_token_estimator: Estimator for tool-level token attribution.
         """
         self._emitter = emitter
         self._compute_cost_per_ms = compute_cost_per_ms or self.DEFAULT_COMPUTE_COST_PER_TOOL_MS
+        self._tool_estimator = tool_token_estimator or ToolTokenEstimator()
 
     async def on_token_usage(self, event_data: dict[str, Any]) -> CostRecordedEvent | None:
         """Handle token_usage event and emit CostRecordedEvent.
@@ -110,6 +114,17 @@ class CostCalculator:
             except ValueError:
                 timestamp = datetime.now()
 
+        # Estimate tool token breakdown if tool_details present
+        tool_token_breakdown: dict[str, dict[str, int]] = {}
+        tool_details = event_data.get("tool_details", [])
+        if tool_details:
+            breakdown = self._tool_estimator.estimate_from_tool_details(tool_details)
+            for tool_name, tt in breakdown.by_tool.items():
+                tool_token_breakdown[tool_name] = {
+                    "tool_use": tt.tool_use_tokens,
+                    "tool_result": tt.tool_result_tokens,
+                }
+
         # Create event
         cost_event = CostRecordedEvent(
             session_id=session_id,
@@ -123,6 +138,7 @@ class CostCalculator:
             output_tokens=output_tokens,
             cache_creation_tokens=cache_creation,
             cache_read_tokens=cache_read,
+            tool_token_breakdown=tool_token_breakdown,
             timestamp=timestamp,
         )
 

@@ -42,6 +42,8 @@ def _domain_session_cost_to_api(cost: SessionCost) -> SessionCostResponse:
         duration_ms=cost.duration_ms,
         cost_by_model={k: str(v) for k, v in cost.cost_by_model.items()},
         cost_by_tool={k: str(v) for k, v in cost.cost_by_tool.items()},
+        tokens_by_tool=cost.tokens_by_tool,
+        cost_by_tool_tokens={k: str(v) for k, v in cost.cost_by_tool_tokens.items()},
         is_finalized=cost.is_finalized,
         started_at=cost.started_at,
         completed_at=cost.completed_at,

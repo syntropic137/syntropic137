@@ -372,6 +372,10 @@ class SessionCostResponse(BaseModel):
     cost_by_model: dict[str, str] = Field(default_factory=dict)
     cost_by_tool: dict[str, str] = Field(default_factory=dict)
 
+    # Tool token attribution (estimated)
+    tokens_by_tool: dict[str, int] = Field(default_factory=dict)
+    cost_by_tool_tokens: dict[str, str] = Field(default_factory=dict)
+
     # Status
     is_finalized: bool = False
     started_at: datetime | None = None
