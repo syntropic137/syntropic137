@@ -32,6 +32,7 @@ class CostRecordedEvent(DomainEvent):
         cache_read_tokens: Cache read tokens (for token costs).
         tool_name: Tool name (for tool execution costs).
         tool_duration_ms: Tool execution duration in milliseconds.
+        tool_token_breakdown: Per-tool token attribution (estimated).
         timestamp: When the cost was incurred.
         metadata: Additional metadata.
     """
@@ -59,6 +60,10 @@ class CostRecordedEvent(DomainEvent):
     tool_name: str | None = None
     tool_duration_ms: float | None = None
 
+    # Tool token attribution (for llm_tokens type with tool calls)
+    # Format: {"ToolName": {"tool_use": 100, "tool_result": 500}}
+    tool_token_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
+
     # Timing
     timestamp: datetime | None = None
 
@@ -82,6 +87,7 @@ class CostRecordedEvent(DomainEvent):
             "cache_read_tokens": self.cache_read_tokens,
             "tool_name": self.tool_name,
             "tool_duration_ms": self.tool_duration_ms,
+            "tool_token_breakdown": self.tool_token_breakdown,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "metadata": self.metadata,
         }

@@ -68,7 +68,13 @@ class SessionCost:
     """Cost breakdown by model."""
 
     cost_by_tool: dict[str, Decimal] = field(default_factory=dict)
-    """Cost breakdown by tool."""
+    """Cost breakdown by tool (execution costs)."""
+
+    tokens_by_tool: dict[str, int] = field(default_factory=dict)
+    """Token breakdown by tool (estimated)."""
+
+    cost_by_tool_tokens: dict[str, Decimal] = field(default_factory=dict)
+    """Token cost breakdown by tool (derived from tokens_by_tool)."""
 
     # Status
     is_finalized: bool = False
@@ -96,6 +102,11 @@ class SessionCost:
         cost_by_tool = {
             k: Decimal(v) if isinstance(v, str) else v
             for k, v in data.get("cost_by_tool", {}).items()
+        }
+        tokens_by_tool = data.get("tokens_by_tool", {})
+        cost_by_tool_tokens = {
+            k: Decimal(v) if isinstance(v, str) else v
+            for k, v in data.get("cost_by_tool_tokens", {}).items()
         }
 
         # Parse timestamps
@@ -138,6 +149,8 @@ class SessionCost:
             duration_ms=data.get("duration_ms", 0),
             cost_by_model=cost_by_model,
             cost_by_tool=cost_by_tool,
+            tokens_by_tool=tokens_by_tool,
+            cost_by_tool_tokens=cost_by_tool_tokens,
             is_finalized=data.get("is_finalized", False),
             started_at=started_at,
             completed_at=completed_at,
@@ -164,6 +177,8 @@ class SessionCost:
             "duration_ms": self.duration_ms,
             "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "cost_by_tool": {k: str(v) for k, v in self.cost_by_tool.items()},
+            "tokens_by_tool": self.tokens_by_tool,
+            "cost_by_tool_tokens": {k: str(v) for k, v in self.cost_by_tool_tokens.items()},
             "is_finalized": self.is_finalized,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,

@@ -100,6 +100,17 @@ class SessionCostProjection:
                 current = session_cost.cost_by_model.get(model, Decimal("0"))
                 session_cost.cost_by_model[model] = current + amount
 
+            # Aggregate tool token breakdown (if present)
+            tool_breakdown = event_data.get("tool_token_breakdown", {})
+            for tool_name, tool_tokens in tool_breakdown.items():
+                tool_use = tool_tokens.get("tool_use", 0)
+                tool_result = tool_tokens.get("tool_result", 0)
+                total_tool_tokens = tool_use + tool_result
+
+                # Aggregate tokens by tool
+                current_tokens = session_cost.tokens_by_tool.get(tool_name, 0)
+                session_cost.tokens_by_tool[tool_name] = current_tokens + total_tool_tokens
+
             # Increment turns (each token usage = one turn)
             session_cost.turns += 1
 
