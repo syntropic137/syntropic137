@@ -213,7 +213,7 @@ class TestGetDefaultIsolationBackend:
 
 class TestSettingsWorkspaceIntegration:
     """Test workspace settings integration with main Settings class.
-    
+
     Note: We test WorkspaceSettings directly with _env_file=None to isolate
     from real .env file values during testing.
     """

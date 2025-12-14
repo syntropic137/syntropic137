@@ -13,7 +13,7 @@ from aef_shared.settings.github import (
 
 class TestGitHubAppSettings:
     """Tests for GitHubAppSettings.
-    
+
     Note: These tests explicitly set values rather than relying on defaults,
     since GitHubAppSettings reads from .env file which may have real values.
     """
