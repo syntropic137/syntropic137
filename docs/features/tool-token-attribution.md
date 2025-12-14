@@ -77,14 +77,14 @@ Response includes:
   "session_id": "session_123",
   "total_cost_usd": "0.52",
   "total_tokens": 15000,
-  
+
   "tokens_by_tool": {
     "Write": 8000,
     "Read": 5000,
     "Shell": 1500,
     "Grep": 500
   },
-  
+
   "cost_by_tool_tokens": {
     "Write": "0.28",
     "Read": "0.16",

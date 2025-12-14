@@ -108,7 +108,10 @@ class TestToolTokenEstimator:
         assert "Read" in breakdown.by_tool
         assert "Write" in breakdown.by_tool
         # Read should have aggregated tokens from both calls
-        assert breakdown.by_tool["Read"].tool_use_tokens > breakdown.by_tool["Write"].tool_use_tokens * 0.5
+        assert (
+            breakdown.by_tool["Read"].tool_use_tokens
+            > breakdown.by_tool["Write"].tool_use_tokens * 0.5
+        )
 
     def test_estimate_from_tool_details(self, estimator: ToolTokenEstimator) -> None:
         """Test estimating from collector tool_details format."""

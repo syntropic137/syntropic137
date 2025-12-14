@@ -65,9 +65,7 @@ class ToolTokenBreakdown:
         If the tool already exists, tokens are aggregated.
         """
         if tool_tokens.tool_name in self.by_tool:
-            self.by_tool[tool_tokens.tool_name] = (
-                self.by_tool[tool_tokens.tool_name] + tool_tokens
-            )
+            self.by_tool[tool_tokens.tool_name] = self.by_tool[tool_tokens.tool_name] + tool_tokens
         else:
             self.by_tool[tool_tokens.tool_name] = tool_tokens
 
@@ -107,7 +105,11 @@ class ToolTokenBreakdown:
         costs: dict[str, Decimal] = {}
         for name, tt in self.by_tool.items():
             # tool_use is output tokens, tool_result is input tokens
-            input_cost = Decimal(tt.tool_result_tokens) * input_price_per_million / Decimal(1_000_000)
-            output_cost = Decimal(tt.tool_use_tokens) * output_price_per_million / Decimal(1_000_000)
+            input_cost = (
+                Decimal(tt.tool_result_tokens) * input_price_per_million / Decimal(1_000_000)
+            )
+            output_cost = (
+                Decimal(tt.tool_use_tokens) * output_price_per_million / Decimal(1_000_000)
+            )
             costs[name] = input_cost + output_cost
         return costs

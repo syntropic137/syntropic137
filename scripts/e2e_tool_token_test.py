@@ -217,14 +217,14 @@ async def test_api_response_format() -> None:
 
     # Verify format
     assert isinstance(response["tokens_by_tool"], dict), "tokens_by_tool should be dict"
-    assert all(
-        isinstance(v, int) for v in response["tokens_by_tool"].values()
-    ), "token counts should be int"
+    assert all(isinstance(v, int) for v in response["tokens_by_tool"].values()), (
+        "token counts should be int"
+    )
 
     assert isinstance(response["cost_by_tool_tokens"], dict), "cost_by_tool_tokens should be dict"
-    assert all(
-        isinstance(v, str) for v in response["cost_by_tool_tokens"].values()
-    ), "costs should be string"
+    assert all(isinstance(v, str) for v in response["cost_by_tool_tokens"].values()), (
+        "costs should be string"
+    )
 
     print("\n✅ API response format verified")
     print()
