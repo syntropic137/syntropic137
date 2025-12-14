@@ -79,7 +79,7 @@ class ClaudeAgentExecutor:
         """Get the agent provider name."""
         return "claude"
 
-    def _get_agent(self) -> "ClaudeAgenticAgent":
+    def _get_agent(self) -> ClaudeAgenticAgent:
         """Get or create the underlying Claude agent."""
         if self._agent is None:
             from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
