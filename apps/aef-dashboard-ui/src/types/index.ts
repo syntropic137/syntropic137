@@ -375,6 +375,10 @@ export interface SessionCost {
   cost_by_model: Record<string, string>
   cost_by_tool: Record<string, string>
 
+  // Tool token attribution (estimated)
+  tokens_by_tool: Record<string, number>
+  cost_by_tool_tokens: Record<string, string>
+
   // Status
   is_finalized: boolean
   started_at: string | null

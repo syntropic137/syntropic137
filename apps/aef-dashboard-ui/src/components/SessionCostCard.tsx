@@ -1,16 +1,24 @@
 import { Clock, DollarSign, MessageSquare, Zap } from 'lucide-react'
 import type { SessionCost } from '../types'
 import { formatCost, formatDuration, formatTokens } from '../utils/formatters'
+import { ToolCostBreakdown } from './ToolCostBreakdown'
 
 interface SessionCostCardProps {
   cost: SessionCost
   showBreakdown?: boolean
+  showToolTokens?: boolean
   compact?: boolean
 }
 
-export function SessionCostCard({ cost, showBreakdown = false, compact = false }: SessionCostCardProps) {
+export function SessionCostCard({
+  cost,
+  showBreakdown = false,
+  showToolTokens = false,
+  compact = false,
+}: SessionCostCardProps) {
   const hasModelBreakdown = Object.keys(cost.cost_by_model).length > 0
   const hasToolBreakdown = Object.keys(cost.cost_by_tool).length > 0
+  const hasToolTokens = cost.tokens_by_tool && Object.keys(cost.tokens_by_tool).length > 0
 
   if (compact) {
     return (
@@ -142,6 +150,16 @@ export function SessionCostCard({ cost, showBreakdown = false, compact = false }
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tool Token Attribution */}
+      {showToolTokens && hasToolTokens && (
+        <div className="mt-4 pt-4 border-t border-[var(--color-border)]">
+          <ToolCostBreakdown
+            tokensByTool={cost.tokens_by_tool}
+            costByToolTokens={cost.cost_by_tool_tokens}
+          />
         </div>
       )}
     </div>
