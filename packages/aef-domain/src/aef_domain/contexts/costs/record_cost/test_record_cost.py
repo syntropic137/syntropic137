@@ -47,9 +47,18 @@ class TestCostAmount:
         assert result.value == Decimal("3.50")
 
     def test_str_format(self) -> None:
-        """Test string formatting."""
+        """Test string formatting with adaptive precision."""
+        # Large amounts: 2 decimals
         cost = CostAmount(Decimal("1.234567"))
-        assert str(cost) == "$1.234567"
+        assert str(cost) == "$1.23"
+
+        # Medium amounts: 4 decimals
+        cost = CostAmount(Decimal("0.05"))
+        assert str(cost) == "$0.0500"
+
+        # Small amounts: 6 decimals
+        cost = CostAmount(Decimal("0.001234"))
+        assert str(cost) == "$0.001234"
 
 
 class TestTokenCount:

@@ -42,8 +42,23 @@ class CostAmount:
         return CostAmount(self.value + other.value)
 
     def __str__(self) -> str:
-        """Format as USD string."""
-        return f"${self.value:.6f}"
+        """Format as USD string with adaptive precision."""
+        return self.format_usd()
+
+    def format_usd(self) -> str:
+        """Format as USD string with adaptive precision.
+
+        Precision rules:
+        - >= $1.00: 2 decimal places (e.g., $1.52)
+        - >= $0.01: 4 decimal places (e.g., $0.0523)
+        - < $0.01: 6 decimal places (e.g., $0.000234)
+        """
+        if self.value >= Decimal("1.00"):
+            return f"${self.value:.2f}"
+        elif self.value >= Decimal("0.01"):
+            return f"${self.value:.4f}"
+        else:
+            return f"${self.value:.6f}"
 
 
 @dataclass(frozen=True)

@@ -336,3 +336,102 @@ class TestToolTokenAggregation:
         assert session_cost is not None
         # Shell: 1050 + 2050 = 3100
         assert session_cost.tokens_by_tool["Shell"] == 3100
+
+    @pytest.mark.asyncio
+    async def test_cost_by_tool_tokens_calculated(self, projection: SessionCostProjection) -> None:
+        """Test that cost_by_tool_tokens is calculated proportionally."""
+        # Event with 1000 total tokens and $0.10 cost
+        # Write has 500 tokens (50%), should get $0.05
+        # Read has 300 tokens (30%), should get $0.03
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.10",
+                "input_tokens": 600,
+                "output_tokens": 400,
+                "tool_token_breakdown": {
+                    "Write": {"tool_use": 200, "tool_result": 300},  # 500 tokens
+                    "Read": {"tool_use": 100, "tool_result": 200},  # 300 tokens
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+
+        # Verify cost_by_tool_tokens calculated
+        assert "Write" in session_cost.cost_by_tool_tokens
+        assert "Read" in session_cost.cost_by_tool_tokens
+
+        # Write: 500/1000 * 0.10 = 0.05
+        from decimal import Decimal
+
+        assert session_cost.cost_by_tool_tokens["Write"] == Decimal("0.05")
+        # Read: 300/1000 * 0.10 = 0.03
+        assert session_cost.cost_by_tool_tokens["Read"] == Decimal("0.03")
+
+    @pytest.mark.asyncio
+    async def test_cost_by_tool_tokens_aggregates_across_events(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Test that cost_by_tool_tokens aggregates across multiple events."""
+        from decimal import Decimal
+
+        # First event: Write gets 50% of $0.10 = $0.05
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.10",
+                "input_tokens": 500,
+                "output_tokens": 500,
+                "tool_token_breakdown": {
+                    "Write": {"tool_use": 250, "tool_result": 250},  # 500/1000 = 50%
+                },
+            }
+        )
+
+        # Second event: Write gets 25% of $0.20 = $0.05
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.20",
+                "input_tokens": 1000,
+                "output_tokens": 1000,
+                "tool_token_breakdown": {
+                    "Write": {"tool_use": 200, "tool_result": 300},  # 500/2000 = 25%
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+
+        # Write: $0.05 + $0.05 = $0.10
+        assert session_cost.cost_by_tool_tokens["Write"] == Decimal("0.10")
+
+    @pytest.mark.asyncio
+    async def test_cost_by_tool_tokens_zero_when_no_tokens(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Test that cost is not calculated when total tokens is zero."""
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.10",
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "tool_token_breakdown": {
+                    "Write": {"tool_use": 100, "tool_result": 100},
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        # Tokens recorded but no cost (would be divide by zero)
+        assert session_cost.tokens_by_tool.get("Write") == 200
+        assert session_cost.cost_by_tool_tokens.get("Write") is None
