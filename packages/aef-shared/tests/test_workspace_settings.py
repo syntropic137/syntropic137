@@ -18,7 +18,6 @@ from aef_shared.settings import (
     GitIdentityResolver,
     GitIdentitySettings,
     IsolationBackend,
-    Settings,
     WorkspaceSecuritySettings,
     WorkspaceSettings,
     get_default_isolation_backend,
