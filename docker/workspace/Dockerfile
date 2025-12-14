@@ -49,6 +49,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
+# Install GitHub CLI (gh) for PR creation
+# Using official GitHub install script
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv for fast Python package management
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uv /usr/local/bin/ \
@@ -79,7 +88,10 @@ ENV HOME=/workspace \
     # Disable pip version warnings
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Use uv for Python package management
-    UV_SYSTEM_PYTHON=1
+    UV_SYSTEM_PYTHON=1 \
+    # GitHub CLI uses GH_TOKEN for authentication (set by workspace injection)
+    # GH_TOKEN will be injected at runtime via env var
+    GH_NO_UPDATE_NOTIFIER=1
 
 # Health check: verify workspace is accessible
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=2 \

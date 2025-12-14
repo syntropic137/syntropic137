@@ -115,8 +115,8 @@ class TestGetBestBackend:
             best = router.get_best_backend()
             assert best == IsolationBackend.GVISOR
 
-    def test_raises_when_none_available(self) -> None:
-        """Should raise RuntimeError when no backend available."""
+    def test_returns_none_in_test_environment(self) -> None:
+        """Should return None when no backend available in test environment."""
         router = WorkspaceRouter()
 
         with (
@@ -124,6 +124,21 @@ class TestGetBestBackend:
             patch.object(GVisorWorkspace, "is_available", return_value=False),
             patch.object(HardenedDockerWorkspace, "is_available", return_value=False),
             patch.object(E2BWorkspace, "is_available", return_value=False),
+            patch.object(router, "_is_test_environment", return_value=True),
+        ):
+            # In test environment, returns None to allow InMemoryWorkspace fallback
+            assert router.get_best_backend() is None
+
+    def test_raises_when_none_available_outside_test(self) -> None:
+        """Should raise RuntimeError when no backend available outside test env."""
+        router = WorkspaceRouter()
+
+        with (
+            patch.object(FirecrackerWorkspace, "is_available", return_value=False),
+            patch.object(GVisorWorkspace, "is_available", return_value=False),
+            patch.object(HardenedDockerWorkspace, "is_available", return_value=False),
+            patch.object(E2BWorkspace, "is_available", return_value=False),
+            patch.object(router, "_is_test_environment", return_value=False),
             pytest.raises(RuntimeError, match="No isolation backend available"),
         ):
             router.get_best_backend()

@@ -1,0 +1,222 @@
+# Envoy Sidecar Proxy Configuration for AEF
+# See: docker/sidecar-proxy/README.md
+#
+# This configuration:
+# 1. Intercepts outbound HTTP/HTTPS requests
+# 2. Injects authentication tokens via ext_authz filter
+# 3. Logs all requests for observability
+# 4. Enforces rate limits
+
+admin:
+  address:
+    socket_address:
+      address: 127.0.0.1
+      port_value: 9901
+
+static_resources:
+  listeners:
+    # HTTP Proxy listener (agents connect here)
+    - name: http_proxy
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8081
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                codec_type: AUTO
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          timestamp: "%START_TIME%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(:PATH)%"
+                          host: "%REQ(:AUTHORITY)%"
+                          response_code: "%RESPONSE_CODE%"
+                          duration_ms: "%DURATION%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+                          execution_id: "%REQ(X-AEF-EXECUTION-ID)%"
+                route_config:
+                  name: local_route
+                  virtual_hosts:
+                    # Anthropic API
+                    - name: anthropic
+                      domains:
+                        - "api.anthropic.com"
+                        - "api.anthropic.com:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: anthropic_api
+                            timeout: 300s # Long timeout for streaming
+                          request_headers_to_add:
+                            - header:
+                                key: "anthropic-version"
+                                value: "2023-06-01"
+
+                    # GitHub API
+                    - name: github
+                      domains:
+                        - "api.github.com"
+                        - "api.github.com:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: github_api
+                            timeout: 30s
+
+                    # GitHub Raw Content
+                    - name: github_raw
+                      domains:
+                        - "raw.githubusercontent.com"
+                        - "raw.githubusercontent.com:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: github_raw
+                            timeout: 30s
+
+                    # Block all other hosts
+                    - name: blocked
+                      domains:
+                        - "*"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          direct_response:
+                            status: 403
+                            body:
+                              inline_string: '{"error": "Host not allowed", "message": "Only api.anthropic.com, api.github.com, and raw.githubusercontent.com are allowed"}'
+
+                http_filters:
+                  # External authorization for token injection
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      grpc_service:
+                        envoy_grpc:
+                          cluster_name: token_injector
+                        timeout: 5s
+                      failure_mode_allow: false
+                      transport_api_version: V3
+
+                  # Rate limiting
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: http_local_rate_limiter
+                      token_bucket:
+                        max_tokens: 100
+                        tokens_per_fill: 10
+                        fill_interval: 1s
+                      filter_enabled:
+                        runtime_key: local_rate_limit_enabled
+                        default_value:
+                          numerator: 100
+                          denominator: HUNDRED
+                      filter_enforced:
+                        runtime_key: local_rate_limit_enforced
+                        default_value:
+                          numerator: 100
+                          denominator: HUNDRED
+
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    # Anthropic API cluster
+    - name: anthropic_api
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: anthropic_api
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: api.anthropic.com
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: api.anthropic.com
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # GitHub API cluster
+    - name: github_api
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: github_api
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: api.github.com
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: api.github.com
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # GitHub Raw Content cluster
+    - name: github_raw
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: github_raw
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: raw.githubusercontent.com
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: raw.githubusercontent.com
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # Token Injector Service (runs alongside)
+    - name: token_injector
+      type: STATIC
+      load_assignment:
+        cluster_name: token_injector
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: 127.0.0.1
+                      port_value: 9002
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}

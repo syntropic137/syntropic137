@@ -178,6 +178,8 @@ Existing endpoints updated:
 ## Related ADRs
 - ADR-013: Event Sourcing Projection Consistency
 - ADR-012: Artifact Storage
+- **ADR-023: Workspace-First Execution Model** - Specifies how `WorkflowExecutionEngine`
+  implements this model with required workspace isolation and event persistence
 
 ## Files Changed
 - `packages/aef-domain/.../read_models/workflow_execution_summary.py` - New

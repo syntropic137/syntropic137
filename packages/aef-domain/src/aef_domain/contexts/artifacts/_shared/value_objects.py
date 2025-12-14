@@ -7,7 +7,12 @@ from enum import Enum
 
 
 class ArtifactType(str, Enum):
-    """Type of artifact produced by a phase."""
+    """Type of artifact produced by a phase.
+
+    Artifacts can be:
+    - Content: Actual file content stored in artifact DB
+    - Reference: Pointer to external resource (GitHub, URL, etc.)
+    """
 
     # Research artifacts
     RESEARCH_SUMMARY = "research_summary"
@@ -32,13 +37,24 @@ class ArtifactType(str, Enum):
     TEST_RESULTS = "test_results"
     COVERAGE_REPORT = "coverage_report"
 
-    # Generic
+    # Generic content
     TEXT = "text"
     MARKDOWN = "markdown"
     JSON = "json"
     YAML = "yaml"
     EXECUTION_REPORT = "execution_report"
     OTHER = "other"
+
+    # GitHub references (pointers, not content)
+    GITHUB_COMMIT = "github_commit"  # Reference to a commit SHA
+    GITHUB_PR = "github_pr"  # Reference to a pull request
+    GITHUB_ISSUE = "github_issue"  # Reference to an issue
+    GITHUB_FILE = "github_file"  # Reference to file at specific commit
+    GITHUB_BRANCH = "github_branch"  # Reference to a branch
+
+    # External references
+    URL = "url"  # Generic URL reference
+    FILE_PATH = "file_path"  # Path reference (not content)
 
 
 class ContentType(str, Enum):

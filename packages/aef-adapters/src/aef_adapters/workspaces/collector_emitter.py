@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from aiohttp import ClientSession  # type: ignore[import-not-found]
+    from aiohttp import ClientSession
 
 logger = logging.getLogger(__name__)
 

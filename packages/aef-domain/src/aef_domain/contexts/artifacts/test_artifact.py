@@ -106,6 +106,45 @@ class TestArtifactAggregate:
 
         assert artifact.session_id == "sess-456"
 
+    def test_create_artifact_with_execution_id(self) -> None:
+        """Test creating artifact with execution_id context (v2).
+
+        The execution_id links artifacts to specific workflow execution runs,
+        enabling queries like "get all artifacts from execution X".
+        """
+        artifact = ArtifactAggregate()
+
+        command = CreateArtifactCommand(
+            workflow_id="wf-123",
+            phase_id="research",
+            execution_id="exec-789",
+            session_id="sess-456",
+            artifact_type=ArtifactType.TEXT,
+            content="Execution output",
+        )
+
+        artifact.create_artifact(command)
+
+        assert artifact.execution_id == "exec-789"
+        assert artifact.workflow_id == "wf-123"
+        assert artifact.phase_id == "research"
+        assert artifact.session_id == "sess-456"
+
+    def test_create_artifact_execution_id_optional(self) -> None:
+        """Test that execution_id is optional for backward compatibility."""
+        artifact = ArtifactAggregate()
+
+        command = CreateArtifactCommand(
+            workflow_id="wf-123",
+            phase_id="research",
+            artifact_type=ArtifactType.TEXT,
+            content="No execution context",
+        )
+
+        artifact.create_artifact(command)
+
+        assert artifact.execution_id is None  # Defaults to None
+
     def test_create_artifact_with_lineage(self) -> None:
         """Test creating artifact with derived_from lineage."""
         artifact = ArtifactAggregate()
