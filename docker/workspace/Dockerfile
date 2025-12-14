@@ -64,6 +64,15 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uvx /usr/local/bin/ \
     && rm -rf /root/.local
 
+# Install anthropic SDK (required for agent runner)
+RUN pip install --no-cache-dir anthropic>=0.40.0
+
+# Copy and install aef-agent-runner package
+# This runs inside the container to execute the Claude agent
+COPY packages/aef-agent-runner /tmp/aef-agent-runner
+RUN pip install --no-cache-dir /tmp/aef-agent-runner \
+    && rm -rf /tmp/aef-agent-runner
+
 # Create workspace user (non-root)
 RUN groupadd --gid 1000 workspace \
     && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home workspace
@@ -91,11 +100,21 @@ ENV HOME=/workspace \
     UV_SYSTEM_PYTHON=1 \
     # GitHub CLI uses GH_TOKEN for authentication (set by workspace injection)
     # GH_TOKEN will be injected at runtime via env var
-    GH_NO_UPDATE_NOTIFIER=1
+    GH_NO_UPDATE_NOTIFIER=1 \
+    # Proxy settings for sidecar (injected at runtime by orchestrator)
+    # These will be set to http://sidecar:8081 when running with sidecar
+    # The sidecar intercepts requests and injects API tokens
+    HTTP_PROXY="" \
+    HTTPS_PROXY="" \
+    NO_PROXY="localhost,127.0.0.1"
+
+# Create standard workspace directories
+RUN mkdir -p /workspace/inputs /workspace/artifacts
 
 # Health check: verify workspace is accessible
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=2 \
     CMD [ "test", "-w", "/workspace" ]
 
-# Default command (keep container running)
-CMD ["sleep", "infinity"]
+# Default command: run agent runner (orchestrator writes task.json first)
+# Can be overridden with "sleep infinity" for interactive debugging
+CMD ["python", "-m", "aef_agent_runner"]
