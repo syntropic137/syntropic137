@@ -47,11 +47,11 @@ class TestToolTokens:
         assert result.total_tokens == 330
 
     def test_add_different_tools_raises(self) -> None:
-        """Test that adding different tools raises ValueError."""
+        """Test that adding different tools raises TypeError (via NotImplemented)."""
         tt1 = ToolTokens(tool_name="Write", tool_use_tokens=100)
         tt2 = ToolTokens(tool_name="Read", tool_use_tokens=100)
 
-        with pytest.raises(ValueError, match="Cannot add ToolTokens for different tools"):
+        with pytest.raises(TypeError):
             _ = tt1 + tt2
 
     def test_estimated_flag_propagates(self) -> None:

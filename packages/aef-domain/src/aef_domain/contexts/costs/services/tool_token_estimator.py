@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 # Characters per token for different content types
 CHARS_PER_TOKEN_TEXT = 4.0
 CHARS_PER_TOKEN_JSON = 3.5
-CHARS_PER_TOKEN_CODE = 3.0
 
 # Overhead tokens for tool structure (name, id, type fields)
 TOOL_USE_OVERHEAD = 15

@@ -38,9 +38,7 @@ class ToolTokens:
     def __add__(self, other: "ToolTokens") -> "ToolTokens":
         """Add two ToolTokens for the same tool."""
         if self.tool_name != other.tool_name:
-            raise ValueError(
-                f"Cannot add ToolTokens for different tools: {self.tool_name} vs {other.tool_name}"
-            )
+            return NotImplemented
         return ToolTokens(
             tool_name=self.tool_name,
             tool_use_tokens=self.tool_use_tokens + other.tool_use_tokens,
