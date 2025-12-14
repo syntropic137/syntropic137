@@ -1,9 +1,18 @@
 # ADR-021: Isolated Workspace Architecture
 
-**Status:** Accepted (Implemented)
+**Status:** Accepted (Implemented, Enforcement in ADR-023)
 **Date:** 2025-12-11
 **Deciders:** @neural
 **Tags:** security, isolation, workspaces, scale, firecracker, docker
+
+> **Enforcement Note:** This ADR defines the isolation architecture. The **enforcement mechanisms**
+> (how the executor requires isolation and fails without it) are specified in
+> **[ADR-023: Workspace-First Execution Model](./ADR-023-workspace-first-execution-model.md)**.
+>
+> Key enforcement rules from ADR-023:
+> - `LocalWorkspace` raises `RuntimeError` in non-test environments
+> - `WorkflowExecutionEngine` requires `WorkspaceRouter` as a dependency
+> - `WorkspaceRouter` fails if no backend is available in production
 
 ## Context
 
@@ -291,7 +300,6 @@ See: `PROJECT-PLAN_20251211_ISOLATED-WORKSPACE-ARCHITECTURE.md`
 8. **Documentation**: ADR, usage guides, runbooks
 9. **Testing**: Security tests, scale tests, benchmarks
 
-<<<<<<< HEAD
 ## POC Findings (2025-12-11)
 
 Proof-of-concept testing validated the isolated workspace architecture:
@@ -599,13 +607,13 @@ This provides:
 - [ ] Add integration tests for git operations
 - [ ] Add credential rotation documentation
 
-=======
->>>>>>> origin/main
 ## Related ADRs
 
 - **ADR-009**: Agentic Execution Architecture (original workspace design)
 - **ADR-017**: Scalable Event Collection (multi-environment support)
 - **ADR-004**: Environment Configuration (settings pattern)
+- **ADR-022**: Secure Token Architecture (credential injection for workspaces)
+- **ADR-023**: Workspace-First Execution Model (**enforcement of this architecture**)
 
 ## References
 

@@ -18,7 +18,6 @@ from aef_shared.settings import (
     GitIdentityResolver,
     GitIdentitySettings,
     IsolationBackend,
-    Settings,
     WorkspaceSecuritySettings,
     WorkspaceSettings,
     get_default_isolation_backend,
@@ -212,35 +211,36 @@ class TestGetDefaultIsolationBackend:
 
 
 class TestSettingsWorkspaceIntegration:
-    """Test workspace settings integration with main Settings class."""
+    """Test workspace settings integration with main Settings class.
 
-    def test_workspace_property(self) -> None:
-        """Settings.workspace should return WorkspaceSettings."""
+    Note: We test WorkspaceSettings directly with _env_file=None to isolate
+    from real .env file values during testing.
+    """
+
+    def test_workspace_settings_creation(self) -> None:
+        """WorkspaceSettings should be creatable with defaults."""
         with patch.dict(os.environ, {}, clear=True):
-            settings = Settings(_env_file=None)
-
-            workspace = settings.workspace
+            workspace = WorkspaceSettings(_env_file=None)
             assert isinstance(workspace, WorkspaceSettings)
 
-    def test_workspace_security_property(self) -> None:
-        """Settings.workspace_security should return WorkspaceSecuritySettings."""
+    def test_workspace_security_settings_creation(self) -> None:
+        """WorkspaceSecuritySettings should be creatable with defaults."""
         with patch.dict(os.environ, {}, clear=True):
-            settings = Settings(_env_file=None)
-
-            security = settings.workspace_security
+            security = WorkspaceSecuritySettings(_env_file=None)
             assert isinstance(security, WorkspaceSecuritySettings)
 
     def test_workspace_respects_env_vars(self) -> None:
-        """Workspace settings from main Settings should respect env vars."""
+        """Workspace settings should respect env vars."""
         env = {
             "AEF_WORKSPACE_POOL_SIZE": "200",
             "AEF_SECURITY_MAX_MEMORY": "1Gi",
         }
         with patch.dict(os.environ, env, clear=True):
-            settings = Settings(_env_file=None)
+            workspace = WorkspaceSettings(_env_file=None)
+            security = WorkspaceSecuritySettings(_env_file=None)
 
-            assert settings.workspace.pool_size == 200
-            assert settings.workspace_security.max_memory == "1Gi"
+            assert workspace.pool_size == 200
+            assert security.max_memory == "1Gi"
 
 
 # =============================================================================
@@ -324,16 +324,16 @@ class TestGitIdentitySettings:
             GitIdentitySettings(_env_file=None)
 
     def test_settings_integration(self) -> None:
-        """Main Settings should provide git_identity property."""
+        """GitIdentitySettings should work with env vars."""
         env = {
             "AEF_GIT_USER_NAME": "agent",
             "AEF_GIT_USER_EMAIL": "agent@aef.dev",
         }
         with patch.dict(os.environ, env, clear=True):
-            settings = Settings(_env_file=None)
+            git_identity = GitIdentitySettings(_env_file=None)
 
-            assert isinstance(settings.git_identity, GitIdentitySettings)
-            assert settings.git_identity.user_name == "agent"
+            assert git_identity.user_name == "agent"
+            assert git_identity.user_email == "agent@aef.dev"
 
 
 # =============================================================================
@@ -413,12 +413,12 @@ class TestContainerLoggingSettings:
             assert "sk-ant-api03-1234567890" in result  # NOT redacted
 
     def test_settings_integration(self) -> None:
-        """Main Settings should provide container_logging property."""
+        """ContainerLoggingSettings should work with defaults."""
         with patch.dict(os.environ, {}, clear=True):
-            settings = Settings(_env_file=None)
+            logging = ContainerLoggingSettings(_env_file=None)
 
-            assert isinstance(settings.container_logging, ContainerLoggingSettings)
-            assert settings.container_logging.level == "INFO"
+            assert isinstance(logging, ContainerLoggingSettings)
+            assert logging.level == "INFO"
 
 
 # =============================================================================

@@ -1,9 +1,18 @@
 # ADR-009: Agentic Execution Architecture
 
-**Status:** Accepted
+**Status:** Accepted (Execution Model Superseded by ADR-023)
 **Date:** 2025-12-02
 **Deciders:** @neural
 **Tags:** agents, agentic-sdk, claude-agent-sdk, paradigm-shift
+
+> **Note:** This ADR defines the agentic protocol and workspace concept. The **execution model**
+> (how `WorkflowExecutionEngine` uses workspaces and persists events) is specified in
+> **[ADR-023: Workspace-First Execution Model](./ADR-023-workspace-first-execution-model.md)**.
+>
+> Key additions in ADR-023:
+> - `WorkspaceRouter` is a **required** dependency for execution
+> - `LocalWorkspace` **fails** in non-test environments
+> - Events are **persisted** via aggregate pattern (not just logged)
 
 ## Context
 

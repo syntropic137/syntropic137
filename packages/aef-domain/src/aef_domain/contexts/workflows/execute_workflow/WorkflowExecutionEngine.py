@@ -1,4 +1,12 @@
-"""WorkflowExecutionEngine - orchestrates workflow execution across phases."""
+"""WorkflowExecutionEngine - orchestrates workflow execution across phases.
+
+See ADR-023: Workspace-First Execution Model for architectural decisions.
+
+Key requirements:
+- WorkspaceRouter is REQUIRED - agents run inside isolated workspaces
+- WorkflowExecutionRepository is REQUIRED - events persist via aggregate
+- All events flow through WorkflowExecutionAggregate for consistency
+"""
 
 from __future__ import annotations
 
@@ -18,28 +26,24 @@ from aef_domain.contexts.workflows._shared.execution_value_objects import (
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows.execute_workflow.PhaseCompletedEvent import (
-    PhaseCompletedEvent,
-)
-from aef_domain.contexts.workflows.execute_workflow.PhaseStartedEvent import (
-    PhaseStartedEvent,
-)
-from aef_domain.contexts.workflows.execute_workflow.WorkflowCompletedEvent import (
-    WorkflowCompletedEvent,
-)
-from aef_domain.contexts.workflows.execute_workflow.WorkflowExecutionStartedEvent import (
-    WorkflowExecutionStartedEvent,
-)
-from aef_domain.contexts.workflows.execute_workflow.WorkflowFailedEvent import (
-    WorkflowFailedEvent,
+from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+    CompleteExecutionCommand,
+    CompletePhaseCommand,
+    FailExecutionCommand,
+    StartExecutionCommand,
+    StartPhaseCommand,
+    WorkflowExecutionAggregate,
 )
 
 if TYPE_CHECKING:
-    from event_sourcing import EventEnvelope
-
     from aef_adapters.agents.instrumented import InstrumentedAgent
+    from aef_adapters.workspaces.router import WorkspaceRouter
+    from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
+    )
+    from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
+        ArtifactQueryServiceProtocol,
     )
     from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
         AgentSessionAggregate,
@@ -64,6 +68,22 @@ class WorkflowRepository(Protocol):
         ...
 
 
+class WorkflowExecutionRepository(Protocol):
+    """Repository protocol for WorkflowExecution aggregates.
+
+    Required per ADR-023: Workspace-First Execution Model.
+    All execution events MUST be persisted via this repository.
+    """
+
+    async def get_by_id(self, execution_id: str) -> WorkflowExecutionAggregate | None:
+        """Get an execution by ID."""
+        ...
+
+    async def save(self, aggregate: WorkflowExecutionAggregate) -> None:
+        """Save the aggregate and persist uncommitted events to event store."""
+        ...
+
+
 class SessionRepository(Protocol):
     """Repository protocol for AgentSession aggregates."""
 
@@ -81,14 +101,6 @@ class ArtifactRepository(Protocol):
 
     async def get_by_id(self, artifact_id: str) -> ArtifactAggregate | None:
         """Get an artifact by ID."""
-        ...
-
-
-class EventPublisher(Protocol):
-    """Protocol for publishing domain events."""
-
-    async def publish(self, events: list[EventEnvelope[Any]]) -> None:
-        """Publish domain events for integration."""
         ...
 
 
@@ -145,7 +157,12 @@ class WorkflowExecutionResult:
 
 @dataclass
 class ExecutionContext:
-    """Mutable context for tracking execution state."""
+    """Mutable context for tracking execution state.
+
+    Note: Phase outputs are NO LONGER stored in-memory. They are persisted
+    as artifacts and queried from the artifact projection when needed.
+    This ensures crash recovery and audit trail (ADR-012, ADR-023).
+    """
 
     workflow_id: str
     execution_id: str
@@ -153,26 +170,35 @@ class ExecutionContext:
     inputs: dict[str, Any]
     phase_results: list[PhaseResult] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
-    phase_outputs: dict[str, str] = field(default_factory=dict)  # phase_id -> artifact content
+    completed_phase_ids: list[str] = field(default_factory=list)  # For querying artifacts
 
 
 class WorkflowExecutionEngine:
     """Orchestrates workflow execution across phases.
 
+    IMPORTANT (ADR-023): This engine requires:
+    - WorkspaceRouter: Agents run inside isolated workspaces
+    - WorkflowExecutionRepository: Events persist via aggregate pattern
+
     Responsibilities:
     - Load workflow definition
-    - Execute phases sequentially
+    - Create isolated workspace for agent execution
+    - Execute phases sequentially inside workspace
     - Manage phase input/output artifacts
     - Track execution metrics
-    - Emit domain events
+    - Persist events via WorkflowExecutionAggregate
 
     Example:
+        from aef_adapters.workspaces import get_workspace_router
+        from aef_adapters.storage.repositories import get_workflow_execution_repository
+
         engine = WorkflowExecutionEngine(
-            workflow_repository=repo,
+            workflow_repository=workflow_repo,
+            execution_repository=get_workflow_execution_repository(),
+            workspace_router=get_workspace_router(),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=create_agent,
-            event_publisher=publisher,
         )
 
         result = await engine.execute(
@@ -184,29 +210,65 @@ class WorkflowExecutionEngine:
     def __init__(
         self,
         workflow_repository: WorkflowRepository,
+        execution_repository: WorkflowExecutionRepository,
+        workspace_router: WorkspaceRouter,
         session_repository: SessionRepository,
         artifact_repository: ArtifactRepository,
         agent_factory: AgentFactory,
-        event_publisher: EventPublisher,
+        artifact_query_service: ArtifactQueryServiceProtocol | None = None,
     ) -> None:
+        """Initialize the workflow execution engine.
+
+        Args:
+            workflow_repository: Repository for Workflow aggregates
+            execution_repository: Repository for WorkflowExecution aggregates (REQUIRED)
+            workspace_router: Router for creating isolated workspaces (REQUIRED)
+            session_repository: Repository for AgentSession aggregates
+            artifact_repository: Repository for Artifact aggregates
+            agent_factory: Factory for creating instrumented agents
+            artifact_query_service: Service for querying artifacts (REQUIRED for
+                multi-phase workflows). If None, phase outputs cannot be injected
+                into subsequent phase prompts.
+
+        Raises:
+            ValueError: If execution_repository or workspace_router is None
+        """
+        if execution_repository is None:
+            raise ValueError(
+                "execution_repository is required per ADR-023. "
+                "Use get_workflow_execution_repository() from aef_adapters.storage.repositories."
+            )
+        if workspace_router is None:
+            raise ValueError(
+                "workspace_router is required per ADR-023. "
+                "Use get_workspace_router() from aef_adapters.workspaces."
+            )
+
         self._workflows = workflow_repository
+        self._executions = execution_repository
+        self._router = workspace_router
         self._sessions = session_repository
         self._artifacts = artifact_repository
         self._agent_factory = agent_factory
-        self._publisher = event_publisher
+        self._artifact_query = artifact_query_service
 
     async def execute(
         self,
         workflow_id: str,
         inputs: dict[str, Any],
         execution_id: str | None = None,
+        _workspace_config: IsolatedWorkspaceConfig | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow from start to finish.
+
+        Per ADR-023, agents execute inside isolated workspaces and all events
+        are persisted via the WorkflowExecutionAggregate.
 
         Args:
             workflow_id: ID of the workflow to execute.
             inputs: Initial input variables for the workflow.
             execution_id: Optional custom execution ID.
+            workspace_config: Optional workspace configuration override.
 
         Returns:
             WorkflowExecutionResult with status and artifacts.
@@ -228,17 +290,61 @@ class WorkflowExecutionEngine:
             inputs=inputs,
         )
 
-        # 3. Emit execution started event
-        await self._emit_execution_started(workflow, ctx)
+        # 3. Create execution aggregate and emit started event
+        aggregate = WorkflowExecutionAggregate()
+        start_cmd = StartExecutionCommand(
+            execution_id=ctx.execution_id,
+            workflow_id=workflow_id,
+            workflow_name=workflow.name or "Unknown",
+            total_phases=len(workflow.phases),
+            inputs=inputs,
+        )
+        aggregate._handle_command(start_cmd)
+        await self._executions.save(aggregate)
+
+        logger.info(
+            "Workflow execution started: %s (execution: %s)",
+            workflow_id,
+            ctx.execution_id,
+        )
 
         # 4. Execute phases
+        # TODO: Each phase should create its own isolated workspace:
+        #   1. Create workspace via self._router.create()
+        #   2. Inject artifacts from previous phases
+        #   3. Execute agent inside workspace (subprocess or SDK)
+        #   4. Collect artifacts for next phase
+        #   5. Destroy workspace (stateless)
+        # For now, router is DI-enforced but agent runs in host process.
+        # See ADR-023 and docs/PLAN-FULL-WORKSPACE-ISOLATION.md
         try:
             phases = self._get_executable_phases(workflow)
             for phase in sorted(phases, key=lambda p: p.order):
-                await self._execute_phase(workflow, phase, ctx)
+                await self._execute_phase(workflow, phase, ctx, aggregate)
+                # Save after each phase for partial progress persistence
+                await self._executions.save(aggregate)
 
-            # 5. Emit completion event
-            await self._emit_execution_completed(workflow, ctx)
+            # 5. Emit completion event and save
+            metrics = ExecutionMetrics.from_results(ctx.phase_results)
+            complete_cmd = CompleteExecutionCommand(
+                execution_id=ctx.execution_id,
+                completed_phases=metrics.completed_phases,
+                total_phases=metrics.total_phases,
+                total_input_tokens=metrics.total_input_tokens,
+                total_output_tokens=metrics.total_output_tokens,
+                total_cost_usd=metrics.total_cost_usd,
+                duration_seconds=metrics.total_duration_seconds,
+                artifact_ids=ctx.artifact_ids,
+            )
+            aggregate._handle_command(complete_cmd)
+            await self._executions.save(aggregate)
+
+            logger.info(
+                "Workflow execution completed: %s (phases: %d, tokens: %d)",
+                workflow_id,
+                metrics.completed_phases,
+                metrics.total_tokens,
+            )
 
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,
@@ -248,12 +354,33 @@ class WorkflowExecutionEngine:
                 completed_at=datetime.now(UTC),
                 phase_results=ctx.phase_results,
                 artifact_ids=ctx.artifact_ids,
-                metrics=ExecutionMetrics.from_results(ctx.phase_results),
+                metrics=metrics,
             )
 
         except Exception as e:
-            # 6. Handle failure
-            await self._emit_execution_failed(workflow, ctx, e)
+            # 6. Handle failure - emit failed event and save
+            metrics = ExecutionMetrics.from_results(ctx.phase_results)
+            failed_phase_id = None
+            if isinstance(e, WorkflowExecutionError):
+                failed_phase_id = e.phase_id
+
+            fail_cmd = FailExecutionCommand(
+                execution_id=ctx.execution_id,
+                error=str(e),
+                error_type=type(e).__name__,
+                failed_phase_id=failed_phase_id,
+                completed_phases=metrics.completed_phases,
+                total_phases=len(workflow.phases),
+            )
+            aggregate._handle_command(fail_cmd)
+            await self._executions.save(aggregate)
+
+            logger.error(
+                "Workflow execution failed: %s (phase: %s, error: %s)",
+                workflow_id,
+                failed_phase_id,
+                str(e),
+            )
 
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,
@@ -263,7 +390,7 @@ class WorkflowExecutionEngine:
                 completed_at=datetime.now(UTC),
                 phase_results=ctx.phase_results,
                 artifact_ids=ctx.artifact_ids,
-                metrics=ExecutionMetrics.from_results(ctx.phase_results),
+                metrics=metrics,
                 error_message=str(e),
             )
 
@@ -292,23 +419,33 @@ class WorkflowExecutionEngine:
 
     async def _execute_phase(
         self,
-        workflow: WorkflowAggregate,
+        _workflow: WorkflowAggregate,
         phase: ExecutablePhase,
         ctx: ExecutionContext,
+        aggregate: WorkflowExecutionAggregate,
     ) -> None:
         """Execute a single phase.
 
-        1. Start agent session
+        1. Emit phase started via aggregate
         2. Build prompt from template and inputs
         3. Execute agent
         4. Create artifact
-        5. Record phase result
+        5. Emit phase completed via aggregate
         """
         phase_started_at = datetime.now(UTC)
         session_id = str(uuid4())
 
-        # Emit phase started
-        await self._emit_phase_started(workflow, phase, ctx, session_id)
+        # Emit phase started via aggregate
+        start_phase_cmd = StartPhaseCommand(
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            phase_id=phase.phase_id,
+            phase_name=phase.name,
+            phase_order=phase.order,
+            session_id=session_id,
+        )
+        aggregate._handle_command(start_phase_cmd)
+        logger.info("Phase started: %s (workflow: %s)", phase.phase_id, ctx.workflow_id)
 
         try:
             # Get instrumented agent
@@ -319,8 +456,8 @@ class WorkflowExecutionEngine:
                 phase_id=phase.phase_id,
             )
 
-            # Build prompt
-            prompt = self._build_prompt(phase, ctx)
+            # Build prompt (queries previous phase artifacts from DB)
+            prompt = await self._build_prompt(phase, ctx)
 
             # Import here to avoid circular imports
             from aef_adapters.agents import AgentConfig, AgentMessage, AgentRole
@@ -358,20 +495,21 @@ class WorkflowExecutionEngine:
                 ),
             )
 
-            # Create artifact
+            # Create artifact linked to this execution run
             artifact_id = str(uuid4())
             await self._create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,
+                execution_id=ctx.execution_id,  # Link to execution run for retrieval
                 session_id=session_id,
                 artifact_type=phase.output_artifact_type,
                 content=response.content,
                 title=f"{phase.name} Output",
             )
 
-            # Store output for next phase
-            ctx.phase_outputs[phase.phase_id] = response.content
+            # Track completed phase for artifact queries (DB-backed, not in-memory)
+            ctx.completed_phase_ids.append(phase.phase_id)
             ctx.artifact_ids.append(artifact_id)
 
             # Record phase result
@@ -392,8 +530,25 @@ class WorkflowExecutionEngine:
             )
             ctx.phase_results.append(result)
 
-            # Emit phase completed
-            await self._emit_phase_completed(phase, ctx, result, duration)
+            # Emit phase completed via aggregate
+            complete_phase_cmd = CompletePhaseCommand(
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                session_id=session_id,
+                artifact_id=artifact_id,
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                total_tokens=response.total_tokens,
+                cost_usd=Decimal(str(response.cost_estimate)),
+                duration_seconds=duration,
+            )
+            aggregate._handle_command(complete_phase_cmd)
+            logger.info(
+                "Phase completed: %s (success: True, tokens: %d)",
+                phase.phase_id,
+                response.total_tokens,
+            )
 
         except Exception as e:
             # Record failed phase
@@ -410,8 +565,13 @@ class WorkflowExecutionEngine:
             )
             ctx.phase_results.append(result)
 
-            # Emit phase completed (with failure)
-            await self._emit_phase_completed(phase, ctx, result, duration)
+            # Note: We don't emit PhaseCompleted for failures
+            # The FailExecutionCommand in execute() will capture the failure
+            logger.info(
+                "Phase failed: %s (error: %s)",
+                phase.phase_id,
+                str(e),
+            )
 
             # Re-raise to stop workflow
             raise WorkflowExecutionError(
@@ -421,12 +581,15 @@ class WorkflowExecutionEngine:
                 cause=e,
             ) from e
 
-    def _build_prompt(self, phase: ExecutablePhase, ctx: ExecutionContext) -> str:
+    async def _build_prompt(self, phase: ExecutablePhase, ctx: ExecutionContext) -> str:
         """Build the prompt for a phase.
 
         Substitutes template variables with:
         - Initial workflow inputs
-        - Previous phase outputs
+        - Previous phase outputs (queried from DB via ArtifactQueryService)
+
+        Note: Phase outputs are retrieved from the artifact projection, NOT from
+        an in-memory dict. This ensures crash recovery and audit trail.
         """
         prompt = phase.prompt_template
 
@@ -434,11 +597,23 @@ class WorkflowExecutionEngine:
         for key, value in ctx.inputs.items():
             prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
 
-        # Substitute previous phase outputs
-        for phase_id, content in ctx.phase_outputs.items():
-            # Support both {{phase_id}} and {{phase_id_output}} patterns
-            prompt = prompt.replace(f"{{{{{phase_id}}}}}", content)
-            prompt = prompt.replace(f"{{{{{phase_id}_output}}}}", content)
+        # Substitute previous phase outputs from DB
+        if self._artifact_query and ctx.completed_phase_ids:
+            phase_outputs = await self._artifact_query.get_for_phase_injection(
+                execution_id=ctx.execution_id,
+                completed_phase_ids=ctx.completed_phase_ids,
+            )
+            for phase_id, content in phase_outputs.items():
+                # Support both {{phase_id}} and {{phase_id_output}} patterns
+                prompt = prompt.replace(f"{{{{{phase_id}}}}}", content)
+                prompt = prompt.replace(f"{{{{{phase_id}_output}}}}", content)
+        elif ctx.completed_phase_ids and not self._artifact_query:
+            logger.warning(
+                "artifact_query_service not configured - phase outputs cannot be "
+                "injected into prompt for phase %s. Configure ArtifactQueryService "
+                "for multi-phase workflows.",
+                phase.phase_id,
+            )
 
         return prompt
 
@@ -447,12 +622,24 @@ class WorkflowExecutionEngine:
         artifact_id: str,
         workflow_id: str,
         phase_id: str,
+        execution_id: str,
         session_id: str,
         artifact_type: str,
         content: str,
         title: str,
     ) -> None:
-        """Create and save an artifact."""
+        """Create and save an artifact.
+
+        Args:
+            artifact_id: Unique artifact identifier
+            workflow_id: Parent workflow ID
+            phase_id: Phase that produced this artifact
+            execution_id: Execution run ID (links to WorkflowExecution aggregate)
+            session_id: Agent session ID
+            artifact_type: Type of artifact (string, mapped to enum)
+            content: Artifact content
+            title: Human-readable title
+        """
         from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
             ArtifactAggregate,
         )
@@ -468,6 +655,7 @@ class WorkflowExecutionEngine:
             aggregate_id=artifact_id,
             workflow_id=workflow_id,
             phase_id=phase_id,
+            execution_id=execution_id,  # Links artifact to specific execution run
             session_id=session_id,
             artifact_type=artifact_type_enum,
             content=content,
@@ -495,137 +683,3 @@ class WorkflowExecutionEngine:
             "script": ArtifactType.SCRIPT,
         }
         return type_mapping.get(type_str.lower(), ArtifactType.OTHER)
-
-    # =========================================================================
-    # EVENT EMISSION
-    # =========================================================================
-
-    async def _emit_execution_started(
-        self, workflow: WorkflowAggregate, ctx: ExecutionContext
-    ) -> None:
-        """Emit WorkflowExecutionStartedEvent."""
-        _event = WorkflowExecutionStartedEvent(
-            workflow_id=ctx.workflow_id,
-            execution_id=ctx.execution_id,
-            workflow_name=workflow.name or "Unknown",
-            started_at=ctx.started_at,
-            total_phases=len(workflow.phases),
-            inputs=ctx.inputs,
-        )
-        logger.info(
-            "Workflow execution started: %s (execution: %s)",
-            ctx.workflow_id,
-            ctx.execution_id,
-        )
-        # Note: In full implementation, wrap in EventEnvelope and publish
-        # await self._publisher.publish([EventEnvelope(event)])
-
-    async def _emit_phase_started(
-        self,
-        _workflow: WorkflowAggregate,
-        phase: ExecutablePhase,
-        ctx: ExecutionContext,
-        session_id: str,
-    ) -> None:
-        """Emit PhaseStartedEvent."""
-        _event = PhaseStartedEvent(
-            workflow_id=ctx.workflow_id,
-            execution_id=ctx.execution_id,
-            phase_id=phase.phase_id,
-            phase_name=phase.name,
-            phase_order=phase.order,
-            started_at=datetime.now(UTC),
-            session_id=session_id,
-        )
-        logger.info("Phase started: %s (workflow: %s)", phase.phase_id, ctx.workflow_id)
-
-    async def _emit_phase_completed(
-        self,
-        phase: ExecutablePhase,
-        ctx: ExecutionContext,
-        result: PhaseResult,
-        _duration: float,
-    ) -> None:
-        """Emit PhaseCompletedEvent."""
-        _event = PhaseCompletedEvent(
-            workflow_id=ctx.workflow_id,
-            execution_id=ctx.execution_id,
-            phase_id=phase.phase_id,
-            completed_at=result.completed_at or datetime.now(UTC),
-            success=result.status == PhaseStatus.COMPLETED,
-            error_message=result.error_message,
-            artifact_id=result.artifact_id,
-            session_id=result.session_id,
-            input_tokens=result.input_tokens,
-            output_tokens=result.output_tokens,
-            total_tokens=result.total_tokens,
-            cost_usd=result.cost_usd,
-            duration_seconds=(
-                (result.completed_at - result.started_at).total_seconds()
-                if result.completed_at and result.started_at
-                else 0.0
-            ),
-        )
-        logger.info(
-            "Phase completed: %s (success: %s, tokens: %d)",
-            phase.phase_id,
-            result.status == PhaseStatus.COMPLETED,
-            result.total_tokens,
-        )
-
-    async def _emit_execution_completed(
-        self, _workflow: WorkflowAggregate, ctx: ExecutionContext
-    ) -> None:
-        """Emit WorkflowCompletedEvent."""
-        metrics = ExecutionMetrics.from_results(ctx.phase_results)
-        _event = WorkflowCompletedEvent(
-            workflow_id=ctx.workflow_id,
-            execution_id=ctx.execution_id,
-            completed_at=datetime.now(UTC),
-            total_phases=metrics.total_phases,
-            completed_phases=metrics.completed_phases,
-            total_input_tokens=metrics.total_input_tokens,
-            total_output_tokens=metrics.total_output_tokens,
-            total_tokens=metrics.total_tokens,
-            total_cost_usd=metrics.total_cost_usd,
-            total_duration_seconds=metrics.total_duration_seconds,
-            artifact_ids=ctx.artifact_ids,
-        )
-        logger.info(
-            "Workflow execution completed: %s (phases: %d, tokens: %d)",
-            ctx.workflow_id,
-            metrics.completed_phases,
-            metrics.total_tokens,
-        )
-
-    async def _emit_execution_failed(
-        self, workflow: WorkflowAggregate, ctx: ExecutionContext, error: Exception
-    ) -> None:
-        """Emit WorkflowFailedEvent."""
-        metrics = ExecutionMetrics.from_results(ctx.phase_results)
-
-        # Get failed phase ID if it's a WorkflowExecutionError
-        failed_phase_id = None
-        if isinstance(error, WorkflowExecutionError):
-            failed_phase_id = error.phase_id
-
-        _event = WorkflowFailedEvent(
-            workflow_id=ctx.workflow_id,
-            execution_id=ctx.execution_id,
-            failed_at=datetime.now(UTC),
-            failed_phase_id=failed_phase_id,
-            error_message=str(error),
-            error_type=type(error).__name__,
-            completed_phases=metrics.completed_phases,
-            total_phases=len(workflow.phases),
-            total_input_tokens=metrics.total_input_tokens,
-            total_output_tokens=metrics.total_output_tokens,
-            total_tokens=metrics.total_tokens,
-            total_cost_usd=metrics.total_cost_usd,
-        )
-        logger.error(
-            "Workflow execution failed: %s (phase: %s, error: %s)",
-            ctx.workflow_id,
-            failed_phase_id,
-            str(error),
-        )

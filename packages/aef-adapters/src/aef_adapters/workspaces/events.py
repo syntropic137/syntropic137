@@ -18,9 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from aef_adapters.workspaces.config import (  # type: ignore[import-untyped]
-        IsolatedWorkspaceConfig,
-    )
+    from aef_adapters.workspaces.config import IsolatedWorkspaceConfig
     from aef_adapters.workspaces.protocol import IsolatedWorkspace
 
 logger = logging.getLogger(__name__)
@@ -249,6 +247,73 @@ class WorkspaceEventEmitter:
                 "total_size_bytes": total_size_bytes,
                 "storage_prefix": storage_prefix,
                 "stored_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    async def token_vended(
+        self,
+        workspace_id: str,
+        session_id: str,
+        execution_id: str,
+        token_id: str,
+        token_type: str,
+        ttl_seconds: int,
+    ) -> None:
+        """Emit TokenVended event when a token is issued for a workspace.
+
+        Args:
+            workspace_id: The workspace the token is for.
+            session_id: Session ID for correlation.
+            execution_id: Execution ID for token tracking.
+            token_id: Unique identifier for the vended token.
+            token_type: Type of token (github, anthropic, etc.).
+            ttl_seconds: Token time-to-live in seconds.
+        """
+        if not self.enabled:
+            return
+
+        await self._emit(
+            "TokenVended",
+            {
+                "workspace_id": workspace_id,
+                "session_id": session_id,
+                "execution_id": execution_id,
+                "token_id": token_id,
+                "token_type": token_type,
+                "ttl_seconds": ttl_seconds,
+                "vended_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    async def token_revoked(
+        self,
+        workspace_id: str,
+        session_id: str,
+        execution_id: str,
+        tokens_revoked: int,
+        reason: str = "workspace_cleanup",
+    ) -> None:
+        """Emit TokenRevoked event when tokens are revoked.
+
+        Args:
+            workspace_id: The workspace the tokens were for.
+            session_id: Session ID for correlation.
+            execution_id: Execution ID whose tokens were revoked.
+            tokens_revoked: Number of tokens revoked.
+            reason: Reason for revocation (workspace_cleanup, manual, budget_exceeded).
+        """
+        if not self.enabled:
+            return
+
+        await self._emit(
+            "TokenRevoked",
+            {
+                "workspace_id": workspace_id,
+                "session_id": session_id,
+                "execution_id": execution_id,
+                "tokens_revoked": tokens_revoked,
+                "reason": reason,
+                "revoked_at": datetime.now(UTC).isoformat(),
             },
         )
 

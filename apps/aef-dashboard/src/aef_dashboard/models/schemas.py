@@ -298,11 +298,18 @@ class EventMessage(BaseModel):
 
 
 class ExecuteWorkflowRequest(BaseModel):
-    """Request to execute a workflow."""
+    """Request to execute a workflow.
+
+    IMPORTANT: Use 'inputs' not 'parameters' for workflow variables.
+    Extra fields are rejected to catch typos early.
+    """
+
+    model_config = ConfigDict(extra="forbid")  # Reject unknown fields like 'parameters'
 
     inputs: dict[str, str] = Field(
         default_factory=dict,
-        description="Input variables for the workflow (e.g., topic, context)",
+        description="Input variables for the workflow (e.g., topic, context). "
+        "Keys must match {{variable}} placeholders in workflow prompts.",
     )
     provider: str = Field(
         default="claude",

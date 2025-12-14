@@ -243,3 +243,71 @@ class TestGetGitInjector:
         injector1 = get_git_injector()
         injector2 = get_git_injector()
         assert injector1 is injector2
+
+
+class TestGitInjectorWithTokenVending:
+    """Test GitInjector with token vending service integration."""
+
+    @pytest.fixture
+    def mock_workspace(self) -> AsyncMock:
+        """Create a mock workspace."""
+        return AsyncMock()
+
+    @pytest.fixture
+    def successful_executor(self) -> AsyncMock:
+        """Create an executor that always succeeds."""
+
+        async def executor(_workspace, _cmd):
+            return (0, "", "")
+
+        return AsyncMock(side_effect=executor)
+
+    @pytest.mark.asyncio
+    async def test_inject_with_execution_id(
+        self,
+        mock_workspace: AsyncMock,
+        successful_executor: AsyncMock,
+    ) -> None:
+        """Should accept execution_id parameter."""
+        env = {
+            "AEF_GIT_USER_NAME": "test-user",
+            "AEF_GIT_USER_EMAIL": "test@example.com",
+        }
+
+        with patch.dict(os.environ, env, clear=True):
+            injector = GitInjector()
+            result = await injector.inject_identity(
+                mock_workspace,
+                successful_executor,
+                execution_id="test-exec-123",
+            )
+
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_inject_with_token_vending_service(
+        self,
+        mock_workspace: AsyncMock,
+        successful_executor: AsyncMock,
+    ) -> None:
+        """Should accept token_vending_service parameter."""
+        env = {
+            "AEF_GIT_USER_NAME": "test-user",
+            "AEF_GIT_USER_EMAIL": "test@example.com",
+        }
+
+        # Mock token vending service
+        mock_tvs = AsyncMock()
+        mock_tvs.vend_github_token = AsyncMock(return_value="test-token")
+
+        with patch.dict(os.environ, env, clear=True):
+            injector = GitInjector()
+            result = await injector.inject_identity(
+                mock_workspace,
+                successful_executor,
+                execution_id="test-exec-123",
+                token_vending_service=mock_tvs,
+            )
+
+            # Should succeed (token vending not used for basic identity)
+            assert result is True

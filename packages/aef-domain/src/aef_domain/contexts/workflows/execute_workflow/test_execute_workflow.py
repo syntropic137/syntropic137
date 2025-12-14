@@ -146,14 +146,85 @@ class MockArtifactRepository:
         return self._artifacts.get(artifact_id)
 
 
-class MockEventPublisher:
-    """Mock event publisher for testing."""
+class MockWorkflowExecutionRepository:
+    """Mock workflow execution repository for testing (ADR-023)."""
 
     def __init__(self) -> None:
-        self._events: list[Any] = []
+        self._executions: dict[str, Any] = {}
 
-    async def publish(self, events: list[Any]) -> None:
-        self._events.extend(events)
+    async def get_by_id(self, execution_id: str) -> Any | None:
+        return self._executions.get(execution_id)
+
+    async def save(self, aggregate: Any) -> None:
+        if hasattr(aggregate, "id") and aggregate.id:
+            self._executions[aggregate.id] = aggregate
+
+
+class MockWorkspaceRouter:
+    """Mock workspace router for testing (ADR-023)."""
+
+    def __init__(self) -> None:
+        self._workspaces_created: list[Any] = []
+        self._commands_executed: list[tuple[Any, list[str]]] = []
+
+    async def create(self, config: Any) -> Any:
+        """Mock workspace creation - returns async context manager."""
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _mock_workspace() -> Any:
+            self._workspaces_created.append(config)
+            yield MockWorkspace()
+
+        return _mock_workspace()
+
+
+class MockWorkspace:
+    """Mock isolated workspace for testing."""
+
+    isolation_id: str = "mock-workspace-123"
+    workspace_path: str = "/tmp/mock-workspace"
+
+
+class MockArtifactQueryService:
+    """Mock artifact query service for testing phase chaining.
+
+    This simulates the DB-backed artifact query that replaces
+    in-memory phase_outputs.
+    """
+
+    def __init__(self) -> None:
+        self._artifacts: dict[str, dict[str, str]] = {}  # execution_id -> {phase_id -> content}
+
+    def add_artifact(
+        self,
+        execution_id: str,
+        phase_id: str,
+        content: str,
+    ) -> None:
+        """Add an artifact to the mock store."""
+        if execution_id not in self._artifacts:
+            self._artifacts[execution_id] = {}
+        self._artifacts[execution_id][phase_id] = content
+
+    async def get_by_execution(self, execution_id: str) -> list[Any]:
+        """Get artifacts for an execution."""
+        return []  # Mock returns empty - could filter by execution_id if needed
+
+    async def get_for_phase_injection(
+        self,
+        execution_id: str,
+        completed_phase_ids: list[str],
+    ) -> dict[str, str]:
+        """Get phase outputs for prompt injection."""
+        if execution_id not in self._artifacts:
+            return {}
+
+        result = {}
+        for phase_id in completed_phase_ids:
+            if phase_id in self._artifacts[execution_id]:
+                result[phase_id] = self._artifacts[execution_id][phase_id]
+        return result
 
 
 def create_test_workflow(
@@ -336,17 +407,11 @@ class TestWorkflowExecutionEngine:
         return MockArtifactRepository()
 
     @pytest.fixture
-    def event_publisher(self) -> MockEventPublisher:
-        """Create mock event publisher."""
-        return MockEventPublisher()
-
-    @pytest.fixture
     def engine(
         self,
         workflow_repo: MockWorkflowRepository,
         session_repo: MockSessionRepository,
         artifact_repo: MockArtifactRepository,
-        event_publisher: MockEventPublisher,
         mock_agent: MockInstrumentedAgent,
     ) -> WorkflowExecutionEngine:
         """Create execution engine with mock dependencies."""
@@ -356,10 +421,11 @@ class TestWorkflowExecutionEngine:
 
         return WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
-            event_publisher=event_publisher,
         )
 
     @pytest.mark.asyncio
@@ -378,7 +444,7 @@ class TestWorkflowExecutionEngine:
         self,
         engine: WorkflowExecutionEngine,
         workflow_repo: MockWorkflowRepository,
-        artifact_repo: MockArtifactRepository,  # noqa: ARG002 - needed by fixture
+        artifact_repo: MockArtifactRepository,
         mock_agent: MockInstrumentedAgent,
     ) -> None:
         """Test executing a simple 2-phase workflow."""
@@ -457,11 +523,17 @@ class TestWorkflowExecutionEngine:
     @pytest.mark.asyncio
     async def test_phase_chaining_with_previous_output(
         self,
-        engine: WorkflowExecutionEngine,
         workflow_repo: MockWorkflowRepository,
+        session_repo: MockSessionRepository,
+        artifact_repo: MockArtifactRepository,
         mock_agent: MockInstrumentedAgent,
     ) -> None:
-        """Test that phase output is available to next phase."""
+        """Test that phase output is available to next phase.
+
+        Note: Phase outputs are now retrieved from the ArtifactQueryService
+        (DB-backed) rather than in-memory. This test uses a mock query
+        service that simulates the artifact lookup.
+        """
         phases = [
             PhaseDefinition(
                 phase_id="phase1",
@@ -485,6 +557,68 @@ class TestWorkflowExecutionEngine:
             "Output from phase 1",
             "Output from phase 2",
         ]
+
+        # Create a mock query service that returns the expected phase1 output
+        # This simulates artifacts being persisted and queried from DB
+        mock_query_service = MockArtifactQueryService()
+
+        # We need to inject the phase1 output AFTER it's created but BEFORE phase2 runs
+        # The cleanest way is to use a smarter mock that intercepts artifact saves
+        # For now, we use a hook approach by patching the mock agent
+
+        original_complete = mock_agent.complete
+
+        async def complete_with_artifact_tracking(
+            messages: list[Any], config: Any
+        ) -> MockAgentResponse:
+            result = await original_complete(messages, config)
+            # After phase1 completes, its output should be available for phase2
+            # The execution_id isn't known here, but we use a wildcard approach
+            for _exec_id in mock_query_service._artifacts:
+                pass  # Already added
+            return result
+
+        # Simpler approach: pre-populate with expected output
+        # The mock query service will return this for any execution
+        class DynamicMockQueryService:
+            """Mock that returns artifacts based on what was saved."""
+
+            def __init__(self, artifact_repo: MockArtifactRepository) -> None:
+                self._artifact_repo = artifact_repo
+
+            async def get_by_execution(self, execution_id: str) -> list[Any]:
+                return []
+
+            async def get_for_phase_injection(
+                self,
+                execution_id: str,
+                completed_phase_ids: list[str],
+            ) -> dict[str, str]:
+                # Query the artifact repo for artifacts matching these phases
+                result = {}
+                for artifact in self._artifact_repo._artifacts.values():
+                    if (
+                        artifact.phase_id in completed_phase_ids
+                        and artifact.content
+                        and artifact.phase_id not in result
+                    ):
+                        result[artifact.phase_id] = artifact.content
+                return result
+
+        dynamic_query_service = DynamicMockQueryService(artifact_repo)
+
+        def agent_factory(_provider: str) -> Any:
+            return mock_agent
+
+        engine = WorkflowExecutionEngine(
+            workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
+            session_repository=session_repo,
+            artifact_repository=artifact_repo,
+            agent_factory=cast("Any", agent_factory),
+            artifact_query_service=cast("Any", dynamic_query_service),
+        )
 
         await engine.execute(
             workflow_id=get_workflow_id(workflow),
@@ -577,8 +711,8 @@ class TestWorkflowExecutionFailure:
         class FailingAgent(MockInstrumentedAgent):
             async def complete(
                 self,
-                messages: list[Any],  # noqa: ARG002
-                config: Any,  # noqa: ARG002
+                messages: list[Any],
+                config: Any,
             ) -> Any:
                 raise RuntimeError("Agent failed!")
 
@@ -593,7 +727,6 @@ class TestWorkflowExecutionFailure:
         workflow_repo = MockWorkflowRepository()
         session_repo = MockSessionRepository()
         artifact_repo = MockArtifactRepository()
-        event_publisher = MockEventPublisher()
 
         # Add test workflow
         workflow = create_test_workflow()
@@ -604,10 +737,11 @@ class TestWorkflowExecutionFailure:
 
         return WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
-            event_publisher=event_publisher,
         )
 
     @pytest.mark.asyncio
@@ -636,8 +770,8 @@ class TestWorkflowExecutionFailure:
         class PartialFailAgent(MockInstrumentedAgent):
             async def complete(
                 self,
-                messages: list[Any],  # noqa: ARG002
-                config: Any,  # noqa: ARG002
+                messages: list[Any],
+                config: Any,
             ) -> Any:
                 nonlocal call_count
                 call_count += 1
@@ -652,10 +786,11 @@ class TestWorkflowExecutionFailure:
 
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
             session_repository=MockSessionRepository(),
             artifact_repository=MockArtifactRepository(),
             agent_factory=cast("Any", lambda _p: agent),
-            event_publisher=MockEventPublisher(),
         )
 
         result = await engine.execute(
@@ -669,11 +804,63 @@ class TestWorkflowExecutionFailure:
         assert result.phase_results[1].status == PhaseStatus.FAILED
 
 
+class TestDependencyInjectionEnforcement:
+    """Tests for ADR-023 DI enforcement in WorkflowExecutionEngine."""
+
+    def test_engine_fails_without_execution_repository(self) -> None:
+        """Engine should fail if execution_repository is None."""
+        with pytest.raises(ValueError) as exc_info:
+            WorkflowExecutionEngine(
+                workflow_repository=MockWorkflowRepository(),
+                execution_repository=None,  # type: ignore[arg-type]
+                workspace_router=cast("Any", MockWorkspaceRouter()),
+                session_repository=MockSessionRepository(),
+                artifact_repository=MockArtifactRepository(),
+                agent_factory=cast("Any", lambda _p: None),
+            )
+
+        assert "execution_repository is required" in str(exc_info.value)
+        assert "ADR-023" in str(exc_info.value)
+
+    def test_engine_fails_without_workspace_router(self) -> None:
+        """Engine should fail if workspace_router is None."""
+        with pytest.raises(ValueError) as exc_info:
+            WorkflowExecutionEngine(
+                workflow_repository=MockWorkflowRepository(),
+                execution_repository=MockWorkflowExecutionRepository(),
+                workspace_router=None,  # type: ignore[arg-type]
+                session_repository=MockSessionRepository(),
+                artifact_repository=MockArtifactRepository(),
+                agent_factory=cast("Any", lambda _p: None),
+            )
+
+        assert "workspace_router is required" in str(exc_info.value)
+        assert "ADR-023" in str(exc_info.value)
+
+    def test_engine_succeeds_with_all_dependencies(self) -> None:
+        """Engine should succeed when all dependencies provided."""
+        # Should not raise
+        engine = WorkflowExecutionEngine(
+            workflow_repository=MockWorkflowRepository(),
+            execution_repository=MockWorkflowExecutionRepository(),
+            workspace_router=cast("Any", MockWorkspaceRouter()),
+            session_repository=MockSessionRepository(),
+            artifact_repository=MockArtifactRepository(),
+            agent_factory=cast("Any", lambda _p: None),
+        )
+        assert engine is not None
+
+
 class TestExecutionContext:
     """Tests for ExecutionContext."""
 
-    def test_context_tracks_phase_outputs(self) -> None:
-        """Test context stores phase outputs."""
+    def test_context_tracks_completed_phase_ids(self) -> None:
+        """Test context stores completed phase IDs.
+
+        Note: Phase CONTENT is no longer stored in-memory.
+        Content is persisted to DB as artifacts and queried via
+        ArtifactQueryService when needed (ADR-012).
+        """
         ctx = ExecutionContext(
             workflow_id="wf-123",
             execution_id="exec-123",
@@ -681,11 +868,12 @@ class TestExecutionContext:
             inputs={"topic": "test"},
         )
 
-        ctx.phase_outputs["phase-1"] = "Output from phase 1"
-        ctx.phase_outputs["phase-2"] = "Output from phase 2"
+        ctx.completed_phase_ids.append("phase-1")
+        ctx.completed_phase_ids.append("phase-2")
 
-        assert len(ctx.phase_outputs) == 2
-        assert "Output from phase 1" in ctx.phase_outputs["phase-1"]
+        assert len(ctx.completed_phase_ids) == 2
+        assert "phase-1" in ctx.completed_phase_ids
+        assert "phase-2" in ctx.completed_phase_ids
 
     def test_context_tracks_artifacts(self) -> None:
         """Test context stores artifact IDs."""

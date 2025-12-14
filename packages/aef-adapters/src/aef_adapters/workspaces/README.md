@@ -5,6 +5,27 @@ All agents run in isolated environments by default, protecting against compromis
 or malicious code execution.
 
 See [ADR-021: Isolated Workspace Architecture](../../../../../docs/adrs/ADR-021-isolated-workspace-architecture.md)
+See [ADR-023: Workspace-First Execution Model](../../../../../docs/adrs/ADR-023-workspace-first-execution-model.md)
+
+## ⚠️ Important: Test-Only Workspaces (ADR-023)
+
+`LocalWorkspace` and `InMemoryWorkspace` provide **NO ISOLATION** and are
+**TEST ONLY**. They will raise errors in development, staging, or production:
+
+```python
+# ❌ FAILS in dev/prod - LocalWorkspace is TEST ONLY
+from aef_adapters.workspaces import LocalWorkspace
+workspace = await LocalWorkspace.create(config)  # NonIsolatedWorkspaceError!
+
+# ✅ WORKS everywhere - WorkspaceRouter selects isolated backend
+from aef_adapters.workspaces import get_workspace_router
+router = get_workspace_router()
+async with router.create(config) as workspace:
+    # Uses Docker, gVisor, Firecracker, or E2B
+    ...
+```
+
+**Always use `WorkspaceRouter` for development and production.**
 
 ## Quick Start
 
@@ -580,5 +601,6 @@ sudo mv release-v1.5.0-x86_64/firecracker-v1.5.0-x86_64 /usr/local/bin/firecrack
 ## Related Documentation
 
 - [ADR-021: Isolated Workspace Architecture](../../../../../docs/adrs/ADR-021-isolated-workspace-architecture.md)
+- [ADR-023: Workspace-First Execution Model](../../../../../docs/adrs/ADR-023-workspace-first-execution-model.md)
 - [ADR-009: Agentic Execution Architecture](../../../../../docs/adrs/ADR-009-agentic-execution-architecture.md)
 - [Settings Configuration](../../shared/settings/README.md)
