@@ -64,8 +64,8 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
     && mv /root/.local/bin/uvx /usr/local/bin/ \
     && rm -rf /root/.local
 
-# Install anthropic SDK (required for agent runner)
-RUN pip install --no-cache-dir anthropic>=0.40.0
+# Install anthropic SDK and claude-agent-sdk (required for agent runner)
+RUN pip install --no-cache-dir anthropic>=0.40.0 claude-agent-sdk>=0.1.11
 
 # Copy and install aef-agent-runner package
 # This runs inside the container to execute the Claude agent
@@ -92,6 +92,7 @@ USER workspace
 
 # Set environment variables
 ENV HOME=/workspace \
+    WORKSPACE_DIR=/workspace \
     CLAUDE_PROJECT_DIR=/workspace \
     PATH="/workspace/.local/bin:/usr/local/bin:$PATH" \
     # Disable pip version warnings
@@ -101,6 +102,11 @@ ENV HOME=/workspace \
     # GitHub CLI uses GH_TOKEN for authentication (set by workspace injection)
     # GH_TOKEN will be injected at runtime via env var
     GH_NO_UPDATE_NOTIFIER=1 \
+    # Git configuration for commits
+    GIT_AUTHOR_NAME="AEF Agent" \
+    GIT_AUTHOR_EMAIL="agent@aef.local" \
+    GIT_COMMITTER_NAME="AEF Agent" \
+    GIT_COMMITTER_EMAIL="agent@aef.local" \
     # Proxy settings for sidecar (injected at runtime by orchestrator)
     # These will be set to http://sidecar:8081 when running with sidecar
     # The sidecar intercepts requests and injects API tokens
@@ -110,6 +116,11 @@ ENV HOME=/workspace \
 
 # Create standard workspace directories
 RUN mkdir -p /workspace/inputs /workspace/artifacts
+
+# Configure git for commits
+RUN git config --global user.name "AEF Agent" \
+    && git config --global user.email "agent@aef.local" \
+    && git config --global init.defaultBranch main
 
 # Health check: verify workspace is accessible
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=2 \

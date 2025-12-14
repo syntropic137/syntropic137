@@ -105,6 +105,29 @@ class EnvInjector:
                 )
             )
 
+        # GitHub Token (for git/gh CLI operations)
+        # Try GitHub App token first, fall back to GITHUB_TOKEN env var
+        github_token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+        if github_token:
+            # GH_TOKEN is used by gh CLI
+            env_vars.append(
+                InjectedEnvVar(
+                    name="GH_TOKEN",
+                    value=github_token,
+                    required=False,
+                    description="GitHub token for gh CLI and git push",
+                )
+            )
+            # GITHUB_TOKEN is used by some tools and git credential helper
+            env_vars.append(
+                InjectedEnvVar(
+                    name="GITHUB_TOKEN",
+                    value=github_token,
+                    required=False,
+                    description="GitHub token for git operations",
+                )
+            )
+
         return env_vars
 
     async def inject_api_keys(

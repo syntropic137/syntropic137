@@ -173,8 +173,16 @@ class HardenedDockerWorkspace(GVisorWorkspace):
                 "CLAUDE_PROJECT_DIR=/workspace",
                 "--env",
                 "HOME=/workspace",
+                "--env",
+                "WORKSPACE_DIR=/workspace",
             ]
         )
+
+        # Inject API keys and tokens
+        from aef_adapters.workspaces.env_injector import get_env_injector
+
+        env_injector = get_env_injector()
+        cmd.extend(env_injector.get_docker_env_args())
 
         # Image and command (sleep infinity to keep container running)
         cmd.extend([image, "sleep", "infinity"])

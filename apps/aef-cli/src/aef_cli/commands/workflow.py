@@ -593,6 +593,21 @@ def run_workflow(
             help="Minimal output, only show final result",
         ),
     ] = False,
+    container: Annotated[
+        bool,
+        typer.Option(
+            "--container",
+            "-c",
+            help="Run agent inside isolated container with sidecar proxy",
+        ),
+    ] = False,
+    tenant_id: Annotated[
+        str | None,
+        typer.Option(
+            "--tenant",
+            help="Tenant ID for multi-tenant token attribution",
+        ),
+    ] = None,
 ) -> None:
     """Execute a workflow.
 
@@ -605,6 +620,9 @@ def run_workflow(
 
         # Run quietly (minimal output)
         aef workflow run research-workflow --quiet
+
+        # Run in container mode (isolated execution)
+        aef workflow run github-pr-workflow --container --input change_description="Add README"
     """
     from aef_adapters.agents import (
         AgentProtocol,
@@ -756,6 +774,12 @@ def run_workflow(
         for key, value in parsed_inputs.items():
             console.print(f"  • {key}: [green]{value}[/green]")
 
+    if container:
+        console.print("\n[bold cyan]🐳 Container Mode[/bold cyan]")
+        console.print("  Agent will run in isolated Docker container with sidecar proxy")
+        if tenant_id:
+            console.print(f"  Tenant: [dim]{tenant_id}[/dim]")
+
     if dry_run:
         console.print("\n[yellow]DRY RUN MODE[/yellow] - Validating execution plan\n")
 
@@ -889,6 +913,8 @@ def run_workflow(
                         result = await engine.execute(
                             workflow_id=full_workflow_id,
                             inputs=parsed_inputs,
+                            use_container=container,
+                            tenant_id=tenant_id,
                         )
 
                         # Update progress for completed phases
@@ -905,6 +931,8 @@ def run_workflow(
                     result = await engine.execute(
                         workflow_id=full_workflow_id,
                         inputs=parsed_inputs,
+                        use_container=container,
+                        tenant_id=tenant_id,
                     )
                 except WorkflowNotFoundError:
                     console.print(f"[red]Workflow not found: {full_workflow_id}[/red]")

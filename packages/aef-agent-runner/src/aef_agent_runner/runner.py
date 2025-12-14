@@ -1,9 +1,12 @@
-"""Agent runner - main execution logic.
+"""Agent runner - main execution logic using claude-agent-sdk.
 
-This is the core of the agent runner package. It:
+This is the core of the agent runner package. It uses the official
+claude-agent-sdk for real tool execution (Bash, Read, Write, Edit).
+
+It:
 1. Loads task configuration
-2. Sets up the Claude client
-3. Executes the agent with the task prompt
+2. Sets up the Claude agent with workspace tools
+3. Executes the task using claude-agent-sdk
 4. Emits events for each tool use, turn, etc.
 5. Writes output artifacts
 6. Handles cancellation gracefully
@@ -12,6 +15,7 @@ This is the core of the agent runner package. It:
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -33,22 +37,39 @@ from aef_agent_runner.events import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
-
-    from anthropic import Anthropic
 
     from aef_agent_runner.task import Task
 
 logger = logging.getLogger(__name__)
+
+# Try to import claude-agent-sdk
+try:
+    from claude_agent_sdk import ClaudeAgentOptions, query
+    from claude_agent_sdk.types import (
+        AssistantMessage,
+        ResultMessage,
+        ToolResultMessage,
+        ToolUseBlock,
+    )
+
+    CLAUDE_SDK_AVAILABLE = True
+except ImportError:
+    CLAUDE_SDK_AVAILABLE = False
+    query = None
+    ClaudeAgentOptions = None
+    AssistantMessage = None
+    ResultMessage = None
+    ToolResultMessage = None
+    ToolUseBlock = None
 
 
 class AgentRunner:
     """Runner for executing Claude agents inside isolated containers.
 
     The runner is designed to be the main entry point inside a workspace
-    container. It reads task configuration, executes the agent, and
-    emits events to stdout for the orchestrator.
+    container. It reads task configuration, executes the agent using
+    claude-agent-sdk with real tools, and emits events to stdout.
     """
 
     def __init__(
@@ -84,121 +105,60 @@ class AgentRunner:
         self._total_output_tokens = 0
         self._start_time: float | None = None
 
-    def run(self) -> Iterator[dict[str, Any]]:
-        """Run the agent and yield events.
+    def run(self) -> None:
+        """Run the agent using claude-agent-sdk.
 
-        This is the main execution loop. It yields events as dictionaries
-        that will be emitted as JSONL to stdout.
-
-        Yields:
-            Event dictionaries
+        This uses the official SDK which provides:
+        - Built-in tools (Bash, Read, Write, Edit, etc.)
+        - Proper tool execution in the workspace
+        - Multi-turn autonomous operation
 
         Raises:
             CancellationError: If execution is cancelled
+            RuntimeError: If claude-agent-sdk is not available
         """
+        if not CLAUDE_SDK_AVAILABLE:
+            emit_error(
+                message="claude-agent-sdk not installed",
+                error_type="ImportError",
+            )
+            raise RuntimeError("claude-agent-sdk is required but not installed")
+
         self._start_time = time.time()
         emit_started()
 
         try:
-            # Initialize the Anthropic client
-            # Note: API key is injected by sidecar proxy, not in environment
-            client = self._create_client()
+            # Check for cancellation
+            check_cancellation(self._cancel_token)
 
-            # Build the system prompt with task context
-            system_prompt = self._task.build_system_prompt()
+            # Build the task prompt
+            task_prompt = self._build_task_prompt()
 
-            # Execute the agent loop
-            messages: list[dict[str, Any]] = []
-            user_message = self._build_initial_message()
-            messages.append({"role": "user", "content": user_message})
+            # Configure the agent
+            # Use cwd to set the working directory for tool execution
+            workspace_dir = os.environ.get("WORKSPACE_DIR", "/workspace")
 
-            for turn in range(self._max_turns):
-                # Check for cancellation before each turn
+            options = ClaudeAgentOptions(
+                max_turns=self._max_turns,
+                cwd=workspace_dir,
+                # The API key is injected by the sidecar proxy
+                # We pass a placeholder that the proxy replaces
+                api_key=os.environ.get(
+                    "ANTHROPIC_API_KEY", "placeholder-sidecar-injects"
+                ),
+                model=self._model,
+            )
+
+            emit_progress(turn=0, input_tokens=0, output_tokens=0)
+
+            # Execute using claude-agent-sdk's query function
+            # This handles multi-turn execution with tools automatically
+            for event in query(task_prompt, options=options):
+                # Check for cancellation between events
                 check_cancellation(self._cancel_token)
 
-                self._turn_count = turn + 1
-                emit_progress(
-                    turn=self._turn_count,
-                    input_tokens=self._total_input_tokens,
-                    output_tokens=self._total_output_tokens,
-                )
-
-                # Call Claude
-                response = client.messages.create(
-                    model=self._model,
-                    max_tokens=8192,
-                    system=system_prompt,
-                    messages=messages,
-                )
-
-                # Track token usage
-                usage = response.usage
-                self._total_input_tokens += usage.input_tokens
-                self._total_output_tokens += usage.output_tokens
-                emit_token_usage(
-                    input_tokens=usage.input_tokens,
-                    output_tokens=usage.output_tokens,
-                    cache_creation_tokens=getattr(usage, "cache_creation_input_tokens", 0),
-                    cache_read_tokens=getattr(usage, "cache_read_input_tokens", 0),
-                )
-
-                # Process response content
-                assistant_content = []
-                has_tool_use = False
-
-                for block in response.content:
-                    if block.type == "text":
-                        assistant_content.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
-                        has_tool_use = True
-                        tool_name = block.name
-                        tool_input = block.input
-                        tool_id = block.id
-
-                        emit_tool_use(
-                            tool_name=tool_name,
-                            tool_input=tool_input,
-                            tool_use_id=tool_id,
-                        )
-
-                        # Execute tool (simplified - real implementation would
-                        # use actual tool execution)
-                        tool_result = self._execute_tool(tool_name, tool_input, tool_id)
-
-                        assistant_content.append(
-                            {
-                                "type": "tool_use",
-                                "id": tool_id,
-                                "name": tool_name,
-                                "input": tool_input,
-                            }
-                        )
-
-                        # Add tool result to messages
-                        messages.append({"role": "assistant", "content": assistant_content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": [
-                                    {
-                                        "type": "tool_result",
-                                        "tool_use_id": tool_id,
-                                        "content": tool_result,
-                                    }
-                                ],
-                            }
-                        )
-                        assistant_content = []
-
-                # If no tool use, conversation is complete
-                if not has_tool_use:
-                    if assistant_content:
-                        messages.append({"role": "assistant", "content": assistant_content})
-                    break
-
-                # Check stop reason
-                if response.stop_reason == "end_turn":
-                    break
+                self._turn_count += 1
+                self._handle_sdk_event(event)
 
             # Collect and emit artifacts
             self._collect_artifacts()
@@ -215,68 +175,93 @@ class AgentRunner:
             emit_error(message=str(e), error_type=type(e).__name__)
             raise
 
-    def _create_client(self) -> Anthropic:
-        """Create the Anthropic client.
+    def _handle_sdk_event(self, event: Any) -> None:
+        """Handle events from claude-agent-sdk.
 
-        Note: The API key is NOT in the environment. The sidecar proxy
-        intercepts requests and injects the x-api-key header. We just
-        need to ensure requests go through the proxy (HTTP_PROXY env var).
+        The SDK yields different message types:
+        - AssistantMessage: Claude's response with potential tool uses
+        - ToolResultMessage: Results of tool execution
+        - ResultMessage: Final result when task is complete
         """
-        from anthropic import Anthropic
+        # Handle based on message type
+        if AssistantMessage is not None and isinstance(event, AssistantMessage):
+            # Check for tool use blocks
+            if hasattr(event, "content") and event.content:
+                for block in event.content:
+                    if ToolUseBlock is not None and isinstance(block, ToolUseBlock):
+                        emit_tool_use(
+                            tool_name=block.name,
+                            tool_input=block.input if hasattr(block, "input") else {},
+                            tool_use_id=block.id,
+                        )
 
-        # The client will use HTTP_PROXY/HTTPS_PROXY environment variables
-        # to route through the sidecar, which injects the API key
-        return Anthropic(
-            # Use a placeholder - sidecar will inject the real key
-            api_key="placeholder-sidecar-injects-key",
-        )
+            # Track tokens if available
+            if hasattr(event, "usage") and event.usage:
+                input_tokens = getattr(event.usage, "input_tokens", 0)
+                output_tokens = getattr(event.usage, "output_tokens", 0)
+                self._total_input_tokens += input_tokens
+                self._total_output_tokens += output_tokens
+                emit_token_usage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
 
-    def _build_initial_message(self) -> str:
-        """Build the initial user message."""
-        parts = [f"Execute the {self._task.phase} phase."]
+            emit_progress(
+                turn=self._turn_count,
+                input_tokens=self._total_input_tokens,
+                output_tokens=self._total_output_tokens,
+            )
 
+        elif ToolResultMessage is not None and isinstance(event, ToolResultMessage):
+            # Tool result - extract success/failure info
+            if hasattr(event, "content") and event.content:
+                for result in event.content:
+                    tool_id = getattr(result, "tool_use_id", "unknown")
+                    is_error = getattr(result, "is_error", False)
+                    emit_tool_result(
+                        tool_name="tool",  # SDK doesn't include name in result
+                        success=not is_error,
+                        tool_use_id=tool_id,
+                        duration_ms=0,  # Not tracked by SDK
+                    )
+
+        elif ResultMessage is not None and isinstance(event, ResultMessage):
+            # Final result - task complete
+            if hasattr(event, "usage") and event.usage:
+                input_tokens = getattr(event.usage, "input_tokens", 0)
+                output_tokens = getattr(event.usage, "output_tokens", 0)
+                self._total_input_tokens += input_tokens
+                self._total_output_tokens += output_tokens
+                emit_token_usage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+
+    def _build_task_prompt(self) -> str:
+        """Build the complete task prompt for the agent."""
+        parts = []
+
+        # Add the main prompt from task
+        parts.append(self._task.prompt)
+
+        # Add input context
         if self._task.inputs:
-            parts.append("\n\nWorkflow inputs:")
+            parts.append("\n\n## Workflow Inputs")
             for key, value in self._task.inputs.items():
-                parts.append(f"- {key}: {value}")
+                parts.append(f"- **{key}**: {value}")
 
+        # Add artifact info
         if self._task.artifacts:
-            parts.append("\n\nInput artifacts available in /workspace/inputs/:")
+            parts.append("\n\n## Available Input Artifacts")
+            parts.append("Located in `/workspace/inputs/`:")
             for name in self._task.artifacts:
                 parts.append(f"- {name}")
 
-        parts.append("\n\nWrite any output artifacts to /workspace/artifacts/")
+        # Add output instructions
+        parts.append("\n\n## Output")
+        parts.append("Write any output artifacts to `/workspace/artifacts/`")
 
         return "\n".join(parts)
-
-    def _execute_tool(
-        self,
-        tool_name: str,
-        tool_input: dict[str, Any],
-        tool_id: str,
-    ) -> str:
-        """Execute a tool call.
-
-        This is a simplified implementation. In a real setup, this would
-        dispatch to actual tool implementations (Read, Write, Bash, etc.)
-
-        For now, we emit events and return a placeholder result.
-        """
-        start_time = time.time()
-
-        # Simplified tool execution
-        # Real implementation would use claude-agent-sdk or similar
-        result = f"Tool {tool_name} executed with input: {tool_input}"
-
-        duration_ms = int((time.time() - start_time) * 1000)
-        emit_tool_result(
-            tool_name=tool_name,
-            success=True,
-            tool_use_id=tool_id,
-            duration_ms=duration_ms,
-        )
-
-        return result
 
     def _collect_artifacts(self) -> None:
         """Collect and emit artifact events for files in output directory."""

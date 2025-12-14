@@ -257,6 +257,8 @@ class WorkflowExecutionEngine:
         workflow_id: str,
         inputs: dict[str, Any],
         execution_id: str | None = None,
+        use_container: bool = False,
+        tenant_id: str | None = None,
         _workspace_config: IsolatedWorkspaceConfig | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow from start to finish.
@@ -268,6 +270,11 @@ class WorkflowExecutionEngine:
             workflow_id: ID of the workflow to execute.
             inputs: Initial input variables for the workflow.
             execution_id: Optional custom execution ID.
+            use_container: If True, run agent inside isolated container with
+                sidecar proxy for token injection. If False (default), run
+                agent SDK directly in host process.
+            tenant_id: Tenant ID for multi-tenant token vending. Required when
+                use_container=True for proper token attribution.
             workspace_config: Optional workspace configuration override.
 
         Returns:
@@ -327,7 +334,21 @@ class WorkflowExecutionEngine:
         try:
             phases = self._get_executable_phases(workflow)
             for phase in sorted(phases, key=lambda p: p.order):
-                await self._execute_phase(workflow, phase, ctx, aggregate)
+                if use_container:
+                    # Container mode: agent runs inside isolated workspace with sidecar
+                    result = await self._execute_phase_in_container(
+                        phase=phase,
+                        ctx=ctx,
+                        aggregate=aggregate,
+                        tenant_id=tenant_id,
+                    )
+                    ctx.phase_results.append(result)
+                    if result.artifact_id:
+                        ctx.artifact_ids.append(result.artifact_id)
+                    ctx.completed_phase_ids.append(phase.phase_id)
+                else:
+                    # Host mode: agent SDK runs directly in host process
+                    await self._execute_phase(workflow, phase, ctx, aggregate)
                 # Save after each phase for partial progress persistence
                 await self._executions.save(aggregate)
 
