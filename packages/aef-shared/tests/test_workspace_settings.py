@@ -259,7 +259,7 @@ class TestGitIdentitySettings:
             assert git.user_name is None
             assert git.user_email is None
             assert git.token is None
-            assert git.github_app_id is None
+            # NOTE: github_app_* fields moved to GitHubAppSettings (AEF_GITHUB_* prefix)
             assert git.is_configured is False
             assert git.has_credentials is False
             assert git.credential_type == GitCredentialType.NONE
@@ -295,33 +295,42 @@ class TestGitIdentitySettings:
             assert git.credential_type == GitCredentialType.HTTPS
 
     def test_github_app_credentials(self) -> None:
-        """GitHub App should be preferred over HTTPS token."""
+        """GitHub App (AEF_GITHUB_*) should be preferred over HTTPS token."""
+        from aef_shared.settings.github import GitHubAppSettings
+
         env = {
             "AEF_GIT_USER_NAME": "test-user",
             "AEF_GIT_USER_EMAIL": "test@example.com",
             "AEF_GIT_TOKEN": "ghp_test123token",
-            "AEF_GIT_GITHUB_APP_ID": "12345",
-            "AEF_GIT_GITHUB_APP_INSTALLATION_ID": "67890",
-            "AEF_GIT_GITHUB_APP_PRIVATE_KEY": "base64encodedkey",
+            # GitHub App uses separate AEF_GITHUB_* prefix
+            "AEF_GITHUB_APP_ID": "12345",
+            "AEF_GITHUB_INSTALLATION_ID": "67890",
+            "AEF_GITHUB_PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
         }
         with patch.dict(os.environ, env, clear=True):
             git = GitIdentitySettings(_env_file=None)
+            github = GitHubAppSettings(_env_file=None)
 
+            # GitIdentitySettings should detect GitHub App is configured
             assert git.credential_type == GitCredentialType.GITHUB_APP
-            assert git.github_app_id == "12345"
-            assert git.github_app_installation_id == "67890"
+            # GitHub App settings are in separate class
+            assert github.app_id == "12345"
+            assert github.installation_id == "67890"
+            assert github.is_configured is True
 
     def test_incomplete_github_app_fails_validation(self) -> None:
         """Incomplete GitHub App config should raise ValueError."""
+        from aef_shared.settings.github import GitHubAppSettings
+
         env = {
-            "AEF_GIT_GITHUB_APP_ID": "12345",
+            "AEF_GITHUB_APP_ID": "12345",
             # Missing: INSTALLATION_ID and PRIVATE_KEY
         }
         with (
             patch.dict(os.environ, env, clear=True),
             pytest.raises(ValueError, match="Incomplete GitHub App config"),
         ):
-            GitIdentitySettings(_env_file=None)
+            GitHubAppSettings(_env_file=None)
 
     def test_settings_integration(self) -> None:
         """GitIdentitySettings should work with env vars."""

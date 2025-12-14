@@ -206,7 +206,7 @@ class SpendTracker:
     def __init__(
         self,
         store: BudgetStore,
-        alert_callback: Callable[[SpendAlert], Awaitable[None]] | None = None,
+        alert_callback: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
         """Initialize the spend tracker.
 
@@ -264,7 +264,7 @@ class SpendTracker:
         await self._store.store(budget)
 
         logger.info(
-            "Budget allocated: execution=%s, type=%s, max_input=%d, max_output=%d, max_cost=$%s",
+            "Budget allocated (execution_id=%s, workflow=%s, max_in=%d, max_out=%d, max_cost=$%s)",
             execution_id,
             workflow_type.value,
             budget.max_input_tokens,
@@ -365,7 +365,7 @@ class SpendTracker:
         await self._store.update(budget)
 
         logger.debug(
-            "Usage recorded: execution=%s, input=%d, output=%d, cost=$%s, total=$%s",
+            "Usage recorded (execution_id=%s, input=%d, output=%d, cost=$%s, total=$%s)",
             execution_id,
             input_tokens,
             output_tokens,
@@ -390,7 +390,7 @@ class SpendTracker:
         deleted = await self._store.delete(execution_id)
 
         if deleted:
-            logger.info("Budget released: execution=%s", execution_id)
+            logger.info("Budget released (execution_id=%s)", execution_id)
 
         return deleted
 

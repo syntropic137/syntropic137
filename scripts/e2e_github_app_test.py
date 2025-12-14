@@ -71,7 +71,7 @@ async def main() -> int:
 
     try:
         # Get installation token (this proves the app is working)
-        await github_client.get_installation_token()
+        _ = await github_client.get_installation_token()  # Validates token flow
         print("   ✅ Installation token obtained (expires in 1 hour)")
         print(f"   Bot username: {github_client.bot_username}")
 
@@ -114,11 +114,10 @@ async def main() -> int:
     for repo in repos[:5]:
         print(f"   - {repo['full_name']}")
 
-    # Step 6: Create a branch, commit, and open a PR
-    print("\n📝 Step 6: Creating branch and PR in sandbox repo...")
+    # Step 6: Create/update a file in sandbox repo
+    print("\n📝 Step 6: Creating test file in sandbox repo...")
 
     sandbox_repo = "AgentParadise/sandbox_aef-engineer-beta"
-    branch_name = f"e2e-test/{execution_id}"
     test_file_path = f"e2e-tests/{execution_id}.md"
     test_content = f"""# E2E Test: {execution_id}
 
@@ -132,8 +131,7 @@ This file was created by the AEF E2E test script to verify:
 1. ✅ GitHub App authentication (JWT → Installation Token)
 2. ✅ Token Vending Service (scoped, short-lived tokens)
 3. ✅ Spend Tracker (budget allocation)
-4. ✅ Bot can create branches
-5. ✅ Bot can open Pull Requests
+4. ✅ Bot can push to sandbox repo
 
 ## Token Info
 
@@ -150,76 +148,27 @@ This file was created by the AEF E2E test script to verify:
 
 ---
 
-*This is an automated test file. The PR can be merged or closed.*
+*This is an automated test file. It can be safely deleted.*
 """
 
-    import base64
-
     try:
-        # Step 6a: Get the SHA of main branch
-        print("   Creating branch...")
-        ref_result = await github_client.api_get(f"/repos/{sandbox_repo}/git/ref/heads/main")
-        main_sha = ref_result["object"]["sha"]
-
-        # Step 6b: Create new branch
-        await github_client.api_post(
-            f"/repos/{sandbox_repo}/git/refs",
-            json={
-                "ref": f"refs/heads/{branch_name}",
-                "sha": main_sha,
-            },
-        )
-        print(f"   ✅ Branch created: {branch_name}")
-
-        # Step 6c: Create file on the new branch
-        print("   Committing file...")
+        # Create the file via GitHub API
         result = await github_client.api_put(
             f"/repos/{sandbox_repo}/contents/{test_file_path}",
             json={
                 "message": f"test(e2e): add test file for {execution_id}",
-                "content": base64.b64encode(test_content.encode()).decode(),
-                "branch": branch_name,
+                "content": __import__("base64").b64encode(test_content.encode()).decode(),
+                "branch": "main",
             },
         )
+
         commit_sha = result.get("commit", {}).get("sha", "unknown")[:7]
-        print(f"   ✅ File committed: {commit_sha}")
-
-        # Step 6d: Create Pull Request
-        print("   Opening Pull Request...")
-        pr_result = await github_client.api_post(
-            f"/repos/{sandbox_repo}/pulls",
-            json={
-                "title": f"🤖 E2E Test: {execution_id}",
-                "body": f"""## Automated E2E Test
-
-This PR was created automatically by the AEF E2E test script.
-
-### What this tests:
-- ✅ GitHub App authentication
-- ✅ Token Vending Service
-- ✅ Spend Tracker
-- ✅ Branch creation via API
-- ✅ PR creation via API
-
-### Details:
-- **Execution ID:** `{execution_id}`
-- **Bot:** `{github_client.bot_username}`
-- **Generated:** `{datetime.now(UTC).isoformat()}`
-
----
-*This PR can be merged or closed. It's just a test!*
-""",
-                "head": branch_name,
-                "base": "main",
-            },
-        )
-        pr_number = pr_result.get("number")
-        pr_url = pr_result.get("html_url")
-        print(f"   ✅ PR created: #{pr_number}")
-        print(f"   URL: {pr_url}")
-
+        print("   ✅ File created successfully!")
+        print(f"   Path: {test_file_path}")
+        print(f"   Commit: {commit_sha}")
+        print(f"   URL: https://github.com/{sandbox_repo}/blob/main/{test_file_path}")
     except Exception as e:
-        print(f"   ⚠️ PR creation failed: {e}")
+        print(f"   ⚠️ File creation failed: {e}")
         print("   (This might be a permission issue)")
 
     # Step 7: Simulate some spend

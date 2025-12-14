@@ -4,7 +4,6 @@ This module handles setting up git configuration inside isolated workspaces
 so agents can clone repos and commit code with proper attribution.
 
 See ADR-021: Isolated Workspace Architecture - Git Identity section.
-See ADR-022: Secure Token Architecture - Token Vending section.
 
 Usage:
     from aef_adapters.workspaces.git import GitInjector
@@ -17,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from aef_shared.settings.workspace import (
     GitCredentialType,
@@ -29,19 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from aef_adapters.workspaces.types import IsolatedWorkspace
-
-
-class TokenVendingProtocol(Protocol):
-    """Protocol for token vending service (avoid circular imports)."""
-
-    async def vend_github_token(
-        self,
-        execution_id: str,
-        ttl_seconds: int | None = None,
-    ) -> str:
-        """Vend a short-lived GitHub token for the execution."""
-        ...
-
 
 logger = logging.getLogger(__name__)
 
@@ -143,20 +129,19 @@ class GitInjector:
         workflow_override: GitIdentitySettings | None = None,
         *,
         execution_id: str | None = None,
-        token_vending_service: TokenVendingProtocol | None = None,
+        token_vending_service: object | None = None,
     ) -> bool:
         """Inject git identity into a workspace.
 
         Sets up git user.name and user.email for commits.
-        When TokenVendingService is provided, uses short-lived tracked tokens.
 
         Args:
             workspace: The isolated workspace
             executor: Async function to execute commands:
                       (workspace, command) -> (exit_code, stdout, stderr)
             workflow_override: Optional workflow-specific git settings
-            execution_id: Optional execution ID for token tracking
-            token_vending_service: Optional token vending service for short-lived tokens
+            execution_id: Optional execution identifier for tracing
+            token_vending_service: Optional token vending service (reserved for future use)
 
         Returns:
             True if identity was injected successfully
@@ -164,6 +149,9 @@ class GitInjector:
         Raises:
             ValueError: If git identity cannot be resolved
         """
+        # execution_id and token_vending_service reserved for future token integration
+        _ = execution_id
+        _ = token_vending_service
         try:
             git_settings = self._resolver.resolve(workflow_override)
         except ValueError:
@@ -200,13 +188,7 @@ class GitInjector:
 
         # Inject credentials if available
         if git_settings.has_credentials:
-            return await self._inject_credentials(
-                workspace,
-                executor,
-                git_settings,
-                execution_id=execution_id,
-                token_vending_service=token_vending_service,
-            )
+            return await self._inject_credentials(workspace, executor, git_settings)
 
         return True
 
@@ -215,22 +197,17 @@ class GitInjector:
         workspace: IsolatedWorkspace,
         executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         git_settings: GitIdentitySettings,
-        *,
-        execution_id: str | None = None,
-        token_vending_service: TokenVendingProtocol | None = None,
     ) -> bool:
         """Inject git credentials for push access.
 
         Supports:
         - HTTPS with Personal Access Token
-        - GitHub App (generates installation token via TokenVendingService)
+        - GitHub App (generates installation token)
 
         Args:
             workspace: The isolated workspace
             executor: Command executor function
             git_settings: Git settings with credentials
-            execution_id: Optional execution ID for token tracking
-            token_vending_service: Optional token vending service for short-lived tokens
 
         Returns:
             True if credentials were injected successfully
@@ -238,13 +215,7 @@ class GitInjector:
         if git_settings.credential_type == GitCredentialType.HTTPS:
             return await self._inject_https_credentials(workspace, executor, git_settings)
         elif git_settings.credential_type == GitCredentialType.GITHUB_APP:
-            return await self._inject_github_app_credentials(
-                workspace,
-                executor,
-                git_settings,
-                execution_id=execution_id,
-                token_vending_service=token_vending_service,
-            )
+            return await self._inject_github_app_credentials(workspace, executor, git_settings)
         return True
 
     async def _inject_https_credentials(
@@ -304,32 +275,22 @@ class GitInjector:
         workspace: IsolatedWorkspace,
         executor: Callable[[IsolatedWorkspace, list[str]], Awaitable[tuple[int, str, str]]],
         _git_settings: GitIdentitySettings,
-        *,
-        execution_id: str | None = None,
-        token_vending_service: TokenVendingProtocol | None = None,
     ) -> bool:
         """Inject GitHub App credentials.
 
-        Uses TokenVendingService when available for short-lived, tracked tokens (5 min).
-        Falls back to raw installation token (1 hour) if no token service provided.
+        This generates a short-lived installation token from the App credentials
+        and uses it for git operations. The token is valid for 1 hour.
 
-        Flow (with TokenVendingService):
+        Flow:
         1. Get GitHubAppClient singleton
-        2. Vend short-lived token via TokenVendingService (5 min TTL, tracked)
+        2. Generate installation token (JWT → Installation Token)
         3. Configure git credential helper with token
-        4. Token tracked by execution_id for revocation
-
-        Flow (fallback):
-        1. Get GitHubAppClient singleton
-        2. Generate installation token directly (1 hour TTL)
-        3. Configure git credential helper with token
+        4. Token auto-expires in 1 hour (GitHub's limit)
 
         Args:
             workspace: The isolated workspace
             executor: Command executor function
             _git_settings: Git settings (GitHub App config comes from settings.github)
-            execution_id: Optional execution ID for token tracking
-            token_vending_service: Optional token vending service for short-lived tokens
 
         Returns:
             True if credentials were injected successfully
@@ -338,28 +299,9 @@ class GitInjector:
             from aef_adapters.github import GitHubAppError, get_github_client
 
             client = get_github_client()
-            token_ttl = "1 hour"
 
-            # Use TokenVendingService if available (preferred - short TTL, tracked)
-            if token_vending_service and execution_id:
-                try:
-                    token = await token_vending_service.vend_github_token(
-                        execution_id=execution_id,
-                        ttl_seconds=300,  # 5 minutes
-                    )
-                    token_ttl = "5 minutes (vended)"
-                    logger.info(
-                        "Using vended GitHub token: execution=%s, ttl=5min",
-                        execution_id,
-                    )
-                except Exception as e:
-                    logger.warning(f"TokenVendingService failed, falling back to direct token: {e}")
-                    token = await client.get_installation_token()
-            else:
-                # Fallback: get raw installation token (1 hour TTL)
-                token = await client.get_installation_token()
-                if execution_id:
-                    logger.debug("No TokenVendingService provided, using direct installation token")
+            # Get short-lived installation token (1 hour TTL)
+            token = await client.get_installation_token()
 
             # Configure git to use the token
             # Format: https://x-access-token:TOKEN@github.com
@@ -386,20 +328,9 @@ class GitInjector:
                 logger.error(f"Failed to configure credential helper: {stderr}")
                 return False
 
-            # Also set GH_TOKEN for gh CLI
-            gh_token_cmd = [
-                "sh",
-                "-c",
-                f"echo 'export GH_TOKEN=\"{token}\"' >> ~/.bashrc && "
-                f"echo 'export GITHUB_TOKEN=\"{token}\"' >> ~/.bashrc",
-            ]
-            await executor(workspace, gh_token_cmd)
-
             logger.info(
-                "GitHub App credentials injected: bot=%s, ttl=%s, execution=%s",
+                "GitHub App credentials injected (bot=%s, ttl=1 hour)",
                 client.bot_username,
-                token_ttl,
-                execution_id,
             )
             return True
 

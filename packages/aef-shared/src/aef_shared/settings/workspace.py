@@ -30,13 +30,10 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-if TYPE_CHECKING:
-    from typing import Self
 
 
 class IsolationBackend(str, Enum):
@@ -392,36 +389,8 @@ class GitIdentitySettings(BaseSettings):
             "GitHub Personal Access Token for HTTPS authentication. "
             "Required scopes: repo (for private repos). "
             "Get from: https://github.com/settings/tokens "
-            "Stored in ~/.git-credentials inside container."
-        ),
-    )
-
-    # =========================================================================
-    # GITHUB APP (Recommended for production)
-    # =========================================================================
-
-    github_app_id: str | None = Field(
-        default=None,
-        description=(
-            "GitHub App ID for App authentication. "
-            "Preferred for production - better security, no PAT expiry. "
-            "Get from: https://github.com/settings/apps/<app>/general"
-        ),
-    )
-
-    github_app_installation_id: str | None = Field(
-        default=None,
-        description=(
-            "GitHub App Installation ID. Get from: https://github.com/settings/installations/<id>"
-        ),
-    )
-
-    github_app_private_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "GitHub App private key (PEM format, base64-encoded). "
-            "Generate from: https://github.com/settings/apps/<app>/privatekeys "
-            "Encode: base64 -w0 private-key.pem"
+            "Stored in ~/.git-credentials inside container. "
+            "NOTE: For production, prefer GitHub App (AEF_GITHUB_*) over PAT."
         ),
     )
 
@@ -433,10 +402,16 @@ class GitIdentitySettings(BaseSettings):
     def credential_type(self) -> GitCredentialType:
         """Determine which credential type is configured.
 
+        Checks GitHub App settings (AEF_GITHUB_*) first, then falls back to PAT.
+
         Returns:
             GitCredentialType: The active credential type.
         """
-        if self.github_app_id and self.github_app_installation_id:
+        # Check GitHub App settings (separate config with AEF_GITHUB_* prefix)
+        from aef_shared.settings.github import GitHubAppSettings
+
+        github = GitHubAppSettings()
+        if github.is_configured:
             return GitCredentialType.GITHUB_APP
         if self.token:
             return GitCredentialType.HTTPS
@@ -451,33 +426,6 @@ class GitIdentitySettings(BaseSettings):
     def has_credentials(self) -> bool:
         """Check if credentials are configured for push."""
         return self.credential_type != GitCredentialType.NONE
-
-    # =========================================================================
-    # VALIDATION
-    # =========================================================================
-
-    @model_validator(mode="after")
-    def validate_github_app_complete(self) -> Self:
-        """Ensure GitHub App settings are complete if any are provided."""
-        app_fields = [
-            self.github_app_id,
-            self.github_app_installation_id,
-            self.github_app_private_key,
-        ]
-        provided = sum(1 for f in app_fields if f is not None)
-
-        if 0 < provided < 3:
-            missing = []
-            if not self.github_app_id:
-                missing.append("AEF_GIT_GITHUB_APP_ID")
-            if not self.github_app_installation_id:
-                missing.append("AEF_GIT_GITHUB_APP_INSTALLATION_ID")
-            if not self.github_app_private_key:
-                missing.append("AEF_GIT_GITHUB_APP_PRIVATE_KEY")
-            msg = f"Incomplete GitHub App config. Missing: {', '.join(missing)}"
-            raise ValueError(msg)
-
-        return self
 
 
 # =============================================================================

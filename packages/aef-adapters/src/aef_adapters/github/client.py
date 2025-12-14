@@ -160,12 +160,12 @@ class GitHubAppClient:
         return self._settings.installation_id
 
     @property
-    def bot_username(self) -> str | None:
+    def bot_username(self) -> str:
         """Get the bot username for commits."""
         return self._settings.bot_name
 
     @property
-    def bot_email(self) -> str | None:
+    def bot_email(self) -> str:
         """Get the bot email for commits."""
         return self._settings.bot_email
 
@@ -242,13 +242,15 @@ class GitHubAppClient:
         # Return cached token if valid
         if not force_refresh and self._cached_token and not self._cached_token.is_expired:
             logger.debug(
-                "Using cached installation token (expires in %ss)",
+                "Using cached installation token (expires_in=%ss)",
                 f"{self._cached_token.seconds_until_expiry:.0f}",
             )
             return self._cached_token.token
 
         # Generate new token
-        logger.info("Generating new installation token for installation %s", self.installation_id)
+        logger.info(
+            "Generating new installation token for installation_id=%s", self.installation_id
+        )
 
         jwt_token = self._generate_jwt()
 
@@ -292,7 +294,7 @@ class GitHubAppClient:
             )
 
             logger.info(
-                "Installation token generated (expires %s, permissions: %s)",
+                "Installation token generated (expires_at=%s, permissions=%s)",
                 expires_at.isoformat(),
                 list(self._cached_token.permissions.keys()),
             )
@@ -473,7 +475,7 @@ def get_github_client() -> GitHubAppClient:
 
     _github_client = GitHubAppClient(settings.github)
     logger.info(
-        "GitHub App client initialized (app=%s, installation=%s)",
+        "GitHub App client initialized (app_id=%s, installation_id=%s)",
         settings.github.app_id,
         settings.github.installation_id,
     )

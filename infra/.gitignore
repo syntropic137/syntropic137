@@ -1,0 +1,24 @@
+# Infrastructure .gitignore
+
+# Environment files with actual secrets
+.env
+.env.local
+.env.*.local
+
+# Secrets directory (has its own .gitignore but double-protect)
+docker/secrets/*
+!docker/secrets/.gitignore
+
+# Terraform state (if added later)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Backup files
+*.backup
+*.bak
+
+# Cloudflare credentials (if using local config)
+cloudflare/credentials.json
+cloudflare/tunnel-config.yaml

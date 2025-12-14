@@ -129,19 +129,11 @@ async def check_prerequisites() -> bool:
     return all_ok
 
 
-async def run_phase1_workflow(live: bool = False) -> dict:
+async def run_phase1_workflow(_live: bool = False) -> dict:
     """Run Phase 1: Programmatic workflow execution.
-
-    Args:
-        live: If True, use real Claude agent (not yet implemented).
-              Currently this script tests GitHub App integration directly,
-              not agent-driven workflows. See scripts/e2e_true_agentic_workflow.py
-              for full agent-driven E2E testing.
 
     Returns:
         Dict with execution results (execution_id, branch, pr_url, etc.)
-
-    TODO: Implement live mode to use ClaudeAgentExecutor for workflow steps.
     """
     print_header("🚀 Phase 1: Programmatic Workflow Execution")
 
@@ -196,7 +188,7 @@ async def run_phase1_workflow(live: bool = False) -> dict:
     # Get installation token for Git operations
     print_step(4, "Get GitHub Installation Token")
 
-    await github_client.get_installation_token()
+    _ = await github_client.get_installation_token()  # Validates token generation
     print("   🔑 Installation token obtained (1-hour TTL)")
 
     # Create a branch and file via GitHub API
@@ -543,7 +535,7 @@ async def main() -> int:
     )
 
     # Verify event store
-    await verify_event_store(results["execution_id"])
+    _ = await verify_event_store(results["execution_id"])  # Validates store
 
     # Summary
     print_header("🎉 E2E Integration Test Complete!")
