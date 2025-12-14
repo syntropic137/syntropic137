@@ -111,6 +111,7 @@ class ScopedToken:
     - Short TTL (default 5 minutes)
     - Scoped permissions (specific APIs, repos)
     - Spend limits
+    - Optional tenant association for multi-tenancy
 
     Attributes:
         token_id: Unique identifier for this token
@@ -119,6 +120,7 @@ class ScopedToken:
         expires_at: When the token expires (UTC)
         scope: Scope restrictions for this token
         created_at: When the token was created (UTC)
+        tenant_id: Optional tenant ID for multi-tenancy
     """
 
     token_id: str
@@ -127,6 +129,7 @@ class ScopedToken:
     expires_at: datetime
     scope: TokenScope
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    tenant_id: str | None = None
 
     @property
     def is_expired(self) -> bool:
@@ -153,6 +156,7 @@ class ScopedToken:
             "expires_at": self.expires_at.isoformat(),
             "scope": self.scope.to_dict(),
             "created_at": self.created_at.isoformat(),
+            "tenant_id": self.tenant_id,
         }
 
     @classmethod
@@ -165,6 +169,7 @@ class ScopedToken:
             expires_at=datetime.fromisoformat(data["expires_at"]),
             scope=TokenScope.from_dict(data["scope"]),
             created_at=datetime.fromisoformat(data["created_at"]),
+            tenant_id=data.get("tenant_id"),
         )
 
 
