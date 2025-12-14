@@ -222,3 +222,117 @@ class TestSessionCostProjection:
 
         all_sessions = await projection.get_all()
         assert len(all_sessions) == 0
+
+
+class TestToolTokenAggregation:
+    """Tests for tool token aggregation in SessionCostProjection."""
+
+    @pytest.mark.asyncio
+    async def test_aggregate_tool_tokens_single_event(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Test aggregating tool tokens from a single event."""
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.01",
+                "tool_token_breakdown": {
+                    "Read": {"tool_use": 30, "tool_result": 500},
+                    "Write": {"tool_use": 200, "tool_result": 10},
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        assert session_cost.tokens_by_tool == {"Read": 530, "Write": 210}
+
+    @pytest.mark.asyncio
+    async def test_aggregate_tool_tokens_multiple_events(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Test that tool tokens aggregate across multiple events."""
+        # First event
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.01",
+                "tool_token_breakdown": {
+                    "Read": {"tool_use": 30, "tool_result": 500},
+                },
+            }
+        )
+
+        # Second event with more Read and new Write
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.02",
+                "tool_token_breakdown": {
+                    "Read": {"tool_use": 30, "tool_result": 1000},
+                    "Write": {"tool_use": 500, "tool_result": 10},
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        # Read: 530 + 1030 = 1560
+        assert session_cost.tokens_by_tool["Read"] == 1560
+        # Write: 510 (only from second event)
+        assert session_cost.tokens_by_tool["Write"] == 510
+
+    @pytest.mark.asyncio
+    async def test_no_tool_tokens_when_empty_breakdown(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Test that empty breakdown doesn't affect tokens_by_tool."""
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.01",
+                "tool_token_breakdown": {},
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        assert session_cost.tokens_by_tool == {}
+
+    @pytest.mark.asyncio
+    async def test_tool_tokens_serialization_roundtrip(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Test that tokens_by_tool survives serialization/deserialization."""
+        # Create with tool tokens
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.01",
+                "tool_token_breakdown": {
+                    "Shell": {"tool_use": 50, "tool_result": 1000},
+                },
+            }
+        )
+
+        # Add more to same session (forces reload from store)
+        await projection.on_cost_recorded(
+            {
+                "session_id": "session-1",
+                "cost_type": "llm_tokens",
+                "amount_usd": "0.01",
+                "tool_token_breakdown": {
+                    "Shell": {"tool_use": 50, "tool_result": 2000},
+                },
+            }
+        )
+
+        session_cost = await projection.get_session_cost("session-1")
+        assert session_cost is not None
+        # Shell: 1050 + 2050 = 3100
+        assert session_cost.tokens_by_tool["Shell"] == 3100

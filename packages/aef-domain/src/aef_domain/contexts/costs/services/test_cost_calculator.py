@@ -174,3 +174,73 @@ class TestCostCalculator:
         # 300 cache_read @ $0.30/M = $0.00009
         # Total = $0.01134
         assert cost == Decimal("0.01134")
+
+
+class TestToolTokenAttribution:
+    """Tests for tool token attribution in CostCalculator."""
+
+    @pytest.mark.asyncio
+    async def test_on_token_usage_with_tool_details(self, calculator: CostCalculator) -> None:
+        """Test that tool_details are processed into tool_token_breakdown."""
+        event_data = {
+            "session_id": "session-1",
+            "model": "claude-sonnet-4-20250514",
+            "input_tokens": 5000,
+            "output_tokens": 1000,
+            "tool_details": [
+                {"name": "Read", "input_size": 50, "result_size": 4000},
+                {"name": "Write", "input_size": 2000, "result_size": 30},
+            ],
+        }
+
+        result = await calculator.on_token_usage(event_data)
+
+        assert result is not None
+        assert result.tool_token_breakdown is not None
+        assert "Read" in result.tool_token_breakdown
+        assert "Write" in result.tool_token_breakdown
+
+        # Read should have large tool_result tokens
+        read_breakdown = result.tool_token_breakdown["Read"]
+        assert read_breakdown["tool_result"] > 500  # 4000 chars / ~3.5 = ~1142 tokens
+
+        # Write should have large tool_use tokens
+        write_breakdown = result.tool_token_breakdown["Write"]
+        assert write_breakdown["tool_use"] > 500  # 2000 chars / ~3.5 = ~571 tokens
+
+    @pytest.mark.asyncio
+    async def test_on_token_usage_without_tool_details(self, calculator: CostCalculator) -> None:
+        """Test that events without tool_details have empty breakdown."""
+        event_data = {
+            "session_id": "session-1",
+            "model": "claude-sonnet-4-20250514",
+            "input_tokens": 1000,
+            "output_tokens": 500,
+        }
+
+        result = await calculator.on_token_usage(event_data)
+
+        assert result is not None
+        assert result.tool_token_breakdown == {}
+
+    @pytest.mark.asyncio
+    async def test_on_token_usage_tool_breakdown_in_to_dict(
+        self, calculator: CostCalculator
+    ) -> None:
+        """Test that tool_token_breakdown is included in to_dict()."""
+        event_data = {
+            "session_id": "session-1",
+            "model": "claude-sonnet-4-20250514",
+            "input_tokens": 1000,
+            "output_tokens": 500,
+            "tool_details": [
+                {"name": "Shell", "input_size": 100, "result_size": 500},
+            ],
+        }
+
+        result = await calculator.on_token_usage(event_data)
+        assert result is not None
+
+        event_dict = result.to_dict()
+        assert "tool_token_breakdown" in event_dict
+        assert "Shell" in event_dict["tool_token_breakdown"]
