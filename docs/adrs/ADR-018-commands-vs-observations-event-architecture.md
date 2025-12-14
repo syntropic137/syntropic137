@@ -109,6 +109,7 @@ We adopt **two distinct event patterns** based on the nature of the data:
 | Tool execution tracking | **Pattern 2** | Observation of external fact |
 | Token usage tracking | **Pattern 2** | High-volume telemetry |
 | User prompt events | **Pattern 2** | Observation (prompt already submitted) |
+| **Cost tracking** | **Pattern 2** | Derived from token/tool observations, aggregated via projections |
 
 ## Deduplication Invariant
 
@@ -279,6 +280,106 @@ observation = ToolExecutionObserved(
 # Validate schema + dedup + append (no aggregate)
 await collector.ingest(observation)
 ```
+
+## Pattern 2 Implementation: Cost Tracking
+
+The `costs` VSA context is a complete implementation of Pattern 2, demonstrating how to:
+
+1. **Derive events** from existing observations (token usage → cost calculation)
+2. **Aggregate via projections** (session costs → execution costs)
+3. **Build read models** for efficient querying
+
+### Cost Tracking Architecture
+
+```
+┌─────────────────────┐     ┌─────────────────────┐     ┌─────────────────────┐
+│  token_usage event  │ ──► │   CostCalculator    │ ──► │  CostRecordedEvent  │
+│  (from collector)   │     │   (applies pricing) │     │   (per LLM call)    │
+└─────────────────────┘     └─────────────────────┘     └─────────────────────┘
+                                                                  │
+┌─────────────────────┐                                          │
+│ tool_execution event│ ──► CostCalculator ──► CostRecordedEvent─┘
+└─────────────────────┘                                          │
+                                                                  ▼
+                                                        ┌─────────────────────┐
+                                                        │    Event Store      │
+                                                        └─────────────────────┘
+                                                                  │
+                          ┌───────────────────────────────────────┤
+                          ▼                                       ▼
+                ┌─────────────────────┐             ┌─────────────────────┐
+                │ SessionCostProjection│             │ExecutionCostProjection│
+                │   (per-session)      │             │   (aggregates)      │
+                └─────────────────────┘             └─────────────────────┘
+                          │                                       │
+                          ▼                                       ▼
+                ┌─────────────────────┐             ┌─────────────────────┐
+                │   SessionCost       │             │   ExecutionCost     │
+                │   (read model)      │             │   (read model)      │
+                └─────────────────────┘             └─────────────────────┘
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Session as atomic unit** | Costs are tracked per-session, then aggregated upward |
+| **CostRecordedEvent per cost** | Fine-grained events enable rich analytics |
+| **SessionCostFinalizedEvent** | Captures final totals when session ends |
+| **Decimal precision** | USD amounts stored as `Decimal` to avoid float errors |
+| **Model pricing lookup** | `ModelPricing` value objects with per-model rates |
+
+### Cost Hierarchy
+
+```
+ExecutionCost (aggregated)
+    └── SessionCost (atomic unit)
+            └── CostRecordedEvent (individual cost)
+                    ├── llm_tokens (from token_usage)
+                    └── tool_execution (from tool events)
+```
+
+This demonstrates Pattern 2's power: deriving business value (cost tracking) from raw observations (token usage) without requiring aggregates.
+
+### Tool Token Attribution (Enhancement)
+
+Building on cost tracking, **tool token attribution** provides granular insight into which tools consume tokens:
+
+```
+token_usage event ─┬─► CostCalculator ─────────────► CostRecordedEvent
+                   │   (total tokens)                       │
+                   │                                        │
+                   └─► ToolTokenEstimator                   │
+                       (estimates per-tool)                 │
+                                                            ▼
+                              ┌─────────────────────────────────────────────┐
+                              │         tool_token_breakdown                │
+                              │  {"Write": {"tool_use": 500, "tool_result": 50}}
+                              │  {"Read": {"tool_use": 30, "tool_result": 2000}}
+                              └─────────────────────────────────────────────┘
+```
+
+#### How It Works
+
+1. **ToolTokenEstimator** parses Claude's `content` array for `tool_use` blocks
+2. Estimates tokens based on content size (~3.5 chars/token for JSON)
+3. Tool results count as input tokens on the next API call
+4. Breakdown is added to `CostRecordedEvent.tool_token_breakdown`
+5. Projections aggregate per-tool tokens into `tokens_by_tool`
+
+#### Token Attribution Categories
+
+| Category | Source | Token Type | Example |
+|----------|--------|------------|---------|
+| Tool Use | `tool_use` block | Output tokens | Write file command |
+| Tool Result | `tool_result` block | Input tokens | File content returned |
+| Tool Definition | System prompt | Input tokens | Schema overhead |
+
+#### Limitations
+
+- Token counts are **estimated** (exact counts require API calls)
+- Tool definition tokens are amortized across all messages
+- Cache tokens affect tool costs but are attributed separately
 
 ## Related ADRs
 
