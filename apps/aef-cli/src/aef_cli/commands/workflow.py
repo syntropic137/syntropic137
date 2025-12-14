@@ -618,7 +618,6 @@ def run_workflow(
         connect_event_store,
         disconnect_event_store,
         get_artifact_repository,
-        get_event_publisher,
         get_event_store_client,
         get_session_repository,
         get_workflow_repository,
@@ -786,7 +785,6 @@ def run_workflow(
             workflow_repo = get_workflow_repository()
             session_repo = get_session_repository()
             artifact_repo = get_artifact_repository()
-            publisher = get_event_publisher()
 
             # Create agent factory - REQUIRES API keys (fail fast)
             def agent_factory(provider: str) -> InstrumentedAgent:
@@ -852,13 +850,20 @@ def run_workflow(
                     validators=validators,
                 )
 
-            # Create engine
+            # Create engine with ADR-023 compliant dependencies
+            from aef_adapters.storage.repositories import get_workflow_execution_repository
+            from aef_adapters.workspaces import get_workspace_router
+
+            execution_repo = get_workflow_execution_repository()
+            workspace_router = get_workspace_router()
+
             engine = WorkflowExecutionEngine(
                 workflow_repository=workflow_repo,
+                execution_repository=execution_repo,
+                workspace_router=workspace_router,
                 session_repository=session_repo,
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,
-                event_publisher=publisher,
             )
 
             # Setup progress display

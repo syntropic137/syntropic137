@@ -25,9 +25,12 @@ class CreateArtifactCommand(BaseModel):
     # Target aggregate (generated if not provided)
     aggregate_id: str | None = None
 
-    # Context
+    # Context - links artifact to workflow execution
     workflow_id: str = Field(..., description="Workflow this artifact belongs to")
     phase_id: str = Field(..., description="Phase that produced this artifact")
+    execution_id: str | None = Field(
+        default=None, description="Execution run that produced this artifact"
+    )
     session_id: str | None = Field(default=None, description="Session that produced this artifact")
 
     # Type

@@ -3,6 +3,7 @@
 This package provides adapters for:
 - AI Agents (Claude, OpenAI) - see `aef_adapters.agents`
 - Storage (PostgreSQL, In-Memory) - see `aef_adapters.storage`
+- Object Storage (Local, MinIO, Supabase) - see `aef_adapters.object_storage`
 - Hooks (Observability) - see `aef_adapters.hooks`
 """
 
@@ -25,6 +26,13 @@ from aef_adapters.hooks import (
     ValidatorRegistry,
     get_hook_client,
 )
+from aef_adapters.object_storage import (
+    LocalStorage,
+    MinioStorage,
+    StorageProtocol,
+    SupabaseStorage,
+    get_storage,
+)
 
 __all__ = [
     "AEFHookClient",
@@ -34,10 +42,15 @@ __all__ = [
     "AgentProtocol",
     "AgentProvider",
     "AgentResponse",
+    "LocalStorage",
+    "MinioStorage",
+    "StorageProtocol",
+    "SupabaseStorage",
     "ValidationResult",
     "ValidatorRegistry",
     "__version__",
     "get_agent",
     "get_available_agents",
     "get_hook_client",
+    "get_storage",
 ]

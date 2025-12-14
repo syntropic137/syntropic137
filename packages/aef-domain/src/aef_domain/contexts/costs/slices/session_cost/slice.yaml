@@ -1,0 +1,20 @@
+name: session_cost
+description: Session-level cost tracking (atomic unit)
+context: costs
+type: query
+
+# Events this slice subscribes to
+subscribes_to:
+  - CostRecorded
+  - SessionCostFinalized
+
+# Query this slice handles
+query:
+  name: GetSessionCostQuery
+  returns: SessionCost
+
+# Read model this slice produces
+read_model: SessionCost
+
+# Projection that builds the read model
+projection: SessionCostProjection

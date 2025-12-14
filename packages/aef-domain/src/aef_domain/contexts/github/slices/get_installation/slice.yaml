@@ -1,0 +1,18 @@
+# Get Installation slice configuration
+name: get_installation
+description: Query to retrieve GitHub App installation state
+
+query:
+  name: GetInstallationQuery
+  handler: handler.py
+
+projection:
+  name: InstallationProjection
+  events:
+    - github.AppInstalled
+    - github.InstallationRevoked
+    - github.TokenRefreshed
+
+read_model:
+  name: Installation
+  path: ../../domain/read_models/installation.py

@@ -93,6 +93,15 @@ ignore = [
     "B008",   # do not perform function calls in argument defaults
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Test files often have unused args in mocks implementing interfaces
+"**/test_*.py" = ["ARG001", "ARG002"]
+"**/tests/**" = ["ARG001", "ARG002"]
+# Scripts may have planned-but-not-implemented params
+"scripts/*.py" = ["ARG001"]
+# gRPC handlers require context param even if unused
+"**/token_injector.py" = ["ARG002"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["aef_cli", "aef_collector", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared", "aef_perf"]
 
@@ -101,7 +110,7 @@ python_version = "3.12"
 # Strict mode with pragmatic exceptions for existing code
 strict = false  # Disabled until existing type debt is resolved
 warn_return_any = false  # Too many violations in projections
-warn_unused_ignores = true
+warn_unused_ignores = false  # Type ignores may vary between envs (local vs CI)
 disallow_untyped_defs = false  # TODO: Enable after fixing 26+ violations
 disallow_incomplete_defs = true
 check_untyped_defs = true
@@ -117,6 +126,19 @@ exclude = [
     "^.*/tests/.*$",
     "^.*test_.*\\.py$",
 ]
+
+# Per-module ignores for optional dependencies and internal modules
+[[tool.mypy.overrides]]
+module = [
+    "redis.*",
+    "aiohttp.*",
+    "fakeredis.*",
+    "aef_adapters.*",  # Internal module cross-references
+    "aef_tokens.*",
+    "aef_shared.*",
+    "aef_domain.*",
+]
+ignore_missing_imports = true
 
 # Ignore missing imports for optional dependencies
 [[tool.mypy.overrides]]
@@ -137,8 +159,10 @@ module = [
     "uvicorn.*",
     "grpc",
     "grpc.*",
-    "redis",
-    "redis.*",
+    "supabase",
+    "supabase.*",
+    "minio",
+    "minio.*",
 ]
 ignore_missing_imports = true
 

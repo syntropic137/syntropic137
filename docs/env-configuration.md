@@ -70,27 +70,19 @@ Never edit `.env.example` manually - update `packages/aef-shared/src/aef_shared/
 | `S3_ACCESS_KEY_ID` | For S3 | None | S3 access key |
 | `S3_SECRET_ACCESS_KEY` | For S3 | None | S3 secret key |
 
-### GitHub App (Secure Agent Authentication)
+### GitHub App (Secure Agent Commits)
 
-For production deployments, use a GitHub App instead of Personal Access Tokens. See [GitHub App Setup](deployment/github-app-setup.md) for detailed instructions.
+For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup Guide](deployment/github-app-setup.md).
 
 | Variable | Required | Default | Description | Where to Get |
 |----------|----------|---------|-------------|--------------|
-| `AEF_GITHUB_APP_ID` | For GitHub App | None | Numeric App ID | App settings → General |
-| `AEF_GITHUB_APP_NAME` | For GitHub App | None | App slug (e.g., `aef-engineer-beta`) | App settings → General |
-| `AEF_GITHUB_INSTALLATION_ID` | For GitHub App | None | Installation ID per org | Settings → Installations → Configure URL |
-| `AEF_GITHUB_PRIVATE_KEY` | For GitHub App | None | RSA private key (PEM format) | App settings → Private keys → Generate |
-| `AEF_GITHUB_WEBHOOK_SECRET` | For webhooks | None | HMAC secret for webhook verification | Set during app creation |
+| `AEF_GITHUB_APP_ID` | For GitHub App | None | GitHub App ID | [github.com/settings/apps](https://github.com/settings/apps) |
+| `AEF_GITHUB_APP_NAME` | No | `aef-app` | App name for commit attribution (shows as `<name>[bot]`) | Your app's slug |
+| `AEF_GITHUB_PRIVATE_KEY` | For GitHub App | None | PEM-format private key | Generate from app settings |
+| `AEF_GITHUB_INSTALLATION_ID` | For GitHub App | None | Installation ID | From installation URL |
+| `AEF_GITHUB_WEBHOOK_SECRET` | For webhooks | None | Webhook signature secret | Set during app creation |
 
-### Git Identity (Commit Attribution)
-
-Used for git commits in isolated workspaces. Can be auto-derived from GitHub App settings.
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `AEF_GIT_USER_NAME` | For commits | None | Git committer name (e.g., `aef-bot[bot]`) |
-| `AEF_GIT_USER_EMAIL` | For commits | None | Git committer email |
-| `AEF_GIT_TOKEN` | Legacy | None | GitHub PAT (prefer GitHub App instead) |
+> **Note:** If any of `AEF_GITHUB_APP_ID`, `AEF_GITHUB_PRIVATE_KEY`, or `AEF_GITHUB_INSTALLATION_ID` is set, all three are required.
 
 ## Example .env File
 
@@ -116,24 +108,18 @@ OPENAI_API_KEY=
 # Storage
 ARTIFACT_STORAGE_TYPE=database
 
-# GitHub App (for production - see docs/deployment/github-app-setup.md)
-AEF_GITHUB_APP_ID=2461312
-AEF_GITHUB_APP_NAME=aef-engineer-beta
-AEF_GITHUB_INSTALLATION_ID=99311335
-AEF_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-...your private key...
------END RSA PRIVATE KEY-----"
+# GitHub App (optional - for secure agent commits)
+# AEF_GITHUB_APP_ID=123456
+# AEF_GITHUB_APP_NAME=aef-app
+# AEF_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."
+# AEF_GITHUB_INSTALLATION_ID=12345678
 # AEF_GITHUB_WEBHOOK_SECRET=your-webhook-secret
-
-# Git Identity (auto-derived from GitHub App, or set manually)
-AEF_GIT_USER_NAME=aef-engineer-beta[bot]
-AEF_GIT_USER_EMAIL=2461312+aef-engineer-beta[bot]@users.noreply.github.com
 ```
 
 ## Usage in Code
 
 ```python
-from aef_shared.settings import get_settings
+from aef_shared import get_settings
 
 # Settings are validated on first access
 settings = get_settings()
@@ -154,16 +140,8 @@ if settings.anthropic_api_key:
     api_key = settings.anthropic_api_key.get_secret_value()
 
 # GitHub App settings
-github = settings.github
-if github.is_configured:
-    print(f"GitHub App: {github.app_name}")
-    print(f"Bot: {github.bot_username}")  # e.g., aef-engineer-beta[bot]
-    print(f"Email: {github.bot_email}")   # e.g., 123+app[bot]@users.noreply.github.com
-
-# Git identity for commits
-git = settings.git_identity
-if git.is_configured:
-    print(f"Commits as: {git.user_name} <{git.user_email}>")
+if settings.github.is_configured:
+    print(f"Commits will show as: {settings.github.bot_name}")
 ```
 
 ## Validation

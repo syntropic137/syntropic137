@@ -31,10 +31,15 @@ class ArtifactListProjection(CheckpointedProjection):
     efficient listing and filtering.
 
     Implements CheckpointedProjection for per-projection position tracking.
+
+    Version History:
+        v1: Initial schema
+        v2: Added size_bytes and content fields
+        v3: Added execution_id for workflow execution linking (ADR-012)
     """
 
     PROJECTION_NAME = "artifact_summaries"
-    VERSION = 2  # Bumped to include size_bytes and content fields
+    VERSION = 3  # Added execution_id field
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -108,6 +113,7 @@ class ArtifactListProjection(CheckpointedProjection):
         summary = ArtifactSummary(
             id=artifact_id,
             workflow_id=event_data.get("workflow_id", ""),
+            execution_id=event_data.get("execution_id"),  # v3: Link to execution
             session_id=event_data.get("session_id"),
             phase_id=event_data.get("phase_id"),
             artifact_type=event_data.get("artifact_type", "unknown"),
@@ -140,9 +146,48 @@ class ArtifactListProjection(CheckpointedProjection):
         )
         return [ArtifactSummary.from_dict(d) for d in data]
 
+    async def get_by_execution(self, execution_id: str) -> list[ArtifactSummary]:
+        """Get all artifacts for a specific execution run.
+
+        This is the primary query for retrieving phase outputs
+        to inject into subsequent phases.
+
+        Args:
+            execution_id: The workflow execution ID
+
+        Returns:
+            List of artifacts created during this execution
+        """
+        data = await self._store.query(
+            self.PROJECTION_NAME,
+            filters={"execution_id": execution_id},
+        )
+        return [ArtifactSummary.from_dict(d) for d in data]
+
+    async def get_by_execution_and_phase(
+        self,
+        execution_id: str,
+        phase_id: str,
+    ) -> list[ArtifactSummary]:
+        """Get artifacts for a specific execution and phase.
+
+        Args:
+            execution_id: The workflow execution ID
+            phase_id: The phase ID
+
+        Returns:
+            List of artifacts from the specified phase
+        """
+        data = await self._store.query(
+            self.PROJECTION_NAME,
+            filters={"execution_id": execution_id, "phase_id": phase_id},
+        )
+        return [ArtifactSummary.from_dict(d) for d in data]
+
     async def query(
         self,
         workflow_id: str | None = None,
+        execution_id: str | None = None,
         session_id: str | None = None,
         phase_id: str | None = None,
         artifact_type: str | None = None,
@@ -154,6 +199,8 @@ class ArtifactListProjection(CheckpointedProjection):
         filters = {}
         if workflow_id:
             filters["workflow_id"] = workflow_id
+        if execution_id:
+            filters["execution_id"] = execution_id
         if session_id:
             filters["session_id"] = session_id
         if phase_id:

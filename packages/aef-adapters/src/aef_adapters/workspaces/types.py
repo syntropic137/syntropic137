@@ -132,12 +132,15 @@ class IsolatedWorkspaceConfig:
         isolation_backend: Optional backend override (None = use default)
         git_identity_override: Optional git identity override for this workflow.
             If set, takes precedence over environment variables.
+        execution_id: Unique identifier for this execution, used for token tracking
+            and event correlation. If not provided, derived from session_id.
     """
 
     base_config: WorkspaceConfig
     security: WorkspaceSecuritySettings | None = None
     isolation_backend: IsolationBackend | None = None  # None = use default
     git_identity_override: GitIdentitySettings | None = None  # Workflow override
+    execution_id: str | None = None  # For token tracking and event correlation
 
     @property
     def session_id(self) -> str:
@@ -153,3 +156,8 @@ class IsolatedWorkspaceConfig:
     def phase_id(self) -> str | None:
         """Delegate to base config."""
         return self.base_config.phase_id
+
+    @property
+    def effective_execution_id(self) -> str:
+        """Get execution ID for token tracking (falls back to session_id)."""
+        return self.execution_id or self.base_config.session_id

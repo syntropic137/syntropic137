@@ -1,44 +1,41 @@
-"""GitHub App settings for secure API authentication.
+"""GitHub App settings for secure agent authentication.
 
-Provides configuration for GitHub App authentication which enables:
-- Short-lived, auto-rotating installation tokens
-- Granular repository permissions
-- Webhook signature verification
-- Proper commit attribution (bot identity)
+This module provides configuration for GitHub App integration.
+GitHub Apps provide secure, auto-rotating tokens with fine-grained permissions.
 
-See docs/deployment/github-app-setup.md for setup instructions.
+See HANDOFF-GITHUB-APP.md for architecture details.
 
 Environment Variables:
-    AEF_GITHUB_APP_ID - GitHub App ID (from app settings page)
-    AEF_GITHUB_APP_NAME - App slug (e.g., 'aef-engineer-beta')
-    AEF_GITHUB_INSTALLATION_ID - Installation ID per organization
-    AEF_GITHUB_PRIVATE_KEY - PEM private key for JWT signing
-    AEF_GITHUB_WEBHOOK_SECRET - HMAC secret for webhook verification
+    AEF_GITHUB_* - GitHub App configuration
+
+Usage:
+    from aef_shared.settings.github import GitHubAppSettings
+
+    settings = GitHubAppSettings()
+    if settings.is_configured:
+        client = GitHubAppClient(settings)
+        token = await client.get_installation_token()
 """
 
 from __future__ import annotations
 
-from typing import Self
+from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+if TYPE_CHECKING:
+    from typing import Self
+
 
 class GitHubAppSettings(BaseSettings):
-    """GitHub App authentication settings.
+    """GitHub App configuration for secure authentication.
 
-    Used for secure GitHub API access with installation tokens.
-    All fields are optional to support development without GitHub integration.
+    Commits from agents show as `<app_name>[bot]` with full audit trail.
+    Installation tokens are auto-rotated (1-hour lifetime).
 
-    For production, all fields should be configured.
-    See: https://docs.github.com/en/apps/creating-github-apps
-
-    Attributes:
-        app_id: Numeric App ID from GitHub App settings.
-        app_name: App slug used for commit attribution.
-        installation_id: Installation ID for the target organization.
-        private_key: RSA private key in PEM format for JWT signing.
-        webhook_secret: HMAC secret for verifying webhook payloads.
+    Override via AEF_GITHUB_* environment variables.
     """
 
     model_config = SettingsConfigDict(
@@ -52,32 +49,16 @@ class GitHubAppSettings(BaseSettings):
     # APP IDENTITY
     # =========================================================================
 
-    app_id: str | None = Field(
-        default=None,
-        description=(
-            "GitHub App ID (numeric). "
-            "Find at: https://github.com/settings/apps/<app-name> → General → App ID"
-        ),
+    app_id: str = Field(
+        default="",
+        description=("GitHub App ID. Get from: https://github.com/settings/apps/<app>/general"),
     )
 
-    app_name: str | None = Field(
-        default=None,
+    app_name: str = Field(
+        default="aef-app",
         description=(
-            "GitHub App slug/name for commit attribution. "
-            "Example: 'aef-engineer-beta' → commits appear as 'aef-engineer-beta[bot]'"
-        ),
-    )
-
-    # =========================================================================
-    # INSTALLATION
-    # =========================================================================
-
-    installation_id: str | None = Field(
-        default=None,
-        description=(
-            "Installation ID for the organization/account. "
-            "Find at: https://github.com/settings/installations → Configure → URL contains ID. "
-            "Note: Each org/account has a unique installation ID."
+            "GitHub App name (slug). Used in commit attribution. "
+            "Commits will show as '<app_name>[bot]'."
         ),
     )
 
@@ -85,21 +66,34 @@ class GitHubAppSettings(BaseSettings):
     # AUTHENTICATION
     # =========================================================================
 
-    private_key: SecretStr | None = Field(
-        default=None,
+    private_key: SecretStr = Field(
+        default=SecretStr(""),
         description=(
-            "RSA private key in PEM format for JWT signing. "
-            "Generate at: https://github.com/settings/apps/<app-name> → Private keys. "
-            "Can be raw PEM or base64-encoded. Multi-line values supported in .env with quotes."
+            "GitHub App private key in PEM format. "
+            "Generate from: https://github.com/settings/apps/<app>/privatekeys "
+            "Store securely - never commit to git!"
         ),
     )
 
-    webhook_secret: SecretStr | None = Field(
-        default=None,
+    installation_id: str = Field(
+        default="",
         description=(
-            "HMAC secret for webhook signature verification (X-Hub-Signature-256). "
-            "Set during GitHub App creation. Use a strong random value. "
-            "Generate with: openssl rand -hex 32"
+            "GitHub App Installation ID. "
+            "Get from: https://github.com/settings/installations "
+            "or from webhook payload when app is installed."
+        ),
+    )
+
+    # =========================================================================
+    # WEBHOOK SECURITY
+    # =========================================================================
+
+    webhook_secret: SecretStr = Field(
+        default=SecretStr(""),
+        description=(
+            "Webhook secret for validating GitHub webhook payloads. "
+            "Set when configuring the GitHub App webhook URL. "
+            "Used to verify webhook signatures (X-Hub-Signature-256)."
         ),
     )
 
@@ -109,75 +103,79 @@ class GitHubAppSettings(BaseSettings):
 
     @property
     def is_configured(self) -> bool:
-        """Check if GitHub App is fully configured for API access.
+        """Check if GitHub App is fully configured.
 
-        Returns:
-            True if app_id, installation_id, and private_key are all set.
+        Returns True if all required fields are set:
+        - app_id
+        - private_key (non-empty)
+        - installation_id
         """
-        return bool(self.app_id and self.installation_id and self.private_key)
+        return bool(self.app_id and self.private_key.get_secret_value() and self.installation_id)
 
     @property
-    def can_verify_webhooks(self) -> bool:
-        """Check if webhook verification is enabled.
+    def bot_name(self) -> str:
+        """Get the bot username for commits.
 
         Returns:
-            True if webhook_secret is configured.
+            Bot username in format '<app_name>[bot]'.
         """
-        return self.webhook_secret is not None
+        return f"{self.app_name}[bot]"
 
     @property
-    def bot_username(self) -> str | None:
-        """Get the bot username for commit attribution.
+    def bot_email(self) -> str:
+        """Get the bot email for commits.
+
+        GitHub uses a special noreply email format for app commits.
 
         Returns:
-            Bot username in format 'app-name[bot]' or None if not configured.
+            Bot email in format '<app_id>+<app_name>[bot]@users.noreply.github.com'.
         """
-        if self.app_name:
-            return f"{self.app_name}[bot]"
-        return None
-
-    @property
-    def bot_email(self) -> str | None:
-        """Get the bot email for commit attribution.
-
-        GitHub uses a special noreply format for bot commits.
-
-        Returns:
-            Bot email in format 'APP_ID+app-name[bot]@users.noreply.github.com'
-            or None if not configured.
-        """
-        if self.app_id and self.app_name:
-            return f"{self.app_id}+{self.app_name}[bot]@users.noreply.github.com"
-        return None
+        return f"{self.app_id}+{self.app_name}[bot]@users.noreply.github.com"
 
     # =========================================================================
     # VALIDATION
     # =========================================================================
 
     @model_validator(mode="after")
-    def validate_partial_config(self) -> Self:
-        """Warn if GitHub App is partially configured.
+    def validate_complete_config(self) -> Self:
+        """Ensure GitHub App settings are complete if any are provided.
 
-        Raises ValueError if some but not all required fields are set,
-        as this likely indicates a configuration error.
+        If any of app_id, private_key, or installation_id is set,
+        all three must be provided.
         """
-        required_fields = [self.app_id, self.installation_id, self.private_key]
-        provided = sum(1 for f in required_fields if f is not None)
+        fields = [
+            self.app_id,
+            self.private_key.get_secret_value(),
+            self.installation_id,
+        ]
+        provided = sum(1 for f in fields if f)
 
-        # All or nothing - partial config is likely an error
         if 0 < provided < 3:
             missing = []
             if not self.app_id:
                 missing.append("AEF_GITHUB_APP_ID")
+            if not self.private_key.get_secret_value():
+                missing.append("AEF_GITHUB_PRIVATE_KEY")
             if not self.installation_id:
                 missing.append("AEF_GITHUB_INSTALLATION_ID")
-            if not self.private_key:
-                missing.append("AEF_GITHUB_PRIVATE_KEY")
-            msg = (
-                f"Incomplete GitHub App configuration. "
-                f"Missing: {', '.join(missing)}. "
-                f"Either configure all required fields or none."
-            )
+            msg = f"Incomplete GitHub App config. Missing: {', '.join(missing)}"
             raise ValueError(msg)
 
         return self
+
+
+@lru_cache
+def get_github_settings() -> GitHubAppSettings:
+    """Get cached GitHub App settings.
+
+    Settings are loaded once on first call and cached.
+
+    Returns:
+        Validated GitHubAppSettings instance.
+    """
+    return GitHubAppSettings()
+
+
+def reset_github_settings() -> None:
+    """Clear GitHub settings cache (for testing)."""
+    get_github_settings.cache_clear()

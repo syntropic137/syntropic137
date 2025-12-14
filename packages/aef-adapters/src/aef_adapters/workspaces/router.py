@@ -6,14 +6,19 @@ It automatically:
 2. Falls back to alternatives if preferred backend unavailable
 3. Overflows to cloud backends when local capacity is exceeded
 
-Usage:
-    from aef_adapters.workspaces import WorkspaceRouter
+IMPORTANT (ADR-023): WorkspaceRouter enforces isolation requirements:
+- In TEST environment: Falls back to InMemoryWorkspace if no backend available
+- In DEV/PROD: FAILS if no isolated backend is available
 
-    router = WorkspaceRouter()
+Usage:
+    from aef_adapters.workspaces import get_workspace_router
+
+    router = get_workspace_router()
     async with router.create(config) as workspace:
         # workspace is isolated with the best available backend
-        ...
+        await router.execute_command(workspace, ["python", "script.py"])
 
+See ADR-023: Workspace-First Execution Model
 See ADR-021: Isolated Workspace Architecture
 """
 
@@ -21,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -45,6 +52,10 @@ from aef_shared.settings import IsolationBackend
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from aef_adapters.artifacts.bundle import ArtifactBundle, ArtifactType
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -130,24 +141,45 @@ class WorkspaceRouter:
                 available.append(backend)
         return available
 
-    def get_best_backend(self) -> IsolationBackend:
+    def _is_test_environment(self) -> bool:
+        """Check if we're in a test environment."""
+        app_env = os.getenv("APP_ENVIRONMENT", "development").lower()
+        return app_env in ("test", "testing")
+
+    def get_best_backend(self) -> IsolationBackend | None:
         """Get the best available backend for this platform.
 
         Follows priority order and returns first available.
+        In test environment, returns None if no backend (allows InMemoryWorkspace).
+        In non-test environment, raises RuntimeError.
 
         Returns:
-            Best available IsolationBackend
+            Best available IsolationBackend, or None in test environment
 
         Raises:
-            RuntimeError: If no backend is available
+            RuntimeError: If no backend is available in non-test environment
         """
         available = self.get_available_backends()
-        if not available:
-            raise RuntimeError(
-                "No isolation backend available. "
-                "Install Docker, Firecracker, or configure E2B API key."
-            )
-        return available[0]
+        if available:
+            return available[0]
+
+        # No backends available
+        if self._is_test_environment():
+            # In tests, we allow InMemoryWorkspace as fallback
+            logger.debug("No isolation backends available in test environment")
+            return None
+
+        # In dev/prod, we MUST have isolation (ADR-023)
+        raise RuntimeError(
+            "No isolation backend available for agent execution.\n\n"
+            "Agents MUST run in isolated environments (ADR-023).\n\n"
+            "Available options:\n"
+            "  1. Install Docker: brew install docker (macOS) or apt install docker.io (Linux)\n"
+            "  2. Configure E2B cloud: set AEF_WORKSPACE_CLOUD_API_KEY\n"
+            "  3. Install Firecracker (Linux only): see docs/deployment/firecracker-setup.md\n\n"
+            "See ADR-021: Isolated Workspace Architecture\n"
+            "See ADR-023: Workspace-First Execution Model"
+        )
 
     def get_backend_class(self, backend: IsolationBackend) -> type[BaseIsolatedWorkspace]:
         """Get the implementation class for a backend.
@@ -176,6 +208,9 @@ class WorkspaceRouter:
     ) -> AsyncIterator[IsolatedWorkspace]:
         """Create an isolated workspace with automatic backend selection.
 
+        In test environments, falls back to InMemoryWorkspace if no backends available.
+        In dev/prod, raises RuntimeError if no backends available (ADR-023).
+
         Args:
             config: Workspace configuration
             backend: Force specific backend (None = auto-select)
@@ -185,12 +220,22 @@ class WorkspaceRouter:
             IsolatedWorkspace ready for use
 
         Raises:
-            RuntimeError: If no backend available or capacity exceeded
+            RuntimeError: If no backend available (non-test) or capacity exceeded
         """
         from aef_shared.settings import get_settings
 
         settings = get_settings()
         workspace_settings = settings.workspace
+
+        # Check if we need to use InMemoryWorkspace (tests only)
+        if self._is_test_environment() and not self.get_available_backends():
+            # In test environment with no backends, use InMemoryWorkspace
+            from aef_adapters.workspaces.memory import InMemoryWorkspace
+
+            logger.debug("Using InMemoryWorkspace in test environment (no backends available)")
+            async with InMemoryWorkspace.create(config) as workspace:
+                yield workspace  # type: ignore[misc]
+            return
 
         # Determine which backend to use
         if backend is None:
@@ -284,6 +329,8 @@ class WorkspaceRouter:
     ) -> None:
         """Inject git identity and credentials into workspace.
 
+        Uses TokenVendingService when available for short-lived, tracked tokens.
+
         Args:
             workspace: The workspace to configure
             backend_class: Backend class for command execution
@@ -301,12 +348,27 @@ class WorkspaceRouter:
         # Get workflow override from config
         workflow_override = config.git_identity_override
 
+        # Get execution_id for token tracking
+        execution_id = config.effective_execution_id
+
+        # Try to get TokenVendingService for short-lived tokens
+        token_vending_service = None
+        try:
+            from aef_tokens import get_token_vending_service
+
+            token_vending_service = get_token_vending_service()
+            logger.debug("Using TokenVendingService for git credentials")
+        except ImportError:
+            logger.debug("aef_tokens not available, using direct installation token")
+
         # Git identity not configured is OK for workspaces that don't need git
         with contextlib.suppress(ValueError):
             await injector.inject_identity(
                 workspace,
                 executor,
                 workflow_override=workflow_override,
+                execution_id=execution_id,
+                token_vending_service=token_vending_service,
             )
 
     async def _inject_api_keys(
@@ -379,7 +441,7 @@ class WorkspaceRouter:
             Available backend class
 
         Raises:
-            RuntimeError: If no backend available
+            RuntimeError: If no backend available in non-test environment
         """
         # Try preferred backend first
         backend_class = self.BACKEND_CLASSES.get(preferred)
@@ -392,7 +454,26 @@ class WorkspaceRouter:
             if backend_class and backend_class.is_available():
                 return backend_class
 
-        raise RuntimeError("No isolation backend available")
+        # No backends available - check environment
+        if self._is_test_environment():
+            # In tests, this should not happen as we handle it in create()
+            # But provide a clear error message
+            raise RuntimeError(
+                "No isolation backend available. "
+                "In tests, use InMemoryWorkspace directly or mock the router."
+            )
+
+        # In dev/prod, we MUST have isolation (ADR-023)
+        raise RuntimeError(
+            "No isolation backend available for agent execution.\n\n"
+            "Agents MUST run in isolated environments (ADR-023).\n\n"
+            "Available options:\n"
+            "  1. Install Docker: brew install docker (macOS) or apt install docker.io (Linux)\n"
+            "  2. Configure E2B cloud: set AEF_WORKSPACE_CLOUD_API_KEY\n"
+            "  3. Install Firecracker (Linux only): see docs/deployment/firecracker-setup.md\n\n"
+            "See ADR-021: Isolated Workspace Architecture\n"
+            "See ADR-023: Workspace-First Execution Model"
+        )
 
     async def execute_command(
         self,
@@ -512,6 +593,132 @@ class WorkspaceRouter:
         _, backend_class = entry
         artifacts = await backend_class.collect_artifacts(workspace, patterns)
         return [(str(p), content) for p, content in artifacts]
+
+    async def collect_and_store_artifacts(
+        self,
+        workspace: IsolatedWorkspace,
+        bundle_id: str,
+        phase_id: str,
+        *,
+        patterns: list[str] | None = None,
+        workflow_id: str | None = None,
+        session_id: str | None = None,
+        store_to_storage: bool = True,
+    ) -> ArtifactBundle:
+        """Collect artifacts from workspace and optionally store to object storage.
+
+        Combines artifact collection with bundling and optional storage upload.
+        This is the recommended way to collect outputs from a phase execution.
+
+        Args:
+            workspace: The workspace to collect from.
+            bundle_id: Unique identifier for this bundle.
+            phase_id: Phase that produced these artifacts.
+            patterns: Optional glob patterns to filter files.
+            workflow_id: Workflow ID for storage organization.
+            session_id: Session ID for storage organization.
+            store_to_storage: Whether to upload to object storage.
+
+        Returns:
+            ArtifactBundle containing all collected files.
+
+        Example:
+            async with router.create(config) as workspace:
+                # ... agent execution ...
+
+                bundle = await router.collect_and_store_artifacts(
+                    workspace,
+                    bundle_id="research-001",
+                    phase_id="research",
+                    workflow_id=workflow_id,
+                )
+                # bundle is now saved to object storage
+        """
+        from aef_adapters.artifacts.bundle import ArtifactBundle
+
+        # Collect artifacts from workspace
+        artifacts = await self.collect_artifacts(workspace, patterns)
+
+        # Create bundle
+        bundle = ArtifactBundle(
+            bundle_id=bundle_id,
+            phase_id=phase_id,
+            session_id=session_id,
+            workflow_id=workflow_id,
+        )
+
+        # Add each artifact to bundle
+        for path_str, content in artifacts:
+            path = Path(path_str)
+
+            # Infer artifact type from extension
+            artifact_type = self._infer_artifact_type(path)
+
+            bundle.add_file(
+                path=path,
+                content=content,
+                artifact_type=artifact_type,
+            )
+
+        # Store to object storage if configured
+        if store_to_storage:
+            from aef_adapters.object_storage import get_storage
+
+            storage = await get_storage()
+            await bundle.save_to_storage(storage)
+
+            # Emit event for artifact upload
+            emitter = get_workspace_emitter()
+            await emitter.artifacts_stored(
+                workspace=workspace,
+                bundle_id=bundle_id,
+                file_count=bundle.file_count,
+                total_size_bytes=bundle.total_size_bytes,
+                storage_prefix=bundle.get_storage_prefix(),
+            )
+
+        return bundle
+
+    def _infer_artifact_type(self, path: Path) -> ArtifactType:
+        """Infer artifact type from file extension.
+
+        Args:
+            path: File path to analyze.
+
+        Returns:
+            Inferred ArtifactType.
+        """
+        from aef_adapters.artifacts.bundle import ArtifactType
+
+        ext = path.suffix.lower()
+        name = path.stem.lower()
+
+        # Match by extension
+        type_map = {
+            ".md": ArtifactType.MARKDOWN,
+            ".json": ArtifactType.JSON,
+            ".yaml": ArtifactType.YAML,
+            ".yml": ArtifactType.YAML,
+            ".py": ArtifactType.CODE,
+            ".js": ArtifactType.CODE,
+            ".ts": ArtifactType.CODE,
+            ".txt": ArtifactType.TEXT,
+        }
+
+        if ext in type_map:
+            return type_map[ext]
+
+        # Match by name patterns
+        if "readme" in name:
+            return ArtifactType.README
+        if "plan" in name:
+            return ArtifactType.PLAN
+        if "test" in name:
+            return ArtifactType.TEST_RESULTS
+        if "report" in name:
+            return ArtifactType.ANALYSIS_REPORT
+
+        return ArtifactType.OTHER
 
 
 # Singleton router instance for convenience

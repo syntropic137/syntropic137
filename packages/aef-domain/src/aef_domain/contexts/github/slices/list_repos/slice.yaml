@@ -1,0 +1,11 @@
+# List Repos slice configuration
+name: list_repos
+description: Query to list repositories accessible to an installation
+
+query:
+  name: ListAccessibleReposQuery
+  handler: handler.py
+
+read_model:
+  name: AccessibleRepository
+  path: ../../domain/read_models/accessible_repository.py

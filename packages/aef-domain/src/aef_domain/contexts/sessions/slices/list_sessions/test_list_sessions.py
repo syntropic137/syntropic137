@@ -40,7 +40,7 @@ class MockProjectionStore:
         self,
         projection_name: str,
         filters: dict | None = None,
-        order_by: str | None = None,  # noqa: ARG002
+        order_by: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict]:
@@ -286,7 +286,7 @@ class TestSessionListProjection:
     async def test_query_sessions_by_workflow(
         self,
         projection: SessionListProjection,
-        mock_store: MockProjectionStore,  # noqa: ARG002
+        mock_store: MockProjectionStore,
     ) -> None:
         """Test querying sessions filtered by workflow."""
         # Create sessions for different workflows

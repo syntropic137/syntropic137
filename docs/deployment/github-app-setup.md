@@ -1,187 +1,413 @@
-# GitHub App Setup
+# GitHub App Setup Guide
 
-This guide walks you through setting up a GitHub App for secure agent authentication with AEF.
+This guide walks you through setting up a GitHub App for secure agent commits in AEF.
 
 ## Why Use a GitHub App?
 
-| Feature | Personal Access Token | GitHub App |
-|---------|----------------------|------------|
-| Token Lifetime | 30-90 days (configurable) | **1 hour (auto-rotating)** |
-| Permissions | User-level (all repos) | **Per-installation (granular)** |
-| Audit Trail | Shows as user | **Shows as `app[bot]`** |
-| Rate Limits | User limits | **Higher app limits** |
-| Revocation | Manual | **Automatic on uninstall** |
-| Self-healing | ❌ | **✅ CI logs, PR comments** |
+| Approach | Token Lifetime | Audit Trail | Security |
+|----------|----------------|-------------|----------|
+| Personal Access Token | 30-90 days | User | ⚠️ Long-lived |
+| **GitHub App** | **1 hour** | **Bot** | **✅ Auto-rotating** |
 
-## Quick Start
+GitHub Apps provide:
+- **Short-lived tokens**: Installation tokens expire after 1 hour
+- **Clear attribution**: Commits show as `aef-agent[bot]` not a personal account
+- **Fine-grained permissions**: Request only what's needed
+- **Organization-level control**: Admins can manage app access centrally
+- **Self-healing capabilities**: Read CI logs, respond to PR reviews, fix issues automatically
 
-### Step 1: Create the GitHub App
+## Step 1: Create the GitHub App
 
-#### For Organizations (Recommended)
+### For Organizations (Recommended)
 
-1. Go to **Organization Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App**
-2. URL: `https://github.com/organizations/YOUR-ORG/settings/apps/new`
+If you have an organization (e.g., `AgentParadise`), create the app through the org:
 
-#### For Personal Accounts
+1. Go to **https://github.com/organizations/YOUR_ORG/settings/apps**
+2. Click **New GitHub App**
 
-1. Go to **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App**
-2. URL: `https://github.com/settings/apps/new`
+### For Personal Accounts
 
-### Step 2: Configure App Settings
+1. Go to [GitHub Settings > Developer settings > GitHub Apps](https://github.com/settings/apps)
+2. Click **New GitHub App**
 
-#### Basic Information
+### Basic Information
 
-| Field | Value |
-|-------|-------|
-| **GitHub App name** | `aef-engineer-beta` (or your choice) |
-| **Homepage URL** | Your AEF dashboard URL or repo URL |
-| **Webhook** | Uncheck "Active" for now (enable later for self-healing) |
+Fill in the app details:
+- **GitHub App name**: `aef-agent` (or your preferred name, e.g., `agentparadise-bot`)
+- **Homepage URL**: Your organization's URL (e.g., `https://github.com/AgentParadise`)
+- **Webhook URL**: `https://your-domain.com/webhooks/github` (can leave blank for local dev)
+- **Webhook secret**: Generate a strong random secret (e.g., `openssl rand -hex 32`)
 
-#### Repository Permissions
+### Repository Permissions
+
+Set these permissions for full agentic capabilities:
 
 | Permission | Access | Why |
 |------------|--------|-----|
-| **Contents** | Read & Write | Push commits, read code |
-| **Metadata** | Read-only | Required for all apps |
-| **Pull requests** | Read & Write | Create PRs, read/write comments |
-| **Actions** | Read-only | Read workflow runs, logs, artifacts |
+| **Contents** | Read & Write | Push commits, read code, create branches |
+| **Pull requests** | Read & Write | Create PRs, read/write review comments |
+| **Actions** | Read-only | Read workflow runs, logs, artifacts for self-healing |
 | **Checks** | Read & Write | Read check results, create check runs |
 | **Commit statuses** | Read & Write | Set status checks on commits |
-| **Issues** | Read & Write | If agents create/update issues |
+| **Issues** | Read & Write | Create/update issues from agent findings |
+| **Metadata** | Read-only | Required for all GitHub Apps |
 
-### Step 3: Create the App
+### Subscribe to Events
+
+Enable these webhook events for real-time notifications and full auditability.
+
+#### Required Events (Self-Healing & CI)
+
+| Event | Why | Triggers |
+|-------|-----|----------|
+| **Workflow run** | CI/CD lifecycle | `requested`, `completed` - **self-healing trigger** |
+| **Workflow job** | Individual job tracking | `queued`, `in_progress`, `completed` |
+| **Check run** | Check status | `created`, `completed`, `rerequested` |
+| **Check suite** | Suite completion | `completed`, `rerequested` |
+
+#### Required Events (Pull Requests)
+
+| Event | Why | Triggers |
+|-------|-----|----------|
+| **Pull request** | PR lifecycle | `opened`, `closed`, `merged`, `synchronize`, `edited` |
+| **Pull request review** | Review submitted | `submitted`, `edited`, `dismissed` |
+| **Pull request review comment** | Line comments | `created`, `edited`, `deleted` - **Copilot feedback!** |
+| **Pull request review thread** | Thread resolution | `resolved`, `unresolved` |
+
+#### Required Events (Code & Commits)
+
+| Event | Why | Triggers |
+|-------|-----|----------|
+| **Push** | Code pushed | Branch/tag pushes |
+| **Commit comment** | Commit discussions | `created`, `edited`, `deleted` |
+| **Status** | Commit status | External status updates |
+| **Create** | Branch/tag created | New refs |
+| **Delete** | Branch/tag deleted | Deleted refs |
+
+#### Required Events (Issues & Labels)
+
+| Event | Why | Triggers |
+|-------|-----|----------|
+| **Issues** | Issue lifecycle | `opened`, `closed`, `edited`, `labeled` |
+| **Issue comment** | Issue discussions | `created`, `edited`, `deleted` |
+| **Label** | Label management | `created`, `edited`, `deleted` |
+
+#### Automatic Events (No Checkbox Needed)
+
+These events are **automatically subscribed** for all GitHub Apps - they won't appear in the checkbox list:
+
+| Event | Why | Triggers |
+|-------|-----|----------|
+| **Installation** | App lifecycle | `created`, `deleted`, `suspend`, `unsuspend` |
+| **Installation repositories** | Repo access | `added`, `removed` |
+
+#### Optional Events (Repository & Misc)
+
+| Event | Why | Triggers |
+|-------|-----|----------|
+| **Repository** | Repo settings | `created`, `deleted`, `archived`, `renamed` |
+| **Installation target** | Account renamed | Only if you need to track org/user renames |
+
+#### Quick Checklist
+
+When creating your GitHub App, check these events in the UI:
+
+```
+Subscribe to events (check these boxes):
+  ☑️ Check run
+  ☑️ Check suite
+  ☑️ Commit comment
+  ☑️ Create
+  ☑️ Delete
+  ☑️ Issue comment
+  ☑️ Issues
+  ☑️ Label
+  ☑️ Pull request
+  ☑️ Pull request review
+  ☑️ Pull request review comment
+  ☑️ Pull request review thread
+  ☑️ Push
+  ☑️ Repository
+  ☑️ Status
+  ☑️ Workflow job
+  ☑️ Workflow run
+
+Automatic (no checkbox, always received):
+  ✅ Installation
+  ✅ Installation repositories
+```
+
+> **Note:** All webhook events are captured as domain events for auditability, analytics, and debugging. You can query "show me all events for PR #123" or "how many CI failures this week?"
+
+### Installation Scope
+
+Choose where the app can be installed:
+- **Only on this account**: For your org only
+- **Any account**: If you want others to install it
 
 Click **Create GitHub App**
 
-### Step 4: Generate Private Key
+## Step 2: Generate Private Key
 
-1. On the app settings page, scroll to **Private keys**
+1. After creating the app, scroll down to "Private keys"
 2. Click **Generate a private key**
 3. Save the downloaded `.pem` file securely
-4. **⚠️ This is the only time you can download this key!**
+4. **NEVER commit this file to git!**
 
-### Step 5: Install App
+## Step 3: Install the App
 
-1. Go to **Install App** tab (left sidebar)
-2. Click **Install** next to your organization/account
-3. Choose **All repositories** or **Only select repositories**
-4. Click **Install**
+1. Go to your GitHub App's page
+2. Click **Install App** in the left sidebar
+3. Choose the account/organization
+4. Select repositories:
+   - **All repositories**: Full access
+   - **Only select repositories**: Choose specific repos
+5. Click **Install**
+6. Note the Installation ID from the URL: `https://github.com/settings/installations/[INSTALLATION_ID]`
 
-### Step 6: Get Installation ID
+## Step 4: Configure Environment Variables
 
-After installing, look at the URL:
-```
-https://github.com/settings/installations/99311335
-                                          ^^^^^^^^
-                                          This is your Installation ID
-```
-
-### Step 7: Configure Environment
-
-Add to your `.env` file:
+Set these environment variables in your deployment:
 
 ```bash
-# GitHub App - Required
-AEF_GITHUB_APP_ID=2461312
-AEF_GITHUB_APP_NAME=aef-engineer-beta
-AEF_GITHUB_INSTALLATION_ID=99311335
+# Required: GitHub App credentials
+AEF_GITHUB_APP_ID=123456                    # From app settings page
+AEF_GITHUB_APP_NAME=aef-app                  # Your app's slug
 AEF_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
-<paste your .pem file contents here>
+...your private key content...
 -----END RSA PRIVATE KEY-----"
+AEF_GITHUB_INSTALLATION_ID=12345678         # From installation URL
 
-# Git Identity - For commits
-AEF_GIT_USER_NAME=aef-engineer-beta[bot]
-AEF_GIT_USER_EMAIL=2461312+aef-engineer-beta[bot]@users.noreply.github.com
+# Optional: Webhook security
+AEF_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ```
 
-### Step 8: Test Configuration
+### For Docker/Kubernetes
+
+When using Docker or Kubernetes, you may need to handle the multi-line private key specially:
+
+```yaml
+# docker-compose.yaml
+services:
+  aef-dashboard:
+    environment:
+      - AEF_GITHUB_APP_ID=123456
+      - AEF_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github_private_key
+    secrets:
+      - github_private_key
+
+secrets:
+  github_private_key:
+    file: ./github-app-private-key.pem
+```
+
+Or base64 encode the key:
 
 ```bash
-uv run python -c "
-from aef_shared.settings import get_settings
-settings = get_settings()
-github = settings.github
+# Encode
+cat private-key.pem | base64 -w0 > private-key.b64
 
-print(f'✓ App ID: {github.app_id}')
-print(f'✓ App Name: {github.app_name}')
-print(f'✓ Installation ID: {github.installation_id}')
-print(f'✓ Configured: {github.is_configured}')
-print(f'✓ Bot Username: {github.bot_username}')
-print(f'✓ Bot Email: {github.bot_email}')
-"
+# In environment
+AEF_GITHUB_PRIVATE_KEY_B64=$(cat private-key.b64)
 ```
 
-Expected output:
-```
-✓ App ID: 2461312
-✓ App Name: aef-engineer-beta
-✓ Installation ID: 99311335
-✓ Configured: True
-✓ Bot Username: aef-engineer-beta[bot]
-✓ Bot Email: 2461312+aef-engineer-beta[bot]@users.noreply.github.com
-```
+## Step 5: Verify Configuration
 
----
+Test that everything is configured correctly:
 
-## Environment Variables Reference
+```bash
+# Start the dashboard
+cd apps/aef-dashboard
+uv run python -m aef_dashboard
 
-| Variable | Required | Secret? | Description |
-|----------|----------|---------|-------------|
-| `AEF_GITHUB_APP_ID` | Yes | No | Numeric App ID from settings page |
-| `AEF_GITHUB_APP_NAME` | Yes | No | App slug for commit attribution |
-| `AEF_GITHUB_INSTALLATION_ID` | Yes | No | Installation ID per org/account |
-| `AEF_GITHUB_PRIVATE_KEY` | Yes | **YES** 🔐 | RSA private key (PEM format) |
-| `AEF_GITHUB_WEBHOOK_SECRET` | For webhooks | **YES** 🔐 | HMAC secret for verification |
+# Check health endpoint
+curl http://localhost:8000/health
 
----
-
-## Commit Attribution
-
-With proper configuration, agent commits appear as:
-
-```
-Author: aef-engineer-beta[bot] <2461312+aef-engineer-beta[bot]@users.noreply.github.com>
+# Trigger a test webhook (if configured)
+curl -X POST http://localhost:8000/webhooks/github \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: ping" \
+  -d '{"zen": "Test ping"}'
 ```
 
-This provides:
-- ✅ Clear identification as automated commit
-- ✅ Proper attribution in GitHub UI
-- ✅ Easy filtering: `git log --author="[bot]"`
+## How It Works
 
----
+### Token Generation Flow
 
-## Security Best Practices
+```
+┌──────────────────┐     ┌─────────────────┐     ┌────────────────┐
+│  AEF Agent       │────▶│  GitHub App     │────▶│   GitHub API   │
+│  needs token     │     │  Client         │     │                │
+└──────────────────┘     └─────────────────┘     └────────────────┘
+                              │
+                              ▼
+                    1. Generate JWT using
+                       private key (9 min TTL)
+                              │
+                              ▼
+                    2. POST /app/installations/
+                       {installation_id}/access_tokens
+                              │
+                              ▼
+                    3. Receive installation token
+                       (1 hour TTL)
+                              │
+                              ▼
+                    4. Cache token until near expiry
+```
 
-1. **Never commit `.pem` files** - Add `*.pem` to `.gitignore`
-2. **Use secrets management** in production (AWS Secrets Manager, Vault, etc.)
-3. **Rotate keys periodically** - Generate new private keys and revoke old ones
-4. **Minimum permissions** - Only enable permissions you actually need
-5. **Monitor installations** - Review which repos have access periodically
+### Commit Attribution
 
----
+When an agent makes a commit, it appears as:
+
+```
+Author: aef-agent[bot] <123456+aef-agent[bot]@users.noreply.github.com>
+Committer: aef-agent[bot] <123456+aef-agent[bot]@users.noreply.github.com>
+
+fix(api): handle null response in user endpoint
+
+Applied by AEF agent
+- Workflow: code-review-123
+- Execution: exec-abc
+- Session: session-xyz
+
+Co-authored-by: John Developer <john@example.com>
+```
+
+### Self-Healing Workflow
+
+With the full permission set, agents can autonomously maintain codebases:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    SELF-HEALING LOOP                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. CI FAILURE DETECTED (workflow_run event)                    │
+│     │                                                           │
+│     ▼                                                           │
+│  2. READ LOGS (Actions: read)                                   │
+│     GET /repos/{owner}/{repo}/actions/runs/{id}/logs            │
+│     │                                                           │
+│     ▼                                                           │
+│  3. ANALYZE & FIX (Agent reasoning)                             │
+│     Parse error → Generate fix → Validate locally               │
+│     │                                                           │
+│     ▼                                                           │
+│  4. PUSH FIX (Contents: write)                                  │
+│     git commit → git push                                       │
+│     │                                                           │
+│     ▼                                                           │
+│  5. UPDATE STATUS (Commit statuses: write)                      │
+│     POST /repos/{owner}/{repo}/statuses/{sha}                   │
+│                                                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  6. PR REVIEW RECEIVED (pull_request_review_comment event)      │
+│     │                                                           │
+│     ▼                                                           │
+│  7. READ COMMENTS (Pull requests: read)                         │
+│     GET /repos/{owner}/{repo}/pulls/{id}/comments               │
+│     │                                                           │
+│     ▼                                                           │
+│  8. ADDRESS FEEDBACK (Agent reasoning)                          │
+│     Understand comment → Apply fix → Commit                     │
+│     │                                                           │
+│     ▼                                                           │
+│  9. REPLY TO REVIEW (Pull requests: write)                      │
+│     POST /repos/{owner}/{repo}/pulls/{id}/comments              │
+│     "✅ Fixed - Added error handling as suggested"              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### API Examples
+
+```python
+# Read workflow logs for self-healing
+async def get_failed_logs(run_id: int) -> str:
+    response = await github_client.get(
+        f"/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
+        headers={"Accept": "application/vnd.github+json"}
+    )
+    return response.content
+
+# Read PR review comments
+async def get_review_comments(pr_number: int) -> list:
+    response = await github_client.get(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments"
+    )
+    return response.json()
+
+# Reply to a review comment
+async def reply_to_comment(pr_number: int, comment_id: int, body: str):
+    await github_client.post(
+        f"/repos/{owner}/{repo}/pulls/{pr_number}/comments",
+        json={
+            "body": body,
+            "in_reply_to": comment_id
+        }
+    )
+```
 
 ## Troubleshooting
 
-### "Private key is invalid"
+### "Private key not found" Error
 
-- Ensure the entire PEM content is included (including `-----BEGIN/END-----` lines)
-- Check for extra whitespace or line breaks
-- Verify you're using the correct key for this app
+Ensure the key is correctly formatted with newlines preserved:
 
-### "Installation not found"
+```python
+# Check key format in Python
+import os
+key = os.environ.get("AEF_GITHUB_PRIVATE_KEY", "")
+print(f"Key starts with: {key[:50]}")
+print(f"Key length: {len(key)}")
+```
 
-- Verify the Installation ID matches the installed org/account
-- Ensure the app is still installed (check `https://github.com/settings/installations`)
+### "Bad credentials" Error (401)
 
-### "Resource not accessible by integration"
+1. Verify the App ID matches your GitHub App
+2. Confirm the private key is for this specific app
+3. Check the Installation ID is correct
 
-- The app doesn't have permission for the requested action
-- Update permissions in app settings and re-install
+### "Resource not accessible by integration" Error (403)
 
----
+The app doesn't have sufficient permissions:
+1. Go to GitHub App settings
+2. Update repository permissions
+3. Users may need to re-approve the updated permissions
 
-## Next Steps
+### Token Expired During Long Operation
 
-- [Environment Configuration](../env-configuration.md) - Full env var reference
-- [Git Identity Setup](git-identity-setup.md) - Additional credential options
-- [Production Deployment](production-deployment.md) - Deploy with Docker/Kubernetes
+The client automatically refreshes tokens, but if you're caching tokens externally:
+- Check `expires_at` before using
+- Refresh when less than 5 minutes remain
+- Force refresh if you get a 401 error
+
+## Security Best Practices
+
+1. **Never log tokens**: Use `token_hash` property for logging
+2. **Rotate the private key periodically**: Generate a new key every 90 days
+3. **Use webhook secrets**: Always verify webhook signatures (HMAC-SHA256)
+4. **Monitor installations**: Review which orgs/repos have access
+5. **Audit agent actions**: All commits are attributed to `<app>[bot]` for traceability
+6. **Limit repository access**: Install on specific repos rather than "all repositories" when possible
+
+### Permission Justification
+
+| Permission | Justification |
+|------------|---------------|
+| Contents: Write | Push commits, create branches for fixes |
+| Pull requests: Write | Create PRs, respond to review comments |
+| Actions: Read | Read CI logs to diagnose failures |
+| Checks: Write | Create check runs for agent validations |
+| Commit statuses: Write | Update commit status after agent actions |
+| Issues: Write | Create issues for findings, track work |
+
+> **Note**: All permissions are used for autonomous codebase maintenance. The agent cannot access private data beyond what's needed for code operations.
+
+## Related Documentation
+
+- [GitHub Apps Documentation](https://docs.github.com/en/apps)
+- [Authenticating as a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app)
+- [ADR-021: Isolated Workspace Architecture](../adrs/ADR-021-isolated-workspace-architecture.md)

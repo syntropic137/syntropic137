@@ -10,26 +10,31 @@ Usage:
     settings = get_settings()
     print(settings.database_url)
 
-    # GitHub App for secure API access
-    github = settings.github
-    if github.is_configured:
-        print(f"GitHub App: {github.app_name}")
-
     # Git identity for workspace commits
     git = settings.git_identity
     print(f"Commits as: {git.user_name} <{git.user_email}>")
+
+    # GitHub App settings
+    github = settings.github
+    if github.is_configured:
+        print(f"GitHub App: {github.app_name}")
 
     # Container logging settings
     logging = settings.container_logging
     print(f"Log level: {logging.level}")
 
+    # Object storage settings
+    storage = settings.storage
+    print(f"Storage provider: {storage.provider}")
+
 Environment Variables:
     See Settings class for full list with descriptions.
     Required vars will cause immediate failure if missing.
 
-    AEF_GITHUB_* - GitHub App authentication
     AEF_GIT_* - Git identity and credentials
+    AEF_GITHUB_* - GitHub App configuration
     AEF_LOGGING_* - Container logging configuration
+    AEF_STORAGE_* - Object storage configuration
 """
 
 from aef_shared.settings.config import (
@@ -38,7 +43,15 @@ from aef_shared.settings.config import (
     get_settings,
     reset_settings,
 )
-from aef_shared.settings.github import GitHubAppSettings
+from aef_shared.settings.github import (
+    GitHubAppSettings,
+    get_github_settings,
+    reset_github_settings,
+)
+from aef_shared.settings.storage import (
+    StorageProvider,
+    StorageSettings,
+)
 from aef_shared.settings.workspace import (
     CloudProvider,
     ContainerLoggingSettings,
@@ -61,9 +74,13 @@ __all__ = [
     "GitIdentitySettings",
     "IsolationBackend",
     "Settings",
+    "StorageProvider",
+    "StorageSettings",
     "WorkspaceSecuritySettings",
     "WorkspaceSettings",
     "get_default_isolation_backend",
+    "get_github_settings",
     "get_settings",
+    "reset_github_settings",
     "reset_settings",
 ]

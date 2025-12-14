@@ -212,3 +212,42 @@ class TestTokenVendingService:
 
         token_ids = {t.token_id for t in tokens}
         assert len(token_ids) == 100  # All unique
+
+    @pytest.mark.asyncio
+    async def test_token_id_prefix(self, vending_service: TokenVendingService) -> None:
+        """Token IDs should have the expected prefix."""
+        token = await vending_service.vend_token(
+            execution_id="exec-123",
+            token_type=TokenType.ANTHROPIC,
+        )
+        assert token.token_id.startswith("aef-tok-")
+
+    @pytest.mark.asyncio
+    async def test_vend_with_custom_scope(self, vending_service: TokenVendingService) -> None:
+        """Should create token with custom scope."""
+        custom_scope = TokenScope(allowed_apis=["anthropic:messages"])
+        token = await vending_service.vend_token(
+            execution_id="exec-123",
+            token_type=TokenType.ANTHROPIC,
+            scope=custom_scope,
+        )
+
+        assert token.scope.allowed_apis == ["anthropic:messages"]
+
+    @pytest.mark.asyncio
+    async def test_vend_github_token_type(self, vending_service: TokenVendingService) -> None:
+        """Should create GITHUB type token."""
+        token = await vending_service.vend_token(
+            execution_id="exec-123",
+            token_type=TokenType.GITHUB,
+            scope=TokenScope(allowed_apis=["github:*"]),
+        )
+
+        assert token.token_type == TokenType.GITHUB
+        assert "github:*" in token.scope.allowed_apis
+
+    @pytest.mark.asyncio
+    async def test_revoke_nonexistent_token(self, vending_service: TokenVendingService) -> None:
+        """Should return False for nonexistent token."""
+        result = await vending_service.revoke_token("nonexistent-token")
+        assert result is False

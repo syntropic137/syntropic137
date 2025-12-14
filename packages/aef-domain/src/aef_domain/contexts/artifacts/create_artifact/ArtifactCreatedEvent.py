@@ -12,16 +12,20 @@ from aef_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
 )
 
 
-@event("ArtifactCreated", "v1")
+@event("ArtifactCreated", "v2")
 class ArtifactCreatedEvent(DomainEvent):
-    """Event emitted when an artifact is created."""
+    """Event emitted when an artifact is created.
+
+    v2: Added execution_id to link artifacts to specific workflow execution runs.
+    """
 
     # Identity
     artifact_id: str
 
-    # Context
+    # Context - links artifact to workflow execution
     workflow_id: str
     phase_id: str
+    execution_id: str | None = None  # NEW in v2: Links to WorkflowExecution
     session_id: str | None = None
 
     # Type

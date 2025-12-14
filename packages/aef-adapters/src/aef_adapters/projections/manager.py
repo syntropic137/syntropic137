@@ -12,6 +12,10 @@ from typing import Any, Protocol, runtime_checkable
 
 from aef_adapters.projection_stores import get_projection_store
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
+from aef_domain.contexts.costs.slices.execution_cost.projection import (
+    ExecutionCostProjection,
+)
+from aef_domain.contexts.costs.slices.session_cost.projection import SessionCostProjection
 from aef_domain.contexts.metrics.slices.get_metrics import DashboardMetricsProjection
 from aef_domain.contexts.observability.slices.token_metrics import TokenMetricsProjection
 from aef_domain.contexts.observability.slices.tool_timeline import ToolTimelineProjection
@@ -184,6 +188,15 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "token_usage": [
         ("token_metrics", "on_token_usage"),
     ],
+    # Cost tracking events
+    "CostRecorded": [
+        ("session_cost", "on_cost_recorded"),
+        ("execution_cost", "on_cost_recorded"),
+    ],
+    "SessionCostFinalized": [
+        ("session_cost", "on_session_cost_finalized"),
+        ("execution_cost", "on_session_cost_finalized"),
+    ],
 }
 
 
@@ -220,6 +233,9 @@ class ProjectionManager:
             # Observability projections (Pattern 2: Event Log + CQRS)
             "tool_timeline": ToolTimelineProjection(self._store),
             "token_metrics": TokenMetricsProjection(self._store),
+            # Cost tracking projections
+            "session_cost": SessionCostProjection(self._store),
+            "execution_cost": ExecutionCostProjection(self._store),
             # Real-time projection for WebSocket push (doesn't use store)
             "realtime": get_realtime_projection(),
         }
@@ -405,6 +421,19 @@ class ProjectionManager:
         """Get the real-time projection for WebSocket push."""
         self._ensure_initialized()
         return self._projections["realtime"]
+
+    # Cost tracking projections
+    @property
+    def session_cost(self) -> SessionCostProjection:
+        """Get the session cost projection."""
+        self._ensure_initialized()
+        return self._projections["session_cost"]
+
+    @property
+    def execution_cost(self) -> ExecutionCostProjection:
+        """Get the execution cost projection."""
+        self._ensure_initialized()
+        return self._projections["execution_cost"]
 
 
 @lru_cache
