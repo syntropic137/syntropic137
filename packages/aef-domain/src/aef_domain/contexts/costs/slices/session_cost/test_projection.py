@@ -29,7 +29,7 @@ class MockProjectionStore:
         self,
         projection_name: str,
         filters: dict[str, Any] | None = None,
-        order_by: str | None = None,  # noqa: ARG002 - match protocol signature
+        _order_by: str | None = None,
     ) -> list[dict[str, Any]]:
         """Query data from the store."""
         results = list(self._data.get(projection_name, {}).values())
