@@ -77,8 +77,8 @@ export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 # - Pull requests: Read & Write (if needed)
 
 export AEF_GITHUB_APP_ID="123456"
-export AEF_GITHUB_APP_INSTALLATION_ID="987654"
-export AEF_GITHUB_APP_PRIVATE_KEY="$(cat app-private-key.pem)"
+export AEF_GITHUB_INSTALLATION_ID="987654"
+export AEF_GITHUB_PRIVATE_KEY="$(cat app-private-key.pem)"
 ```
 
 **Pros:**
@@ -176,8 +176,8 @@ Date:   Wed Dec 11 19:30:00 2025
 
 cat > .env.github-app <<EOF
 AEF_GITHUB_APP_ID="123456"
-AEF_GITHUB_APP_INSTALLATION_ID="987654"
-AEF_GITHUB_APP_PRIVATE_KEY="$(cat aef-app.private-key.pem)"
+AEF_GITHUB_INSTALLATION_ID="987654"
+AEF_GITHUB_PRIVATE_KEY="$(cat aef-app.private-key.pem)"
 EOF
 
 chmod 600 .env.github-app

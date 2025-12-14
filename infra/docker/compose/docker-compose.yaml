@@ -1,0 +1,222 @@
+# AEF Production Docker Compose
+#
+# Usage:
+#   Local:   docker compose up -d
+#   Homelab: docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d
+#
+# Prerequisites:
+#   1. Copy ../.env.example to .env and configure
+#   2. Run: just secrets-generate
+#   3. Copy GitHub App private key to ../secrets/github-private-key.pem
+
+name: ${COMPOSE_PROJECT_NAME:-aef}
+
+services:
+  # ==========================================================================
+  # CORE APPLICATION SERVICES
+  # ==========================================================================
+
+  aef-dashboard:
+    build:
+      context: ../../..
+      dockerfile: infra/docker/images/aef-dashboard/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}aef-dashboard:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-aef}-dashboard
+    environment:
+      # Database connection
+      # Note: POSTGRES_PASSWORD here must match the value in secrets/db-password.txt
+      # For production, ensure both are set to the same secure value
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-aef}:${POSTGRES_PASSWORD:-aef_dev_password}@postgres:5432/${POSTGRES_DB:-aef}
+      # Event Store
+      - EVENT_STORE_HOST=event-store
+      - EVENT_STORE_PORT=50051
+      - EVENT_STORE_TENANT_ID=${COMPOSE_PROJECT_NAME:-aef}
+      # Collector
+      - COLLECTOR_URL=http://collector:8080
+      # Logging
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # GitHub App
+      - AEF_GITHUB_APP_ID=${AEF_GITHUB_APP_ID}
+      - AEF_GITHUB_APP_NAME=${AEF_GITHUB_APP_NAME}
+      - AEF_GITHUB_INSTALLATION_ID=${AEF_GITHUB_INSTALLATION_ID}
+    secrets:
+      - github_private_key
+      - github_webhook_secret
+    volumes:
+      - dashboard_logs:/app/logs
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      event-store:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${DASHBOARD_MEMORY_LIMIT:-512m}
+          cpus: "${DASHBOARD_CPU_LIMIT:-0.5}"
+    networks:
+      - aef-internal
+
+  aef-ui:
+    build:
+      context: ../../..
+      dockerfile: infra/docker/images/aef-ui/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}aef-ui:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-aef}-ui
+    ports:
+      - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      aef-dashboard:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${UI_MEMORY_LIMIT:-256m}
+          cpus: "${UI_CPU_LIMIT:-0.25}"
+    networks:
+      - aef-internal
+
+  # ==========================================================================
+  # DATA SERVICES
+  # ==========================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-aef}-postgres
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-aef}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_DB=${POSTGRES_DB:-aef}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../../../docker/init-db:/docker-entrypoint-initdb.d:ro
+    secrets:
+      - db_password
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-aef} -d ${POSTGRES_DB:-aef}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-1g}
+    networks:
+      - aef-internal
+
+  event-store:
+    build:
+      context: ../../../lib/event-sourcing-platform
+      dockerfile: event-store/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}aef-event-store:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-aef}-event-store
+    environment:
+      - BACKEND=postgres
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-aef}:${POSTGRES_PASSWORD:-aef_dev_password}@postgres:5432/${POSTGRES_DB:-aef}
+      - BIND_ADDR=0.0.0.0:50051
+      - RUST_LOG=${LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/50051' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
+    networks:
+      - aef-internal
+
+  collector:
+    build:
+      context: ../../..
+      dockerfile: packages/aef-collector/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}aef-collector:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-aef}-collector
+    environment:
+      - EVENT_COLLECTOR_PORT=8080
+      - EVENTSTORE_HOST=event-store
+      - EVENTSTORE_PORT=50051
+      - EVENT_BATCH_SIZE=${ES_BATCH_SIZE:-100}
+      - EVENT_BATCH_INTERVAL_MS=1000
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      event-store:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
+          cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
+    networks:
+      - aef-internal
+
+# ==========================================================================
+# SECRETS (file-based)
+# ==========================================================================
+# For production, these files should be created by: just secrets-generate
+# GitHub private key must be copied manually from GitHub App settings
+
+secrets:
+  github_private_key:
+    file: ../secrets/github-private-key.pem
+  github_webhook_secret:
+    file: ../secrets/github-webhook-secret.txt
+  db_password:
+    file: ../secrets/db-password.txt
+
+# ==========================================================================
+# VOLUMES
+# ==========================================================================
+
+volumes:
+  postgres_data:
+    name: ${COMPOSE_PROJECT_NAME:-aef}_postgres_data
+  dashboard_logs:
+    name: ${COMPOSE_PROJECT_NAME:-aef}_dashboard_logs
+
+# ==========================================================================
+# NETWORKS
+# ==========================================================================
+
+networks:
+  aef-internal:
+    name: ${COMPOSE_PROJECT_NAME:-aef}_internal
+    driver: bridge

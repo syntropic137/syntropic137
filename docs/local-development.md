@@ -2,6 +2,10 @@
 
 This guide explains how to set up and run the Agentic Engineering Framework locally.
 
+> **📦 For Production/Homelab**: If you're deploying to a homelab or production environment, see:
+> - [Homelab Deployment Guide](infra/docs/homelab-deployment.md) - Docker Compose + Cloudflare Tunnel
+> - [Production Deployment Guide](deployment/production-deployment.md) - Workspace isolation options
+
 ## Quick Start
 
 ```bash
@@ -190,4 +194,3 @@ uv pip list | grep aef
 5. Create a PR
 
 See [Contributing Guidelines](../CONTRIBUTING.md) for more details.
-

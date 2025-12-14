@@ -127,12 +127,12 @@ class RedisTokenStore:
         )
 
         # Add to execution's token set
-        await self._redis.sadd(exec_key, token.token_id)  # type: ignore[misc]
+        await self._redis.sadd(exec_key, token.token_id)
         # Set expiry on the set slightly longer than token TTL
         await self._redis.expire(exec_key, token.ttl_seconds + 60)
 
         logger.debug(
-            "Token stored: id=%s, execution=%s, ttl=%ds",
+            "Token stored (token_id=%s, execution_id=%s, ttl=%ds)",
             token.token_id,
             token.execution_id,
             token.ttl_seconds,
@@ -157,7 +157,7 @@ class RedisTokenStore:
     async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
         """Get all token IDs for an execution."""
         exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{execution_id}"
-        members = await self._redis.smembers(exec_key)  # type: ignore[misc]
+        members = await self._redis.smembers(exec_key)
         return [m.decode() if isinstance(m, bytes) else m for m in members]
 
     async def delete_tokens_for_execution(self, execution_id: str) -> int:
@@ -176,7 +176,7 @@ class RedisTokenStore:
         await self._redis.delete(exec_key)
 
         logger.info(
-            "Tokens revoked for execution: execution=%s, count=%d",
+            "Tokens revoked for execution (execution_id=%s, count=%d)",
             execution_id,
             len(token_ids),
         )
@@ -263,7 +263,7 @@ class TokenVendingService:
         await self._store.store(token)
 
         logger.info(
-            "Token vended: id=%s, execution=%s, type=%s, ttl=%ds",
+            "Token vended (token_id=%s, execution_id=%s, type=%s, ttl=%ds)",
             token.token_id,
             execution_id,
             token_type.value,
@@ -302,7 +302,7 @@ class TokenVendingService:
         """
         deleted = await self._store.delete(token_id)
         if deleted:
-            logger.info("Token revoked: id=%s", token_id)
+            logger.info("Token revoked (token_id=%s)", token_id)
         return deleted
 
     async def revoke_tokens(self, execution_id: str) -> int:
@@ -329,57 +329,6 @@ class TokenVendingService:
                 tokens.append(token)
 
         return tokens
-
-    async def vend_github_token(
-        self,
-        execution_id: str,
-        ttl_seconds: int | None = None,
-    ) -> str:
-        """Vend a short-lived GitHub token for workspace injection.
-
-        This is a convenience method that:
-        1. Gets an installation token from GitHubAppClient
-        2. Tracks it with the TokenVendingService (for revocation/audit)
-        3. Returns the raw token value for git credential injection
-
-        Args:
-            execution_id: The execution this token is for
-            ttl_seconds: Token TTL in seconds (defaults to 5 minutes)
-
-        Returns:
-            The raw GitHub installation token value
-
-        Raises:
-            ValueError: If GitHub App is not configured
-        """
-        # Import here to avoid circular dependency
-        from aef_adapters.github import get_github_client
-
-        client = get_github_client()
-
-        # Get installation token from GitHub
-        github_token = await client.get_installation_token()
-
-        # Create a tracking record for this token
-        # Note: We can't control the actual GitHub token expiry (1 hour),
-        # but we track our intended TTL for revocation/audit purposes
-        scoped_token = await self.vend_token(
-            execution_id=execution_id,
-            token_type=TokenType.GITHUB,
-            scope=TokenScope(
-                allowed_apis=["github:*"],
-            ),
-            ttl_seconds=ttl_seconds,
-        )
-
-        logger.info(
-            "GitHub token vended: id=%s, execution=%s, ttl=%ds",
-            scoped_token.token_id,
-            execution_id,
-            ttl_seconds or self._default_ttl,
-        )
-
-        return github_token
 
     def _generate_token_id(self) -> str:
         """Generate a unique token ID."""
