@@ -14,6 +14,7 @@ It:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -32,8 +33,6 @@ from aef_agent_runner.events import (
     emit_progress,
     emit_started,
     emit_token_usage,
-    emit_tool_result,
-    emit_tool_use,
 )
 
 if TYPE_CHECKING:
@@ -46,22 +45,12 @@ logger = logging.getLogger(__name__)
 # Try to import claude-agent-sdk
 try:
     from claude_agent_sdk import ClaudeAgentOptions, query
-    from claude_agent_sdk.types import (
-        AssistantMessage,
-        ResultMessage,
-        ToolResultMessage,
-        ToolUseBlock,
-    )
 
     CLAUDE_SDK_AVAILABLE = True
 except ImportError:
     CLAUDE_SDK_AVAILABLE = False
     query = None
     ClaudeAgentOptions = None
-    AssistantMessage = None
-    ResultMessage = None
-    ToolResultMessage = None
-    ToolUseBlock = None
 
 
 class AgentRunner:
@@ -117,6 +106,11 @@ class AgentRunner:
             CancellationError: If execution is cancelled
             RuntimeError: If claude-agent-sdk is not available
         """
+        # Run the async implementation
+        asyncio.run(self._run_async())
+
+    async def _run_async(self) -> None:
+        """Async implementation of the agent runner."""
         if not CLAUDE_SDK_AVAILABLE:
             emit_error(
                 message="claude-agent-sdk not installed",
@@ -135,25 +129,22 @@ class AgentRunner:
             task_prompt = self._build_task_prompt()
 
             # Configure the agent
-            # Use cwd to set the working directory for tool execution
             workspace_dir = os.environ.get("WORKSPACE_DIR", "/workspace")
 
+            # ANTHROPIC_API_KEY is read from environment by the SDK
             options = ClaudeAgentOptions(
                 max_turns=self._max_turns,
                 cwd=workspace_dir,
-                # The API key is injected by the sidecar proxy
-                # We pass a placeholder that the proxy replaces
-                api_key=os.environ.get(
-                    "ANTHROPIC_API_KEY", "placeholder-sidecar-injects"
-                ),
                 model=self._model,
+                # Bypass permission prompts - agent runs autonomously
+                permission_mode="bypassPermissions",
             )
 
             emit_progress(turn=0, input_tokens=0, output_tokens=0)
 
             # Execute using claude-agent-sdk's query function
             # This handles multi-turn execution with tools automatically
-            for event in query(task_prompt, options=options):
+            async for event in query(prompt=task_prompt, options=options):
                 # Check for cancellation between events
                 check_cancellation(self._cancel_token)
 
@@ -178,27 +169,18 @@ class AgentRunner:
     def _handle_sdk_event(self, event: Any) -> None:
         """Handle events from claude-agent-sdk.
 
-        The SDK yields different message types:
-        - AssistantMessage: Claude's response with potential tool uses
-        - ToolResultMessage: Results of tool execution
-        - ResultMessage: Final result when task is complete
+        The SDK yields StreamEvent objects with event data.
         """
-        # Handle based on message type
-        if AssistantMessage is not None and isinstance(event, AssistantMessage):
-            # Check for tool use blocks
-            if hasattr(event, "content") and event.content:
-                for block in event.content:
-                    if ToolUseBlock is not None and isinstance(block, ToolUseBlock):
-                        emit_tool_use(
-                            tool_name=block.name,
-                            tool_input=block.input if hasattr(block, "input") else {},
-                            tool_use_id=block.id,
-                        )
+        # StreamEvent has: uuid, session_id, event (dict), parent_tool_use_id
+        if hasattr(event, "event"):
+            event_data = event.event
+            event_type = event_data.get("type", "")
 
-            # Track tokens if available
-            if hasattr(event, "usage") and event.usage:
-                input_tokens = getattr(event.usage, "input_tokens", 0)
-                output_tokens = getattr(event.usage, "output_tokens", 0)
+            # Track usage if available
+            if "usage" in event_data:
+                usage = event_data["usage"]
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
                 self._total_input_tokens += input_tokens
                 self._total_output_tokens += output_tokens
                 emit_token_usage(
@@ -206,35 +188,12 @@ class AgentRunner:
                     output_tokens=output_tokens,
                 )
 
-            emit_progress(
-                turn=self._turn_count,
-                input_tokens=self._total_input_tokens,
-                output_tokens=self._total_output_tokens,
-            )
-
-        elif ToolResultMessage is not None and isinstance(event, ToolResultMessage):
-            # Tool result - extract success/failure info
-            if hasattr(event, "content") and event.content:
-                for result in event.content:
-                    tool_id = getattr(result, "tool_use_id", "unknown")
-                    is_error = getattr(result, "is_error", False)
-                    emit_tool_result(
-                        tool_name="tool",  # SDK doesn't include name in result
-                        success=not is_error,
-                        tool_use_id=tool_id,
-                        duration_ms=0,  # Not tracked by SDK
-                    )
-
-        elif ResultMessage is not None and isinstance(event, ResultMessage):
-            # Final result - task complete
-            if hasattr(event, "usage") and event.usage:
-                input_tokens = getattr(event.usage, "input_tokens", 0)
-                output_tokens = getattr(event.usage, "output_tokens", 0)
-                self._total_input_tokens += input_tokens
-                self._total_output_tokens += output_tokens
-                emit_token_usage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
+            # Log progress
+            if event_type in ("message_start", "content_block_start", "message_stop"):
+                emit_progress(
+                    turn=self._turn_count,
+                    input_tokens=self._total_input_tokens,
+                    output_tokens=self._total_output_tokens,
                 )
 
     def _build_task_prompt(self) -> str:

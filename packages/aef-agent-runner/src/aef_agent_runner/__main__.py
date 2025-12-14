@@ -28,7 +28,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Default paths inside workspace container
-DEFAULT_TASK_PATH = Path("/workspace/task.json")
+# task.json is injected via inject_context which writes to .context/
+DEFAULT_TASK_PATH = Path("/workspace/.context/task.json")
 DEFAULT_OUTPUT_DIR = Path("/workspace/artifacts")
 DEFAULT_CANCEL_PATH = Path("/workspace/.cancel")
 
@@ -77,9 +78,8 @@ def main(
             cancel_token=cancel_token,
         )
 
-        # Consume all events (they're emitted to stdout by the runner)
-        for _ in runner.run():
-            pass
+        # Run the agent (events are emitted to stdout by the runner)
+        runner.run()
 
         logger.info("Agent runner completed successfully")
         return 0

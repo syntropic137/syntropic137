@@ -117,10 +117,12 @@ ENV HOME=/workspace \
 # Create standard workspace directories
 RUN mkdir -p /workspace/inputs /workspace/artifacts
 
-# Configure git for commits
+# Configure git for commits and authentication
 RUN git config --global user.name "AEF Agent" \
     && git config --global user.email "agent@aef.local" \
-    && git config --global init.defaultBranch main
+    && git config --global init.defaultBranch main \
+    # Use GH_TOKEN for git authentication via credential helper
+    && git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-$GITHUB_TOKEN}"; }; f'
 
 # Health check: verify workspace is accessible
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=2 \

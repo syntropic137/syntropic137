@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "aef-adapters",
+    "aef-agent-runner",
     "aef-cli",
     "aef-collector",
     "aef-dashboard",
@@ -88,6 +89,30 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 provides-extras = ["postgres", "claude", "claude-agentic", "openai", "agents", "agentic", "minio", "all"]
+
+[[package]]
+name = "aef-agent-runner"
+version = "0.1.0"
+source = { editable = "packages/aef-agent-runner" }
+dependencies = [
+    { name = "anthropic" },
+    { name = "claude-agent-sdk" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40.0" },
+    { name = "claude-agent-sdk", specifier = ">=0.1.11" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "aef-cli"
