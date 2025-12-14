@@ -309,14 +309,21 @@ class WorkflowExecutionEngine:
         )
 
         # 4. Execute phases
-        # TODO: Each phase should create its own isolated workspace:
+        # Agent execution modes:
+        # - HOST_PROCESS: Agent SDK runs directly (current default, for development)
+        # - CONTAINER: Agent runs inside isolated workspace with sidecar
+        #
+        # When use_container_execution=True:
         #   1. Create workspace via self._router.create()
-        #   2. Inject artifacts from previous phases
-        #   3. Execute agent inside workspace (subprocess or SDK)
-        #   4. Collect artifacts for next phase
-        #   5. Destroy workspace (stateless)
-        # For now, router is DI-enforced but agent runs in host process.
-        # See ADR-023 and docs/PLAN-FULL-WORKSPACE-ISOLATION.md
+        #   2. Start sidecar proxy (for token injection)
+        #   3. Inject artifacts from previous phases
+        #   4. Write task.json with phase config
+        #   5. Execute aef-agent-runner via execute_streaming()
+        #   6. Parse JSONL events and update aggregate
+        #   7. Collect artifacts for next phase
+        #   8. Destroy workspace (stateless)
+        #
+        # See ADR-023: Workspace-First Execution Model
         try:
             phases = self._get_executable_phases(workflow)
             for phase in sorted(phases, key=lambda p: p.order):
@@ -683,3 +690,264 @@ class WorkflowExecutionEngine:
             "script": ArtifactType.SCRIPT,
         }
         return type_mapping.get(type_str.lower(), ArtifactType.OTHER)
+
+    async def _execute_phase_in_container(
+        self,
+        phase: ExecutablePhase,
+        ctx: ExecutionContext,
+        aggregate: WorkflowExecutionAggregate,
+        tenant_id: str | None = None,
+    ) -> PhaseResult:
+        """Execute a phase inside an isolated container with sidecar proxy.
+
+        This implements the full agent-in-container pattern per ADR-023:
+
+        1. Create isolated workspace with sidecar
+        2. Inject input artifacts from previous phases
+        3. Write task.json with phase configuration
+        4. Execute aef-agent-runner via streaming
+        5. Parse JSONL events and emit to aggregate
+        6. Collect output artifacts
+        7. Destroy workspace (stateless)
+
+        Args:
+            phase: The phase to execute
+            ctx: Execution context
+            aggregate: Workflow execution aggregate for events
+            tenant_id: Optional tenant ID for multi-tenancy
+
+        Returns:
+            PhaseResult with execution metrics
+
+        Raises:
+            WorkflowExecutionError: If phase execution fails
+        """
+        import json
+
+        from aef_adapters.agents.agentic_types import WorkspaceConfig
+        from aef_adapters.workspaces.sidecar import SidecarConfig, get_sidecar_manager
+        from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
+
+        phase_started_at = datetime.now(UTC)
+        session_id = str(uuid4())
+
+        # Emit phase started
+        start_cmd = StartPhaseCommand(
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            phase_id=phase.phase_id,
+            phase_name=phase.name,
+            phase_order=phase.order,
+            session_id=session_id,
+        )
+        aggregate._handle_command(start_cmd)
+        logger.info(
+            "Phase started (container mode): %s (workflow: %s)",
+            phase.phase_id,
+            ctx.workflow_id,
+        )
+
+        # Create sidecar for this phase
+        sidecar_manager = get_sidecar_manager()
+        sidecar_config = SidecarConfig(
+            execution_id=ctx.execution_id,
+            tenant_id=tenant_id,
+        )
+
+        try:
+            # Start sidecar proxy
+            sidecar = await sidecar_manager.create(sidecar_config)
+
+            try:
+                # Create workspace configuration
+                workspace_config = IsolatedWorkspaceConfig(
+                    base_config=WorkspaceConfig(
+                        session_id=session_id,
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                    ),
+                    execution_id=ctx.execution_id,
+                )
+
+                # Create isolated workspace (linked to sidecar network)
+                async with self._router.create(workspace_config) as workspace:
+                    # Inject input artifacts from previous phases
+                    if self._artifact_query and ctx.completed_phase_ids:
+                        phase_outputs = await self._artifact_query.get_for_phase_injection(
+                            execution_id=ctx.execution_id,
+                            completed_phase_ids=ctx.completed_phase_ids,
+                        )
+                        # Write artifacts to /workspace/inputs/
+                        for prev_phase_id, content in phase_outputs.items():
+                            await self._router.inject_context(
+                                workspace,
+                                [(f"inputs/{prev_phase_id}.md", content.encode())],
+                            )
+
+                    # Build task.json
+                    prompt = await self._build_prompt(phase, ctx)
+                    task_data = {
+                        "phase": phase.phase_id,
+                        "prompt": prompt,
+                        "execution_id": ctx.execution_id,
+                        "tenant_id": tenant_id or "default",
+                        "inputs": ctx.inputs,
+                        "artifacts": [f"{pid}.md" for pid in ctx.completed_phase_ids],
+                        "config": {
+                            "model": phase.agent_config.model,
+                            "max_tokens": phase.agent_config.max_tokens,
+                            "timeout_seconds": phase.timeout_seconds,
+                        },
+                    }
+
+                    # Write task.json
+                    await self._router.inject_context(
+                        workspace,
+                        [("task.json", json.dumps(task_data).encode())],
+                    )
+
+                    # Configure proxy environment in workspace
+                    # Note: This would be done via workspace env vars at creation time
+                    # For now we rely on the Dockerfile defaults and sidecar network
+
+                    # Execute agent runner and stream events
+                    from aef_adapters.workspaces.base import BaseIsolatedWorkspace
+
+                    total_input_tokens = 0
+                    total_output_tokens = 0
+
+                    async for line in BaseIsolatedWorkspace.execute_streaming(
+                        workspace,
+                        ["python", "-m", "aef_agent_runner"],
+                        timeout=phase.timeout_seconds or 300,
+                    ):
+                        # Parse JSONL event
+                        try:
+                            event = json.loads(line)
+                            event_type = event.get("type", "")
+
+                            # Update metrics from token_usage events
+                            if event_type == "token_usage":
+                                total_input_tokens += event.get("input_tokens", 0)
+                                total_output_tokens += event.get("output_tokens", 0)
+
+                            # Log progress events
+                            if event_type == "progress":
+                                logger.debug(
+                                    "Phase %s progress: turn %d",
+                                    phase.phase_id,
+                                    event.get("turn", 0),
+                                )
+
+                            # Could emit events to aggregate here for observability
+
+                        except json.JSONDecodeError:
+                            logger.warning("Invalid JSONL line: %s", line[:100])
+
+                    # Collect output artifacts
+                    artifacts = await self._router.collect_artifacts(
+                        workspace,
+                        patterns=["artifacts/**/*"],
+                    )
+
+                    # Create artifact records for each output
+                    artifact_ids = []
+                    for path_str, content in artifacts:
+                        artifact_id = str(uuid4())
+                        await self._create_artifact(
+                            artifact_id=artifact_id,
+                            workflow_id=ctx.workflow_id,
+                            phase_id=phase.phase_id,
+                            execution_id=ctx.execution_id,
+                            session_id=session_id,
+                            artifact_type=phase.output_artifact_type,
+                            content=content.decode("utf-8", errors="replace"),
+                            title=f"{phase.name}: {path_str}",
+                        )
+                        artifact_ids.append(artifact_id)
+                        ctx.artifact_ids.append(artifact_id)
+
+                # Workspace destroyed here (context manager exit)
+
+            finally:
+                # Always destroy sidecar
+                await sidecar_manager.destroy(sidecar)
+
+            # Record success
+            phase_completed_at = datetime.now(UTC)
+            duration = (phase_completed_at - phase_started_at).total_seconds()
+
+            result = PhaseResult(
+                phase_id=phase.phase_id,
+                status=PhaseStatus.COMPLETED,
+                started_at=phase_started_at,
+                completed_at=phase_completed_at,
+                artifact_id=artifact_ids[0] if artifact_ids else None,
+                session_id=session_id,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                total_tokens=total_input_tokens + total_output_tokens,
+                cost_usd=self._estimate_cost(total_input_tokens, total_output_tokens),
+            )
+            ctx.phase_results.append(result)
+            ctx.completed_phase_ids.append(phase.phase_id)
+
+            # Emit phase completed
+            complete_cmd = CompletePhaseCommand(
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                session_id=session_id,
+                artifact_id=artifact_ids[0] if artifact_ids else None,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                total_tokens=total_input_tokens + total_output_tokens,
+                cost_usd=result.cost_usd,
+                duration_seconds=duration,
+            )
+            aggregate._handle_command(complete_cmd)
+
+            logger.info(
+                "Phase completed (container mode): %s (tokens: %d)",
+                phase.phase_id,
+                total_input_tokens + total_output_tokens,
+            )
+
+            return result
+
+        except Exception as e:
+            # Record failure
+            phase_completed_at = datetime.now(UTC)
+            result = PhaseResult(
+                phase_id=phase.phase_id,
+                status=PhaseStatus.FAILED,
+                started_at=phase_started_at,
+                completed_at=phase_completed_at,
+                session_id=session_id,
+                error_message=str(e),
+            )
+            ctx.phase_results.append(result)
+
+            logger.error(
+                "Phase failed (container mode): %s (error: %s)",
+                phase.phase_id,
+                str(e),
+            )
+
+            raise WorkflowExecutionError(
+                message=f"Phase {phase.phase_id} failed in container: {e}",
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                cause=e,
+            ) from e
+
+    def _estimate_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
+        """Estimate cost based on token usage.
+
+        Uses Claude Sonnet pricing as default.
+        """
+        # Claude Sonnet 4 pricing (per million tokens)
+        input_price = Decimal("3.00") / Decimal("1000000")
+        output_price = Decimal("15.00") / Decimal("1000000")
+
+        return Decimal(input_tokens) * input_price + Decimal(output_tokens) * output_price
