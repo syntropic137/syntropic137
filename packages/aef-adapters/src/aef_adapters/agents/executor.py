@@ -124,7 +124,9 @@ class ExecutionToolUse(ExecutionEvent):
 class ExecutionCompleted(ExecutionEvent):
     """Agent execution completed."""
 
-    result: WorkspaceExecutionResult = field(default_factory=WorkspaceExecutionResult)
+    result: WorkspaceExecutionResult = field(
+        default_factory=lambda: WorkspaceExecutionResult(success=False, output="")
+    )
 
 
 # =============================================================================

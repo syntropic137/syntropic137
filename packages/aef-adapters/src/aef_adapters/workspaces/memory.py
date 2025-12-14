@@ -126,9 +126,13 @@ class InMemoryWorkspace:
             else:
                 session_id = str(uuid.uuid4())
 
+        # Ensure session_id is a string
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+
         workspace = cls(
             workspace_id=f"mem-{uuid.uuid4().hex[:8]}",
-            session_id=session_id,
+            session_id=str(session_id),  # Ensure string type
         )
 
         # Pre-create standard directories (as empty markers)
