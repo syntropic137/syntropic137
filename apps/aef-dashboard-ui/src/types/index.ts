@@ -342,3 +342,87 @@ export interface WorkspaceInfo {
 export type WorkflowStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled'
 export type SessionStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type PhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+
+// =============================================================================
+// COST TRACKING TYPES
+// =============================================================================
+
+export interface SessionCost {
+  session_id: string
+  execution_id: string | null
+  workflow_id: string | null
+  phase_id: string | null
+  workspace_id: string | null
+
+  // Cost totals
+  total_cost_usd: number
+  token_cost_usd: number
+  compute_cost_usd: number
+
+  // Token counts
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+
+  // Metrics
+  tool_calls: number
+  turns: number
+  duration_ms: number
+
+  // Breakdowns
+  cost_by_model: Record<string, string>
+  cost_by_tool: Record<string, string>
+
+  // Status
+  is_finalized: boolean
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface ExecutionCost {
+  execution_id: string
+  workflow_id: string | null
+
+  // Session tracking
+  session_count: number
+  session_ids: string[]
+
+  // Cost totals
+  total_cost_usd: number
+  token_cost_usd: number
+  compute_cost_usd: number
+
+  // Token counts
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  cache_creation_tokens: number
+  cache_read_tokens: number
+
+  // Metrics
+  tool_calls: number
+  turns: number
+  duration_ms: number
+
+  // Breakdowns
+  cost_by_phase: Record<string, string>
+  cost_by_model: Record<string, string>
+  cost_by_tool: Record<string, string>
+
+  // Status
+  is_complete: boolean
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface CostSummary {
+  total_cost_usd: number
+  total_sessions: number
+  total_executions: number
+  total_tokens: number
+  total_tool_calls: number
+  top_models: Array<{ model: string; cost_usd: string }>
+  top_sessions: Array<{ session_id: string; cost_usd: string; tokens: number }>
+}

@@ -47,3 +47,5 @@ contexts:
     description: "Isolated workspace lifecycle, performance metrics, and observability"
   github:
     description: "GitHub App integration, installation tokens, and secure credential management"
+  costs:
+    description: "Session and execution cost tracking with real-time aggregation"

@@ -335,3 +335,96 @@ class ExecutionStatusResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
+
+
+# =============================================================================
+# COST TRACKING SCHEMAS
+# =============================================================================
+
+
+class SessionCostResponse(BaseModel):
+    """Cost for a single session (atomic unit)."""
+
+    session_id: str
+    execution_id: str | None = None
+    workflow_id: str | None = None
+    phase_id: str | None = None
+    workspace_id: str | None = None
+
+    # Cost totals
+    total_cost_usd: Decimal = Decimal("0")
+    token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
+
+    # Token counts
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    # Metrics
+    tool_calls: int = 0
+    turns: int = 0
+    duration_ms: float = 0
+
+    # Breakdowns (optional)
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_tool: dict[str, str] = Field(default_factory=dict)
+
+    # Status
+    is_finalized: bool = False
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ExecutionCostResponse(BaseModel):
+    """Aggregated cost for a workflow execution."""
+
+    execution_id: str
+    workflow_id: str | None = None
+
+    # Session tracking
+    session_count: int = 0
+    session_ids: list[str] = Field(default_factory=list)
+
+    # Cost totals
+    total_cost_usd: Decimal = Decimal("0")
+    token_cost_usd: Decimal = Decimal("0")
+    compute_cost_usd: Decimal = Decimal("0")
+
+    # Token counts
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+
+    # Metrics
+    tool_calls: int = 0
+    turns: int = 0
+    duration_ms: float = 0
+
+    # Breakdowns (optional)
+    cost_by_phase: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_tool: dict[str, str] = Field(default_factory=dict)
+
+    # Status
+    is_complete: bool = False
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class CostSummaryResponse(BaseModel):
+    """Summary of all costs across sessions/executions."""
+
+    total_cost_usd: Decimal = Decimal("0")
+    total_sessions: int = 0
+    total_executions: int = 0
+    total_tokens: int = 0
+    total_tool_calls: int = 0
+
+    # Top contributors
+    top_models: list[dict[str, Any]] = Field(default_factory=list)
+    top_sessions: list[dict[str, Any]] = Field(default_factory=list)

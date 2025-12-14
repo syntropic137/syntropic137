@@ -112,6 +112,8 @@ agentic-engineering-framework/
 - **Workflows**: Workflow definitions, phases, and execution lifecycle
 - **Agents**: Agent sessions, token tracking, and execution metrics
 - **Artifacts**: Artifact storage, metadata, and retrieval
+- **Workspaces**: Isolated workspace lifecycle, performance metrics, and observability
+- **Costs**: Session and execution cost tracking with real-time aggregation
 
 ### Key Patterns
 

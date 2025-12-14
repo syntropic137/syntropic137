@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from aef_dashboard.api import (
     artifacts_router,
     control_router,
+    costs_router,
     execution_router,
     executions_router,
     metrics_router,
@@ -216,6 +217,7 @@ def create_app() -> FastAPI:
     app.include_router(metrics_router, prefix="/api")
     app.include_router(observability_router, prefix="/api")  # Tool/token metrics
     app.include_router(control_router, prefix="/api")  # Execution control (pause/resume/cancel)
+    app.include_router(costs_router, prefix="/api")  # Cost tracking
 
     # Webhooks (no /api prefix - must match GitHub's webhook URL exactly)
     app.include_router(webhooks_router)

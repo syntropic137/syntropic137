@@ -95,6 +95,10 @@ class EventType(str, Enum):
     WORKSPACE_DESTROYED = "workspace_destroyed"
     WORKSPACE_ERROR = "workspace_error"
 
+    # Cost tracking
+    COST_RECORDED = "cost_recorded"
+    SESSION_COST_FINALIZED = "session_cost_finalized"
+
 
 class CollectedEvent(BaseModel):
     """A single collected event with deterministic ID.
