@@ -11,6 +11,7 @@ See ADR-021: Isolated Workspace Architecture
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -415,3 +416,102 @@ if __name__ == "__main__":
             Tuple of (exit_code, stdout, stderr)
         """
         ...
+
+    @classmethod
+    async def execute_streaming(
+        cls,
+        workspace: IsolatedWorkspace,
+        command: list[str],
+        timeout: int | None = None,
+        cwd: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Execute command and stream stdout lines.
+
+        This is used for long-running agent executions where we want
+        to stream JSONL events from the agent runner.
+
+        Args:
+            workspace: The workspace to execute in
+            command: Command and arguments to run
+            timeout: Maximum execution time in seconds
+            cwd: Working directory (relative to workspace root)
+
+        Yields:
+            Lines from stdout (JSONL events from agent runner)
+
+        Raises:
+            TimeoutError: If execution exceeds timeout
+            RuntimeError: If execution fails
+
+        Example:
+            async for line in cls.execute_streaming(
+                workspace,
+                ["python", "-m", "aef_agent_runner"],
+                timeout=300,
+            ):
+                event = json.loads(line)
+                handle_agent_event(event)
+        """
+        import asyncio
+
+        # Get container ID
+        container_id = workspace.container_id or workspace.vm_id or workspace.sandbox_id
+        if not container_id:
+            raise RuntimeError("No container ID available for streaming execution")
+
+        # Build docker exec command
+        exec_cmd = ["docker", "exec", "-i", container_id]
+        if cwd:
+            exec_cmd.extend(["-w", cwd])
+        exec_cmd.extend(command)
+
+        process = await asyncio.create_subprocess_exec(
+            *exec_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            async with asyncio.timeout(timeout) if timeout else contextlib.nullcontext():
+                if process.stdout:
+                    async for line in process.stdout:
+                        yield line.decode().rstrip("\n")
+        except TimeoutError:
+            process.kill()
+            raise
+
+        await process.wait()
+        if process.returncode != 0:
+            stderr_content = ""
+            if process.stderr:
+                stderr_content = (await process.stderr.read()).decode()
+            raise RuntimeError(
+                f"Command failed with exit code {process.returncode}: {stderr_content}"
+            )
+
+    @classmethod
+    async def request_cancellation(
+        cls,
+        workspace: IsolatedWorkspace,
+    ) -> None:
+        """Request graceful cancellation of running agent.
+
+        Writes .cancel file to workspace which agent runner polls for.
+
+        Args:
+            workspace: The workspace to cancel
+        """
+        container_id = workspace.container_id or workspace.vm_id or workspace.sandbox_id
+        if not container_id:
+            return
+
+        import asyncio
+
+        # Create .cancel file in workspace
+        cmd = ["docker", "exec", container_id, "touch", "/workspace/.cancel"]
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
