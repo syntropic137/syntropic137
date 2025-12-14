@@ -110,7 +110,7 @@ python_version = "3.12"
 # Strict mode with pragmatic exceptions for existing code
 strict = false  # Disabled until existing type debt is resolved
 warn_return_any = false  # Too many violations in projections
-warn_unused_ignores = true
+warn_unused_ignores = false  # Type ignores may vary between envs (local vs CI)
 disallow_untyped_defs = false  # TODO: Enable after fixing 26+ violations
 disallow_incomplete_defs = true
 check_untyped_defs = true
@@ -126,6 +126,19 @@ exclude = [
     "^.*/tests/.*$",
     "^.*test_.*\\.py$",
 ]
+
+# Per-module ignores for optional dependencies and internal modules
+[[tool.mypy.overrides]]
+module = [
+    "redis.*",
+    "aiohttp.*",
+    "fakeredis.*",
+    "aef_adapters.*",  # Internal module cross-references
+    "aef_tokens.*",
+    "aef_shared.*",
+    "aef_domain.*",
+]
+ignore_missing_imports = true
 
 # Ignore missing imports for optional dependencies
 [[tool.mypy.overrides]]
