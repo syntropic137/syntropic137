@@ -65,6 +65,11 @@ WORKDIR /app
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
 
+# Copy source directories that .pth files reference (for editable installs)
+COPY --from=builder /app/packages /app/packages
+COPY --from=builder /app/lib /app/lib
+COPY --from=builder /app/apps /app/apps
+
 # Set environment
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
