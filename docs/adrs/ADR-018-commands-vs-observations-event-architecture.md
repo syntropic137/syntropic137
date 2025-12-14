@@ -341,6 +341,46 @@ ExecutionCost (aggregated)
 
 This demonstrates Pattern 2's power: deriving business value (cost tracking) from raw observations (token usage) without requiring aggregates.
 
+### Tool Token Attribution (Enhancement)
+
+Building on cost tracking, **tool token attribution** provides granular insight into which tools consume tokens:
+
+```
+token_usage event ─┬─► CostCalculator ─────────────► CostRecordedEvent
+                   │   (total tokens)                       │
+                   │                                        │
+                   └─► ToolTokenEstimator                   │
+                       (estimates per-tool)                 │
+                                                            ▼
+                              ┌─────────────────────────────────────────────┐
+                              │         tool_token_breakdown                │
+                              │  {"Write": {"tool_use": 500, "tool_result": 50}}
+                              │  {"Read": {"tool_use": 30, "tool_result": 2000}}
+                              └─────────────────────────────────────────────┘
+```
+
+#### How It Works
+
+1. **ToolTokenEstimator** parses Claude's `content` array for `tool_use` blocks
+2. Estimates tokens based on content size (~3.5 chars/token for JSON)
+3. Tool results count as input tokens on the next API call
+4. Breakdown is added to `CostRecordedEvent.tool_token_breakdown`
+5. Projections aggregate per-tool tokens into `tokens_by_tool`
+
+#### Token Attribution Categories
+
+| Category | Source | Token Type | Example |
+|----------|--------|------------|---------|
+| Tool Use | `tool_use` block | Output tokens | Write file command |
+| Tool Result | `tool_result` block | Input tokens | File content returned |
+| Tool Definition | System prompt | Input tokens | Schema overhead |
+
+#### Limitations
+
+- Token counts are **estimated** (exact counts require API calls)
+- Tool definition tokens are amortized across all messages
+- Cache tokens affect tool costs but are attributed separately
+
 ## Related ADRs
 
 - **ADR-003**: Event Sourcing Decorators (Pattern 1 implementation)
