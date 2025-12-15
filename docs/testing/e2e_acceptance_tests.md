@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 6.1.0
+**Version:** 6.2.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-11
+**Updated:** 2025-12-14
 **Status:** Active
 
 ---
@@ -10,6 +10,14 @@
 ## Overview
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+
+**Version 6.2** adds:
+- **Container Execution Robustness (F17)** - Phase counting, artifact collection, session persistence
+- **Type-Safe Workspace Paths** - Shared constants module in `aef_shared.workspace_paths`
+- **Git Attribution Control** - Disable Claude Co-Authored-By trailer via settings
+- **Analytics Streaming** - Real-time hook events via sidecar
+- **Stale Execution Cleanup** - Background job for stuck executions
+- **60 New Test Criteria** - Comprehensive coverage for container execution
 
 **Version 6.1** adds:
 - **Workspace-First Execution (F16)** - ADR-023 enforcement (LocalWorkspace test-only, WorkspaceRouter required)
@@ -2259,6 +2267,271 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-domain/ -v --tb=short
 
 ---
 
+## Feature 17: Container Execution Robustness ⭐ NEW
+
+> **Project Plan:** `PROJECT-PLAN_20251214_container-execution-fixes.md`
+> **ADRs:** ADR-021 (Isolated Workspaces), ADR-022 (Secure Tokens), ADR-023 (Workspace-First)
+
+### Overview
+
+Tests for the "agent-in-container" execution model robustness:
+- Phase counting accuracy (no duplicates)
+- Artifact collection from correct paths
+- Session persistence and UI visibility
+- Git attribution control
+- Analytics streaming from hooks
+- Stale execution cleanup
+
+### F17.1 Phase Counting Accuracy ⭐ P0
+
+**Given** a workflow executes in container mode
+**When** phases complete
+**Then** exactly one result per phase is recorded
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.1.1 | Single-phase workflow shows `completed_phases = 1` | ⬜ |
+| 17.1.2 | Multi-phase workflow shows correct completed count | ⬜ |
+| 17.1.3 | PhaseCompleted event count equals phase count | ⬜ |
+| 17.1.4 | phase_results array length equals phase count | ⬜ |
+| 17.1.5 | No duplicate PhaseCompleted events per phase | ⬜ |
+| 17.1.6 | UI execution detail shows correct phase count | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run single-phase workflow
+aef workflow run --container --workflow water-lightyear-calc
+
+# Verify via API
+curl -s http://localhost:8000/api/executions/<exec_id> | jq '{completed_phases, total_phases}'
+
+# Verify event count in Event Store
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted' AND aggregate_id = '<exec_id>';"
+```
+
+### F17.2 Artifact Collection ⭐ P0
+
+**Given** an agent writes files in container
+**When** execution completes
+**Then** artifacts are collected from the correct directory
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.2.1 | Agent writes to `/workspace/artifacts` | ⬜ |
+| 17.2.2 | `collect_artifacts()` reads from `/workspace/artifacts` | ⬜ |
+| 17.2.3 | ArtifactCreated events emitted | ⬜ |
+| 17.2.4 | Artifacts visible in execution detail API | ⬜ |
+| 17.2.5 | Artifacts visible in UI execution detail | ⬜ |
+| 17.2.6 | Type-safe workspace_paths module used | ⬜ |
+
+**Validation Commands:**
+```bash
+# After workflow completes
+curl -s http://localhost:8000/api/executions/<exec_id>/artifacts | jq
+
+# Verify path constants
+python -c "from aef_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WORKSPACE_OUTPUT_DIR)"
+```
+
+### F17.3 Session Persistence ⭐ P1
+
+**Given** a phase executes in container
+**When** the phase starts and completes
+**Then** AgentSession aggregate events are emitted
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.3.1 | SessionStarted event emitted on phase start | ⬜ |
+| 17.3.2 | SessionStarted includes workflow_id, execution_id, phase_id | ⬜ |
+| 17.3.3 | SessionCompleted event emitted on phase complete | ⬜ |
+| 17.3.4 | SessionCompleted has success=true for success | ⬜ |
+| 17.3.5 | SessionCompleted has success=false, error_message for failure | ⬜ |
+| 17.3.6 | Session visible in `/api/sessions` list | ⬜ |
+| 17.3.7 | Session visible in UI sessions page | ⬜ |
+| 17.3.8 | Session links to execution in UI | ⬜ |
+
+**Validation Commands:**
+```bash
+# After workflow
+curl -s "http://localhost:8000/api/sessions?execution_id=<exec_id>" | jq
+
+# Event store verification
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, convert_from(payload, 'UTF8')::json->>'phase_id' as phase_id \
+   FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce DESC LIMIT 5;"
+```
+
+### F17.4 Git Attribution Control ⭐ P1
+
+**Given** Claude SDK is configured with attribution settings
+**When** agent commits code
+**Then** no `Co-Authored-By: Claude` trailer appears
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.4.1 | settings.json includes `attribution.commits = false` | ⬜ |
+| 17.4.2 | settings.json includes `attribution.pullRequests = false` | ⬜ |
+| 17.4.3 | Settings copied from agentic-primitives | ⬜ |
+| 17.4.4 | Commit in workflow has no Co-Authored-By trailer | ⬜ |
+| 17.4.5 | PR description has no Claude attribution | ⬜ |
+
+**Validation Commands:**
+```bash
+# After workflow creates PR
+cd /path/to/sandbox-repo
+git log -1 --format="%B"  # Should NOT contain Co-Authored-By
+
+# Check settings in container
+docker exec <container_id> cat /workspace/.claude/settings.json | jq '.attribution'
+```
+
+### F17.5 Real-Time Analytics Streaming ⭐ P2
+
+**Given** hooks fire during agent execution
+**When** events are written to analytics JSONL
+**Then** events are streamed to control plane in real-time
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.5.1 | Hooks write to `.agentic/analytics/events.jsonl` | ⬜ |
+| 17.5.2 | Analytics file watcher detects new lines | ⬜ |
+| 17.5.3 | Events streamed to stdout with type="analytics" | ⬜ |
+| 17.5.4 | Events visible in SSE stream | ⬜ |
+| 17.5.5 | Events include session correlation data | ⬜ |
+| 17.5.6 | Token usage updates in real-time in UI | ⬜ |
+
+**Validation Commands:**
+```bash
+# During workflow execution
+docker exec <container_id> tail -f /workspace/.agentic/analytics/events.jsonl
+
+# Watch SSE stream for analytics events
+curl -N http://localhost:8000/api/events/stream | grep analytics
+```
+
+### F17.6 Stale Execution Cleanup ⭐ P2
+
+**Given** an execution is stuck in "running" state
+**When** the cleanup job runs
+**Then** stale executions are marked as failed
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.6.1 | Executions past TTL detected by cleanup query | ⬜ |
+| 17.6.2 | Stale executions marked as "failed" | ⬜ |
+| 17.6.3 | WorkflowFailed event emitted with reason="stale_timeout" | ⬜ |
+| 17.6.4 | Non-stale executions unaffected | ⬜ |
+| 17.6.5 | Cleanup API endpoint works | ⬜ |
+| 17.6.6 | Cleanup CLI command works | ⬜ |
+| 17.6.7 | Container crash triggers session failure | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run cleanup via API
+curl -X POST http://localhost:8000/api/executions/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{"threshold_hours": 2}'
+
+# Run cleanup via CLI
+aef execution cleanup --threshold 2h
+
+# Verify stale executions marked failed
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, convert_from(payload, 'UTF8')::json->>'reason' \
+   FROM events WHERE event_type = 'WorkflowFailed' ORDER BY global_nonce DESC LIMIT 5;"
+```
+
+### F17.7 Type-Safe Workspace Paths ⭐ P0
+
+**Given** workspace paths are defined in aef_shared
+**When** agent-runner and adapters import them
+**Then** paths are consistent and type-safe
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.7.1 | `WORKSPACE_ROOT = /workspace` | ⬜ |
+| 17.7.2 | `WORKSPACE_OUTPUT_DIR = /workspace/artifacts` | ⬜ |
+| 17.7.3 | `WORKSPACE_CONTEXT_DIR = /workspace/.context` | ⬜ |
+| 17.7.4 | `WORKSPACE_TASK_FILE = /workspace/.context/task.json` | ⬜ |
+| 17.7.5 | `WORKSPACE_ANALYTICS_DIR = /workspace/.agentic/analytics` | ⬜ |
+| 17.7.6 | All paths are `PurePosixPath` type | ⬜ |
+| 17.7.7 | aef-agent-runner imports from aef_shared | ⬜ |
+| 17.7.8 | aef-adapters imports from aef_shared | ⬜ |
+| 17.7.9 | Type checking passes (mypy/pyright) | ⬜ |
+
+**Validation Commands:**
+```bash
+# Verify constants
+python -c "
+from aef_shared.workspace_paths import *
+print(f'ROOT: {WORKSPACE_ROOT}')
+print(f'OUTPUT: {WORKSPACE_OUTPUT_DIR}')
+print(f'CONTEXT: {WORKSPACE_CONTEXT_DIR}')
+print(f'TASK: {WORKSPACE_TASK_FILE}')
+"
+
+# Type check
+cd packages/aef-shared && uv run mypy src/
+cd packages/aef-agent-runner && uv run mypy src/
+```
+
+### F17.8 End-to-End Container Execution ⭐ CRITICAL
+
+**Given** full AEF stack is running
+**When** I execute a container workflow
+**Then** all F17 criteria are met
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.8.1 | Workflow starts via CLI or API | ⬜ |
+| 17.8.2 | Container created with isolation | ⬜ |
+| 17.8.3 | Agent clones repo successfully | ⬜ |
+| 17.8.4 | Agent creates/modifies files | ⬜ |
+| 17.8.5 | Agent commits with correct author | ⬜ |
+| 17.8.6 | No Co-Authored-By trailer in commit | ⬜ |
+| 17.8.7 | Agent opens PR | ⬜ |
+| 17.8.8 | Exactly 1 phase result per phase | ⬜ |
+| 17.8.9 | Artifacts collected and visible | ⬜ |
+| 17.8.10 | Session visible in UI | ⬜ |
+| 17.8.11 | Token usage tracked | ⬜ |
+| 17.8.12 | Execution completes successfully | ⬜ |
+| 17.8.13 | WorkflowCompleted event in store | ⬜ |
+
+**Validation Commands:**
+```bash
+# Full E2E test
+just dev  # Start stack
+sleep 30  # Wait for services
+
+# Execute workflow
+aef workflow run --container --workflow water-lightyear-calc \
+  --input '{"task": "Calculate H2O molecule count in light-year line"}'
+
+# Verify all criteria
+curl -s http://localhost:8000/api/executions/<exec_id> | jq
+
+# Check events
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, COUNT(*) FROM events WHERE aggregate_id = '<exec_id>' GROUP BY event_type;"
+```
+
+### F17 Test Results Summary
+
+| # | Sub-Feature | Criteria | Priority |
+|---|-------------|----------|----------|
+| 17.1 | Phase Counting Accuracy | 6 | P0 |
+| 17.2 | Artifact Collection | 6 | P0 |
+| 17.3 | Session Persistence | 8 | P1 |
+| 17.4 | Git Attribution Control | 5 | P1 |
+| 17.5 | Real-Time Analytics | 6 | P2 |
+| 17.6 | Stale Execution Cleanup | 7 | P2 |
+| 17.7 | Type-Safe Workspace Paths | 9 | P0 |
+| 17.8 | E2E Container Execution | 13 | P0 |
+| **TOTAL** | | **60** | |
+
+---
+
 ## Test Execution Checklist
 
 ### Pre-Test Setup
@@ -2299,8 +2572,12 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-domain/ -v --tb=short
 **GitHub App & Secure Token Architecture (F15) ⭐:**
 15. [ ] **F15: Secure Tokens** - GitHub App auth, token vending, spend tracking, sidecar proxy
 
-**Workspace-First Execution Architecture (F16) ⭐ NEW:**
+**Workspace-First Execution Architecture (F16) ⭐:**
 16. [ ] **F16: Workspace-First Execution** - LocalWorkspace/InMemoryWorkspace test-only, WorkspaceRouter enforcement, AgentExecutor
+
+**Container Execution Robustness (F17) ⭐ NEW:**
+17. [ ] **F17: Container Execution Robustness** - Phase counting, artifact collection, session persistence, git attribution, analytics streaming, stale cleanup
+
 ### Quick Pytest Commands
 
 ```bash
@@ -2330,6 +2607,12 @@ just poc-git-identity   # Git identity injection
 just poc-claude-api     # Claude API connectivity
 just poc-logging        # Container logging
 just poc-allowlist      # Network allowlist
+
+# Run Container Execution Robustness tests (F17)
+APP_ENVIRONMENT=test pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py -v
+APP_ENVIRONMENT=test pytest packages/aef-shared/tests/test_workspace_paths.py -v
+APP_ENVIRONMENT=test pytest packages/aef-adapters/tests/workspaces/test_artifact_collection.py -v
+APP_ENVIRONMENT=test pytest packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py -v
 
 # Run GitHub App & Secure Token tests (F15)
 pytest packages/aef-tokens/tests/ -v
@@ -2369,7 +2652,8 @@ poetry run poe check-fix
 | **F14** | **Isolated Workspace Architecture** ⭐ | **52** | ⬜ | ⬜ | ⬜ |
 | **F15** | **GitHub App & Secure Tokens** ⭐ | **50** | ⬜ | ⬜ | ⬜ |
 | **F16** | **Workspace-First Execution** ⭐ | **51** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **424** | ⬜ | ⬜ | ⬜ |
+| **F17** | **Container Execution Robustness** ⭐ NEW | **60** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **484** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -2384,6 +2668,24 @@ poetry run poe check-fix
 ## Notes
 
 _Add any observations, recommendations, or follow-up items here._
+
+### Migration Notes (v6.1 → v6.2)
+
+- **Container Execution Robustness:** New F17 tests for agent-in-container reliability
+- **Type-Safe Workspace Paths:** New module `aef_shared.workspace_paths` for consistent path constants
+- **Phase Counting Fix:** Removed duplicate `ctx.phase_results.append()` call
+- **Artifact Collection Fix:** Unified output directory across agent-runner and adapters
+- **Session Persistence:** AgentSessionAggregate now created/completed in container mode
+- **Git Attribution:** Settings copied from agentic-primitives with attribution disabled
+- **Analytics Streaming:** Real-time hook event streaming via sidecar (P2)
+- **Stale Cleanup:** Background job to mark stuck executions as failed (P2)
+- **Test Count:** Increased from 424 to 484 criteria
+- **New Files:**
+  - `packages/aef-shared/src/aef_shared/workspace_paths.py`
+  - `packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py`
+  - `packages/aef-shared/tests/test_workspace_paths.py`
+  - `packages/aef-adapters/tests/workspaces/test_artifact_collection.py`
+  - `packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py`
 
 ### Migration Notes (v6.0 → v6.1)
 
@@ -2468,6 +2770,7 @@ _Add any observations, recommendations, or follow-up items here._
 | **Isolated Workspaces** ⭐ | **F14** | **pytest + just POC commands** |
 | **Secure Tokens** ⭐ | **F15** | **pytest + e2e script** |
 | **Workspace-First** ⭐ | **F16** | **pytest (fully automated)** |
+| **Container Robustness** ⭐ NEW | **F17** | **pytest + E2E workflow** |
 
 ### Known Issues & Learnings
 

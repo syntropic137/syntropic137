@@ -136,9 +136,10 @@ class InMemoryWorkspace:
         )
 
         # Pre-create standard directories (as empty markers)
+        # Uses "artifacts" to match WORKSPACE_OUTPUT_DIR from aef_shared.workspace_paths
         workspace.files[".claude/settings.json"] = InMemoryFile(b'{"hooks": {}}')
         workspace.files[".context/.gitkeep"] = InMemoryFile(b"")
-        workspace.files["output/.gitkeep"] = InMemoryFile(b"")
+        workspace.files["artifacts/.gitkeep"] = InMemoryFile(b"")
 
         yield workspace
 
@@ -213,15 +214,18 @@ class InMemoryWorkspace:
         workspace: InMemoryWorkspace,
         patterns: list[str] | None = None,
     ) -> list[tuple[Path, bytes]]:
-        """Collect artifacts from the output directory."""
+        """Collect artifacts from the artifacts directory.
+
+        Uses "artifacts/" to match WORKSPACE_OUTPUT_DIR from aef_shared.workspace_paths.
+        """
         import fnmatch
 
         patterns = patterns or ["*"]
         artifacts: list[tuple[Path, bytes]] = []
 
         for path, file in workspace.files.items():
-            if path.startswith("output/"):
-                rel_path = path[7:]  # Remove "output/" prefix
+            if path.startswith("artifacts/"):
+                rel_path = path[10:]  # Remove "artifacts/" prefix
                 for pattern in patterns:
                     if fnmatch.fnmatch(rel_path, pattern):
                         artifacts.append((Path(rel_path), file.content))

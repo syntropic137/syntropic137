@@ -191,9 +191,7 @@ class SidecarManager:
             stdout, stderr = await proc.communicate()
 
             if proc.returncode != 0:
-                raise RuntimeError(
-                    f"Failed to start sidecar: {stderr.decode().strip()}"
-                )
+                raise RuntimeError(f"Failed to start sidecar: {stderr.decode().strip()}")
 
             container_id = stdout.decode().strip()
 

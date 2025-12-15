@@ -152,28 +152,35 @@ class BaseIsolatedWorkspace(ABC):
 
     @classmethod
     async def _setup_directories(cls, workspace: IsolatedWorkspace) -> None:
-        """Create the workspace directory structure."""
+        """Create the workspace directory structure.
+
+        Uses workspace properties for paths to ensure consistency
+        with shared constants from aef_shared.workspace_paths.
+        """
         directories = [
-            workspace.path / ".claude" / "hooks" / "handlers",
-            workspace.path / ".claude" / "hooks" / "validators" / "security",
-            workspace.path / ".claude" / "hooks" / "validators" / "prompt",
+            workspace.hooks_dir / "handlers",
+            workspace.hooks_dir / "validators" / "security",
+            workspace.hooks_dir / "validators" / "prompt",
             workspace.path / ".agentic" / "analytics",
-            workspace.path / ".context",
-            workspace.path / "output",
+            workspace.context_dir,
+            workspace.output_dir,
         ]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     async def _setup_hooks(cls, workspace: IsolatedWorkspace) -> None:
-        """Copy hooks from agentic-primitives to the workspace."""
+        """Copy hooks from agentic-primitives to the workspace.
+
+        Uses workspace.hooks_dir for consistency with shared constants.
+        """
         # Find hooks source
         hooks_source = cls._find_hooks_source(workspace.path)
 
         if hooks_source and hooks_source.exists():
             # Copy handlers
             handlers_src = hooks_source / "handlers"
-            handlers_dst = workspace.path / ".claude" / "hooks" / "handlers"
+            handlers_dst = workspace.hooks_dir / "handlers"
             if handlers_src.exists():
                 for handler in handlers_src.glob("*.py"):
                     shutil.copy2(handler, handlers_dst / handler.name)
@@ -181,7 +188,7 @@ class BaseIsolatedWorkspace(ABC):
 
             # Copy validators
             validators_src = hooks_source / "validators"
-            validators_dst = workspace.path / ".claude" / "hooks" / "validators"
+            validators_dst = workspace.hooks_dir / "validators"
             if validators_src.exists():
                 for subdir in validators_src.iterdir():
                     if subdir.is_dir():

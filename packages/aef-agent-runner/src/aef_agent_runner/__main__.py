@@ -3,7 +3,7 @@
 This module is executed when running:
     python -m aef_agent_runner
 
-It loads the task from /workspace/task.json, executes the agent,
+It loads the task from /workspace/.context/task.json, executes the agent,
 and emits events to stdout as JSONL.
 """
 
@@ -17,6 +17,11 @@ from aef_agent_runner.cancellation import CancellationError, CancellationToken
 from aef_agent_runner.events import emit_error
 from aef_agent_runner.runner import AgentRunner
 from aef_agent_runner.task import Task
+from aef_shared.workspace_paths import (
+    WORKSPACE_OUTPUT_DIR,
+    WORKSPACE_ROOT,
+    WORKSPACE_TASK_FILE,
+)
 
 # Configure logging to stderr (stdout is for events)
 logging.basicConfig(
@@ -27,11 +32,10 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Default paths inside workspace container
-# task.json is injected via inject_context which writes to .context/
-DEFAULT_TASK_PATH = Path("/workspace/.context/task.json")
-DEFAULT_OUTPUT_DIR = Path("/workspace/artifacts")
-DEFAULT_CANCEL_PATH = Path("/workspace/.cancel")
+# Default paths inside workspace container (from shared constants)
+DEFAULT_TASK_PATH = Path(str(WORKSPACE_TASK_FILE))
+DEFAULT_OUTPUT_DIR = Path(str(WORKSPACE_OUTPUT_DIR))
+DEFAULT_CANCEL_PATH = Path(str(WORKSPACE_ROOT / ".cancel"))
 
 
 def main(

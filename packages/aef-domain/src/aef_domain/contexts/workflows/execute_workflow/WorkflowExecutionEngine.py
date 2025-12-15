@@ -731,6 +731,15 @@ class WorkflowExecutionEngine:
         6. Collect output artifacts
         7. Destroy workspace (stateless)
 
+        Contract:
+            This method RETURNS the PhaseResult - it does NOT append to ctx.
+            The caller is responsible for:
+            - ctx.phase_results.append(result)
+            - ctx.completed_phase_ids.append(phase.phase_id)
+            - ctx.artifact_ids.append(result.artifact_id) if applicable
+
+            This follows the pattern: helper methods RETURN results, callers append.
+
         Args:
             phase: The phase to execute
             ctx: Execution context
@@ -746,7 +755,6 @@ class WorkflowExecutionEngine:
         import json
 
         from aef_adapters.agents.agentic_types import WorkspaceConfig
-        from aef_adapters.workspaces.sidecar import SidecarConfig, get_sidecar_manager
         from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
 
         phase_started_at = datetime.now(UTC)
@@ -768,131 +776,118 @@ class WorkflowExecutionEngine:
             ctx.workflow_id,
         )
 
-        # Create sidecar for this phase
-        sidecar_manager = get_sidecar_manager()
-        sidecar_config = SidecarConfig(
-            execution_id=ctx.execution_id,
-            tenant_id=tenant_id,
-        )
-
         try:
-            # Start sidecar proxy
-            sidecar = await sidecar_manager.create(sidecar_config)
+            # Create workspace configuration
+            # Note: Tokens are injected via EnvInjector in the Docker workspace
+            # The sidecar proxy is optional (future enhancement for zero-trust)
+            workspace_config = IsolatedWorkspaceConfig(
+                base_config=WorkspaceConfig(
+                    session_id=session_id,
+                    workflow_id=ctx.workflow_id,
+                    phase_id=phase.phase_id,
+                ),
+                execution_id=ctx.execution_id,
+            )
 
-            try:
-                # Create workspace configuration
-                workspace_config = IsolatedWorkspaceConfig(
-                    base_config=WorkspaceConfig(
-                        session_id=session_id,
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    ),
-                    execution_id=ctx.execution_id,
+            # Create isolated workspace
+            async with self._router.create(workspace_config) as workspace:
+                # Inject input artifacts from previous phases
+                if self._artifact_query and ctx.completed_phase_ids:
+                    phase_outputs = await self._artifact_query.get_for_phase_injection(
+                        execution_id=ctx.execution_id,
+                        completed_phase_ids=ctx.completed_phase_ids,
+                    )
+                    # Write artifacts to /workspace/inputs/
+                    for prev_phase_id, content in phase_outputs.items():
+                        await self._router.inject_context(
+                            workspace,
+                            [(f"inputs/{prev_phase_id}.md", content.encode())],
+                        )
+
+                # Build task.json
+                prompt = await self._build_prompt(phase, ctx)
+                task_data = {
+                    "phase": phase.phase_id,
+                    "prompt": prompt,
+                    "execution_id": ctx.execution_id,
+                    "tenant_id": tenant_id or "default",
+                    "inputs": ctx.inputs,
+                    "artifacts": [f"{pid}.md" for pid in ctx.completed_phase_ids],
+                    "config": {
+                        "model": phase.agent_config.model,
+                        "max_tokens": phase.agent_config.max_tokens,
+                        "timeout_seconds": phase.timeout_seconds,
+                    },
+                }
+
+                # Write task.json
+                await self._router.inject_context(
+                    workspace,
+                    [("task.json", json.dumps(task_data).encode())],
                 )
 
-                # Create isolated workspace (linked to sidecar network)
-                async with self._router.create(workspace_config) as workspace:
-                    # Inject input artifacts from previous phases
-                    if self._artifact_query and ctx.completed_phase_ids:
-                        phase_outputs = await self._artifact_query.get_for_phase_injection(
-                            execution_id=ctx.execution_id,
-                            completed_phase_ids=ctx.completed_phase_ids,
-                        )
-                        # Write artifacts to /workspace/inputs/
-                        for prev_phase_id, content in phase_outputs.items():
-                            await self._router.inject_context(
-                                workspace,
-                                [(f"inputs/{prev_phase_id}.md", content.encode())],
+                # Configure proxy environment in workspace
+                # Note: This would be done via workspace env vars at creation time
+                # For now we rely on the Dockerfile defaults and sidecar network
+
+                # Execute agent runner and stream events
+                from aef_adapters.workspaces.base import BaseIsolatedWorkspace
+
+                total_input_tokens = 0
+                total_output_tokens = 0
+
+                async for line in BaseIsolatedWorkspace.execute_streaming(
+                    workspace,
+                    ["python", "-m", "aef_agent_runner"],
+                    timeout=phase.timeout_seconds or 300,
+                ):
+                    # Parse JSONL event
+                    try:
+                        event = json.loads(line)
+                        event_type = event.get("type", "")
+
+                        # Update metrics from token_usage events
+                        if event_type == "token_usage":
+                            total_input_tokens += event.get("input_tokens", 0)
+                            total_output_tokens += event.get("output_tokens", 0)
+
+                        # Log progress events
+                        if event_type == "progress":
+                            logger.debug(
+                                "Phase %s progress: turn %d",
+                                phase.phase_id,
+                                event.get("turn", 0),
                             )
 
-                    # Build task.json
-                    prompt = await self._build_prompt(phase, ctx)
-                    task_data = {
-                        "phase": phase.phase_id,
-                        "prompt": prompt,
-                        "execution_id": ctx.execution_id,
-                        "tenant_id": tenant_id or "default",
-                        "inputs": ctx.inputs,
-                        "artifacts": [f"{pid}.md" for pid in ctx.completed_phase_ids],
-                        "config": {
-                            "model": phase.agent_config.model,
-                            "max_tokens": phase.agent_config.max_tokens,
-                            "timeout_seconds": phase.timeout_seconds,
-                        },
-                    }
+                        # Could emit events to aggregate here for observability
 
-                    # Write task.json
-                    await self._router.inject_context(
-                        workspace,
-                        [("task.json", json.dumps(task_data).encode())],
+                    except json.JSONDecodeError:
+                        logger.warning("Invalid JSONL line: %s", line[:100])
+
+                # Collect output artifacts
+                artifacts = await self._router.collect_artifacts(
+                    workspace,
+                    patterns=["artifacts/**/*"],
+                )
+
+                # Create artifact records for each output
+                artifact_ids = []
+                for path_str, content in artifacts:
+                    artifact_id = str(uuid4())
+                    await self._create_artifact(
+                        artifact_id=artifact_id,
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                        execution_id=ctx.execution_id,
+                        session_id=session_id,
+                        artifact_type=phase.output_artifact_type,
+                        content=content.decode("utf-8", errors="replace"),
+                        title=f"{phase.name}: {path_str}",
                     )
+                    artifact_ids.append(artifact_id)
+                    ctx.artifact_ids.append(artifact_id)
 
-                    # Configure proxy environment in workspace
-                    # Note: This would be done via workspace env vars at creation time
-                    # For now we rely on the Dockerfile defaults and sidecar network
-
-                    # Execute agent runner and stream events
-                    from aef_adapters.workspaces.base import BaseIsolatedWorkspace
-
-                    total_input_tokens = 0
-                    total_output_tokens = 0
-
-                    async for line in BaseIsolatedWorkspace.execute_streaming(
-                        workspace,
-                        ["python", "-m", "aef_agent_runner"],
-                        timeout=phase.timeout_seconds or 300,
-                    ):
-                        # Parse JSONL event
-                        try:
-                            event = json.loads(line)
-                            event_type = event.get("type", "")
-
-                            # Update metrics from token_usage events
-                            if event_type == "token_usage":
-                                total_input_tokens += event.get("input_tokens", 0)
-                                total_output_tokens += event.get("output_tokens", 0)
-
-                            # Log progress events
-                            if event_type == "progress":
-                                logger.debug(
-                                    "Phase %s progress: turn %d",
-                                    phase.phase_id,
-                                    event.get("turn", 0),
-                                )
-
-                            # Could emit events to aggregate here for observability
-
-                        except json.JSONDecodeError:
-                            logger.warning("Invalid JSONL line: %s", line[:100])
-
-                    # Collect output artifacts
-                    artifacts = await self._router.collect_artifacts(
-                        workspace,
-                        patterns=["artifacts/**/*"],
-                    )
-
-                    # Create artifact records for each output
-                    artifact_ids = []
-                    for path_str, content in artifacts:
-                        artifact_id = str(uuid4())
-                        await self._create_artifact(
-                            artifact_id=artifact_id,
-                            workflow_id=ctx.workflow_id,
-                            phase_id=phase.phase_id,
-                            execution_id=ctx.execution_id,
-                            session_id=session_id,
-                            artifact_type=phase.output_artifact_type,
-                            content=content.decode("utf-8", errors="replace"),
-                            title=f"{phase.name}: {path_str}",
-                        )
-                        artifact_ids.append(artifact_id)
-                        ctx.artifact_ids.append(artifact_id)
-
-                # Workspace destroyed here (context manager exit)
-
-            finally:
-                # Always destroy sidecar
-                await sidecar_manager.destroy(sidecar)
+            # Workspace destroyed here (context manager exit)
 
             # Record success
             phase_completed_at = datetime.now(UTC)
@@ -910,8 +905,9 @@ class WorkflowExecutionEngine:
                 total_tokens=total_input_tokens + total_output_tokens,
                 cost_usd=self._estimate_cost(total_input_tokens, total_output_tokens),
             )
-            ctx.phase_results.append(result)
-            ctx.completed_phase_ids.append(phase.phase_id)
+            # NOTE: Do NOT append here - caller is responsible for appending
+            # to ctx.phase_results, ctx.completed_phase_ids, and ctx.artifact_ids.
+            # This follows the contract: helper methods RETURN results, callers append.
 
             # Emit phase completed
             complete_cmd = CompletePhaseCommand(

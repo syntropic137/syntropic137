@@ -12,6 +12,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from aef_shared.workspace_paths import (
+    WORKSPACE_CONTEXT_DIR,
+    WORKSPACE_HOOKS_DIR,
+    WORKSPACE_OUTPUT_DIR,
+    WORKSPACE_ROOT,
+)
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -62,18 +69,34 @@ class IsolatedWorkspace:
 
     @property
     def context_dir(self) -> Path:
-        """Directory for injected context files."""
-        return self.path / ".context"
+        """Directory for injected context files.
+
+        Uses WORKSPACE_CONTEXT_DIR constant for consistency with agent-runner.
+        """
+        # Get relative path from container root (e.g., ".context")
+        rel_path = WORKSPACE_CONTEXT_DIR.relative_to(WORKSPACE_ROOT)
+        return self.path / str(rel_path)
 
     @property
     def output_dir(self) -> Path:
-        """Directory for agent outputs."""
-        return self.path / "output"
+        """Directory for agent outputs.
+
+        Uses WORKSPACE_OUTPUT_DIR constant for consistency with agent-runner.
+        This is where the agent writes artifacts that get collected after execution.
+        """
+        # Get relative path from container root (e.g., "artifacts")
+        rel_path = WORKSPACE_OUTPUT_DIR.relative_to(WORKSPACE_ROOT)
+        return self.path / str(rel_path)
 
     @property
     def hooks_dir(self) -> Path:
-        """Directory containing hook handlers."""
-        return self.path / ".claude" / "hooks"
+        """Directory containing hook handlers.
+
+        Uses WORKSPACE_HOOKS_DIR constant for consistency with agent-runner.
+        """
+        # Get relative path from container root (e.g., ".claude/hooks")
+        rel_path = WORKSPACE_HOOKS_DIR.relative_to(WORKSPACE_ROOT)
+        return self.path / str(rel_path)
 
     @property
     def isolation_id(self) -> str | None:

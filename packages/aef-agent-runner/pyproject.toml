@@ -11,6 +11,7 @@ keywords = ["aef", "agent", "runner", "container", "claude"]
 dependencies = [
     "anthropic>=0.40.0",
     "claude-agent-sdk>=0.1.11",
+    "aef-shared",  # For workspace path constants
 ]
 
 [project.optional-dependencies]

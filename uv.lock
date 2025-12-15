@@ -95,6 +95,7 @@ name = "aef-agent-runner"
 version = "0.1.0"
 source = { editable = "packages/aef-agent-runner" }
 dependencies = [
+    { name = "aef-shared" },
     { name = "anthropic" },
     { name = "claude-agent-sdk" },
 ]
@@ -107,6 +108,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aef-shared", editable = "packages/aef-shared" },
     { name = "anthropic", specifier = ">=0.40.0" },
     { name = "claude-agent-sdk", specifier = ">=0.1.11" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },

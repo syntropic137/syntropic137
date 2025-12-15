@@ -21,7 +21,7 @@ Creates temporary directories with:
 - .claude/hooks/ with handlers from agentic-primitives
 - .agentic/analytics/ for event output
 - .context/ for injected context
-- output/ for agent outputs
+- artifacts/ for agent outputs (see WORKSPACE_OUTPUT_DIR in aef_shared.workspace_paths)
 """
 
 from __future__ import annotations
@@ -36,11 +36,28 @@ from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from aef_adapters.agents.agentic_types import Workspace, WorkspaceConfig
+from aef_shared.workspace_paths import (
+    WORKSPACE_ANALYTICS_DIR,
+    WORKSPACE_CONTEXT_DIR,
+    WORKSPACE_HOOKS_DIR,
+    WORKSPACE_OUTPUT_DIR,
+    WORKSPACE_ROOT,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
+
+
+def _host_path(workspace_dir: Path, container_path) -> Path:
+    """Convert a container path constant to a host path.
+
+    The container path constants are rooted at /workspace.
+    This converts them to paths relative to the workspace_dir on the host.
+    """
+    rel_path = container_path.relative_to(WORKSPACE_ROOT)
+    return workspace_dir / str(rel_path)
 
 
 class NonIsolatedWorkspaceError(Exception):
@@ -177,28 +194,37 @@ class LocalWorkspace:
 
     @classmethod
     async def _setup_directories(cls, workspace_dir: Path) -> None:
-        """Create the workspace directory structure."""
+        """Create the workspace directory structure.
+
+        Uses shared constants for path names to ensure consistency
+        with isolated workspaces and the agent-runner.
+        """
+        hooks_dir = _host_path(workspace_dir, WORKSPACE_HOOKS_DIR)
         directories = [
-            workspace_dir / ".claude" / "hooks" / "handlers",
-            workspace_dir / ".claude" / "hooks" / "validators" / "security",
-            workspace_dir / ".claude" / "hooks" / "validators" / "prompt",
-            workspace_dir / ".agentic" / "analytics",
-            workspace_dir / ".context",
-            workspace_dir / "output",
+            hooks_dir / "handlers",
+            hooks_dir / "validators" / "security",
+            hooks_dir / "validators" / "prompt",
+            _host_path(workspace_dir, WORKSPACE_ANALYTICS_DIR),
+            _host_path(workspace_dir, WORKSPACE_CONTEXT_DIR),
+            _host_path(workspace_dir, WORKSPACE_OUTPUT_DIR),
         ]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     async def _setup_hooks(cls, workspace_dir: Path, config: WorkspaceConfig) -> None:
-        """Copy hooks from agentic-primitives to the workspace."""
+        """Copy hooks from agentic-primitives to the workspace.
+
+        Uses shared constants for hook directory path.
+        """
         # Determine hooks source (config override or auto-discover)
         hooks_source = config.hooks_source or cls._find_hooks_source(workspace_dir)
+        hooks_dir = _host_path(workspace_dir, WORKSPACE_HOOKS_DIR)
 
         if hooks_source and hooks_source.exists():
             # Copy handlers
             handlers_src = hooks_source / "handlers"
-            handlers_dst = workspace_dir / ".claude" / "hooks" / "handlers"
+            handlers_dst = hooks_dir / "handlers"
             if handlers_src.exists():
                 for handler in handlers_src.glob("*.py"):
                     shutil.copy2(handler, handlers_dst / handler.name)
@@ -207,7 +233,7 @@ class LocalWorkspace:
 
             # Copy validators
             validators_src = hooks_source / "validators"
-            validators_dst = workspace_dir / ".claude" / "hooks" / "validators"
+            validators_dst = hooks_dir / "validators"
             if validators_src.exists():
                 for subdir in validators_src.iterdir():
                     if subdir.is_dir():

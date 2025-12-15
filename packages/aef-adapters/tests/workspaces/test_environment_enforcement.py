@@ -208,9 +208,9 @@ class TestInMemoryWorkspaceIntegration:
                 session_id: str = "test-session"
 
             async with InMemoryWorkspace.create(MockConfig()) as workspace:
-                # Write some artifacts
-                await workspace.write_file("output/result.txt", b"result data")
-                await workspace.write_file("output/report.json", b'{"status": "ok"}')
+                # Write some artifacts (using "artifacts/" to match WORKSPACE_OUTPUT_DIR)
+                await workspace.write_file("artifacts/result.txt", b"result data")
+                await workspace.write_file("artifacts/report.json", b'{"status": "ok"}')
 
                 # Collect artifacts
                 artifacts = await InMemoryWorkspace.collect_artifacts(workspace)
