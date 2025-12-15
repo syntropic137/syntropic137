@@ -129,7 +129,7 @@ class IsolationConfig:
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
 
     # Image/environment
-    image: str = "aef-agent-runner:latest"
+    image: str = "aef-workspace-claude:latest"
     working_directory: str = "/workspace"
 
     # Capabilities

@@ -814,15 +814,31 @@ class WorkflowExecutionEngine:
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
         try:
-            # Create isolated workspace using new WorkspaceService
-            # Token injection handled automatically via sidecar
+            # Create isolated workspace using WorkspaceService
+            # Setup phase secrets pattern (ADR-024): secrets available during
+            # setup phase, cleared before agent runs
             async with self._workspace_service.create_workspace(
                 execution_id=ctx.execution_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,
-                with_sidecar=True,
-                inject_tokens=True,  # Automatic token injection via sidecar
+                with_sidecar=False,  # Sidecar not needed with setup phase pattern
+                inject_tokens=False,  # Handled by setup phase
             ) as workspace:
+                # Run setup phase with secrets (ADR-024)
+                # Uses GitHub App to generate installation token if configured
+                from aef_adapters.workspace_backends.service import SetupPhaseSecrets
+
+                secrets = await SetupPhaseSecrets.create()
+
+                setup_result = await workspace.run_setup_phase(secrets)
+                if setup_result.exit_code != 0:
+                    raise WorkflowExecutionError(
+                        message=f"Setup phase failed: {setup_result.stderr}",
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                    )
+                logger.info("Setup phase completed, secrets cleared")
+
                 # Inject input artifacts from previous phases
                 if self._artifact_query and ctx.completed_phase_ids:
                     phase_outputs = await self._artifact_query.get_for_phase_injection(
@@ -853,14 +869,21 @@ class WorkflowExecutionEngine:
                     },
                 }
 
-                # Write task.json
+                # Write task.json to .context directory (expected by aef-agent-runner)
                 await workspace.inject_files(
                     [
-                        ("task.json", json.dumps(task_data).encode()),
+                        (".context/task.json", json.dumps(task_data).encode()),
                     ]
                 )
 
                 # Execute agent runner and stream events
+                # ANTHROPIC_API_KEY is passed to agent (needed for Claude calls)
+                # GitHub auth uses cached credentials from setup phase (ADR-024)
+                # No raw GitHub token in agent environment
+                agent_env = {}
+                if secrets.anthropic_api_key:
+                    agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+
                 total_input_tokens = 0
                 total_output_tokens = 0
 
@@ -868,6 +891,7 @@ class WorkflowExecutionEngine:
                 async for line in workspace.stream(
                     ["python", "-m", "aef_agent_runner"],
                     timeout_seconds=phase.timeout_seconds or 300,
+                    environment=agent_env,
                 ):
                     line_count += 1
                     logger.debug("Received line %d from agent runner: %s", line_count, line[:100])

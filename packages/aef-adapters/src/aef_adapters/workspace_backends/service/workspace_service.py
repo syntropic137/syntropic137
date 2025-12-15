@@ -4,15 +4,15 @@ This service composes all workspace adapters and provides a clean interface
 for the WorkflowExecutionEngine. It handles the full lifecycle:
 
 1. Create isolation container
-2. Start sidecar proxy
-3. Vend and inject tokens
-4. Execute commands / stream output
+2. Run setup script with secrets (ADR-024 Setup Phase)
+3. Clear secrets from environment
+4. Execute agent commands
 5. Collect artifacts
-6. Cleanup (destroy container + sidecar)
+6. Cleanup (destroy container)
 
 All operations are event-sourced via WorkspaceAggregate for audit trail.
 
-See ADR-021, ADR-022, ADR-023.
+See ADR-021, ADR-023, ADR-024.
 """
 
 from __future__ import annotations
@@ -60,6 +60,173 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class GitHubAppNotConfiguredError(Exception):
+    """Raised when GitHub App is required but not configured."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "GitHub App is not configured. Set GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, "
+            "and GITHUB_APP_INSTALLATION_ID environment variables. "
+            "See docs/deployment/github-app-setup.md for details."
+        )
+
+
+@dataclass
+class SetupPhaseSecrets:
+    """Secrets available only during setup phase (ADR-024).
+
+    These secrets are used to configure credentials during the setup phase,
+    then CLEARED before the agent runs. This follows the OpenAI Codex pattern.
+
+    GitHub authentication is EXCLUSIVELY via GitHub App installation tokens.
+    No personal access tokens (GH_TOKEN) are supported - this reduces cognitive
+    load and ensures consistent, auditable authentication.
+
+    Attributes:
+        github_app_token: GitHub App installation token (short-lived, scoped)
+        anthropic_api_key: Claude API key
+        git_author_name: Git commit author name (from GitHub App bot)
+        git_author_email: Git commit author email (from GitHub App bot)
+
+    Usage:
+        # Create with GitHub App token (required)
+        secrets = await SetupPhaseSecrets.create()
+
+        # For testing only (no GitHub operations)
+        secrets = SetupPhaseSecrets.for_testing(anthropic_api_key="sk-ant-xxx")
+    """
+
+    github_app_token: str | None = None
+    anthropic_api_key: str | None = None
+    git_author_name: str | None = None
+    git_author_email: str | None = None
+
+    @classmethod
+    async def create(cls, *, require_github: bool = True) -> SetupPhaseSecrets:
+        """Create SetupPhaseSecrets using GitHub App.
+
+        This is the production factory method. It:
+        1. Uses GitHub App to generate a short-lived installation token
+        2. Uses GitHub App bot identity for git commits
+        3. Reads ANTHROPIC_API_KEY from environment
+
+        Args:
+            require_github: If True (default), raises if GitHub App not configured
+
+        Returns:
+            SetupPhaseSecrets with credentials
+
+        Raises:
+            GitHubAppNotConfiguredError: If require_github=True and App not configured
+        """
+        import os
+
+        from aef_shared.settings.github import GitHubAppSettings
+
+        github_app_token = None
+        git_author_name = None
+        git_author_email = None
+
+        # GitHub App is the ONLY supported method for GitHub auth
+        github_settings = GitHubAppSettings()
+        if github_settings.is_configured:
+            try:
+                from aef_adapters.github import GitHubAppClient
+
+                client = GitHubAppClient(github_settings)
+                # get_installation_token returns the token string directly
+                github_app_token = await client.get_installation_token()
+                # Use GitHub App bot identity for commits
+                git_author_name = github_settings.bot_name
+                git_author_email = github_settings.bot_email
+                logger.info(
+                    "Generated GitHub App installation token (bot: %s)",
+                    github_settings.bot_name,
+                )
+            except Exception as e:
+                logger.error("Failed to get GitHub App token: %s", e)
+                if require_github:
+                    raise
+        elif require_github:
+            raise GitHubAppNotConfiguredError()
+
+        # Get Anthropic API key from environment
+        anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+        return cls(
+            github_app_token=github_app_token,
+            anthropic_api_key=anthropic_api_key,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
+        )
+
+    @classmethod
+    def for_testing(
+        cls,
+        *,
+        anthropic_api_key: str | None = None,
+        git_author_name: str = "Test Agent",
+        git_author_email: str = "test@example.com",
+    ) -> SetupPhaseSecrets:
+        """Create SetupPhaseSecrets for testing (no GitHub operations).
+
+        ⚠️  TEST ENVIRONMENT ONLY - no GitHub token is provided.
+
+        Args:
+            anthropic_api_key: Optional API key for Claude
+            git_author_name: Git author name (default: "Test Agent")
+            git_author_email: Git author email (default: "test@example.com")
+
+        Returns:
+            SetupPhaseSecrets without GitHub token
+        """
+        import os
+
+        return cls(
+            github_app_token=None,
+            anthropic_api_key=anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"),
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
+        )
+
+
+# Default setup script that configures credentials
+# Uses GITHUB_APP_TOKEN from GitHub App installation (no GH_TOKEN/PAT support)
+DEFAULT_SETUP_SCRIPT = """#!/bin/bash
+set -e
+
+# Configure Git identity (uses env vars injected by run_setup_phase)
+# These come from the GitHub App bot configuration
+git config --global user.name "${GIT_AUTHOR_NAME}"
+git config --global user.email "${GIT_AUTHOR_EMAIL}"
+git config --global init.defaultBranch main
+
+# Configure Git credential helper with GitHub App token
+if [ -n "${GITHUB_APP_TOKEN}" ]; then
+    # Store credentials for git push (persists after token env var is cleared)
+    git config --global credential.helper store
+    echo "https://x-access-token:${GITHUB_APP_TOKEN}@github.com" > ~/.git-credentials
+    chmod 600 ~/.git-credentials
+
+    # Configure gh CLI by writing config directly
+    # This persists the token for gh commands (pr create, etc.)
+    mkdir -p ~/.config/gh
+    cat > ~/.config/gh/hosts.yml << EOF
+github.com:
+    oauth_token: ${GITHUB_APP_TOKEN}
+    user: ${GIT_AUTHOR_NAME:-aef-bot}
+    git_protocol: https
+EOF
+    chmod 600 ~/.config/gh/hosts.yml
+    echo "GitHub App token configured for git and gh CLI"
+else
+    echo "Warning: No GITHUB_APP_TOKEN - GitHub operations will fail"
+fi
+
+# Any custom setup can be appended here
+"""
+
+
 @dataclass
 class WorkspaceServiceConfig:
     """Configuration for WorkspaceService.
@@ -75,9 +242,9 @@ class WorkspaceServiceConfig:
     """
 
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
-    image: str = "aef-agent-runner:latest"
-    memory_limit_mb: int = 512
-    cpu_limit_cores: float = 1.0
+    image: str = "aef-workspace-claude:latest"
+    memory_limit_mb: int = 2048  # 2GB - Claude CLI needs more memory
+    cpu_limit_cores: float = 2.0  # Allow more CPU for agent work
     timeout_seconds: int = 3600  # 1 hour
     allowed_hosts: tuple[str, ...] = (
         "api.anthropic.com",
@@ -86,6 +253,7 @@ class WorkspaceServiceConfig:
     )
     default_token_ttl: int = 300  # 5 minutes
     capabilities: tuple[CapabilityType, ...] = (CapabilityType.NETWORK,)
+    environment: dict[str, str] = field(default_factory=dict)  # Non-sensitive env vars
 
 
 @dataclass
@@ -231,6 +399,115 @@ class ManagedWorkspace:
             base_path=base_path,
         )
 
+    async def run_setup_phase(
+        self,
+        secrets: SetupPhaseSecrets,
+        setup_script: str | None = None,
+    ) -> ExecutionResult:
+        """Run setup phase with secrets, then clear secrets (ADR-024).
+
+        This method:
+        1. Runs the setup script with secrets available as env vars
+        2. Clears all secrets from the container environment
+        3. Removes any temporary files that might contain secrets
+
+        After this method completes, the agent phase can safely run
+        without access to raw secrets.
+
+        Args:
+            secrets: Secrets to make available during setup
+            setup_script: Custom setup script (uses DEFAULT_SETUP_SCRIPT if None)
+
+        Returns:
+            ExecutionResult from setup script
+        """
+        # Build environment with secrets
+        # Uses explicit env var names for clarity (no GH_TOKEN ambiguity)
+        setup_env: dict[str, str] = {}
+
+        if secrets.github_app_token:
+            # GITHUB_APP_TOKEN is the only supported GitHub auth method
+            setup_env["GITHUB_APP_TOKEN"] = secrets.github_app_token
+
+        if secrets.anthropic_api_key:
+            setup_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+
+        # Git identity from GitHub App bot configuration
+        if secrets.git_author_name:
+            setup_env["GIT_AUTHOR_NAME"] = secrets.git_author_name
+            setup_env["GIT_COMMITTER_NAME"] = secrets.git_author_name
+        if secrets.git_author_email:
+            setup_env["GIT_AUTHOR_EMAIL"] = secrets.git_author_email
+            setup_env["GIT_COMMITTER_EMAIL"] = secrets.git_author_email
+
+        # Write setup script to container
+        script = setup_script or DEFAULT_SETUP_SCRIPT
+        await self.inject_files(
+            [(".setup/setup.sh", script.encode())],
+            base_path="/workspace",
+        )
+
+        # Run setup script WITH secrets
+        logger.info("Running setup phase with secrets (workspace=%s)", self.workspace_id)
+        result = await self.execute(
+            ["bash", "/workspace/.setup/setup.sh"],
+            environment=setup_env,
+            timeout_seconds=60,  # Setup should be quick
+        )
+
+        if result.exit_code != 0:
+            logger.error(
+                "Setup phase failed (exit=%d): %s",
+                result.exit_code,
+                result.stderr,
+            )
+            return result
+
+        # Clear secrets from environment
+        await self._clear_secrets()
+
+        logger.info("Setup phase complete, secrets cleared (workspace=%s)", self.workspace_id)
+        return result
+
+    async def _clear_secrets(self) -> None:
+        """Clear all traces of secrets from the container.
+
+        This is called after setup phase completes. It removes:
+        - Environment variables containing secrets
+        - Shell history
+        - Temporary files
+
+        Note: Git credentials in ~/.git-credentials are intentionally kept
+        so the agent can push without raw token access.
+        """
+        # Clear shell history and temp files
+        clear_script = """#!/bin/bash
+# Clear shell history
+rm -f ~/.bash_history ~/.zsh_history /root/.bash_history /root/.zsh_history 2>/dev/null || true
+
+# Clear setup script (contains no secrets, but clean up)
+rm -rf /workspace/.setup 2>/dev/null || true
+
+# Clear any temp files
+rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
+
+# Note: ~/.git-credentials is kept intentionally for git push
+"""
+        await self.inject_files(
+            [(".cleanup/clear.sh", clear_script.encode())],
+            base_path="/workspace",
+        )
+        await self.execute(
+            ["bash", "/workspace/.cleanup/clear.sh"],
+            timeout_seconds=10,
+        )
+
+        # Clean up the cleanup script too
+        await self.execute(
+            ["rm", "-rf", "/workspace/.cleanup"],
+            timeout_seconds=5,
+        )
+
     @property
     def proxy_url(self) -> str | None:
         """Get the proxy URL for HTTP requests."""
@@ -303,6 +580,7 @@ class WorkspaceService:
         cls,
         config: WorkspaceServiceConfig | None = None,
         token_service: object | None = None,  # TokenVendingService
+        environment: dict[str, str] | None = None,
     ) -> WorkspaceService:
         """Create WorkspaceService with Docker adapters.
 
@@ -311,6 +589,7 @@ class WorkspaceService:
         Args:
             config: Optional service configuration
             token_service: Optional TokenVendingService (uses default if None)
+            environment: Environment variables to pass to containers (e.g., ANTHROPIC_API_KEY)
 
         Returns:
             Configured WorkspaceService
@@ -326,7 +605,26 @@ class WorkspaceService:
         )
         from aef_tokens.vending import get_token_vending_service
 
-        cfg = config or WorkspaceServiceConfig()
+        # Build config with environment
+        if config:
+            cfg = config
+            if environment:
+                # Merge environment into existing config
+                merged_env = dict(cfg.environment)
+                merged_env.update(environment)
+                cfg = WorkspaceServiceConfig(
+                    backend=cfg.backend,
+                    image=cfg.image,
+                    memory_limit_mb=cfg.memory_limit_mb,
+                    cpu_limit_cores=cfg.cpu_limit_cores,
+                    timeout_seconds=cfg.timeout_seconds,
+                    allowed_hosts=cfg.allowed_hosts,
+                    default_token_ttl=cfg.default_token_ttl,
+                    capabilities=cfg.capabilities,
+                    environment=merged_env,
+                )
+        else:
+            cfg = WorkspaceServiceConfig(environment=environment or {})
 
         # Create adapters
         isolation = DockerIsolationAdapter(
@@ -465,6 +763,7 @@ class WorkspaceService:
                 memory_limit_mb=self._config.memory_limit_mb,
                 cpu_limit_cores=self._config.cpu_limit_cores,
             ),
+            environment=self._config.environment,
         )
 
         isolation_handle: IsolationHandle | None = None

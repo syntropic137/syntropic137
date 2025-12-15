@@ -875,11 +875,27 @@ def run_workflow(
                 )
 
             # Create engine with ADR-023 compliant dependencies
+            import os
+
             from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
-            workspace_service = WorkspaceService.create_docker()
+
+            # Container environment - non-sensitive config only (ADR-024)
+            #
+            # Secrets are handled by the Setup Phase Secrets pattern:
+            # 1. Engine generates GitHub App installation token (short-lived)
+            # 2. Runs setup script inside container WITH token
+            # 3. Clears token from environment BEFORE agent runs
+            # 4. Agent uses cached git/gh credentials (no raw token access)
+            #
+            # ANTHROPIC_API_KEY is passed to agent (needed for Claude calls)
+            # GitHub auth is EXCLUSIVELY via GitHub App (no GH_TOKEN/PAT)
+            # See ADR-024: Setup Phase Secrets Pattern
+            container_env: dict[str, str] = {}
+
+            workspace_service = WorkspaceService.create_docker(environment=container_env)
 
             engine = WorkflowExecutionEngine(
                 workflow_repository=workflow_repo,

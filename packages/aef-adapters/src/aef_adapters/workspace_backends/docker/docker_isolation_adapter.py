@@ -32,8 +32,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Default workspace image
-DEFAULT_WORKSPACE_IMAGE = "aef-agent-runner:latest"
+# Default workspace image - matches image built by `just workspace-build`
+DEFAULT_WORKSPACE_IMAGE = "aef-workspace-claude:latest"
 
 # Default network
 DEFAULT_NETWORK = "aef-workspace-net"

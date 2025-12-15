@@ -3,9 +3,10 @@
 #
 # This workflow is the canonical example of a true E2E agentic workflow:
 # 1. Agent runs in isolated Docker container
-# 2. GitHub credentials are injected via TokenVendingService (5-min TTL)
-# 3. Agent uses standard git and gh CLI commands
-# 4. All operations are observable in the event store
+# 2. GitHub App installation token is generated (1-hour TTL, see ADR-024)
+# 3. Git credentials are configured during setup phase, then cleared
+# 4. Agent uses standard git and gh CLI commands with cached credentials
+# 5. All operations are observable in the event store
 
 id: github-pr-workflow
 name: GitHub PR Workflow
@@ -107,8 +108,8 @@ phases:
 
       ### Important Notes
 
-      - The `GITHUB_TOKEN` and `GH_TOKEN` environment variables are pre-configured
-      - Git user.name and user.email are pre-configured
+      - Git credentials are pre-configured via the setup phase (ADR-024)
+      - Git user.name and user.email are set to the GitHub App bot identity
       - You have full access to bash commands in the workspace
       - Work inside `/workspace/repo` after cloning
 

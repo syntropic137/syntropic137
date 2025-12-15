@@ -105,14 +105,10 @@ ENV HOME=/workspace \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     # Use uv for Python package management
     UV_SYSTEM_PYTHON=1 \
-    # GitHub CLI uses GH_TOKEN for authentication (set by workspace injection)
-    # GH_TOKEN will be injected at runtime via env var
+    # GitHub CLI - disable update notifications
     GH_NO_UPDATE_NOTIFIER=1 \
-    # Git configuration for commits
-    GIT_AUTHOR_NAME="AEF Agent" \
-    GIT_AUTHOR_EMAIL="agent@aef.local" \
-    GIT_COMMITTER_NAME="AEF Agent" \
-    GIT_COMMITTER_EMAIL="agent@aef.local" \
+    # Git identity is configured at runtime by setup script (ADR-024)
+    # Uses GitHub App bot identity for commits
     # Proxy settings for sidecar (injected at runtime by orchestrator)
     # These will be set to http://sidecar:8081 when running with sidecar
     # The sidecar intercepts requests and injects API tokens
@@ -123,12 +119,12 @@ ENV HOME=/workspace \
 # Create standard workspace directories
 RUN mkdir -p /workspace/inputs /workspace/artifacts
 
-# Configure git for commits and authentication
-RUN git config --global user.name "AEF Agent" \
-    && git config --global user.email "agent@aef.local" \
-    && git config --global init.defaultBranch main \
-    # Use GH_TOKEN for git authentication via credential helper
-    && git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-$GITHUB_TOKEN}"; }; f'
+# Configure git defaults (overridden by setup script with GitHub App identity)
+# See ADR-024: Setup Phase Secrets Pattern
+RUN git config --global init.defaultBranch main \
+    # Credential helper is configured by setup script with GitHub App token
+    # The setup script writes to ~/.git-credentials for persistence
+    && git config --global credential.helper store
 
 # Health check: verify workspace is accessible
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=2 \

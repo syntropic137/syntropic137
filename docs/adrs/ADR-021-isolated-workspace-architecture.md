@@ -630,7 +630,7 @@ Includes:
 - `claude-agent-sdk` (agentic execution)
 - `anthropic` SDK (API client)
 - `gh` CLI (GitHub operations)
-- `git` with credential helper for `GH_TOKEN`
+- `git` with credential helper for GitHub App token (see ADR-024)
 
 ### Contract Validation
 
