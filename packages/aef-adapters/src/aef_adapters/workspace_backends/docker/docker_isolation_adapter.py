@@ -354,6 +354,100 @@ class DockerIsolationAdapter:
         except Exception:
             return False
 
+    async def copy_to(
+        self,
+        handle: IsolationHandle,
+        files: list[tuple[str, bytes]],
+        base_path: str = "/workspace",  # noqa: ARG002
+    ) -> None:
+        """Copy files into the container.
+
+        Uses docker cp to copy files. First writes to temp dir, then copies in.
+
+        Args:
+            handle: Handle from create()
+            files: List of (relative_path, content) tuples
+            base_path: Base path inside container
+        """
+        state = self._containers.get(handle.isolation_id)
+        if not state:
+            raise RuntimeError(f"Container not found: {handle.isolation_id}")
+
+        # Write files to workspace directory (which is mounted)
+        for rel_path, content in files:
+            file_path = state.workspace_dir / rel_path
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(content)
+
+        logger.debug(
+            "Copied %d files to container (id=%s)",
+            len(files),
+            handle.isolation_id[:12],
+        )
+
+    async def copy_from(
+        self,
+        handle: IsolationHandle,
+        patterns: list[str],
+        base_path: str = "/workspace",  # noqa: ARG002
+    ) -> list[tuple[str, bytes]]:
+        """Copy files out of the container.
+
+        Reads from mounted workspace directory.
+
+        Args:
+            handle: Handle from create()
+            patterns: Glob patterns (e.g., ["artifacts/**/*"])
+            base_path: Base path inside container
+
+        Returns:
+            List of (relative_path, content) tuples
+        """
+        import fnmatch
+
+        state = self._containers.get(handle.isolation_id)
+        if not state:
+            raise RuntimeError(f"Container not found: {handle.isolation_id}")
+
+        results: list[tuple[str, bytes]] = []
+
+        # Search workspace directory for matching files
+        for pattern in patterns:
+            # Handle patterns like "artifacts/**/*"
+            search_base = state.workspace_dir
+            if "/" in pattern:
+                # Extract base directory from pattern
+                parts = pattern.split("/")
+                for part in parts:
+                    if "*" in part:
+                        break
+                    search_base = search_base / part
+                    pattern = "/".join(parts[parts.index(part) + 1 :])
+
+            if not search_base.exists():
+                continue
+
+            # Walk and match
+            for file_path in search_base.rglob("*"):
+                if file_path.is_file():
+                    rel_path = file_path.relative_to(state.workspace_dir)
+                    # Check if matches any pattern
+                    if fnmatch.fnmatch(str(rel_path), pattern) or fnmatch.fnmatch(
+                        str(rel_path), f"**/{pattern}"
+                    ):
+                        try:
+                            content = file_path.read_bytes()
+                            results.append((str(rel_path), content))
+                        except Exception as e:
+                            logger.warning("Failed to read %s: %s", file_path, e)
+
+        logger.debug(
+            "Collected %d files from container (id=%s)",
+            len(results),
+            handle.isolation_id[:12],
+        )
+        return results
+
     def _build_docker_command(
         self,
         *,

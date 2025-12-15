@@ -3,7 +3,7 @@
 See ADR-023: Workspace-First Execution Model for architectural decisions.
 
 Key requirements:
-- WorkspaceRouter is REQUIRED - agents run inside isolated workspaces
+- WorkspaceService is REQUIRED - agents run inside isolated workspaces
 - WorkflowExecutionRepository is REQUIRED - events persist via aggregate
 - All events flow through WorkflowExecutionAggregate for consistency
 """
@@ -19,6 +19,10 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
+from aef_domain.contexts.sessions._shared.value_objects import OperationType
+from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+    RecordOperationCommand,
+)
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -37,8 +41,7 @@ from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
 
 if TYPE_CHECKING:
     from aef_adapters.agents.instrumented import InstrumentedAgent
-    from aef_adapters.workspaces.router import WorkspaceRouter
-    from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
+    from aef_adapters.workspace_backends.service import WorkspaceService
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
     )
@@ -178,7 +181,7 @@ class WorkflowExecutionEngine:
     """Orchestrates workflow execution across phases.
 
     IMPORTANT (ADR-023): This engine requires:
-    - WorkspaceRouter: Agents run inside isolated workspaces
+    - WorkspaceService: Agents run inside isolated workspaces
     - WorkflowExecutionRepository: Events persist via aggregate pattern
 
     Responsibilities:
@@ -190,13 +193,13 @@ class WorkflowExecutionEngine:
     - Persist events via WorkflowExecutionAggregate
 
     Example:
-        from aef_adapters.workspaces import get_workspace_router
+        from aef_adapters.workspace_backends.service import WorkspaceService
         from aef_adapters.storage.repositories import get_workflow_execution_repository
 
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=get_workflow_execution_repository(),
-            workspace_router=get_workspace_router(),
+            workspace_service=WorkspaceService.create_docker(),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=create_agent,
@@ -212,7 +215,7 @@ class WorkflowExecutionEngine:
         self,
         workflow_repository: WorkflowRepository,
         execution_repository: WorkflowExecutionRepository,
-        workspace_router: WorkspaceRouter,
+        workspace_service: WorkspaceService,
         session_repository: SessionRepository,
         artifact_repository: ArtifactRepository,
         agent_factory: AgentFactory,
@@ -223,7 +226,7 @@ class WorkflowExecutionEngine:
         Args:
             workflow_repository: Repository for Workflow aggregates
             execution_repository: Repository for WorkflowExecution aggregates (REQUIRED)
-            workspace_router: Router for creating isolated workspaces (REQUIRED)
+            workspace_service: Service for creating isolated workspaces (REQUIRED)
             session_repository: Repository for AgentSession aggregates
             artifact_repository: Repository for Artifact aggregates
             agent_factory: Factory for creating instrumented agents
@@ -232,22 +235,22 @@ class WorkflowExecutionEngine:
                 into subsequent phase prompts.
 
         Raises:
-            ValueError: If execution_repository or workspace_router is None
+            ValueError: If execution_repository or workspace_service is None
         """
         if execution_repository is None:
             raise ValueError(
                 "execution_repository is required per ADR-023. "
                 "Use get_workflow_execution_repository() from aef_adapters.storage.repositories."
             )
-        if workspace_router is None:
+        if workspace_service is None:
             raise ValueError(
-                "workspace_router is required per ADR-023. "
-                "Use get_workspace_router() from aef_adapters.workspaces."
+                "workspace_service is required per ADR-023. "
+                "Use WorkspaceService.create_docker() from aef_adapters.workspace_backends.service."
             )
 
         self._workflows = workflow_repository
         self._executions = execution_repository
-        self._router = workspace_router
+        self._workspace_service = workspace_service
         self._sessions = session_repository
         self._artifacts = artifact_repository
         self._agent_factory = agent_factory
@@ -260,7 +263,6 @@ class WorkflowExecutionEngine:
         execution_id: str | None = None,
         use_container: bool = False,
         tenant_id: str | None = None,
-        _workspace_config: IsolatedWorkspaceConfig | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow from start to finish.
 
@@ -276,7 +278,6 @@ class WorkflowExecutionEngine:
                 agent SDK directly in host process.
             tenant_id: Tenant ID for multi-tenant token vending. Required when
                 use_container=True for proper token attribution.
-            workspace_config: Optional workspace configuration override.
 
         Returns:
             WorkflowExecutionResult with status and artifacts.
@@ -735,7 +736,7 @@ class WorkflowExecutionEngine:
 
         This implements the full agent-in-container pattern per ADR-023:
 
-        1. Create isolated workspace with sidecar
+        1. Create isolated workspace with sidecar via WorkspaceService
         2. Inject input artifacts from previous phases
         3. Write task.json with phase configuration
         4. Execute aef-agent-runner via streaming
@@ -766,8 +767,6 @@ class WorkflowExecutionEngine:
         """
         import json
 
-        from aef_adapters.agents.agentic_types import WorkspaceConfig
-        from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
         from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
@@ -815,20 +814,15 @@ class WorkflowExecutionEngine:
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
         try:
-            # Create workspace configuration
-            # Note: Tokens are injected via EnvInjector in the Docker workspace
-            # The sidecar proxy is optional (future enhancement for zero-trust)
-            workspace_config = IsolatedWorkspaceConfig(
-                base_config=WorkspaceConfig(
-                    session_id=session_id,
-                    workflow_id=ctx.workflow_id,
-                    phase_id=phase.phase_id,
-                ),
+            # Create isolated workspace using new WorkspaceService
+            # Token injection handled automatically via sidecar
+            async with self._workspace_service.create_workspace(
                 execution_id=ctx.execution_id,
-            )
-
-            # Create isolated workspace
-            async with self._router.create(workspace_config) as workspace:
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                with_sidecar=True,
+                inject_tokens=True,  # Automatic token injection via sidecar
+            ) as workspace:
                 # Inject input artifacts from previous phases
                 if self._artifact_query and ctx.completed_phase_ids:
                     phase_outputs = await self._artifact_query.get_for_phase_injection(
@@ -836,11 +830,12 @@ class WorkflowExecutionEngine:
                         completed_phase_ids=ctx.completed_phase_ids,
                     )
                     # Write artifacts to /workspace/inputs/
-                    for prev_phase_id, content in phase_outputs.items():
-                        await self._router.inject_context(
-                            workspace,
-                            [(f"inputs/{prev_phase_id}.md", content.encode())],
-                        )
+                    files_to_inject = [
+                        (f"inputs/{prev_phase_id}.md", content.encode())
+                        for prev_phase_id, content in phase_outputs.items()
+                    ]
+                    if files_to_inject:
+                        await workspace.inject_files(files_to_inject)
 
                 # Build task.json
                 prompt = await self._build_prompt(phase, ctx)
@@ -859,35 +854,52 @@ class WorkflowExecutionEngine:
                 }
 
                 # Write task.json
-                await self._router.inject_context(
-                    workspace,
-                    [("task.json", json.dumps(task_data).encode())],
-                )
-
-                # Configure proxy environment in workspace
-                # Note: This would be done via workspace env vars at creation time
-                # For now we rely on the Dockerfile defaults and sidecar network
+                await workspace.inject_files([
+                    ("task.json", json.dumps(task_data).encode()),
+                ])
 
                 # Execute agent runner and stream events
-                from aef_adapters.workspaces.base import BaseIsolatedWorkspace
-
                 total_input_tokens = 0
                 total_output_tokens = 0
 
-                async for line in BaseIsolatedWorkspace.execute_streaming(
-                    workspace,
+                line_count = 0
+                async for line in workspace.stream(
                     ["python", "-m", "aef_agent_runner"],
-                    timeout=phase.timeout_seconds or 300,
+                    timeout_seconds=phase.timeout_seconds or 300,
                 ):
+                    line_count += 1
+                    logger.debug("Received line %d from agent runner: %s", line_count, line[:100])
+
                     # Parse JSONL event
                     try:
                         event = json.loads(line)
                         event_type = event.get("type", "")
+                        logger.debug("Parsed event type: %s", event_type)
 
                         # Update metrics from token_usage events
                         if event_type == "token_usage":
-                            total_input_tokens += event.get("input_tokens", 0)
-                            total_output_tokens += event.get("output_tokens", 0)
+                            input_tokens = event.get("input_tokens", 0)
+                            output_tokens = event.get("output_tokens", 0)
+                            total_input_tokens += input_tokens
+                            total_output_tokens += output_tokens
+
+                            # Forward to session aggregate for observability
+                            if session is not None and self._sessions is not None:
+                                record_cmd = RecordOperationCommand(
+                                    aggregate_id=session_id,
+                                    operation_type=OperationType.MESSAGE_RESPONSE,
+                                    input_tokens=input_tokens,
+                                    output_tokens=output_tokens,
+                                    total_tokens=input_tokens + output_tokens,
+                                    success=True,
+                                )
+                                session._handle_command(record_cmd)
+                                await self._sessions.save(session)
+                                logger.debug(
+                                    "Recorded token usage: %d input, %d output",
+                                    input_tokens,
+                                    output_tokens,
+                                )
 
                         # Log progress events
                         if event_type == "progress":
@@ -906,15 +918,45 @@ class WorkflowExecutionEngine:
                                 source,
                                 data.get("event_type", "unknown"),
                             )
-                            # TODO: Forward to session aggregate for observability
-                            # This enables real-time dashboards showing hook activity
+
+                            # Forward tool events to session aggregate
+                            if session is not None and self._sessions is not None:
+                                analytics_type = data.get("event_type", "")
+                                if analytics_type == "tool_use":
+                                    record_cmd = RecordOperationCommand(
+                                        aggregate_id=session_id,
+                                        operation_type=OperationType.TOOL_STARTED,
+                                        tool_name=data.get("tool_name"),
+                                        tool_use_id=data.get("tool_use_id"),
+                                        tool_input=data.get("input"),
+                                        success=True,
+                                    )
+                                    session._handle_command(record_cmd)
+                                    await self._sessions.save(session)
+                                elif analytics_type == "tool_result":
+                                    record_cmd = RecordOperationCommand(
+                                        aggregate_id=session_id,
+                                        operation_type=OperationType.TOOL_COMPLETED,
+                                        tool_name=data.get("tool_name"),
+                                        tool_use_id=data.get("tool_use_id"),
+                                        tool_output=str(data.get("output", ""))[:1000],
+                                        success=not data.get("is_error", False),
+                                    )
+                                    session._handle_command(record_cmd)
+                                    await self._sessions.save(session)
 
                     except json.JSONDecodeError:
                         logger.warning("Invalid JSONL line: %s", line[:100])
 
+                logger.info(
+                    "Agent runner streaming complete: %d lines, %d input tokens, %d output tokens",
+                    line_count,
+                    total_input_tokens,
+                    total_output_tokens,
+                )
+
                 # Collect output artifacts
-                artifacts = await self._router.collect_artifacts(
-                    workspace,
+                artifacts = await workspace.collect_files(
                     patterns=["artifacts/**/*"],
                 )
 

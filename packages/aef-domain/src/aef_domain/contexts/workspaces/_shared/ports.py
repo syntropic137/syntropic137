@@ -129,6 +129,45 @@ class IsolationBackendPort(Protocol):
         """
         ...
 
+    async def copy_to(
+        self,
+        handle: IsolationHandle,
+        files: list[tuple[str, bytes]],
+        base_path: str = "/workspace",
+    ) -> None:
+        """Copy files into the isolation.
+
+        Args:
+            handle: Handle from create()
+            files: List of (relative_path, content) tuples
+            base_path: Base path inside isolation
+
+        Raises:
+            IsolationExecutionError: If copy fails
+        """
+        ...
+
+    async def copy_from(
+        self,
+        handle: IsolationHandle,
+        patterns: list[str],
+        base_path: str = "/workspace",
+    ) -> list[tuple[str, bytes]]:
+        """Copy files out of the isolation.
+
+        Args:
+            handle: Handle from create()
+            patterns: Glob patterns to match (e.g., ["artifacts/**/*"])
+            base_path: Base path inside isolation
+
+        Returns:
+            List of (relative_path, content) tuples
+
+        Raises:
+            IsolationExecutionError: If copy fails
+        """
+        ...
+
 
 # =============================================================================
 # SIDECAR PORT

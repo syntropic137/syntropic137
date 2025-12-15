@@ -184,7 +184,7 @@ class MemoryIsolationAdapter:
         """
         self._instances.pop(handle.isolation_id, None)
 
-    async def execute(  # noqa: PLR0913
+    async def execute(
         self,
         handle: IsolationHandle,
         command: list[str],
@@ -245,6 +245,52 @@ class MemoryIsolationAdapter:
         """
         state = self._instances.get(handle.isolation_id)
         return state is not None and state.is_healthy
+
+    async def copy_to(
+        self,
+        handle: IsolationHandle,
+        files: list[tuple[str, bytes]],
+        base_path: str = "/workspace",  # noqa: ARG002
+    ) -> None:
+        """Copy files into the mock isolation.
+
+        Stores files in instance state for later retrieval.
+
+        Args:
+            handle: Handle from create()
+            files: List of (relative_path, content) tuples
+            base_path: Ignored in mock
+        """
+        state = self._instances.get(handle.isolation_id)
+        if state is None:
+            return
+
+        for rel_path, content in files:
+            state.files[rel_path] = content
+
+    async def copy_from(
+        self,
+        handle: IsolationHandle,
+        patterns: list[str],  # noqa: ARG002
+        base_path: str = "/workspace",  # noqa: ARG002
+    ) -> list[tuple[str, bytes]]:
+        """Copy files out of the mock isolation.
+
+        Returns stored files.
+
+        Args:
+            handle: Handle from create()
+            patterns: Ignored in mock (returns all files)
+            base_path: Ignored in mock
+
+        Returns:
+            All stored files
+        """
+        state = self._instances.get(handle.isolation_id)
+        if state is None:
+            return []
+
+        return list(state.files.items())
 
     # ==========================================================================
     # TEST HELPERS

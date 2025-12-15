@@ -192,6 +192,44 @@ class ManagedWorkspace:
         self._tokens_injected = True
         return result
 
+    async def inject_files(
+        self,
+        files: list[tuple[str, bytes]],
+        base_path: str = "/workspace",
+    ) -> None:
+        """Inject files into the workspace.
+
+        Args:
+            files: List of (relative_path, content) tuples
+            base_path: Base path in workspace
+        """
+        await self._service._isolation.copy_to(
+            self.isolation_handle,
+            files,
+            base_path=base_path,
+        )
+
+    async def collect_files(
+        self,
+        patterns: list[str] | None = None,
+        base_path: str = "/workspace",
+    ) -> list[tuple[str, bytes]]:
+        """Collect files from the workspace.
+
+        Args:
+            patterns: Glob patterns (default: ["artifacts/**/*"])
+            base_path: Base path in workspace
+
+        Returns:
+            List of (relative_path, content) tuples
+        """
+        pats = patterns or ["artifacts/**/*"]
+        return await self._service._isolation.copy_from(
+            self.isolation_handle,
+            pats,
+            base_path=base_path,
+        )
+
     @property
     def proxy_url(self) -> str | None:
         """Get the proxy URL for HTTP requests."""
