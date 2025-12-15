@@ -49,8 +49,8 @@ try:
     CLAUDE_SDK_AVAILABLE = True
 except ImportError:
     CLAUDE_SDK_AVAILABLE = False
-    query = None
-    ClaudeAgentOptions = None
+    query = None  # type: ignore[assignment]
+    ClaudeAgentOptions = None  # type: ignore[assignment, misc]
 
 
 class AgentRunner:

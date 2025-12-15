@@ -907,8 +907,8 @@ class WorkflowExecutionEngine:
                 )
 
                 # Create artifact records for each output
-                artifact_ids = []
-                for path_str, content in artifacts:
+                artifact_ids: list[str] = []
+                for artifact_path, artifact_content in artifacts:
                     artifact_id = str(uuid4())
                     await self._create_artifact(
                         artifact_id=artifact_id,
@@ -917,8 +917,8 @@ class WorkflowExecutionEngine:
                         execution_id=ctx.execution_id,
                         session_id=session_id,
                         artifact_type=phase.output_artifact_type,
-                        content=content.decode("utf-8", errors="replace"),
-                        title=f"{phase.name}: {path_str}",
+                        content=artifact_content.decode("utf-8", errors="replace"),
+                        title=f"{phase.name}: {artifact_path}",
                     )
                     artifact_ids.append(artifact_id)
                     ctx.artifact_ids.append(artifact_id)

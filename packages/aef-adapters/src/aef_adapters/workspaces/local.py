@@ -32,7 +32,7 @@ import os
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar
 
 from aef_adapters.agents.agentic_types import Workspace, WorkspaceConfig
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _host_path(workspace_dir: Path, container_path) -> Path:
+def _host_path(workspace_dir: Path, container_path: PurePosixPath) -> Path:
     """Convert a container path constant to a host path.
 
     The container path constants are rooted at /workspace.

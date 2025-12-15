@@ -132,14 +132,17 @@ class StaleExecutionCleaner:
 
             # Also check expected_completion_at if set
             if summary.expected_completion_at:
-                expected = summary.expected_completion_at
-                if isinstance(expected, str):
+                expected_raw = summary.expected_completion_at
+                expected_dt: datetime | None = None
+                if isinstance(expected_raw, str):
                     try:
-                        expected = datetime.fromisoformat(expected.replace("Z", "+00:00"))
+                        expected_dt = datetime.fromisoformat(expected_raw.replace("Z", "+00:00"))
                     except ValueError:
-                        expected = None
+                        expected_dt = None
+                elif isinstance(expected_raw, datetime):
+                    expected_dt = expected_raw
 
-                if expected and expected > datetime.now(UTC):
+                if expected_dt and expected_dt > datetime.now(UTC):
                     # Not yet past expected completion - skip
                     logger.debug(
                         "Skipping %s - not past expected completion",
