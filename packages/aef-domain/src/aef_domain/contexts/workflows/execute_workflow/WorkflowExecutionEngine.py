@@ -168,6 +168,7 @@ class ExecutionContext:
     execution_id: str
     started_at: datetime
     inputs: dict[str, Any]
+    repo_url: str | None = None  # Repository URL from workflow definition
     phase_results: list[PhaseResult] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
     completed_phase_ids: list[str] = field(default_factory=list)  # For querying artifacts
@@ -290,11 +291,14 @@ class WorkflowExecutionEngine:
             raise WorkflowNotFoundError(workflow_id)
 
         # 2. Initialize execution context
+        # Get repo URL from aggregate's private attribute (set from workflow definition)
+        repo_url = getattr(workflow, "_repository_url", None)
         ctx = ExecutionContext(
             workflow_id=workflow_id,
             execution_id=execution_id or str(uuid4()),
             started_at=datetime.now(UTC),
             inputs=inputs,
+            repo_url=repo_url,
         )
 
         # 3. Create execution aggregate and emit started event
@@ -613,6 +617,7 @@ class WorkflowExecutionEngine:
         """Build the prompt for a phase.
 
         Substitutes template variables with:
+        - Built-in variables (execution_id, repo_url, workflow_id, phase_id)
         - Initial workflow inputs
         - Previous phase outputs (queried from DB via ArtifactQueryService)
 
@@ -620,6 +625,13 @@ class WorkflowExecutionEngine:
         an in-memory dict. This ensures crash recovery and audit trail.
         """
         prompt = phase.prompt_template
+
+        # Substitute built-in variables
+        prompt = prompt.replace("{{execution_id}}", ctx.execution_id)
+        prompt = prompt.replace("{{workflow_id}}", ctx.workflow_id)
+        prompt = prompt.replace("{{phase_id}}", phase.phase_id)
+        if ctx.repo_url:
+            prompt = prompt.replace("{{repo_url}}", ctx.repo_url)
 
         # Substitute initial inputs
         for key, value in ctx.inputs.items():
