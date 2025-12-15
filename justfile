@@ -35,7 +35,8 @@ dev-reset:
     docker compose -f docker/docker-compose.dev.yaml up --build -d
 
 # Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
-dev-force:
+# Builds workspace image if missing
+dev-force: _workspace-check
     @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
     -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
@@ -99,6 +100,19 @@ dev-fresh:
     @echo "   Backend:      http://localhost:8000"
     @echo "   Feedback API: http://localhost:8001"
     @echo "   API Docs:     http://localhost:8000/docs"
+
+# --- Workspace Image ---
+
+# Build the Claude workspace Docker image (aef-workspace-claude)
+workspace-build:
+    @echo "🔨 Building aef-workspace-claude image..."
+    docker build -t aef-workspace-claude:latest -f docker/workspace/Dockerfile .
+    @echo "✅ Image built: aef-workspace-claude:latest"
+
+# Check if workspace image exists, build if missing
+_workspace-check:
+    @docker image inspect aef-workspace-claude:latest >/dev/null 2>&1 || \
+        (echo "⚠️  Workspace image not found. Building (first time only)..." && just workspace-build)
 
 # Run the CLI application
 cli *args:

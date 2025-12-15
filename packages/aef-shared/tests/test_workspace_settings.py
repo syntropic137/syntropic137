@@ -138,7 +138,7 @@ class TestWorkspaceSettings:
             assert settings.cloud_api_key is None
 
             # Docker settings
-            assert settings.docker_image == "python:3.12-slim"
+            assert settings.docker_image == "aef-workspace-claude:latest"
             assert settings.docker_runtime == "runsc"
             assert settings.docker_network == "none"
 

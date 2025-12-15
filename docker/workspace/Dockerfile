@@ -1,8 +1,9 @@
-# AEF Isolated Workspace Image
-# This image is used for running coding agents in isolation.
+# AEF Isolated Workspace Image for Claude Agents
+# This image is used for running Claude agents in isolation.
 #
 # Build:
-#   docker build -t aef-workspace:latest -f docker/workspace/Dockerfile .
+#   docker build -t aef-workspace-claude:latest -f docker/workspace/Dockerfile .
+#   Or: just workspace-build
 #
 # Usage:
 #   Used automatically by GVisorWorkspace and HardenedDockerWorkspace
@@ -66,6 +67,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 
 # Install anthropic SDK and claude-agent-sdk (required for agent runner)
 RUN pip install --no-cache-dir anthropic>=0.40.0 claude-agent-sdk>=0.1.11
+
+# Copy and install aef-shared package (dependency of aef-agent-runner)
+COPY packages/aef-shared /tmp/aef-shared
+RUN pip install --no-cache-dir /tmp/aef-shared \
+    && rm -rf /tmp/aef-shared
 
 # Copy and install aef-agent-runner package
 # This runs inside the container to execute the Claude agent

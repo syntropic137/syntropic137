@@ -13,7 +13,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-IMAGE_NAME="${AEF_WORKSPACE_IMAGE:-aef-workspace}"
+IMAGE_NAME="${AEF_WORKSPACE_IMAGE:-aef-workspace-claude}"
 REGISTRY="${AEF_REGISTRY:-}"
 VERSION="${1:-latest}"
 PUSH=false
@@ -49,7 +49,7 @@ docker build \
     --file "${SCRIPT_DIR}/Dockerfile" \
     --tag "${FULL_IMAGE}" \
     --label "org.opencontainers.image.source=https://github.com/AgentParadise/agentic-engineering-framework" \
-    --label "org.opencontainers.image.description=AEF Isolated Workspace for Coding Agents" \
+    --label "org.opencontainers.image.description=AEF Isolated Workspace for Claude Agents" \
     --label "org.opencontainers.image.version=${VERSION}" \
     "${REPO_ROOT}"
 

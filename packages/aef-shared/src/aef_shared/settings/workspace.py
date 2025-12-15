@@ -293,12 +293,11 @@ class WorkspaceSettings(BaseSettings):
     # =========================================================================
 
     docker_image: str = Field(
-        default="python:3.12-slim",
+        default="aef-workspace-claude:latest",
         description=(
-            "Docker image for container-based backends. "
-            "Default: python:3.12-slim (widely available). "
-            "For production, build and use 'aef-workspace:latest' with "
-            "pre-configured hooks and tools."
+            "Docker image for Claude agent execution. "
+            "Includes aef-agent-runner, claude-agent-sdk, and gh CLI. "
+            "Build with: just workspace-build"
         ),
     )
 

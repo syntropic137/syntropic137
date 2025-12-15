@@ -487,11 +487,33 @@ if __name__ == "__main__":
             exec_cmd.extend(["-w", cwd])
         exec_cmd.extend(command)
 
+        # Log the command being executed (critical for debugging)
+        logger.info(
+            "Executing streaming command in container",
+            extra={
+                "container_id": container_id,
+                "command": " ".join(command),
+                "full_cmd": " ".join(exec_cmd),
+                "timeout": timeout,
+                "cwd": cwd,
+            },
+        )
+
         process = await asyncio.create_subprocess_exec(
             *exec_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+
+        # Collect stderr in background for error reporting
+        stderr_lines: list[str] = []
+
+        async def collect_stderr() -> None:
+            if process.stderr:
+                async for line in process.stderr:
+                    stderr_lines.append(line.decode())
+
+        stderr_task = asyncio.create_task(collect_stderr())
 
         try:
             async with asyncio.timeout(timeout) if timeout else contextlib.nullcontext():
@@ -500,16 +522,40 @@ if __name__ == "__main__":
                         yield line.decode().rstrip("\n")
         except TimeoutError:
             process.kill()
-            raise
+            stderr_task.cancel()
+            raise TimeoutError(
+                f"Agent execution timed out after {timeout}s.\n"
+                f"  Container: {container_id}\n"
+                f"  Command: {' '.join(command)}\n"
+                f"Consider increasing timeout_seconds in workflow phase config."
+            ) from None
 
+        # Wait for stderr collection to complete
+        await stderr_task
         await process.wait()
+
         if process.returncode != 0:
-            stderr_content = ""
-            if process.stderr:
-                stderr_content = (await process.stderr.read()).decode()
-            raise RuntimeError(
-                f"Command failed with exit code {process.returncode}: {stderr_content}"
+            stderr_content = "".join(stderr_lines)
+            logger.error(
+                "Container command failed",
+                extra={
+                    "container_id": container_id,
+                    "command": " ".join(command),
+                    "exit_code": process.returncode,
+                    "stderr": stderr_content[:500],  # Truncate for logging
+                },
             )
+            raise RuntimeError(
+                f"Container command failed (exit {process.returncode}):\n"
+                f"  Container: {container_id}\n"
+                f"  Command: {' '.join(command)}\n"
+                f"  Stderr:\n{stderr_content}"
+            )
+
+        logger.info(
+            "Streaming command completed successfully",
+            extra={"container_id": container_id, "command": " ".join(command)},
+        )
 
     @classmethod
     async def request_cancellation(

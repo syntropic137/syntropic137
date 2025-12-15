@@ -287,6 +287,9 @@ class WorkspaceRouter:
                 # Setup logging directory
                 await self._setup_logging(workspace, backend_class)
 
+                # Validate container meets agent requirements (ADR-023)
+                await self._validate_contract(workspace, backend_class, emitter, pre_workspace_id)
+
                 commands_executed = 0
                 try:
                     # Track command count in workspace metadata
@@ -428,6 +431,48 @@ class WorkspaceRouter:
                 workspace,
                 ["touch", log_path],
             )
+
+    async def _validate_contract(
+        self,
+        workspace: IsolatedWorkspace,
+        backend_class: type[BaseIsolatedWorkspace],
+        emitter: WorkspaceEventEmitter,  # noqa: F821
+        workspace_id: str,
+    ) -> None:
+        """Validate container meets agent execution requirements (ADR-023).
+
+        This ensures the container has all required tools and packages
+        before attempting to run an agent. Fails fast with clear errors.
+
+        Args:
+            workspace: The workspace to validate
+            backend_class: Backend class for command execution
+            emitter: Event emitter for error reporting
+            workspace_id: Workspace ID for error reporting
+        """
+        from aef_adapters.workspaces.contract import AgentContainerContract
+
+        # Create executor function for the contract validator
+        async def executor(
+            ws: IsolatedWorkspace,
+            cmd: list[str],
+        ) -> tuple[int, str, str]:
+            return await backend_class.execute_command(ws, cmd)
+
+        result = await AgentContainerContract.validate(workspace, executor)
+
+        if not result.passed:
+            # Emit error event
+            await emitter.workspace_error(
+                workspace_id=workspace_id,
+                session_id=workspace.config.session_id if workspace.config else None,
+                operation="contract_validation",
+                error=RuntimeError("\n".join(result.failures)),
+                isolation_backend=workspace.isolation_backend.value
+                if workspace.isolation_backend
+                else None,
+            )
+            raise RuntimeError(result.error_message)
 
     def _get_available_backend_class(
         self, preferred: IsolationBackend
