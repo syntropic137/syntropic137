@@ -569,6 +569,8 @@ class MemoryEventStreamAdapter:
         _command: list[str],
         *,
         _timeout_seconds: int | None = None,
+        _working_directory: str | None = None,
+        _environment: dict[str, str] | None = None,
     ) -> AsyncIterator[str]:
         """Stream mock output lines.
 

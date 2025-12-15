@@ -60,9 +60,7 @@ class TestTokenVendingServiceAdapter:
     """Tests for TokenVendingServiceAdapter."""
 
     @pytest.mark.asyncio
-    async def test_vend_token_returns_token_id(
-        self, token_service: TokenVendingService
-    ) -> None:
+    async def test_vend_token_returns_token_id(self, token_service: TokenVendingService) -> None:
         """Test that vend_token returns a token ID."""
         from aef_adapters.workspace_backends.tokens import TokenVendingServiceAdapter
 
@@ -77,9 +75,7 @@ class TestTokenVendingServiceAdapter:
         assert token_id.startswith("aef-tok-")
 
     @pytest.mark.asyncio
-    async def test_vend_token_stores_in_service(
-        self, token_service: TokenVendingService
-    ) -> None:
+    async def test_vend_token_stores_in_service(self, token_service: TokenVendingService) -> None:
         """Test that vended token is stored in service."""
         from aef_adapters.workspace_backends.tokens import TokenVendingServiceAdapter
 
@@ -98,9 +94,7 @@ class TestTokenVendingServiceAdapter:
         assert stored_token.token_type == AefTokenType.ANTHROPIC
 
     @pytest.mark.asyncio
-    async def test_vend_tokens_returns_multiple(
-        self, token_service: TokenVendingService
-    ) -> None:
+    async def test_vend_tokens_returns_multiple(self, token_service: TokenVendingService) -> None:
         """Test vending multiple tokens at once."""
         from aef_adapters.workspace_backends.tokens import TokenVendingServiceAdapter
 
@@ -117,9 +111,7 @@ class TestTokenVendingServiceAdapter:
         assert TokenType.GITHUB in tokens
 
     @pytest.mark.asyncio
-    async def test_revoke_tokens_removes_all(
-        self, token_service: TokenVendingService
-    ) -> None:
+    async def test_revoke_tokens_removes_all(self, token_service: TokenVendingService) -> None:
         """Test that revoke_tokens removes all tokens for execution."""
         from aef_adapters.workspace_backends.tokens import TokenVendingServiceAdapter
 
@@ -139,9 +131,7 @@ class TestTokenVendingServiceAdapter:
         assert stored is None
 
     @pytest.mark.asyncio
-    async def test_validate_token_returns_valid(
-        self, token_service: TokenVendingService
-    ) -> None:
+    async def test_validate_token_returns_valid(self, token_service: TokenVendingService) -> None:
         """Test token validation for valid token."""
         from aef_adapters.workspace_backends.tokens import TokenVendingServiceAdapter
 

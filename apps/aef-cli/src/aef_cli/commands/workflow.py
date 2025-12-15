@@ -876,15 +876,15 @@ def run_workflow(
 
             # Create engine with ADR-023 compliant dependencies
             from aef_adapters.storage.repositories import get_workflow_execution_repository
-            from aef_adapters.workspaces import get_workspace_router
+            from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
-            workspace_router = get_workspace_router()
+            workspace_service = WorkspaceService.create_docker()
 
             engine = WorkflowExecutionEngine(
                 workflow_repository=workflow_repo,
                 execution_repository=execution_repo,
-                workspace_router=workspace_router,
+                workspace_service=workspace_service,
                 session_repository=session_repo,
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,

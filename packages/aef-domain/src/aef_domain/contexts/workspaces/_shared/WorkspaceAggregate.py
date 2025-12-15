@@ -371,6 +371,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
         result: ExecutionResult = command.result
 
         # Create appropriate event based on success
+        event: CommandExecutedEvent | CommandFailedEvent
         if result.success:
             event = CommandExecutedEvent(
                 workspace_id=str(self._workspace_id),

@@ -854,9 +854,11 @@ class WorkflowExecutionEngine:
                 }
 
                 # Write task.json
-                await workspace.inject_files([
-                    ("task.json", json.dumps(task_data).encode()),
-                ])
+                await workspace.inject_files(
+                    [
+                        ("task.json", json.dumps(task_data).encode()),
+                    ]
+                )
 
                 # Execute agent runner and stream events
                 total_input_tokens = 0

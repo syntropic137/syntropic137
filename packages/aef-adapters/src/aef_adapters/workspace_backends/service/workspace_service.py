@@ -152,13 +152,14 @@ class ManagedWorkspace:
         Yields:
             Individual stdout lines
         """
-        async for line in self._service._event_stream.stream(
+        stream = self._service._event_stream.stream(
             self.isolation_handle,
             command,
             timeout_seconds=timeout_seconds,
             working_directory=working_directory,
             environment=environment,
-        ):
+        )
+        async for line in stream:  # type: ignore[attr-defined]
             yield line
 
     async def inject_tokens(
@@ -337,14 +338,14 @@ class WorkspaceService:
 
         # Token vending
         tvs = token_service or get_token_vending_service()
-        vending = TokenVendingServiceAdapter(tvs)
+        vending = TokenVendingServiceAdapter(tvs)  # type: ignore[arg-type]
         token_injection = SidecarTokenInjectionAdapter(vending, sidecar)
 
         return cls(
             isolation=isolation,
             sidecar=sidecar,
             token_injection=token_injection,
-            event_stream=event_stream,
+            event_stream=event_stream,  # type: ignore[arg-type]
             config=cfg,
         )
 
@@ -391,7 +392,7 @@ class WorkspaceService:
             isolation=isolation,
             sidecar=sidecar,
             token_injection=token_injection,
-            event_stream=event_stream,
+            event_stream=event_stream,  # type: ignore[arg-type]
             config=cfg,
         )
 

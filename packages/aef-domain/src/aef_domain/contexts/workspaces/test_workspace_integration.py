@@ -14,8 +14,6 @@ Run: pytest packages/aef-domain/src/aef_domain/contexts/workspaces/test_workspac
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pytest
 
 from aef_adapters.workspace_backends.memory import (
@@ -30,7 +28,6 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     IsolationBackendType,
     IsolationConfig,
     SecurityPolicy,
-    SidecarConfig,
     TokenType,
     WorkspaceStatus,
 )
@@ -39,10 +36,6 @@ from aef_domain.contexts.workspaces.create_workspace import CreateWorkspaceComma
 from aef_domain.contexts.workspaces.execute_command import ExecuteCommandCommand
 from aef_domain.contexts.workspaces.inject_tokens import InjectTokensCommand
 from aef_domain.contexts.workspaces.terminate_workspace import TerminateWorkspaceCommand
-
-if TYPE_CHECKING:
-    pass
-
 
 # =============================================================================
 # INTEGRATION TEST: Full Workspace Lifecycle

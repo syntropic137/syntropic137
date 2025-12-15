@@ -422,7 +422,7 @@ class TestWorkflowExecutionEngine:
         return WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=MockWorkflowExecutionRepository(),
-            workspace_router=cast("Any", MockWorkspaceRouter()),
+            workspace_service=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
@@ -613,7 +613,7 @@ class TestWorkflowExecutionEngine:
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=MockWorkflowExecutionRepository(),
-            workspace_router=cast("Any", MockWorkspaceRouter()),
+            workspace_service=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
@@ -738,7 +738,7 @@ class TestWorkflowExecutionFailure:
         return WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=MockWorkflowExecutionRepository(),
-            workspace_router=cast("Any", MockWorkspaceRouter()),
+            workspace_service=cast("Any", MockWorkspaceRouter()),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=cast("Any", agent_factory),
@@ -787,7 +787,7 @@ class TestWorkflowExecutionFailure:
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=MockWorkflowExecutionRepository(),
-            workspace_router=cast("Any", MockWorkspaceRouter()),
+            workspace_service=cast("Any", MockWorkspaceRouter()),
             session_repository=MockSessionRepository(),
             artifact_repository=MockArtifactRepository(),
             agent_factory=cast("Any", lambda _p: agent),
@@ -813,7 +813,7 @@ class TestDependencyInjectionEnforcement:
             WorkflowExecutionEngine(
                 workflow_repository=MockWorkflowRepository(),
                 execution_repository=None,  # type: ignore[arg-type]
-                workspace_router=cast("Any", MockWorkspaceRouter()),
+                workspace_service=cast("Any", MockWorkspaceRouter()),
                 session_repository=MockSessionRepository(),
                 artifact_repository=MockArtifactRepository(),
                 agent_factory=cast("Any", lambda _p: None),
@@ -822,19 +822,19 @@ class TestDependencyInjectionEnforcement:
         assert "execution_repository is required" in str(exc_info.value)
         assert "ADR-023" in str(exc_info.value)
 
-    def test_engine_fails_without_workspace_router(self) -> None:
+    def test_engine_fails_without_workspace_service(self) -> None:
         """Engine should fail if workspace_router is None."""
         with pytest.raises(ValueError) as exc_info:
             WorkflowExecutionEngine(
                 workflow_repository=MockWorkflowRepository(),
                 execution_repository=MockWorkflowExecutionRepository(),
-                workspace_router=None,  # type: ignore[arg-type]
+                workspace_service=None,  # type: ignore[arg-type]
                 session_repository=MockSessionRepository(),
                 artifact_repository=MockArtifactRepository(),
                 agent_factory=cast("Any", lambda _p: None),
             )
 
-        assert "workspace_router is required" in str(exc_info.value)
+        assert "workspace_service is required" in str(exc_info.value)
         assert "ADR-023" in str(exc_info.value)
 
     def test_engine_succeeds_with_all_dependencies(self) -> None:
@@ -843,7 +843,7 @@ class TestDependencyInjectionEnforcement:
         engine = WorkflowExecutionEngine(
             workflow_repository=MockWorkflowRepository(),
             execution_repository=MockWorkflowExecutionRepository(),
-            workspace_router=cast("Any", MockWorkspaceRouter()),
+            workspace_service=cast("Any", MockWorkspaceRouter()),
             session_repository=MockSessionRepository(),
             artifact_repository=MockArtifactRepository(),
             agent_factory=cast("Any", lambda _p: None),

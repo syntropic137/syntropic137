@@ -127,7 +127,7 @@ class RedisTokenStore:
         )
 
         # Add to execution's token set
-        await self._redis.sadd(exec_key, token.token_id)
+        await self._redis.sadd(exec_key, token.token_id)  # type: ignore[misc]
         # Set expiry on the set slightly longer than token TTL
         await self._redis.expire(exec_key, token.ttl_seconds + 60)
 
@@ -157,7 +157,7 @@ class RedisTokenStore:
     async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
         """Get all token IDs for an execution."""
         exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{execution_id}"
-        members = await self._redis.smembers(exec_key)
+        members = await self._redis.smembers(exec_key)  # type: ignore[misc]
         return [m.decode() if isinstance(m, bytes) else m for m in members]
 
     async def delete_tokens_for_execution(self, execution_id: str) -> int:

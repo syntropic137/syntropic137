@@ -441,9 +441,16 @@ class AgenticWorkflowExecutor:
                           When set, tool events are sent to the Collector.
             control_signal_checker: Optional callback to check for control signals
                           (pause/resume/cancel). Called after each tool event.
+
+        Note:
+            The workspace_service is stored for future use. Currently _execute_phase
+            uses a local directory-based approach. This will be migrated to use
+            WorkspaceService.create_workspace() in a future update.
         """
         self._agent_factory = agent_factory
         self._workspace_service = workspace_service
+        # Temporary: local workspace path for legacy _execute_phase
+        self._base_path = Path.cwd() / ".aef-workspaces"
         self._default_provider = default_provider
         self._default_max_turns = default_max_turns
         self._default_max_budget_usd = default_max_budget_usd

@@ -61,4 +61,4 @@ class CreateWorkspaceCommand(Command):
     labels: dict[str, str] = field(default_factory=dict)
 
     # Explicit ID (optional, auto-generated if not provided)
-    aggregate_id: str | None = None
+    aggregate_id: str | None = None  # type: ignore[assignment]

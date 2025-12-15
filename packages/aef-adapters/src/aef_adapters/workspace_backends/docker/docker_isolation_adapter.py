@@ -305,9 +305,10 @@ class DockerIsolationAdapter:
             stdout_str = stdout.decode() if stdout else ""
             stderr_str = stderr.decode() if stderr else ""
 
+            exit_code = -1 if timed_out else (proc.returncode or 0)
             return ExecutionResult(
-                exit_code=proc.returncode if not timed_out else -1,
-                success=proc.returncode == 0 and not timed_out,
+                exit_code=exit_code,
+                success=exit_code == 0 and not timed_out,
                 duration_ms=duration_ms,
                 stdout=stdout_str,
                 stderr=stderr_str,

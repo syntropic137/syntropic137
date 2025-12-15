@@ -41,7 +41,6 @@ from aef_adapters.orchestration.executor import (
 )
 from aef_adapters.orchestration.factory import (
     get_agentic_agent,
-    get_workspace,
 )
 
 logger = get_logger(__name__)
@@ -150,10 +149,13 @@ class ExecutionService:
                 """Check for control signals (pause/resume/cancel)."""
                 return await signal_adapter.get_signal(exec_id)
 
+            from aef_adapters.workspace_backends.service import WorkspaceService
+
+            workspace_service = WorkspaceService.create_docker()
+
             executor = AgenticWorkflowExecutor(
                 agent_factory=get_agentic_agent,
-                workspace_factory=get_workspace,  # type: ignore[arg-type]
-                base_workspace_path=self._base_workspace_path,
+                workspace_service=workspace_service,
                 default_provider=provider,
                 default_max_budget_usd=max_budget_usd,
                 control_signal_checker=check_signal,

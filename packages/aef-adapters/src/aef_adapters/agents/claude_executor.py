@@ -15,6 +15,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aef_adapters.agents.executor import (
@@ -126,23 +127,29 @@ class ClaudeAgentExecutor:
         if not agent.is_available:
             raise AgentNotAvailableError(
                 "Claude agent not available. Check ANTHROPIC_API_KEY.",
-                workspace_id=workspace.isolation_id,
+                workspace_id=workspace.workspace_id,
                 execution_id=execution_id,
             )
 
         # Emit started event
         yield ExecutionStarted(
-            workspace_id=workspace.isolation_id,
+            workspace_id=workspace.workspace_id,
             task=task,
         )
 
         start_time = time.time()
-        workspace_id = workspace.isolation_id
+        workspace_id = workspace.workspace_id
 
         # Adapt ManagedWorkspace to Workspace for the underlying agent
-        # TODO: In future, execute agent subprocess inside workspace container
+        # Note: ManagedWorkspace handles execution internally - this adapter
+        # bridges to the legacy Workspace interface for backward compatibility
+        workspace_path_str = (
+            workspace.isolation_handle.workspace_path
+            if workspace.isolation_handle and workspace.isolation_handle.workspace_path
+            else "/workspace"
+        )
         adapted_workspace = Workspace(
-            path=workspace.path,
+            path=Path(workspace_path_str),
             config=None,  # type: ignore[arg-type]
         )
 

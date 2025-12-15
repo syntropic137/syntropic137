@@ -24,3 +24,8 @@ class TerminateWorkspaceCommand(Command):
 
     # Force cleanup even if operations in progress
     force: bool = False
+
+    @property
+    def aggregate_id(self) -> str:
+        """Return workspace_id as the aggregate ID."""
+        return self.workspace_id

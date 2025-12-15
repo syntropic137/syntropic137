@@ -422,6 +422,8 @@ class EventStreamPort(Protocol):
         command: list[str],
         *,
         timeout_seconds: int | None = None,
+        working_directory: str | None = None,
+        environment: dict[str, str] | None = None,
     ) -> AsyncIterator[str]:
         """Stream stdout lines from command execution.
 

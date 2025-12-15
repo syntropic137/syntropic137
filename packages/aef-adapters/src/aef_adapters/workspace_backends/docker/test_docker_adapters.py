@@ -123,7 +123,9 @@ class TestDockerIsolationAdapter:
         """Test container creation with gVisor runtime."""
         from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
 
-        with patch("asyncio.create_subprocess_exec", side_effect=create_subprocess_mock_factory()) as mock_exec:
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=create_subprocess_mock_factory()
+        ) as mock_exec:
             adapter = DockerIsolationAdapter(use_gvisor=True)
             handle = await adapter.create(config)
 
@@ -155,7 +157,9 @@ class TestDockerIsolationAdapter:
         """Test that destroy stops and removes the container."""
         from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
 
-        with patch("asyncio.create_subprocess_exec", side_effect=create_subprocess_mock_factory()) as mock_exec:
+        with patch(
+            "asyncio.create_subprocess_exec", side_effect=create_subprocess_mock_factory()
+        ) as mock_exec:
             adapter = DockerIsolationAdapter(use_gvisor=False)
             handle = await adapter.create(config)
 
@@ -225,9 +229,7 @@ class TestDockerIsolationAdapter:
             assert "not found" in result.stderr
 
     @pytest.mark.asyncio
-    async def test_health_check_returns_true_for_running(
-        self, config: IsolationConfig
-    ) -> None:
+    async def test_health_check_returns_true_for_running(self, config: IsolationConfig) -> None:
         """Test health_check returns True for running container."""
         from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
 
@@ -240,9 +242,7 @@ class TestDockerIsolationAdapter:
             assert is_healthy is True
 
     @pytest.mark.asyncio
-    async def test_health_check_returns_false_for_stopped(
-        self, config: IsolationConfig
-    ) -> None:
+    async def test_health_check_returns_false_for_stopped(self, config: IsolationConfig) -> None:
         """Test health_check returns False for stopped container."""
         from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
 
@@ -484,9 +484,7 @@ class TestDockerEventStreamAdapter:
             assert '{"event": "done"}' in lines[2]
 
     @pytest.mark.asyncio
-    async def test_stream_handles_timeout(
-        self, isolation_handle: IsolationHandle
-    ) -> None:
+    async def test_stream_handles_timeout(self, isolation_handle: IsolationHandle) -> None:
         """Test that stream handles timeout correctly."""
         from aef_adapters.workspace_backends.docker import DockerEventStreamAdapter
 
