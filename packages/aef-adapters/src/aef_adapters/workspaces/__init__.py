@@ -1,5 +1,41 @@
 """Workspace adapters - isolated execution environments for agents.
 
+⚠️  DEPRECATED MODULE - MIGRATION IN PROGRESS ⚠️
+
+This module is deprecated and will be removed in a future release.
+The new workspace implementation is in `aef_domain.contexts.workspaces/`.
+
+Migration Guide:
+    OLD (deprecated):
+        from aef_adapters.workspaces import get_workspace_router
+        router = get_workspace_router()
+        async with router.create(config) as workspace:
+            await router.execute_command(workspace, ["cmd"])
+
+    NEW (use this):
+        from aef_domain.contexts.workspaces import WorkspaceAggregate
+        from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
+        # See aef_domain.contexts.workspaces.README.md for full migration guide
+
+Problems with this module:
+    - Fat orchestrator in router.py (789 lines) - untestable
+    - Mixed concerns: git, env, logging, contracts in one place
+    - Sidecar not integrated (ADR-022 violation)
+    - Token vending disconnected from sidecar
+    - No domain model - just dataclasses
+    - Events not event-sourced - no audit trail
+
+New architecture:
+    - Event-sourced WorkspaceAggregate in domain layer
+    - Clean port interfaces for DI (IsolationBackendPort, SidecarPort, etc.)
+    - Adapters per backend (docker/, firecracker/, cloud/, memory/)
+    - Proper token injection via sidecar per ADR-022
+
+See: PROJECT-PLAN_20251215_WORKSPACE-BOUNDED-CONTEXT.md
+
+---
+LEGACY DOCUMENTATION (for reference during migration):
+
 This module provides workspace implementations for agentic execution.
 
 IMPORTANT (ADR-023): LocalWorkspace is TEST ONLY and will FAIL in other environments.
@@ -34,6 +70,16 @@ Quick Start (Tests only):
 See ADR-023: Workspace-First Execution Model (enforcement)
 See ADR-021: Isolated Workspace Architecture (backends)
 """
+
+import warnings
+
+warnings.warn(
+    "aef_adapters.workspaces is deprecated. "
+    "Use aef_domain.contexts.workspaces with aef_adapters.workspace_backends instead. "
+    "See PROJECT-PLAN_20251215_WORKSPACE-BOUNDED-CONTEXT.md for migration guide.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from aef_adapters.workspaces.base import BaseIsolatedWorkspace
 from aef_adapters.workspaces.collector_emitter import (
