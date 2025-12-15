@@ -425,6 +425,103 @@ class TestDockerSidecarAdapter:
 # =============================================================================
 
 
+# =============================================================================
+# DOCKER EVENT STREAM ADAPTER TESTS
+# =============================================================================
+
+
+class TestDockerEventStreamAdapter:
+    """Tests for DockerEventStreamAdapter."""
+
+    @pytest.fixture
+    def isolation_handle(self) -> IsolationHandle:
+        """Create test isolation handle."""
+        return IsolationHandle(
+            isolation_id="container-stream-123",
+            isolation_type="docker",
+            workspace_path="/workspace",
+        )
+
+    @pytest.mark.asyncio
+    async def test_stream_yields_lines(self, isolation_handle: IsolationHandle) -> None:
+        """Test that stream yields stdout lines."""
+        from aef_adapters.workspace_backends.docker import DockerEventStreamAdapter
+
+        # Mock process that outputs lines
+        mock_stdout = MagicMock()
+        mock_stdout.readline = AsyncMock(
+            side_effect=[
+                b'{"event": "start"}\n',
+                b'{"event": "progress"}\n',
+                b'{"event": "done"}\n',
+                b"",  # EOF
+            ]
+        )
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = mock_stdout
+        mock_proc.stderr = MagicMock()
+        mock_proc.stderr.read = AsyncMock(return_value=b"")
+        mock_proc.returncode = 0
+        mock_proc.terminate = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        async def mock_subprocess(*args, **kwargs):
+            return mock_proc
+
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+            adapter = DockerEventStreamAdapter()
+
+            lines = []
+            async for line in adapter.stream(
+                isolation_handle,
+                ["python", "-u", "agent.py"],
+            ):
+                lines.append(line)
+
+            assert len(lines) == 3
+            assert '{"event": "start"}' in lines[0]
+            assert '{"event": "done"}' in lines[2]
+
+    @pytest.mark.asyncio
+    async def test_stream_handles_timeout(
+        self, isolation_handle: IsolationHandle
+    ) -> None:
+        """Test that stream handles timeout correctly."""
+        from aef_adapters.workspace_backends.docker import DockerEventStreamAdapter
+
+        # Mock process that blocks
+        mock_stdout = MagicMock()
+        mock_stdout.readline = AsyncMock(side_effect=TimeoutError())
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = mock_stdout
+        mock_proc.stderr = MagicMock()
+        mock_proc.returncode = None
+        mock_proc.terminate = MagicMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.kill = MagicMock()
+
+        async def mock_subprocess(*args, **kwargs):
+            return mock_proc
+
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_subprocess):
+            adapter = DockerEventStreamAdapter()
+
+            lines = []
+            async for line in adapter.stream(
+                isolation_handle,
+                ["python", "slow.py"],
+                timeout_seconds=1,
+            ):
+                lines.append(line)
+
+            # Should complete without error, just empty
+            assert len(lines) == 0
+            # Process should be terminated
+            mock_proc.terminate.assert_called_once()
+
+
 class TestDockerAdaptersIntegration:
     """Integration tests for Docker adapters working together (mocked)."""
 

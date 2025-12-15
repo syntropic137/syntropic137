@@ -18,6 +18,9 @@ Usage:
 See ADR-021 (Isolated Workspace Architecture) and ADR-022 (Secure Token Architecture).
 """
 
+from aef_adapters.workspace_backends.docker.docker_event_stream_adapter import (
+    DockerEventStreamAdapter,
+)
 from aef_adapters.workspace_backends.docker.docker_isolation_adapter import (
     DockerIsolationAdapter,
 )
@@ -26,6 +29,7 @@ from aef_adapters.workspace_backends.docker.docker_sidecar_adapter import (
 )
 
 __all__ = [
+    "DockerEventStreamAdapter",
     "DockerIsolationAdapter",
     "DockerSidecarAdapter",
 ]
