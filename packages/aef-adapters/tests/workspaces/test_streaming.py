@@ -85,10 +85,13 @@ class TestExecuteStreaming:
         mock_process.stderr.read = mock.AsyncMock(return_value=b"Error: something failed")
         mock_process.wait = mock.AsyncMock()
 
-        with mock.patch(
-            "asyncio.create_subprocess_exec",
-            return_value=mock_process,
-        ), pytest.raises(RuntimeError, match="exit code 1"):
+        with (
+            mock.patch(
+                "asyncio.create_subprocess_exec",
+                return_value=mock_process,
+            ),
+            pytest.raises(RuntimeError, match="exit code 1"),
+        ):
             async for _ in BaseIsolatedWorkspace.execute_streaming(
                 workspace,
                 ["python", "-m", "aef_agent_runner"],

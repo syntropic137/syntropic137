@@ -54,7 +54,7 @@ class TestIsolatedWorkspace:
         base = tmp_path / "workspace"
 
         assert ws.context_dir == base / ".context"
-        assert ws.output_dir == base / "output"
+        assert ws.output_dir == base / "artifacts"
         assert ws.hooks_dir == base / ".claude" / "hooks"
         assert ws.analytics_path == base / ".agentic" / "analytics" / "events.jsonl"
 

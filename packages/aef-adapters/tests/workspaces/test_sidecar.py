@@ -84,9 +84,7 @@ class TestSidecarManager:
         # Mock asyncio.create_subprocess_exec
         mock_process = mock.AsyncMock()
         mock_process.returncode = 0
-        mock_process.communicate = mock.AsyncMock(
-            return_value=(b"container-id-abc123\n", b"")
-        )
+        mock_process.communicate = mock.AsyncMock(return_value=(b"container-id-abc123\n", b""))
 
         # Need to mock multiple subprocess calls
         call_count = 0
