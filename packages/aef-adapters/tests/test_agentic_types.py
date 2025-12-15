@@ -215,7 +215,7 @@ class TestWorkspace:
 
         assert workspace.analytics_path == Path("/tmp/workspace/.agentic/analytics/events.jsonl")
         assert workspace.context_dir == Path("/tmp/workspace/.context")
-        assert workspace.output_dir == Path("/tmp/workspace/output")
+        assert workspace.output_dir == Path("/tmp/workspace/artifacts")
         assert workspace.hooks_dir == Path("/tmp/workspace/.claude/hooks")
 
 

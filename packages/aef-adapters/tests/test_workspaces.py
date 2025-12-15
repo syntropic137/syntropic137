@@ -34,7 +34,7 @@ class TestLocalWorkspace:
             assert (workspace.path / ".claude" / "hooks" / "validators").is_dir()
             assert (workspace.path / ".agentic" / "analytics").is_dir()
             assert (workspace.path / ".context").is_dir()
-            assert (workspace.path / "output").is_dir()
+            assert (workspace.path / "artifacts").is_dir()
 
     @pytest.mark.asyncio
     async def test_create_settings_json(self, workspace_config: WorkspaceConfig) -> None:
@@ -89,7 +89,7 @@ class TestLocalWorkspace:
                 == workspace.path / ".agentic" / "analytics" / "events.jsonl"
             )
             assert workspace.context_dir == workspace.path / ".context"
-            assert workspace.output_dir == workspace.path / "output"
+            assert workspace.output_dir == workspace.path / "artifacts"
             assert workspace.hooks_dir == workspace.path / ".claude" / "hooks"
 
     @pytest.mark.asyncio
