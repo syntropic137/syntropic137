@@ -142,6 +142,7 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
             total_tokens=0,
             total_cost_usd="0",
             tool_call_count=0,
+            expected_completion_at=event_data.get("expected_completion_at"),
         )
         await self._store.save(self.PROJECTION_NAME, execution_id, summary.to_dict())
 

@@ -46,6 +46,9 @@ class WorkflowExecutionSummary:
     tool_call_count: int = 0
     """Total number of tool calls across all phases."""
 
+    expected_completion_at: datetime | str | None = None
+    """When we expect this execution to complete (for stale detection)."""
+
     error_message: str | None = None
     """Error message if execution failed."""
 
@@ -68,6 +71,7 @@ class WorkflowExecutionSummary:
             total_tokens=data.get("total_tokens", 0),
             total_cost_usd=cost,
             tool_call_count=data.get("tool_call_count", 0),
+            expected_completion_at=data.get("expected_completion_at"),
             error_message=data.get("error_message"),
         )
 
@@ -94,5 +98,6 @@ class WorkflowExecutionSummary:
             "total_tokens": self.total_tokens,
             "total_cost_usd": str(self.total_cost_usd),
             "tool_call_count": self.tool_call_count,
+            "expected_completion_at": self._to_iso_string(self.expected_completion_at),
             "error_message": self.error_message,
         }

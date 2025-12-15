@@ -44,13 +44,24 @@ class StartExecutionCommand:
         workflow_name: str,
         total_phases: int,
         inputs: dict[str, Any],
+        expected_completion_at: datetime | None = None,
     ) -> None:
-        """Initialize command."""
+        """Initialize command.
+
+        Args:
+            execution_id: Unique execution ID
+            workflow_id: Workflow being executed
+            workflow_name: Name of the workflow
+            total_phases: Number of phases to execute
+            inputs: Input parameters for the workflow
+            expected_completion_at: When we expect this to complete (for stale detection)
+        """
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
         self.workflow_name = workflow_name
         self.total_phases = total_phases
         self.inputs = inputs
+        self.expected_completion_at = expected_completion_at
 
 
 class CompleteExecutionCommand:
@@ -220,6 +231,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._status: ExecutionStatus = ExecutionStatus.RUNNING
         self._started_at: datetime | None = None
         self._completed_at: datetime | None = None
+        self._expected_completion_at: datetime | None = None  # For stale detection
         self._total_phases: int = 0
         self._completed_phases: int = 0
         self._current_phase_order: int = 0
@@ -265,6 +277,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             started_at=datetime.now(UTC),
             total_phases=command.total_phases,
             inputs=command.inputs,
+            expected_completion_at=command.expected_completion_at,
         )
         self._apply(event)
 
@@ -380,6 +393,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._workflow_name = event.workflow_name
             self._started_at = event.started_at
             self._total_phases = event.total_phases
+            self._expected_completion_at = getattr(event, "expected_completion_at", None)
         else:
             # Dict-based event from gRPC
             data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
@@ -387,6 +401,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._workflow_name = data.get("workflow_name")
             self._started_at = data.get("started_at")
             self._total_phases = data.get("total_phases", 0)
+            self._expected_completion_at = data.get("expected_completion_at")
 
         self._status = ExecutionStatus.RUNNING
 
