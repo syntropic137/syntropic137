@@ -195,7 +195,7 @@ class TestWorkspaceLifecycle:
 
         # Check path properties
         assert workspace.context_dir == tmp_path / "workspace" / ".context"
-        assert workspace.output_dir == tmp_path / "workspace" / "output"
+        assert workspace.output_dir == tmp_path / "workspace" / "artifacts"
         assert workspace.hooks_dir == tmp_path / "workspace" / ".claude" / "hooks"
 
         # Check lifecycle
