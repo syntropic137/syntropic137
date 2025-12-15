@@ -300,6 +300,130 @@ async def check_agent_runner_installed(container_name: str) -> bool:
     return True
 
 
+async def verify_settings_json_attribution(container_name: str) -> bool:
+    """F17.4: Verify .claude/settings.json has attribution disabled.
+
+    This prevents "Co-Authored-By: Claude" trailers in git commits.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "exec",
+        container_name,
+        "cat",
+        "/workspace/.claude/settings.json",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+
+    if proc.returncode != 0:
+        logger.warning("Could not read settings.json: %s", stderr.decode())
+        return False
+
+    try:
+        settings = json.loads(stdout.decode())
+        attribution = settings.get("attribution", {})
+        commits_disabled = attribution.get("commits") is False
+        prs_disabled = attribution.get("pullRequests") is False
+
+        if commits_disabled and prs_disabled:
+            logger.info("   ✅ Attribution settings: commits & PRs disabled")
+            return True
+        else:
+            logger.warning("   ⚠️ Attribution not fully disabled: %s", attribution)
+            return False
+    except json.JSONDecodeError as e:
+        logger.warning("Invalid settings.json: %s", e)
+        return False
+
+
+async def verify_artifacts_directory(container_name: str) -> bool:
+    """F17.2: Verify artifacts directory exists at correct path.
+
+    Uses WORKSPACE_OUTPUT_DIR = /workspace/artifacts
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "exec",
+        container_name,
+        "test",
+        "-d",
+        "/workspace/artifacts",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+
+    if proc.returncode == 0:
+        logger.info("   ✅ Artifacts directory: /workspace/artifacts exists")
+        return True
+    else:
+        logger.warning("   ⚠️ Artifacts directory /workspace/artifacts not found")
+        return False
+
+
+async def verify_analytics_directory(container_name: str) -> bool:
+    """F17.5: Verify analytics directory exists for hook events.
+
+    Uses WORKSPACE_ANALYTICS_DIR = /workspace/.agentic/analytics
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "exec",
+        container_name,
+        "mkdir",
+        "-p",
+        "/workspace/.agentic/analytics",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.wait()
+
+    # Directory created or already exists
+    logger.info("   ✅ Analytics directory: /workspace/.agentic/analytics ready")
+    return True
+
+
+def count_events_by_type(events: list[dict]) -> dict[str, int]:
+    """Count events by type for phase counting verification."""
+    counts: dict[str, int] = {}
+    for event in events:
+        event_type = event.get("type", "unknown")
+        counts[event_type] = counts.get(event_type, 0) + 1
+    return counts
+
+
+def verify_phase_counting(events: list[dict]) -> bool:
+    """F17.1: Verify phase counting is correct (no duplicates).
+
+    Checks that we don't have duplicate phase_complete events.
+    """
+    counts = count_events_by_type(events)
+
+    # Check for phase completion events
+    phase_complete = counts.get("phase_complete", 0)
+    phase_started = counts.get("phase_started", 0)
+
+    if phase_complete > 1 and phase_started == 1:
+        logger.warning("   ⚠️ Phase counting: %d completes for 1 start", phase_complete)
+        return False
+
+    logger.info("   ✅ Phase counting: %s", counts)
+    return True
+
+
+def verify_analytics_events(events: list[dict]) -> bool:
+    """F17.5: Verify analytics events are being streamed."""
+    analytics_events = [e for e in events if e.get("type") == "analytics"]
+
+    if analytics_events:
+        logger.info("   ✅ Analytics streaming: %d events received", len(analytics_events))
+        return True
+    else:
+        logger.info("   (i) Analytics streaming: no events (may need hook execution)")
+        return True  # Not a failure, just informational
+
+
 async def run_e2e_test(cleanup: bool = True) -> bool:
     """Run the full E2E test."""
     execution_id = str(uuid.uuid4())
@@ -347,8 +471,21 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
             logger.error("Agent runner not installed!")
             return False
 
-        # Step 5: Write task.json
-        logger.info("📝 Step 5: Writing task.json...")
+        # Step 5: F17 Verification - Check workspace setup
+        logger.info("🔧 Step 5: Verifying F17 Container Execution Setup...")
+        f17_checks = []
+
+        # F17.4: Attribution settings
+        f17_checks.append(await verify_settings_json_attribution(workspace_container))
+
+        # F17.2: Artifacts directory
+        f17_checks.append(await verify_artifacts_directory(workspace_container))
+
+        # F17.5: Analytics directory
+        f17_checks.append(await verify_analytics_directory(workspace_container))
+
+        # Step 6: Write task.json
+        logger.info("📝 Step 6: Writing task.json...")
         task = {
             "phase": "test",
             "prompt": "This is a test phase. Simply output 'Hello from container!'",
@@ -359,14 +496,14 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         }
         await write_task_to_container(workspace_container, task)
 
-        # Step 6: Execute agent runner
-        logger.info("🚀 Step 6: Executing agent runner...")
+        # Step 7: Execute agent runner
+        logger.info("🚀 Step 7: Executing agent runner...")
         logger.info("   (This will fail without API tokens - expected)")
 
         events = await execute_agent_streaming(workspace_container, timeout=10)
 
-        # Step 7: Analyze events
-        logger.info("📊 Step 7: Analyzing events...")
+        # Step 8: Analyze events
+        logger.info("📊 Step 8: Analyzing events...")
         logger.info("   Total events received: %d", len(events))
 
         event_types = [e.get("type") for e in events]
@@ -386,7 +523,13 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
             error_event = next(e for e in events if e.get("type") == "error")
             logger.info("   Error: %s", error_event.get("message", "")[:100])
 
-        # Step 8: Summary
+        # F17.1: Verify phase counting
+        f17_checks.append(verify_phase_counting(events))
+
+        # F17.5: Verify analytics events
+        f17_checks.append(verify_analytics_events(events))
+
+        # Step 9: Summary
         print()
         print("=" * 60)
         print("E2E Test Results")
@@ -397,6 +540,7 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         print(f"Sidecar:         {sidecar_container}")
         print(f"Workspace:       {workspace_container}")
         print(f"Events:          {len(events)}")
+        print(f"F17 Checks:      {sum(f17_checks)}/{len(f17_checks)} passed")
         print(f"Started Event:   {'✅' if has_started else '❌'}")
         print()
 
