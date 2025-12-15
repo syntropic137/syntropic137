@@ -184,14 +184,14 @@ class MemoryIsolationAdapter:
         """
         self._instances.pop(handle.isolation_id, None)
 
-    async def execute(
+    async def execute(  # noqa: PLR0913
         self,
         handle: IsolationHandle,
         command: list[str],
         *,
-        _timeout_seconds: int | None = None,
-        _working_directory: str | None = None,
-        _environment: dict[str, str] | None = None,
+        timeout_seconds: int | None = None,  # noqa: ARG002
+        working_directory: str | None = None,  # noqa: ARG002
+        environment: dict[str, str] | None = None,  # noqa: ARG002
     ) -> ExecutionResult:
         """Simulate command execution in memory.
 
