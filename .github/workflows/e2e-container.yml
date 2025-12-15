@@ -1,0 +1,221 @@
+name: E2E Container Execution
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/aef-agent-runner/**'
+      - 'packages/aef-adapters/src/aef_adapters/workspaces/**'
+      - 'packages/aef-domain/src/aef_domain/contexts/workflows/**'
+      - 'docker/workspace/**'
+      - '.github/workflows/e2e-container.yml'
+  pull_request:
+    paths:
+      - 'packages/aef-agent-runner/**'
+      - 'packages/aef-adapters/src/aef_adapters/workspaces/**'
+      - 'packages/aef-domain/src/aef_domain/contexts/workflows/**'
+      - 'docker/workspace/**'
+      - '.github/workflows/e2e-container.yml'
+  workflow_dispatch:
+    inputs:
+      run_full_e2e:
+        description: 'Run full E2E with live API calls (requires secrets)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: e2e-container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  #############################################################################
+  # F17 UNIT TESTS - Container Execution Robustness
+  #############################################################################
+
+  f17-unit-tests:
+    name: F17 Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_ENVIRONMENT: test
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run workspace paths tests
+        run: |
+          uv run pytest packages/aef-shared/tests/test_workspace_paths.py -v
+
+      - name: Run stale cleaner tests
+        run: |
+          uv run pytest packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py -v
+
+      - name: Run container execution tests
+        run: |
+          uv run pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py -v
+
+      - name: Run artifact collection tests
+        run: |
+          uv run pytest packages/aef-adapters/tests/workspaces/test_artifact_collection.py -v
+
+      - name: Run attribution settings tests
+        run: |
+          uv run pytest packages/aef-adapters/tests/workspaces/test_attribution_settings.py -v
+
+      - name: Run analytics streamer tests
+        run: |
+          uv run --package aef-agent-runner pytest packages/aef-agent-runner/tests/test_analytics_streamer.py -v
+
+  #############################################################################
+  # DOCKER BUILD - Validate workspace image builds
+  #############################################################################
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-workspace-${{ hashFiles('docker/workspace/**') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-workspace-
+
+      - name: Build workspace image
+        uses: docker/build-push-action@v5
+        with:
+          context: docker/workspace
+          push: false
+          tags: aef-workspace:latest
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          load: true
+
+      - name: Verify workspace image
+        run: |
+          # Check image exists
+          docker images aef-workspace:latest
+
+          # Check python is installed
+          docker run --rm aef-workspace:latest python --version
+
+          # Check aef-agent-runner is installed (if present)
+          docker run --rm aef-workspace:latest python -c "import aef_agent_runner; print('OK')" || echo "aef-agent-runner not pre-installed (expected for dev builds)"
+
+      # Fix cache size growth
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  #############################################################################
+  # E2E CONTAINER TEST - Full integration (optional, requires secrets)
+  #############################################################################
+
+  e2e-container:
+    name: E2E Container Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [f17-unit-tests, docker-build]
+    if: github.event.inputs.run_full_e2e == 'true' || github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Build workspace image
+        run: |
+          docker build -t aef-workspace:latest docker/workspace/
+
+      - name: Build sidecar image (if exists)
+        run: |
+          if [ -d "docker/sidecar-proxy" ]; then
+            docker build -t aef-sidecar:latest docker/sidecar-proxy/
+          else
+            echo "Sidecar directory not found, skipping..."
+          fi
+
+      - name: Run E2E container test
+        run: |
+          uv run python scripts/e2e_agent_in_container_test.py
+        continue-on-error: true  # May fail without API keys
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-container-logs
+          path: |
+            /tmp/aef-e2e-*.log
+          retention-days: 7
+
+  #############################################################################
+  # SUMMARY
+  #############################################################################
+
+  e2e-success:
+    name: E2E Success
+    if: always()
+    needs:
+      - f17-unit-tests
+      - docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check all jobs
+        run: |
+          if [[ "${{ needs.f17-unit-tests.result }}" == "failure" ]] || \
+             [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
+            echo "❌ E2E checks failed"
+            exit 1
+          fi
+          echo "✅ All E2E checks passed!"
+
+      - name: Write summary
+        run: |
+          echo "## E2E Container Execution Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| F17 Unit Tests | ${{ needs.f17-unit-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
