@@ -885,7 +885,17 @@ class WorkflowExecutionEngine:
                                 event.get("turn", 0),
                             )
 
-                        # Could emit events to aggregate here for observability
+                        # Handle analytics events from hook streamer
+                        if event_type == "analytics":
+                            source = event.get("source", "unknown")
+                            data = event.get("data", {})
+                            logger.debug(
+                                "Analytics event (source=%s): %s",
+                                source,
+                                data.get("event_type", "unknown"),
+                            )
+                            # TODO: Forward to session aggregate for observability
+                            # This enables real-time dashboards showing hook activity
 
                     except json.JSONDecodeError:
                         logger.warning("Invalid JSONL line: %s", line[:100])

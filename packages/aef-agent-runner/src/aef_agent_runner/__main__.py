@@ -5,6 +5,8 @@ This module is executed when running:
 
 It loads the task from /workspace/.context/task.json, executes the agent,
 and emits events to stdout as JSONL.
+
+Also starts the analytics streamer to forward hook events in real-time.
 """
 
 from __future__ import annotations
@@ -13,11 +15,13 @@ import logging
 import sys
 from pathlib import Path
 
+from aef_agent_runner.analytics_streamer import AnalyticsStreamer
 from aef_agent_runner.cancellation import CancellationError, CancellationToken
 from aef_agent_runner.events import emit_error
 from aef_agent_runner.runner import AgentRunner
 from aef_agent_runner.task import Task
 from aef_shared.workspace_paths import (
+    WORKSPACE_ANALYTICS_DIR,
     WORKSPACE_OUTPUT_DIR,
     WORKSPACE_ROOT,
     WORKSPACE_TASK_FILE,
@@ -61,6 +65,12 @@ def main(
     logger.info("Task file: %s", task_path)
     logger.info("Output dir: %s", output_dir)
     logger.info("Cancel file: %s", cancel_path)
+
+    # Start analytics streamer to forward hook events in real-time
+    analytics_dir = Path(str(WORKSPACE_ANALYTICS_DIR))
+    analytics_streamer = AnalyticsStreamer(analytics_dir)
+    analytics_streamer.start()
+    logger.info("Analytics streamer started: %s", analytics_dir)
 
     try:
         # Load task
@@ -106,6 +116,11 @@ def main(
         logger.exception("Agent runner failed with unexpected error")
         emit_error(message=str(e), error_type=type(e).__name__)
         return 1
+
+    finally:
+        # Stop analytics streamer
+        analytics_streamer.stop()
+        logger.info("Analytics streamer stopped")
 
 
 if __name__ == "__main__":
