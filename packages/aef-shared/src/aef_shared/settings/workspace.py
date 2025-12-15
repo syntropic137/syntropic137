@@ -30,7 +30,7 @@ import subprocess
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -356,6 +356,20 @@ class GitIdentitySettings(BaseSettings):
         extra="ignore",
     )
 
+    # Private attribute to track env file configuration (not a field)
+    _skip_env_file: bool = False
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialize settings, tracking env file configuration.
+
+        Args:
+            **kwargs: Pydantic settings kwargs including _env_file.
+        """
+        super().__init__(**kwargs)
+        # Track if we were constructed without env file (for test isolation)
+        if kwargs.get("_env_file") is None:
+            object.__setattr__(self, "_skip_env_file", True)
+
     # =========================================================================
     # IDENTITY (Required for commits)
     # =========================================================================
@@ -409,7 +423,13 @@ class GitIdentitySettings(BaseSettings):
         # Check GitHub App settings (separate config with AEF_GITHUB_* prefix)
         from aef_shared.settings.github import GitHubAppSettings
 
-        github = GitHubAppSettings()
+        # Propagate env file configuration to nested settings for test isolation
+        # _env_file is a pydantic-settings runtime parameter not typed in __init__
+        github = (
+            GitHubAppSettings(_env_file=None)  # type: ignore[call-arg]
+            if self._skip_env_file
+            else GitHubAppSettings()
+        )
         if github.is_configured:
             return GitCredentialType.GITHUB_APP
         if self.token:
