@@ -137,7 +137,16 @@ class InMemoryWorkspace:
 
         # Pre-create standard directories (as empty markers)
         # Uses "artifacts" to match WORKSPACE_OUTPUT_DIR from aef_shared.workspace_paths
-        workspace.files[".claude/settings.json"] = InMemoryFile(b'{"hooks": {}}')
+        # Include attribution settings to disable Co-Authored-By trailers
+        default_settings = {
+            "attribution": {"commits": False, "pullRequests": False},
+            "hooks": {},
+        }
+        import json
+
+        workspace.files[".claude/settings.json"] = InMemoryFile(
+            json.dumps(default_settings).encode()
+        )
         workspace.files[".context/.gitkeep"] = InMemoryFile(b"")
         workspace.files["artifacts/.gitkeep"] = InMemoryFile(b"")
 

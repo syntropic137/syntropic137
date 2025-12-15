@@ -286,8 +286,23 @@ if __name__ == "__main__":
 
     @classmethod
     async def _generate_settings(cls, workspace: IsolatedWorkspace) -> None:
-        """Generate .claude/settings.json for hook configuration."""
+        """Generate .claude/settings.json for hook configuration.
+
+        Includes:
+        - Hook handlers for pre/post tool use and user prompt
+        - Attribution settings to disable Co-Authored-By trailers
+
+        The attribution settings prevent Claude SDK from automatically adding
+        "Co-Authored-By: Claude" trailers to git commits. This is important
+        for automated workflows where we want clean commit histories.
+        """
         settings = {
+            # Disable Claude attribution trailers in commits and PRs
+            # This prevents "Co-Authored-By: Claude Sonnet 4 <noreply@anthropic.com>"
+            "attribution": {
+                "commits": False,
+                "pullRequests": False,
+            },
             "hooks": {
                 "PreToolUse": [
                     {
@@ -324,7 +339,7 @@ if __name__ == "__main__":
                         ],
                     }
                 ],
-            }
+            },
         }
 
         settings_path = workspace.path / ".claude" / "settings.json"

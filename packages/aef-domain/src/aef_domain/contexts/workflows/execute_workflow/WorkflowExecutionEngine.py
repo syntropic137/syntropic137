@@ -756,6 +756,15 @@ class WorkflowExecutionEngine:
 
         from aef_adapters.agents.agentic_types import WorkspaceConfig
         from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
+        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+            CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+            StartSessionCommand,
+        )
 
         phase_started_at = datetime.now(UTC)
         session_id = str(uuid4())
@@ -775,6 +784,23 @@ class WorkflowExecutionEngine:
             phase.phase_id,
             ctx.workflow_id,
         )
+
+        # Create session aggregate for detailed observability
+        # This tracks the session at a more granular level than the workflow aggregate
+        session: AgentSessionAggregate | None = None
+        if self._sessions is not None:
+            session = AgentSessionAggregate()
+            start_session_cmd = StartSessionCommand(
+                aggregate_id=session_id,
+                workflow_id=ctx.workflow_id,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                agent_provider=phase.agent_config.provider,
+                agent_model=phase.agent_config.model,
+            )
+            session._handle_command(start_session_cmd)
+            await self._sessions.save(session)
+            logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
         try:
             # Create workspace configuration
@@ -924,6 +950,16 @@ class WorkflowExecutionEngine:
             )
             aggregate._handle_command(complete_cmd)
 
+            # Complete session aggregate (success)
+            if session is not None and self._sessions is not None:
+                complete_session_cmd = CompleteSessionCommand(
+                    aggregate_id=session_id,
+                    success=True,
+                )
+                session._handle_command(complete_session_cmd)
+                await self._sessions.save(session)
+                logger.debug("Session completed: %s (success)", session_id)
+
             logger.info(
                 "Phase completed (container mode): %s (tokens: %d)",
                 phase.phase_id,
@@ -944,6 +980,25 @@ class WorkflowExecutionEngine:
                 error_message=str(e),
             )
             ctx.phase_results.append(result)
+
+            # Complete session aggregate (failure)
+            if session is not None and self._sessions is not None:
+                try:
+                    complete_session_cmd = CompleteSessionCommand(
+                        aggregate_id=session_id,
+                        success=False,
+                        error_message=str(e),
+                    )
+                    session._handle_command(complete_session_cmd)
+                    await self._sessions.save(session)
+                    logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
+                except Exception as session_err:
+                    # Don't let session persistence failure hide the original error
+                    logger.warning(
+                        "Failed to complete session %s: %s",
+                        session_id,
+                        session_err,
+                    )
 
             logger.error(
                 "Phase failed (container mode): %s (error: %s)",
