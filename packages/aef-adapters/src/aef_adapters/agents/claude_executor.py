@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from aef_adapters.agents.agentic_types import AgentExecutionConfig
     from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
     from aef_adapters.agents.executor import ExecutionEvent
-    from aef_adapters.workspaces.types import IsolatedWorkspace
+    from aef_adapters.workspace_backends.service import ManagedWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class ClaudeAgentExecutor:
     async def execute(
         self,
         task: str,
-        workspace: IsolatedWorkspace,
+        workspace: ManagedWorkspace,
         config: AgentExecutionConfig,
         *,
         execution_id: str | None = None,
@@ -139,7 +139,7 @@ class ClaudeAgentExecutor:
         start_time = time.time()
         workspace_id = workspace.isolation_id
 
-        # Adapt IsolatedWorkspace to Workspace for the underlying agent
+        # Adapt ManagedWorkspace to Workspace for the underlying agent
         # TODO: In future, execute agent subprocess inside workspace container
         adapted_workspace = Workspace(
             path=workspace.path,

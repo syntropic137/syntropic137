@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from aef_adapters.agents.agentic_types import AgentExecutionConfig
-    from aef_adapters.workspaces.types import IsolatedWorkspace
+    from aef_adapters.workspace_backends.service import ManagedWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class AgentExecutor(Protocol):
     async def execute(
         self,
         task: str,
-        workspace: IsolatedWorkspace,
+        workspace: ManagedWorkspace,
         config: AgentExecutionConfig,
         *,
         execution_id: str | None = None,

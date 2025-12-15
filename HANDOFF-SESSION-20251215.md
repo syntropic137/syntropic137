@@ -55,7 +55,7 @@ Run a **full E2E test** of the isolated container execution model:
 
 **Symptom**: Agent tries `gh auth login --web` (interactive login) instead of using token
 
-**Root Cause**: 
+**Root Cause**:
 - `GitInjector._inject_github_app_credentials()` writes to `.git-credentials` only
 - `gh` CLI needs `GH_TOKEN` environment variable
 - `env_injector.py` looks for `os.getenv("GH_TOKEN")` which is empty on host
@@ -63,7 +63,7 @@ Run a **full E2E test** of the isolated container execution model:
 **Evidence**:
 ```bash
 docker exec <container> bash -c 'echo "GH_TOKEN: ${GH_TOKEN}"'
-# Output: GH_TOKEN: 
+# Output: GH_TOKEN:
 # (empty!)
 
 docker exec <container> cat ~/.git-credentials
@@ -71,7 +71,7 @@ docker exec <container> cat ~/.git-credentials
 # (git credentials ARE there, but gh CLI doesn't use this)
 ```
 
-**Fix Needed**: 
+**Fix Needed**:
 - Option A: Also export `GH_TOKEN` in `.bashrc` with the installation token
 - Option B: Implement sidecar proxy properly (per ADR-022)
 
@@ -112,13 +112,13 @@ docker exec <container> cat ~/.git-credentials
 
 **Symptom**: Session shows `total_tokens: 0`, `operations: []`
 
-**Root Cause**: 
+**Root Cause**:
 - `aef_agent_runner` emits JSONL events to stdout
 - `WorkflowExecutionEngine._execute_phase_in_container()` streams these
 - BUT: The streaming loop was receiving 0 lines (see debug logs)
 - The `execute_streaming` may not be correctly capturing stdout
 
-**Code Location**: 
+**Code Location**:
 ```python
 # packages/aef-domain/.../WorkflowExecutionEngine.py:881
 async for line in BaseIsolatedWorkspace.execute_streaming(...):
@@ -337,3 +337,57 @@ docker exec <container> ls -la /workspace/artifacts/
 
 *Document created: 2025-12-15 10:00 UTC*
 *Last workflow run: water-lightyear-calc, Execution ID: f8c89b12-7cc8-47bc-bbc7-a628238b73f7*
+
+---
+
+## 🔄 SESSION UPDATE: Architecture Decision (Same Day)
+
+### Research Findings
+
+After deep-dive analysis of the codebase and ADRs, we identified:
+
+1. **ADR-022 Violation**: Direct token injection violates the zero-trust sidecar design
+2. **Sprawling Implementation**: 20+ files in `aef-adapters/workspaces/` with no domain boundary
+3. **Sidecar Code Exists but Unused**: `sidecar.py` and `docker/sidecar-proxy/` are implemented but not integrated
+4. **Token Vending Service Ready**: `aef-tokens/` package is complete but disconnected
+
+### Decision: Complete Refactoring (No Quick Fixes)
+
+Instead of patching the broken E2E flow, we're refactoring the entire workspace module into a **proper event-sourced bounded context** following VSA principles.
+
+### New Architecture
+
+See: `PROJECT-PLAN_20251215_WORKSPACE-BOUNDED-CONTEXT.md`
+
+Key changes:
+- **New bounded context**: `aef-domain/contexts/workspaces/` with proper VSA structure
+- **Event-sourced aggregate**: `WorkspaceAggregate` with full audit trail
+- **Port/Adapter pattern**: Clean DI interfaces for isolation, tokens, artifacts
+- **Sidecar integration**: Docker adapter includes sidecar for token injection
+- **Testable in isolation**: Each component can be unit tested with mocks
+
+### Implementation Order
+
+1. **Milestone 0**: Mark old code for deprecation
+2. **Milestones 1-5**: Domain foundation + in-memory adapter (testable)
+3. **Milestone 6**: Docker sidecar adapter (token injection per ADR-022)
+4. **Milestones 7-9**: Git, artifacts, termination
+5. **Milestones 10-12**: Application service, projections, migration
+
+### Files to Delete (After Migration)
+
+```
+packages/aef-adapters/src/aef_adapters/workspaces/  # ENTIRE MODULE
+```
+
+### Expected Outcome
+
+- ✅ Sidecar token injection working per ADR-022
+- ✅ Full event audit trail for workspace lifecycle
+- ✅ Testable components (unit tests without Docker)
+- ✅ Clean DI boundaries
+- ✅ E2E test working reliably
+
+---
+
+*Architecture decision: 2025-12-15 ~12:00 UTC*
