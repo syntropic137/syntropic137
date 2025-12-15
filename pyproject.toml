@@ -58,6 +58,7 @@ aef-domain = { workspace = true }
 aef-adapters = { workspace = true }
 aef-shared = { workspace = true }
 aef-perf = { workspace = true }
+aef-tokens = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 agentic-hooks = { path = "lib/agentic-primitives/lib/python/agentic_hooks" }

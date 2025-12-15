@@ -27,6 +27,7 @@ source = { editable = "packages/aef-adapters" }
 dependencies = [
     { name = "aef-domain" },
     { name = "aef-shared" },
+    { name = "aef-tokens" },
     { name = "agentic-hooks", extra = ["http"] },
     { name = "agentic-logging" },
     { name = "anthropic" },
@@ -69,6 +70,7 @@ postgres = [
 requires-dist = [
     { name = "aef-domain", editable = "packages/aef-domain" },
     { name = "aef-shared", editable = "packages/aef-shared" },
+    { name = "aef-tokens", editable = "packages/aef-tokens" },
     { name = "agentic-hooks", extras = ["http"], directory = "lib/agentic-primitives/lib/python/agentic_hooks" },
     { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
     { name = "anthropic", specifier = ">=0.75.0" },
