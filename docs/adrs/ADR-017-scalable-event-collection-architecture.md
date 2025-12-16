@@ -78,6 +78,77 @@ Events flow through a message queue to event store
 
 This provides a universal pattern that works identically across all environments while maintaining simplicity.
 
+### Two Agent Execution Patterns
+
+**Important**: The event collection approach differs based on how the agent is executed:
+
+#### Pattern A: CLI Agent (Interactive/File-based)
+
+Used by: Claude Code CLI, human-in-the-loop development sessions
+
+```
+Claude Code CLI
+    │ triggers
+    ▼
+File-based hooks (.claude/hooks/)
+    │ write to
+    ▼
+.agentic/analytics/events.jsonl
+    │ watched by
+    ▼
+Event Sidecar / File Watcher
+    │ batches and posts
+    ▼
+Event Collector → Event Store
+```
+
+**Characteristics:**
+- Human interactive sessions
+- File-based hook scripts (Python/Shell)
+- AnalyticsStreamer watches JSONL files
+- Good for development/debugging
+
+#### Pattern B: SDK Agent (Containerized/Stdout)
+
+Used by: `claude-agent-sdk`, `aef-agent-runner`, production workloads
+
+```
+claude-agent-sdk query()
+    │ yields
+    ▼
+ResultMessage (usage, content, tool blocks)
+    │ processed by
+    ▼
+Agent Runner → emit_*() → stdout (JSONL)
+    │ streamed by
+    ▼
+Orchestrator (reads container stdout)
+    │ parses JSONL
+    ▼
+EventCollectorPort → Event Store
+```
+
+**Characteristics:**
+- Programmatic, autonomous execution
+- JSONL to stdout (industry standard for containerized agents)
+- Orchestrator collects events from stdout stream
+- Scales to 10,000+ concurrent agents
+
+**Industry Alignment**: This stdout-based pattern aligns with:
+- OpenAI Codex CLI architecture
+- Langfuse/LangSmith agent tracing
+- E2B sandbox observability
+
+#### Pattern Selection Guide
+
+| Criteria | Use Pattern A (File) | Use Pattern B (Stdout) |
+|----------|---------------------|------------------------|
+| Execution mode | Interactive CLI | Programmatic SDK |
+| Environment | Local filesystem | Docker container |
+| Hook type | Claude Code CLI hooks | SDK callbacks |
+| Scalability | Single agent | 1000s of agents |
+| Debugging | Rich file-based logs | Structured stdout |
+
 ### Architectural Pattern
 
 This ADR implements **Pattern 2: Event Log + CQRS** as defined in [ADR-018](./ADR-018-commands-vs-observations-event-architecture.md).

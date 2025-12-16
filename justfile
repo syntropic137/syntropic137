@@ -104,10 +104,32 @@ dev-fresh:
 # --- Workspace Image ---
 
 # Build the Claude workspace Docker image (aef-workspace-claude)
+# Tags with: latest, git short SHA, and date-based version
 workspace-build:
-    @echo "🔨 Building aef-workspace-claude image..."
-    docker build -t aef-workspace-claude:latest -f docker/workspace/Dockerfile .
-    @echo "✅ Image built: aef-workspace-claude:latest"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    DATE_TAG=$(date +%Y%m%d)
+    VERSION_TAG="v${DATE_TAG}-${GIT_SHA}"
+    echo "🔨 Building aef-workspace-claude image..."
+    echo "   Version: ${VERSION_TAG}"
+    docker build \
+        -t aef-workspace-claude:latest \
+        -t aef-workspace-claude:${VERSION_TAG} \
+        -t aef-workspace-claude:${GIT_SHA} \
+        --label "org.opencontainers.image.revision=${GIT_SHA}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --label "org.opencontainers.image.version=${VERSION_TAG}" \
+        -f docker/workspace/Dockerfile .
+    echo "✅ Image built with tags:"
+    echo "   - aef-workspace-claude:latest"
+    echo "   - aef-workspace-claude:${VERSION_TAG}"
+    echo "   - aef-workspace-claude:${GIT_SHA}"
+
+# List all workspace image versions
+workspace-versions:
+    @echo "📦 Workspace image versions:"
+    @docker images aef-workspace-claude | head -20
 
 # Check if workspace image exists, build if missing
 _workspace-check:
