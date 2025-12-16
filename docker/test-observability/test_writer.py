@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import time
+
 from observability_writer import ObservabilityWriter
 
 

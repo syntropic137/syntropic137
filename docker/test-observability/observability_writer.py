@@ -3,10 +3,11 @@
 Standalone ObservabilityWriter for TimescaleDB.
 This is a proof-of-concept implementation to validate the observability architecture.
 """
-import asyncpg
-from datetime import datetime, UTC
-from uuid import uuid4
 import json
+from datetime import UTC, datetime
+from uuid import uuid4
+
+import asyncpg
 
 
 class ObservabilityWriter:

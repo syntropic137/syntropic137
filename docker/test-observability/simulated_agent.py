@@ -4,6 +4,7 @@ Simulated agent execution for E2E testing.
 This simulates a realistic agent workflow without requiring the full AEF stack.
 """
 import asyncio
+
 from observability_writer import ObservabilityWriter
 
 

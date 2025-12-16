@@ -3,8 +3,9 @@
 Standalone CostProjection for TimescaleDB.
 This is a proof-of-concept implementation to validate cost calculation from observations.
 """
-import asyncpg
 from decimal import Decimal
+
+import asyncpg
 
 
 class CostProjection:

@@ -4,8 +4,9 @@ End-to-End observability test.
 Validates the complete flow: Agent → Writer → TimescaleDB → Projection → Cost Calculation
 """
 import asyncio
-from observability_writer import ObservabilityWriter
+
 from cost_projection import CostProjection
+from observability_writer import ObservabilityWriter
 from simulated_agent import SimulatedAgent
 
 
@@ -44,7 +45,7 @@ async def test_e2e():
 
     result = await projection.calculate_session_cost(session_id)
 
-    print(f"\n📈 Session Metrics:")
+    print("\n📈 Session Metrics:")
     print(f"  • Input tokens: {result['input_tokens']:,}")
     print(f"  • Output tokens: {result['output_tokens']:,}")
     print(f"  • Cache creation: {result['cache_creation_tokens']:,}")
@@ -57,9 +58,9 @@ async def test_e2e():
     # Turn 2: 5000 in, 3000 out, 0 cache_create, 12000 cache_read
     # Turn 3: 3000 in, 1500 out, 0 cache_create, 10000 cache_read
     # Total: 23000 in, 6500 out, 8000 cache_create, 22000 cache_read
-    # Tools: 6 (2 per turn × 3 turns)
+    # Tools: 6 (2 per turn x 3 turns)
 
-    print(f"\n🔍 Validation:")
+    print("\n🔍 Validation:")
 
     # Assertions
     errors = []

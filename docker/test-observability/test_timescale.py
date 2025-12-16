@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import asyncio
-import asyncpg
-from datetime import datetime, UTC
 import json
+from datetime import UTC, datetime
+
+import asyncpg
+
 
 async def test_timescale():
     print("🔍 Testing TimescaleDB setup...")

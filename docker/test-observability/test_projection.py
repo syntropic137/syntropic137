@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import asyncio
-from observability_writer import ObservabilityWriter
+
 from cost_projection import CostProjection
+from observability_writer import ObservabilityWriter
 
 
 async def test_projection():
@@ -80,7 +81,7 @@ async def test_projection():
 
     result = await projection.calculate_session_cost(session_id)
 
-    print(f"\n📊 Session Cost Summary:")
+    print("\n📊 Session Cost Summary:")
     print(f"  Input tokens: {result['input_tokens']:,}")
     print(f"  Output tokens: {result['output_tokens']:,}")
     print(f"  Cache creation tokens: {result['cache_creation_tokens']:,}")
