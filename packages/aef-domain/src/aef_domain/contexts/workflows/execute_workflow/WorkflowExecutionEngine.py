@@ -22,6 +22,12 @@ from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
     AgentObservationEvent,
 )
+
+# Import for direct event store access
+try:
+    from event_sourcing.core.event import EventFactory
+except ImportError:
+    EventFactory = None  # type: ignore[misc, assignment]
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -257,6 +263,47 @@ class WorkflowExecutionEngine:
         self._agent_factory = agent_factory
         self._artifact_query = artifact_query_service
         self._event_store = event_store
+        # Track observation nonces per session for event store appends
+        self._observation_nonces: dict[str, int] = {}
+
+    async def _append_observation(
+        self,
+        observation: AgentObservationEvent,
+        session_id: str,
+        tenant_id: str = "default",
+    ) -> None:
+        """Append an AgentObservation event to the event store.
+
+        Uses a separate stream per session: AgentObservations-{session_id}
+        This keeps high-volume observability events separate from aggregate events.
+
+        Args:
+            observation: The observation event to append
+            session_id: The session ID
+            tenant_id: The tenant ID for multi-tenancy
+        """
+        if self._event_store is None or EventFactory is None:
+            return
+
+        # Get/increment nonce for this session
+        nonce = self._observation_nonces.get(session_id, 0) + 1
+        self._observation_nonces[session_id] = nonce
+
+        # Create event envelope with metadata
+        envelope = EventFactory.create(
+            event=observation,
+            aggregate_id=session_id,
+            aggregate_type="AgentObservations",  # Separate type for observations
+            aggregate_nonce=nonce,
+            tenant_id=tenant_id,
+        )
+
+        # Append to event store
+        stream_name = f"AgentObservations-{session_id}"
+        await self._event_store.append_events(
+            stream_name=stream_name,
+            events=[envelope],
+        )
 
     async def execute(
         self,
@@ -931,7 +978,11 @@ class WorkflowExecutionEngine:
                                     phase_id=phase.phase_id,
                                     workspace_id=workspace_id,
                                 )
-                                await self._event_store.save(observation)
+                                await self._append_observation(
+                                    observation=observation,
+                                    session_id=session_id,
+                                    tenant_id=tenant_id or "default",
+                                )
                                 logger.debug(
                                     "Recorded token observation: %d input, %d output",
                                     input_tokens,
@@ -971,7 +1022,11 @@ class WorkflowExecutionEngine:
                                     phase_id=phase.phase_id,
                                     workspace_id=workspace_id,
                                 )
-                                await self._event_store.save(observation)
+                                await self._append_observation(
+                                    observation=observation,
+                                    session_id=session_id,
+                                    tenant_id=tenant_id or "default",
+                                )
 
                         # Handle tool_result observations (tool completed)
                         if event_type == "tool_result":
@@ -1001,7 +1056,11 @@ class WorkflowExecutionEngine:
                                     phase_id=phase.phase_id,
                                     workspace_id=workspace_id,
                                 )
-                                await self._event_store.save(observation)
+                                await self._append_observation(
+                                    observation=observation,
+                                    session_id=session_id,
+                                    tenant_id=tenant_id or "default",
+                                )
 
                     except json.JSONDecodeError:
                         logger.warning("Invalid JSONL line: %s", line[:100])
