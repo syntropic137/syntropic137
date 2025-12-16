@@ -33,6 +33,8 @@ from aef_agent_runner.events import (
     emit_progress,
     emit_started,
     emit_token_usage,
+    emit_tool_result,
+    emit_tool_use,
 )
 from aef_agent_runner.hooks import create_hooks_config
 
@@ -49,12 +51,18 @@ try:
 
     # Import message types for proper event handling
     try:
-        from claude_agent_sdk import AssistantMessage, ResultMessage, ToolUseBlock
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ResultMessage,
+            ToolResultBlock,
+            ToolUseBlock,
+        )
     except ImportError:
         # Fallback if types aren't exported (older SDK versions)
         AssistantMessage = None  # type: ignore[assignment, misc]
         ResultMessage = None  # type: ignore[assignment, misc]
         ToolUseBlock = None  # type: ignore[assignment, misc]
+        ToolResultBlock = None  # type: ignore[assignment, misc]
 
     CLAUDE_SDK_AVAILABLE = True
 except ImportError:
@@ -64,6 +72,7 @@ except ImportError:
     AssistantMessage = None  # type: ignore[assignment, misc]
     ResultMessage = None  # type: ignore[assignment, misc]
     ToolUseBlock = None  # type: ignore[assignment, misc]
+    ToolResultBlock = None  # type: ignore[assignment, misc]
 
 
 class AgentRunner:
@@ -106,6 +115,10 @@ class AgentRunner:
         self._total_input_tokens = 0
         self._total_output_tokens = 0
         self._start_time: float | None = None
+
+        # Tool use tracking: Maps tool_use_id → tool_name
+        # ToolResultBlock doesn't include tool name, so we store it from ToolUseBlock
+        self._tool_use_map: dict[str, str] = {}
 
     def run(self) -> None:
         """Run the agent using claude-agent-sdk.
@@ -194,11 +207,12 @@ class AgentRunner:
 
         The SDK yields different message types:
         - AssistantMessage: Contains content blocks (text, tool_use)
+        - UserMessage: May contain tool_result blocks
         - ResultMessage: Final message with usage statistics
 
         This method extracts and emits observability events for:
         - Token usage (from ResultMessage.usage or AssistantMessage.usage)
-        - Tool usage (from ToolUseBlock in AssistantMessage.content)
+        - Tool usage (from ToolUseBlock/ToolResultBlock in message.content)
         """
         # Handle AssistantMessage - contains content blocks with tool_use
         if AssistantMessage is not None and isinstance(event, AssistantMessage):
@@ -208,6 +222,12 @@ class AgentRunner:
         # Handle ResultMessage - contains final usage statistics
         if ResultMessage is not None and isinstance(event, ResultMessage):
             self._handle_result_message(event)
+            return
+
+        # Handle any message with content blocks (UserMessage, etc.)
+        # This catches tool_result blocks that come in UserMessage
+        if hasattr(event, "content") and event.content:
+            self._handle_content_blocks(event)
             return
 
         # Fallback: Handle legacy StreamEvent format (older SDK versions)
@@ -221,11 +241,13 @@ class AgentRunner:
     def _handle_assistant_message(self, message: Any) -> None:
         """Handle AssistantMessage from SDK.
 
-        Note: Tool events (tool_use, tool_result) are now emitted by SDK hooks
-        (PreToolUse, PostToolUse) to ensure consistent observability.
-        This method only handles token usage tracking.
+        Per Claude SDK documentation (lines 819-912), AssistantMessage.content
+        contains ContentBlock objects including ToolUseBlock and ToolResultBlock.
+
+        We parse these directly for observability (NOT via hooks, which don't
+        fire for built-in tools like Bash, Write, Read).
         """
-        # Track usage if available on AssistantMessage
+        # 1. Handle token usage (existing code)
         if hasattr(message, "usage") and message.usage:
             usage = message.usage
             input_tokens = getattr(usage, "input_tokens", 0) or 0
@@ -243,25 +265,122 @@ class AgentRunner:
                     cache_read_tokens=cache_read,
                 )
 
-        # Note: Tool events are emitted via SDK hooks (PreToolUse, PostToolUse)
-        # We only count tool blocks here for progress tracking
-        tool_count = 0
+        # 2. Parse content blocks for tool observability (NEW)
         if hasattr(message, "content") and message.content:
             for block in message.content:
-                if (ToolUseBlock is not None and isinstance(block, ToolUseBlock)) or (
-                    isinstance(block, dict) and block.get("type") == "tool_use"
-                ):
-                    tool_count += 1
+                # Get block type via duck typing (works with SDK classes, dicts, and mocks)
+                block_type = (
+                    getattr(block, "type", None)
+                    if not isinstance(block, dict)
+                    else block.get("type")
+                )
 
-        if tool_count > 0:
-            logger.debug("AssistantMessage contains %d tool_use blocks", tool_count)
+                # Handle ToolUseBlock (tool started)
+                if block_type == "tool_use":
+                    tool_name = (
+                        getattr(block, "name", None)
+                        if not isinstance(block, dict)
+                        else block.get("name")
+                    ) or "unknown"
+                    tool_use_id = (
+                        getattr(block, "id", None)
+                        if not isinstance(block, dict)
+                        else block.get("id")
+                    )
+                    tool_input = (
+                        getattr(block, "input", None)
+                        if not isinstance(block, dict)
+                        else block.get("input")
+                    ) or {}
 
-        # Emit progress update
+                    # Emit tool_use event to stdout (JSONL)
+                    emit_tool_use(
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                        tool_use_id=tool_use_id,
+                    )
+
+                    # Store mapping for ToolResultBlock (which doesn't include tool name)
+                    if tool_use_id:
+                        self._tool_use_map[tool_use_id] = tool_name
+
+                    logger.debug("Tool started: %s (id=%s)", tool_name, tool_use_id)
+
+                # Handle ToolResultBlock (tool completed)
+                elif block_type == "tool_result":
+                    tool_use_id = (
+                        getattr(block, "tool_use_id", None)
+                        if not isinstance(block, dict)
+                        else block.get("tool_use_id")
+                    )
+                    is_error = (
+                        getattr(block, "is_error", False)
+                        if not isinstance(block, dict)
+                        else block.get("is_error", False)
+                    )
+
+                    # Get tool name from stored mapping
+                    tool_name = self._tool_use_map.get(tool_use_id, "unknown")
+
+                    # Emit tool_result event to stdout (JSONL)
+                    emit_tool_result(
+                        tool_name=tool_name,
+                        success=not is_error,
+                        tool_use_id=tool_use_id,
+                        duration_ms=None,  # SDK doesn't provide duration, could calculate if needed
+                    )
+
+                    logger.debug("Tool completed: %s (id=%s, success=%s)", tool_name, tool_use_id, not is_error)
+
+        # 3. Emit progress update (existing)
         emit_progress(
             turn=self._turn_count,
             input_tokens=self._total_input_tokens,
             output_tokens=self._total_output_tokens,
         )
+
+    def _handle_content_blocks(self, message: Any) -> None:
+        """Handle any message with content blocks (e.g., UserMessage with tool_result).
+
+        This catches tool_result blocks that come in messages other than AssistantMessage.
+        """
+        for block in message.content:
+            block_type = (
+                getattr(block, "type", None)
+                if not isinstance(block, dict)
+                else block.get("type")
+            )
+
+            # Only handle tool_result here (tool_use is handled in AssistantMessage)
+            if block_type == "tool_result":
+                tool_use_id = (
+                    getattr(block, "tool_use_id", None)
+                    if not isinstance(block, dict)
+                    else block.get("tool_use_id")
+                )
+                is_error = (
+                    getattr(block, "is_error", False)
+                    if not isinstance(block, dict)
+                    else block.get("is_error", False)
+                )
+
+                # Get tool name from stored mapping
+                tool_name = self._tool_use_map.get(tool_use_id, "unknown")
+
+                # Emit tool_result event to stdout (JSONL)
+                emit_tool_result(
+                    tool_name=tool_name,
+                    success=not is_error,
+                    tool_use_id=tool_use_id,
+                    duration_ms=None,
+                )
+
+                logger.debug(
+                    "Tool completed (from content): %s (id=%s, success=%s)",
+                    tool_name,
+                    tool_use_id,
+                    not is_error,
+                )
 
     def _handle_result_message(self, message: Any) -> None:
         """Handle ResultMessage from SDK.
