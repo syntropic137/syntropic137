@@ -73,6 +73,12 @@ COPY packages/aef-shared /tmp/aef-shared
 RUN pip install --no-cache-dir /tmp/aef-shared \
     && rm -rf /tmp/aef-shared
 
+# Copy and install agentic-primitives packages (dependencies from submodule)
+# agentic-security is required by aef-agent-runner for safety validation
+COPY lib/agentic-primitives/lib/python/agentic_security /tmp/agentic-security
+RUN pip install --no-cache-dir /tmp/agentic-security \
+    && rm -rf /tmp/agentic-security
+
 # Copy and install aef-agent-runner package
 # This runs inside the container to execute the Claude agent
 COPY packages/aef-agent-runner /tmp/aef-agent-runner

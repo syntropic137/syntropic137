@@ -19,11 +19,13 @@ from aef_agent_runner.events import AgentEvent, emit_event
 from aef_agent_runner.hooks import (
     HookEventName,
     PermissionDecision,
-    ToolName,
     create_hooks_config,
 )
 from aef_agent_runner.runner import AgentRunner
 from aef_agent_runner.task import Task
+
+# Re-export ToolName from agentic_security (single source of truth)
+from agentic_security import ToolName
 
 __all__ = [
     "AgentEvent",
