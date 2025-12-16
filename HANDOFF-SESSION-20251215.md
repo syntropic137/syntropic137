@@ -1,6 +1,111 @@
 # 🧠 Observability Investigation Session
 **Date:** 2025-12-16
-**Focus:** Full E2E Observability (Tokens ✅, Tools ✅)
+**Focus:** Full E2E Observability → **Agentic Primitives Evolution**
+
+---
+
+## 🚀 NEW: Agentic Primitives Architecture (2025-12-16 22:00)
+
+### Strategic Decision
+
+After successfully debugging tool observability, we pivoted to a **strategic architectural investment**:
+
+**Transform `agentic-primitives` into the universal agent integration layer** - the "breakout board" that makes any agent runtime (Claude CLI, Claude SDK, OpenAI, etc.) secure, observable, and scalable.
+
+### Why This Matters
+
+1. **AEF was duplicating code** that `agentic-primitives` should provide
+2. **Security patterns scattered** across projects (bash validators, file validators)
+3. **Isolation not abstracted** - each project reinvents Docker workspaces
+4. **CLI vs SDK differences** require different integration patterns
+
+### New Packages Planned
+
+```
+agentic-primitives/lib/python/
+├── agentic_hooks/       # ✅ EXISTS - Event emission
+├── agentic_security/    # 🆕 NEW - Consolidated security policies
+├── agentic_isolation/   # 🆕 NEW - Docker/E2B/Local workspaces
+├── agentic_agent/       # 🆕 NEW - Instrumented agent (from example)
+└── adapters/            # 🆕 NEW - Runtime adapters
+    ├── claude_cli/      # Generates .claude/hooks/*.py
+    └── claude_sdk/      # Creates ClaudeAgentOptions with hooks
+```
+
+### Installation Options (Proposed)
+
+```bash
+pip install agentic-primitives                    # Core only
+pip install agentic-primitives[claude-cli]        # + CLI adapter
+pip install agentic-primitives[claude-sdk]        # + SDK adapter
+pip install agentic-primitives[isolation]         # + Docker/E2B
+pip install agentic-primitives[timescaledb]       # + TimescaleDB backend
+pip install agentic-primitives[all]               # Everything
+```
+
+### Key Interfaces
+
+**Security Policy:**
+```python
+from agentic_security import SecurityPolicy
+
+policy = SecurityPolicy(
+    blocked_paths=["/etc/passwd", "~/.ssh/"],
+    blocked_commands=["rm -rf /", "curl | bash"],
+)
+```
+
+**Isolated Workspace:**
+```python
+from agentic_isolation import IsolatedWorkspace
+
+async with IsolatedWorkspace.create(
+    provider="docker",
+    image="aef-workspace:latest",
+    secrets={"GITHUB_TOKEN": token},
+) as workspace:
+    await workspace.execute("echo hello")
+```
+
+**Unified Config:**
+```python
+from agentic_primitives import AgentConfig
+
+config = AgentConfig(
+    security=policy,
+    observability=ObservabilityConfig(backend="timescaledb"),
+    isolation=IsolationConfig(provider="docker"),
+)
+
+# Works for any runtime
+config.generate_cli_hooks()           # For Claude CLI
+options = config.to_claude_sdk()      # For Claude SDK
+```
+
+### Documentation Created
+
+- **PROJECT-PLAN_20251216_AGENTIC-PRIMITIVES-EVOLUTION.md**: Full implementation plan with 8 milestones
+- **lib/agentic-primitives/docs/adrs/025-universal-agent-integration-layer.md**: Architecture decision
+
+### AEF Integration Benefits
+
+Once implemented, `aef-agent-runner` becomes:
+
+```python
+# BEFORE: Duplicated logic
+from aef_agent_runner.hooks import DANGEROUS_PATTERNS
+from aef_agent_runner.events import emit_tool_use
+
+# AFTER: Uses agentic-primitives
+from agentic_agent import InstrumentedAgent
+from agentic_hooks import HookClient
+from agentic_hooks.backends import TimescaleDBBackend
+from agentic_security import SecurityPolicy
+
+async with HookClient(backend=TimescaleDBBackend(conn)) as client:
+    async with InstrumentedAgent(hook_client=client, security_policy=policy) as agent:
+        result = await agent.run(prompt)  # All observability automatic!
+```
 
 ---
 

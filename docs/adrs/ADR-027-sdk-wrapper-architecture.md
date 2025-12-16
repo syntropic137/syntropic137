@@ -64,7 +64,7 @@ from agentic_primitives.examples.claude_sdk.agent import InstrumentedAgent
 
 class AEFAgent(InstrumentedAgent):
     """AEF-specific agent with TimescaleDB observability."""
-    
+
     def __init__(
         self,
         hook_client: HookClient,  # DI: Injected backend
@@ -74,7 +74,7 @@ class AEFAgent(InstrumentedAgent):
         super().__init__(**kwargs)
         self._hook_client = hook_client
         self._workspace_id = workspace_id
-    
+
     async def _on_tool_started(self, block: ToolUseBlock):
         """Override to emit via HookClient."""
         await self._hook_client.emit(HookEvent(
@@ -97,10 +97,10 @@ from agentic_hooks.events import HookEvent
 
 class TimescaleDBBackend(Backend):
     """agentic_hooks backend that writes to TimescaleDB."""
-    
+
     def __init__(self, writer: ObservabilityWriter):
         self._writer = writer
-    
+
     async def write(self, events: list[HookEvent]) -> None:
         for event in events:
             await self._writer.record_observation(
