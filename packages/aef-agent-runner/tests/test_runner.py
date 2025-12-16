@@ -78,23 +78,27 @@ class TestAgentRunner:
 
         assert output_dir.exists()
 
-    def test_build_initial_message(
+    def test_build_task_prompt(
         self,
         task: Task,
         output_dir: Path,
         cancel_token: CancellationToken,
     ) -> None:
-        """Should build initial message with task context."""
+        """Should build task prompt with task context."""
         runner = AgentRunner(
             task=task,
             output_dir=output_dir,
             cancel_token=cancel_token,
         )
 
-        message = runner._build_initial_message()
+        message = runner._build_task_prompt()
 
-        assert "test phase" in message
-        assert "key: value" in message
+        # Prompt from task
+        assert "Test the system" in message
+        # Inputs section
+        assert "key" in message
+        assert "value" in message
+        # Output instructions
         assert "/workspace/artifacts/" in message
 
     def test_collect_artifacts_emits_events(

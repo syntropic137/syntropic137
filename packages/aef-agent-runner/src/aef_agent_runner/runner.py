@@ -34,6 +34,7 @@ from aef_agent_runner.events import (
     emit_started,
     emit_token_usage,
 )
+from aef_agent_runner.hooks import create_hooks_config
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,11 +47,23 @@ logger = logging.getLogger(__name__)
 try:
     from claude_agent_sdk import ClaudeAgentOptions, query
 
+    # Import message types for proper event handling
+    try:
+        from claude_agent_sdk import AssistantMessage, ResultMessage, ToolUseBlock
+    except ImportError:
+        # Fallback if types aren't exported (older SDK versions)
+        AssistantMessage = None  # type: ignore[assignment, misc]
+        ResultMessage = None  # type: ignore[assignment, misc]
+        ToolUseBlock = None  # type: ignore[assignment, misc]
+
     CLAUDE_SDK_AVAILABLE = True
 except ImportError:
     CLAUDE_SDK_AVAILABLE = False
     query = None  # type: ignore[assignment]
     ClaudeAgentOptions = None  # type: ignore[assignment, misc]
+    AssistantMessage = None  # type: ignore[assignment, misc]
+    ResultMessage = None  # type: ignore[assignment, misc]
+    ToolUseBlock = None  # type: ignore[assignment, misc]
 
 
 class AgentRunner:
@@ -131,6 +144,14 @@ class AgentRunner:
             # Configure the agent
             workspace_dir = os.environ.get("WORKSPACE_DIR", "/workspace")
 
+            # Create hooks for observability and safety
+            # - Observability hooks: emit events to stdout (non-blocking)
+            # - Safety hooks: validate tool calls (blocking, can deny)
+            hooks_config = create_hooks_config(
+                enable_observability=True,
+                enable_safety=True,
+            )
+
             # ANTHROPIC_API_KEY is read from environment by the SDK
             options = ClaudeAgentOptions(
                 max_turns=self._max_turns,
@@ -138,6 +159,8 @@ class AgentRunner:
                 model=self._model,
                 # Bypass permission prompts - agent runs autonomously
                 permission_mode="bypassPermissions",
+                # Register hooks for observability and safety (type: ignore for flexible hook types)
+                hooks=hooks_config if hooks_config else None,  # type: ignore[arg-type]
             )
 
             emit_progress(turn=0, input_tokens=0, output_tokens=0)
@@ -169,32 +192,148 @@ class AgentRunner:
     def _handle_sdk_event(self, event: Any) -> None:
         """Handle events from claude-agent-sdk.
 
-        The SDK yields StreamEvent objects with event data.
-        """
-        # StreamEvent has: uuid, session_id, event (dict), parent_tool_use_id
-        if hasattr(event, "event"):
-            event_data = event.event
-            event_type = event_data.get("type", "")
+        The SDK yields different message types:
+        - AssistantMessage: Contains content blocks (text, tool_use)
+        - ResultMessage: Final message with usage statistics
 
-            # Track usage if available
-            if "usage" in event_data:
-                usage = event_data["usage"]
-                input_tokens = usage.get("input_tokens", 0)
-                output_tokens = usage.get("output_tokens", 0)
+        This method extracts and emits observability events for:
+        - Token usage (from ResultMessage.usage or AssistantMessage.usage)
+        - Tool usage (from ToolUseBlock in AssistantMessage.content)
+        """
+        # Handle AssistantMessage - contains content blocks with tool_use
+        if AssistantMessage is not None and isinstance(event, AssistantMessage):
+            self._handle_assistant_message(event)
+            return
+
+        # Handle ResultMessage - contains final usage statistics
+        if ResultMessage is not None and isinstance(event, ResultMessage):
+            self._handle_result_message(event)
+            return
+
+        # Fallback: Handle legacy StreamEvent format (older SDK versions)
+        if hasattr(event, "event"):
+            self._handle_stream_event(event)
+            return
+
+        # Unknown event type - log for debugging
+        logger.debug("Unknown SDK event type: %s", type(event).__name__)
+
+    def _handle_assistant_message(self, message: Any) -> None:
+        """Handle AssistantMessage from SDK.
+
+        Note: Tool events (tool_use, tool_result) are now emitted by SDK hooks
+        (PreToolUse, PostToolUse) to ensure consistent observability.
+        This method only handles token usage tracking.
+        """
+        # Track usage if available on AssistantMessage
+        if hasattr(message, "usage") and message.usage:
+            usage = message.usage
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+
+            if input_tokens > 0 or output_tokens > 0:
                 self._total_input_tokens += input_tokens
                 self._total_output_tokens += output_tokens
                 emit_token_usage(
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cache_creation_tokens=cache_creation,
+                    cache_read_tokens=cache_read,
                 )
 
-            # Log progress
-            if event_type in ("message_start", "content_block_start", "message_stop"):
-                emit_progress(
-                    turn=self._turn_count,
-                    input_tokens=self._total_input_tokens,
-                    output_tokens=self._total_output_tokens,
+        # Note: Tool events are emitted via SDK hooks (PreToolUse, PostToolUse)
+        # We only count tool blocks here for progress tracking
+        tool_count = 0
+        if hasattr(message, "content") and message.content:
+            for block in message.content:
+                if (ToolUseBlock is not None and isinstance(block, ToolUseBlock)) or (
+                    isinstance(block, dict) and block.get("type") == "tool_use"
+                ):
+                    tool_count += 1
+
+        if tool_count > 0:
+            logger.debug("AssistantMessage contains %d tool_use blocks", tool_count)
+
+        # Emit progress update
+        emit_progress(
+            turn=self._turn_count,
+            input_tokens=self._total_input_tokens,
+            output_tokens=self._total_output_tokens,
+        )
+
+    def _handle_result_message(self, message: Any) -> None:
+        """Handle ResultMessage from SDK.
+
+        This is the final message with complete usage statistics.
+        """
+        # Extract final usage statistics
+        if hasattr(message, "usage") and message.usage:
+            usage = message.usage
+            # Handle both dict and object-style usage
+            if isinstance(usage, dict):
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                cache_creation = usage.get("cache_creation_input_tokens", 0)
+                cache_read = usage.get("cache_read_input_tokens", 0)
+            else:
+                input_tokens = getattr(usage, "input_tokens", 0) or 0
+                output_tokens = getattr(usage, "output_tokens", 0) or 0
+                cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+
+            # Emit token usage event
+            if input_tokens > 0 or output_tokens > 0:
+                self._total_input_tokens += input_tokens
+                self._total_output_tokens += output_tokens
+                emit_token_usage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_creation_tokens=cache_creation,
+                    cache_read_tokens=cache_read,
                 )
+
+        # Log final progress
+        emit_progress(
+            turn=self._turn_count,
+            input_tokens=self._total_input_tokens,
+            output_tokens=self._total_output_tokens,
+        )
+
+        logger.debug(
+            "ResultMessage: total_input=%d, total_output=%d",
+            self._total_input_tokens,
+            self._total_output_tokens,
+        )
+
+    def _handle_stream_event(self, event: Any) -> None:
+        """Handle legacy StreamEvent format (older SDK versions).
+
+        StreamEvent has: uuid, session_id, event (dict), parent_tool_use_id
+        """
+        event_data = event.event
+        event_type = event_data.get("type", "")
+
+        # Track usage if available
+        if "usage" in event_data:
+            usage = event_data["usage"]
+            input_tokens = usage.get("input_tokens", 0)
+            output_tokens = usage.get("output_tokens", 0)
+            self._total_input_tokens += input_tokens
+            self._total_output_tokens += output_tokens
+            emit_token_usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+
+        # Log progress
+        if event_type in ("message_start", "content_block_start", "message_stop"):
+            emit_progress(
+                turn=self._turn_count,
+                input_tokens=self._total_input_tokens,
+                output_tokens=self._total_output_tokens,
+            )
 
     def _build_task_prompt(self) -> str:
         """Build the complete task prompt for the agent."""

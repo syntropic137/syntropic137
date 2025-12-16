@@ -37,6 +37,12 @@ class EventType(str, Enum):
     # Token events
     TOKEN_USAGE = "token_usage"
 
+    # Hook-based observability events (from SDK hooks)
+    PROMPT_SUBMITTED = "prompt_submitted"
+    EXECUTION_STOPPED = "execution_stopped"
+    SUBAGENT_STOPPED = "subagent_stopped"
+    CONTEXT_COMPACTING = "context_compacting"
+
 
 @dataclass
 class AgentEvent:
@@ -184,5 +190,50 @@ def emit_token_usage(
                 "cache_creation_tokens": cache_creation_tokens,
                 "cache_read_tokens": cache_read_tokens,
             },
+        )
+    )
+
+
+# =============================================================================
+# HOOK-BASED OBSERVABILITY EVENTS
+# =============================================================================
+
+
+def emit_prompt_submitted(prompt: str) -> None:
+    """Emit a prompt_submitted event (from UserPromptSubmit hook)."""
+    emit_event(
+        AgentEvent(
+            type=EventType.PROMPT_SUBMITTED,
+            data={"prompt": prompt},
+        )
+    )
+
+
+def emit_execution_stopped(reason: str) -> None:
+    """Emit an execution_stopped event (from Stop hook)."""
+    emit_event(
+        AgentEvent(
+            type=EventType.EXECUTION_STOPPED,
+            data={"reason": reason},
+        )
+    )
+
+
+def emit_subagent_stopped(subagent: str) -> None:
+    """Emit a subagent_stopped event (from SubagentStop hook)."""
+    emit_event(
+        AgentEvent(
+            type=EventType.SUBAGENT_STOPPED,
+            data={"subagent": subagent},
+        )
+    )
+
+
+def emit_context_compacting(message_count: int) -> None:
+    """Emit a context_compacting event (from PreCompact hook)."""
+    emit_event(
+        AgentEvent(
+            type=EventType.CONTEXT_COMPACTING,
+            data={"message_count": message_count},
         )
     )

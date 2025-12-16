@@ -9,12 +9,14 @@ Key features:
 - JSONL event streaming to stdout
 - Artifact writing to /workspace/artifacts/
 - Graceful cancellation via /workspace/.cancel
+- SDK hooks for observability and safety validation
 - Zero-trust: agent never sees raw API tokens (sidecar injects them)
 """
 
 __version__ = "0.1.0"
 
 from aef_agent_runner.events import AgentEvent, emit_event
+from aef_agent_runner.hooks import create_hooks_config
 from aef_agent_runner.runner import AgentRunner
 from aef_agent_runner.task import Task
 
@@ -22,5 +24,6 @@ __all__ = [
     "AgentEvent",
     "AgentRunner",
     "Task",
+    "create_hooks_config",
     "emit_event",
 ]
