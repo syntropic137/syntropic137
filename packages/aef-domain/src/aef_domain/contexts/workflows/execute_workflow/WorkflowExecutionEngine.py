@@ -19,9 +19,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
-from aef_domain.contexts.sessions._shared.value_objects import OperationType
-from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
-    RecordOperationCommand,
+from aef_domain.contexts.observability.domain.events.agent_observation import (
+    AgentObservationEvent,
 )
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     ExecutablePhase,
@@ -220,6 +219,7 @@ class WorkflowExecutionEngine:
         artifact_repository: ArtifactRepository,
         agent_factory: AgentFactory,
         artifact_query_service: ArtifactQueryServiceProtocol | None = None,
+        event_store: Any | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
@@ -233,6 +233,7 @@ class WorkflowExecutionEngine:
             artifact_query_service: Service for querying artifacts (REQUIRED for
                 multi-phase workflows). If None, phase outputs cannot be injected
                 into subsequent phase prompts.
+            event_store: Event store for persisting AgentObservation events
 
         Raises:
             ValueError: If execution_repository or workspace_service is None
@@ -255,6 +256,7 @@ class WorkflowExecutionEngine:
         self._artifacts = artifact_repository
         self._agent_factory = agent_factory
         self._artifact_query = artifact_query_service
+        self._event_store = event_store
 
     async def execute(
         self,
@@ -887,6 +889,11 @@ class WorkflowExecutionEngine:
                 total_input_tokens = 0
                 total_output_tokens = 0
 
+                # Variables for observation events
+                execution_id = ctx.execution_id
+                workspace_id = getattr(workspace, "id", None)  # Get workspace ID if available
+                agent_model = phase.agent_config.model
+
                 line_count = 0
                 async for line in workspace.stream(
                     ["python", "-m", "aef_agent_runner"],
@@ -902,27 +909,31 @@ class WorkflowExecutionEngine:
                         event_type = event.get("type", "")
                         logger.debug("Parsed event type: %s", event_type)
 
-                        # Update metrics from token_usage events
+                        # Handle token_usage observations
                         if event_type == "token_usage":
                             input_tokens = event.get("input_tokens", 0)
                             output_tokens = event.get("output_tokens", 0)
+                            cache_creation = event.get("cache_creation_input_tokens", 0)
+                            cache_read = event.get("cache_read_input_tokens", 0)
                             total_input_tokens += input_tokens
                             total_output_tokens += output_tokens
 
-                            # Forward to session aggregate for observability
-                            if session is not None and self._sessions is not None:
-                                record_cmd = RecordOperationCommand(
-                                    aggregate_id=session_id,
-                                    operation_type=OperationType.MESSAGE_RESPONSE,
+                            # Emit AgentObservation event
+                            if self._event_store is not None:
+                                observation = AgentObservationEvent.token_usage(
+                                    session_id=session_id,
                                     input_tokens=input_tokens,
                                     output_tokens=output_tokens,
-                                    total_tokens=input_tokens + output_tokens,
-                                    success=True,
+                                    cache_creation_tokens=cache_creation,
+                                    cache_read_tokens=cache_read,
+                                    model=agent_model,
+                                    execution_id=execution_id,
+                                    phase_id=phase.phase_id,
+                                    workspace_id=workspace_id,
                                 )
-                                session._handle_command(record_cmd)
-                                await self._sessions.save(session)
+                                await self._event_store.save(observation)
                                 logger.debug(
-                                    "Recorded token usage: %d input, %d output",
+                                    "Recorded token observation: %d input, %d output",
                                     input_tokens,
                                     output_tokens,
                                 )
@@ -935,41 +946,62 @@ class WorkflowExecutionEngine:
                                 event.get("turn", 0),
                             )
 
-                        # Handle analytics events from hook streamer
-                        if event_type == "analytics":
-                            source = event.get("source", "unknown")
-                            data = event.get("data", {})
+                        # Handle tool_use observations (tool started)
+                        if event_type == "tool_use":
+                            tool_name = event.get("tool", "unknown")
+                            tool_use_id = event.get("tool_use_id")
+                            tool_input = event.get("input", {})
                             logger.debug(
-                                "Analytics event (source=%s): %s",
-                                source,
-                                data.get("event_type", "unknown"),
+                                "Tool use: %s (id=%s)",
+                                tool_name,
+                                tool_use_id,
                             )
 
-                            # Forward tool events to session aggregate
-                            if session is not None and self._sessions is not None:
-                                analytics_type = data.get("event_type", "")
-                                if analytics_type == "tool_use":
-                                    record_cmd = RecordOperationCommand(
-                                        aggregate_id=session_id,
-                                        operation_type=OperationType.TOOL_STARTED,
-                                        tool_name=data.get("tool_name"),
-                                        tool_use_id=data.get("tool_use_id"),
-                                        tool_input=data.get("input"),
-                                        success=True,
-                                    )
-                                    session._handle_command(record_cmd)
-                                    await self._sessions.save(session)
-                                elif analytics_type == "tool_result":
-                                    record_cmd = RecordOperationCommand(
-                                        aggregate_id=session_id,
-                                        operation_type=OperationType.TOOL_COMPLETED,
-                                        tool_name=data.get("tool_name"),
-                                        tool_use_id=data.get("tool_use_id"),
-                                        tool_output=str(data.get("output", ""))[:1000],
-                                        success=not data.get("is_error", False),
-                                    )
-                                    session._handle_command(record_cmd)
-                                    await self._sessions.save(session)
+                            # Emit AgentObservation event
+                            if self._event_store is not None:
+                                import json
+
+                                input_preview = json.dumps(tool_input)[:200] if tool_input else None
+                                observation = AgentObservationEvent.tool_started(
+                                    session_id=session_id,
+                                    tool_name=tool_name,
+                                    tool_use_id=tool_use_id,
+                                    input_preview=input_preview,
+                                    execution_id=execution_id,
+                                    phase_id=phase.phase_id,
+                                    workspace_id=workspace_id,
+                                )
+                                await self._event_store.save(observation)
+
+                        # Handle tool_result observations (tool completed)
+                        if event_type == "tool_result":
+                            tool_name = event.get("tool", "unknown")
+                            tool_use_id = event.get("tool_use_id")
+                            success = event.get("success", True)
+                            duration_ms = event.get("duration_ms")
+                            output = event.get("output")
+                            logger.debug(
+                                "Tool result: %s (id=%s, success=%s)",
+                                tool_name,
+                                tool_use_id,
+                                success,
+                            )
+
+                            # Emit AgentObservation event
+                            if self._event_store is not None:
+                                output_preview = str(output)[:200] if output else None
+                                observation = AgentObservationEvent.tool_completed(
+                                    session_id=session_id,
+                                    tool_name=tool_name,
+                                    tool_use_id=tool_use_id,
+                                    success=success,
+                                    output_preview=output_preview,
+                                    duration_ms=duration_ms,
+                                    execution_id=execution_id,
+                                    phase_id=phase.phase_id,
+                                    workspace_id=workspace_id,
+                                )
+                                await self._event_store.save(observation)
 
                     except json.JSONDecodeError:
                         logger.warning("Invalid JSONL line: %s", line[:100])
