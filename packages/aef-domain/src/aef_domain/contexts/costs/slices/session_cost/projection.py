@@ -3,7 +3,9 @@
 Pattern: Event Log + CQRS (ADR-018 Pattern 2)
 
 Subscribes to:
-- CostRecorded: Individual cost events
+- AgentObservation: Unified telemetry events (all agent observations)
+  - TOKEN_USAGE: Updates token counts and costs
+  - TOOL_COMPLETED: Increments tool_calls count
 - SessionCostFinalized: Session completion with final totals
 """
 
@@ -12,6 +14,7 @@ from decimal import Decimal
 from typing import Any
 
 from aef_domain.contexts.costs.domain.read_models.session_cost import SessionCost
+from aef_domain.contexts.observability.domain.events.agent_observation import ObservationType
 
 
 class SessionCostProjection:
@@ -41,13 +44,19 @@ class SessionCostProjection:
         """Get the projection name."""
         return self.PROJECTION_NAME
 
-    async def on_cost_recorded(self, event_data: dict[str, Any]) -> None:
-        """Handle CostRecorded event.
+    async def on_agent_observation(self, event_data: dict[str, Any]) -> None:
+        """Handle AgentObservation event.
 
-        Incrementally updates the session cost totals.
+        Processes unified telemetry:
+        - TOKEN_USAGE: Calculate cost from tokens, update counts
+        - TOOL_COMPLETED: Increment tool_calls count
         """
         session_id = event_data.get("session_id")
         if not session_id:
+            return
+
+        observation_type = event_data.get("observation_type")
+        if not observation_type:
             return
 
         # Get existing session cost or create new
@@ -73,76 +82,62 @@ class SessionCostProjection:
                 elif isinstance(ts, datetime):
                     session_cost.started_at = ts
 
-        # Parse cost amount
-        amount_str = event_data.get("amount_usd", "0")
-        amount = Decimal(str(amount_str))
+        # Type-specific payload
+        data = event_data.get("data", {})
 
-        cost_type = event_data.get("cost_type", "")
-
-        # Update totals based on cost type
-        if cost_type == "llm_tokens":
-            session_cost.token_cost_usd += amount
+        # Handle TOKEN_USAGE observations
+        if observation_type == ObservationType.TOKEN_USAGE.value:
+            input_tokens = data.get("input_tokens") or 0
+            output_tokens = data.get("output_tokens") or 0
+            cache_creation = data.get("cache_creation_tokens") or 0
+            cache_read = data.get("cache_read_tokens") or 0
 
             # Update token counts
-            input_tokens = event_data.get("input_tokens") or 0
-            output_tokens = event_data.get("output_tokens") or 0
-            cache_creation = event_data.get("cache_creation_tokens") or 0
-            cache_read = event_data.get("cache_read_tokens") or 0
-
             session_cost.input_tokens += input_tokens
             session_cost.output_tokens += output_tokens
             session_cost.cache_creation_tokens += cache_creation
             session_cost.cache_read_tokens += cache_read
 
+            # Calculate cost (using default pricing - can be enhanced with ModelPricing)
+            # Prices per 1M tokens (Claude 3.5 Sonnet pricing)
+            input_price_per_million = Decimal("3.00")  # $3/MTok input
+            output_price_per_million = Decimal("15.00")  # $15/MTok output
+            cache_write_per_million = Decimal("3.75")  # $3.75/MTok cache write
+            cache_read_per_million = Decimal("0.30")  # $0.30/MTok cache read
+
+            input_cost = (Decimal(input_tokens) / 1_000_000) * input_price_per_million
+            output_cost = (Decimal(output_tokens) / 1_000_000) * output_price_per_million
+            cache_write_cost = (Decimal(cache_creation) / 1_000_000) * cache_write_per_million
+            cache_read_cost = (Decimal(cache_read) / 1_000_000) * cache_read_per_million
+
+            token_cost = input_cost + output_cost + cache_write_cost + cache_read_cost
+            session_cost.token_cost_usd += token_cost
+            session_cost.total_cost_usd += token_cost
+
             # Update cost by model
-            model = event_data.get("model")
+            model = data.get("model")
             if model:
                 current = session_cost.cost_by_model.get(model, Decimal("0"))
-                session_cost.cost_by_model[model] = current + amount
+                session_cost.cost_by_model[model] = current + token_cost
 
-            # Aggregate tool token breakdown (if present)
-            tool_breakdown = event_data.get("tool_token_breakdown", {})
-            event_total_tokens = input_tokens + output_tokens + cache_creation + cache_read
-
-            for tool_name, tool_tokens in tool_breakdown.items():
-                tool_use = tool_tokens.get("tool_use", 0)
-                tool_result = tool_tokens.get("tool_result", 0)
-                total_tool_tokens = tool_use + tool_result
-
-                # Aggregate tokens by tool
-                current_tokens = session_cost.tokens_by_tool.get(tool_name, 0)
-                session_cost.tokens_by_tool[tool_name] = current_tokens + total_tool_tokens
-
-                # Calculate proportional cost for this tool
-                # (tool_tokens / total_event_tokens) * event_cost
-                if event_total_tokens > 0 and amount > 0:
-                    tool_cost = (Decimal(total_tool_tokens) / Decimal(event_total_tokens)) * amount
-                    current_cost = session_cost.cost_by_tool_tokens.get(tool_name, Decimal("0"))
-                    session_cost.cost_by_tool_tokens[tool_name] = current_cost + tool_cost
-
-            # Increment turns (each token usage = one turn)
+            # Increment turns (each token_usage = one turn)
             session_cost.turns += 1
 
-        elif cost_type == "tool_execution":
-            session_cost.compute_cost_usd += amount
-
-            # Update tool metrics
+        # Handle TOOL_COMPLETED observations
+        elif observation_type == ObservationType.TOOL_COMPLETED.value:
             session_cost.tool_calls += 1
 
-            duration = event_data.get("tool_duration_ms") or 0
-            session_cost.duration_ms += duration
+            # Track duration if available
+            duration_ms = data.get("duration_ms")
+            if duration_ms:
+                session_cost.duration_ms += duration_ms
 
-            # Update cost by tool
-            tool_name = event_data.get("tool_name")
+            # Track tool name for breakdown
+            tool_name = data.get("tool_name")
             if tool_name:
-                current = session_cost.cost_by_tool.get(tool_name, Decimal("0"))
-                session_cost.cost_by_tool[tool_name] = current + amount
-
-        elif cost_type == "compute":
-            session_cost.compute_cost_usd += amount
-
-        # Update total
-        session_cost.total_cost_usd += amount
+                # Track call count by tool (using cost_by_tool as counter for now)
+                # Note: actual tool execution cost would need compute pricing
+                pass  # Tool execution itself is free - cost is in tokens
 
         # Save updated session cost
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
