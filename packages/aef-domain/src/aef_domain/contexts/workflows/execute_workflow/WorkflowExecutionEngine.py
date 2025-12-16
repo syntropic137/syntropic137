@@ -298,11 +298,12 @@ class WorkflowExecutionEngine:
             tenant_id=tenant_id,
         )
 
-        # Append to event store with correct expected_version
-        # For first event (nonce=1), expected_version=None creates new stream
-        # For subsequent events, expected_version is the previous nonce
+        # Append to event store with optimistic concurrency control
+        # expected_version = number of events already in stream
+        # For first event (nonce=1): expected_version=0 (stream has 0 events)
+        # For second event (nonce=2): expected_version=1 (stream has 1 event)
         stream_name = f"AgentObservations-{session_id}"
-        expected_version = None if nonce == 1 else nonce - 1
+        expected_version = nonce - 1
         await self._event_store.append_events(
             stream_name=stream_name,
             events=[envelope],
