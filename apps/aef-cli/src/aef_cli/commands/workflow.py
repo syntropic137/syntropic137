@@ -875,8 +875,6 @@ def run_workflow(
                 )
 
             # Create engine with ADR-023 compliant dependencies
-            import os
-
             from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.workspace_backends.service import WorkspaceService
 
