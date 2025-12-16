@@ -38,10 +38,58 @@ from aef_agent_runner.events import (
 logger = logging.getLogger(__name__)
 
 # =============================================================================
+# CONSTANTS
+# TODO: Move to agentic-primitives for consistent agent operations
+# =============================================================================
+
+
+class HookEventName:
+    """SDK hook event names (from claude-agent-sdk HookEvent type)."""
+
+    PRE_TOOL_USE = "PreToolUse"
+    POST_TOOL_USE = "PostToolUse"
+    USER_PROMPT_SUBMIT = "UserPromptSubmit"
+    STOP = "Stop"
+    SUBAGENT_STOP = "SubagentStop"
+    PRE_COMPACT = "PreCompact"
+
+
+class PermissionDecision:
+    """Permission decisions returned by safety hooks."""
+
+    ALLOW = "allow"
+    DENY = "deny"
+
+
+class ToolName:
+    """Claude Code built-in tool names."""
+
+    BASH = "Bash"
+    READ = "Read"
+    WRITE = "Write"
+    EDIT = "Edit"
+    GLOB = "Glob"
+    GREP = "Grep"
+    TASK = "Task"
+
+
+# Sensitive System Paths (blocked for writes)
+SENSITIVE_PATHS: tuple[str, ...] = (
+    "/etc/",
+    "/usr/",
+    "/bin/",
+    "/sbin/",
+    "/boot/",
+    "/lib/",
+    "/lib64/",
+    "/var/",
+)
+
+# =============================================================================
 # DANGEROUS COMMAND PATTERNS (for safety validation)
 # =============================================================================
 
-DANGEROUS_BASH_PATTERNS: list[str] = [
+DANGEROUS_BASH_PATTERNS: tuple[str, ...] = (
     "rm -rf /",
     "rm -rf ~",
     "rm -rf /*",
@@ -55,7 +103,7 @@ DANGEROUS_BASH_PATTERNS: list[str] = [
     "chown -R",
     "wget http",  # Potentially dangerous downloads without https
     "curl http",  # Potentially dangerous downloads without https
-]
+)
 
 
 # =============================================================================
@@ -262,7 +310,7 @@ async def validate_tool_use(
     tool_input = input_data.get("tool_input", {})
 
     # Validate Bash commands
-    if tool_name == "Bash":
+    if tool_name == ToolName.BASH:
         command = tool_input.get("command", "")
         is_dangerous, pattern = _is_dangerous_command(command)
 
@@ -274,23 +322,22 @@ async def validate_tool_use(
             )
             return {
                 "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
+                    "hookEventName": HookEventName.PRE_TOOL_USE,
+                    "permissionDecision": PermissionDecision.DENY,
                     "permissionDecisionReason": f"Dangerous command blocked (matched: {pattern})",
                 }
             }
 
     # Validate Write operations to sensitive paths
-    if tool_name == "Write":
+    if tool_name == ToolName.WRITE:
         file_path = tool_input.get("file_path", "")
-        sensitive_paths = ["/etc/", "/usr/", "/bin/", "/sbin/", "/boot/"]
-        for sensitive in sensitive_paths:
+        for sensitive in SENSITIVE_PATHS:
             if file_path.startswith(sensitive):
                 logger.warning("BLOCKED write to sensitive path: %s", file_path)
                 return {
                     "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
+                        "hookEventName": HookEventName.PRE_TOOL_USE,
+                        "permissionDecision": PermissionDecision.DENY,
                         "permissionDecisionReason": f"Write to sensitive path blocked: {sensitive}",
                     }
                 }

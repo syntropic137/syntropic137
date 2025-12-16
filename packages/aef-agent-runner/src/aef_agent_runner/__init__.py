@@ -16,14 +16,22 @@ Key features:
 __version__ = "0.1.0"
 
 from aef_agent_runner.events import AgentEvent, emit_event
-from aef_agent_runner.hooks import create_hooks_config
+from aef_agent_runner.hooks import (
+    HookEventName,
+    PermissionDecision,
+    ToolName,
+    create_hooks_config,
+)
 from aef_agent_runner.runner import AgentRunner
 from aef_agent_runner.task import Task
 
 __all__ = [
     "AgentEvent",
     "AgentRunner",
+    "HookEventName",
+    "PermissionDecision",
     "Task",
+    "ToolName",
     "create_hooks_config",
     "emit_event",
 ]
