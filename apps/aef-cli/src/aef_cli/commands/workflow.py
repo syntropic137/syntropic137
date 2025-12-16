@@ -875,12 +875,16 @@ def run_workflow(
                 )
 
             # Create engine with ADR-023 compliant dependencies
-            from aef_adapters.storage.event_store_client import get_event_store_client
             from aef_adapters.storage.repositories import get_workflow_execution_repository
+            from aef_adapters.storage.observability_writer import get_observability_writer
             from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
-            event_store = get_event_store_client()
+            observability_writer = get_observability_writer()
+
+            # Initialize observability writer (creates TimescaleDB schema)
+            import asyncio
+            asyncio.create_task(observability_writer.initialize())
 
             # Container environment - non-sensitive config only (ADR-024)
             #
@@ -904,7 +908,7 @@ def run_workflow(
                 session_repository=session_repo,
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,
-                event_store=event_store,
+                observability_writer=observability_writer,
             )
 
             # Setup progress display

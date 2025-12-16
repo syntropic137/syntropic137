@@ -196,6 +196,54 @@ test:
 test-cov:
     uv run pytest --cov=apps/aef-cli/src --cov=packages/aef-domain/src --cov=packages/aef-adapters/src --cov=packages/aef-shared/src --cov-report=term-missing --cov-fail-under=80
 
+# Test TimescaleDB observability stack in isolation
+test-timescale-isolated:
+    @echo "🧪 Starting isolated TimescaleDB test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_timescale.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ TimescaleDB isolated test complete!"
+
+# Test ObservabilityWriter in isolation
+test-writer-isolated:
+    @echo "🧪 Starting ObservabilityWriter test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_writer.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ ObservabilityWriter isolated test complete!"
+
+# Test CostProjection in isolation
+test-projection-isolated:
+    @echo "🧪 Starting CostProjection test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_projection.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ CostProjection isolated test complete!"
+
+# Test E2E observability flow in isolation
+test-observability-e2e:
+    @echo "🧪 Starting E2E observability test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_e2e.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ E2E observability test complete!"
+
 # Run linter
 lint:
     uv run ruff check .

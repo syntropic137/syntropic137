@@ -21,13 +21,9 @@ from uuid import uuid4
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
     AgentObservationEvent,
+    ObservationType,
 )
 
-# Import for direct event store access
-try:
-    from event_sourcing.core.event import EventFactory
-except ImportError:
-    EventFactory = None  # type: ignore[misc, assignment]
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -225,7 +221,7 @@ class WorkflowExecutionEngine:
         artifact_repository: ArtifactRepository,
         agent_factory: AgentFactory,
         artifact_query_service: ArtifactQueryServiceProtocol | None = None,
-        event_store: Any | None = None,
+        observability_writer: Any | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
@@ -239,7 +235,7 @@ class WorkflowExecutionEngine:
             artifact_query_service: Service for querying artifacts (REQUIRED for
                 multi-phase workflows). If None, phase outputs cannot be injected
                 into subsequent phase prompts.
-            event_store: Event store for persisting AgentObservation events
+            observability_writer: ObservabilityWriter for TimescaleDB (ADR-026)
 
         Raises:
             ValueError: If execution_repository or workspace_service is None
@@ -262,52 +258,37 @@ class WorkflowExecutionEngine:
         self._artifacts = artifact_repository
         self._agent_factory = agent_factory
         self._artifact_query = artifact_query_service
-        self._event_store = event_store
-        # Track observation nonces per session for event store appends
-        self._observation_nonces: dict[str, int] = {}
+        self._observability_writer = observability_writer
 
-    async def _append_observation(
+    async def _record_observation(
         self,
-        observation: AgentObservationEvent,
+        observation_type: ObservationType,
         session_id: str,
-        tenant_id: str = "default",
+        data: dict[str, Any],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> None:
-        """Append an AgentObservation event to the event store.
-
-        Uses a separate stream per session: AgentObservations-{session_id}
-        This keeps high-volume observability events separate from aggregate events.
+        """Record an agent observation to TimescaleDB.
 
         Args:
-            observation: The observation event to append
+            observation_type: Type of observation (TOKEN_USAGE, TOOL_STARTED, TOOL_COMPLETED)
             session_id: The session ID
-            tenant_id: The tenant ID for multi-tenancy
+            data: Observation data (JSONB)
+            execution_id: Optional execution ID
+            phase_id: Optional phase ID
+            workspace_id: Optional workspace ID
         """
-        if self._event_store is None or EventFactory is None:
+        if self._observability_writer is None:
             return
 
-        # Get/increment nonce for this session
-        nonce = self._observation_nonces.get(session_id, 0) + 1
-        self._observation_nonces[session_id] = nonce
-
-        # Create event envelope with metadata
-        envelope = EventFactory.create(
-            event=observation,
-            aggregate_id=session_id,
-            aggregate_type="AgentObservations",  # Separate type for observations
-            aggregate_nonce=nonce,
-            tenant_id=tenant_id,
-        )
-
-        # Append to event store with optimistic concurrency control
-        # expected_version = number of events already in stream
-        # For first event (nonce=1): expected_version=0 (stream has 0 events)
-        # For second event (nonce=2): expected_version=1 (stream has 1 event)
-        stream_name = f"AgentObservations-{session_id}"
-        expected_version = nonce - 1
-        await self._event_store.append_events(
-            stream_name=stream_name,
-            events=[envelope],
-            expected_version=expected_version,
+        await self._observability_writer.record_observation(
+            session_id=session_id,
+            observation_type=observation_type.value,
+            data=data,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
         )
 
     async def execute(
@@ -970,23 +951,21 @@ class WorkflowExecutionEngine:
                             total_input_tokens += input_tokens
                             total_output_tokens += output_tokens
 
-                            # Emit AgentObservation event
-                            if self._event_store is not None:
-                                observation = AgentObservationEvent.token_usage(
+                            # Record token usage observation to TimescaleDB
+                            if self._observability_writer is not None:
+                                await self._record_observation(
+                                    observation_type=ObservationType.TOKEN_USAGE,
                                     session_id=session_id,
-                                    input_tokens=input_tokens,
-                                    output_tokens=output_tokens,
-                                    cache_creation_tokens=cache_creation,
-                                    cache_read_tokens=cache_read,
-                                    model=agent_model,
+                                    data={
+                                        'input_tokens': input_tokens,
+                                        'output_tokens': output_tokens,
+                                        'cache_creation_tokens': cache_creation,
+                                        'cache_read_tokens': cache_read,
+                                        'model': agent_model,
+                                    },
                                     execution_id=execution_id,
                                     phase_id=phase.phase_id,
                                     workspace_id=workspace_id,
-                                )
-                                await self._append_observation(
-                                    observation=observation,
-                                    session_id=session_id,
-                                    tenant_id=tenant_id or "default",
                                 )
                                 logger.debug(
                                     "Recorded token observation: %d input, %d output",
@@ -1013,24 +992,23 @@ class WorkflowExecutionEngine:
                                 tool_use_id,
                             )
 
-                            # Emit AgentObservation event
-                            if self._event_store is not None:
+                            # Record tool started observation to TimescaleDB
+                            if self._observability_writer is not None:
                                 import json
 
                                 input_preview = json.dumps(tool_input)[:200] if tool_input else None
-                                observation = AgentObservationEvent.tool_started(
+                                await self._record_observation(
+                                    observation_type=ObservationType.TOOL_STARTED,
                                     session_id=session_id,
-                                    tool_name=tool_name,
-                                    tool_use_id=tool_use_id,
-                                    input_preview=input_preview,
+                                    data={
+                                        'tool_name': tool_name,
+                                        'tool_use_id': tool_use_id,
+                                        'input': tool_input,
+                                        'input_preview': input_preview,
+                                    },
                                     execution_id=execution_id,
                                     phase_id=phase.phase_id,
                                     workspace_id=workspace_id,
-                                )
-                                await self._append_observation(
-                                    observation=observation,
-                                    session_id=session_id,
-                                    tenant_id=tenant_id or "default",
                                 )
 
                         # Handle tool_result observations (tool completed)
@@ -1047,24 +1025,23 @@ class WorkflowExecutionEngine:
                                 success,
                             )
 
-                            # Emit AgentObservation event
-                            if self._event_store is not None:
+                            # Record tool completed observation to TimescaleDB
+                            if self._observability_writer is not None:
                                 output_preview = str(output)[:200] if output else None
-                                observation = AgentObservationEvent.tool_completed(
+                                await self._record_observation(
+                                    observation_type=ObservationType.TOOL_COMPLETED,
                                     session_id=session_id,
-                                    tool_name=tool_name,
-                                    tool_use_id=tool_use_id,
-                                    success=success,
-                                    output_preview=output_preview,
-                                    duration_ms=duration_ms,
+                                    data={
+                                        'tool_name': tool_name,
+                                        'tool_use_id': tool_use_id,
+                                        'success': success,
+                                        'output': output,
+                                        'output_preview': output_preview,
+                                        'duration_ms': duration_ms,
+                                    },
                                     execution_id=execution_id,
                                     phase_id=phase.phase_id,
                                     workspace_id=workspace_id,
-                                )
-                                await self._append_observation(
-                                    observation=observation,
-                                    session_id=session_id,
-                                    tenant_id=tenant_id or "default",
                                 )
 
                     except json.JSONDecodeError:
