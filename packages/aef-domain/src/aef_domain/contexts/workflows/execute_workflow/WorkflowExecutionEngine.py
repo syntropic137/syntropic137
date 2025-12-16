@@ -298,11 +298,15 @@ class WorkflowExecutionEngine:
             tenant_id=tenant_id,
         )
 
-        # Append to event store
+        # Append to event store with correct expected_version
+        # For first event (nonce=1), expected_version=None creates new stream
+        # For subsequent events, expected_version is the previous nonce
         stream_name = f"AgentObservations-{session_id}"
+        expected_version = None if nonce == 1 else nonce - 1
         await self._event_store.append_events(
             stream_name=stream_name,
             events=[envelope],
+            expected_version=expected_version,
         )
 
     async def execute(
