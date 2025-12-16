@@ -78,7 +78,7 @@ async def test_writer():
 
         # Verify data integrity
         token_row = await conn.fetchrow('''
-            SELECT data FROM agent_observations 
+            SELECT data FROM agent_observations
             WHERE session_id = $1 AND observation_type = $2
             ORDER BY time DESC LIMIT 1
         ''', 'test-session-1', 'token_usage')

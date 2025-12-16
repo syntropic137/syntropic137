@@ -875,16 +875,16 @@ def run_workflow(
                 )
 
             # Create engine with ADR-023 compliant dependencies
-            from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.storage.observability_writer import get_observability_writer
+            from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
             observability_writer = get_observability_writer()
 
             # Initialize observability writer (creates TimescaleDB schema)
-            import asyncio
-            asyncio.create_task(observability_writer.initialize())
+            # Note: initialization happens lazily on first write
+            # No need to pre-initialize here
 
             # Container environment - non-sensitive config only (ADR-024)
             #

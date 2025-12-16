@@ -53,7 +53,7 @@ class ObservabilityWriter:
 
             # Add compression policy (compress data older than 7 days)
             await conn.execute('''
-                SELECT add_compression_policy('agent_observations', 
+                SELECT add_compression_policy('agent_observations',
                     INTERVAL '7 days',
                     if_not_exists => TRUE
                 )

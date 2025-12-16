@@ -11,11 +11,12 @@ This separates observability events (high-volume, time-series) from
 domain events (low-volume, aggregate-centric) for scalability.
 """
 
-import asyncpg
-from datetime import datetime, UTC
-from uuid import uuid4
 import json
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
+
+import asyncpg
 
 
 class ObservabilityWriter:
@@ -53,10 +54,10 @@ class ObservabilityWriter:
 
         async with self.pool.acquire() as conn:
             # Enable TimescaleDB extension
-            await conn.execute('CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;')
+            await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
 
             # Create observations table
-            await conn.execute('''
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS agent_observations (
                     time TIMESTAMPTZ NOT NULL,
                     session_id TEXT NOT NULL,
@@ -68,50 +69,50 @@ class ObservabilityWriter:
                     data JSONB NOT NULL,
                     PRIMARY KEY (time, observation_id)
                 )
-            ''')
+            """)
 
             # Create hypertable (partitioned by time for time-series optimization)
-            await conn.execute('''
+            await conn.execute("""
                 SELECT create_hypertable(
                     'agent_observations',
                     'time',
                     if_not_exists => TRUE,
                     chunk_time_interval => INTERVAL '1 day'
                 )
-            ''')
+            """)
 
             # Create indexes for common queries
-            await conn.execute('''
+            await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_observations_session
                 ON agent_observations (session_id, time DESC)
-            ''')
+            """)
 
-            await conn.execute('''
+            await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_observations_execution
                 ON agent_observations (execution_id, time DESC)
-            ''')
+            """)
 
-            await conn.execute('''
+            await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_observations_type
                 ON agent_observations (observation_type, time DESC)
-            ''')
+            """)
 
             # Configure compression (compress data older than 7 days)
-            await conn.execute('''
+            await conn.execute("""
                 ALTER TABLE agent_observations SET (
                     timescaledb.compress,
                     timescaledb.compress_segmentby = 'session_id, observation_type'
                 )
-            ''')
+            """)
 
             # Add compression policy
-            await conn.execute('''
+            await conn.execute("""
                 SELECT add_compression_policy(
                     'agent_observations',
                     INTERVAL '7 days',
                     if_not_exists => TRUE
                 )
-            ''')
+            """)
 
             # Add retention policy (optional - keep data for 90 days)
             # Uncomment when ready for production data lifecycle management
@@ -150,15 +151,27 @@ class ObservabilityWriter:
         if not self._initialized:
             await self.initialize()
 
+        if self.pool is None:
+            raise RuntimeError("ObservabilityWriter pool is not initialized")
+
         observation_id = str(uuid4())
 
         async with self.pool.acquire() as conn:
-            await conn.execute('''
+            await conn.execute(
+                """
                 INSERT INTO agent_observations
                 (time, session_id, observation_type, observation_id, data, execution_id, phase_id, workspace_id)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ''', datetime.now(UTC), session_id, observation_type,
-                 observation_id, json.dumps(data), execution_id, phase_id, workspace_id)
+            """,
+                datetime.now(UTC),
+                session_id,
+                observation_type,
+                observation_id,
+                json.dumps(data),
+                execution_id,
+                phase_id,
+                workspace_id,
+            )
 
         return observation_id
 
@@ -188,6 +201,7 @@ def get_observability_writer(connection_string: str | None = None) -> Observabil
     if _observability_writer is None:
         if connection_string is None:
             from aef_shared.settings.config import get_settings
+
             settings = get_settings()
             connection_string = (
                 f"postgresql://{settings.timescale_user}:{settings.timescale_password.get_secret_value()}"

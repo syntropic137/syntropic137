@@ -20,10 +20,8 @@ from uuid import uuid4
 
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
-    AgentObservationEvent,
     ObservationType,
 )
-
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -957,11 +955,11 @@ class WorkflowExecutionEngine:
                                     observation_type=ObservationType.TOKEN_USAGE,
                                     session_id=session_id,
                                     data={
-                                        'input_tokens': input_tokens,
-                                        'output_tokens': output_tokens,
-                                        'cache_creation_tokens': cache_creation,
-                                        'cache_read_tokens': cache_read,
-                                        'model': agent_model,
+                                        "input_tokens": input_tokens,
+                                        "output_tokens": output_tokens,
+                                        "cache_creation_tokens": cache_creation,
+                                        "cache_read_tokens": cache_read,
+                                        "model": agent_model,
                                     },
                                     execution_id=execution_id,
                                     phase_id=phase.phase_id,
@@ -1001,10 +999,10 @@ class WorkflowExecutionEngine:
                                     observation_type=ObservationType.TOOL_STARTED,
                                     session_id=session_id,
                                     data={
-                                        'tool_name': tool_name,
-                                        'tool_use_id': tool_use_id,
-                                        'input': tool_input,
-                                        'input_preview': input_preview,
+                                        "tool_name": tool_name,
+                                        "tool_use_id": tool_use_id,
+                                        "input": tool_input,
+                                        "input_preview": input_preview,
                                     },
                                     execution_id=execution_id,
                                     phase_id=phase.phase_id,
@@ -1032,12 +1030,12 @@ class WorkflowExecutionEngine:
                                     observation_type=ObservationType.TOOL_COMPLETED,
                                     session_id=session_id,
                                     data={
-                                        'tool_name': tool_name,
-                                        'tool_use_id': tool_use_id,
-                                        'success': success,
-                                        'output': output,
-                                        'output_preview': output_preview,
-                                        'duration_ms': duration_ms,
+                                        "tool_name": tool_name,
+                                        "tool_use_id": tool_use_id,
+                                        "success": success,
+                                        "output": output,
+                                        "output_preview": output_preview,
+                                        "duration_ms": duration_ms,
                                     },
                                     execution_id=execution_id,
                                     phase_id=phase.phase_id,

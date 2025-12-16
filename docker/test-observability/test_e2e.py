@@ -60,40 +60,40 @@ async def test_e2e():
     # Tools: 6 (2 per turn × 3 turns)
 
     print(f"\n🔍 Validation:")
-    
+
     # Assertions
     errors = []
-    
+
     if result['input_tokens'] != 23000:
         errors.append(f"Input tokens: expected 23000, got {result['input_tokens']}")
     else:
         print("  ✓ Input tokens: 23,000")
-    
+
     if result['output_tokens'] != 6500:
         errors.append(f"Output tokens: expected 6500, got {result['output_tokens']}")
     else:
         print("  ✓ Output tokens: 6,500")
-    
+
     if result['cache_creation_tokens'] != 8000:
         errors.append(f"Cache creation: expected 8000, got {result['cache_creation_tokens']}")
     else:
         print("  ✓ Cache creation: 8,000")
-    
+
     if result['cache_read_tokens'] != 22000:
         errors.append(f"Cache read: expected 22000, got {result['cache_read_tokens']}")
     else:
         print("  ✓ Cache read: 22,000")
-    
+
     if result['tool_calls'] != 6:
         errors.append(f"Tool calls: expected 6, got {result['tool_calls']}")
     else:
         print("  ✓ Tool calls: 6")
-    
+
     if result['total_cost_usd'] <= 0:
         errors.append(f"Cost should be > 0, got {result['total_cost_usd']}")
     else:
         print(f"  ✓ Total cost: ${result['total_cost_usd']:.4f}")
-    
+
     # Verify cost calculation manually
     # Input: 23000 * $0.000003 = $0.069
     # Output: 6500 * $0.000015 = $0.0975
