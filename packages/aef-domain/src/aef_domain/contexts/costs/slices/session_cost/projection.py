@@ -2,11 +2,11 @@
 
 Pattern: Event Log + CQRS (ADR-018 Pattern 2)
 
-Subscribes to:
-- AgentObservation: Unified telemetry events (all agent observations)
-  - TOKEN_USAGE: Updates token counts and costs
-  - TOOL_COMPLETED: Increments tool_calls count
-- SessionCostFinalized: Session completion with final totals
+Data Sources:
+- TimescaleDB: agent_observations table (token_usage, tool_started, tool_completed)
+- Event Store: SessionCostFinalized events (optional finalized totals)
+
+See ADR-026: TimescaleDB for Observability Storage
 """
 
 from datetime import datetime
@@ -31,13 +31,15 @@ class SessionCostProjection:
 
     PROJECTION_NAME = "session_cost"
 
-    def __init__(self, store: Any):
-        """Initialize with a projection store.
+    def __init__(self, store: Any, observability_writer: Any | None = None):
+        """Initialize with a projection store and optional observability writer.
 
         Args:
             store: A ProjectionStoreProtocol implementation
+            observability_writer: ObservabilityWriter for querying TimescaleDB
         """
         self._store = store
+        self._observability_writer = observability_writer
 
     @property
     def name(self) -> str:
@@ -224,16 +226,95 @@ class SessionCostProjection:
     async def get_session_cost(self, session_id: str) -> SessionCost | None:
         """Get session cost by session ID.
 
+        Queries TimescaleDB directly for real-time cost calculation.
+
         Args:
             session_id: The session to get cost for.
 
         Returns:
             SessionCost if found, None otherwise.
         """
+        # Query TimescaleDB directly if observability_writer is available
+        if self._observability_writer is not None:
+            return await self._calculate_from_timescale(session_id)
+
+        # Fallback to projection store (legacy path)
         data = await self._store.get(self.PROJECTION_NAME, session_id)
         if not data:
             return None
         return SessionCost.from_dict(data)
+
+    async def _calculate_from_timescale(self, session_id: str) -> SessionCost | None:
+        """Calculate session cost directly from TimescaleDB observations.
+
+        Args:
+            session_id: The session to calculate cost for
+
+        Returns:
+            SessionCost with aggregated metrics, or None if no observations found
+        """
+        if self._observability_writer.pool is None:
+            return None
+
+        async with self._observability_writer.pool.acquire() as conn:
+            # Aggregate token usage
+            token_result = await conn.fetchrow(
+                """
+                SELECT
+                    SUM((data->>'input_tokens')::int) as total_input,
+                    SUM((data->>'output_tokens')::int) as total_output,
+                    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+                    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
+                    MIN(time) as started_at,
+                    MAX(time) as last_observation,
+                    execution_id,
+                    phase_id,
+                    workspace_id
+                FROM agent_observations
+                WHERE session_id = $1 AND observation_type = 'token_usage'
+                GROUP BY execution_id, phase_id, workspace_id
+                """,
+                session_id,
+            )
+
+            if not token_result or token_result["total_input"] is None:
+                return None
+
+            # Count tool calls
+            tool_count = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM agent_observations
+                WHERE session_id = $1 AND observation_type = 'tool_completed'
+                """,
+                session_id,
+            )
+
+            # Calculate cost (Claude Sonnet 4 pricing)
+            input_cost = Decimal(token_result["total_input"] or 0) * Decimal("0.000003")
+            output_cost = Decimal(token_result["total_output"] or 0) * Decimal("0.000015")
+            cache_creation_cost = (
+                Decimal(token_result["cache_creation"] or 0) * Decimal("0.00000375")
+            )
+            cache_read_cost = Decimal(token_result["cache_read"] or 0) * Decimal("0.0000003")
+
+            total_cost = input_cost + output_cost + cache_creation_cost + cache_read_cost
+
+            # Build SessionCost
+            session_cost = SessionCost(session_id=session_id)
+            session_cost.input_tokens = token_result["total_input"] or 0
+            session_cost.output_tokens = token_result["total_output"] or 0
+            session_cost.cache_creation_tokens = token_result["cache_creation"] or 0
+            session_cost.cache_read_tokens = token_result["cache_read"] or 0
+            session_cost.tool_calls = tool_count or 0
+            session_cost.token_cost_usd = total_cost
+            session_cost.total_cost_usd = total_cost
+            session_cost.started_at = token_result["started_at"]
+            session_cost.execution_id = token_result["execution_id"]
+            session_cost.phase_id = token_result["phase_id"]
+            session_cost.workspace_id = token_result["workspace_id"]
+
+            return session_cost
 
     async def get_sessions_for_execution(self, execution_id: str) -> list[SessionCost]:
         """Get all session costs for an execution.

@@ -95,6 +95,7 @@ async def _start_subscription_service() -> None:
             connect_event_store,
             get_event_store_client,
         )
+        from aef_adapters.storage.observability_writer import get_observability_writer
         from aef_adapters.subscriptions import create_coordinator_service
         from aef_shared.settings import get_settings
 
@@ -104,6 +105,16 @@ async def _start_subscription_service() -> None:
         if settings.is_test:
             logger.info("Skipping subscription service in test environment")
             return
+
+        # Initialize ObservabilityWriter for TimescaleDB queries (ADR-026)
+        try:
+            observability_writer = get_observability_writer()
+            await observability_writer.initialize()
+            logger.info("ObservabilityWriter initialized for cost projections")
+        except Exception as e:
+            logger.warning(
+                "Could not initialize ObservabilityWriter, cost data may be unavailable: %s", e
+            )
 
         # Connect to event store
         await connect_event_store()

@@ -78,6 +78,9 @@ async def get_session(session_id: str) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
+    # Get cost data from TimescaleDB via SessionCostProjection
+    session_cost = await manager.session_cost.get_session_cost(session_id)
+
     # Convert operations from projection to API model (includes v2 fields)
     operations = []
     for op in session.operations:
@@ -126,6 +129,18 @@ async def get_session(session_id: str) -> SessionResponse:
         except Exception:
             pass  # workflow lookup is optional
 
+    # Use cost data from TimescaleDB if available, otherwise use session data
+    if session_cost:
+        input_tokens = session_cost.input_tokens
+        output_tokens = session_cost.output_tokens
+        total_tokens = input_tokens + output_tokens
+        total_cost_usd = session_cost.total_cost_usd
+    else:
+        input_tokens = session.input_tokens
+        output_tokens = session.output_tokens
+        total_tokens = session.total_tokens
+        total_cost_usd = Decimal(str(session.total_cost_usd))
+
     return SessionResponse(
         id=session.id,
         workflow_id=session.workflow_id,
@@ -136,10 +151,10 @@ async def get_session(session_id: str) -> SessionResponse:
         agent_provider=session.agent_type,
         agent_model=None,
         status=session.status,
-        input_tokens=session.input_tokens,
-        output_tokens=session.output_tokens,
-        total_tokens=session.total_tokens,
-        total_cost_usd=Decimal(str(session.total_cost_usd)),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        total_cost_usd=total_cost_usd,
         operations=operations,
         started_at=session.started_at,
         completed_at=session.completed_at,
