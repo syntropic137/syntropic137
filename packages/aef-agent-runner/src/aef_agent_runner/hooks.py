@@ -4,8 +4,8 @@ This module provides hook callbacks for the claude-agent-sdk that:
 1. Emit observability events (non-blocking) to stdout as JSONL
 2. Validate tool usage for safety (blocking, can deny dangerous operations)
 
-Design: These hooks can later be extracted to agentic-primitives
-as the standardized interface for both SDK and CLI agents.
+Security validation is delegated to agentic-security (agentic-primitives)
+which provides the canonical patterns and policies.
 
 Available SDK Hooks (Python):
 - PreToolUse: Called before tool execution
@@ -26,6 +26,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+# Security validation from agentic-primitives (single source of truth)
+from agentic_security import SecurityPolicy
+
 from aef_agent_runner.events import (
     emit_context_compacting,
     emit_execution_stopped,
@@ -38,8 +41,7 @@ from aef_agent_runner.events import (
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# CONSTANTS
-# TODO: Move to agentic-primitives for consistent agent operations
+# CONSTANTS (SDK-specific, not duplicated from agentic_security)
 # =============================================================================
 
 
@@ -61,49 +63,13 @@ class PermissionDecision:
     DENY = "deny"
 
 
-class ToolName:
-    """Claude Code built-in tool names."""
-
-    BASH = "Bash"
-    READ = "Read"
-    WRITE = "Write"
-    EDIT = "Edit"
-    GLOB = "Glob"
-    GREP = "Grep"
-    TASK = "Task"
-
-
-# Sensitive System Paths (blocked for writes)
-SENSITIVE_PATHS: tuple[str, ...] = (
-    "/etc/",
-    "/usr/",
-    "/bin/",
-    "/sbin/",
-    "/boot/",
-    "/lib/",
-    "/lib64/",
-    "/var/",
-)
-
 # =============================================================================
-# DANGEROUS COMMAND PATTERNS (for safety validation)
+# SECURITY POLICY (configured once, used for all validation)
 # =============================================================================
 
-DANGEROUS_BASH_PATTERNS: tuple[str, ...] = (
-    "rm -rf /",
-    "rm -rf ~",
-    "rm -rf /*",
-    ":(){ :|:& };:",  # Fork bomb
-    "> /dev/sda",
-    "> /dev/nvme",
-    "mkfs.",
-    "dd if=/dev/zero of=/dev/",
-    "dd if=/dev/random of=/dev/",
-    "chmod -R 777 /",
-    "chown -R",
-    "wget http",  # Potentially dangerous downloads without https
-    "curl http",  # Potentially dangerous downloads without https
-)
+# Create default security policy from agentic_security
+# This replaces the hardcoded DANGEROUS_BASH_PATTERNS and SENSITIVE_PATHS
+_security_policy = SecurityPolicy.with_defaults()
 
 
 # =============================================================================
@@ -269,23 +235,8 @@ async def on_pre_compact(
 
 # =============================================================================
 # SAFETY HOOKS (Blocking)
+# Uses agentic_security.SecurityPolicy for consistent validation
 # =============================================================================
-
-
-def _is_dangerous_command(command: str) -> tuple[bool, str]:
-    """Check if a bash command matches dangerous patterns.
-
-    Args:
-        command: The bash command to check
-
-    Returns:
-        Tuple of (is_dangerous, matched_pattern)
-    """
-    command_lower = command.lower()
-    for pattern in DANGEROUS_BASH_PATTERNS:
-        if pattern.lower() in command_lower:
-            return True, pattern
-    return False, ""
 
 
 async def validate_tool_use(
@@ -298,6 +249,9 @@ async def validate_tool_use(
     This hook runs BEFORE observability hooks to prevent dangerous
     operations from being executed.
 
+    Delegates to agentic_security.SecurityPolicy for consistent validation
+    across all agent runtimes (SDK, CLI, etc.).
+
     Args:
         input_data: Contains tool_name, tool_input
         _tool_use_id: Not used for validation
@@ -309,38 +263,22 @@ async def validate_tool_use(
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
 
-    # Validate Bash commands
-    if tool_name == ToolName.BASH:
-        command = tool_input.get("command", "")
-        is_dangerous, pattern = _is_dangerous_command(command)
+    # Use SecurityPolicy for validation (single source of truth)
+    result = _security_policy.validate(tool_name, tool_input)
 
-        if is_dangerous:
-            logger.warning(
-                "BLOCKED dangerous Bash command: %s (pattern: %s)",
-                command[:100],
-                pattern,
-            )
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": HookEventName.PRE_TOOL_USE,
-                    "permissionDecision": PermissionDecision.DENY,
-                    "permissionDecisionReason": f"Dangerous command blocked (matched: {pattern})",
-                }
+    if not result.safe:
+        logger.warning(
+            "BLOCKED %s: %s",
+            tool_name,
+            result.reason,
+        )
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": HookEventName.PRE_TOOL_USE,
+                "permissionDecision": PermissionDecision.DENY,
+                "permissionDecisionReason": result.reason or "Security policy violation",
             }
-
-    # Validate Write operations to sensitive paths
-    if tool_name == ToolName.WRITE:
-        file_path = tool_input.get("file_path", "")
-        for sensitive in SENSITIVE_PATHS:
-            if file_path.startswith(sensitive):
-                logger.warning("BLOCKED write to sensitive path: %s", file_path)
-                return {
-                    "hookSpecificOutput": {
-                        "hookEventName": HookEventName.PRE_TOOL_USE,
-                        "permissionDecision": PermissionDecision.DENY,
-                        "permissionDecisionReason": f"Write to sensitive path blocked: {sensitive}",
-                    }
-                }
+        }
 
     return {}  # Allow
 
