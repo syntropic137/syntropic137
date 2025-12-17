@@ -10,6 +10,7 @@ dependencies = [
     "aef-tokens",  # Token vending service (ADR-022)
     "agentic-hooks[http]",
     "agentic-logging",  # Structured logging (ADR-014 from agentic-primitives)
+    "agentic-observability",  # Observability protocol (M8 - Unified Executor)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",

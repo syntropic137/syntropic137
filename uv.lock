@@ -30,6 +30,7 @@ dependencies = [
     { name = "aef-tokens" },
     { name = "agentic-hooks", extra = ["http"] },
     { name = "agentic-logging" },
+    { name = "agentic-observability" },
     { name = "anthropic" },
     { name = "event-sourcing-python", extra = ["grpc"] },
     { name = "pyyaml" },
@@ -73,6 +74,7 @@ requires-dist = [
     { name = "aef-tokens", editable = "packages/aef-tokens" },
     { name = "agentic-hooks", extras = ["http"], directory = "lib/agentic-primitives/lib/python/agentic_hooks" },
     { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
+    { name = "agentic-observability", directory = "lib/agentic-primitives/lib/python/agentic_observability" },
     { name = "anthropic", specifier = ">=0.75.0" },
     { name = "anthropic", marker = "extra == 'agents'", specifier = ">=0.42.0" },
     { name = "anthropic", marker = "extra == 'all'", specifier = ">=0.42.0" },
@@ -403,6 +405,20 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "python-json-logger", specifier = ">=2.0.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "agentic-observability"
+version = "0.1.0"
+source = { directory = "lib/agentic-primitives/lib/python/agentic_observability" }
+
+[package.metadata]
+requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.3.0" },
 ]
 provides-extras = ["dev"]
 

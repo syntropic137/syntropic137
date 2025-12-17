@@ -1,28 +1,35 @@
-"""Factory for creating agentic agents and isolated workspaces.
+"""Factory for creating workflow executors, agentic agents, and isolated workspaces.
 
 Provides factory patterns for instantiating:
+- WorkflowExecutor (unified, with required observability)
 - Agentic agents that implement AgenticProtocol
 - Isolated workspaces via WorkspaceRouter
 
 Example:
-    from aef_adapters.orchestration import get_agentic_agent, get_workspace
+    from aef_adapters.orchestration import create_workflow_executor
 
-    # Get Claude agentic agent
-    agent = get_agentic_agent("claude")
+    # Create unified executor (recommended)
+    executor = create_workflow_executor(
+        agent_factory=get_agentic_agent,
+        workspace_service=workspace_service,
+    )
 
-    # Get isolated workspace (uses WorkspaceRouter)
-    async with get_workspace(config) as workspace:
-        async for event in agent.execute(task, workspace, exec_config):
-            process(event)
+    async for event in executor.execute(workflow, inputs):
+        process(event)
 
-See ADR-021: Isolated Workspace Architecture
+See:
+- ADR-021: Isolated Workspace Architecture
+- ADR-027: Unified Workflow Executor Architecture (M8)
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
+
+from agentic_observability import ObservabilityPort
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -30,8 +37,93 @@ if TYPE_CHECKING:
 
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
     from aef_adapters.agents.agentic_types import Workspace, WorkspaceConfig
+    from aef_adapters.control import ControlSignal
+    from aef_adapters.orchestration.workflow_executor import WorkflowExecutor
+    from aef_adapters.workspace_backends.service import WorkspaceService
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Workflow Executor Factory (M8: Unified Executor Architecture)
+# =============================================================================
+
+
+def create_workflow_executor(
+    agent_factory: Callable[[str], AgenticProtocol] | None = None,
+    workspace_service: WorkspaceService | None = None,
+    *,
+    observability: ObservabilityPort | None = None,
+    default_provider: str = "claude",
+    default_max_turns: int = 50,
+    default_max_budget_usd: float | None = None,
+    control_signal_checker: Callable[[str], Awaitable[ControlSignal | None]] | None = None,
+) -> WorkflowExecutor:
+    """Create a unified WorkflowExecutor with proper DI wiring.
+
+    This is the recommended way to create a WorkflowExecutor. It:
+    - Automatically configures TimescaleObservability if not provided
+    - Validates all required dependencies
+    - Provides sensible defaults
+
+    Args:
+        agent_factory: Factory for creating agentic agents.
+            Defaults to get_agentic_agent.
+        workspace_service: WorkspaceService for isolated workspaces.
+            Required - must be provided.
+        observability: ObservabilityPort for telemetry.
+            Defaults to get_observability() (TimescaleDB).
+        default_provider: Default agent provider (e.g., "claude").
+        default_max_turns: Default max turns per phase.
+        default_max_budget_usd: Optional budget limit per phase.
+        control_signal_checker: Optional callback for pause/resume/cancel.
+
+    Returns:
+        Configured WorkflowExecutor ready for execution.
+
+    Raises:
+        ValueError: If workspace_service is not provided.
+
+    Example:
+        from aef_adapters.orchestration import create_workflow_executor
+        from aef_adapters.workspace_backends.service import WorkspaceService
+
+        executor = create_workflow_executor(
+            workspace_service=WorkspaceService.create_docker(),
+        )
+
+        async for event in executor.execute(workflow, inputs):
+            print(event)
+    """
+    from aef_adapters.orchestration.workflow_executor import WorkflowExecutor
+
+    # Validate required dependencies
+    if workspace_service is None:
+        raise ValueError(
+            "workspace_service is required. "
+            "Use WorkspaceService.create_docker() for production, "
+            "or WorkspaceService.create_memory() for tests."
+        )
+
+    # Default agent factory
+    if agent_factory is None:
+        agent_factory = get_agentic_agent
+
+    # Default observability (TimescaleDB)
+    if observability is None:
+        from aef_adapters.observability import get_observability
+
+        observability = get_observability()
+
+    return WorkflowExecutor(
+        observability=observability,
+        agent_factory=agent_factory,
+        workspace_service=workspace_service,
+        default_provider=default_provider,
+        default_max_turns=default_max_turns,
+        default_max_budget_usd=default_max_budget_usd,
+        control_signal_checker=control_signal_checker,
+    )
 
 
 class AgenticAgentFactory(Protocol):

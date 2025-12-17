@@ -23,7 +23,10 @@ from uuid import uuid4
 
 from agentic_logging import get_logger
 
-from aef_adapters.orchestration import AgenticWorkflowExecutor
+from aef_adapters.orchestration import (
+    create_workflow_executor,
+    get_agentic_agent,
+)
 
 if TYPE_CHECKING:
     from aef_adapters.control import ControlSignal
@@ -38,9 +41,6 @@ from aef_adapters.orchestration.executor import (
     WorkflowCompleted,
     WorkflowFailed,
     WorkflowStarted,
-)
-from aef_adapters.orchestration.factory import (
-    get_agentic_agent,
 )
 
 logger = get_logger(__name__)
@@ -153,7 +153,9 @@ class ExecutionService:
 
             workspace_service = WorkspaceService.create_docker()
 
-            executor = AgenticWorkflowExecutor(
+            # Create unified executor with required observability (M8)
+            # Factory automatically wires TimescaleObservability
+            executor = create_workflow_executor(
                 agent_factory=get_agentic_agent,
                 workspace_service=workspace_service,
                 default_provider=provider,
