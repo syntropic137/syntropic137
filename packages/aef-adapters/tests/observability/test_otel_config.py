@@ -3,8 +3,6 @@
 import os
 from unittest.mock import patch
 
-import pytest
-
 from aef_adapters.observability.conventions import AEFSemanticConventions
 from aef_adapters.observability.otel_config import (
     create_phase_otel_config,

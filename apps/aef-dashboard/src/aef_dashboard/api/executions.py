@@ -119,7 +119,7 @@ async def list_all_executions(
     return ExecutionListResponse(
         executions=[
             ExecutionSummaryResponse(
-                execution_id=e.execution_id,
+                execution_id=e.workflow_execution_id,
                 workflow_id=e.workflow_id,
                 workflow_name=e.workflow_name,
                 status=e.status,
@@ -158,7 +158,7 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
     # Convert phases
     phases = [
         PhaseExecutionInfo(
-            phase_id=p.phase_id,
+            phase_id=p.workflow_phase_id,
             name=p.name,
             status=p.status,
             session_id=p.session_id,
@@ -176,7 +176,7 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
     ]
 
     return ExecutionDetailResponse(
-        execution_id=detail.execution_id,
+        execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
         workflow_name=detail.workflow_name,
         status=detail.status,

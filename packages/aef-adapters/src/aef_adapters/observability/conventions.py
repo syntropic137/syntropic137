@@ -71,8 +71,4 @@ class AEFSemanticConventions:
 
         Useful for documentation and validation.
         """
-        return [
-            attr
-            for attr in dir(cls)
-            if attr.isupper() and not attr.startswith("_")
-        ]
+        return [attr for attr in dir(cls) if attr.isupper() and not attr.startswith("_")]

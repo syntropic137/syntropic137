@@ -36,9 +36,14 @@ class ObservationType(Enum):
     TOKEN_USAGE = "token_usage"
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
+    SESSION_COMPLETED = "session_completed"
+    SESSION_ERROR = "session_error"
     ERROR = "error"
     CUSTOM = "custom"
     PROGRESS = "progress"  # Generic progress update
+    EXECUTION_STARTED = "execution_started"
+    EXECUTION_COMPLETED = "execution_completed"
+    EXECUTION_ERROR = "execution_error"
 
 
 @dataclass
@@ -136,9 +141,9 @@ class NullObservability:
 
     async def record_tool_started(
         self,
-        context: ObservationContext,
-        tool_name: str,
-        tool_input: dict[str, Any],
+        context: ObservationContext,  # noqa: ARG002
+        tool_name: str,  # noqa: ARG002
+        tool_input: dict[str, Any],  # noqa: ARG002
     ) -> str:
         """Return a dummy operation ID."""
         return "null-op-" + str(uuid4())[:8]

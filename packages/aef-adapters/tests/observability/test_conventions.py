@@ -1,7 +1,5 @@
 """Tests for AEFSemanticConventions."""
 
-import pytest
-
 from aef_adapters.observability.conventions import AEFSemanticConventions
 
 
