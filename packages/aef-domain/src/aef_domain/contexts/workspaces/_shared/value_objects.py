@@ -189,12 +189,21 @@ class IsolationHandle:
     """Handle to an isolation instance (container/VM/sandbox).
 
     Returned by IsolationBackendPort.create() and used for subsequent operations.
+
+    Note on paths:
+    - workspace_path: Path inside the container (e.g., /workspace)
+    - host_workspace_path: Path on the host that is mounted into the container
+
+    The host_workspace_path is used when the agent runs on the host machine
+    (like claude-agent-sdk) and needs to access files that will be visible
+    inside the container.
     """
 
     isolation_id: str  # Container ID, VM ID, etc.
     isolation_type: str  # "docker", "firecracker", "e2b", "memory"
     proxy_url: str | None = None  # Sidecar proxy URL if applicable
     workspace_path: str | None = None  # Path to workspace inside isolation
+    host_workspace_path: str | None = None  # Path on host mounted into container
 
 
 @dataclass(frozen=True)

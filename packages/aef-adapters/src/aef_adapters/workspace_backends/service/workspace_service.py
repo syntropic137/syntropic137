@@ -276,17 +276,25 @@ class ManagedWorkspace:
 
     @property
     def path(self) -> Path:
-        """Get the workspace path inside the isolation container.
+        """Get the workspace path for agents running on the host.
 
-        This is the path where the agent can write files and execute commands.
-        For Docker, this is typically /workspace mounted from the host.
+        This returns the HOST path (mounted into the container) so that
+        agents like claude-agent-sdk can access files locally. The same
+        files will be visible inside the container at /workspace.
+
+        For commands that need to run INSIDE the container, use
+        execute() which runs via docker exec.
         """
         from pathlib import Path
 
+        # Prefer host path for local agent execution (claude-agent-sdk runs on host)
+        if self.isolation_handle.host_workspace_path:
+            return Path(self.isolation_handle.host_workspace_path)
+        # Fallback to container path (for in-container execution)
         if self.isolation_handle.workspace_path:
             return Path(self.isolation_handle.workspace_path)
-        # Fallback to a default path
-        return Path(f"/workspace/{self.execution_id}")
+        # Last resort fallback
+        return Path(f"/tmp/aef-workspace-{self.execution_id}")
 
     async def execute(
         self,

@@ -306,6 +306,7 @@ class TestDockerSidecarAdapter:
             isolation_id="container123",
             isolation_type="docker",
             workspace_path="/workspace",
+            host_workspace_path="/tmp/aef-workspace-test",
         )
 
     @pytest.mark.asyncio
@@ -440,6 +441,7 @@ class TestDockerEventStreamAdapter:
             isolation_id="container-stream-123",
             isolation_type="docker",
             workspace_path="/workspace",
+            host_workspace_path="/tmp/aef-workspace-stream-test",
         )
 
     @pytest.mark.asyncio

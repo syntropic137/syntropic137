@@ -196,6 +196,7 @@ class DockerIsolationAdapter:
                 isolation_type="docker" if not self._use_gvisor else "gvisor",
                 proxy_url=None,  # Set by sidecar adapter
                 workspace_path="/workspace",
+                host_workspace_path=str(workspace_dir),  # Host path for local agents
             )
 
         except Exception as e:
