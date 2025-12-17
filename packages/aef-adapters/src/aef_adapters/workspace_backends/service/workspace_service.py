@@ -274,6 +274,20 @@ class ManagedWorkspace:
     _service: WorkspaceService = field(repr=False)
     _tokens_injected: bool = False
 
+    @property
+    def path(self) -> Path:
+        """Get the workspace path inside the isolation container.
+
+        This is the path where the agent can write files and execute commands.
+        For Docker, this is typically /workspace mounted from the host.
+        """
+        from pathlib import Path
+
+        if self.isolation_handle.workspace_path:
+            return Path(self.isolation_handle.workspace_path)
+        # Fallback to a default path
+        return Path(f"/workspace/{self.execution_id}")
+
     async def execute(
         self,
         command: list[str],
