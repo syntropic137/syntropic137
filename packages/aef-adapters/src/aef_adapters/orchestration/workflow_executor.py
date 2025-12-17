@@ -392,32 +392,13 @@ class WorkflowExecutor:
         ToolUseStarted: type,
         TurnCompleted: type,
     ) -> AsyncIterator[ExecutionEvent]:
-        """Execute a single phase with full observability."""
+        """Execute a single phase with full observability.
+
+        Uses WorkspaceService for proper Docker isolation with GitHub credentials.
+        """
         phase_started_at = datetime.now(UTC)
 
-        # Create workspace for this phase
-        workspace_path = self._base_path / ctx.execution_id / phase.phase_id
-        workspace_path.mkdir(parents=True, exist_ok=True)
-
-        # Emit phase started
-        yield PhaseStarted(
-            workflow_id=ctx.workflow_id,
-            execution_id=ctx.execution_id,
-            phase_id=phase.phase_id,
-            phase_name=phase.name,
-            phase_order=phase.order,
-            started_at=phase_started_at,
-            workspace_path=workspace_path,
-        )
-
-        # Record phase started observation
-        await self._observability.record(
-            ObservationType.EXECUTION_STARTED,
-            obs_context,
-            {"phase_name": phase.name, "phase_order": phase.order},
-        )
-
-        # Build task prompt
+        # Build task prompt first (needed for phase context)
         task = self._build_task(phase, ctx)
 
         # Create phase context with previous artifacts
@@ -428,236 +409,265 @@ class WorkflowExecutor:
             artifacts=ctx.artifact_bundles,
         )
 
-        # Inject context files into workspace
-        for rel_path, content in phase_context_obj.to_context_files():
-            file_path = workspace_path / rel_path
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_bytes(content)
-
-        # Create workspace object for agent
-        workspace_config = WorkspaceConfig(
-            session_id=str(uuid4()),
-            base_dir=workspace_path.parent,
-            workflow_id=ctx.workflow_id,
-            phase_id=phase.phase_id,
-        )
-        workspace = Workspace(
-            path=workspace_path,
-            config=workspace_config,
-        )
-
-        # Create execution config
-        config = AgentExecutionConfig(
-            allowed_tools=phase.allowed_tools,
-            max_turns=self._default_max_turns,
-            max_budget_usd=self._default_max_budget_usd,
-            timeout_seconds=phase.timeout_seconds,
-        )
-
-        # Execute agent with full observability
-        result_text = ""
-        input_tokens = 0
-        output_tokens = 0
-        tool_call_count = 0
-        turn_number = 0
-
-        async for event in agent.execute(task, workspace, config):
-            if isinstance(event, ToolUseStarted):
-                # Record tool started via ObservabilityPort
-                operation_id = await self._observability.record_tool_started(
-                    obs_context,
-                    tool_name=event.tool_name,
-                    tool_input=event.tool_input or {},
-                )
-
-                # Store operation_id for correlation (using tool_use_id as key)
-                if not hasattr(self, "_pending_tools"):
-                    self._pending_tools: dict[str, tuple[str, datetime]] = {}
-                if event.tool_use_id:
-                    self._pending_tools[event.tool_use_id] = (operation_id, datetime.now(UTC))
-
-                # Yield for SSE real-time tracking
-                yield ToolStarted(
-                    workflow_id=ctx.workflow_id,
-                    execution_id=ctx.execution_id,
-                    phase_id=phase.phase_id,
-                    tool_name=event.tool_name,
-                    tool_use_id=event.tool_use_id,
-                    tool_input=event.tool_input,
-                    timestamp=event.timestamp,
-                )
-
-            elif isinstance(event, ToolUseCompleted):
-                tool_call_count += 1
-
-                # Get operation_id from pending tools
-                operation_id = ""
-                start_time = datetime.now(UTC)
-                if hasattr(self, "_pending_tools") and event.tool_use_id:
-                    pending = self._pending_tools.pop(event.tool_use_id, None)
-                    if pending:
-                        operation_id, start_time = pending
-
-                # Calculate duration
-                duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
-                if event.duration_ms:
-                    duration_ms = int(event.duration_ms)
-
-                # Record tool completed via ObservabilityPort
-                await self._observability.record_tool_completed(
-                    obs_context,
-                    operation_id=operation_id,
-                    tool_name=event.tool_name,
-                    success=event.success,
-                    duration_ms=duration_ms,
-                    output_preview=event.tool_output[:500] if event.tool_output else None,
-                )
-
-                # Truncate long tool outputs
-                tool_output = event.tool_output
-                if tool_output and len(tool_output) > 10000:
-                    tool_output = tool_output[:10000] + "... [truncated]"
-
-                yield ToolUsed(
-                    workflow_id=ctx.workflow_id,
-                    execution_id=ctx.execution_id,
-                    phase_id=phase.phase_id,
-                    tool_name=event.tool_name,
-                    tool_use_id=event.tool_use_id,
-                    success=event.success,
-                    tool_output=tool_output,
-                    duration_ms=event.duration_ms,
-                    error=event.error,
-                )
-
-                # Check for control signals
-                async for ctrl_event in self._check_control_signals(ctx, phase.phase_id):
-                    yield ctrl_event
-                    if isinstance(ctrl_event, ExecutionCancelled):
-                        return
-
-            elif isinstance(event, ToolBlocked):
-                yield ToolBlockedExecution(
-                    workflow_id=ctx.workflow_id,
-                    execution_id=ctx.execution_id,
-                    phase_id=phase.phase_id,
-                    tool_name=event.tool_name,
-                    tool_use_id=event.tool_use_id,
-                    reason=event.reason,
-                    validator=event.validator,
-                    timestamp=event.timestamp,
-                )
-
-            elif isinstance(event, TurnCompleted):
-                turn_number += 1
-
-                # Record token usage via ObservabilityPort
-                await self._observability.record_token_usage(
-                    obs_context,
-                    input_tokens=event.input_tokens,
-                    output_tokens=event.output_tokens,
-                )
-
-                # Emit turn update for real-time UI
-                yield TurnUpdate(
-                    workflow_id=ctx.workflow_id,
-                    execution_id=ctx.execution_id,
-                    phase_id=phase.phase_id,
-                    turn_number=turn_number,
-                    input_tokens=event.input_tokens,
-                    output_tokens=event.output_tokens,
-                    cumulative_input_tokens=event.cumulative_input_tokens,
-                    cumulative_output_tokens=event.cumulative_output_tokens,
-                    timestamp=event.timestamp,
-                )
-
-                # Check for control signals between turns
-                async for ctrl_event in self._check_control_signals(ctx, phase.phase_id):
-                    yield ctrl_event
-                    if isinstance(ctrl_event, ExecutionCancelled):
-                        return
-
-            elif isinstance(event, TaskCompleted):
-                result_text = event.result
-                input_tokens = event.input_tokens
-                output_tokens = event.output_tokens
-
-            elif isinstance(event, TaskFailed):
-                await self._observability.record(
-                    ObservationType.EXECUTION_ERROR,
-                    obs_context,
-                    {"error": event.error, "error_type": event.error_type},
-                )
-                yield PhaseFailed(
-                    workflow_id=ctx.workflow_id,
-                    execution_id=ctx.execution_id,
-                    phase_id=phase.phase_id,
-                    failed_at=datetime.now(UTC),
-                    error=event.error,
-                    error_type=event.error_type,
-                    partial_tokens=event.input_tokens + event.output_tokens,
-                )
-                return
-
-        # Create artifact bundle from output
-        bundle = ArtifactBundle(
-            bundle_id=str(uuid4()),
-            phase_id=phase.phase_id,
-            workflow_id=ctx.workflow_id,
-            title=f"{phase.name} Output",
-        )
-
-        # Add result as primary artifact
-        from aef_adapters.artifacts import ArtifactType as AT
-        bundle.add_file(
-            Path(f"{phase.phase_id}_output.md"),
-            result_text.encode("utf-8"),
-            artifact_type=AT(phase.output_artifact_type)
-            if phase.output_artifact_type in [t.value for t in AT]
-            else AT.TEXT,
-            is_primary=True,
-        )
-
-        # Store outputs for next phase
-        ctx.phase_outputs[phase.phase_id] = result_text
-        ctx.artifact_bundles.append(bundle)
-        ctx.total_input_tokens += input_tokens
-        ctx.total_output_tokens += output_tokens
-
-        # Calculate duration
-        phase_completed_at = datetime.now(UTC)
-        duration_ms = (phase_completed_at - phase_started_at).total_seconds() * 1000
-        ctx.total_duration_ms += duration_ms
-
-        # Record phase completed observation
-        await self._observability.record(
-            ObservationType.EXECUTION_COMPLETED,
-            obs_context,
-            {
-                "duration_ms": duration_ms,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "tool_call_count": tool_call_count,
-            },
-        )
-
-        # Emit phase completed
-        completed_event = PhaseCompleted(
-            workflow_id=ctx.workflow_id,
+        # Use WorkspaceService for Docker isolation (ADR-024: Setup Phase Secrets)
+        # This creates an isolated container with GitHub credentials pre-configured
+        async with self._workspace_service.create_workspace(
             execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
             phase_id=phase.phase_id,
-            completed_at=phase_completed_at,
-            artifact_bundle_id=bundle.bundle_id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
-            duration_ms=duration_ms,
-            tool_call_count=tool_call_count,
-            artifact_bundle=bundle,
-        )
-        ctx.phase_results.append(completed_event)
+            with_sidecar=False,  # Sidecar not needed with setup phase pattern
+            inject_tokens=False,  # Handled by setup phase in container
+        ) as managed_workspace:
+            workspace_path = managed_workspace.path
 
-        yield completed_event
+            # Emit phase started
+            yield PhaseStarted(
+                workflow_id=ctx.workflow_id,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                phase_name=phase.name,
+                phase_order=phase.order,
+                started_at=phase_started_at,
+                workspace_path=workspace_path,
+            )
+
+            # Record phase started observation
+            await self._observability.record(
+                ObservationType.EXECUTION_STARTED,
+                obs_context,
+                {"phase_name": phase.name, "phase_order": phase.order},
+            )
+
+            # Inject context files into workspace
+            for rel_path, content in phase_context_obj.to_context_files():
+                file_path = workspace_path / rel_path
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_bytes(content)
+
+            # Create workspace object for agent
+            workspace_config = WorkspaceConfig(
+                session_id=str(uuid4()),
+                base_dir=workspace_path.parent,
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+            )
+            workspace = Workspace(
+                path=workspace_path,
+                config=workspace_config,
+            )
+
+            # Create execution config
+            config = AgentExecutionConfig(
+                allowed_tools=phase.allowed_tools,
+                max_turns=self._default_max_turns,
+                max_budget_usd=self._default_max_budget_usd,
+                timeout_seconds=phase.timeout_seconds,
+            )
+
+            # Execute agent with full observability
+            result_text = ""
+            input_tokens = 0
+            output_tokens = 0
+            tool_call_count = 0
+            turn_number = 0
+
+            async for event in agent.execute(task, workspace, config):
+                if isinstance(event, ToolUseStarted):
+                    # Record tool started via ObservabilityPort
+                    operation_id = await self._observability.record_tool_started(
+                        obs_context,
+                        tool_name=event.tool_name,
+                        tool_input=event.tool_input or {},
+                    )
+
+                    # Store operation_id for correlation (using tool_use_id as key)
+                    if not hasattr(self, "_pending_tools"):
+                        self._pending_tools: dict[str, tuple[str, datetime]] = {}
+                    if event.tool_use_id:
+                        self._pending_tools[event.tool_use_id] = (operation_id, datetime.now(UTC))
+
+                    # Yield for SSE real-time tracking
+                    yield ToolStarted(
+                        workflow_id=ctx.workflow_id,
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        tool_name=event.tool_name,
+                        tool_use_id=event.tool_use_id,
+                        tool_input=event.tool_input,
+                        timestamp=event.timestamp,
+                    )
+
+                elif isinstance(event, ToolUseCompleted):
+                    tool_call_count += 1
+
+                    # Get operation_id from pending tools
+                    operation_id = ""
+                    start_time = datetime.now(UTC)
+                    if hasattr(self, "_pending_tools") and event.tool_use_id:
+                        pending = self._pending_tools.pop(event.tool_use_id, None)
+                        if pending:
+                            operation_id, start_time = pending
+
+                    # Calculate duration
+                    duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
+                    if event.duration_ms:
+                        duration_ms = int(event.duration_ms)
+
+                    # Record tool completed via ObservabilityPort
+                    await self._observability.record_tool_completed(
+                        obs_context,
+                        operation_id=operation_id,
+                        tool_name=event.tool_name,
+                        success=event.success,
+                        duration_ms=duration_ms,
+                        output_preview=event.tool_output[:500] if event.tool_output else None,
+                    )
+
+                    # Truncate long tool outputs
+                    tool_output = event.tool_output
+                    if tool_output and len(tool_output) > 10000:
+                        tool_output = tool_output[:10000] + "... [truncated]"
+
+                    yield ToolUsed(
+                        workflow_id=ctx.workflow_id,
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        tool_name=event.tool_name,
+                        tool_use_id=event.tool_use_id,
+                        success=event.success,
+                        tool_output=tool_output,
+                        duration_ms=event.duration_ms,
+                        error=event.error,
+                    )
+
+                    # Check for control signals
+                    async for ctrl_event in self._check_control_signals(ctx, phase.phase_id):
+                        yield ctrl_event
+                        if isinstance(ctrl_event, ExecutionCancelled):
+                            return
+
+                elif isinstance(event, ToolBlocked):
+                    yield ToolBlockedExecution(
+                        workflow_id=ctx.workflow_id,
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        tool_name=event.tool_name,
+                        tool_use_id=event.tool_use_id,
+                        reason=event.reason,
+                        validator=event.validator,
+                        timestamp=event.timestamp,
+                    )
+
+                elif isinstance(event, TurnCompleted):
+                    turn_number += 1
+
+                    # Record token usage via ObservabilityPort
+                    await self._observability.record_token_usage(
+                        obs_context,
+                        input_tokens=event.input_tokens,
+                        output_tokens=event.output_tokens,
+                    )
+
+                    # Emit turn update for real-time UI
+                    yield TurnUpdate(
+                        workflow_id=ctx.workflow_id,
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        turn_number=turn_number,
+                        input_tokens=event.input_tokens,
+                        output_tokens=event.output_tokens,
+                        cumulative_input_tokens=event.cumulative_input_tokens,
+                        cumulative_output_tokens=event.cumulative_output_tokens,
+                        timestamp=event.timestamp,
+                    )
+
+                    # Check for control signals between turns
+                    async for ctrl_event in self._check_control_signals(ctx, phase.phase_id):
+                        yield ctrl_event
+                        if isinstance(ctrl_event, ExecutionCancelled):
+                            return
+
+                elif isinstance(event, TaskCompleted):
+                    result_text = event.result
+                    input_tokens = event.input_tokens
+                    output_tokens = event.output_tokens
+
+                elif isinstance(event, TaskFailed):
+                    await self._observability.record(
+                        ObservationType.EXECUTION_ERROR,
+                        obs_context,
+                        {"error": event.error, "error_type": event.error_type},
+                    )
+                    yield PhaseFailed(
+                        workflow_id=ctx.workflow_id,
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        failed_at=datetime.now(UTC),
+                        error=event.error,
+                        error_type=event.error_type,
+                        partial_tokens=event.input_tokens + event.output_tokens,
+                    )
+                    return
+
+            # Create artifact bundle from output
+            bundle = ArtifactBundle(
+                bundle_id=str(uuid4()),
+                phase_id=phase.phase_id,
+                workflow_id=ctx.workflow_id,
+                title=f"{phase.name} Output",
+            )
+
+            # Add result as primary artifact
+            from aef_adapters.artifacts import ArtifactType as AT
+            bundle.add_file(
+                Path(f"{phase.phase_id}_output.md"),
+                result_text.encode("utf-8"),
+                artifact_type=AT(phase.output_artifact_type)
+                if phase.output_artifact_type in [t.value for t in AT]
+                else AT.TEXT,
+                is_primary=True,
+            )
+
+            # Store outputs for next phase
+            ctx.phase_outputs[phase.phase_id] = result_text
+            ctx.artifact_bundles.append(bundle)
+            ctx.total_input_tokens += input_tokens
+            ctx.total_output_tokens += output_tokens
+
+            # Calculate duration
+            phase_completed_at = datetime.now(UTC)
+            duration_ms = (phase_completed_at - phase_started_at).total_seconds() * 1000
+            ctx.total_duration_ms += duration_ms
+
+            # Record phase completed observation
+            await self._observability.record(
+                ObservationType.EXECUTION_COMPLETED,
+                obs_context,
+                {
+                    "duration_ms": duration_ms,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "tool_call_count": tool_call_count,
+                },
+            )
+
+            # Emit phase completed
+            completed_event = PhaseCompleted(
+                workflow_id=ctx.workflow_id,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                completed_at=phase_completed_at,
+                artifact_bundle_id=bundle.bundle_id,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                duration_ms=duration_ms,
+                tool_call_count=tool_call_count,
+                artifact_bundle=bundle,
+            )
+            ctx.phase_results.append(completed_event)
+
+            yield completed_event
 
     async def _check_control_signals(
         self,
