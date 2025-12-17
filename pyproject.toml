@@ -170,6 +170,8 @@ module = [
     "agentic_isolation.*",
     "agentic_adapters",
     "agentic_adapters.*",
+    "agentic_observability",
+    "agentic_observability.*",
     "sse_starlette",
     "sse_starlette.*",
     "uvicorn",
