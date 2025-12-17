@@ -141,7 +141,7 @@ exclude = [
 #   - Proper type annotations
 #   - cast() for legitimate type narrowing
 #   - Guards (if x is not None, isinstance, etc.)
-# 
+#
 # The # type: ignore comment is also discouraged - use only as last resort
 # with a specific error code and explanation.
 
