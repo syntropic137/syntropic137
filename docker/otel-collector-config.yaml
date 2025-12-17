@@ -1,0 +1,88 @@
+# OpenTelemetry Collector Configuration for AEF
+# Receives OTel signals from Claude CLI containers and exports to TimescaleDB
+# See ADR-028: OTel Platform Integration
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch processor for efficient export
+  batch:
+    timeout: 5s
+    send_batch_size: 1000
+
+  # Resource processor to add AEF metadata
+  resource:
+    attributes:
+      - key: service.namespace
+        value: aef
+        action: upsert
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+exporters:
+  # PostgreSQL/TimescaleDB exporter for metrics
+  # Note: For production, use proper OTLP-compatible backend
+  # For dev, we log to console and can add Prometheus for metrics
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # Prometheus exporter for metrics scraping
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: aef
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  # OTLP exporter for forwarding to other backends (optional)
+  # Uncomment to forward to Grafana Cloud, Honeycomb, etc.
+  # otlphttp:
+  #   endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT}
+  #   headers:
+  #     authorization: Bearer ${OTEL_EXPORTER_OTLP_HEADERS_AUTHORIZATION}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+
+  pipelines:
+    # Traces from Claude CLI tool executions
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [logging]
+
+    # Metrics from Claude CLI (token usage, costs)
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [logging, prometheus]
+
+    # Logs/events from hooks (security decisions, tool blocked)
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [logging]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      address: 0.0.0.0:8888

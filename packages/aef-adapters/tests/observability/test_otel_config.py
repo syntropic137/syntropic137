@@ -176,15 +176,52 @@ class TestGetCollectorEndpoint:
         """Test that default endpoint is returned."""
         with patch.dict(os.environ, {}, clear=True):
             os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+            os.environ.pop("AEF_OTEL_COLLECTOR_HOST", None)
+            os.environ.pop("AEF_OTEL_COLLECTOR_PORT", None)
 
             endpoint = get_collector_endpoint()
             assert endpoint == "http://localhost:4317"
 
-    def test_returns_value_from_env(self) -> None:
-        """Test that endpoint from environment is returned."""
+    def test_returns_value_from_explicit_env(self) -> None:
+        """Test that explicit OTEL_EXPORTER_OTLP_ENDPOINT takes priority."""
         with patch.dict(
             os.environ,
             {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
         ):
             endpoint = get_collector_endpoint()
             assert endpoint == "http://collector:4317"
+
+    def test_uses_docker_host_when_set(self) -> None:
+        """Test that AEF_OTEL_COLLECTOR_HOST is used for Docker network."""
+        with patch.dict(
+            os.environ,
+            {"AEF_OTEL_COLLECTOR_HOST": "otel-collector"},
+            clear=True,
+        ):
+            endpoint = get_collector_endpoint()
+            assert endpoint == "http://otel-collector:4317"
+
+    def test_uses_custom_port_when_set(self) -> None:
+        """Test that AEF_OTEL_COLLECTOR_PORT is used for custom port."""
+        with patch.dict(
+            os.environ,
+            {
+                "AEF_OTEL_COLLECTOR_HOST": "otel-collector",
+                "AEF_OTEL_COLLECTOR_PORT": "4318",
+            },
+            clear=True,
+        ):
+            endpoint = get_collector_endpoint()
+            assert endpoint == "http://otel-collector:4318"
+
+    def test_explicit_endpoint_overrides_host(self) -> None:
+        """Test that explicit endpoint takes priority over host/port."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://explicit:9999",
+                "AEF_OTEL_COLLECTOR_HOST": "otel-collector",
+            },
+        ):
+            endpoint = get_collector_endpoint()
+            assert endpoint == "http://explicit:9999"

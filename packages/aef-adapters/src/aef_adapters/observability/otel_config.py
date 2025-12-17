@@ -116,10 +116,23 @@ def create_phase_otel_config(
 def get_collector_endpoint() -> str:
     """Get the OTel Collector endpoint from environment.
 
+    Resolution order:
+    1. OTEL_EXPORTER_OTLP_ENDPOINT env var (explicit override)
+    2. AEF_OTEL_COLLECTOR_HOST env var (Docker network name)
+    3. Default to localhost:4317 (local development)
+
+    In Docker compose, set AEF_OTEL_COLLECTOR_HOST=otel-collector
+
     Returns:
-        Collector endpoint URL (defaults to localhost:4317)
+        Collector endpoint URL
     """
-    return os.getenv(
-        "OTEL_EXPORTER_OTLP_ENDPOINT",
-        "http://localhost:4317",
-    )
+    # Check for explicit endpoint first
+    explicit = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if explicit:
+        return explicit
+
+    # Check for Docker-style host override
+    host = os.getenv("AEF_OTEL_COLLECTOR_HOST", "localhost")
+    port = os.getenv("AEF_OTEL_COLLECTOR_PORT", "4317")
+
+    return f"http://{host}:{port}"
