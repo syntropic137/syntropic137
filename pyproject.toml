@@ -69,8 +69,8 @@ agentic-security = { path = "lib/agentic-primitives/lib/python/agentic_security"
 agentic-agent = { path = "lib/agentic-primitives/lib/python/agentic_agent" }
 agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation" }
 agentic-adapters = { path = "lib/agentic-primitives/lib/python/agentic_adapters" }
-# M8: Unified Executor Architecture
-agentic-observability = { path = "lib/agentic-primitives/lib/python/agentic_observability" }
+# OTel-first observability (ADR-026)
+agentic-otel = { path = "lib/agentic-primitives/lib/python/agentic_otel" }
 
 [tool.ruff]
 target-version = "py312"
@@ -179,8 +179,8 @@ module = [
     "agentic_isolation.*",
     "agentic_adapters",
     "agentic_adapters.*",
-    "agentic_observability",
-    "agentic_observability.*",
+    "agentic_otel",
+    "agentic_otel.*",
     "sse_starlette",
     "sse_starlette.*",
     "uvicorn",

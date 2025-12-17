@@ -1,7 +1,11 @@
-"""TimescaleDB implementation of ObservabilityPort.
+"""TimescaleDB implementation of ObservabilityPort (legacy).
 
-This adapter implements the ObservabilityPort protocol from agentic-primitives,
-wrapping the existing ObservabilityWriter for backward compatibility.
+DEPRECATED: This module uses the legacy ObservabilityPort protocol.
+New code should use OTel-first observability with:
+- agentic_otel.OTelConfig
+- agentic_otel.HookOTelEmitter
+
+This adapter wraps the ObservabilityWriter for backward compatibility.
 
 Architecture: ADR-026 - TimescaleDB for Observability Storage
 Pattern: Port/Adapter (ADR-012)
@@ -10,14 +14,23 @@ Pattern: Port/Adapter (ADR-012)
 from __future__ import annotations
 
 import json
+import warnings
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from agentic_observability import (
+from aef_adapters.observability.protocol import (
     ObservabilityPort,
     ObservationContext,
     ObservationType,
+)
+
+# Emit deprecation warning on import
+warnings.warn(
+    "TimescaleObservability is deprecated. Use OTel-first observability "
+    "with agentic_otel. See ADR-026.",
+    DeprecationWarning,
+    stacklevel=2,
 )
 
 if TYPE_CHECKING:

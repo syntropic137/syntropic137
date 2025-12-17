@@ -8,9 +8,9 @@ dependencies = [
     "aef-shared",
     "aef-domain",
     "aef-tokens",  # Token vending service (ADR-022)
-    "agentic-hooks[http]",
+    "agentic-hooks[http]",  # Legacy hooks (deprecated, use agentic-otel)
     "agentic-logging",  # Structured logging (ADR-014 from agentic-primitives)
-    "agentic-observability",  # Observability protocol (M8 - Unified Executor)
+    "agentic-otel",  # OTel-first observability (ADR-026)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",

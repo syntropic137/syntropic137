@@ -1,21 +1,27 @@
-"""Tests for TimescaleObservability adapter.
+"""Tests for TimescaleObservability adapter (legacy).
 
 These tests verify that TimescaleObservability correctly implements
 the ObservabilityPort protocol and integrates with ObservabilityWriter.
+
+Note: TimescaleObservability is deprecated. Use OTel-first observability.
 """
 
 from __future__ import annotations
 
+import warnings
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from agentic_observability import (
-    ObservabilityPort,
-    ObservationContext,
-    ObservationType,
-)
 
-from aef_adapters.observability.timescale import TimescaleObservability
+# Suppress deprecation warnings for test imports
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from aef_adapters.observability.protocol import (
+        ObservabilityPort,
+        ObservationContext,
+        ObservationType,
+    )
+    from aef_adapters.observability.timescale import TimescaleObservability
 
 
 @pytest.fixture

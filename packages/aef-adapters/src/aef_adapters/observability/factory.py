@@ -1,9 +1,9 @@
-"""Factory for creating ObservabilityPort implementations.
+"""Factory for creating ObservabilityPort implementations (legacy).
 
-This module provides a factory function that creates the appropriate
-observability adapter based on the environment and configuration.
+DEPRECATED: This module uses the legacy ObservabilityPort protocol.
+New code should use OTel-first observability with create_phase_otel_config().
 
-Usage:
+Usage (legacy):
     from aef_adapters.observability import get_observability
 
     # Get the singleton adapter
@@ -11,10 +11,17 @@ Usage:
 
     # Pass to executors
     executor = WorkflowExecutor(observability=observability)
+
+Usage (recommended):
+    from aef_adapters.observability import create_phase_otel_config
+
+    otel_config = create_phase_otel_config(...)
+    env = otel_config.to_env()  # Inject into container
 """
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
 from aef_adapters.observability.timescale import TimescaleObservability
@@ -24,7 +31,7 @@ from aef_adapters.storage.observability_writer import (
 )
 
 if TYPE_CHECKING:
-    from agentic_observability import ObservabilityPort
+    from aef_adapters.observability.protocol import ObservabilityPort
 
 # Singleton instance
 _observability_adapter: TimescaleObservability | None = None
@@ -37,8 +44,10 @@ def get_observability(
 ) -> ObservabilityPort:
     """Get or create the ObservabilityPort singleton.
 
-    This is the recommended way to obtain an observability adapter.
-    It handles connection configuration and singleton management.
+    DEPRECATED: Use create_phase_otel_config() for OTel-first observability.
+
+    This legacy function handles connection configuration and singleton management
+    for the TimescaleDB observability adapter.
 
     Args:
         connection_string: Optional TimescaleDB connection string.
@@ -49,12 +58,24 @@ def get_observability(
     Returns:
         ObservabilityPort implementation (TimescaleObservability)
 
-    Example:
+    Example (legacy):
         from aef_adapters.observability import get_observability
 
         observability = get_observability()
         executor = WorkflowExecutor(observability=observability)
+
+    Example (recommended):
+        from aef_adapters.observability import create_phase_otel_config
+
+        otel_config = create_phase_otel_config(...)
+        env = otel_config.to_env()
     """
+    warnings.warn(
+        "get_observability() is deprecated. Use create_phase_otel_config() "
+        "for OTel-first observability.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     global _observability_adapter
 
     if _observability_adapter is None:
