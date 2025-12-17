@@ -32,7 +32,7 @@ from aef_domain.contexts.workflows.domain.read_models.workflow_execution_summary
 class MockExecutionSummary:
     """Mock execution summary for testing."""
 
-    execution_id: str
+    workflow_execution_id: str
     workflow_id: str = "workflow-1"
     status: str = "running"
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -41,7 +41,7 @@ class MockExecutionSummary:
     def to_summary(self) -> WorkflowExecutionSummary:
         """Convert to WorkflowExecutionSummary."""
         return WorkflowExecutionSummary(
-            execution_id=self.execution_id,
+            workflow_execution_id=self.workflow_execution_id,
             workflow_id=self.workflow_id,
             workflow_name="Test Workflow",
             status=self.status,
@@ -141,11 +141,11 @@ class TestStaleExecutionCleaner:
         stale_time = datetime.now(UTC) - timedelta(hours=3)
         executions = [
             MockExecutionSummary(
-                execution_id="stale-1",
+                workflow_execution_id="stale-1",
                 started_at=stale_time,
             ),
             MockExecutionSummary(
-                execution_id="stale-2",
+                workflow_execution_id="stale-2",
                 started_at=stale_time - timedelta(minutes=30),
             ),
         ]
@@ -154,7 +154,7 @@ class TestStaleExecutionCleaner:
 
         # Add aggregates
         for ex in executions:
-            repo.add_aggregate(MockAggregate(ex.execution_id))
+            repo.add_aggregate(MockAggregate(ex.workflow_execution_id))
 
         return StaleExecutionCleaner(projection, repo), projection, repo
 
@@ -186,12 +186,12 @@ class TestStaleExecutionCleaner:
 
         executions = [
             MockExecutionSummary(
-                execution_id="has-future-expected",
+                workflow_execution_id="has-future-expected",
                 started_at=old_start,
                 expected_completion_at=future_completion,
             ),
             MockExecutionSummary(
-                execution_id="past-expected",
+                workflow_execution_id="past-expected",
                 started_at=old_start,
                 expected_completion_at=datetime.now(UTC) - timedelta(minutes=30),
             ),
@@ -201,7 +201,7 @@ class TestStaleExecutionCleaner:
         repo = MockRepository()
 
         for ex in executions:
-            repo.add_aggregate(MockAggregate(ex.execution_id))
+            repo.add_aggregate(MockAggregate(ex.workflow_execution_id))
 
         cleaner = StaleExecutionCleaner(projection, repo)
 
@@ -259,12 +259,12 @@ class TestStaleExecutionCleaner:
         old_time = datetime.now(UTC) - timedelta(hours=5)
         executions = [
             MockExecutionSummary(
-                execution_id="completed-1",
+                workflow_execution_id="completed-1",
                 started_at=old_time,
                 status="completed",
             ),
             MockExecutionSummary(
-                execution_id="running-1",
+                workflow_execution_id="running-1",
                 started_at=old_time,
                 status="running",
             ),
@@ -301,7 +301,7 @@ class TestStaleExecutionCleaner:
         recent_time = datetime.now(UTC) - timedelta(minutes=30)
         executions = [
             MockExecutionSummary(
-                execution_id="recent-1",
+                workflow_execution_id="recent-1",
                 started_at=recent_time,
             ),
         ]
@@ -330,7 +330,7 @@ class TestStaleExecutionCleaner:
         old_time = datetime.now(UTC) - timedelta(hours=3)
         executions = [
             MockExecutionSummary(
-                execution_id="missing-1",
+                workflow_execution_id="missing-1",
                 started_at=old_time,
             ),
         ]
@@ -356,7 +356,7 @@ class TestStaleExecutionCleaner:
 
         executions = [
             MockExecutionSummary(
-                execution_id="string-expected",
+                workflow_execution_id="string-expected",
                 started_at=old_start,
                 expected_completion_at=past_expected_str,
             ),
@@ -380,7 +380,7 @@ class TestStaleExecutionCleaner:
         # Create more than MAX_BATCH_SIZE (100) executions
         executions = [
             MockExecutionSummary(
-                execution_id=f"stale-{i}",
+                workflow_execution_id=f"stale-{i}",
                 started_at=old_time,
             )
             for i in range(150)
@@ -389,7 +389,7 @@ class TestStaleExecutionCleaner:
         projection = MockProjection(executions)
         repo = MockRepository()
         for ex in executions:
-            repo.add_aggregate(MockAggregate(ex.execution_id))
+            repo.add_aggregate(MockAggregate(ex.workflow_execution_id))
 
         cleaner = StaleExecutionCleaner(projection, repo)
 

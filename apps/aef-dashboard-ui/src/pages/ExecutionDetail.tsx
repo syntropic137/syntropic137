@@ -142,7 +142,7 @@ export function ExecutionDetail() {
       href: `/workflows/${execution.workflow_id}`,
     },
     {
-      label: `Execution ${execution.execution_id.slice(0, 8)}`,
+      label: `Execution ${execution.workflow_execution_id.slice(0, 8)}`,
     },
   ]
 
@@ -169,7 +169,7 @@ export function ExecutionDetail() {
                 {execution.workflow_name}
               </p>
               <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-                <span className="font-mono">{execution.execution_id}</span>
+                <span className="font-mono">{execution.workflow_execution_id}</span>
                 <span>•</span>
                 <span>Duration: {formatDuration(execution.started_at, execution.completed_at)}</span>
               </div>
@@ -250,7 +250,7 @@ export function ExecutionDetail() {
               const phaseTokens = phase.input_tokens + phase.output_tokens
 
               return (
-                <div key={phase.phase_id} className="flex items-center">
+                <div key={phase.workflow_phase_id} className="flex items-center">
                   <div
                     className={clsx(
                       'flex min-w-[200px] flex-col rounded-lg border p-4 transition-all',

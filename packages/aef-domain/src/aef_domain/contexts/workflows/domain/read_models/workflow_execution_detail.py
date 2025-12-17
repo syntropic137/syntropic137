@@ -9,8 +9,8 @@ from decimal import Decimal
 class PhaseExecutionDetail:
     """Detailed metrics for a phase within an execution."""
 
-    phase_id: str
-    """Phase identifier within the workflow."""
+    workflow_phase_id: str
+    """Phase identifier within the workflow execution."""
 
     name: str
     """Human-readable phase name."""
@@ -63,7 +63,7 @@ class PhaseExecutionDetail:
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
-            "phase_id": self.phase_id,
+            "workflow_phase_id": self.workflow_phase_id,
             "name": self.name,
             "status": self.status,
             "session_id": self.session_id,
@@ -81,13 +81,19 @@ class PhaseExecutionDetail:
 
     @classmethod
     def from_dict(cls, data: dict) -> "PhaseExecutionDetail":
-        """Create from dictionary data."""
+        """Create from dictionary data.
+
+        Supports both new naming (workflow_phase_id) and legacy (phase_id).
+        """
         cost = data.get("cost_usd", "0")
         if isinstance(cost, str):
             cost = Decimal(cost)
 
+        # Support both new and legacy naming for backward compatibility
+        phase_id = data.get("workflow_phase_id") or data.get("phase_id", "")
+
         return cls(
-            phase_id=data.get("phase_id", ""),
+            workflow_phase_id=phase_id,
             name=data.get("name", ""),
             status=data.get("status", "pending"),
             session_id=data.get("session_id"),
@@ -108,8 +114,8 @@ class PhaseExecutionDetail:
 class WorkflowExecutionDetail:
     """Full detail of a workflow execution including per-phase metrics."""
 
-    execution_id: str
-    """Unique identifier for this execution run."""
+    workflow_execution_id: str
+    """Unique identifier for this workflow execution run."""
 
     workflow_id: str
     """ID of the workflow template being executed."""
@@ -149,7 +155,10 @@ class WorkflowExecutionDetail:
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionDetail":
-        """Create from dictionary data."""
+        """Create from dictionary data.
+
+        Supports both new naming (workflow_execution_id) and legacy (execution_id).
+        """
         phases_data = data.get("phases", [])
         phases = tuple(PhaseExecutionDetail.from_dict(p) for p in phases_data)
 
@@ -157,8 +166,11 @@ class WorkflowExecutionDetail:
         if isinstance(cost, str):
             cost = Decimal(cost)
 
+        # Support both new and legacy naming for backward compatibility
+        execution_id = data.get("workflow_execution_id") or data.get("execution_id", "")
+
         return cls(
-            execution_id=data["execution_id"],
+            workflow_execution_id=execution_id,
             workflow_id=data["workflow_id"],
             workflow_name=data.get("workflow_name", ""),
             status=data.get("status", "pending"),
@@ -185,7 +197,7 @@ class WorkflowExecutionDetail:
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
-            "execution_id": self.execution_id,
+            "workflow_execution_id": self.workflow_execution_id,
             "workflow_id": self.workflow_id,
             "workflow_name": self.workflow_name,
             "status": self.status,
