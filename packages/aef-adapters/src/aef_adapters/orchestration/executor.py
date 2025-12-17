@@ -384,6 +384,7 @@ class ExecutionContext:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_duration_ms: float = 0.0
+    total_cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 # ============================================================================

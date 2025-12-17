@@ -300,6 +300,9 @@ class ClaudeAgenticAgent:
                             input_tokens = getattr(usage, "input_tokens", 0) or 0
                             output_tokens = getattr(usage, "output_tokens", 0) or 0
 
+                    # Use SDK's cost if available (includes tool token costs)
+                    sdk_cost = getattr(message, "total_cost_usd", None)
+
             # Calculate final metrics
             duration_ms = (time.time() - start_time) * 1000
             total_tokens = input_tokens + output_tokens
@@ -313,8 +316,8 @@ class ClaudeAgenticAgent:
                 turns_used=turns_used,
                 tools_used=tool_calls,
                 duration_ms=duration_ms,
-                # TODO: Add cost estimation from model config
-                estimated_cost_usd=None,
+                # Use SDK's cost which includes tool token costs
+                estimated_cost_usd=sdk_cost if "sdk_cost" in dir() else None,
             )
 
         except TimeoutError as e:

@@ -272,6 +272,7 @@ class SessionCostProjection:
                     (data->>'input_tokens')::int as total_input,
                     (data->>'output_tokens')::int as total_output,
                     (data->>'tool_call_count')::int as tool_count,
+                    (data->>'total_cost_usd')::numeric as sdk_cost,
                     time as completed_at,
                     execution_id,
                     phase_id,
@@ -334,19 +335,25 @@ class SessionCostProjection:
                 session_id,
             )
 
-            # Calculate cost (Claude Sonnet 4 pricing)
+            # Get token counts
             input_tokens = token_result["total_input"] or 0
             output_tokens = token_result["total_output"] or 0
             # Cache tokens only available from token_usage aggregation
             cache_creation = token_result.get("cache_creation") or 0
             cache_read = token_result.get("cache_read") or 0
 
-            input_cost = Decimal(input_tokens) * Decimal("0.000003")
-            output_cost = Decimal(output_tokens) * Decimal("0.000015")
-            cache_creation_cost = Decimal(cache_creation) * Decimal("0.00000375")
-            cache_read_cost = Decimal(cache_read) * Decimal("0.0000003")
-
-            total_cost = input_cost + output_cost + cache_creation_cost + cache_read_cost
+            # Prefer SDK-provided cost (includes tool token costs accurately)
+            # Fall back to our calculation if SDK cost not available
+            sdk_cost = exec_result.get("sdk_cost") if exec_result else None
+            if sdk_cost is not None:
+                total_cost = Decimal(str(sdk_cost))
+            else:
+                # Calculate cost (Claude Sonnet 4 pricing)
+                input_cost = Decimal(input_tokens) * Decimal("0.000003")
+                output_cost = Decimal(output_tokens) * Decimal("0.000015")
+                cache_creation_cost = Decimal(cache_creation) * Decimal("0.00000375")
+                cache_read_cost = Decimal(cache_read) * Decimal("0.0000003")
+                total_cost = input_cost + output_cost + cache_creation_cost + cache_read_cost
 
             # Build SessionCost
             session_cost = SessionCost(session_id=session_id)

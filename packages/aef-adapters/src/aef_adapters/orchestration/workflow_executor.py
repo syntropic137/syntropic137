@@ -369,7 +369,8 @@ class WorkflowExecutor:
             total_output_tokens=ctx.total_output_tokens,
             total_tokens=ctx.total_input_tokens + ctx.total_output_tokens,
             total_duration_ms=ctx.total_duration_ms,
-            estimated_cost_usd=Decimal("0"),  # TODO: Calculate from model config
+            # Use accumulated SDK cost (includes tool token costs)
+            estimated_cost_usd=ctx.total_cost_usd,
         )
 
     async def _execute_phase(
@@ -591,6 +592,8 @@ class WorkflowExecutor:
                     result_text = event.result
                     input_tokens = event.input_tokens
                     output_tokens = event.output_tokens
+                    # Capture SDK-reported cost (includes tool token costs)
+                    sdk_cost = event.estimated_cost_usd
 
                 elif isinstance(event, TaskFailed):
                     await self._observability.record(
@@ -633,6 +636,9 @@ class WorkflowExecutor:
             ctx.artifact_bundles.append(bundle)
             ctx.total_input_tokens += input_tokens
             ctx.total_output_tokens += output_tokens
+            # Accumulate SDK cost if available
+            if "sdk_cost" in dir() and sdk_cost is not None:
+                ctx.total_cost_usd += Decimal(str(sdk_cost))
 
             # Calculate duration
             phase_completed_at = datetime.now(UTC)
@@ -640,6 +646,8 @@ class WorkflowExecutor:
             ctx.total_duration_ms += duration_ms
 
             # Record phase completed observation
+            # Include SDK cost if available (includes tool token costs)
+            sdk_cost_value = sdk_cost if "sdk_cost" in dir() and sdk_cost is not None else None
             await self._observability.record(
                 ObservationType.EXECUTION_COMPLETED,
                 obs_context,
@@ -648,6 +656,7 @@ class WorkflowExecutor:
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "tool_call_count": tool_call_count,
+                    "total_cost_usd": float(sdk_cost_value) if sdk_cost_value else None,
                 },
             )
 
