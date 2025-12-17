@@ -25,12 +25,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
-import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -180,7 +177,7 @@ class PreMergeValidator:
         """Check code formatting."""
         logger.info("📝 Checking code formatting...")
 
-        success, output, duration = await self.run_command(
+        success, _output, duration = await self.run_command(
             ["uv", "run", "ruff", "format", "--check", "."],
             "Format check",
             timeout=120,
@@ -352,7 +349,7 @@ class PreMergeValidator:
             if result.message:
                 print(f"         | {result.message}")
             if result.details and not result.passed:
-                print(f"         |")
+                print("         |")
                 for line in result.details.split("\n")[:5]:
                     print(f"         | {line}")
                 if len(result.details.split("\n")) > 5:

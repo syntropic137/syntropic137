@@ -25,15 +25,14 @@ See:
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
-from agentic_observability import ObservabilityPort
-
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from contextlib import AbstractAsyncContextManager as AsyncContextManager
+
+    from agentic_observability import ObservabilityPort
 
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
     from aef_adapters.agents.agentic_types import Workspace, WorkspaceConfig

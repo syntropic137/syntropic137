@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from aef_adapters.control import ExecutionController
 from aef_adapters.control.adapters.projection import ProjectionControlStateAdapter
-from aef_adapters.control.ports import SignalQueuePort
 from aef_adapters.projection_stores import get_projection_store
+
+if TYPE_CHECKING:
+    from aef_adapters.control.ports import SignalQueuePort
 
 # Global adapter instances (shared across controller instances)
 _state_adapter: ProjectionControlStateAdapter | None = None
@@ -24,7 +27,7 @@ class NullSignalQueueAdapter:
     TODO: Replace with Redis-backed adapter for production control plane.
     """
 
-    async def get_signal(self, execution_id: str) -> None:
+    async def get_signal(self, _execution_id: str) -> None:
         """No signals in development mode."""
         return None
 

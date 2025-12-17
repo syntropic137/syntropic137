@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -47,6 +46,8 @@ from agentic_observability import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Awaitable, Callable
+
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
     from aef_adapters.control import ControlSignal
     from aef_adapters.workspace_backends.service import WorkspaceService
@@ -398,7 +399,7 @@ class WorkflowExecutor:
         obs_context: ObservationContext,
         # Type imports passed as params to avoid circular imports
         ArtifactBundle: type,
-        ArtifactType: type,
+        ArtifactType: type,  # noqa: ARG002
         PhaseContext: type,
         AgentExecutionConfig: type,
         Workspace: type,

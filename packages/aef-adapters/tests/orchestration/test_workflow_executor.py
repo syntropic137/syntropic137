@@ -38,7 +38,7 @@ def mock_agent():
 @pytest.fixture
 def mock_agent_factory(mock_agent):
     """Create a factory that returns the mock agent."""
-    return lambda provider: mock_agent
+    return lambda _provider: mock_agent
 
 
 @pytest.fixture

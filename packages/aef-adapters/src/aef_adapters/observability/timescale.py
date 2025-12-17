@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agentic_observability import (
@@ -20,7 +20,8 @@ from agentic_observability import (
     ObservationType,
 )
 
-from aef_adapters.storage.observability_writer import ObservabilityWriter
+if TYPE_CHECKING:
+    from aef_adapters.storage.observability_writer import ObservabilityWriter
 
 
 class TimescaleObservability:
@@ -207,7 +208,7 @@ def _check_protocol_compliance() -> None:
 
     # Create a minimal mock writer for checking
     class MockWriter:
-        async def record_observation(self, **kwargs: Any) -> str:
+        async def record_observation(self, **_kwargs: Any) -> str:
             return "test-id"
 
         async def close(self) -> None:

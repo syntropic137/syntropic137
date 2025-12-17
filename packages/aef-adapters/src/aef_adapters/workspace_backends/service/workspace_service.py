@@ -20,7 +20,6 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aef_domain.contexts.workspaces._shared.value_objects import (
@@ -42,6 +41,7 @@ from aef_domain.contexts.workspaces.terminate_workspace.TerminateWorkspaceComman
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
     from aef_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,

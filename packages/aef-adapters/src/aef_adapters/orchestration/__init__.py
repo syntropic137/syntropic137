@@ -56,9 +56,10 @@ from aef_adapters.orchestration.factory import (
 from aef_adapters.orchestration.workflow_executor import WorkflowExecutor
 
 __all__ = [
-    # Unified Executor (M8 - recommended)
-    "WorkflowExecutor",
-    "create_workflow_executor",
+    # Factories
+    "AgenticAgentFactory",
+    # Legacy (deprecated)
+    "AgenticWorkflowExecutor",
     # Execution Events
     "ExecutionCancelled",
     "ExecutionEvent",
@@ -72,15 +73,14 @@ __all__ = [
     "ToolUsed",
     "TurnUpdate",
     "WorkflowCompleted",
+    # Unified Executor (M8 - recommended)
+    "WorkflowExecutor",
     "WorkflowFailed",
     "WorkflowStarted",
-    # Factories
-    "AgenticAgentFactory",
     "WorkspaceFactory",
+    "create_workflow_executor",
     "execute_in_workspace",
     "get_agentic_agent",
     "get_workspace",
     "get_workspace_local",
-    # Legacy (deprecated)
-    "AgenticWorkflowExecutor",
 ]

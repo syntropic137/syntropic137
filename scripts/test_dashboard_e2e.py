@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 # Add project root to path
@@ -52,7 +52,7 @@ async def test_workspace_service() -> bool:
         service = WorkspaceService.create_docker()
 
         async with service.create_workspace(
-            execution_id=f"e2e-test-{datetime.now(timezone.utc).strftime('%H%M%S')}",
+            execution_id=f"e2e-test-{datetime.now(UTC).strftime('%H%M%S')}",
             workflow_id="e2e-test",
             phase_id="phase-1",
             with_sidecar=False,
@@ -81,19 +81,20 @@ async def test_observability_port() -> bool:
     print_step("Testing ObservabilityPort → TimescaleDB...")
 
     try:
+        from agentic_observability import ObservationContext, ObservationType
+
         from aef_adapters.observability import get_observability
-        from agentic_observability import ObservationType, ObservationContext
 
         obs = get_observability()
 
-        test_session_id = f"e2e-obs-test-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+        test_session_id = f"e2e-obs-test-{datetime.now(UTC).strftime('%H%M%S')}"
         ctx = ObservationContext(session_id=test_session_id)
 
         # Record an observation
         await obs.record(
             ObservationType.SESSION_STARTED,
             ctx,
-            {"test": True, "timestamp": datetime.now(timezone.utc).isoformat()},
+            {"test": True, "timestamp": datetime.now(UTC).isoformat()},
         )
         await obs.flush()
 
@@ -197,9 +198,10 @@ async def test_full_workflow_execution() -> bool:
     print_step("Testing full workflow execution in Docker...")
 
     try:
+        from dataclasses import dataclass
+
         from aef_adapters.orchestration import create_workflow_executor
         from aef_adapters.workspace_backends.service import WorkspaceService
-        from dataclasses import dataclass
 
         # Create a minimal workflow definition
         @dataclass
