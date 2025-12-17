@@ -27,17 +27,17 @@ class NullSignalQueueAdapter:
     TODO: Replace with Redis-backed adapter for production control plane.
     """
 
-    async def get_signal(self, _execution_id: str) -> None:
+    async def enqueue(self, _execution_id: str, _signal: object) -> None:
+        """No-op in development mode."""
+        pass
+
+    async def dequeue(self, _execution_id: str) -> None:
         """No signals in development mode."""
         return None
 
-    async def send_signal(self, execution_id: str, signal: object) -> None:
-        """No-op in development mode."""
-        pass
-
-    async def clear_signals(self, execution_id: str) -> None:
-        """No-op in development mode."""
-        pass
+    async def get_signal(self, _execution_id: str) -> None:
+        """No signals in development mode (alias for dequeue)."""
+        return None
 
 
 def _get_adapters() -> tuple[ProjectionControlStateAdapter, SignalQueuePort]:
