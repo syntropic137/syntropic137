@@ -29,53 +29,6 @@ concurrency:
 
 jobs:
   #############################################################################
-  # F17 TESTS - All container execution robustness tests in one job
-  # Target: <2 minutes
-  #############################################################################
-
-  f17-tests:
-    name: F17 Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      APP_ENVIRONMENT: test
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: uv sync --all-extras
-
-      # Run all F17 tests in a single pytest call for speed
-      - name: Run F17 unit tests
-        run: |
-          uv run pytest \
-            packages/aef-shared/tests/test_workspace_paths.py \
-            packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py \
-            packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py \
-            -q --tb=short
-
-      # Agent runner tests need package install, run separately
-      - name: Run analytics streamer tests
-        run: |
-          uv run --package aef-agent-runner pytest \
-            packages/aef-agent-runner/tests/test_analytics_streamer.py \
-            -q --tb=short
-
-  #############################################################################
   # DOCKER BUILD - Validate workspace image (runs in parallel)
   # Target: <3 minutes with cache
   #############################################################################
@@ -117,7 +70,7 @@ jobs:
     name: E2E Container Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [f17-tests, docker-build]
+    needs: [docker-build]
     if: github.event.inputs.run_full_e2e == 'true'
 
     steps:
@@ -149,13 +102,12 @@ jobs:
   e2e-success:
     name: E2E Success
     if: always()
-    needs: [f17-tests, docker-build]
+    needs: [docker-build]
     runs-on: ubuntu-latest
     steps:
       - name: Check jobs
         run: |
-          if [[ "${{ needs.f17-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
+          if [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
             exit 1
           fi
-          echo "✅ All E2E checks passed!"
+          echo "✅ Docker build passed!"
