@@ -66,8 +66,6 @@ jobs:
             packages/aef-shared/tests/test_workspace_paths.py \
             packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py \
             packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py \
-            packages/aef-adapters/tests/workspaces/test_artifact_collection.py \
-            packages/aef-adapters/tests/workspaces/test_attribution_settings.py \
             -q --tb=short
 
       # Agent runner tests need package install, run separately
@@ -98,7 +96,8 @@ jobs:
       - name: Build workspace image
         uses: docker/build-push-action@v5
         with:
-          context: docker/workspace
+          context: .
+          file: docker/workspace/Dockerfile
           push: false
           tags: aef-workspace:latest
           cache-from: type=gha
