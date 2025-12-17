@@ -231,11 +231,19 @@ class ClaudeAgenticAgent:
                     turns_used += 1
 
                     # Extract per-turn usage if available
+                    # SDK may return usage as object (message.usage.input_tokens)
+                    # or as dict (message.usage["input_tokens"])
                     turn_input = 0
                     turn_output = 0
                     if hasattr(message, "usage") and message.usage:
-                        turn_input = message.usage.get("input_tokens", 0)
-                        turn_output = message.usage.get("output_tokens", 0)
+                        usage = message.usage
+                        # Try dict-style first, then object-style
+                        if isinstance(usage, dict):
+                            turn_input = usage.get("input_tokens", 0)
+                            turn_output = usage.get("output_tokens", 0)
+                        else:
+                            turn_input = getattr(usage, "input_tokens", 0) or 0
+                            turn_output = getattr(usage, "output_tokens", 0) or 0
                         cumulative_input_tokens += turn_input
                         cumulative_output_tokens += turn_output
 
@@ -282,10 +290,15 @@ class ClaudeAgenticAgent:
                 elif isinstance(message, ResultMessage):
                     result_text = message.result or ""
 
-                    # Extract token usage
+                    # Extract token usage (handle both dict and object-style)
                     if message.usage:
-                        input_tokens = message.usage.get("input_tokens", 0)
-                        output_tokens = message.usage.get("output_tokens", 0)
+                        usage = message.usage
+                        if isinstance(usage, dict):
+                            input_tokens = usage.get("input_tokens", 0)
+                            output_tokens = usage.get("output_tokens", 0)
+                        else:
+                            input_tokens = getattr(usage, "input_tokens", 0) or 0
+                            output_tokens = getattr(usage, "output_tokens", 0) or 0
 
             # Calculate final metrics
             duration_ms = (time.time() - start_time) * 1000

@@ -78,11 +78,16 @@ async def get_session(session_id: str) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
+    # Get execution_id for TimescaleDB queries
+    # Observability data is stored with execution_id as session_id in TimescaleDB
+    execution_id = getattr(session, "execution_id", None)
+    timescale_session_id = execution_id or session_id
+
     # Get cost data from TimescaleDB via SessionCostProjection
-    session_cost = await manager.session_cost.get_session_cost(session_id)
+    session_cost = await manager.session_cost.get_session_cost(timescale_session_id)
 
     # Get tool operations from TimescaleDB via SessionToolsProjection (ADR-026)
-    tool_operations = await manager.session_tools.get(session_id)
+    tool_operations = await manager.session_tools.get(timescale_session_id)
 
     # Convert ToolOperation read models to API OperationInfo
     operations: list[OperationInfo] = []

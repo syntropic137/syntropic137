@@ -244,6 +244,26 @@ test-observability-e2e:
     docker compose -f docker/docker-compose.observability-test.yaml down -v
     @echo "✅ E2E observability test complete!"
 
+# Run E2E container execution tests (full flow: sidecar + workspace + agent)
+test-e2e-container:
+    uv run python scripts/e2e_agent_in_container_test.py
+
+# Run E2E container tests with image rebuild
+test-e2e-container-build:
+    uv run python scripts/e2e_agent_in_container_test.py --build
+
+# Pre-merge validation (all checks before opening PR)
+validate-pre-merge quick="":
+    @if [ "{{quick}}" = "--quick" ]; then \
+        uv run python scripts/pre_merge_validation.py --quick; \
+    else \
+        uv run python scripts/pre_merge_validation.py; \
+    fi
+
+# Pre-merge validation (quick mode - skip E2E tests)
+validate-pre-merge-quick:
+    uv run python scripts/pre_merge_validation.py --quick
+
 # Run linter
 lint:
     uv run ruff check .
