@@ -67,15 +67,20 @@ class TimescaleObservability:
             context: Observation context with session/execution IDs
             data: Observation-specific data
         """
+        # Include workspace_path in data if available
+        obs_data = {
+            "observation_id": context.observation_id,
+            "agent_id": context.agent_id,
+            "correlation_id": context.correlation_id,
+            **data,
+        }
+        if context.workspace_path:
+            obs_data["workspace_path"] = context.workspace_path
+
         await self._writer.record_observation(
             session_id=context.session_id,
             observation_type=observation_type.value,
-            data={
-                "observation_id": context.observation_id,
-                "agent_id": context.agent_id,
-                "correlation_id": context.correlation_id,
-                **data,
-            },
+            data=obs_data,
             execution_id=context.execution_id,
             phase_id=context.phase_id,
             workspace_id=context.workflow_id,  # Map workflow_id to workspace_id

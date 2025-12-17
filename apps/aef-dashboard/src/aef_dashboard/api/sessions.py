@@ -86,6 +86,30 @@ async def get_session(session_id: str) -> SessionResponse:
     # Get cost data from TimescaleDB via SessionCostProjection
     session_cost = await manager.session_cost.get_session_cost(timescale_session_id)
 
+    # Get workspace_path from execution_started observation
+    workspace_path: str | None = None
+    try:
+        from aef_adapters.storage.observability_writer import get_observability_writer
+
+        writer = get_observability_writer()
+        if writer.pool is None:
+            await writer.initialize()
+        if writer.pool:
+            async with writer.pool.acquire() as conn:
+                result = await conn.fetchval(
+                    """
+                    SELECT data->>'workspace_path'
+                    FROM agent_observations
+                    WHERE session_id = $1 AND observation_type = 'execution_started'
+                    ORDER BY time DESC
+                    LIMIT 1
+                    """,
+                    timescale_session_id,
+                )
+                workspace_path = result
+    except Exception:
+        pass  # Workspace path is optional
+
     # Get tool operations from TimescaleDB via SessionToolsProjection (ADR-026)
     tool_operations = await manager.session_tools.get(timescale_session_id)
 
@@ -200,6 +224,7 @@ async def get_session(session_id: str) -> SessionResponse:
         agent_provider=session.agent_type,
         agent_model=None,
         status=session.status,
+        workspace_path=workspace_path,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         total_tokens=total_tokens,

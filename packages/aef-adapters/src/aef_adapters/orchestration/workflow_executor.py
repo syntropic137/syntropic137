@@ -421,6 +421,15 @@ class WorkflowExecutor:
         ) as managed_workspace:
             workspace_path = managed_workspace.path
 
+            # Update observation context with workspace path for tracking
+            obs_context = ObservationContext(
+                session_id=obs_context.session_id,
+                execution_id=obs_context.execution_id,
+                workflow_id=obs_context.workflow_id,
+                phase_id=obs_context.phase_id,
+                workspace_path=str(workspace_path),
+            )
+
             # Emit phase started
             yield PhaseStarted(
                 workflow_id=ctx.workflow_id,
@@ -432,11 +441,15 @@ class WorkflowExecutor:
                 workspace_path=workspace_path,
             )
 
-            # Record phase started observation
+            # Record phase started observation with workspace path
             await self._observability.record(
                 ObservationType.EXECUTION_STARTED,
                 obs_context,
-                {"phase_name": phase.name, "phase_order": phase.order},
+                {
+                    "phase_name": phase.name,
+                    "phase_order": phase.order,
+                    "workspace_path": str(workspace_path),
+                },
             )
 
             # Inject context files into workspace

@@ -143,6 +143,8 @@ class SessionResponse(BaseModel):
     agent_provider: str | None
     agent_model: str | None
     status: str
+    workspace_path: str | None = None
+    """Path to the isolated workspace on host."""
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
