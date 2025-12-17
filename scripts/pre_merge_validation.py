@@ -84,8 +84,10 @@ class PreMergeValidator:
             except TimeoutError:
                 proc.kill()
                 await proc.wait()
-                return False, f"Command timed out after {timeout}s", int(
-                    (time.time() - start) * 1000
+                return (
+                    False,
+                    f"Command timed out after {timeout}s",
+                    int((time.time() - start) * 1000),
                 )
 
             duration_ms = int((time.time() - start) * 1000)
@@ -353,7 +355,7 @@ class PreMergeValidator:
                 print(f"         |")
                 for line in result.details.split("\n")[:5]:
                     print(f"         | {line}")
-                if len(result.details.split('\n')) > 5:
+                if len(result.details.split("\n")) > 5:
                     print(f"         | ... ({len(result.details.split('\n')) - 5} more lines)")
             print()
 
