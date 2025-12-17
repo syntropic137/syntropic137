@@ -60,6 +60,10 @@ class PhaseDefinition(BaseModel):
     output_artifact_types: list[str] = Field(default_factory=list)
 
     # Agent configuration
-    prompt_template_id: str | None = None
+    prompt_template: str | None = None
+    """The actual prompt template content for this phase."""
+
     max_tokens: int | None = None
     timeout_seconds: int | None = None
+    allowed_tools: list[str] = Field(default_factory=list)
+    """Tools allowed during this phase execution."""

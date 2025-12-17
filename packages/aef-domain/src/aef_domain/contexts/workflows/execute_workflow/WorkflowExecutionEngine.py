@@ -481,7 +481,7 @@ class WorkflowExecutionEngine:
                     name=phase.name,
                     order=phase.order,
                     description=phase.description,
-                    prompt_template=phase.prompt_template_id or "",
+                    prompt_template=phase.prompt_template or "",
                     output_artifact_type=phase.output_artifact_types[0]
                     if phase.output_artifact_types
                     else "text",

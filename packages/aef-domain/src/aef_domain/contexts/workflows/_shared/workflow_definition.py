@@ -61,7 +61,7 @@ class PhaseYamlDefinition(BaseModel):
             description=self.description,
             input_artifact_types=self.input_artifacts,
             output_artifact_types=self.output_artifacts,
-            prompt_template_id=self.prompt_template,
+            prompt_template=self.prompt_template,
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
         )

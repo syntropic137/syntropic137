@@ -240,7 +240,7 @@ def create_test_workflow(
                 name="Research Phase",
                 order=1,
                 description="Research the topic",
-                prompt_template_id="Research: {{topic}}",
+                prompt_template="Research: {{topic}}",
                 output_artifact_types=["research_summary"],
             ),
             PhaseDefinition(
@@ -248,7 +248,7 @@ def create_test_workflow(
                 name="Planning Phase",
                 order=2,
                 description="Create a plan",
-                prompt_template_id="Plan based on: {{phase-1}}",
+                prompt_template="Plan based on: {{phase-1}}",
                 output_artifact_types=["plan"],
             ),
         ]
@@ -502,7 +502,7 @@ class TestWorkflowExecutionEngine:
                 phase_id="research",
                 name="Research",
                 order=1,
-                prompt_template_id="Research topic: {{topic}}",
+                prompt_template="Research topic: {{topic}}",
                 output_artifact_types=["text"],
             ),
         ]
@@ -539,14 +539,14 @@ class TestWorkflowExecutionEngine:
                 phase_id="phase1",
                 name="Phase 1",
                 order=1,
-                prompt_template_id="Start with: {{topic}}",
+                prompt_template="Start with: {{topic}}",
                 output_artifact_types=["text"],
             ),
             PhaseDefinition(
                 phase_id="phase2",
                 name="Phase 2",
                 order=2,
-                prompt_template_id="Continue from: {{phase1}}",
+                prompt_template="Continue from: {{phase1}}",
                 output_artifact_types=["text"],
             ),
         ]
