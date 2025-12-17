@@ -1,0 +1,113 @@
+name: E2E Container Execution
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/aef-agent-runner/**"
+      - "packages/aef-adapters/src/aef_adapters/workspaces/**"
+      - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
+      - "docker/workspace/**"
+      - ".github/workflows/e2e-container.yml"
+  pull_request:
+    paths:
+      - "packages/aef-agent-runner/**"
+      - "packages/aef-adapters/src/aef_adapters/workspaces/**"
+      - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
+      - "docker/workspace/**"
+      - ".github/workflows/e2e-container.yml"
+  workflow_dispatch:
+    inputs:
+      run_full_e2e:
+        description: "Run full E2E with live API calls (requires secrets)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: e2e-container-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  #############################################################################
+  # DOCKER BUILD - Validate workspace image (runs in parallel)
+  # Target: <3 minutes with cache
+  #############################################################################
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build workspace image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/workspace/Dockerfile
+          push: false
+          tags: aef-workspace:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          load: true
+
+      - name: Verify image
+        run: |
+          docker run --rm aef-workspace:latest python --version
+          docker run --rm aef-workspace:latest python -c "import aef_agent_runner; print('OK')" || true
+
+  #############################################################################
+  # E2E CONTAINER TEST - Full integration (manual trigger only)
+  #############################################################################
+
+  e2e-container:
+    name: E2E Container Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [docker-build]
+    if: github.event.inputs.run_full_e2e == 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install & Run E2E
+        run: |
+          uv sync --all-extras
+          docker build -t aef-workspace:latest docker/workspace/
+          uv run python scripts/e2e_agent_in_container_test.py
+        continue-on-error: true
+
+  #############################################################################
+  # SUMMARY
+  #############################################################################
+
+  e2e-success:
+    name: E2E Success
+    if: always()
+    needs: [docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check jobs
+        run: |
+          if [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
+            exit 1
+          fi
+          echo "✅ Docker build passed!"

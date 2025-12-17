@@ -19,6 +19,7 @@ dependencies = [
     "event-sourcing-python",
     "grpcio>=1.60", # Required by event-sourcing SDK
     "claude-agent-sdk>=0.1.11",
+    "minio>=7.2.20",
 ]
 
 # Core agentic SDK (required for full functionality)
@@ -58,10 +59,18 @@ aef-domain = { workspace = true }
 aef-adapters = { workspace = true }
 aef-shared = { workspace = true }
 aef-perf = { workspace = true }
+aef-tokens = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 agentic-hooks = { path = "lib/agentic-primitives/lib/python/agentic_hooks" }
 agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging" }
+# NEW: agentic-primitives packages (M1-M4)
+agentic-security = { path = "lib/agentic-primitives/lib/python/agentic_security" }
+agentic-agent = { path = "lib/agentic-primitives/lib/python/agentic_agent" }
+agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation" }
+agentic-adapters = { path = "lib/agentic-primitives/lib/python/agentic_adapters" }
+# M8: Unified Executor Architecture
+agentic-observability = { path = "lib/agentic-primitives/lib/python/agentic_observability" }
 
 [tool.ruff]
 target-version = "py312"
@@ -127,6 +136,15 @@ exclude = [
     "^.*test_.*\\.py$",
 ]
 
+# IMPORTANT: NEVER use ignore_errors = true in mypy overrides!
+# Always fix type errors properly with:
+#   - Proper type annotations
+#   - cast() for legitimate type narrowing
+#   - Guards (if x is not None, isinstance, etc.)
+#
+# The # type: ignore comment is also discouraged - use only as last resort
+# with a specific error code and explanation.
+
 # Per-module ignores for optional dependencies and internal modules
 [[tool.mypy.overrides]]
 module = [
@@ -153,6 +171,16 @@ module = [
     "agentic_hooks.*",
     "agentic_logging",
     "agentic_logging.*",
+    "agentic_security",
+    "agentic_security.*",
+    "agentic_agent",
+    "agentic_agent.*",
+    "agentic_isolation",
+    "agentic_isolation.*",
+    "agentic_adapters",
+    "agentic_adapters.*",
+    "agentic_observability",
+    "agentic_observability.*",
     "sse_starlette",
     "sse_starlette.*",
     "uvicorn",
@@ -208,11 +236,17 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "raise typer.Exit",  # CLI exits are hard to test
 ]
-# Exclude interactive CLI commands from coverage (require real API keys)
+# Exclude files that require external services or are deprecated
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "*/agents/claude.py",  # Requires Anthropic API
     "*/agents/openai.py",  # Requires OpenAI API
     "*/storage/postgres.py",  # Requires running PostgreSQL
+    "*/execute_workflow/WorkflowExecutionEngine.py",  # Legacy - being replaced by WorkflowExecutor (M8)
+    "*/workspace_backends/*",  # Requires Docker runtime
+    "*/orchestration/workflow_executor.py",  # Requires Docker + Claude SDK
+    "*/orchestration/executor.py",  # Requires Docker + Claude SDK
+    "*/orchestration/factory.py",  # Requires full DI setup
+    "*/stale_execution_cleaner.py",  # Background cleanup - integration tested
 ]

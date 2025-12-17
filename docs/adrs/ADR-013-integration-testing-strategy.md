@@ -1,9 +1,10 @@
 # ADR-013: Integration Testing Strategy with Event Store
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2025-12-04
+**Updated:** 2025-12-16
 **Authors:** @neural
-**Related:** ADR-004 (Environment Configuration), ADR-006 (Event Sourcing)
+**Related:** ADR-004 (Environment Configuration), ADR-006 (Event Sourcing), ADR-018 (Observability Events)
 
 ## Context
 
@@ -24,27 +25,133 @@ On 2025-12-04, we discovered a critical bug where projections failed with:
 
 This is a symptom of insufficient integration test coverage with realistic infrastructure.
 
+### 2025-12-16 Update: Tool Observability Testing
+
+While implementing tool observability (parsing SDK messages for tool_use/tool_result events), we developed a fast unit testing approach that validates parsing logic **without Claude API calls**. This reduced feedback time from 5+ minutes to 0.24 seconds.
+
+**Key Insight**: For external API integrations (Claude SDK, GitHub API, etc.), create mock message types that match the SDK's structure. This enables comprehensive testing without:
+- API costs
+- Network latency
+- Rate limiting
+- Flaky external dependencies
+
 ## Decision
 
 Implement a **three-tier testing strategy** following the event-sourcing-platform pattern:
 
-### Tier 1: Unit Tests (Fast, In-Memory)
-- Use `MemoryEventStoreClient` or mocks
-- Test business logic, validation, event handlers
-- ~0.1s per test
-- Run on every commit
+### ⚠️ CRITICAL: Test Environment Isolation
 
-### Tier 2: Integration Tests (Real Event Store)
+**Mocks and memory implementations MUST only be used in the `test` environment.**
+
+```python
+# conftest.py - CORRECT pattern
+import os
+import pytest
+
+@pytest.fixture
+def event_store_client():
+    """Get event store client - memory only in tests."""
+    env = os.getenv("AEF_ENVIRONMENT", "development")
+
+    if env == "test":
+        # Memory client is ONLY acceptable in tests
+        from aef_adapters.storage.memory import MemoryEventStoreClient
+        return MemoryEventStoreClient()
+    else:
+        # NEVER use memory client in dev/prod - will give false positives!
+        raise RuntimeError(
+            f"Tests must run with AEF_ENVIRONMENT=test, got {env}. "
+            "Memory implementations must not leak into dev/prod."
+        )
+```
+
+**Why This Matters**:
+- Memory implementations skip serialization → miss JSON encoding bugs
+- Memory implementations skip network → miss connectivity issues
+- Memory implementations skip auth → miss permission bugs
+- **False positives in dev/prod are WORSE than no tests** - they create false confidence
+
+**Enforcement**:
+```python
+# In production code - defensive check
+class MemoryEventStoreClient:
+    def __init__(self):
+        env = os.getenv("AEF_ENVIRONMENT", "development")
+        if env not in ("test", "testing"):
+            raise RuntimeError(
+                "MemoryEventStoreClient can only be used in test environment. "
+                f"Current environment: {env}"
+            )
+```
+
+### Tier 1: Unit Tests (Fast, <1s total)
+- Use mocks for external APIs (Claude SDK, GitHub, etc.)
+- Use `MemoryEventStoreClient` for event store logic (**test env only!**)
+- Test business logic, validation, parsing, event handlers
+- **Goal: <0.5s for full suite** - enables rapid iteration
+- Run on every save/change
+
+**Example: SDK Message Parsing (from tool observability)**
+```python
+# packages/aef-agent-runner/tests/test_runner.py
+@dataclass
+class MockToolUseBlock:
+    """Mock SDK ToolUseBlock - no API calls needed."""
+    type: str = "tool_use"
+    id: str = "toolu_01abc123"
+    name: str = "Bash"
+    input: dict = field(default_factory=lambda: {"command": "ls"})
+
+class TestToolObservabilityParsing:
+    """15 tests in 0.24 seconds - no Claude API!"""
+
+    def test_parses_tool_use_block_object(self, runner):
+        message = MockAssistantMessage(
+            content=[MockToolUseBlock(name="Bash", id="toolu_001")]
+        )
+        with mock.patch("aef_agent_runner.runner.emit_tool_use") as m:
+            runner._handle_assistant_message(message)
+            m.assert_called_once()
+```
+
+### Tier 2: Integration Tests (Real Infrastructure, ~10s)
 - Use testcontainers for isolated event store instance
-- Test serialization, projection handlers, subscription service
-- ~0.5s per test
-- Run in CI, optional locally
+- Test serialization round-trips, projection handlers, subscription service
+- **Catches bugs that mocks miss** (datetime serialization, JSON encoding)
+- Run in CI, optional locally with pre-running containers
 
-### Tier 3: E2E Tests (Full Stack)
+### Tier 3: E2E Tests (Full Stack, ~5min)
 - Real infrastructure (Docker Compose)
-- Test complete workflows with UI
-- ~2s per test
-- Run before merge
+- Test complete workflows: Agent → Event Store → API → UI
+- Run sparingly - before PR merge
+- **Not for rapid iteration** - use for validation gates only
+
+### Mock Patterns for External APIs
+
+When testing code that interacts with external APIs (Claude SDK, GitHub, etc.), create mock objects that match the SDK's structure using duck typing:
+
+```python
+# Use dataclasses to create type-safe mocks
+@dataclass
+class MockToolUseBlock:
+    type: str = "tool_use"
+    id: str = "toolu_01abc123"
+    name: str = "Bash"
+    input: dict = field(default_factory=dict)
+
+@dataclass
+class MockAssistantMessage:
+    content: list = field(default_factory=list)
+    usage: MockUsage = field(default_factory=MockUsage)
+```
+
+**Benefits**:
+- Type-safe: IDEs provide autocomplete
+- Explicit: Clear what's being mocked
+- Portable: Can be shared across test modules
+- SDK-agnostic: Works even if SDK types aren't exported
+
+**Consider for agentic-primitives**: These mock patterns could become canonical test fixtures that all AEF packages share.
 
 ### Fast Development Mode (from event-sourcing-platform)
 
@@ -53,12 +160,14 @@ For local development:
 # Pre-running infrastructure (~50ms startup)
 export TEST_DATABASE_URL=postgresql://localhost:15648/test
 export TEST_EVENTSTORE_URL=localhost:50051
+export AEF_ENVIRONMENT=test  # Required for memory implementations!
 ```
 
 For CI:
 ```bash
 # Testcontainers fallback (isolated but slower)
 export FORCE_TESTCONTAINERS=1
+export AEF_ENVIRONMENT=test
 ```
 
 ## Implementation Plan
@@ -145,11 +254,20 @@ jobs:
 - **Realistic test environment** - CI tests match production behavior
 - **Fast development** - pre-running infrastructure for local testing
 - **Isolated CI** - testcontainers ensure clean state per run
+- **Rapid iteration** - unit tests <1s enable TDD workflow
+- **No API costs** - mocks eliminate Claude/GitHub API charges during development
 
 ### Negative
 - **Slower CI** - integration tests add ~30-60s to pipeline
 - **Docker dependency** - requires Docker for local integration tests
 - **Complexity** - two-mode testing (fast dev vs testcontainers)
+- **Mock maintenance** - mocks must be updated when SDK changes
+
+### Critical: Environment Isolation
+- **Memory implementations MUST NOT leak to dev/prod**
+- **Mocks give false positives** if used outside test environment
+- **Defensive checks required** in memory implementations
+- **CI must set `AEF_ENVIRONMENT=test`** explicitly
 
 ### Neutral
 - **Existing tests unchanged** - unit tests continue working as-is
@@ -188,5 +306,12 @@ Key insight: The platform uses **persistent dev containers** for fast iteration,
 
 - [pytest-testcontainers](https://github.com/testcontainers/testcontainers-python)
 - [event-sourcing-platform testing docs](lib/event-sourcing-platform/docs-site/docs/development/fast-testing.md)
+- [agentic-primitives TDD ADR](lib/agentic-primitives/docs/adrs/008-test-driven-development.md)
 - ADR-004: Environment Configuration
 - ADR-006: Event Sourcing with EventStoreDB
+- ADR-018: Commands vs Observations Event Architecture
+
+### Implementation Examples
+- `packages/aef-agent-runner/tests/test_runner.py` - Fast unit tests for SDK message parsing
+- `packages/aef-adapters/tests/conftest.py` - Test fixture patterns
+- `docker/test-observability/` - Isolated integration test environment

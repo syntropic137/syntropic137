@@ -593,6 +593,21 @@ def run_workflow(
             help="Minimal output, only show final result",
         ),
     ] = False,
+    container: Annotated[
+        bool,
+        typer.Option(
+            "--container",
+            "-c",
+            help="Run agent inside isolated container with sidecar proxy",
+        ),
+    ] = False,
+    tenant_id: Annotated[
+        str | None,
+        typer.Option(
+            "--tenant",
+            help="Tenant ID for multi-tenant token attribution",
+        ),
+    ] = None,
 ) -> None:
     """Execute a workflow.
 
@@ -605,6 +620,9 @@ def run_workflow(
 
         # Run quietly (minimal output)
         aef workflow run research-workflow --quiet
+
+        # Run in container mode (isolated execution)
+        aef workflow run github-pr-workflow --container --input change_description="Add README"
     """
     from aef_adapters.agents import (
         AgentProtocol,
@@ -756,6 +774,12 @@ def run_workflow(
         for key, value in parsed_inputs.items():
             console.print(f"  • {key}: [green]{value}[/green]")
 
+    if container:
+        console.print("\n[bold cyan]🐳 Container Mode[/bold cyan]")
+        console.print("  Agent will run in isolated Docker container with sidecar proxy")
+        if tenant_id:
+            console.print(f"  Tenant: [dim]{tenant_id}[/dim]")
+
     if dry_run:
         console.print("\n[yellow]DRY RUN MODE[/yellow] - Validating execution plan\n")
 
@@ -851,19 +875,43 @@ def run_workflow(
                 )
 
             # Create engine with ADR-023 compliant dependencies
+            from aef_adapters.storage.artifact_storage import get_artifact_storage
+            from aef_adapters.storage.observability_writer import get_observability_writer
             from aef_adapters.storage.repositories import get_workflow_execution_repository
-            from aef_adapters.workspaces import get_workspace_router
+            from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
-            workspace_router = get_workspace_router()
+            observability_writer = get_observability_writer()
+            artifact_content_storage = await get_artifact_storage()
+
+            # Initialize observability writer (creates TimescaleDB schema)
+            # Note: initialization happens lazily on first write
+            # No need to pre-initialize here
+
+            # Container environment - non-sensitive config only (ADR-024)
+            #
+            # Secrets are handled by the Setup Phase Secrets pattern:
+            # 1. Engine generates GitHub App installation token (short-lived)
+            # 2. Runs setup script inside container WITH token
+            # 3. Clears token from environment BEFORE agent runs
+            # 4. Agent uses cached git/gh credentials (no raw token access)
+            #
+            # ANTHROPIC_API_KEY is passed to agent (needed for Claude calls)
+            # GitHub auth is EXCLUSIVELY via GitHub App (no GH_TOKEN/PAT)
+            # See ADR-024: Setup Phase Secrets Pattern
+            container_env: dict[str, str] = {}
+
+            workspace_service = WorkspaceService.create_docker(environment=container_env)
 
             engine = WorkflowExecutionEngine(
                 workflow_repository=workflow_repo,
                 execution_repository=execution_repo,
-                workspace_router=workspace_router,
+                workspace_service=workspace_service,
                 session_repository=session_repo,
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,
+                observability_writer=observability_writer,
+                artifact_content_storage=artifact_content_storage,  # ADR-012
             )
 
             # Setup progress display
@@ -889,6 +937,8 @@ def run_workflow(
                         result = await engine.execute(
                             workflow_id=full_workflow_id,
                             inputs=parsed_inputs,
+                            use_container=container,
+                            tenant_id=tenant_id,
                         )
 
                         # Update progress for completed phases
@@ -905,6 +955,8 @@ def run_workflow(
                     result = await engine.execute(
                         workflow_id=full_workflow_id,
                         inputs=parsed_inputs,
+                        use_container=container,
+                        tenant_id=tenant_id,
                     )
                 except WorkflowNotFoundError:
                     console.print(f"[red]Workflow not found: {full_workflow_id}[/red]")

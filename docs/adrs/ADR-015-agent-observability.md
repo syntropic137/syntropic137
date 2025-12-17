@@ -192,15 +192,43 @@ class OperationRecordedEvent(DomainEvent):
 
 ### 3. Event Flow
 
+The event flow differs based on agent execution pattern (see ADR-017 for details):
+
+#### Pattern A: CLI Agent (File-based hooks)
+
 ```
-Agent Execution
+Claude Code CLI
        │
-       ├─► ToolUseStarted ────► RecordOperationCommand(TOOL_STARTED)
+       ├─► Hook Script ────► .agentic/analytics/events.jsonl
+       │                              │
+       │                              ▼
+       │                        AnalyticsStreamer (file watcher)
+       │                              │
+       │                              ▼
+       │                        RecordOperationCommand
        │                              │
        │                              ▼
        │                        OperationRecordedEvent
        │                              │
-       ├─► ToolUseCompleted ──► RecordOperationCommand(TOOL_COMPLETED)
+       │                              ▼
+       │                        Event Store → Projections → UI
+```
+
+#### Pattern B: SDK Agent (Stdout - recommended for containers)
+
+```
+claude-agent-sdk query()
+       │
+       ├─► ResultMessage ────► AgentRunner.emit_*()
+       │                              │
+       │                              ▼ stdout (JSONL)
+       │                        Orchestrator (reads stdout)
+       │                              │
+       │                              ▼
+       │                        EventCollectorPort.collect_*()
+       │                              │
+       │                              ▼
+       │                        SessionAggregate
        │                              │
        │                              ▼
        │                        OperationRecordedEvent
@@ -220,6 +248,8 @@ Agent Execution
        │
        └─► TaskCompleted
 ```
+
+**Note**: Pattern B (stdout) is the industry standard for containerized agent execution and scales to 10,000+ concurrent agents. See ADR-017 for architectural rationale.
 
 ### 4. Projection Timeline
 

@@ -3,6 +3,7 @@
 ## Status
 
 **Accepted** - 2025-12-09
+**Updated** - 2025-12-16 - Added storage decision (TimescaleDB for observations)
 
 ## Context
 
@@ -381,13 +382,63 @@ token_usage event ─┬─► CostCalculator ───────────�
 - Tool definition tokens are amortized across all messages
 - Cache tokens affect tool costs but are attributed separately
 
+## Storage Decision (2025-12-16 Update)
+
+During E2E testing, we discovered that **observability events cannot be stored in the domain event store** because they violate aggregate invariants.
+
+### The Problem
+
+```python
+# This FAILS with "append precondition failed"
+await event_store.append_events(
+    stream_name=f"AgentObservations-{session_id}",
+    events=[observation],
+    expected_version=nonce - 1,  # ❌ No aggregate = no version
+)
+```
+
+The event store requires aggregates with optimistic concurrency control. Observations don't belong to aggregates - they're external facts that already happened.
+
+### The Solution: Separate Storage Systems
+
+**Pattern 1 (Domain Events) → PostgreSQL Event Store**
+- Managed by event-sourcing library
+- Aggregate versioning and concurrency control
+- Forever retention (audit trail)
+
+**Pattern 2 (Observability) → TimescaleDB Hypertable**
+- Direct INSERT (no aggregates)
+- Time-series optimized
+- 10x-100x better write performance
+- Automatic compression and retention
+
+### Architecture
+
+```
+PostgreSQL Database (same instance, different tables)
+├── events (domain events)
+└── agent_observations (TimescaleDB hypertable)
+```
+
+**See ADR-026 for complete implementation details.**
+
+### Performance Comparison
+
+| Metric | PostgreSQL | TimescaleDB |
+|--------|-----------|-------------|
+| Write throughput | 1x baseline | **20x faster** |
+| Time-range queries | 1x baseline | **14,000x faster** |
+| Storage (compressed) | 100% | **10% (90% reduction)** |
+| Data retention | Manual DELETE | **Automatic policies** |
+
 ## Related ADRs
 
 - **ADR-003**: Event Sourcing Decorators (Pattern 1 implementation)
-- **ADR-007**: Event Store Integration (storage layer for both patterns)
+- **ADR-007**: Event Store Integration (storage layer for Pattern 1)
 - **ADR-008**: VSA Projection Architecture (read side for both patterns)
 - **ADR-013**: Projection Consistency (applies to both patterns)
-- **ADR-017**: Scalable Event Collection (uses Pattern 2)
+- **ADR-017**: Scalable Event Collection (superseded by ADR-026)
+- **ADR-026**: TimescaleDB for Observability Storage (Pattern 2 storage)
 
 ## References
 

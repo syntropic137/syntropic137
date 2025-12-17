@@ -33,7 +33,7 @@ import logging
 import mimetypes
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from aef_adapters.object_storage.protocol import (
     DownloadError,
@@ -191,7 +191,8 @@ class MinioStorage:
                     io.BytesIO(content),
                     len(content),
                     content_type=content_type,
-                    metadata=metadata,
+                    # Minio expects dict[str, str | list[str] | tuple[str]] but we only use str values
+                    metadata=cast("dict[str, Any]", metadata) if metadata else None,
                 ),
             )
 
@@ -306,7 +307,7 @@ class MinioStorage:
 
             return StorageObject(
                 key=key,
-                size_bytes=stat.size,
+                size_bytes=stat.size or 0,
                 content_type=stat.content_type,
                 etag=stat.etag,
                 last_modified=stat.last_modified or datetime.now(UTC),

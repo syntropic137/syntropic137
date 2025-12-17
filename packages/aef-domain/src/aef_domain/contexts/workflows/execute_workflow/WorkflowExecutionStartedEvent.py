@@ -13,6 +13,9 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     """Event emitted when workflow execution starts.
 
     Marks the beginning of the execution lifecycle.
+
+    The expected_completion_at field is used for stale execution detection.
+    If an execution is still "running" past this time, it may be stuck.
     """
 
     workflow_id: str
@@ -21,3 +24,7 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     started_at: datetime
     total_phases: int
     inputs: dict[str, Any]
+
+    # Expected completion time (for stale detection)
+    # Calculated as: started_at + sum of all phase timeouts + buffer
+    expected_completion_at: datetime | None = None

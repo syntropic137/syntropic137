@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -78,41 +78,117 @@ async def get_session(session_id: str) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    # Convert operations from projection to API model (includes v2 fields)
-    operations = []
-    for op in session.operations:
-        # Handle timestamp - can be string or datetime
-        ts = op.timestamp
-        if isinstance(ts, str):
-            from datetime import datetime as dt
+    # Get execution_id for TimescaleDB queries
+    # Observability data is stored with execution_id as session_id in TimescaleDB
+    execution_id = getattr(session, "execution_id", None)
+    timescale_session_id = execution_id or session_id
+
+    # Get cost data from TimescaleDB via SessionCostProjection
+    session_cost = await manager.session_cost.get_session_cost(timescale_session_id)
+
+    # Get workspace_path from execution_started observation
+    workspace_path: str | None = None
+    try:
+        from aef_adapters.storage.observability_writer import get_observability_writer
+
+        writer = get_observability_writer()
+        if writer.pool is None:
+            await writer.initialize()
+        if writer.pool:
+            async with writer.pool.acquire() as conn:
+                result = await conn.fetchval(
+                    """
+                    SELECT data->>'workspace_path'
+                    FROM agent_observations
+                    WHERE session_id = $1 AND observation_type = 'execution_started'
+                    ORDER BY time DESC
+                    LIMIT 1
+                    """,
+                    timescale_session_id,
+                )
+                workspace_path = result
+    except Exception:
+        pass  # Workspace path is optional
+
+    # Get tool operations from TimescaleDB via SessionToolsProjection (ADR-026)
+    tool_operations = await manager.session_tools.get(timescale_session_id)
+
+    # Convert ToolOperation read models to API OperationInfo
+    operations: list[OperationInfo] = []
+    for tool_op in tool_operations:
+        # Handle input_preview - may be a string that needs parsing
+        tool_input_dict: dict[str, Any] | None = None
+        if tool_op.input_preview:
+            import json as json_module
 
             try:
-                ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                ts = None
+                parsed = json_module.loads(tool_op.input_preview)
+                if isinstance(parsed, dict):
+                    tool_input_dict = parsed
+                else:
+                    tool_input_dict = {"raw": tool_op.input_preview}
+            except (json_module.JSONDecodeError, TypeError):
+                tool_input_dict = {"raw": tool_op.input_preview}
+
         operations.append(
             OperationInfo(
-                operation_id=op.operation_id,
-                operation_type=op.operation_type,
-                timestamp=ts,
-                duration_seconds=op.duration_seconds,
-                success=op.success,
-                # Token metrics
-                input_tokens=op.input_tokens,
-                output_tokens=op.output_tokens,
-                total_tokens=op.total_tokens,
+                operation_id=tool_op.observation_id,
+                operation_type=tool_op.operation_type,
+                timestamp=tool_op.timestamp,
+                duration_seconds=(tool_op.duration_ms / 1000.0) if tool_op.duration_ms else None,
+                success=tool_op.success if tool_op.success is not None else True,
+                # Token metrics (not available in tool operations)
+                input_tokens=None,
+                output_tokens=None,
+                total_tokens=None,
                 # Tool details
-                tool_name=op.tool_name,
-                tool_use_id=op.tool_use_id,
-                tool_input=op.tool_input,
-                tool_output=op.tool_output,
-                # Message details
-                message_role=op.message_role,
-                message_content=op.message_content,
-                # Thinking details
-                thinking_content=op.thinking_content,
+                tool_name=tool_op.tool_name,
+                tool_use_id=tool_op.tool_use_id,
+                tool_input=tool_input_dict,
+                tool_output=tool_op.output_preview,
+                # Message details (not applicable for tool ops)
+                message_role=None,
+                message_content=None,
+                # Thinking details (not applicable for tool ops)
+                thinking_content=None,
             )
         )
+
+    # Fallback to projection if TimescaleDB doesn't have data
+    if not operations:
+        for op in session.operations:
+            # Handle timestamp - can be string or datetime
+            ts = op.timestamp
+            if isinstance(ts, str):
+                from datetime import datetime as dt
+
+                try:
+                    ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    ts = None
+            operations.append(
+                OperationInfo(
+                    operation_id=op.operation_id,
+                    operation_type=op.operation_type,
+                    timestamp=ts,
+                    duration_seconds=op.duration_seconds,
+                    success=op.success,
+                    # Token metrics
+                    input_tokens=op.input_tokens,
+                    output_tokens=op.output_tokens,
+                    total_tokens=op.total_tokens,
+                    # Tool details
+                    tool_name=op.tool_name,
+                    tool_use_id=op.tool_use_id,
+                    tool_input=op.tool_input,
+                    tool_output=op.tool_output,
+                    # Message details
+                    message_role=op.message_role,
+                    message_content=op.message_content,
+                    # Thinking details
+                    thinking_content=op.thinking_content,
+                )
+            )
 
     # Get workflow name from projection if available
     workflow_name = None
@@ -126,6 +202,18 @@ async def get_session(session_id: str) -> SessionResponse:
         except Exception:
             pass  # workflow lookup is optional
 
+    # Use cost data from TimescaleDB if available, otherwise use session data
+    if session_cost:
+        input_tokens = session_cost.input_tokens
+        output_tokens = session_cost.output_tokens
+        total_tokens = input_tokens + output_tokens
+        total_cost_usd = session_cost.total_cost_usd
+    else:
+        input_tokens = session.input_tokens
+        output_tokens = session.output_tokens
+        total_tokens = session.total_tokens
+        total_cost_usd = Decimal(str(session.total_cost_usd))
+
     return SessionResponse(
         id=session.id,
         workflow_id=session.workflow_id,
@@ -136,10 +224,11 @@ async def get_session(session_id: str) -> SessionResponse:
         agent_provider=session.agent_type,
         agent_model=None,
         status=session.status,
-        input_tokens=session.input_tokens,
-        output_tokens=session.output_tokens,
-        total_tokens=session.total_tokens,
-        total_cost_usd=Decimal(str(session.total_cost_usd)),
+        workspace_path=workspace_path,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+        total_cost_usd=total_cost_usd,
         operations=operations,
         started_at=session.started_at,
         completed_at=session.completed_at,

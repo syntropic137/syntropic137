@@ -43,6 +43,13 @@ class CreateArtifactCommand(BaseModel):
     content: str = Field(..., description="Artifact content", min_length=1)
     title: str | None = Field(default=None, description="Human-readable title")
 
+    # Storage (ADR-012: Two-tier storage)
+    storage_uri: str | None = Field(
+        default=None,
+        description="URI to content in object storage (e.g., s3://bucket/key). "
+        "If None, content is stored only in event store.",
+    )
+
     # Classification
     is_primary_deliverable: bool = Field(
         default=True, description="Whether this is the primary phase output"

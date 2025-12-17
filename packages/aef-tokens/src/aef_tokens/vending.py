@@ -127,7 +127,7 @@ class RedisTokenStore:
         )
 
         # Add to execution's token set
-        await self._redis.sadd(exec_key, token.token_id)
+        await self._redis.sadd(exec_key, token.token_id)  # type: ignore[misc]
         # Set expiry on the set slightly longer than token TTL
         await self._redis.expire(exec_key, token.ttl_seconds + 60)
 
@@ -157,7 +157,7 @@ class RedisTokenStore:
     async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
         """Get all token IDs for an execution."""
         exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{execution_id}"
-        members = await self._redis.smembers(exec_key)
+        members = await self._redis.smembers(exec_key)  # type: ignore[misc]
         return [m.decode() if isinstance(m, bytes) else m for m in members]
 
     async def delete_tokens_for_execution(self, execution_id: str) -> int:
@@ -229,6 +229,7 @@ class TokenVendingService:
         token_type: TokenType,
         scope: TokenScope | None = None,
         ttl_seconds: int | None = None,
+        tenant_id: str | None = None,
     ) -> ScopedToken:
         """Issue a new scoped token.
 
@@ -237,6 +238,7 @@ class TokenVendingService:
             token_type: Type of token (anthropic, github, internal)
             scope: Scope restrictions (defaults to empty scope)
             ttl_seconds: Token TTL in seconds (defaults to 5 minutes)
+            tenant_id: Optional tenant ID for multi-tenancy
 
         Returns:
             The issued ScopedToken
@@ -258,19 +260,115 @@ class TokenVendingService:
             expires_at=now + timedelta(seconds=ttl),
             scope=scope or TokenScope(),
             created_at=now,
+            tenant_id=tenant_id,
         )
 
         await self._store.store(token)
 
         logger.info(
-            "Token vended (token_id=%s, execution_id=%s, type=%s, ttl=%ds)",
+            "Token vended (token_id=%s, execution_id=%s, type=%s, tenant=%s, ttl=%ds)",
             token.token_id,
             execution_id,
             token_type.value,
+            tenant_id or "default",
             ttl,
         )
 
         return token
+
+    async def vend_execution_tokens(
+        self,
+        execution_id: str,
+        tenant_id: str | None = None,
+        token_types: list[TokenType] | None = None,
+        scope: TokenScope | None = None,
+        ttl_seconds: int | None = None,
+    ) -> dict[TokenType, ScopedToken]:
+        """Vend multiple tokens for an execution (convenience method).
+
+        This is typically called when starting a phase to pre-vend all
+        required tokens before the agent starts.
+
+        Args:
+            execution_id: The execution ID
+            tenant_id: Optional tenant ID for multi-tenancy
+            token_types: Token types to vend (defaults to ANTHROPIC)
+            scope: Scope restrictions applied to all tokens
+            ttl_seconds: TTL for all tokens
+
+        Returns:
+            Dict mapping token type to issued token
+        """
+        types = token_types or [TokenType.ANTHROPIC]
+        tokens = {}
+
+        for token_type in types:
+            token = await self.vend_token(
+                execution_id=execution_id,
+                token_type=token_type,
+                scope=scope,
+                ttl_seconds=ttl_seconds,
+                tenant_id=tenant_id,
+            )
+            tokens[token_type] = token
+
+        return tokens
+
+    async def get_tokens_by_tenant(self, tenant_id: str) -> list[ScopedToken]:
+        """Get all active tokens for a tenant.
+
+        Used for tenant-level monitoring and cleanup.
+
+        Args:
+            tenant_id: The tenant ID to query
+
+        Returns:
+            List of active tokens for this tenant
+        """
+        # Note: This requires scanning, which is O(n). For production,
+        # consider adding a tenant index to the store.
+        # For now, this is only used for admin/monitoring purposes.
+        if isinstance(self._store, InMemoryTokenStore):
+            return [
+                token
+                for token in self._store._tokens.values()
+                if token.tenant_id == tenant_id and not token.is_expired
+            ]
+        else:
+            # Redis implementation would need SCAN with pattern matching
+            # or a separate tenant index. For now, return empty.
+            logger.warning("get_tokens_by_tenant not fully implemented for Redis store")
+            return []
+
+    async def revoke_tokens_for_tenant(self, tenant_id: str) -> int:
+        """Revoke all tokens for a tenant.
+
+        Used when:
+        - Tenant is suspended
+        - Tenant exceeds limits
+        - Admin intervention
+
+        Args:
+            tenant_id: The tenant to revoke tokens for
+
+        Returns:
+            Number of tokens revoked
+        """
+        tokens = await self.get_tokens_by_tenant(tenant_id)
+        count = 0
+
+        for token in tokens:
+            if await self.revoke_token(token.token_id):
+                count += 1
+
+        if count > 0:
+            logger.info(
+                "Tokens revoked for tenant (tenant_id=%s, count=%d)",
+                tenant_id,
+                count,
+            )
+
+        return count
 
     async def get_token(self, token_id: str) -> ScopedToken | None:
         """Get a token by ID.

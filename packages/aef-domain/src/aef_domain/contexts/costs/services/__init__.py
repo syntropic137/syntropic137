@@ -1,7 +1,9 @@
-"""Cost calculation services."""
+"""Cost calculation services.
 
-from aef_domain.contexts.costs.services.cost_calculator import CostCalculator
+Note: CostCalculator has been removed in favor of direct cost calculation
+in the CostProjection from AgentObservation events (unified observation model).
 
-__all__ = [
-    "CostCalculator",
-]
+See: packages/aef-domain/src/aef_domain/contexts/observability/domain/events/agent_observation.py
+"""
+
+__all__: list[str] = []

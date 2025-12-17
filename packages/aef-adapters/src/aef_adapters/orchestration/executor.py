@@ -11,9 +11,11 @@ this executor leverages the claude-agent-sdk style execution where
 agents control their own flow until task completion.
 
 Example:
+    from aef_adapters.workspace_backends.service import WorkspaceService
+
     executor = AgenticWorkflowExecutor(
         agent_factory=get_agentic_agent,
-        workspace_factory=LocalWorkspace.create,
+        workspace_service=WorkspaceService.create_docker(),
     )
 
     async for event in executor.execute(workflow_def, {"topic": "AI"}):
@@ -55,7 +57,7 @@ if TYPE_CHECKING:
     from aef_adapters.agents.agentic_protocol import AgenticProtocol
     from aef_adapters.collector import CollectorClient
     from aef_adapters.control import ControlSignal
-    from aef_adapters.workspaces.protocol import WorkspaceProtocol
+    from aef_adapters.workspace_backends.service import WorkspaceService
 
 logger = logging.getLogger(__name__)
 
@@ -341,16 +343,19 @@ class WorkflowDefinition(Protocol):
 # ============================================================================
 
 
-class WorkspaceFactory(Protocol):
-    """Protocol for creating workspaces."""
+class WorkspaceFactoryProtocol(Protocol):
+    """Protocol for workspace service factory.
 
-    async def __call__(
+    Use WorkspaceService.create_docker() or WorkspaceService.create_memory().
+    """
+
+    def create_workspace(
         self,
-        base_path: Path,
-        *,
         execution_id: str,
-        phase_id: str,
-    ) -> WorkspaceProtocol:
+        workflow_id: str | None = None,
+        phase_id: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Create a workspace for phase execution."""
         ...
 
@@ -379,6 +384,7 @@ class ExecutionContext:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_duration_ms: float = 0.0
+    total_cost_usd: Decimal = field(default_factory=lambda: Decimal("0"))
 
 
 # ============================================================================
@@ -401,10 +407,11 @@ class AgenticWorkflowExecutor:
     - Sends tool events to Collector for observability (when configured)
 
     Example:
+        from aef_adapters.workspace_backends.service import WorkspaceService
+
         executor = AgenticWorkflowExecutor(
             agent_factory=get_agentic_agent,
-            workspace_factory=LocalWorkspace.create,
-            base_workspace_path=Path("/tmp/aef-workspaces"),
+            workspace_service=WorkspaceService.create_docker(),
             collector_url="http://localhost:8080",  # Optional
         )
 
@@ -415,9 +422,8 @@ class AgenticWorkflowExecutor:
     def __init__(
         self,
         agent_factory: Callable[[str], AgenticProtocol],
-        workspace_factory: Callable[..., WorkspaceProtocol],
+        workspace_service: WorkspaceService,
         *,
-        base_workspace_path: Path | None = None,
         default_provider: str = "claude",
         default_max_turns: int = 50,
         default_max_budget_usd: float | None = None,
@@ -428,8 +434,7 @@ class AgenticWorkflowExecutor:
 
         Args:
             agent_factory: Factory for creating agentic agents.
-            workspace_factory: Factory for creating workspaces.
-            base_workspace_path: Base path for workspace directories.
+            workspace_service: WorkspaceService for creating isolated workspaces.
             default_provider: Default agent provider.
             default_max_turns: Default max turns per phase.
             default_max_budget_usd: Default max budget per phase.
@@ -437,10 +442,16 @@ class AgenticWorkflowExecutor:
                           When set, tool events are sent to the Collector.
             control_signal_checker: Optional callback to check for control signals
                           (pause/resume/cancel). Called after each tool event.
+
+        Note:
+            The workspace_service is stored for future use. Currently _execute_phase
+            uses a local directory-based approach. This will be migrated to use
+            WorkspaceService.create_workspace() in a future update.
         """
         self._agent_factory = agent_factory
-        self._workspace_factory = workspace_factory
-        self._base_path = base_workspace_path or Path.cwd() / ".aef-workspaces"
+        self._workspace_service = workspace_service
+        # Temporary: local workspace path for legacy _execute_phase
+        self._base_path = Path.cwd() / ".aef-workspaces"
         self._default_provider = default_provider
         self._default_max_turns = default_max_turns
         self._default_max_budget_usd = default_max_budget_usd
