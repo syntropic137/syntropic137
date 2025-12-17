@@ -21,6 +21,9 @@ class PhaseExecutionDetail:
     session_id: str | None = None
     """Session ID that executed this phase."""
 
+    agent_session_id: str | None = None
+    """Claude CLI agent session ID for OTel correlation (ADR-028)."""
+
     artifact_id: str | None = None
     """Artifact ID produced by this phase."""
 
@@ -64,6 +67,7 @@ class PhaseExecutionDetail:
             "name": self.name,
             "status": self.status,
             "session_id": self.session_id,
+            "agent_session_id": self.agent_session_id,
             "artifact_id": self.artifact_id,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -87,6 +91,7 @@ class PhaseExecutionDetail:
             name=data.get("name", ""),
             status=data.get("status", "pending"),
             session_id=data.get("session_id"),
+            agent_session_id=data.get("agent_session_id"),
             artifact_id=data.get("artifact_id"),
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),

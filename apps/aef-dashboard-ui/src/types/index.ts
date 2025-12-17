@@ -231,6 +231,8 @@ export interface PhaseExecutionDetail {
   name: string
   status: string
   session_id: string | null
+  /** Claude CLI agent session ID for OTel correlation (ADR-028) */
+  agent_session_id: string | null
   artifact_id: string | null
   input_tokens: number
   output_tokens: number

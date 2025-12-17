@@ -296,6 +296,13 @@ export function ExecutionDetail() {
                         View Session →
                       </Link>
                     )}
+                    {phase.agent_session_id && (
+                      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
+                        <span title="Claude CLI session ID for OTel correlation">
+                          OTel: {phase.agent_session_id.slice(0, 8)}...
+                        </span>
+                      </div>
+                    )}
                   </div>
                   {idx < execution.phases.length - 1 && (
                     <div className="mx-2 h-px w-8 bg-[var(--color-border)]" />
