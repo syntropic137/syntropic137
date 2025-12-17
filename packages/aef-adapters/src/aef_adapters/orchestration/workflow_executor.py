@@ -33,17 +33,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+# Legacy observability imports (deprecated - use OTel-first approach)
+import warnings
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from agentic_observability import (
-    ObservabilityPort,
-    ObservationContext,
-    ObservationType,
-)
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from aef_adapters.observability.protocol import (
+        ObservabilityPort,
+        ObservationContext,
+        ObservationType,
+    )
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -407,12 +412,21 @@ class WorkflowExecutor:
 
         # Use WorkspaceService for Docker isolation (ADR-024: Setup Phase Secrets)
         # This creates an isolated container with GitHub credentials pre-configured
+        # OTel config is injected for observability correlation (ADR-028)
+        otel_env = self._create_otel_environment(
+            ctx.workflow_id,
+            ctx.execution_id,
+            phase.phase_id,
+            phase.name,
+        )
+
         async with self._workspace_service.create_workspace(
             execution_id=ctx.execution_id,
             workflow_id=ctx.workflow_id,
             phase_id=phase.phase_id,
             with_sidecar=False,  # Sidecar not needed with setup phase pattern
             inject_tokens=False,  # Handled by setup phase in container
+            extra_environment=otel_env,  # Inject OTel config for telemetry
         ) as managed_workspace:
             workspace_path = managed_workspace.path
 
@@ -755,3 +769,52 @@ class WorkflowExecutor:
             task = task.replace(f"{{{{{phase_id}_output}}}}", content)
 
         return task
+
+    def _create_otel_environment(
+        self,
+        workflow_id: str,
+        execution_id: str,
+        phase_id: str,
+        phase_name: str,
+    ) -> dict[str, str]:
+        """Create OTel environment variables for container injection.
+
+        This injects AEF resource attributes as OTel environment variables
+        so all telemetry from the container can be correlated back to the
+        workflow execution. See ADR-028: OTel Platform Integration.
+
+        Args:
+            workflow_id: Workflow template ID
+            execution_id: Workflow execution ID
+            phase_id: Phase ID within the execution
+            phase_name: Human-readable phase name
+
+        Returns:
+            Environment variables for OTel configuration
+        """
+        try:
+            from aef_adapters.observability import (
+                AEFSemanticConventions,
+                get_collector_endpoint,
+            )
+
+            conv = AEFSemanticConventions
+
+            # Build resource attributes string
+            resource_attrs = [
+                f"{conv.WORKFLOW_TEMPLATE_ID}={workflow_id}",
+                f"{conv.WORKFLOW_EXECUTION_ID}={execution_id}",
+                f"{conv.WORKFLOW_PHASE_ID}={phase_id}",
+                f"{conv.WORKFLOW_PHASE_NAME}={phase_name}",
+            ]
+
+            # TODO: Add tenant_id, pr_number, repo when available from context
+
+            return {
+                "OTEL_EXPORTER_OTLP_ENDPOINT": get_collector_endpoint(),
+                "OTEL_SERVICE_NAME": "agentic-agent",
+                "OTEL_RESOURCE_ATTRIBUTES": ",".join(resource_attrs),
+            }
+        except ImportError:
+            logger.warning("agentic_otel not available, skipping OTel injection")
+            return {}

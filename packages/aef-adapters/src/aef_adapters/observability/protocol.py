@@ -115,3 +115,58 @@ class ObservabilityPort(Protocol):
     async def close(self) -> None:
         """Close the adapter."""
         ...
+
+
+class NullObservability:
+    """No-op observability adapter for testing (legacy).
+
+    DEPRECATED: Use mocks or OTel-first observability instead.
+
+    This adapter implements ObservabilityPort but discards all observations.
+    Useful for unit tests that don't need observability.
+    """
+
+    async def record(
+        self,
+        observation_type: ObservationType,
+        context: ObservationContext,
+        data: dict[str, Any],
+    ) -> None:
+        """Discard observation."""
+
+    async def record_tool_started(
+        self,
+        context: ObservationContext,
+        tool_name: str,
+        tool_input: dict[str, Any],
+    ) -> str:
+        """Return a dummy operation ID."""
+        return "null-op-" + str(uuid4())[:8]
+
+    async def record_tool_completed(
+        self,
+        context: ObservationContext,
+        operation_id: str,
+        tool_name: str,
+        success: bool,
+        duration_ms: int,
+        output_preview: str | None = None,
+    ) -> None:
+        """Discard completion record."""
+
+    async def record_token_usage(
+        self,
+        context: ObservationContext,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        model: str | None = None,
+    ) -> None:
+        """Discard token usage."""
+
+    async def flush(self) -> None:
+        """No-op flush."""
+
+    async def close(self) -> None:
+        """No-op close."""
