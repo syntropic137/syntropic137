@@ -240,20 +240,20 @@ chore:       5%  ██
 
 ```sql
 WITH token_totals AS (
-  SELECT 
+  SELECT
     SUM((data->>'total_tokens')::int) as total_tokens
   FROM agent_observations
   WHERE observation_type = 'execution_completed'
     AND time > NOW() - INTERVAL '30 days'
 ),
 committed_tokens AS (
-  SELECT 
+  SELECT
     SUM((data->>'estimated_tokens')::int) as committed
   FROM events
   WHERE event_type = 'code.committed'
     AND timestamp > NOW() - INTERVAL '30 days'
 )
-SELECT 
+SELECT
   committed::float / total_tokens as cognitive_efficiency
 FROM token_totals, committed_tokens;
 ```
@@ -261,7 +261,7 @@ FROM token_totals, committed_tokens;
 ### Deployment Frequency
 
 ```sql
-SELECT 
+SELECT
   COUNT(*)::float / 30 as deployments_per_day
 FROM events
 WHERE event_type = 'deployment.completed'
@@ -273,20 +273,20 @@ WHERE event_type = 'deployment.completed'
 
 ```sql
 WITH commits AS (
-  SELECT 
+  SELECT
     data->>'commit_hash' as hash,
     timestamp as commit_time
   FROM events
   WHERE event_type = 'code.committed'
 ),
 deploys AS (
-  SELECT 
+  SELECT
     data->'commits' as commit_hashes,
     timestamp as deploy_time
   FROM events
   WHERE event_type = 'deployment.completed'
 )
-SELECT 
+SELECT
   AVG(deploy_time - commit_time) as avg_lead_time
 FROM commits c
 JOIN deploys d ON d.commit_hashes @> to_jsonb(c.hash);
@@ -295,8 +295,8 @@ JOIN deploys d ON d.commit_hashes @> to_jsonb(c.hash);
 ### Change Failure Rate
 
 ```sql
-SELECT 
-  COUNT(*) FILTER (WHERE data->>'status' = 'failed')::float / 
+SELECT
+  COUNT(*) FILTER (WHERE data->>'status' = 'failed')::float /
   COUNT(*) * 100 as change_failure_rate_pct
 FROM events
 WHERE event_type = 'deployment.completed'

@@ -217,4 +217,3 @@ class MinioArtifactStorage:
             return True
         except Exception:
             return False
-

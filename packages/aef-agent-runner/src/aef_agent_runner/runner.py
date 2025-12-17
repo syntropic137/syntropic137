@@ -340,7 +340,12 @@ class AgentRunner:
                         duration_ms=None,  # SDK doesn't provide duration, could calculate if needed
                     )
 
-                    logger.debug("Tool completed: %s (id=%s, success=%s)", tool_name, tool_use_id, not is_error)
+                    logger.debug(
+                        "Tool completed: %s (id=%s, success=%s)",
+                        tool_name,
+                        tool_use_id,
+                        not is_error,
+                    )
 
         # 3. Emit progress update (existing)
         emit_progress(

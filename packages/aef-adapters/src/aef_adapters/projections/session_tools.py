@@ -146,7 +146,7 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
                 time,
                 data
             FROM agent_observations
-            WHERE {' AND '.join(conditions)}
+            WHERE {" AND ".join(conditions)}
             ORDER BY time ASC
             LIMIT ${param_idx}
         """

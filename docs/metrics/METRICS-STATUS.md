@@ -85,7 +85,7 @@ With current data, we can calculate:
 ### From TimescaleDB (`agent_observations`)
 ```sql
 -- Total tokens per session
-SELECT session_id, 
+SELECT session_id,
        SUM((data->>'input_tokens')::int) as input_tokens,
        SUM((data->>'output_tokens')::int) as output_tokens,
        MAX((data->>'total_cost_usd')::numeric) as cost

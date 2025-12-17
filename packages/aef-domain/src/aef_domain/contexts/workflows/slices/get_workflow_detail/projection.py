@@ -120,11 +120,8 @@ class WorkflowDetailProjection(CheckpointedProjection):
                 agent_type=p.get(PhaseFields.AGENT_TYPE, PhaseDefaults.AGENT_TYPE),
                 order=p.get(PhaseFields.ORDER, i),
                 # Check both new and old field names for backwards compatibility
-                prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE)
-                or p.get("prompt_template_id"),
-                timeout_seconds=p.get(
-                    PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS
-                ),
+                prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
+                timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
             )
             for i, p in enumerate(phases_data)

@@ -10,7 +10,7 @@ Pattern: Port/Adapter (ADR-012)
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -103,7 +103,7 @@ class TimescaleObservability:
             Operation ID for correlating with tool_completed
         """
         operation_id = str(uuid4())
-        self._operation_contexts[operation_id] = (context, datetime.now(timezone.utc))
+        self._operation_contexts[operation_id] = (context, datetime.now(UTC))
 
         # Create input preview (truncated for storage)
         input_str = json.dumps(tool_input, default=str)
@@ -204,7 +204,6 @@ class TimescaleObservability:
 # Runtime check that we implement the protocol
 def _check_protocol_compliance() -> None:
     """Verify TimescaleObservability implements ObservabilityPort at import time."""
-    import asyncpg  # Ensure dependency is available
 
     # Create a minimal mock writer for checking
     class MockWriter:

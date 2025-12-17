@@ -8,8 +8,8 @@ Exports:
     - get_observability: Factory function for getting the adapter
 """
 
-from aef_adapters.observability.timescale import TimescaleObservability
 from aef_adapters.observability.factory import get_observability
+from aef_adapters.observability.timescale import TimescaleObservability
 
 __all__ = [
     "TimescaleObservability",

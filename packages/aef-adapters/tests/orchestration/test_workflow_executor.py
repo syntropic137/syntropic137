@@ -17,7 +17,7 @@ import pytest
 # Set test environment before importing NullObservability
 os.environ["AEF_ENVIRONMENT"] = "test"
 
-from agentic_observability import NullObservability, ObservationType
+from agentic_observability import NullObservability
 
 
 @pytest.fixture
@@ -78,9 +78,7 @@ class MockWorkflow:
 class TestWorkflowExecutorRequiresObservability:
     """Tests verifying observability is REQUIRED (Poka-Yoke)."""
 
-    def test_raises_if_observability_is_none(
-        self, mock_agent_factory, mock_workspace_service
-    ):
+    def test_raises_if_observability_is_none(self, mock_agent_factory, mock_workspace_service):
         """WorkflowExecutor should raise if observability is None."""
         from aef_adapters.orchestration.workflow_executor import WorkflowExecutor
 
@@ -93,9 +91,7 @@ class TestWorkflowExecutorRequiresObservability:
 
         assert "requires observability" in str(exc_info.value)
 
-    def test_raises_if_observability_wrong_type(
-        self, mock_agent_factory, mock_workspace_service
-    ):
+    def test_raises_if_observability_wrong_type(self, mock_agent_factory, mock_workspace_service):
         """WorkflowExecutor should raise if observability is wrong type."""
         from aef_adapters.orchestration.workflow_executor import WorkflowExecutor
 
@@ -153,9 +149,7 @@ class TestCreateWorkflowExecutorFactory:
 
         assert executor._observability is observability
 
-    def test_uses_default_agent_factory(
-        self, observability, mock_workspace_service
-    ):
+    def test_uses_default_agent_factory(self, observability, mock_workspace_service):
         """Factory should use default agent factory if not provided."""
         from aef_adapters.orchestration.factory import create_workflow_executor
 

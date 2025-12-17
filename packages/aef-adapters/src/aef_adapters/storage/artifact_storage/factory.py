@@ -105,4 +105,3 @@ def get_test_artifact_storage() -> InMemoryArtifactStorage:
 def reset_artifact_storage() -> None:
     """Reset the cached artifact storage instance (for testing)."""
     _get_artifact_storage_instance.cache_clear()
-

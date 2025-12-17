@@ -291,9 +291,22 @@ class WorkflowExecutor:
 
             try:
                 async for event in self._execute_phase(
-                    agent, phase, ctx, phase_context, ArtifactBundle, ArtifactType, PhaseContext,
-                    AgentExecutionConfig, Workspace, WorkspaceConfig,
-                    TaskCompleted, TaskFailed, ToolBlocked, ToolUseCompleted, ToolUseStarted, TurnCompleted,
+                    agent,
+                    phase,
+                    ctx,
+                    phase_context,
+                    ArtifactBundle,
+                    ArtifactType,
+                    PhaseContext,
+                    AgentExecutionConfig,
+                    Workspace,
+                    WorkspaceConfig,
+                    TaskCompleted,
+                    TaskFailed,
+                    ToolBlocked,
+                    ToolUseCompleted,
+                    ToolUseStarted,
+                    TurnCompleted,
                 ):
                     yield event
 
@@ -323,7 +336,11 @@ class WorkflowExecutor:
                 await self._observability.record(
                     ObservationType.SESSION_ERROR,
                     obs_context,
-                    {"error": str(e), "failed_phase": phase.phase_id, "error_type": type(e).__name__},
+                    {
+                        "error": str(e),
+                        "failed_phase": phase.phase_id,
+                        "error_type": type(e).__name__,
+                    },
                 )
                 yield PhaseFailed(
                     workflow_id=ctx.workflow_id,
@@ -635,6 +652,7 @@ class WorkflowExecutor:
 
             # Add result as primary artifact
             from aef_adapters.artifacts import ArtifactType as AT
+
             bundle.add_file(
                 Path(f"{phase.phase_id}_output.md"),
                 result_text.encode("utf-8"),

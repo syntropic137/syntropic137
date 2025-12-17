@@ -15,8 +15,6 @@ Usage:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from agentic_observability import ObservabilityPort
 
 from aef_adapters.observability.timescale import TimescaleObservability
@@ -24,9 +22,6 @@ from aef_adapters.storage.observability_writer import (
     ObservabilityWriter,
     get_observability_writer,
 )
-
-if TYPE_CHECKING:
-    pass
 
 # Singleton instance
 _observability_adapter: TimescaleObservability | None = None

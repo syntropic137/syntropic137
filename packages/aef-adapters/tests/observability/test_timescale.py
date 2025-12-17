@@ -6,9 +6,9 @@ the ObservabilityPort protocol and integrates with ObservabilityWriter.
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from agentic_observability import (
     ObservabilityPort,
     ObservationContext,

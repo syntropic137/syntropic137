@@ -50,6 +50,7 @@ def _get_adapters() -> tuple[ProjectionControlStateAdapter, SignalQueuePort]:
         if env == "test":
             # Only use in-memory in test environment
             from aef_adapters.control.adapters.memory import InMemorySignalQueueAdapter
+
             _signal_adapter = InMemorySignalQueueAdapter()
         else:
             # TODO: Use Redis for production. For now, use null adapter.
@@ -73,7 +74,7 @@ def get_controller() -> ExecutionController:
     )
 
 
-def get_signal_adapter() -> InMemorySignalQueueAdapter:
+def get_signal_adapter() -> SignalQueuePort:
     """Get the signal adapter for executor integration.
 
     This is needed so the executor can check for control signals.

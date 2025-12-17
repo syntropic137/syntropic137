@@ -139,4 +139,3 @@ class InMemoryArtifactStorage:
     def count(self) -> int:
         """Get number of stored artifacts (for test assertions)."""
         return len(self._storage)
-

@@ -50,4 +50,3 @@ __all__ = [
     "get_test_artifact_storage",
     "reset_artifact_storage",
 ]
-

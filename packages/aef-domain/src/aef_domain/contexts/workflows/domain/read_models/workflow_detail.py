@@ -93,9 +93,7 @@ class WorkflowDetail:
                 agent_type=p.get(PhaseFields.AGENT_TYPE, PhaseDefaults.AGENT_TYPE),
                 order=p.get(PhaseFields.ORDER, i),
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE),
-                timeout_seconds=p.get(
-                    PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS
-                ),
+                timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
             )
             for i, p in enumerate(phases_data)

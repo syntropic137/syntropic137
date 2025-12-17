@@ -5,10 +5,10 @@ Centralizes all magic strings to prevent typos and enable refactoring.
 
 from typing import Final
 
-
 # =============================================================================
 # Phase Definition Fields
 # =============================================================================
+
 
 class PhaseFields:
     """Field names for phase definitions."""
@@ -31,6 +31,7 @@ class PhaseFields:
 # Workflow Definition Fields
 # =============================================================================
 
+
 class WorkflowFields:
     """Field names for workflow definitions."""
 
@@ -48,6 +49,7 @@ class WorkflowFields:
 # =============================================================================
 # Default Values
 # =============================================================================
+
 
 class PhaseDefaults:
     """Default values for phase definitions."""
