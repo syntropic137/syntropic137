@@ -225,11 +225,17 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "raise typer.Exit",  # CLI exits are hard to test
 ]
-# Exclude interactive CLI commands from coverage (require real API keys)
+# Exclude files that require external services or are deprecated
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "*/agents/claude.py",  # Requires Anthropic API
     "*/agents/openai.py",  # Requires OpenAI API
     "*/storage/postgres.py",  # Requires running PostgreSQL
+    "*/execute_workflow/WorkflowExecutionEngine.py",  # Legacy - being replaced by WorkflowExecutor (M8)
+    "*/workspace_backends/*",  # Requires Docker runtime
+    "*/orchestration/workflow_executor.py",  # Requires Docker + Claude SDK
+    "*/orchestration/executor.py",  # Requires Docker + Claude SDK
+    "*/orchestration/factory.py",  # Requires full DI setup
+    "*/stale_execution_cleaner.py",  # Background cleanup - integration tested
 ]
