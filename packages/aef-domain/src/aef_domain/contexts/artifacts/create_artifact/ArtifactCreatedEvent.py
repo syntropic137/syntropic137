@@ -12,11 +12,12 @@ from aef_domain.contexts.artifacts._shared.value_objects import (  # noqa: TC001
 )
 
 
-@event("ArtifactCreated", "v2")
+@event("ArtifactCreated", "v3")
 class ArtifactCreatedEvent(DomainEvent):
     """Event emitted when an artifact is created.
 
     v2: Added execution_id to link artifacts to specific workflow execution runs.
+    v3: Added storage_uri for two-tier storage (ADR-012).
     """
 
     # Identity
@@ -37,6 +38,9 @@ class ArtifactCreatedEvent(DomainEvent):
     content_hash: str
     size_bytes: int
     title: str | None = None
+
+    # Storage (ADR-012: Two-tier storage)
+    storage_uri: str | None = None  # NEW in v3: URI to object storage
 
     # Classification
     is_primary_deliverable: bool = True

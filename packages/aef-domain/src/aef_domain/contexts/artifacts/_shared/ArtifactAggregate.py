@@ -49,6 +49,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._content_hash: str | None = None
         self._size_bytes: int = 0
         self._title: str | None = None
+        self._storage_uri: str | None = None  # Object storage reference (ADR-012)
         self._is_primary_deliverable: bool = True
         self._derived_from: list[str] = []
         self._metadata: dict[str, str | int | float | bool | None] = {}
@@ -117,6 +118,11 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         return self._is_primary_deliverable
 
     @property
+    def storage_uri(self) -> str | None:
+        """Get the object storage URI for this artifact's content."""
+        return self._storage_uri
+
+    @property
     def derived_from(self) -> list[str]:
         """Get list of parent artifact IDs."""
         return list(self._derived_from)
@@ -168,6 +174,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
             content_hash=content_hash,
             size_bytes=size_bytes,
             title=command.title,
+            storage_uri=command.storage_uri,  # Object storage reference (ADR-012)
             is_primary_deliverable=command.is_primary_deliverable,
             derived_from=command.derived_from or [],
             metadata=command.metadata or {},
@@ -192,6 +199,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._content_hash = event.content_hash
         self._size_bytes = event.size_bytes
         self._title = event.title
+        self._storage_uri = event.storage_uri  # Object storage reference (ADR-012)
         self._is_primary_deliverable = event.is_primary_deliverable
         self._derived_from = list(event.derived_from)
         self._metadata = dict(event.metadata)

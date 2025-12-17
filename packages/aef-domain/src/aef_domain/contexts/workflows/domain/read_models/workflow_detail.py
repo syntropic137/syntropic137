@@ -8,6 +8,12 @@ For execution details, see WorkflowExecutionDetail.
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from aef_domain.contexts.workflows.domain.constants import (
+    PhaseDefaults,
+    PhaseFields,
+    WorkflowFields,
+)
+
 
 @dataclass(frozen=True)
 class PhaseDefinitionDetail:
@@ -26,11 +32,20 @@ class PhaseDefinitionDetail:
     description: str | None = None
     """Optional description of what this phase does."""
 
-    agent_type: str = ""
+    agent_type: str = PhaseDefaults.AGENT_TYPE
     """Type of agent to use for this phase."""
 
-    order: int = 0
+    order: int = PhaseDefaults.ORDER
     """Order in which this phase executes."""
+
+    prompt_template: str | None = None
+    """The prompt template for this phase (required for agent execution)."""
+
+    timeout_seconds: int = PhaseDefaults.TIMEOUT_SECONDS
+    """Timeout for phase execution in seconds."""
+
+    allowed_tools: tuple[str, ...] = ()
+    """Tools allowed during this phase execution."""
 
 
 @dataclass(frozen=True)
@@ -69,27 +84,30 @@ class WorkflowDetail:
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowDetail":
         """Create from dictionary data."""
-        phases_data = data.get("phases", [])
+        phases_data = data.get(WorkflowFields.PHASES, [])
         phases = [
             PhaseDefinitionDetail(
-                id=p.get("id", p.get("phase_id", "")),
-                name=p.get("name", ""),
-                description=p.get("description"),
-                agent_type=p.get("agent_type", ""),
-                order=p.get("order", i),
+                id=p.get(PhaseFields.ID, p.get(PhaseFields.PHASE_ID, "")),
+                name=p.get(PhaseFields.NAME, ""),
+                description=p.get(PhaseFields.DESCRIPTION),
+                agent_type=p.get(PhaseFields.AGENT_TYPE, PhaseDefaults.AGENT_TYPE),
+                order=p.get(PhaseFields.ORDER, i),
+                prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE),
+                timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
             )
             for i, p in enumerate(phases_data)
         ]
 
         return cls(
-            id=data["id"],
-            name=data["name"],
-            workflow_type=data.get("workflow_type", ""),
-            classification=data.get("classification", ""),
-            description=data.get("description"),
+            id=data[WorkflowFields.ID],
+            name=data[WorkflowFields.NAME],
+            workflow_type=data.get(WorkflowFields.WORKFLOW_TYPE, ""),
+            classification=data.get(WorkflowFields.CLASSIFICATION, ""),
+            description=data.get(WorkflowFields.DESCRIPTION),
             phases=phases,
-            created_at=data.get("created_at"),
-            runs_count=data.get("runs_count", 0),
+            created_at=data.get(WorkflowFields.CREATED_AT),
+            runs_count=data.get(WorkflowFields.RUNS_COUNT, 0),
         )
 
     @staticmethod
@@ -109,20 +127,23 @@ class WorkflowDetail:
             if isinstance(p, dict):
                 return p
             return {
-                "id": p.id,
-                "name": p.name,
-                "description": p.description,
-                "agent_type": p.agent_type,
-                "order": p.order,
+                PhaseFields.ID: p.id,
+                PhaseFields.NAME: p.name,
+                PhaseFields.DESCRIPTION: p.description,
+                PhaseFields.AGENT_TYPE: p.agent_type,
+                PhaseFields.ORDER: p.order,
+                PhaseFields.PROMPT_TEMPLATE: p.prompt_template,
+                PhaseFields.TIMEOUT_SECONDS: p.timeout_seconds,
+                PhaseFields.ALLOWED_TOOLS: list(p.allowed_tools),
             }
 
         return {
-            "id": self.id,
-            "name": self.name,
-            "workflow_type": self.workflow_type,
-            "classification": self.classification,
-            "description": self.description,
-            "phases": [phase_to_dict(p) for p in self.phases],
-            "created_at": self._to_iso_string(self.created_at),
-            "runs_count": self.runs_count,
+            WorkflowFields.ID: self.id,
+            WorkflowFields.NAME: self.name,
+            WorkflowFields.WORKFLOW_TYPE: self.workflow_type,
+            WorkflowFields.CLASSIFICATION: self.classification,
+            WorkflowFields.DESCRIPTION: self.description,
+            WorkflowFields.PHASES: [phase_to_dict(p) for p in self.phases],
+            WorkflowFields.CREATED_AT: self._to_iso_string(self.created_at),
+            WorkflowFields.RUNS_COUNT: self.runs_count,
         }

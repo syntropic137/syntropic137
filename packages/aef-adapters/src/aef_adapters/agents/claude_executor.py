@@ -15,6 +15,7 @@ import logging
 import time
 from datetime import UTC, datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aef_adapters.agents.executor import (
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from aef_adapters.agents.agentic_types import AgentExecutionConfig
     from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
     from aef_adapters.agents.executor import ExecutionEvent
-    from aef_adapters.workspaces.types import IsolatedWorkspace
+    from aef_adapters.workspace_backends.service import ManagedWorkspace
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class ClaudeAgentExecutor:
     async def execute(
         self,
         task: str,
-        workspace: IsolatedWorkspace,
+        workspace: ManagedWorkspace,
         config: AgentExecutionConfig,
         *,
         execution_id: str | None = None,
@@ -126,23 +127,29 @@ class ClaudeAgentExecutor:
         if not agent.is_available:
             raise AgentNotAvailableError(
                 "Claude agent not available. Check ANTHROPIC_API_KEY.",
-                workspace_id=workspace.isolation_id,
+                workspace_id=workspace.workspace_id,
                 execution_id=execution_id,
             )
 
         # Emit started event
         yield ExecutionStarted(
-            workspace_id=workspace.isolation_id,
+            workspace_id=workspace.workspace_id,
             task=task,
         )
 
         start_time = time.time()
-        workspace_id = workspace.isolation_id
+        workspace_id = workspace.workspace_id
 
-        # Adapt IsolatedWorkspace to Workspace for the underlying agent
-        # TODO: In future, execute agent subprocess inside workspace container
+        # Adapt ManagedWorkspace to Workspace for the underlying agent
+        # Note: ManagedWorkspace handles execution internally - this adapter
+        # bridges to the legacy Workspace interface for backward compatibility
+        workspace_path_str = (
+            workspace.isolation_handle.workspace_path
+            if workspace.isolation_handle and workspace.isolation_handle.workspace_path
+            else "/workspace"
+        )
         adapted_workspace = Workspace(
-            path=workspace.path,
+            path=Path(workspace_path_str),
             config=None,  # type: ignore[arg-type]
         )
 

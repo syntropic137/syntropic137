@@ -108,6 +108,41 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
+    # TIMESCALEDB (Observability) - See ADR-026
+    # =========================================================================
+
+    timescale_host: str = Field(
+        default="localhost",
+        description=(
+            "TimescaleDB host for observability events. "
+            "For Docker: timescaledb (service name). "
+            "For local dev: localhost"
+        ),
+    )
+
+    timescale_port: int = Field(
+        default=5433,
+        ge=1024,
+        le=65535,
+        description="TimescaleDB port. Default: 5433 (to avoid conflict with main PostgreSQL on 5432).",
+    )
+
+    timescale_user: str = Field(
+        default="aef",
+        description="TimescaleDB user for observability database.",
+    )
+
+    timescale_password: SecretStr = Field(
+        default=SecretStr("aef_dev_password"),
+        description="TimescaleDB password for observability database.",
+    )
+
+    timescale_db: str = Field(
+        default="aef_observability",
+        description="TimescaleDB database name for observability events.",
+    )
+
+    # =========================================================================
     # EVENT STORE (gRPC) - See ADR-007: Event Store Integration
     # =========================================================================
 

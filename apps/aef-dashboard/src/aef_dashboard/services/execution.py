@@ -23,7 +23,10 @@ from uuid import uuid4
 
 from agentic_logging import get_logger
 
-from aef_adapters.orchestration import AgenticWorkflowExecutor
+from aef_adapters.orchestration import (
+    create_workflow_executor,
+    get_agentic_agent,
+)
 
 if TYPE_CHECKING:
     from aef_adapters.control import ControlSignal
@@ -38,10 +41,6 @@ from aef_adapters.orchestration.executor import (
     WorkflowCompleted,
     WorkflowFailed,
     WorkflowStarted,
-)
-from aef_adapters.orchestration.factory import (
-    get_agentic_agent,
-    get_workspace,
 )
 
 logger = get_logger(__name__)
@@ -150,10 +149,15 @@ class ExecutionService:
                 """Check for control signals (pause/resume/cancel)."""
                 return await signal_adapter.get_signal(exec_id)
 
-            executor = AgenticWorkflowExecutor(
+            from aef_adapters.workspace_backends.service import WorkspaceService
+
+            workspace_service = WorkspaceService.create_docker()
+
+            # Create unified executor with required observability (M8)
+            # Factory automatically wires TimescaleObservability
+            executor = create_workflow_executor(
                 agent_factory=get_agentic_agent,
-                workspace_factory=get_workspace,  # type: ignore[arg-type]
-                base_workspace_path=self._base_workspace_path,
+                workspace_service=workspace_service,
                 default_provider=provider,
                 default_max_budget_usd=max_budget_usd,
                 control_signal_checker=check_signal,

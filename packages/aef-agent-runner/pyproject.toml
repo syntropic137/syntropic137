@@ -1,0 +1,35 @@
+[project]
+name = "aef-agent-runner"
+version = "0.1.0"
+description = "Agent runner for AEF isolated workspaces - executes Claude SDK inside containers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "AEF Team" }]
+keywords = ["aef", "agent", "runner", "container", "claude"]
+
+dependencies = [
+    "anthropic>=0.40.0",
+    "claude-agent-sdk>=0.1.11",
+    "aef-shared",  # For workspace path constants
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[project.scripts]
+aef-agent-run = "aef_agent_runner.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aef_agent_runner"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

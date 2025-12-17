@@ -126,6 +126,26 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # TimescaleDB - Time-series database for observability events
+  # Provides 10x-100x better performance than domain event store for high-volume telemetry
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: aef-timescaledb
+    environment:
+      POSTGRES_DB: aef_observability
+      POSTGRES_USER: aef
+      POSTGRES_PASSWORD: aef_dev_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aef -d aef_observability"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   # Example sidecar proxy for agent containers
   # This is a template - actual sidecars are deployed per-execution
   sidecar-proxy:
@@ -146,6 +166,7 @@ volumes:
   postgres_data:
   minio_data:
   redis_data:
+  timescaledb_data:
 
 networks:
   default:

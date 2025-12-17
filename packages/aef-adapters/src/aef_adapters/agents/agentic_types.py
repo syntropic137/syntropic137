@@ -17,6 +17,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from aef_shared import WORKSPACE_OUTPUT_DIR, WORKSPACE_ROOT
+
 
 class AgentTool(str, Enum):
     """Standard tools available to agentic agents.
@@ -319,8 +321,9 @@ class Workspace:
 
     @property
     def output_dir(self) -> Path:
-        """Directory for agent outputs."""
-        return self.path / "output"
+        """Directory for agent outputs (artifacts)."""
+        rel_path = WORKSPACE_OUTPUT_DIR.relative_to(WORKSPACE_ROOT)
+        return self.path / str(rel_path)
 
     @property
     def hooks_dir(self) -> Path:

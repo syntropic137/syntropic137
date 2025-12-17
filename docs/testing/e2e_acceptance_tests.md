@@ -1,8 +1,8 @@
 # AEF End-to-End Acceptance Tests
 
-**Version:** 6.1.0
+**Version:** 6.3.0
 **Created:** 2025-12-02
-**Updated:** 2025-12-11
+**Updated:** 2025-12-15
 **Status:** Active
 
 ---
@@ -10,6 +10,21 @@
 ## Overview
 
 This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+
+**Version 6.3** adds:
+- **WorkspaceService Architecture (F18)** - Full E2E validation of new event-sourced workspace domain
+- **Deprecated WorkspaceRouter Removed** - Old module deleted, all references updated
+- **Event-Sourced WorkspaceAggregate** - Immutable audit trail for workspace lifecycle
+- **DI-First Adapters** - Docker, Memory, Token adapters with Protocol interfaces
+- **70 New Test Criteria** - Comprehensive E2E coverage for workspace domain
+
+**Version 6.2** adds:
+- **Container Execution Robustness (F17)** - Phase counting, artifact collection, session persistence
+- **Type-Safe Workspace Paths** - Shared constants module in `aef_shared.workspace_paths`
+- **Git Attribution Control** - Disable Claude Co-Authored-By trailer via settings
+- **Analytics Streaming** - Real-time hook events via sidecar
+- **Stale Execution Cleanup** - Background job for stuck executions
+- **60 New Test Criteria** - Comprehensive coverage for container execution
 
 **Version 6.1** adds:
 - **Workspace-First Execution (F16)** - ADR-023 enforcement (LocalWorkspace test-only, WorkspaceRouter required)
@@ -1659,15 +1674,15 @@ All agent workspaces run in isolated containers/VMs. This feature tests:
 - Network allowlist enforcement
 - Dashboard workspace info display
 
-### F14.1 Workspace Router & Backend Selection
+### F14.1 WorkspaceService & Backend Selection
 
 **Given** the system is configured
-**When** I create a workspace via WorkspaceRouter
+**When** I create a workspace via WorkspaceService
 **Then** the best available backend is selected
 
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
-| 14.1.1 | WorkspaceRouter.get_available_backends() returns list | ⬜ |
+| 14.1.1 | WorkspaceService creates workspace with available backend | ⬜ |
 | 14.1.2 | At least one backend available (docker_hardened fallback) | ⬜ |
 | 14.1.3 | get_best_backend() returns highest priority available | ⬜ |
 | 14.1.4 | WorkspaceCreating event emitted before creation | ⬜ |
@@ -2128,7 +2143,7 @@ Enforces that all agent execution flows through isolated workspaces:
 | 16.1.2 | LocalWorkspace works in `testing` environment | ⬜ |
 | 16.1.3 | LocalWorkspace raises error in `development` | ⬜ |
 | 16.1.4 | LocalWorkspace raises error in `production` | ⬜ |
-| 16.1.5 | Error message references WorkspaceRouter | ⬜ |
+| 16.1.5 | Error message references WorkspaceService | ⬜ |
 | 16.1.6 | Error message references ADR-023 | ⬜ |
 
 **Validation Commands:**
@@ -2159,7 +2174,7 @@ APP_ENVIRONMENT=development python -c "from aef_adapters.workspaces import Local
 APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "inmemory"
 ```
 
-### F16.3 WorkspaceRouter Enforcement
+### F16.3 WorkspaceService Enforcement
 
 **Given** no isolated backend is available
 **When** I call `get_best_backend()` in non-test environment
@@ -2183,13 +2198,13 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_e
 ### F16.4 WorkflowExecutionEngine Required Dependencies
 
 **Given** I create a WorkflowExecutionEngine
-**When** `execution_repository` or `workspace_router` is None
+**When** `execution_repository` or `workspace_service` is None
 **Then** it raises `ValueError` immediately
 
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 16.4.1 | Engine requires `execution_repository` (not None) | ⬜ |
-| 16.4.2 | Engine requires `workspace_router` (not None) | ⬜ |
+| 16.4.2 | Engine requires `workspace_service` (not None) | ⬜ |
 | 16.4.3 | ValueError references ADR-023 | ⬜ |
 | 16.4.4 | Engine works with both dependencies provided | ⬜ |
 | 16.4.5 | Engine saves aggregate after each phase | ⬜ |
@@ -2234,7 +2249,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/agents/test_execu
 |---|---------------------|--------|
 | 16.6.1 | LocalWorkspace enforcement tests pass (6 tests) | ⬜ |
 | 16.6.2 | InMemoryWorkspace enforcement tests pass (4 tests) | ⬜ |
-| 16.6.3 | WorkspaceRouter enforcement tests pass (4 tests) | ⬜ |
+| 16.6.3 | WorkspaceService enforcement tests pass (4 tests) | ⬜ |
 | 16.6.4 | InMemoryWorkspace integration tests pass (2 tests) | ⬜ |
 | 16.6.5 | AgentExecutor tests pass (15 tests) | ⬜ |
 | 16.6.6 | WorkflowExecutionEngine DI tests pass (3 tests) | ⬜ |
@@ -2256,6 +2271,533 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-domain/tests/contexts/workflows/
 # Full domain test suite
 APP_ENVIRONMENT=test uv run pytest packages/aef-domain/ -v --tb=short
 ```
+
+---
+
+## Feature 17: Container Execution Robustness ⭐ NEW
+
+> **Project Plan:** `PROJECT-PLAN_20251214_container-execution-fixes.md`
+> **ADRs:** ADR-021 (Isolated Workspaces), ADR-022 (Secure Tokens), ADR-023 (Workspace-First)
+
+### Overview
+
+Tests for the "agent-in-container" execution model robustness:
+- Phase counting accuracy (no duplicates)
+- Artifact collection from correct paths
+- Session persistence and UI visibility
+- Git attribution control
+- Analytics streaming from hooks
+- Stale execution cleanup
+
+### F17.1 Phase Counting Accuracy ⭐ P0
+
+**Given** a workflow executes in container mode
+**When** phases complete
+**Then** exactly one result per phase is recorded
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.1.1 | Single-phase workflow shows `completed_phases = 1` | ⬜ |
+| 17.1.2 | Multi-phase workflow shows correct completed count | ⬜ |
+| 17.1.3 | PhaseCompleted event count equals phase count | ⬜ |
+| 17.1.4 | phase_results array length equals phase count | ⬜ |
+| 17.1.5 | No duplicate PhaseCompleted events per phase | ⬜ |
+| 17.1.6 | UI execution detail shows correct phase count | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run single-phase workflow
+aef workflow run --container --workflow water-lightyear-calc
+
+# Verify via API
+curl -s http://localhost:8000/api/executions/<exec_id> | jq '{completed_phases, total_phases}'
+
+# Verify event count in Event Store
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted' AND aggregate_id = '<exec_id>';"
+```
+
+### F17.2 Artifact Collection ⭐ P0
+
+**Given** an agent writes files in container
+**When** execution completes
+**Then** artifacts are collected from the correct directory
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.2.1 | Agent writes to `/workspace/artifacts` | ⬜ |
+| 17.2.2 | `collect_artifacts()` reads from `/workspace/artifacts` | ⬜ |
+| 17.2.3 | ArtifactCreated events emitted | ⬜ |
+| 17.2.4 | Artifacts visible in execution detail API | ⬜ |
+| 17.2.5 | Artifacts visible in UI execution detail | ⬜ |
+| 17.2.6 | Type-safe workspace_paths module used | ⬜ |
+
+**Validation Commands:**
+```bash
+# After workflow completes
+curl -s http://localhost:8000/api/executions/<exec_id>/artifacts | jq
+
+# Verify path constants
+python -c "from aef_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WORKSPACE_OUTPUT_DIR)"
+```
+
+### F17.3 Session Persistence ⭐ P1
+
+**Given** a phase executes in container
+**When** the phase starts and completes
+**Then** AgentSession aggregate events are emitted
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.3.1 | SessionStarted event emitted on phase start | ⬜ |
+| 17.3.2 | SessionStarted includes workflow_id, execution_id, phase_id | ⬜ |
+| 17.3.3 | SessionCompleted event emitted on phase complete | ⬜ |
+| 17.3.4 | SessionCompleted has success=true for success | ⬜ |
+| 17.3.5 | SessionCompleted has success=false, error_message for failure | ⬜ |
+| 17.3.6 | Session visible in `/api/sessions` list | ⬜ |
+| 17.3.7 | Session visible in UI sessions page | ⬜ |
+| 17.3.8 | Session links to execution in UI | ⬜ |
+
+**Validation Commands:**
+```bash
+# After workflow
+curl -s "http://localhost:8000/api/sessions?execution_id=<exec_id>" | jq
+
+# Event store verification
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, convert_from(payload, 'UTF8')::json->>'phase_id' as phase_id \
+   FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce DESC LIMIT 5;"
+```
+
+### F17.4 Git Attribution Control ⭐ P1
+
+**Given** Claude SDK is configured with attribution settings
+**When** agent commits code
+**Then** no `Co-Authored-By: Claude` trailer appears
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.4.1 | settings.json includes `attribution.commits = false` | ⬜ |
+| 17.4.2 | settings.json includes `attribution.pullRequests = false` | ⬜ |
+| 17.4.3 | Settings copied from agentic-primitives | ⬜ |
+| 17.4.4 | Commit in workflow has no Co-Authored-By trailer | ⬜ |
+| 17.4.5 | PR description has no Claude attribution | ⬜ |
+
+**Validation Commands:**
+```bash
+# After workflow creates PR
+cd /path/to/sandbox-repo
+git log -1 --format="%B"  # Should NOT contain Co-Authored-By
+
+# Check settings in container
+docker exec <container_id> cat /workspace/.claude/settings.json | jq '.attribution'
+```
+
+### F17.5 Real-Time Analytics Streaming ⭐ P2
+
+**Given** hooks fire during agent execution
+**When** events are written to analytics JSONL
+**Then** events are streamed to control plane in real-time
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.5.1 | Hooks write to `.agentic/analytics/events.jsonl` | ⬜ |
+| 17.5.2 | Analytics file watcher detects new lines | ⬜ |
+| 17.5.3 | Events streamed to stdout with type="analytics" | ⬜ |
+| 17.5.4 | Events visible in SSE stream | ⬜ |
+| 17.5.5 | Events include session correlation data | ⬜ |
+| 17.5.6 | Token usage updates in real-time in UI | ⬜ |
+
+**Validation Commands:**
+```bash
+# During workflow execution
+docker exec <container_id> tail -f /workspace/.agentic/analytics/events.jsonl
+
+# Watch SSE stream for analytics events
+curl -N http://localhost:8000/api/events/stream | grep analytics
+```
+
+### F17.6 Stale Execution Cleanup ⭐ P2
+
+**Given** an execution is stuck in "running" state
+**When** the cleanup job runs
+**Then** stale executions are marked as failed
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.6.1 | Executions past TTL detected by cleanup query | ⬜ |
+| 17.6.2 | Stale executions marked as "failed" | ⬜ |
+| 17.6.3 | WorkflowFailed event emitted with reason="stale_timeout" | ⬜ |
+| 17.6.4 | Non-stale executions unaffected | ⬜ |
+| 17.6.5 | Cleanup API endpoint works | ⬜ |
+| 17.6.6 | Cleanup CLI command works | ⬜ |
+| 17.6.7 | Container crash triggers session failure | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run cleanup via API
+curl -X POST http://localhost:8000/api/executions/cleanup \
+  -H "Content-Type: application/json" \
+  -d '{"threshold_hours": 2}'
+
+# Run cleanup via CLI
+aef execution cleanup --threshold 2h
+
+# Verify stale executions marked failed
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, convert_from(payload, 'UTF8')::json->>'reason' \
+   FROM events WHERE event_type = 'WorkflowFailed' ORDER BY global_nonce DESC LIMIT 5;"
+```
+
+### F17.7 Type-Safe Workspace Paths ⭐ P0
+
+**Given** workspace paths are defined in aef_shared
+**When** agent-runner and adapters import them
+**Then** paths are consistent and type-safe
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.7.1 | `WORKSPACE_ROOT = /workspace` | ⬜ |
+| 17.7.2 | `WORKSPACE_OUTPUT_DIR = /workspace/artifacts` | ⬜ |
+| 17.7.3 | `WORKSPACE_CONTEXT_DIR = /workspace/.context` | ⬜ |
+| 17.7.4 | `WORKSPACE_TASK_FILE = /workspace/.context/task.json` | ⬜ |
+| 17.7.5 | `WORKSPACE_ANALYTICS_DIR = /workspace/.agentic/analytics` | ⬜ |
+| 17.7.6 | All paths are `PurePosixPath` type | ⬜ |
+| 17.7.7 | aef-agent-runner imports from aef_shared | ⬜ |
+| 17.7.8 | aef-adapters imports from aef_shared | ⬜ |
+| 17.7.9 | Type checking passes (mypy/pyright) | ⬜ |
+
+**Validation Commands:**
+```bash
+# Verify constants
+python -c "
+from aef_shared.workspace_paths import *
+print(f'ROOT: {WORKSPACE_ROOT}')
+print(f'OUTPUT: {WORKSPACE_OUTPUT_DIR}')
+print(f'CONTEXT: {WORKSPACE_CONTEXT_DIR}')
+print(f'TASK: {WORKSPACE_TASK_FILE}')
+"
+
+# Type check
+cd packages/aef-shared && uv run mypy src/
+cd packages/aef-agent-runner && uv run mypy src/
+```
+
+### F17.8 End-to-End Container Execution ⭐ CRITICAL
+
+**Given** full AEF stack is running
+**When** I execute a container workflow
+**Then** all F17 criteria are met
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 17.8.1 | Workflow starts via CLI or API | ⬜ |
+| 17.8.2 | Container created with isolation | ⬜ |
+| 17.8.3 | Agent clones repo successfully | ⬜ |
+| 17.8.4 | Agent creates/modifies files | ⬜ |
+| 17.8.5 | Agent commits with correct author | ⬜ |
+| 17.8.6 | No Co-Authored-By trailer in commit | ⬜ |
+| 17.8.7 | Agent opens PR | ⬜ |
+| 17.8.8 | Exactly 1 phase result per phase | ⬜ |
+| 17.8.9 | Artifacts collected and visible | ⬜ |
+| 17.8.10 | Session visible in UI | ⬜ |
+| 17.8.11 | Token usage tracked | ⬜ |
+| 17.8.12 | Execution completes successfully | ⬜ |
+| 17.8.13 | WorkflowCompleted event in store | ⬜ |
+
+**Validation Commands:**
+```bash
+# Full E2E test
+just dev  # Start stack
+sleep 30  # Wait for services
+
+# Execute workflow
+aef workflow run --container --workflow water-lightyear-calc \
+  --input '{"task": "Calculate H2O molecule count in light-year line"}'
+
+# Verify all criteria
+curl -s http://localhost:8000/api/executions/<exec_id> | jq
+
+# Check events
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, COUNT(*) FROM events WHERE aggregate_id = '<exec_id>' GROUP BY event_type;"
+```
+
+### F17 Test Results Summary
+
+| # | Sub-Feature | Criteria | Priority |
+|---|-------------|----------|----------|
+| 17.1 | Phase Counting Accuracy | 6 | P0 |
+| 17.2 | Artifact Collection | 6 | P0 |
+| 17.3 | Session Persistence | 8 | P1 |
+| 17.4 | Git Attribution Control | 5 | P1 |
+| 17.5 | Real-Time Analytics | 6 | P2 |
+| 17.6 | Stale Execution Cleanup | 7 | P2 |
+| 17.7 | Type-Safe Workspace Paths | 9 | P0 |
+| 17.8 | E2E Container Execution | 13 | P0 |
+| **TOTAL** | | **60** | |
+
+---
+
+## Feature 18: WorkspaceService Architecture ⭐ NEW
+
+> **ADRs:** ADR-021 (Isolated Workspaces), ADR-022 (Secure Tokens), ADR-023 (Workspace-First)
+> **Architecture:** Event-sourced, VSA-compliant, DI-first workspace domain
+
+### Overview
+
+Tests for the new `WorkspaceService` architecture that replaces the deprecated `WorkspaceRouter`:
+
+```
+WorkspaceService.create_workspace()
+    ├── IsolationBackendPort (Docker/Memory)
+    ├── SidecarPort (Token injection proxy)
+    ├── TokenInjectionPort (Scoped token vending)
+    └── EventStreamPort (Real-time output streaming)
+```
+
+**Key Components:**
+- `WorkspaceAggregate` - Event-sourced aggregate with full audit trail
+- `WorkspaceService` - Unified facade for lifecycle management
+- `ManagedWorkspace` - Context manager with inject/execute/stream/collect operations
+- Port interfaces - `IsolationBackendPort`, `SidecarPort`, `TokenInjectionPort`, `EventStreamPort`
+
+### F18.1 WorkspaceService Factory Methods
+
+**Given** the application needs a workspace service
+**When** I call factory methods
+**Then** the correct service is created
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.1.1 | `WorkspaceService.create_docker()` returns service with Docker adapter | ⬜ |
+| 18.1.2 | `WorkspaceService.create_memory()` returns service with Memory adapter | ⬜ |
+| 18.1.3 | Memory service only works in `APP_ENVIRONMENT=test` | ⬜ |
+| 18.1.4 | Docker service includes sidecar and event stream adapters | ⬜ |
+| 18.1.5 | Service accepts custom token vending service | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run factory tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/service/test_workspace_service.py -v -k "factory"
+```
+
+### F18.2 WorkspaceAggregate Event Sourcing
+
+**Given** a workspace is created and used
+**When** commands are executed
+**Then** events are emitted and state is rebuilt correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.2.1 | `CreateWorkspaceCommand` emits `IsolationStartedEvent` | ⬜ |
+| 18.2.2 | `ExecuteCommandCommand` emits `CommandExecutedEvent` on success | ⬜ |
+| 18.2.3 | `ExecuteCommandCommand` emits `CommandFailedEvent` on failure | ⬜ |
+| 18.2.4 | `InjectTokensCommand` emits `TokensInjectedEvent` | ⬜ |
+| 18.2.5 | `TerminateWorkspaceCommand` emits `WorkspaceTerminatedEvent` | ⬜ |
+| 18.2.6 | Aggregate rebuilds state from event stream | ⬜ |
+| 18.2.7 | Event versions increment correctly | ⬜ |
+| 18.2.8 | All events include workspace_id and timestamp | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run aggregate tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-domain/src/aef_domain/contexts/workspaces/test_workspace_integration.py -v
+```
+
+### F18.3 ManagedWorkspace Lifecycle
+
+**Given** a workspace is created via WorkspaceService
+**When** I use the ManagedWorkspace context manager
+**Then** the full lifecycle is managed correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.3.1 | `create_workspace()` returns async context manager | ⬜ |
+| 18.3.2 | Workspace is created on context entry | ⬜ |
+| 18.3.3 | `inject_files()` writes files to workspace | ⬜ |
+| 18.3.4 | `inject_tokens()` injects tokens via sidecar | ⬜ |
+| 18.3.5 | `execute()` runs commands in workspace | ⬜ |
+| 18.3.6 | `stream()` yields real-time output lines | ⬜ |
+| 18.3.7 | `collect_files()` retrieves artifacts | ⬜ |
+| 18.3.8 | Workspace is terminated on context exit | ⬜ |
+| 18.3.9 | Cleanup happens even on exception | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run lifecycle tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/service/test_workspace_service.py -v -k "lifecycle"
+```
+
+### F18.4 Docker Isolation Adapter
+
+**Given** DockerIsolationAdapter is configured
+**When** I create and use a workspace
+**Then** Docker containers are managed correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.4.1 | `create()` starts Docker container | ⬜ |
+| 18.4.2 | Container uses configured image (aef-workspace-claude) | ⬜ |
+| 18.4.3 | gVisor runtime used when `use_gvisor=True` | ⬜ |
+| 18.4.4 | Network configured per security policy | ⬜ |
+| 18.4.5 | Memory limits applied | ⬜ |
+| 18.4.6 | `execute()` runs docker exec | ⬜ |
+| 18.4.7 | `health_check()` returns container status | ⬜ |
+| 18.4.8 | `destroy()` stops and removes container | ⬜ |
+| 18.4.9 | `copy_to()` writes files to workspace dir | ⬜ |
+| 18.4.10 | `copy_from()` reads files from workspace dir | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run Docker adapter tests (mocked)
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/docker/test_docker_adapters.py -v
+```
+
+### F18.5 Token Injection Flow
+
+**Given** TokenVendingServiceAdapter is configured
+**When** tokens are injected into workspace
+**Then** scoped tokens flow through the sidecar
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.5.1 | `vend_token()` creates scoped token with TTL | ⬜ |
+| 18.5.2 | Token scope includes allowed APIs | ⬜ |
+| 18.5.3 | Token scope includes allowed repos | ⬜ |
+| 18.5.4 | Sidecar receives token via injection port | ⬜ |
+| 18.5.5 | `revoke_tokens()` cleans up all tokens for execution | ⬜ |
+| 18.5.6 | Token validation works correctly | ⬜ |
+| 18.5.7 | Expired tokens rejected | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run token adapter tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/tokens/test_token_adapters.py -v
+```
+
+### F18.6 Event Stream Adapter
+
+**Given** DockerEventStreamAdapter is configured
+**When** agent executes in container
+**Then** stdout is streamed in real-time
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.6.1 | `stream()` yields lines from docker exec | ⬜ |
+| 18.6.2 | Timeout is respected | ⬜ |
+| 18.6.3 | Empty lines are handled | ⬜ |
+| 18.6.4 | Stream closes cleanly on completion | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run event stream tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/docker/test_docker_adapters.py -v -k "stream"
+```
+
+### F18.7 Memory Adapter (Test Environment)
+
+**Given** MemoryIsolationAdapter is configured
+**When** used in test environment
+**Then** all operations work in-memory
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.7.1 | Raises error if `APP_ENVIRONMENT != test` | ⬜ |
+| 18.7.2 | `create()` initializes in-memory state | ⬜ |
+| 18.7.3 | `execute()` returns mock results | ⬜ |
+| 18.7.4 | File operations use in-memory dictionary | ⬜ |
+| 18.7.5 | `destroy()` clears state | ⬜ |
+| 18.7.6 | No Docker dependency | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run memory adapter tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/memory/test_memory_adapter.py -v
+```
+
+### F18.8 WorkflowExecutionEngine Integration
+
+**Given** WorkflowExecutionEngine with WorkspaceService
+**When** workflow executes phases in containers
+**Then** WorkspaceService is used correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.8.1 | Engine requires `workspace_service` (not None) | ⬜ |
+| 18.8.2 | `_execute_phase_in_container()` uses `create_workspace()` | ⬜ |
+| 18.8.3 | Task.json injected via `inject_files()` | ⬜ |
+| 18.8.4 | Agent output streamed via `stream()` | ⬜ |
+| 18.8.5 | Artifacts collected via `collect_files()` | ⬜ |
+| 18.8.6 | Workspace terminated after phase | ⬜ |
+| 18.8.7 | Events emitted to event store | ⬜ |
+
+**Validation Commands:**
+```bash
+# Run engine integration tests
+APP_ENVIRONMENT=test uv run pytest packages/aef-domain/src/aef_domain/contexts/workflows/execute_workflow/test_execute_workflow.py -v
+```
+
+### F18.9 Full Stack E2E Validation ⭐ CRITICAL
+
+**Given** all components are running (PostgreSQL, Event Store, Dashboard, Docker)
+**When** I execute a workflow via UI or CLI
+**Then** events flow through all layers correctly
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 18.9.1 | **Event Store Layer**: WorkflowExecutionStarted persisted | ⬜ |
+| 18.9.2 | **Event Store Layer**: WorkspaceCreated event persisted | ⬜ |
+| 18.9.3 | **Docker Layer**: Container created with correct image | ⬜ |
+| 18.9.4 | **Docker Layer**: Container has correct network config | ⬜ |
+| 18.9.5 | **Token Layer**: Token vended for execution | ⬜ |
+| 18.9.6 | **Token Layer**: Token injected into container | ⬜ |
+| 18.9.7 | **Agent Layer**: Agent runner starts correctly | ⬜ |
+| 18.9.8 | **Agent Layer**: Task.json read by agent | ⬜ |
+| 18.9.9 | **Stream Layer**: Agent output streamed to control plane | ⬜ |
+| 18.9.10 | **Stream Layer**: SSE events reach dashboard | ⬜ |
+| 18.9.11 | **Event Store Layer**: CommandExecutedEvent persisted | ⬜ |
+| 18.9.12 | **Event Store Layer**: PhaseCompleted persisted | ⬜ |
+| 18.9.13 | **Artifact Layer**: Files collected from container | ⬜ |
+| 18.9.14 | **Artifact Layer**: Artifacts visible in API | ⬜ |
+| 18.9.15 | **UI Layer**: Execution appears in list | ⬜ |
+| 18.9.16 | **UI Layer**: Status updates in real-time | ⬜ |
+| 18.9.17 | **UI Layer**: Token count updates | ⬜ |
+| 18.9.18 | **UI Layer**: Phase progress shown | ⬜ |
+| 18.9.19 | **Cleanup Layer**: Container destroyed after completion | ⬜ |
+| 18.9.20 | **Cleanup Layer**: Tokens revoked after execution | ⬜ |
+
+**Validation Commands:**
+```bash
+# Start full stack
+just dev-force
+sleep 30
+
+# Execute workflow
+source .env && uv run aef workflow run water-lightyear --container
+
+# Verify events in store
+docker exec aef-postgres psql -U aef -d aef -c \
+  "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY COUNT(*) DESC;"
+
+# Verify in UI
+open http://localhost:5173/executions
+```
+
+### F18 Test Results Summary
+
+| # | Sub-Feature | Criteria | Priority |
+|---|-------------|----------|----------|
+| 18.1 | WorkspaceService Factory Methods | 5 | P0 |
+| 18.2 | WorkspaceAggregate Event Sourcing | 8 | P0 |
+| 18.3 | ManagedWorkspace Lifecycle | 9 | P0 |
+| 18.4 | Docker Isolation Adapter | 10 | P0 |
+| 18.5 | Token Injection Flow | 7 | P1 |
+| 18.6 | Event Stream Adapter | 4 | P1 |
+| 18.7 | Memory Adapter (Test Environment) | 6 | P1 |
+| 18.8 | WorkflowExecutionEngine Integration | 7 | P0 |
+| 18.9 | Full Stack E2E Validation | 20 | P0 |
+| **TOTAL** | | **76** | |
 
 ---
 
@@ -2299,8 +2841,15 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-domain/ -v --tb=short
 **GitHub App & Secure Token Architecture (F15) ⭐:**
 15. [ ] **F15: Secure Tokens** - GitHub App auth, token vending, spend tracking, sidecar proxy
 
-**Workspace-First Execution Architecture (F16) ⭐ NEW:**
-16. [ ] **F16: Workspace-First Execution** - LocalWorkspace/InMemoryWorkspace test-only, WorkspaceRouter enforcement, AgentExecutor
+**Workspace-First Execution Architecture (F16) ⭐:**
+16. [ ] **F16: Workspace-First Execution** - LocalWorkspace/InMemoryWorkspace test-only, WorkspaceService enforcement, AgentExecutor
+
+**Container Execution Robustness (F17) ⭐:**
+17. [ ] **F17: Container Execution Robustness** - Phase counting, artifact collection, session persistence, git attribution, analytics streaming, stale cleanup
+
+**WorkspaceService Architecture (F18) ⭐ NEW:**
+18. [ ] **F18: WorkspaceService Architecture** - Event-sourced workspace domain, Docker/Memory adapters, token injection, full stack E2E validation
+
 ### Quick Pytest Commands
 
 ```bash
@@ -2330,6 +2879,12 @@ just poc-git-identity   # Git identity injection
 just poc-claude-api     # Claude API connectivity
 just poc-logging        # Container logging
 just poc-allowlist      # Network allowlist
+
+# Run Container Execution Robustness tests (F17)
+APP_ENVIRONMENT=test pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py -v
+APP_ENVIRONMENT=test pytest packages/aef-shared/tests/test_workspace_paths.py -v
+APP_ENVIRONMENT=test pytest packages/aef-adapters/tests/workspaces/test_artifact_collection.py -v
+APP_ENVIRONMENT=test pytest packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py -v
 
 # Run GitHub App & Secure Token tests (F15)
 pytest packages/aef-tokens/tests/ -v
@@ -2369,7 +2924,9 @@ poetry run poe check-fix
 | **F14** | **Isolated Workspace Architecture** ⭐ | **52** | ⬜ | ⬜ | ⬜ |
 | **F15** | **GitHub App & Secure Tokens** ⭐ | **50** | ⬜ | ⬜ | ⬜ |
 | **F16** | **Workspace-First Execution** ⭐ | **51** | ⬜ | ⬜ | ⬜ |
-| **TOTAL** | | **424** | ⬜ | ⬜ | ⬜ |
+| **F17** | **Container Execution Robustness** ⭐ | **60** | ⬜ | ⬜ | ⬜ |
+| **F18** | **WorkspaceService Architecture** ⭐ NEW | **76** | ⬜ | ⬜ | ⬜ |
+| **TOTAL** | | **560** | ⬜ | ⬜ | ⬜ |
 
 ---
 
@@ -2384,6 +2941,44 @@ poetry run poe check-fix
 ## Notes
 
 _Add any observations, recommendations, or follow-up items here._
+
+### Migration Notes (v6.2 → v6.3)
+
+- **WorkspaceService Architecture:** New F18 tests for event-sourced workspace domain
+- **Deprecated WorkspaceRouter Removed:** Old `aef-adapters/workspaces/` module deleted (12,500+ lines)
+- **WorkspaceService Facade:** Unified lifecycle management via `WorkspaceService.create_docker()` / `.create_memory()`
+- **WorkspaceAggregate:** Event-sourced aggregate with commands: Create, Execute, InjectTokens, Terminate
+- **Port Interfaces:** `IsolationBackendPort`, `SidecarPort`, `TokenInjectionPort`, `EventStreamPort`
+- **Docker Adapters:** `DockerIsolationAdapter`, `DockerSidecarAdapter`, `DockerEventStreamAdapter`
+- **Memory Adapters:** In-memory implementations for isolated unit testing (test env only)
+- **Token Adapters:** `TokenVendingServiceAdapter`, `SidecarTokenInjectionAdapter`
+- **WorkflowExecutionEngine:** Now requires `workspace_service` instead of `workspace_router`
+- **Test Count:** Increased from 484 to 560 criteria
+- **New Files:**
+  - `packages/aef-domain/src/aef_domain/contexts/workspaces/_shared/` (Aggregate, Ports, Value Objects)
+  - `packages/aef-domain/src/aef_domain/contexts/workspaces/*/` (Command slices)
+  - `packages/aef-adapters/src/aef_adapters/workspace_backends/docker/` (Docker implementations)
+  - `packages/aef-adapters/src/aef_adapters/workspace_backends/memory/` (Test implementations)
+  - `packages/aef-adapters/src/aef_adapters/workspace_backends/tokens/` (Token adapters)
+  - `packages/aef-adapters/src/aef_adapters/workspace_backends/service/workspace_service.py` (Facade)
+
+### Migration Notes (v6.1 → v6.2)
+
+- **Container Execution Robustness:** New F17 tests for agent-in-container reliability
+- **Type-Safe Workspace Paths:** New module `aef_shared.workspace_paths` for consistent path constants
+- **Phase Counting Fix:** Removed duplicate `ctx.phase_results.append()` call
+- **Artifact Collection Fix:** Unified output directory across agent-runner and adapters
+- **Session Persistence:** AgentSessionAggregate now created/completed in container mode
+- **Git Attribution:** Settings copied from agentic-primitives with attribution disabled
+- **Analytics Streaming:** Real-time hook event streaming via sidecar (P2)
+- **Stale Cleanup:** Background job to mark stuck executions as failed (P2)
+- **Test Count:** Increased from 424 to 484 criteria
+- **New Files:**
+  - `packages/aef-shared/src/aef_shared/workspace_paths.py`
+  - `packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py`
+  - `packages/aef-shared/tests/test_workspace_paths.py`
+  - `packages/aef-adapters/tests/workspaces/test_artifact_collection.py`
+  - `packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py`
 
 ### Migration Notes (v6.0 → v6.1)
 
@@ -2468,6 +3063,8 @@ _Add any observations, recommendations, or follow-up items here._
 | **Isolated Workspaces** ⭐ | **F14** | **pytest + just POC commands** |
 | **Secure Tokens** ⭐ | **F15** | **pytest + e2e script** |
 | **Workspace-First** ⭐ | **F16** | **pytest (fully automated)** |
+| **Container Robustness** ⭐ | **F17** | **pytest + E2E workflow** |
+| **WorkspaceService** ⭐ NEW | **F18** | **pytest + Docker E2E** |
 
 ### Known Issues & Learnings
 

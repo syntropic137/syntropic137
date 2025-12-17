@@ -615,6 +615,40 @@ This provides:
 - **ADR-022**: Secure Token Architecture (credential injection for workspaces)
 - **ADR-023**: Workspace-First Execution Model (**enforcement of this architecture**)
 
+## Implementation Notes (2025-12-15)
+
+### Container Image
+
+The `aef-workspace-claude` image is the reference implementation for Claude agents:
+
+- **Location**: `docker/workspace/Dockerfile`
+- **Build**: `just workspace-build`
+- **Default**: Configured in `aef_shared.settings.workspace.docker_image`
+
+Includes:
+- `aef_agent_runner` package (runs inside container)
+- `claude-agent-sdk` (agentic execution)
+- `anthropic` SDK (API client)
+- `gh` CLI (GitHub operations)
+- `git` with credential helper for GitHub App token (see ADR-024)
+
+### Contract Validation
+
+`AgentContainerContract` validates container requirements before execution:
+
+- **Location**: `packages/aef-adapters/src/aef_adapters/workspaces/contract.py`
+- **Validates**: Required commands (`python`, `git`, `gh`) and modules (`aef_agent_runner`, `anthropic`, `claude_agent_sdk`)
+- **Integration**: Called by `WorkspaceRouter.create()` after workspace setup
+- **Fail-fast**: Raises `RuntimeError` with actionable fix instructions
+
+### Compliance Tests
+
+ADR compliance is verified by integration tests:
+
+- **Location**: `packages/aef-adapters/tests/integration/test_adr_compliance.py`
+- **Run**: `pytest tests/integration/test_adr_compliance.py -v`
+- **Marker**: `@pytest.mark.integration`
+
 ## References
 
 - [Firecracker Documentation](https://github.com/firecracker-microvm/firecracker)

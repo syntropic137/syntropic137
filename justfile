@@ -35,7 +35,8 @@ dev-reset:
     docker compose -f docker/docker-compose.dev.yaml up --build -d
 
 # Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
-dev-force:
+# Builds workspace image if missing
+dev-force: _workspace-check
     @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
     -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
@@ -100,6 +101,41 @@ dev-fresh:
     @echo "   Feedback API: http://localhost:8001"
     @echo "   API Docs:     http://localhost:8000/docs"
 
+# --- Workspace Image ---
+
+# Build the Claude workspace Docker image (aef-workspace-claude)
+# Tags with: latest, git short SHA, and date-based version
+workspace-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    DATE_TAG=$(date +%Y%m%d)
+    VERSION_TAG="v${DATE_TAG}-${GIT_SHA}"
+    echo "🔨 Building aef-workspace-claude image..."
+    echo "   Version: ${VERSION_TAG}"
+    docker build \
+        -t aef-workspace-claude:latest \
+        -t aef-workspace-claude:${VERSION_TAG} \
+        -t aef-workspace-claude:${GIT_SHA} \
+        --label "org.opencontainers.image.revision=${GIT_SHA}" \
+        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --label "org.opencontainers.image.version=${VERSION_TAG}" \
+        -f docker/workspace/Dockerfile .
+    echo "✅ Image built with tags:"
+    echo "   - aef-workspace-claude:latest"
+    echo "   - aef-workspace-claude:${VERSION_TAG}"
+    echo "   - aef-workspace-claude:${GIT_SHA}"
+
+# List all workspace image versions
+workspace-versions:
+    @echo "📦 Workspace image versions:"
+    @docker images aef-workspace-claude | head -20
+
+# Check if workspace image exists, build if missing
+_workspace-check:
+    @docker image inspect aef-workspace-claude:latest >/dev/null 2>&1 || \
+        (echo "⚠️  Workspace image not found. Building (first time only)..." && just workspace-build)
+
 # Run the CLI application
 cli *args:
     uv run --package aef-cli aef {{args}}
@@ -159,6 +195,74 @@ test:
 # Run tests with coverage report
 test-cov:
     uv run pytest --cov=apps/aef-cli/src --cov=packages/aef-domain/src --cov=packages/aef-adapters/src --cov=packages/aef-shared/src --cov-report=term-missing --cov-fail-under=80
+
+# Test TimescaleDB observability stack in isolation
+test-timescale-isolated:
+    @echo "🧪 Starting isolated TimescaleDB test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_timescale.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ TimescaleDB isolated test complete!"
+
+# Test ObservabilityWriter in isolation
+test-writer-isolated:
+    @echo "🧪 Starting ObservabilityWriter test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_writer.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ ObservabilityWriter isolated test complete!"
+
+# Test CostProjection in isolation
+test-projection-isolated:
+    @echo "🧪 Starting CostProjection test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_projection.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ CostProjection isolated test complete!"
+
+# Test E2E observability flow in isolation
+test-observability-e2e:
+    @echo "🧪 Starting E2E observability test..."
+    docker compose -f docker/docker-compose.observability-test.yaml up -d
+    @echo "⏳ Waiting for TimescaleDB to be ready..."
+    @sleep 3
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
+    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_e2e.py
+    @echo "🧹 Cleaning up..."
+    docker compose -f docker/docker-compose.observability-test.yaml down -v
+    @echo "✅ E2E observability test complete!"
+
+# Run E2E container execution tests (full flow: sidecar + workspace + agent)
+test-e2e-container:
+    uv run python scripts/e2e_agent_in_container_test.py
+
+# Run E2E container tests with image rebuild
+test-e2e-container-build:
+    uv run python scripts/e2e_agent_in_container_test.py --build
+
+# Pre-merge validation (all checks before opening PR)
+validate-pre-merge quick="":
+    @if [ "{{quick}}" = "--quick" ]; then \
+        uv run python scripts/pre_merge_validation.py --quick; \
+    else \
+        uv run python scripts/pre_merge_validation.py; \
+    fi
+
+# Pre-merge validation (quick mode - skip E2E tests)
+validate-pre-merge-quick:
+    uv run python scripts/pre_merge_validation.py --quick
 
 # Run linter
 lint:

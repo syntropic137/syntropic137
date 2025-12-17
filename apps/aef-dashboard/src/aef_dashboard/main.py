@@ -79,6 +79,58 @@ def _validate_api_keys() -> None:
         logger.info("✓ ANTHROPIC_API_KEY configured and exported (%s)", masked)
 
 
+def _validate_github_app() -> None:
+    """Validate GitHub App is configured at startup.
+
+    Poka-Yoke: Fail fast if GitHub App credentials are missing.
+    GitHub App is REQUIRED for:
+    - Creating PRs from agent workflows
+    - Git authentication in isolated containers
+    - Secure, auditable GitHub operations
+
+    This prevents silent failures when running workflows that need GitHub.
+    """
+    from aef_shared.settings.github import GitHubAppSettings
+
+    settings = get_settings()
+    github = GitHubAppSettings()
+
+    if not github.is_configured:
+        missing = []
+        if not github.app_id:
+            missing.append("AEF_GITHUB_APP_ID")
+        if not github.private_key.get_secret_value():
+            missing.append("AEF_GITHUB_PRIVATE_KEY")
+        if not github.installation_id:
+            missing.append("AEF_GITHUB_INSTALLATION_ID")
+
+        missing_str = ", ".join(missing)
+
+        if settings.is_test:
+            logger.info("GitHub App not configured (test mode - mocks will be used)")
+        elif settings.app_environment == "development":
+            # In development, fail hard - we need GitHub for PR workflows
+            raise RuntimeError(
+                f"GitHub App is REQUIRED but not configured. "
+                f"Missing: {missing_str}. "
+                f"Ensure .env is loaded with GitHub App credentials. "
+                f"See docs/deployment/github-app-setup.md for setup instructions."
+            )
+        else:
+            # Production/Staging - definitely fail
+            raise RuntimeError(
+                f"GitHub App is REQUIRED in {settings.app_environment} mode. "
+                f"Missing: {missing_str}. "
+                f"Set these environment variables and restart."
+            )
+    else:
+        logger.info(
+            "✓ GitHub App configured (app_id=%s, bot=%s)",
+            github.app_id,
+            github.bot_name,
+        )
+
+
 async def _start_subscription_service() -> None:
     """Start the coordinator subscription service for projection updates.
 
@@ -95,6 +147,7 @@ async def _start_subscription_service() -> None:
             connect_event_store,
             get_event_store_client,
         )
+        from aef_adapters.storage.observability_writer import get_observability_writer
         from aef_adapters.subscriptions import create_coordinator_service
         from aef_shared.settings import get_settings
 
@@ -104,6 +157,16 @@ async def _start_subscription_service() -> None:
         if settings.is_test:
             logger.info("Skipping subscription service in test environment")
             return
+
+        # Initialize ObservabilityWriter for TimescaleDB queries (ADR-026)
+        try:
+            observability_writer = get_observability_writer()
+            await observability_writer.initialize()
+            logger.info("ObservabilityWriter initialized for cost projections")
+        except Exception as e:
+            logger.warning(
+                "Could not initialize ObservabilityWriter, cost data may be unavailable: %s", e
+            )
 
         # Connect to event store
         await connect_event_store()
@@ -157,6 +220,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     On startup:
         - Validate API keys (fail-fast)
+        - Validate GitHub App (fail-fast)
         - Connect to event store
         - Start subscription service for projection updates
 
@@ -166,8 +230,9 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """
     logger.info("Starting AEF Dashboard...")
 
-    # Fail-fast: validate required API keys
+    # Fail-fast: validate required credentials (Poka-Yoke)
     _validate_api_keys()
+    _validate_github_app()
 
     # Start subscription service
     await _start_subscription_service()

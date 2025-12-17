@@ -185,10 +185,10 @@ def multi_phase_workflow() -> MockWorkflow:
 @pytest.fixture
 def executor(mock_agent: MockAgenticAgent, tmp_path: Path) -> AgenticWorkflowExecutor:
     """Create an executor with mock agent."""
+    mock_workspace_service = MagicMock()
     return AgenticWorkflowExecutor(
         agent_factory=lambda _: mock_agent,
-        workspace_factory=MagicMock(),
-        base_workspace_path=tmp_path,
+        workspace_service=mock_workspace_service,
     )
 
 
@@ -241,10 +241,10 @@ class TestAgenticWorkflowExecutor:
         tmp_path: Path,
     ) -> None:
         """Test executing a multi-phase workflow."""
+        mock_workspace_service = MagicMock()
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=MagicMock(),
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_service,
         )
 
         events = []
@@ -277,10 +277,10 @@ class TestAgenticWorkflowExecutor:
         tmp_path: Path,
     ) -> None:
         """Test execution fails gracefully with unavailable agent."""
+        mock_workspace_service = MagicMock()
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: unavailable_agent,
-            workspace_factory=MagicMock(),
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_service,
         )
 
         events = []
@@ -301,10 +301,10 @@ class TestAgenticWorkflowExecutor:
         tmp_path: Path,
     ) -> None:
         """Test execution handles phase failure."""
+        mock_workspace_service = MagicMock()
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: failing_agent,
-            workspace_factory=MagicMock(),
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_service,
         )
 
         events = []
@@ -328,10 +328,10 @@ class TestAgenticWorkflowExecutor:
         tmp_path: Path,
     ) -> None:
         """Test that phase outputs are passed to subsequent phases."""
+        mock_workspace_service = MagicMock()
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=MagicMock(),
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_service,
         )
 
         # Execute workflow
@@ -371,10 +371,10 @@ class TestAgenticWorkflowExecutor:
         tmp_path: Path,
     ) -> None:
         """Test that workspace is created for execution."""
+        mock_workspace_service = MagicMock()
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=MagicMock(),
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_service,
         )
 
         events = []

@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any, Protocol, runtime_checkable
 
 from aef_adapters.projection_stores import get_projection_store
+from aef_adapters.projections.session_tools import SessionToolsProjection
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from aef_domain.contexts.costs.slices.execution_cost.projection import (
     ExecutionCostProjection,
@@ -233,13 +234,54 @@ class ProjectionManager:
             # Observability projections (Pattern 2: Event Log + CQRS)
             "tool_timeline": ToolTimelineProjection(self._store),
             "token_metrics": TokenMetricsProjection(self._store),
-            # Cost tracking projections
-            "session_cost": SessionCostProjection(self._store),
+            # Cost tracking projections (now query TimescaleDB directly)
+            "session_cost": self._create_session_cost_projection(),
             "execution_cost": ExecutionCostProjection(self._store),
+            # TimescaleDB-backed observability projections (CQRS pattern)
+            "session_tools": self._create_session_tools_projection(),
             # Real-time projection for WebSocket push (doesn't use store)
             "realtime": get_realtime_projection(),
         }
         self._initialized = True
+
+    def _create_session_tools_projection(self) -> SessionToolsProjection:
+        """Create SessionToolsProjection with TimescaleDB access.
+
+        This projection queries TimescaleDB for tool operations.
+        See ADR-026: TimescaleDB for Observability Storage
+        """
+        try:
+            from aef_adapters.storage.observability_writer import get_observability_writer
+
+            observability_writer = get_observability_writer()
+            return SessionToolsProjection(pool=observability_writer.pool)
+        except Exception as e:
+            # Return projection without pool - will return empty results
+            logger.warning(
+                "Could not connect to TimescaleDB for tools projection: %s",
+                e,
+            )
+            return SessionToolsProjection(pool=None)
+
+    def _create_session_cost_projection(self) -> SessionCostProjection:
+        """Create SessionCostProjection with TimescaleDB access.
+
+        This projection now queries TimescaleDB directly for real-time cost calculation.
+        See ADR-026: TimescaleDB for Observability Storage
+        """
+        try:
+            from aef_adapters.storage.observability_writer import get_observability_writer
+
+            observability_writer = get_observability_writer()
+            return SessionCostProjection(self._store, observability_writer=observability_writer)
+        except Exception as e:
+            # Fallback to event store-based projection if TimescaleDB unavailable
+            logger.warning(
+                "Could not connect to TimescaleDB for cost projection, "
+                "falling back to event store: %s",
+                e,
+            )
+            return SessionCostProjection(self._store)
 
     def get_projection(self, name: str) -> Any:
         """Get a projection by name.
@@ -434,6 +476,12 @@ class ProjectionManager:
         """Get the execution cost projection."""
         self._ensure_initialized()
         return self._projections["execution_cost"]
+
+    @property
+    def session_tools(self) -> SessionToolsProjection:
+        """Get the session tools projection (TimescaleDB-backed)."""
+        self._ensure_initialized()
+        return self._projections["session_tools"]
 
 
 @lru_cache

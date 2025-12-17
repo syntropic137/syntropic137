@@ -69,6 +69,9 @@ def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
                 order=p.get("order", i),
                 description=p.get("description"),
                 agent_type=p.get("agent_type", ""),
+                prompt_template=p.get("prompt_template"),
+                timeout_seconds=p.get("timeout_seconds", 300),
+                allowed_tools=p.get("allowed_tools", []),
             )
         else:
             phase_def = PhaseDefinition(
@@ -77,6 +80,9 @@ def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
                 order=getattr(p, "order", i),
                 description=getattr(p, "description", None),
                 agent_type=getattr(p, "agent_type", ""),
+                prompt_template=getattr(p, "prompt_template", None),
+                timeout_seconds=getattr(p, "timeout_seconds", 300),
+                allowed_tools=list(getattr(p, "allowed_tools", [])),
             )
         phases.append(phase_def)
 

@@ -2,11 +2,11 @@
 
 ## Status
 
-Proposed
+**On Hold** - Sidecar proxy pattern deferred due to complexity. See ADR-024 for interim solution.
 
 ## Date
 
-2025-12-12
+2025-12-12 (Updated: 2025-12-15)
 
 ## Context
 
@@ -396,3 +396,51 @@ See: `PROJECT-PLAN_20251212_SECURE-TOKEN-ARCHITECTURE.md`
 - [HashiCorp Vault Dynamic Secrets](https://www.vaultproject.io/docs/secrets/databases)
 - [SPIFFE/SPIRE Workload Identity](https://spiffe.io/)
 - [AWS IAM Roles for Service Accounts](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html)
+
+---
+
+## 2025-12-15 Update: On Hold
+
+### Why We Paused
+
+The sidecar proxy pattern (Envoy-based token injection) provides excellent security but introduces significant complexity:
+
+1. **Additional Container**: Every workspace needs an Envoy sidecar (~50MB RAM each)
+2. **Envoy Configuration**: Complex YAML config for ext_authz, clusters, listeners
+3. **Token Injection Service**: HTTP service for Envoy to call for token lookup
+4. **Network Orchestration**: Docker network config, DNS resolution, port routing
+5. **Build Pipeline**: New Docker image to build/maintain (`aef-sidecar-proxy`)
+
+Estimated implementation time: **2-3 days** for a production-ready solution.
+
+### Interim Solution
+
+We are implementing a **Codex-style "Setup Phase Secrets"** pattern (see ADR-024):
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SETUP PHASE                     │ AGENT PHASE                   │
+│ (secrets available)             │ (secrets CLEARED)             │
+│                                 │                               │
+│  • Clone private repos          │  • Agent runs                 │
+│  • Configure git credentials    │  • Uses cached git creds      │
+│  • Authenticate gh CLI          │  • Can push via credential    │
+│  • Install private packages     │    helper (no raw token)      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+This approach:
+- ✅ Is used by OpenAI Codex at scale
+- ✅ Much simpler to implement (hours, not days)
+- ✅ Provides good security (secrets removed before agent runs)
+- ⚠️ Tokens exist briefly during setup phase
+
+### Path Forward
+
+When we need the **maximum security** of sidecar proxy (e.g., multi-tenant production with untrusted agents), we can revisit this ADR and implement:
+
+1. Envoy sidecar container
+2. ext_authz filter calling Token Vending Service
+3. Full token injection without any secrets in container
+
+For now, ADR-024 provides adequate security for single-tenant and controlled deployments.

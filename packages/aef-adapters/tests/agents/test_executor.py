@@ -8,8 +8,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from decimal import Decimal
-from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -246,8 +245,8 @@ class TestClaudeAgentExecutor:
                 # Create a mock workspace
                 @dataclass
                 class MockWorkspace:
-                    isolation_id: str = "mock-ws"
-                    workspace_path: Path = Path("/tmp/mock")
+                    workspace_id: str = "mock-ws"
+                    isolation_handle = MagicMock(workspace_path="/tmp/mock")
 
                 @dataclass
                 class MockConfig:

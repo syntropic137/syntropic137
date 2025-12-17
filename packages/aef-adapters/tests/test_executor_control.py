@@ -155,8 +155,7 @@ class TestExecutorControlSignals:
 
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=mock_workspace_factory,
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_factory,
             control_signal_checker=check_signal,
         )
 
@@ -215,8 +214,7 @@ class TestExecutorControlSignals:
 
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=mock_workspace_factory,
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_factory,
             control_signal_checker=check_signal,
         )
 
@@ -269,8 +267,7 @@ class TestExecutorControlSignals:
 
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=mock_workspace_factory,
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_factory,
             control_signal_checker=check_signal,
         )
 
@@ -323,8 +320,7 @@ class TestExecutorControlSignals:
         # No signal checker configured
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=mock_workspace_factory,
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_factory,
         )
 
         events = []
@@ -389,8 +385,7 @@ class TestExecutorControlSignals:
 
         executor = AgenticWorkflowExecutor(
             agent_factory=lambda _: mock_agent,
-            workspace_factory=mock_workspace_factory,
-            base_workspace_path=tmp_path,
+            workspace_service=mock_workspace_factory,
             control_signal_checker=check_signal,
         )
 

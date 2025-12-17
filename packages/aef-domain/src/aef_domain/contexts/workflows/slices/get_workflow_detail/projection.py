@@ -17,6 +17,10 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from aef_domain.contexts.workflows.domain.constants import (
+    PhaseDefaults,
+    PhaseFields,
+)
 from aef_domain.contexts.workflows.domain.read_models.workflow_detail import (
     PhaseDefinitionDetail,
     WorkflowDetail,
@@ -106,14 +110,19 @@ class WorkflowDetailProjection(CheckpointedProjection):
         workflow_id = event_data.get("workflow_id", "")
 
         # Convert phase data to PhaseDefinitionDetail format
+        # Note: older events may use "prompt_template_id" instead of "prompt_template"
         phases_data = event_data.get("phases", [])
         phases = [
             PhaseDefinitionDetail(
-                id=p.get("id", p.get("phase_id", f"phase-{i}")),
-                name=p.get("name", ""),
-                description=p.get("description"),
-                agent_type=p.get("agent_type", ""),
-                order=p.get("order", i),
+                id=p.get(PhaseFields.ID, p.get(PhaseFields.PHASE_ID, f"phase-{i}")),
+                name=p.get(PhaseFields.NAME, ""),
+                description=p.get(PhaseFields.DESCRIPTION),
+                agent_type=p.get(PhaseFields.AGENT_TYPE, PhaseDefaults.AGENT_TYPE),
+                order=p.get(PhaseFields.ORDER, i),
+                # Check both new and old field names for backwards compatibility
+                prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
+                timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
+                allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
             )
             for i, p in enumerate(phases_data)
         ]

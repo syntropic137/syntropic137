@@ -3,7 +3,7 @@
 See ADR-023: Workspace-First Execution Model for architectural decisions.
 
 Key requirements:
-- WorkspaceRouter is REQUIRED - agents run inside isolated workspaces
+- WorkspaceService is REQUIRED - agents run inside isolated workspaces
 - WorkflowExecutionRepository is REQUIRED - events persist via aggregate
 - All events flow through WorkflowExecutionAggregate for consistency
 """
@@ -19,6 +19,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
+from aef_domain.contexts.observability.domain.events.agent_observation import (
+    ObservationType,
+)
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -37,10 +40,12 @@ from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
 
 if TYPE_CHECKING:
     from aef_adapters.agents.instrumented import InstrumentedAgent
-    from aef_adapters.workspaces.router import WorkspaceRouter
-    from aef_adapters.workspaces.types import IsolatedWorkspaceConfig
+    from aef_adapters.workspace_backends.service import WorkspaceService
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
+    )
+    from aef_domain.contexts.artifacts.domain.ports.artifact_storage import (
+        ArtifactContentStoragePort,
     )
     from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
@@ -168,6 +173,7 @@ class ExecutionContext:
     execution_id: str
     started_at: datetime
     inputs: dict[str, Any]
+    repo_url: str | None = None  # Repository URL from workflow definition
     phase_results: list[PhaseResult] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
     completed_phase_ids: list[str] = field(default_factory=list)  # For querying artifacts
@@ -177,7 +183,7 @@ class WorkflowExecutionEngine:
     """Orchestrates workflow execution across phases.
 
     IMPORTANT (ADR-023): This engine requires:
-    - WorkspaceRouter: Agents run inside isolated workspaces
+    - WorkspaceService: Agents run inside isolated workspaces
     - WorkflowExecutionRepository: Events persist via aggregate pattern
 
     Responsibilities:
@@ -189,13 +195,13 @@ class WorkflowExecutionEngine:
     - Persist events via WorkflowExecutionAggregate
 
     Example:
-        from aef_adapters.workspaces import get_workspace_router
+        from aef_adapters.workspace_backends.service import WorkspaceService
         from aef_adapters.storage.repositories import get_workflow_execution_repository
 
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=get_workflow_execution_repository(),
-            workspace_router=get_workspace_router(),
+            workspace_service=WorkspaceService.create_docker(),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=create_agent,
@@ -211,53 +217,92 @@ class WorkflowExecutionEngine:
         self,
         workflow_repository: WorkflowRepository,
         execution_repository: WorkflowExecutionRepository,
-        workspace_router: WorkspaceRouter,
+        workspace_service: WorkspaceService,
         session_repository: SessionRepository,
         artifact_repository: ArtifactRepository,
         agent_factory: AgentFactory,
         artifact_query_service: ArtifactQueryServiceProtocol | None = None,
+        observability_writer: Any | None = None,
+        artifact_content_storage: ArtifactContentStoragePort | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
         Args:
             workflow_repository: Repository for Workflow aggregates
             execution_repository: Repository for WorkflowExecution aggregates (REQUIRED)
-            workspace_router: Router for creating isolated workspaces (REQUIRED)
+            workspace_service: Service for creating isolated workspaces (REQUIRED)
             session_repository: Repository for AgentSession aggregates
             artifact_repository: Repository for Artifact aggregates
             agent_factory: Factory for creating instrumented agents
             artifact_query_service: Service for querying artifacts (REQUIRED for
                 multi-phase workflows). If None, phase outputs cannot be injected
                 into subsequent phase prompts.
+            observability_writer: ObservabilityWriter for TimescaleDB (ADR-026)
+            artifact_content_storage: Storage for artifact content in object storage
+                (MinIO/S3). If None, content stored only in event store. (ADR-012)
 
         Raises:
-            ValueError: If execution_repository or workspace_router is None
+            ValueError: If execution_repository or workspace_service is None
         """
         if execution_repository is None:
             raise ValueError(
                 "execution_repository is required per ADR-023. "
                 "Use get_workflow_execution_repository() from aef_adapters.storage.repositories."
             )
-        if workspace_router is None:
+        if workspace_service is None:
             raise ValueError(
-                "workspace_router is required per ADR-023. "
-                "Use get_workspace_router() from aef_adapters.workspaces."
+                "workspace_service is required per ADR-023. "
+                "Use WorkspaceService.create_docker() from aef_adapters.workspace_backends.service."
             )
 
         self._workflows = workflow_repository
         self._executions = execution_repository
-        self._router = workspace_router
+        self._workspace_service = workspace_service
         self._sessions = session_repository
         self._artifacts = artifact_repository
         self._agent_factory = agent_factory
         self._artifact_query = artifact_query_service
+        self._observability_writer = observability_writer
+        self._artifact_content_storage = artifact_content_storage
+
+    async def _record_observation(
+        self,
+        observation_type: ObservationType,
+        session_id: str,
+        data: dict[str, Any],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        """Record an agent observation to TimescaleDB.
+
+        Args:
+            observation_type: Type of observation (TOKEN_USAGE, TOOL_STARTED, TOOL_COMPLETED)
+            session_id: The session ID
+            data: Observation data (JSONB)
+            execution_id: Optional execution ID
+            phase_id: Optional phase ID
+            workspace_id: Optional workspace ID
+        """
+        if self._observability_writer is None:
+            return
+
+        await self._observability_writer.record_observation(
+            session_id=session_id,
+            observation_type=observation_type.value,
+            data=data,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            workspace_id=workspace_id,
+        )
 
     async def execute(
         self,
         workflow_id: str,
         inputs: dict[str, Any],
         execution_id: str | None = None,
-        _workspace_config: IsolatedWorkspaceConfig | None = None,
+        use_container: bool = False,
+        tenant_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow from start to finish.
 
@@ -268,7 +313,11 @@ class WorkflowExecutionEngine:
             workflow_id: ID of the workflow to execute.
             inputs: Initial input variables for the workflow.
             execution_id: Optional custom execution ID.
-            workspace_config: Optional workspace configuration override.
+            use_container: If True, run agent inside isolated container with
+                sidecar proxy for token injection. If False (default), run
+                agent SDK directly in host process.
+            tenant_id: Tenant ID for multi-tenant token vending. Required when
+                use_container=True for proper token attribution.
 
         Returns:
             WorkflowExecutionResult with status and artifacts.
@@ -283,11 +332,14 @@ class WorkflowExecutionEngine:
             raise WorkflowNotFoundError(workflow_id)
 
         # 2. Initialize execution context
+        # Get repo URL from aggregate's private attribute (set from workflow definition)
+        repo_url = getattr(workflow, "_repository_url", None)
         ctx = ExecutionContext(
             workflow_id=workflow_id,
             execution_id=execution_id or str(uuid4()),
             started_at=datetime.now(UTC),
             inputs=inputs,
+            repo_url=repo_url,
         )
 
         # 3. Create execution aggregate and emit started event
@@ -309,18 +361,39 @@ class WorkflowExecutionEngine:
         )
 
         # 4. Execute phases
-        # TODO: Each phase should create its own isolated workspace:
+        # Agent execution modes:
+        # - HOST_PROCESS: Agent SDK runs directly (current default, for development)
+        # - CONTAINER: Agent runs inside isolated workspace with sidecar
+        #
+        # When use_container_execution=True:
         #   1. Create workspace via self._router.create()
-        #   2. Inject artifacts from previous phases
-        #   3. Execute agent inside workspace (subprocess or SDK)
-        #   4. Collect artifacts for next phase
-        #   5. Destroy workspace (stateless)
-        # For now, router is DI-enforced but agent runs in host process.
-        # See ADR-023 and docs/PLAN-FULL-WORKSPACE-ISOLATION.md
+        #   2. Start sidecar proxy (for token injection)
+        #   3. Inject artifacts from previous phases
+        #   4. Write task.json with phase config
+        #   5. Execute aef-agent-runner via execute_streaming()
+        #   6. Parse JSONL events and update aggregate
+        #   7. Collect artifacts for next phase
+        #   8. Destroy workspace (stateless)
+        #
+        # See ADR-023: Workspace-First Execution Model
         try:
             phases = self._get_executable_phases(workflow)
             for phase in sorted(phases, key=lambda p: p.order):
-                await self._execute_phase(workflow, phase, ctx, aggregate)
+                if use_container:
+                    # Container mode: agent runs inside isolated workspace with sidecar
+                    result = await self._execute_phase_in_container(
+                        phase=phase,
+                        ctx=ctx,
+                        aggregate=aggregate,
+                        tenant_id=tenant_id,
+                    )
+                    ctx.phase_results.append(result)
+                    if result.artifact_id:
+                        ctx.artifact_ids.append(result.artifact_id)
+                    ctx.completed_phase_ids.append(phase.phase_id)
+                else:
+                    # Host mode: agent SDK runs directly in host process
+                    await self._execute_phase(workflow, phase, ctx, aggregate)
                 # Save after each phase for partial progress persistence
                 await self._executions.save(aggregate)
 
@@ -408,7 +481,7 @@ class WorkflowExecutionEngine:
                     name=phase.name,
                     order=phase.order,
                     description=phase.description,
-                    prompt_template=phase.prompt_template_id or "",
+                    prompt_template=phase.prompt_template or "",
                     output_artifact_type=phase.output_artifact_types[0]
                     if phase.output_artifact_types
                     else "text",
@@ -585,6 +658,7 @@ class WorkflowExecutionEngine:
         """Build the prompt for a phase.
 
         Substitutes template variables with:
+        - Built-in variables (execution_id, repo_url, workflow_id, phase_id)
         - Initial workflow inputs
         - Previous phase outputs (queried from DB via ArtifactQueryService)
 
@@ -592,6 +666,13 @@ class WorkflowExecutionEngine:
         an in-memory dict. This ensures crash recovery and audit trail.
         """
         prompt = phase.prompt_template
+
+        # Substitute built-in variables
+        prompt = prompt.replace("{{execution_id}}", ctx.execution_id)
+        prompt = prompt.replace("{{workflow_id}}", ctx.workflow_id)
+        prompt = prompt.replace("{{phase_id}}", phase.phase_id)
+        if ctx.repo_url:
+            prompt = prompt.replace("{{repo_url}}", ctx.repo_url)
 
         # Substitute initial inputs
         for key, value in ctx.inputs.items():
@@ -630,6 +711,10 @@ class WorkflowExecutionEngine:
     ) -> None:
         """Create and save an artifact.
 
+        Two-tier storage (ADR-012):
+        1. Content → Object storage (MinIO/S3) if configured
+        2. Metadata + storage_uri → Event store
+
         Args:
             artifact_id: Unique artifact identifier
             workflow_id: Parent workflow ID
@@ -650,6 +735,40 @@ class WorkflowExecutionEngine:
         # Map string type to ArtifactType enum
         artifact_type_enum = self._map_artifact_type(artifact_type)
 
+        # Upload content to object storage if configured (ADR-012)
+        storage_uri: str | None = None
+        if self._artifact_content_storage is not None:
+            try:
+                result = await self._artifact_content_storage.upload(
+                    artifact_id=artifact_id,
+                    content=content.encode("utf-8"),
+                    workflow_id=workflow_id,
+                    phase_id=phase_id,
+                    execution_id=execution_id,
+                    content_type="text/markdown",
+                    metadata={
+                        "session_id": session_id,
+                        "artifact_type": artifact_type,
+                        "title": title,
+                    },
+                )
+                storage_uri = result.storage_uri
+                logger.info(
+                    "Artifact content uploaded to object storage",
+                    extra={
+                        "artifact_id": artifact_id,
+                        "storage_uri": storage_uri,
+                        "size_bytes": result.size_bytes,
+                    },
+                )
+            except Exception as e:
+                # Log error but continue - content will still be in event store
+                logger.warning(
+                    "Failed to upload artifact to object storage, "
+                    "content will be stored in event store only",
+                    extra={"artifact_id": artifact_id, "error": str(e)},
+                )
+
         aggregate = ArtifactAggregate()
         command = CreateArtifactCommand(
             aggregate_id=artifact_id,
@@ -660,6 +779,7 @@ class WorkflowExecutionEngine:
             artifact_type=artifact_type_enum,
             content=content,
             title=title,
+            storage_uri=storage_uri,  # NEW: Reference to object storage
         )
         aggregate._handle_command(command)
         await self._artifacts.save(aggregate)
@@ -683,3 +803,430 @@ class WorkflowExecutionEngine:
             "script": ArtifactType.SCRIPT,
         }
         return type_mapping.get(type_str.lower(), ArtifactType.OTHER)
+
+    async def _execute_phase_in_container(
+        self,
+        phase: ExecutablePhase,
+        ctx: ExecutionContext,
+        aggregate: WorkflowExecutionAggregate,
+        tenant_id: str | None = None,
+    ) -> PhaseResult:
+        """Execute a phase inside an isolated container with sidecar proxy.
+
+        This implements the full agent-in-container pattern per ADR-023:
+
+        1. Create isolated workspace with sidecar via WorkspaceService
+        2. Inject input artifacts from previous phases
+        3. Write task.json with phase configuration
+        4. Execute aef-agent-runner via streaming
+        5. Parse JSONL events and emit to aggregate
+        6. Collect output artifacts
+        7. Destroy workspace (stateless)
+
+        Contract:
+            This method RETURNS the PhaseResult - it does NOT append to ctx.
+            The caller is responsible for:
+            - ctx.phase_results.append(result)
+            - ctx.completed_phase_ids.append(phase.phase_id)
+            - ctx.artifact_ids.append(result.artifact_id) if applicable
+
+            This follows the pattern: helper methods RETURN results, callers append.
+
+        Args:
+            phase: The phase to execute
+            ctx: Execution context
+            aggregate: Workflow execution aggregate for events
+            tenant_id: Optional tenant ID for multi-tenancy
+
+        Returns:
+            PhaseResult with execution metrics
+
+        Raises:
+            WorkflowExecutionError: If phase execution fails
+        """
+        import json
+
+        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+            CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+            StartSessionCommand,
+        )
+
+        phase_started_at = datetime.now(UTC)
+        session_id = str(uuid4())
+
+        # Emit phase started
+        start_cmd = StartPhaseCommand(
+            execution_id=ctx.execution_id,
+            workflow_id=ctx.workflow_id,
+            phase_id=phase.phase_id,
+            phase_name=phase.name,
+            phase_order=phase.order,
+            session_id=session_id,
+        )
+        aggregate._handle_command(start_cmd)
+        logger.info(
+            "Phase started (container mode): %s (workflow: %s)",
+            phase.phase_id,
+            ctx.workflow_id,
+        )
+
+        # Create session aggregate for detailed observability
+        # This tracks the session at a more granular level than the workflow aggregate
+        session: AgentSessionAggregate | None = None
+        if self._sessions is not None:
+            session = AgentSessionAggregate()
+            start_session_cmd = StartSessionCommand(
+                aggregate_id=session_id,
+                workflow_id=ctx.workflow_id,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                agent_provider=phase.agent_config.provider,
+                agent_model=phase.agent_config.model,
+            )
+            session._handle_command(start_session_cmd)
+            await self._sessions.save(session)
+            logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
+
+        try:
+            # Create isolated workspace using WorkspaceService
+            # Setup phase secrets pattern (ADR-024): secrets available during
+            # setup phase, cleared before agent runs
+            async with self._workspace_service.create_workspace(
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                with_sidecar=False,  # Sidecar not needed with setup phase pattern
+                inject_tokens=False,  # Handled by setup phase
+            ) as workspace:
+                # Run setup phase with secrets (ADR-024)
+                # Uses GitHub App to generate installation token if configured
+                from aef_adapters.workspace_backends.service import SetupPhaseSecrets
+
+                secrets = await SetupPhaseSecrets.create()
+
+                setup_result = await workspace.run_setup_phase(secrets)
+                if setup_result.exit_code != 0:
+                    raise WorkflowExecutionError(
+                        message=f"Setup phase failed: {setup_result.stderr}",
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                    )
+                logger.info("Setup phase completed, secrets cleared")
+
+                # Inject input artifacts from previous phases
+                if self._artifact_query and ctx.completed_phase_ids:
+                    phase_outputs = await self._artifact_query.get_for_phase_injection(
+                        execution_id=ctx.execution_id,
+                        completed_phase_ids=ctx.completed_phase_ids,
+                    )
+                    # Write artifacts to /workspace/inputs/
+                    files_to_inject = [
+                        (f"inputs/{prev_phase_id}.md", content.encode())
+                        for prev_phase_id, content in phase_outputs.items()
+                    ]
+                    if files_to_inject:
+                        await workspace.inject_files(files_to_inject)
+
+                # Build task.json
+                prompt = await self._build_prompt(phase, ctx)
+                task_data = {
+                    "phase": phase.phase_id,
+                    "prompt": prompt,
+                    "execution_id": ctx.execution_id,
+                    "tenant_id": tenant_id or "default",
+                    "inputs": ctx.inputs,
+                    "artifacts": [f"{pid}.md" for pid in ctx.completed_phase_ids],
+                    "config": {
+                        "model": phase.agent_config.model,
+                        "max_tokens": phase.agent_config.max_tokens,
+                        "timeout_seconds": phase.timeout_seconds,
+                    },
+                }
+
+                # Write task.json to .context directory (expected by aef-agent-runner)
+                await workspace.inject_files(
+                    [
+                        (".context/task.json", json.dumps(task_data).encode()),
+                    ]
+                )
+
+                # Execute agent runner and stream events
+                # ANTHROPIC_API_KEY is passed to agent (needed for Claude calls)
+                # GitHub auth uses cached credentials from setup phase (ADR-024)
+                # No raw GitHub token in agent environment
+                agent_env = {}
+                if secrets.anthropic_api_key:
+                    agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+
+                total_input_tokens = 0
+                total_output_tokens = 0
+
+                # Variables for observation events
+                execution_id = ctx.execution_id
+                workspace_id = getattr(workspace, "id", None)  # Get workspace ID if available
+                agent_model = phase.agent_config.model
+
+                line_count = 0
+                async for line in workspace.stream(
+                    ["python", "-m", "aef_agent_runner"],
+                    timeout_seconds=phase.timeout_seconds or 300,
+                    environment=agent_env,
+                ):
+                    line_count += 1
+                    logger.debug("Received line %d from agent runner: %s", line_count, line[:100])
+
+                    # Parse JSONL event
+                    try:
+                        event = json.loads(line)
+                        event_type = event.get("type", "")
+                        logger.debug("Parsed event type: %s", event_type)
+
+                        # Handle token_usage observations
+                        if event_type == "token_usage":
+                            input_tokens = event.get("input_tokens", 0)
+                            output_tokens = event.get("output_tokens", 0)
+                            cache_creation = event.get("cache_creation_input_tokens", 0)
+                            cache_read = event.get("cache_read_input_tokens", 0)
+                            total_input_tokens += input_tokens
+                            total_output_tokens += output_tokens
+
+                            # Record token usage observation to TimescaleDB
+                            if self._observability_writer is not None:
+                                await self._record_observation(
+                                    observation_type=ObservationType.TOKEN_USAGE,
+                                    session_id=session_id,
+                                    data={
+                                        "input_tokens": input_tokens,
+                                        "output_tokens": output_tokens,
+                                        "cache_creation_tokens": cache_creation,
+                                        "cache_read_tokens": cache_read,
+                                        "model": agent_model,
+                                    },
+                                    execution_id=execution_id,
+                                    phase_id=phase.phase_id,
+                                    workspace_id=workspace_id,
+                                )
+                                logger.debug(
+                                    "Recorded token observation: %d input, %d output",
+                                    input_tokens,
+                                    output_tokens,
+                                )
+
+                        # Log progress events
+                        if event_type == "progress":
+                            logger.debug(
+                                "Phase %s progress: turn %d",
+                                phase.phase_id,
+                                event.get("turn", 0),
+                            )
+
+                        # Handle tool_use observations (tool started)
+                        if event_type == "tool_use":
+                            tool_name = event.get("tool", "unknown")
+                            tool_use_id = event.get("tool_use_id")
+                            tool_input = event.get("input", {})
+                            logger.debug(
+                                "Tool use: %s (id=%s)",
+                                tool_name,
+                                tool_use_id,
+                            )
+
+                            # Record tool started observation to TimescaleDB
+                            if self._observability_writer is not None:
+                                import json
+
+                                input_preview = json.dumps(tool_input)[:200] if tool_input else None
+                                await self._record_observation(
+                                    observation_type=ObservationType.TOOL_STARTED,
+                                    session_id=session_id,
+                                    data={
+                                        "tool_name": tool_name,
+                                        "tool_use_id": tool_use_id,
+                                        "input": tool_input,
+                                        "input_preview": input_preview,
+                                    },
+                                    execution_id=execution_id,
+                                    phase_id=phase.phase_id,
+                                    workspace_id=workspace_id,
+                                )
+
+                        # Handle tool_result observations (tool completed)
+                        if event_type == "tool_result":
+                            tool_name = event.get("tool", "unknown")
+                            tool_use_id = event.get("tool_use_id")
+                            success = event.get("success", True)
+                            duration_ms = event.get("duration_ms")
+                            output = event.get("output")
+                            logger.debug(
+                                "Tool result: %s (id=%s, success=%s)",
+                                tool_name,
+                                tool_use_id,
+                                success,
+                            )
+
+                            # Record tool completed observation to TimescaleDB
+                            if self._observability_writer is not None:
+                                output_preview = str(output)[:200] if output else None
+                                await self._record_observation(
+                                    observation_type=ObservationType.TOOL_COMPLETED,
+                                    session_id=session_id,
+                                    data={
+                                        "tool_name": tool_name,
+                                        "tool_use_id": tool_use_id,
+                                        "success": success,
+                                        "output": output,
+                                        "output_preview": output_preview,
+                                        "duration_ms": duration_ms,
+                                    },
+                                    execution_id=execution_id,
+                                    phase_id=phase.phase_id,
+                                    workspace_id=workspace_id,
+                                )
+
+                    except json.JSONDecodeError:
+                        logger.warning("Invalid JSONL line: %s", line[:100])
+
+                logger.info(
+                    "Agent runner streaming complete: %d lines, %d input tokens, %d output tokens",
+                    line_count,
+                    total_input_tokens,
+                    total_output_tokens,
+                )
+
+                # Collect output artifacts
+                artifacts = await workspace.collect_files(
+                    patterns=["artifacts/**/*"],
+                )
+
+                # Create artifact records for each output
+                artifact_ids: list[str] = []
+                for artifact_path, artifact_content in artifacts:
+                    artifact_id = str(uuid4())
+                    await self._create_artifact(
+                        artifact_id=artifact_id,
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                        execution_id=ctx.execution_id,
+                        session_id=session_id,
+                        artifact_type=phase.output_artifact_type,
+                        content=artifact_content.decode("utf-8", errors="replace"),
+                        title=f"{phase.name}: {artifact_path}",
+                    )
+                    artifact_ids.append(artifact_id)
+                    ctx.artifact_ids.append(artifact_id)
+
+            # Workspace destroyed here (context manager exit)
+
+            # Record success
+            phase_completed_at = datetime.now(UTC)
+            duration = (phase_completed_at - phase_started_at).total_seconds()
+
+            result = PhaseResult(
+                phase_id=phase.phase_id,
+                status=PhaseStatus.COMPLETED,
+                started_at=phase_started_at,
+                completed_at=phase_completed_at,
+                artifact_id=artifact_ids[0] if artifact_ids else None,
+                session_id=session_id,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                total_tokens=total_input_tokens + total_output_tokens,
+                cost_usd=self._estimate_cost(total_input_tokens, total_output_tokens),
+            )
+            # NOTE: Do NOT append here - caller is responsible for appending
+            # to ctx.phase_results, ctx.completed_phase_ids, and ctx.artifact_ids.
+            # This follows the contract: helper methods RETURN results, callers append.
+
+            # Emit phase completed
+            complete_cmd = CompletePhaseCommand(
+                execution_id=ctx.execution_id,
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                session_id=session_id,
+                artifact_id=artifact_ids[0] if artifact_ids else None,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                total_tokens=total_input_tokens + total_output_tokens,
+                cost_usd=result.cost_usd,
+                duration_seconds=duration,
+            )
+            aggregate._handle_command(complete_cmd)
+
+            # Complete session aggregate (success)
+            if session is not None and self._sessions is not None:
+                complete_session_cmd = CompleteSessionCommand(
+                    aggregate_id=session_id,
+                    success=True,
+                )
+                session._handle_command(complete_session_cmd)
+                await self._sessions.save(session)
+                logger.debug("Session completed: %s (success)", session_id)
+
+            logger.info(
+                "Phase completed (container mode): %s (tokens: %d)",
+                phase.phase_id,
+                total_input_tokens + total_output_tokens,
+            )
+
+            return result
+
+        except Exception as e:
+            # Record failure
+            phase_completed_at = datetime.now(UTC)
+            result = PhaseResult(
+                phase_id=phase.phase_id,
+                status=PhaseStatus.FAILED,
+                started_at=phase_started_at,
+                completed_at=phase_completed_at,
+                session_id=session_id,
+                error_message=str(e),
+            )
+            ctx.phase_results.append(result)
+
+            # Complete session aggregate (failure)
+            if session is not None and self._sessions is not None:
+                try:
+                    complete_session_cmd = CompleteSessionCommand(
+                        aggregate_id=session_id,
+                        success=False,
+                        error_message=str(e),
+                    )
+                    session._handle_command(complete_session_cmd)
+                    await self._sessions.save(session)
+                    logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
+                except Exception as session_err:
+                    # Don't let session persistence failure hide the original error
+                    logger.warning(
+                        "Failed to complete session %s: %s",
+                        session_id,
+                        session_err,
+                    )
+
+            logger.error(
+                "Phase failed (container mode): %s (error: %s)",
+                phase.phase_id,
+                str(e),
+            )
+
+            raise WorkflowExecutionError(
+                message=f"Phase {phase.phase_id} failed in container: {e}",
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+                cause=e,
+            ) from e
+
+    def _estimate_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
+        """Estimate cost based on token usage.
+
+        Uses Claude Sonnet pricing as default.
+        """
+        # Claude Sonnet 4 pricing (per million tokens)
+        input_price = Decimal("3.00") / Decimal("1000000")
+        output_price = Decimal("15.00") / Decimal("1000000")
+
+        return Decimal(input_tokens) * input_price + Decimal(output_tokens) * output_price

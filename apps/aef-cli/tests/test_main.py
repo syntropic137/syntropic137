@@ -50,7 +50,7 @@ def create_test_workflow(workflow_id: str = "test-workflow") -> str:
                 name="Test Phase",
                 order=1,
                 # Prompt template is required for execution
-                prompt_template_id="Test prompt for {{topic}}",
+                prompt_template="Test prompt for {{topic}}",
             )
         ],
     )

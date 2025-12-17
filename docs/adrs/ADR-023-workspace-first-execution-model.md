@@ -308,6 +308,52 @@ See: `PROJECT-PLAN_20251213_WORKSPACE-FIRST-EXECUTION.md`
 | ADR-021 | Isolated workspace architecture - **enforcement specified here** |
 | ADR-022 | Secure token architecture - **credential injection integrated** |
 
+## Implementation Notes (2025-12-15)
+
+### Default Configuration
+
+```python
+# packages/aef-shared/src/aef_shared/settings/workspace.py
+docker_image = "aef-workspace-claude:latest"
+```
+
+### Automated Build
+
+The `just dev-force` command automatically builds the workspace image if missing:
+
+```bash
+just dev-force  # Checks for image, builds if needed, starts stack
+just workspace-build  # Build image manually
+```
+
+### Contract Enforcement
+
+`AgentContainerContract` ensures containers meet requirements before agent execution:
+
+```python
+# Called automatically by WorkspaceRouter.create()
+result = await AgentContainerContract.validate(workspace, executor)
+if not result.passed:
+    raise RuntimeError(result.error_message)
+```
+
+### Compliance Tests
+
+ADR compliance is verified by integration tests:
+
+- **Location**: `packages/aef-adapters/tests/integration/test_adr_compliance.py`
+- **Run**: `pytest tests/integration/test_adr_compliance.py -v`
+
+### Key Files
+
+| Component | Location |
+|-----------|----------|
+| Workspace Image | `docker/workspace/Dockerfile` |
+| Contract Validation | `aef_adapters.workspaces.contract` |
+| Workspace Router | `aef_adapters.workspaces.router` |
+| Settings | `aef_shared.settings.workspace` |
+| Compliance Tests | `tests/integration/test_adr_compliance.py` |
+
 ## References
 
 - [5 Whys Root Cause Analysis](https://en.wikipedia.org/wiki/Five_whys)

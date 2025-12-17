@@ -16,18 +16,14 @@ This module provides adapters for AI agent providers (Claude, OpenAI).
 ## Agentic Execution (Recommended)
 
     from aef_adapters.agents import ClaudeAgenticAgent, AgentExecutionConfig
-    from aef_adapters.workspaces import LocalWorkspace, WorkspaceConfig
+    from aef_adapters.workspace_backends.service import WorkspaceService
 
     agent = ClaudeAgenticAgent()
+    service = WorkspaceService.create_docker()
 
-    async with LocalWorkspace.create(config) as workspace:
-        async for event in agent.execute(
-            task="Create a hello.py file",
-            workspace=workspace,
-            config=AgentExecutionConfig(max_turns=10),
-        ):
-            if isinstance(event, TaskCompleted):
-                print(f"Done: {event.result}")
+    async with service.create_workspace(execution_id="exec-123") as workspace:
+        # Workspace provides execute(), stream(), inject_files(), etc.
+        result = await workspace.execute(["python", "script.py"])
 
 For Testing (Chat Completion - Legacy):
     from aef_adapters.agents import MockAgent, MockAgentConfig

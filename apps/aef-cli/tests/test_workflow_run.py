@@ -53,7 +53,7 @@ def sample_workflow_id() -> str:
             input_artifact_types=["topic"],
             output_artifact_types=["research_summary"],
             # Prompt template is required for execution
-            prompt_template_id="Research the given topic and provide a summary.",
+            prompt_template="Research the given topic and provide a summary.",
         ),
         PhaseDefinition(
             phase_id="planning",
@@ -62,7 +62,7 @@ def sample_workflow_id() -> str:
             description="Create a plan based on research",
             input_artifact_types=["research_summary"],
             output_artifact_types=["plan"],
-            prompt_template_id="Create a detailed plan based on the research: {{research}}",
+            prompt_template="Create a detailed plan based on the research: {{research}}",
         ),
     ]
 

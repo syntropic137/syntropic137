@@ -1,12 +1,12 @@
-"""Tests for ExecutionCostProjection."""
+"""Tests for ExecutionCostProjection with unified AgentObservation model."""
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from aef_domain.contexts.costs.slices.execution_cost.projection import ExecutionCostProjection
+from aef_domain.contexts.observability.domain.events.agent_observation import ObservationType
 
 
 class MockProjectionStore:
@@ -42,84 +42,80 @@ def projection(store: MockProjectionStore) -> ExecutionCostProjection:
     return ExecutionCostProjection(store)
 
 
-class TestExecutionCostProjection:
-    """Tests for ExecutionCostProjection."""
+class TestAgentObservationHandling:
+    """Tests for unified AgentObservation event handling."""
 
     @pytest.mark.asyncio
-    async def test_on_cost_recorded_creates_execution(
+    async def test_token_usage_observation_creates_execution(
         self, projection: ExecutionCostProjection
     ) -> None:
-        """Test that CostRecorded creates a new execution cost."""
+        """Test that TOKEN_USAGE observation creates a new execution cost."""
         event_data = {
             "session_id": "session-1",
             "execution_id": "exec-1",
-            "cost_type": "llm_tokens",
-            "amount_usd": "0.01",
-            "model": "claude-sonnet-4-20250514",
-            "input_tokens": 1000,
-            "output_tokens": 500,
+            "observation_type": ObservationType.TOKEN_USAGE.value,
+            "data": {
+                "input_tokens": 5000,
+                "output_tokens": 2000,
+                "cache_creation_tokens": 0,
+                "cache_read_tokens": 0,
+            },
             "timestamp": datetime.now().isoformat(),
         }
 
-        await projection.on_cost_recorded(event_data)
+        await projection.on_agent_observation(event_data)
 
         execution_cost = await projection.get_execution_cost("exec-1")
         assert execution_cost is not None
         assert execution_cost.execution_id == "exec-1"
-        assert execution_cost.total_cost_usd == Decimal("0.01")
-        assert execution_cost.session_count == 1
+        assert execution_cost.input_tokens == 5000
+        assert execution_cost.output_tokens == 2000
         assert "session-1" in execution_cost.session_ids
+        assert execution_cost.session_count == 1
 
     @pytest.mark.asyncio
-    async def test_on_cost_recorded_aggregates_sessions(
+    async def test_token_usage_aggregates_sessions(
         self, projection: ExecutionCostProjection
     ) -> None:
-        """Test that costs from multiple sessions are aggregated."""
-        # Session 1
-        await projection.on_cost_recorded(
+        """Test that multiple sessions aggregate to execution."""
+        # First session
+        await projection.on_agent_observation(
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "phase_id": "research",
-                "cost_type": "llm_tokens",
-                "amount_usd": "0.50",
-                "input_tokens": 5000,
-                "output_tokens": 2500,
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {"input_tokens": 1000, "output_tokens": 500},
             }
         )
 
-        # Session 2
-        await projection.on_cost_recorded(
+        # Second session
+        await projection.on_agent_observation(
             {
                 "session_id": "session-2",
                 "execution_id": "exec-1",
-                "phase_id": "execute",
-                "cost_type": "llm_tokens",
-                "amount_usd": "1.00",
-                "input_tokens": 10000,
-                "output_tokens": 5000,
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {"input_tokens": 2000, "output_tokens": 1000},
             }
         )
 
         execution_cost = await projection.get_execution_cost("exec-1")
         assert execution_cost is not None
-        assert execution_cost.total_cost_usd == Decimal("1.50")
         assert execution_cost.session_count == 2
-        assert execution_cost.input_tokens == 15000
-        assert execution_cost.output_tokens == 7500
-        assert "research" in execution_cost.cost_by_phase
-        assert "execute" in execution_cost.cost_by_phase
+        assert "session-1" in execution_cost.session_ids
+        assert "session-2" in execution_cost.session_ids
+        assert execution_cost.input_tokens == 3000
+        assert execution_cost.output_tokens == 1500
 
     @pytest.mark.asyncio
-    async def test_on_cost_recorded_without_execution_skipped(
+    async def test_observation_without_execution_skipped(
         self, projection: ExecutionCostProjection
     ) -> None:
-        """Test that costs without execution_id are skipped."""
-        await projection.on_cost_recorded(
+        """Test that observations without execution_id are skipped."""
+        await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "cost_type": "llm_tokens",
-                "amount_usd": "0.01",
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {"input_tokens": 1000, "output_tokens": 500},
             }
         )
 
@@ -127,21 +123,82 @@ class TestExecutionCostProjection:
         assert len(all_executions) == 0
 
     @pytest.mark.asyncio
-    async def test_on_session_cost_finalized_tracks_completion(
+    async def test_tool_completed_increments_count(
         self, projection: ExecutionCostProjection
     ) -> None:
-        """Test that SessionCostFinalized updates execution tracking."""
-        # Add some costs
-        await projection.on_cost_recorded(
+        """Test that TOOL_COMPLETED observation increments tool calls."""
+        await projection.on_agent_observation(
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "cost_type": "llm_tokens",
-                "amount_usd": "1.00",
+                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "data": {
+                    "tool_name": "Read",
+                    "tool_use_id": "tool-1",
+                    "success": True,
+                    "duration_ms": 100,
+                },
             }
         )
 
-        # Finalize session
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "data": {
+                    "tool_name": "Write",
+                    "tool_use_id": "tool-2",
+                    "success": True,
+                    "duration_ms": 200,
+                },
+            }
+        )
+
+        execution_cost = await projection.get_execution_cost("exec-1")
+        assert execution_cost is not None
+        assert execution_cost.tool_calls == 2
+        assert execution_cost.duration_ms == 300
+
+    @pytest.mark.asyncio
+    async def test_session_counted_once(self, projection: ExecutionCostProjection) -> None:
+        """Test that same session is only counted once."""
+        # Multiple observations from same session
+        for _ in range(5):
+            await projection.on_agent_observation(
+                {
+                    "session_id": "session-1",
+                    "execution_id": "exec-1",
+                    "observation_type": ObservationType.TOKEN_USAGE.value,
+                    "data": {"input_tokens": 100, "output_tokens": 50},
+                }
+            )
+
+        execution_cost = await projection.get_execution_cost("exec-1")
+        assert execution_cost is not None
+        assert execution_cost.session_count == 1
+        assert len(execution_cost.session_ids) == 1
+
+
+class TestSessionCostFinalized:
+    """Tests for SessionCostFinalized event handling."""
+
+    @pytest.mark.asyncio
+    async def test_session_cost_finalized_tracks_completion(
+        self, projection: ExecutionCostProjection
+    ) -> None:
+        """Test that SessionCostFinalized updates completion time."""
+        # First some observations
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "data": {"input_tokens": 1000, "output_tokens": 500},
+            }
+        )
+
+        # Then finalize
         completed_at = datetime.now()
         await projection.on_session_cost_finalized(
             {
@@ -154,58 +211,3 @@ class TestExecutionCostProjection:
         execution_cost = await projection.get_execution_cost("exec-1")
         assert execution_cost is not None
         assert execution_cost.completed_at is not None
-
-    @pytest.mark.asyncio
-    async def test_session_counted_once(self, projection: ExecutionCostProjection) -> None:
-        """Test that same session is only counted once."""
-        # Multiple events from same session
-        for _ in range(5):
-            await projection.on_cost_recorded(
-                {
-                    "session_id": "session-1",
-                    "execution_id": "exec-1",
-                    "cost_type": "llm_tokens",
-                    "amount_usd": "0.01",
-                }
-            )
-
-        execution_cost = await projection.get_execution_cost("exec-1")
-        assert execution_cost is not None
-        assert execution_cost.session_count == 1
-        assert len(execution_cost.session_ids) == 1
-        assert execution_cost.total_cost_usd == Decimal("0.05")
-
-    @pytest.mark.asyncio
-    async def test_tool_execution_costs_aggregated(
-        self, projection: ExecutionCostProjection
-    ) -> None:
-        """Test that tool execution costs are aggregated."""
-        await projection.on_cost_recorded(
-            {
-                "session_id": "session-1",
-                "execution_id": "exec-1",
-                "cost_type": "tool_execution",
-                "amount_usd": "0.001",
-                "tool_name": "read_file",
-                "tool_duration_ms": 100,
-            }
-        )
-
-        await projection.on_cost_recorded(
-            {
-                "session_id": "session-1",
-                "execution_id": "exec-1",
-                "cost_type": "tool_execution",
-                "amount_usd": "0.002",
-                "tool_name": "write_file",
-                "tool_duration_ms": 200,
-            }
-        )
-
-        execution_cost = await projection.get_execution_cost("exec-1")
-        assert execution_cost is not None
-        assert execution_cost.compute_cost_usd == Decimal("0.003")
-        assert execution_cost.tool_calls == 2
-        assert execution_cost.duration_ms == 300
-        assert "read_file" in execution_cost.cost_by_tool
-        assert "write_file" in execution_cost.cost_by_tool
