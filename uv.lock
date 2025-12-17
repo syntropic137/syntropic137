@@ -314,6 +314,7 @@ dependencies = [
     { name = "claude-agent-sdk" },
     { name = "event-sourcing-python" },
     { name = "grpcio" },
+    { name = "minio" },
 ]
 
 [package.optional-dependencies]
@@ -349,6 +350,7 @@ requires-dist = [
     { name = "claude-agent-sdk", marker = "extra == 'all'", specifier = ">=0.1.9" },
     { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
     { name = "grpcio", specifier = ">=1.60" },
+    { name = "minio", specifier = ">=7.2.20" },
 ]
 provides-extras = ["agentic", "all"]
 

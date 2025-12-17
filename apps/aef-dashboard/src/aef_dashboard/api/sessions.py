@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -81,41 +81,85 @@ async def get_session(session_id: str) -> SessionResponse:
     # Get cost data from TimescaleDB via SessionCostProjection
     session_cost = await manager.session_cost.get_session_cost(session_id)
 
-    # Convert operations from projection to API model (includes v2 fields)
-    operations = []
-    for op in session.operations:
-        # Handle timestamp - can be string or datetime
-        ts = op.timestamp
-        if isinstance(ts, str):
-            from datetime import datetime as dt
+    # Get tool operations from TimescaleDB via SessionToolsProjection (ADR-026)
+    tool_operations = await manager.session_tools.get(session_id)
+
+    # Convert ToolOperation read models to API OperationInfo
+    operations: list[OperationInfo] = []
+    for tool_op in tool_operations:
+        # Handle input_preview - may be a string that needs parsing
+        tool_input_dict: dict[str, Any] | None = None
+        if tool_op.input_preview:
+            import json as json_module
 
             try:
-                ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                ts = None
+                parsed = json_module.loads(tool_op.input_preview)
+                if isinstance(parsed, dict):
+                    tool_input_dict = parsed
+                else:
+                    tool_input_dict = {"raw": tool_op.input_preview}
+            except (json_module.JSONDecodeError, TypeError):
+                tool_input_dict = {"raw": tool_op.input_preview}
+
         operations.append(
             OperationInfo(
-                operation_id=op.operation_id,
-                operation_type=op.operation_type,
-                timestamp=ts,
-                duration_seconds=op.duration_seconds,
-                success=op.success,
-                # Token metrics
-                input_tokens=op.input_tokens,
-                output_tokens=op.output_tokens,
-                total_tokens=op.total_tokens,
+                operation_id=tool_op.observation_id,
+                operation_type=tool_op.operation_type,
+                timestamp=tool_op.timestamp,
+                duration_seconds=(tool_op.duration_ms / 1000.0) if tool_op.duration_ms else None,
+                success=tool_op.success if tool_op.success is not None else True,
+                # Token metrics (not available in tool operations)
+                input_tokens=None,
+                output_tokens=None,
+                total_tokens=None,
                 # Tool details
-                tool_name=op.tool_name,
-                tool_use_id=op.tool_use_id,
-                tool_input=op.tool_input,
-                tool_output=op.tool_output,
-                # Message details
-                message_role=op.message_role,
-                message_content=op.message_content,
-                # Thinking details
-                thinking_content=op.thinking_content,
+                tool_name=tool_op.tool_name,
+                tool_use_id=tool_op.tool_use_id,
+                tool_input=tool_input_dict,
+                tool_output=tool_op.output_preview,
+                # Message details (not applicable for tool ops)
+                message_role=None,
+                message_content=None,
+                # Thinking details (not applicable for tool ops)
+                thinking_content=None,
             )
         )
+
+    # Fallback to projection if TimescaleDB doesn't have data
+    if not operations:
+        for op in session.operations:
+            # Handle timestamp - can be string or datetime
+            ts = op.timestamp
+            if isinstance(ts, str):
+                from datetime import datetime as dt
+
+                try:
+                    ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    ts = None
+            operations.append(
+                OperationInfo(
+                    operation_id=op.operation_id,
+                    operation_type=op.operation_type,
+                    timestamp=ts,
+                    duration_seconds=op.duration_seconds,
+                    success=op.success,
+                    # Token metrics
+                    input_tokens=op.input_tokens,
+                    output_tokens=op.output_tokens,
+                    total_tokens=op.total_tokens,
+                    # Tool details
+                    tool_name=op.tool_name,
+                    tool_use_id=op.tool_use_id,
+                    tool_input=op.tool_input,
+                    tool_output=op.tool_output,
+                    # Message details
+                    message_role=op.message_role,
+                    message_content=op.message_content,
+                    # Thinking details
+                    thinking_content=op.thinking_content,
+                )
+            )
 
     # Get workflow name from projection if available
     workflow_name = None

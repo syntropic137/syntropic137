@@ -268,12 +268,22 @@ class AgentRunner:
         # 2. Parse content blocks for tool observability (NEW)
         if hasattr(message, "content") and message.content:
             for block in message.content:
-                # Get block type via duck typing (works with SDK classes, dicts, and mocks)
-                block_type = (
-                    getattr(block, "type", None)
-                    if not isinstance(block, dict)
-                    else block.get("type")
-                )
+                # Get block type - SDK classes don't have 'type' attr, use class name
+                # Works with: ToolUseBlock (SDK), dict with "type" key, mock objects
+                if isinstance(block, dict):
+                    block_type = block.get("type")
+                else:
+                    # Check class name for SDK types (ToolUseBlock, TextBlock, etc.)
+                    class_name = type(block).__name__
+                    if class_name == "ToolUseBlock":
+                        block_type = "tool_use"
+                    elif class_name == "ToolResultBlock":
+                        block_type = "tool_result"
+                    elif class_name == "TextBlock":
+                        block_type = "text"
+                    else:
+                        # Fallback to checking 'type' attribute for mock objects
+                        block_type = getattr(block, "type", None)
 
                 # Handle ToolUseBlock (tool started)
                 if block_type == "tool_use":
@@ -345,11 +355,15 @@ class AgentRunner:
         This catches tool_result blocks that come in messages other than AssistantMessage.
         """
         for block in message.content:
-            block_type = (
-                getattr(block, "type", None)
-                if not isinstance(block, dict)
-                else block.get("type")
-            )
+            # Get block type - SDK classes don't have 'type' attr, use class name
+            if isinstance(block, dict):
+                block_type = block.get("type")
+            else:
+                class_name = type(block).__name__
+                if class_name == "ToolResultBlock":
+                    block_type = "tool_result"
+                else:
+                    block_type = getattr(block, "type", None)
 
             # Only handle tool_result here (tool_use is handled in AssistantMessage)
             if block_type == "tool_result":

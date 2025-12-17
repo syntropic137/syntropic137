@@ -19,6 +19,7 @@ dependencies = [
     "event-sourcing-python",
     "grpcio>=1.60", # Required by event-sourcing SDK
     "claude-agent-sdk>=0.1.11",
+    "minio>=7.2.20",
 ]
 
 # Core agentic SDK (required for full functionality)

@@ -1,7 +1,9 @@
 # ADR-012: Artifact Storage Architecture
 
 ## Status
-**Partially Implemented** - Core domain and query service implemented
+**Implemented** - MinIO integration complete (Phase 0, 0.5, 1)
+
+**Updated:** 2025-12-16 - Added MinIO object storage for artifact content
 
 ## Context
 Workflow executions generate artifacts (markdown documents, code files, data files) that need to be:
@@ -144,13 +146,31 @@ async def get_artifact_content(artifact_id: str) -> bytes:
 4. ✅ Update `WorkflowExecutionEngine._build_prompt()` to use service
 5. ✅ Add comprehensive tests
 
-### Phase 1: MinIO for Development
-1. Add MinIO to `docker-compose.dev.yaml`
-2. Create `ArtifactStorageProtocol` interface
-3. Implement `MinioArtifactStorage`
-4. Update `_persist_artifact` to upload content
+### ✅ Phase 1: MinIO for Development (COMPLETED 2025-12-16)
+1. ✅ Add MinIO to `docker-compose.dev.yaml`
+2. ✅ Create `ArtifactContentStoragePort` in domain layer (ports & adapters)
+3. ✅ Implement `MinioArtifactStorage` adapter
+4. ✅ Implement `InMemoryArtifactStorage` for tests (with **safety guard**)
+5. ✅ Add `storage_uri` to `ArtifactCreatedEvent` (v3)
+6. ✅ Update `WorkflowExecutionEngine._create_artifact()` to upload content
+7. ✅ Inject `artifact_content_storage` via DI in CLI
 
-### Phase 2: Production S3
+**Safety Guard (Critical):**
+```python
+# InMemoryArtifactStorage throws if AEF_ENVIRONMENT != 'test'
+# Prevents false positives in production!
+class InMemoryArtifactStorage:
+    def __init__(self):
+        if os.environ.get("AEF_ENVIRONMENT") != "test":
+            raise TestOnlyAdapterError(...)
+```
+
+**Files:**
+- `packages/aef-domain/.../ports/artifact_storage.py` - Port definition
+- `packages/aef-adapters/.../artifact_storage/minio.py` - MinIO adapter
+- `packages/aef-adapters/.../artifact_storage/memory.py` - Test adapter
+
+### Phase 2: Production S3 (Future)
 1. Add AWS SDK dependencies
 2. Implement `S3ArtifactStorage`
 3. Add IAM role configuration

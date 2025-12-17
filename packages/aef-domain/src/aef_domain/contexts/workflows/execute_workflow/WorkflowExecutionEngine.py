@@ -44,6 +44,9 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
     )
+    from aef_domain.contexts.artifacts.domain.ports.artifact_storage import (
+        ArtifactContentStoragePort,
+    )
     from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
@@ -220,6 +223,7 @@ class WorkflowExecutionEngine:
         agent_factory: AgentFactory,
         artifact_query_service: ArtifactQueryServiceProtocol | None = None,
         observability_writer: Any | None = None,
+        artifact_content_storage: ArtifactContentStoragePort | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
@@ -234,6 +238,8 @@ class WorkflowExecutionEngine:
                 multi-phase workflows). If None, phase outputs cannot be injected
                 into subsequent phase prompts.
             observability_writer: ObservabilityWriter for TimescaleDB (ADR-026)
+            artifact_content_storage: Storage for artifact content in object storage
+                (MinIO/S3). If None, content stored only in event store. (ADR-012)
 
         Raises:
             ValueError: If execution_repository or workspace_service is None
@@ -257,6 +263,7 @@ class WorkflowExecutionEngine:
         self._agent_factory = agent_factory
         self._artifact_query = artifact_query_service
         self._observability_writer = observability_writer
+        self._artifact_content_storage = artifact_content_storage
 
     async def _record_observation(
         self,
@@ -704,6 +711,10 @@ class WorkflowExecutionEngine:
     ) -> None:
         """Create and save an artifact.
 
+        Two-tier storage (ADR-012):
+        1. Content → Object storage (MinIO/S3) if configured
+        2. Metadata + storage_uri → Event store
+
         Args:
             artifact_id: Unique artifact identifier
             workflow_id: Parent workflow ID
@@ -724,6 +735,40 @@ class WorkflowExecutionEngine:
         # Map string type to ArtifactType enum
         artifact_type_enum = self._map_artifact_type(artifact_type)
 
+        # Upload content to object storage if configured (ADR-012)
+        storage_uri: str | None = None
+        if self._artifact_content_storage is not None:
+            try:
+                result = await self._artifact_content_storage.upload(
+                    artifact_id=artifact_id,
+                    content=content.encode("utf-8"),
+                    workflow_id=workflow_id,
+                    phase_id=phase_id,
+                    execution_id=execution_id,
+                    content_type="text/markdown",
+                    metadata={
+                        "session_id": session_id,
+                        "artifact_type": artifact_type,
+                        "title": title,
+                    },
+                )
+                storage_uri = result.storage_uri
+                logger.info(
+                    "Artifact content uploaded to object storage",
+                    extra={
+                        "artifact_id": artifact_id,
+                        "storage_uri": storage_uri,
+                        "size_bytes": result.size_bytes,
+                    },
+                )
+            except Exception as e:
+                # Log error but continue - content will still be in event store
+                logger.warning(
+                    "Failed to upload artifact to object storage, "
+                    "content will be stored in event store only",
+                    extra={"artifact_id": artifact_id, "error": str(e)},
+                )
+
         aggregate = ArtifactAggregate()
         command = CreateArtifactCommand(
             aggregate_id=artifact_id,
@@ -734,6 +779,7 @@ class WorkflowExecutionEngine:
             artifact_type=artifact_type_enum,
             content=content,
             title=title,
+            storage_uri=storage_uri,  # NEW: Reference to object storage
         )
         aggregate._handle_command(command)
         await self._artifacts.save(aggregate)

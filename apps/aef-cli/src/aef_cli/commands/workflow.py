@@ -875,12 +875,14 @@ def run_workflow(
                 )
 
             # Create engine with ADR-023 compliant dependencies
+            from aef_adapters.storage.artifact_storage import get_artifact_storage
             from aef_adapters.storage.observability_writer import get_observability_writer
             from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
             observability_writer = get_observability_writer()
+            artifact_content_storage = await get_artifact_storage()
 
             # Initialize observability writer (creates TimescaleDB schema)
             # Note: initialization happens lazily on first write
@@ -909,6 +911,7 @@ def run_workflow(
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,
                 observability_writer=observability_writer,
+                artifact_content_storage=artifact_content_storage,  # ADR-012
             )
 
             # Setup progress display
