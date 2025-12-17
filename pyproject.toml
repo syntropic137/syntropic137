@@ -130,15 +130,10 @@ warn_unused_configs = true
 show_error_codes = true
 show_column_numbers = true
 pretty = true
-# Exclude test files and runtime-heavy modules from type checking
+# Exclude test files from type checking (both /tests/ dirs and co-located test_*.py)
 exclude = [
     "^.*/tests/.*$",
     "^.*test_.*\\.py$",
-    # Exclude modules that require Docker/runtime to type check properly (Issue #32)
-    "^.*workflow_executor\\.py$",
-    "^.*session_cost/projection\\.py$",
-    "^.*workspace_backends/.*$",
-    "^.*aef_agent_runner/runner\\.py$",
 ]
 
 # Per-module ignores for optional dependencies and internal modules
@@ -153,17 +148,6 @@ module = [
     "aef_domain.*",
 ]
 ignore_missing_imports = true
-
-# Disable strict type checking for runtime-heavy modules (Issue #32)
-[[tool.mypy.overrides]]
-module = [
-    "aef_adapters.orchestration.workflow_executor",
-    "aef_adapters.object_storage.minio",
-    "aef_domain.contexts.costs.slices.session_cost.projection",
-    "aef_agent_runner.runner",
-    "aef_cli.commands.workflow",
-]
-ignore_errors = true
 
 # Ignore missing imports for optional dependencies
 [[tool.mypy.overrides]]

@@ -330,7 +330,7 @@ class AgentRunner:
                     )
 
                     # Get tool name from stored mapping
-                    tool_name = self._tool_use_map.get(tool_use_id, "unknown")
+                    tool_name = self._tool_use_map.get(tool_use_id or "", "unknown")
 
                     # Emit tool_result event to stdout (JSONL)
                     emit_tool_result(
@@ -384,7 +384,7 @@ class AgentRunner:
                 )
 
                 # Get tool name from stored mapping
-                tool_name = self._tool_use_map.get(tool_use_id, "unknown")
+                tool_name = self._tool_use_map.get(tool_use_id or "", "unknown")
 
                 # Emit tool_result event to stdout (JSONL)
                 emit_tool_result(

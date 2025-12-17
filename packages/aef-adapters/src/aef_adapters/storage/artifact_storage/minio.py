@@ -13,25 +13,15 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
+
+# Import StorageResult from domain (not local definition)
+from aef_domain.contexts.artifacts.domain.ports import StorageResult
 
 if TYPE_CHECKING:
     from aef_adapters.object_storage.minio import MinioStorage
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class StorageResult:
-    """Result of an artifact upload operation."""
-
-    storage_uri: str
-    content_hash: str
-    size_bytes: int
-    uploaded_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class StorageError(Exception):

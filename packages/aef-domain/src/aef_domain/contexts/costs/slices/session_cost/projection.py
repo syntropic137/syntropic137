@@ -253,6 +253,10 @@ class SessionCostProjection:
         Returns:
             SessionCost with aggregated metrics, or None if no observations found
         """
+        # Guard: this method should only be called when _observability_writer is set
+        if self._observability_writer is None:
+            return None
+
         # Lazy-initialize pool if needed (singleton may not be initialized yet)
         if self._observability_writer.pool is None:
             try:

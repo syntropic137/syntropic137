@@ -191,7 +191,8 @@ class MinioStorage:
                     io.BytesIO(content),
                     len(content),
                     content_type=content_type,
-                    metadata=metadata,
+                    # Cast metadata to minio's expected type (dict values are just strings)
+                    metadata=metadata if metadata else None,  # type: ignore[arg-type]
                 ),
             )
 
@@ -306,7 +307,7 @@ class MinioStorage:
 
             return StorageObject(
                 key=key,
-                size_bytes=stat.size,
+                size_bytes=stat.size or 0,
                 content_type=stat.content_type,
                 etag=stat.etag,
                 last_modified=stat.last_modified or datetime.now(UTC),

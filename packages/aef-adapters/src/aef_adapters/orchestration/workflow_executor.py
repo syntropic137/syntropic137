@@ -216,18 +216,6 @@ class WorkflowExecutor:
     ) -> AsyncIterator[ExecutionEvent]:
         """Internal workflow execution logic."""
         # Import types from existing executor
-        from aef_adapters.agents.agentic_types import (
-            AgentExecutionConfig,
-            TaskCompleted,
-            TaskFailed,
-            ToolBlocked,
-            ToolUseCompleted,
-            ToolUseStarted,
-            TurnCompleted,
-            Workspace,
-            WorkspaceConfig,
-        )
-        from aef_adapters.artifacts import ArtifactBundle, ArtifactType, PhaseContext
 
         # Initialize context
         ctx = ExecutionContext(
@@ -296,18 +284,6 @@ class WorkflowExecutor:
                     phase,
                     ctx,
                     phase_context,
-                    ArtifactBundle,
-                    ArtifactType,
-                    PhaseContext,
-                    AgentExecutionConfig,
-                    Workspace,
-                    WorkspaceConfig,
-                    TaskCompleted,
-                    TaskFailed,
-                    ToolBlocked,
-                    ToolUseCompleted,
-                    ToolUseStarted,
-                    TurnCompleted,
                 ):
                     yield event
 
@@ -397,24 +373,25 @@ class WorkflowExecutor:
         phase: WorkflowPhase,
         ctx: ExecutionContext,
         obs_context: ObservationContext,
-        # Type imports passed as params to avoid circular imports
-        ArtifactBundle: type,
-        ArtifactType: type,  # noqa: ARG002
-        PhaseContext: type,
-        AgentExecutionConfig: type,
-        Workspace: type,
-        WorkspaceConfig: type,
-        TaskCompleted: type,
-        TaskFailed: type,
-        ToolBlocked: type,
-        ToolUseCompleted: type,
-        ToolUseStarted: type,
-        TurnCompleted: type,
     ) -> AsyncIterator[ExecutionEvent]:
         """Execute a single phase with full observability.
 
         Uses WorkspaceService for proper Docker isolation with GitHub credentials.
         """
+        # Import types here to avoid circular imports AND enable mypy type narrowing
+        from aef_adapters.agents.agentic_types import (
+            AgentExecutionConfig,
+            TaskCompleted,
+            TaskFailed,
+            ToolBlocked,
+            ToolUseCompleted,
+            ToolUseStarted,
+            TurnCompleted,
+            Workspace,
+            WorkspaceConfig,
+        )
+        from aef_adapters.artifacts import ArtifactBundle, PhaseContext
+
         phase_started_at = datetime.now(UTC)
 
         # Build task prompt first (needed for phase context)
@@ -674,7 +651,7 @@ class WorkflowExecutor:
 
             # Calculate duration
             phase_completed_at = datetime.now(UTC)
-            duration_ms = (phase_completed_at - phase_started_at).total_seconds() * 1000
+            duration_ms = int((phase_completed_at - phase_started_at).total_seconds() * 1000)
             ctx.total_duration_ms += duration_ms
 
             # Record phase completed observation
