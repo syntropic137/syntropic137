@@ -42,6 +42,9 @@ class PhaseDefinition(BaseModel):
     order: int = 0
     description: str | None = None
     agent_type: str = ""
+    prompt_template: str | None = None
+    timeout_seconds: int = 300
+    allowed_tools: list[str] = Field(default_factory=list)
 
 
 class WorkflowResponse(BaseModel):
