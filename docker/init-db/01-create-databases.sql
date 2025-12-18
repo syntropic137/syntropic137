@@ -1,27 +1,74 @@
--- Create event store schema
-CREATE SCHEMA IF NOT EXISTS event_store;
+-- =============================================================================
+-- AEF Unified Database Schema - Initial Setup
+-- =============================================================================
+-- This script initializes the consolidated TimescaleDB database.
+--
+-- NOTE: The event-sourcing-platform (ESP) manages its own tables via sqlx migrations:
+--   - events, aggregates, idempotency, projection_checkpoints
+-- These are created automatically when the event-store service starts.
+--
+-- This script only creates:
+-- - TimescaleDB/pgvector extensions
+-- - Observability tables (agent_events) - used by Dashboard API
+-- - Workflow management tables (workflow_definitions, artifacts)
+-- =============================================================================
 
--- Events table
-CREATE TABLE IF NOT EXISTS event_store.events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type VARCHAR(255) NOT NULL,
-    aggregate_id UUID NOT NULL,
-    event_type VARCHAR(255) NOT NULL,
-    event_data JSONB NOT NULL,
-    metadata JSONB DEFAULT '{}',
-    version INTEGER NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+-- Enable TimescaleDB extension
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+-- Enable pgvector for future AI/embedding features
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- =============================================================================
+-- OBSERVABILITY SCHEMA (Agent Events / Telemetry)
+-- =============================================================================
+
+-- Agent events table - high-volume telemetry data
+CREATE TABLE IF NOT EXISTS public.agent_events (
+    id UUID DEFAULT gen_random_uuid(),
+    event_type VARCHAR(100) NOT NULL,
+    session_id UUID,
+    execution_id UUID,
+    phase_id VARCHAR(255),
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    data JSONB NOT NULL DEFAULT '{}',
     
-    CONSTRAINT unique_aggregate_version UNIQUE (aggregate_id, version)
+    -- Composite primary key for hypertable
+    PRIMARY KEY (id, timestamp)
 );
 
--- Index for aggregate queries
-CREATE INDEX IF NOT EXISTS idx_events_aggregate 
-ON event_store.events (aggregate_type, aggregate_id, version);
+-- Convert to hypertable for time-series optimization
+-- 1-hour chunks for high-volume telemetry data
+SELECT create_hypertable(
+    'public.agent_events',
+    'timestamp',
+    chunk_time_interval => INTERVAL '1 hour',
+    if_not_exists => TRUE,
+    migrate_data => TRUE
+);
 
--- Index for event type queries
-CREATE INDEX IF NOT EXISTS idx_events_type 
-ON event_store.events (event_type, created_at);
+-- Enable compression on agent_events for older data (after 7 days)
+ALTER TABLE public.agent_events SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'session_id, execution_id'
+);
+
+-- Auto-compress chunks older than 7 days
+SELECT add_compression_policy('public.agent_events', INTERVAL '7 days', if_not_exists => TRUE);
+
+-- Indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_agent_events_session 
+ON public.agent_events (session_id, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_execution 
+ON public.agent_events (execution_id, timestamp DESC);
+
+CREATE INDEX IF NOT EXISTS idx_agent_events_type 
+ON public.agent_events (event_type, timestamp DESC);
+
+-- =============================================================================
+-- WORKFLOW MANAGEMENT SCHEMA
+-- =============================================================================
 
 -- Workflow definitions table (seeded from YAML)
 CREATE TABLE IF NOT EXISTS public.workflow_definitions (
@@ -53,24 +100,9 @@ CREATE TABLE IF NOT EXISTS public.artifacts (
 CREATE INDEX IF NOT EXISTS idx_artifacts_workflow 
 ON public.artifacts (workflow_id, phase_name);
 
--- Processor todos table (for processor/todo pattern)
-CREATE TABLE IF NOT EXISTS event_store.processor_todos (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    processor_name VARCHAR(255) NOT NULL,
-    event_id UUID NOT NULL REFERENCES event_store.events(id),
-    status VARCHAR(50) DEFAULT 'pending',
-    attempts INTEGER DEFAULT 0,
-    last_error TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    processed_at TIMESTAMPTZ,
-    
-    CONSTRAINT unique_processor_event UNIQUE (processor_name, event_id)
-);
-
--- Index for pending todos
-CREATE INDEX IF NOT EXISTS idx_todos_pending 
-ON event_store.processor_todos (processor_name, status) 
-WHERE status = 'pending';
+-- =============================================================================
+-- UTILITY FUNCTIONS
+-- =============================================================================
 
 -- Function to update timestamps
 CREATE OR REPLACE FUNCTION update_updated_at()
@@ -82,15 +114,15 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger for workflow definitions
+DROP TRIGGER IF EXISTS update_workflow_definitions_timestamp ON public.workflow_definitions;
 CREATE TRIGGER update_workflow_definitions_timestamp
     BEFORE UPDATE ON public.workflow_definitions
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
--- Comments for documentation
-COMMENT ON SCHEMA event_store IS 'Event sourcing infrastructure';
-COMMENT ON TABLE event_store.events IS 'Immutable event log';
-COMMENT ON TABLE event_store.processor_todos IS 'Processor work queue (todo pattern)';
+-- =============================================================================
+-- DOCUMENTATION
+-- =============================================================================
+COMMENT ON TABLE public.agent_events IS 'Observability telemetry events (hypertable)';
 COMMENT ON TABLE public.workflow_definitions IS 'Workflow templates seeded from YAML';
 COMMENT ON TABLE public.artifacts IS 'Phase output artifacts';
-

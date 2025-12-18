@@ -16,7 +16,7 @@ cd agentic-engineering-framework
 # 2. Install dependencies
 uv sync
 
-# 3. Start Docker services (PostgreSQL)
+# 3. Start Docker services (TimescaleDB)
 just dev
 
 # 4. Copy and configure environment
@@ -50,7 +50,7 @@ just cli workflow list
 ### Starting Development Services
 
 ```bash
-# Start all services (PostgreSQL)
+# Start all services (TimescaleDB + Event Store)
 just dev
 
 # View logs
@@ -158,7 +158,7 @@ agentic-engineering-framework/
 docker ps
 
 # View container logs
-docker logs aef-postgres
+docker logs aef-db
 
 # Restart services
 just dev-reset
@@ -168,11 +168,14 @@ just dev-reset
 
 ```bash
 # Connect to database directly
-docker exec -it aef-postgres psql -U aef -d aef
+docker exec -it aef-db psql -U aef -d aef
 
 # Check tables
-\dt event_store.*
-\dt public.*
+\dt public.*           # Observability & workflow tables
+\dt event_store.*      # Domain events (managed by ESP)
+
+# Check TimescaleDB hypertables
+SELECT * FROM timescaledb_information.hypertables;
 ```
 
 ### Import Errors

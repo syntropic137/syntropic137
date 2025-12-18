@@ -108,38 +108,40 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # TIMESCALEDB (Observability) - See ADR-026
+    # TIMESCALEDB (Unified Database) - See ADR-026, ADR-030
     # =========================================================================
+    # Single TimescaleDB instance serves both domain events and observability.
+    # The Event Store (esp) and Dashboard API share the same database.
 
     timescale_host: str = Field(
         default="localhost",
         description=(
-            "TimescaleDB host for observability events. "
+            "TimescaleDB host for unified database. "
             "For Docker: timescaledb (service name). "
             "For local dev: localhost"
         ),
     )
 
     timescale_port: int = Field(
-        default=5433,
+        default=5432,
         ge=1024,
         le=65535,
-        description="TimescaleDB port. Default: 5433 (to avoid conflict with main PostgreSQL on 5432).",
+        description="TimescaleDB port. Default: 5432 (unified database).",
     )
 
     timescale_user: str = Field(
         default="aef",
-        description="TimescaleDB user for observability database.",
+        description="TimescaleDB user for unified database.",
     )
 
     timescale_password: SecretStr = Field(
         default=SecretStr("aef_dev_password"),
-        description="TimescaleDB password for observability database.",
+        description="TimescaleDB password for unified database.",
     )
 
     timescale_db: str = Field(
-        default="aef_observability",
-        description="TimescaleDB database name for observability events.",
+        default="aef",
+        description="TimescaleDB database name (unified for domain + observability).",
     )
 
     # =========================================================================

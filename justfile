@@ -68,7 +68,7 @@ dev-force: _workspace-check
 dev-fresh:
     @echo "🧹 Cleaning database and restarting full stack..."
     docker compose -f docker/docker-compose.dev.yaml down -v
-    @echo "Building & starting Docker services (PostgreSQL + Event Store)..."
+    @echo "Building & starting Docker services (TimescaleDB + Event Store)..."
     docker compose -f docker/docker-compose.dev.yaml up -d --build
     @sleep 4
     @echo "🌱 Running database migrations..."

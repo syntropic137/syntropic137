@@ -4,17 +4,27 @@
 name: aef
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: aef-postgres
+  # =============================================================================
+  # UNIFIED DATABASE - TimescaleDB
+  # =============================================================================
+  # Single database instance for all AEF data:
+  # - Domain events (event_store.events) - hypertable for append-only workloads
+  # - Observability events (public.agent_events) - hypertable for time-series
+  # - Workflow definitions, artifacts, projections
+  #
+  # TimescaleDB provides 10x-100x better performance for append-only event stores
+  # =============================================================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: aef-db
     environment:
+      POSTGRES_DB: aef
       POSTGRES_USER: aef
       POSTGRES_PASSWORD: aef_dev_password
-      POSTGRES_DB: aef
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U aef -d aef"]
@@ -30,13 +40,13 @@ services:
     container_name: aef-event-store
     environment:
       BACKEND: postgres
-      DATABASE_URL: postgres://aef:aef_dev_password@postgres:5432/aef
+      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
       BIND_ADDR: 0.0.0.0:50051
       RUST_LOG: info
     ports:
       - "50051:50051"
     depends_on:
-      postgres:
+      timescaledb:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/50051' || exit 1"]
@@ -126,26 +136,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # TimescaleDB - Time-series database for observability events
-  # Provides 10x-100x better performance than domain event store for high-volume telemetry
-  timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    container_name: aef-timescaledb
-    environment:
-      POSTGRES_DB: aef_observability
-      POSTGRES_USER: aef
-      POSTGRES_PASSWORD: aef_dev_password
-    ports:
-      - "5433:5432"
-    volumes:
-      - timescaledb_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aef -d aef_observability"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
   # Example sidecar proxy for agent containers
   # This is a template - actual sidecars are deployed per-execution
   sidecar-proxy:
@@ -163,10 +153,9 @@ services:
     restart: unless-stopped
 
 volumes:
-  postgres_data:
+  db_data:
   minio_data:
   redis_data:
-  timescaledb_data:
 
 networks:
   default:
