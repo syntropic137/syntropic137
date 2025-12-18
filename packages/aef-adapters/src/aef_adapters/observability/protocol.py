@@ -1,177 +1,175 @@
-"""Legacy Observability Protocol (deprecated).
+"""Observability protocol definitions.
 
-This module provides a local copy of the ObservabilityPort protocol
-that was previously in agentic-primitives/agentic_observability.
-
-DEPRECATED: New code should use OTel-first approach with:
-- agentic_otel.OTelConfig
-- agentic_otel.HookOTelEmitter
-- AEFSemanticConventions
-
-This protocol is kept for backward compatibility during migration.
+DEPRECATED: This module is being replaced by aef_adapters.events.
+Kept for backwards compatibility during migration.
 """
 
 from __future__ import annotations
 
-import warnings
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 from uuid import uuid4
 
-# Emit deprecation warning on import
-warnings.warn(
-    "aef_adapters.observability.protocol is deprecated. "
-    "Use agentic_otel for OTel-first observability.",
-    DeprecationWarning,
-    stacklevel=2,
-)
+logger = logging.getLogger(__name__)
 
 
-class ObservationType(Enum):
-    """Types of agent observations (legacy)."""
+class ObservationType(str, Enum):
+    """Types of observations that can be recorded."""
 
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
-    TOKEN_USAGE = "token_usage"
+    # Session lifecycle
     SESSION_STARTED = "session_started"
-    SESSION_ENDED = "session_ended"
     SESSION_COMPLETED = "session_completed"
     SESSION_ERROR = "session_error"
-    ERROR = "error"
-    CUSTOM = "custom"
-    PROGRESS = "progress"  # Generic progress update
+
+    # Execution lifecycle
     EXECUTION_STARTED = "execution_started"
     EXECUTION_COMPLETED = "execution_completed"
     EXECUTION_ERROR = "execution_error"
 
+    # Tool usage
+    TOOL_STARTED = "tool_started"
+    TOOL_COMPLETED = "tool_completed"
+
+    # Token usage
+    TOKEN_USAGE = "token_usage"
+
 
 @dataclass
 class ObservationContext:
-    """Context for an observation (legacy).
-
-    Contains all the identifiers needed to correlate observations
-    across sessions, executions, and workflows.
-    """
+    """Context for observations."""
 
     session_id: str
     execution_id: str | None = None
     phase_id: str | None = None
     workflow_id: str | None = None
-    agent_id: str | None = None
-    correlation_id: str | None = None
-    workspace_path: str | None = None
-    observation_id: str = field(default_factory=lambda: str(uuid4()))
+    workspace_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
-@runtime_checkable
-class ObservabilityPort(Protocol):
-    """Protocol for observability adapters (legacy).
+class ObservabilityPort:
+    """Interface for observability adapters.
 
-    DEPRECATED: Use OTel-first observability instead.
+    DEPRECATED: Use AgentEventStore instead for new code.
     """
 
     async def record(
         self,
         observation_type: ObservationType,
         context: ObservationContext,
-        data: dict[str, Any],
-    ) -> None:
-        """Record a generic observation."""
-        ...
+        data: dict[str, Any] | None = None,
+    ) -> str:
+        """Record an observation. Returns observation ID."""
+        raise NotImplementedError
 
     async def record_tool_started(
         self,
         context: ObservationContext,
         tool_name: str,
-        tool_input: dict[str, Any],
+        tool_input: dict[str, Any] | None = None,
+        tool_use_id: str | None = None,
     ) -> str:
-        """Record a tool execution starting."""
-        ...
+        """Record tool started. Returns operation ID."""
+        raise NotImplementedError
 
     async def record_tool_completed(
         self,
         context: ObservationContext,
         operation_id: str,
-        tool_name: str,
         success: bool,
-        duration_ms: int,
+        duration_ms: int | None = None,
         output_preview: str | None = None,
+        error: str | None = None,
     ) -> None:
-        """Record a tool execution completing."""
-        ...
+        """Record tool completed."""
+        raise NotImplementedError
 
     async def record_token_usage(
         self,
         context: ObservationContext,
         input_tokens: int,
         output_tokens: int,
+        cache_creation_tokens: int = 0,
         cache_read_tokens: int = 0,
-        cache_write_tokens: int = 0,
-        model: str | None = None,
     ) -> None:
         """Record token usage."""
-        ...
+        raise NotImplementedError
 
     async def flush(self) -> None:
         """Flush any buffered observations."""
-        ...
-
-    async def close(self) -> None:
-        """Close the adapter."""
-        ...
+        pass
 
 
-class NullObservability:
-    """No-op observability adapter for testing (legacy).
+class NullObservability(ObservabilityPort):
+    """Null implementation that logs but doesn't store.
 
-    DEPRECATED: Use mocks or OTel-first observability instead.
-
-    This adapter implements ObservabilityPort but discards all observations.
-    Useful for unit tests that don't need observability.
+    Use for tests or when observability storage is not available.
     """
 
     async def record(
         self,
         observation_type: ObservationType,
         context: ObservationContext,
-        data: dict[str, Any],
-    ) -> None:
-        """Discard observation."""
+        data: dict[str, Any] | None = None,
+    ) -> str:
+        """Record an observation (logs only)."""
+        obs_id = str(uuid4())
+        logger.debug(
+            "NullObservability.record: %s session=%s data=%s",
+            observation_type.value,
+            context.session_id,
+            data,
+        )
+        return obs_id
 
     async def record_tool_started(
         self,
-        context: ObservationContext,  # noqa: ARG002
-        tool_name: str,  # noqa: ARG002
-        tool_input: dict[str, Any],  # noqa: ARG002
+        context: ObservationContext,
+        tool_name: str,
+        tool_input: dict[str, Any] | None = None,  # noqa: ARG002
+        tool_use_id: str | None = None,  # noqa: ARG002
     ) -> str:
-        """Return a dummy operation ID."""
-        return "null-op-" + str(uuid4())[:8]
+        """Record tool started (logs only)."""
+        operation_id = str(uuid4())
+        logger.debug(
+            "NullObservability.tool_started: %s session=%s",
+            tool_name,
+            context.session_id,
+        )
+        return operation_id
 
     async def record_tool_completed(
         self,
-        context: ObservationContext,
+        context: ObservationContext,  # noqa: ARG002
         operation_id: str,
-        tool_name: str,
         success: bool,
-        duration_ms: int,
-        output_preview: str | None = None,
+        duration_ms: int | None = None,  # noqa: ARG002
+        output_preview: str | None = None,  # noqa: ARG002
+        error: str | None = None,  # noqa: ARG002
     ) -> None:
-        """Discard completion record."""
+        """Record tool completed (logs only)."""
+        logger.debug(
+            "NullObservability.tool_completed: op=%s success=%s",
+            operation_id,
+            success,
+        )
 
     async def record_token_usage(
         self,
-        context: ObservationContext,
+        context: ObservationContext,  # noqa: ARG002
         input_tokens: int,
         output_tokens: int,
-        cache_read_tokens: int = 0,
-        cache_write_tokens: int = 0,
-        model: str | None = None,
+        cache_creation_tokens: int = 0,  # noqa: ARG002
+        cache_read_tokens: int = 0,  # noqa: ARG002
     ) -> None:
-        """Discard token usage."""
+        """Record token usage (logs only)."""
+        logger.debug(
+            "NullObservability.token_usage: in=%d out=%d",
+            input_tokens,
+            output_tokens,
+        )
 
     async def flush(self) -> None:
         """No-op flush."""
-
-    async def close(self) -> None:
-        """No-op close."""
+        pass

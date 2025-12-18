@@ -1,30 +1,47 @@
-"""Observability adapters for agent telemetry.
+"""Observability adapters for AEF.
 
-This module provides implementations for observability backends and
-OTel configuration utilities.
+DEPRECATED: This module is being replaced by aef_adapters.events.
+The new AgentEventStore provides simpler, higher-throughput event storage.
 
-Exports:
-    OTel-First (recommended):
-    - AEFSemanticConventions: Resource attribute constants
-    - create_phase_otel_config: Factory for phase-level OTelConfig
-
-    Legacy (deprecated):
-    - TimescaleObservability: Production adapter writing to TimescaleDB
-    - get_observability: Factory function for getting the adapter
+This module is kept for backwards compatibility during migration.
+New code should use:
+    from aef_adapters.events import AgentEventStore, EventBuffer
 """
 
-from aef_adapters.observability.conventions import AEFSemanticConventions
-from aef_adapters.observability.factory import get_observability
-from aef_adapters.observability.otel_config import (
-    create_phase_otel_config,
-    get_collector_endpoint,
+from aef_adapters.observability.protocol import (
+    NullObservability,
+    ObservabilityPort,
+    ObservationContext,
+    ObservationType,
 )
-from aef_adapters.observability.timescale import TimescaleObservability
 
 __all__ = [
-    "AEFSemanticConventions",
-    "TimescaleObservability",
-    "create_phase_otel_config",
-    "get_collector_endpoint",
+    "NullObservability",
+    "ObservabilityPort",
+    "ObservationContext",
+    "ObservationType",
     "get_observability",
 ]
+
+
+def get_observability() -> ObservabilityPort:
+    """Get the observability adapter.
+
+    Returns a NullObservability instance during migration.
+    TODO: Replace with event store integration.
+    """
+    return NullObservability()
+
+
+# Stub for legacy code
+class AEFSemanticConventions:
+    """Stub for semantic conventions during migration."""
+
+    @staticmethod
+    def to_resource_attributes(*_args, **_kwargs):
+        return {}
+
+
+def get_collector_endpoint() -> str:
+    """Get collector endpoint (deprecated)."""
+    return ""
