@@ -39,7 +39,7 @@ from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
 )
 
 if TYPE_CHECKING:
-    from aef_adapters.agents.instrumented import InstrumentedAgent
+    from aef_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
     from aef_adapters.workspace_backends.service import WorkspaceService
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,

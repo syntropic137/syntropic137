@@ -1,9 +1,9 @@
 """Session tools projection for querying tool operations from TimescaleDB.
 
 This projection provides a clean interface for querying tool operations
-(tool_started, tool_completed) for a given session.
+(tool_execution_started, tool_execution_completed) for a given session.
 
-See ADR-026: TimescaleDB for Observability Storage
+See ADR-029: Simplified Event System
 """
 
 from __future__ import annotations
@@ -12,11 +12,12 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-
-from aef_adapters.projections.observability_base import ObservabilityProjection
+from uuid import uuid4
 
 if TYPE_CHECKING:
     from datetime import datetime
+
+    import asyncpg
 
 logger = logging.getLogger(__name__)
 
@@ -25,31 +26,31 @@ logger = logging.getLogger(__name__)
 class ToolOperation:
     """Read model for a tool operation from TimescaleDB.
 
-    Represents either a tool_started or tool_completed event.
+    Represents either a tool_execution_started or tool_execution_completed event.
     """
 
     observation_id: str
     tool_name: str
     tool_use_id: str | None
-    operation_type: str  # "tool_started" or "tool_completed"
+    operation_type: str  # "tool_execution_started" or "tool_execution_completed"
     timestamp: datetime
-    success: bool | None  # Only for tool_completed
+    success: bool | None  # Only for tool_execution_completed
     input_preview: str | None  # Truncated input for display
     output_preview: str | None  # Truncated output for display
-    duration_ms: int | None  # Only for tool_completed
+    duration_ms: int | None  # Only for tool_execution_completed
 
     @property
     def is_started(self) -> bool:
-        """Check if this is a tool_started event."""
-        return self.operation_type == "tool_started"
+        """Check if this is a tool_execution_started event."""
+        return self.operation_type == "tool_execution_started"
 
     @property
     def is_completed(self) -> bool:
-        """Check if this is a tool_completed event."""
-        return self.operation_type == "tool_completed"
+        """Check if this is a tool_execution_completed event."""
+        return self.operation_type == "tool_execution_completed"
 
 
-class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
+class SessionToolsProjection:
     """Projection for querying tool operations from TimescaleDB.
 
     Provides efficient queries for tool operations within a session,
@@ -59,6 +60,14 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
         projection = SessionToolsProjection(pool)
         operations = await projection.get("session-123")
     """
+
+    def __init__(self, pool: asyncpg.Pool | None = None) -> None:
+        """Initialize with optional connection pool.
+
+        Args:
+            pool: asyncpg connection pool for TimescaleDB
+        """
+        self._pool = pool
 
     async def get(self, session_id: str) -> list[ToolOperation]:
         """Get all tool operations for a session.
@@ -78,13 +87,12 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
                 rows = await conn.fetch(
                     """
                     SELECT
-                        observation_id,
-                        observation_type,
+                        event_type,
                         time,
                         data
-                    FROM agent_observations
+                    FROM agent_events
                     WHERE session_id = $1
-                      AND observation_type IN ('tool_started', 'tool_completed')
+                      AND event_type IN ('tool_execution_started', 'tool_execution_completed')
                     ORDER BY time ASC
                     """,
                     session_id,
@@ -118,7 +126,7 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
             return []
 
         # Build dynamic query
-        conditions = ["observation_type IN ('tool_started', 'tool_completed')"]
+        conditions = ["event_type IN ('tool_execution_started', 'tool_execution_completed')"]
         params: list[Any] = []
         param_idx = 1
 
@@ -141,11 +149,10 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
 
         query = f"""
             SELECT
-                observation_id,
-                observation_type,
+                event_type,
                 time,
                 data
-            FROM agent_observations
+            FROM agent_events
             WHERE {" AND ".join(conditions)}
             ORDER BY time ASC
             LIMIT ${param_idx}
@@ -163,7 +170,7 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
         """Convert a database row to a ToolOperation.
 
         Args:
-            row: Database row with observation data
+            row: Database row with event data
 
         Returns:
             ToolOperation read model
@@ -173,14 +180,18 @@ class SessionToolsProjection(ObservabilityProjection[list[ToolOperation]]):
         if isinstance(data, str):
             data = json.loads(data)
 
-        observation_type = row["observation_type"]
-        is_completed = observation_type == "tool_completed"
+        event_type = row["event_type"]
+        is_completed = event_type == "tool_execution_completed"
+
+        # Generate a unique ID from the row data
+        tool_use_id = data.get("tool_use_id", "")
+        obs_id = data.get("observation_id") or f"{tool_use_id}-{row['time'].isoformat()}"
 
         return ToolOperation(
-            observation_id=row["observation_id"],
+            observation_id=obs_id or str(uuid4()),
             tool_name=data.get("tool_name", "unknown"),
             tool_use_id=data.get("tool_use_id"),
-            operation_type=observation_type,
+            operation_type=event_type,
             timestamp=row["time"],
             success=data.get("success") if is_completed else None,
             input_preview=data.get("input_preview"),

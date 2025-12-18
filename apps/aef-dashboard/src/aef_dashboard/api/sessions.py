@@ -86,21 +86,20 @@ async def get_session(session_id: str) -> SessionResponse:
     # Get cost data from TimescaleDB via SessionCostProjection
     session_cost = await manager.session_cost.get_session_cost(timescale_session_id)
 
-    # Get workspace_path from execution_started observation
+    # Get workspace_path from execution_started event (ADR-029)
     workspace_path: str | None = None
     try:
-        from aef_adapters.storage.observability_writer import get_observability_writer
+        from aef_adapters.events import get_event_store
 
-        writer = get_observability_writer()
-        if writer.pool is None:
-            await writer.initialize()
-        if writer.pool:
-            async with writer.pool.acquire() as conn:
+        store = get_event_store()
+        await store.initialize()
+        if store.pool:
+            async with store.pool.acquire() as conn:
                 result = await conn.fetchval(
                     """
                     SELECT data->>'workspace_path'
-                    FROM agent_observations
-                    WHERE session_id = $1 AND observation_type = 'execution_started'
+                    FROM agent_events
+                    WHERE session_id = $1 AND event_type = 'execution_started'
                     ORDER BY time DESC
                     LIMIT 1
                     """,

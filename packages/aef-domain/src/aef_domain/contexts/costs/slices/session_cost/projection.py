@@ -3,10 +3,10 @@
 Pattern: Event Log + CQRS (ADR-018 Pattern 2)
 
 Data Sources:
-- TimescaleDB: agent_observations table (token_usage, tool_started, tool_completed)
+- TimescaleDB: agent_events table (token_usage, tool_execution_completed)
 - Event Store: SessionCostFinalized events (optional finalized totals)
 
-See ADR-026: TimescaleDB for Observability Storage
+See ADR-029: Simplified Event System
 """
 
 from datetime import datetime
@@ -31,15 +31,15 @@ class SessionCostProjection:
 
     PROJECTION_NAME = "session_cost"
 
-    def __init__(self, store: Any, observability_writer: Any | None = None):
-        """Initialize with a projection store and optional observability writer.
+    def __init__(self, store: Any, pool: Any | None = None):
+        """Initialize with a projection store and optional DB pool.
 
         Args:
             store: A ProjectionStoreProtocol implementation
-            observability_writer: ObservabilityWriter for querying TimescaleDB
+            pool: asyncpg Pool for querying TimescaleDB (ADR-029)
         """
         self._store = store
-        self._observability_writer = observability_writer
+        self._pool = pool
 
     @property
     def name(self) -> str:
@@ -57,8 +57,8 @@ class SessionCostProjection:
         if not session_id:
             return
 
-        observation_type = event_data.get("observation_type")
-        if not observation_type:
+        event_type = event_data.get("event_type")
+        if not event_type:
             return
 
         # Get existing session cost or create new
@@ -88,7 +88,7 @@ class SessionCostProjection:
         data = event_data.get("data", {})
 
         # Handle TOKEN_USAGE observations
-        if observation_type == ObservationType.TOKEN_USAGE.value:
+        if event_type == ObservationType.TOKEN_USAGE.value:
             input_tokens = data.get("input_tokens") or 0
             output_tokens = data.get("output_tokens") or 0
             cache_creation = data.get("cache_creation_tokens") or 0
@@ -126,7 +126,7 @@ class SessionCostProjection:
             session_cost.turns += 1
 
         # Handle TOOL_COMPLETED observations
-        elif observation_type == ObservationType.TOOL_COMPLETED.value:
+        elif event_type == ObservationType.TOOL_COMPLETED.value:
             session_cost.tool_calls += 1
 
             # Track duration if available
@@ -235,7 +235,7 @@ class SessionCostProjection:
             SessionCost if found, None otherwise.
         """
         # Query TimescaleDB directly if observability_writer is available
-        if self._observability_writer is not None:
+        if self._pool is not None:
             return await self._calculate_from_timescale(session_id)
 
         # Fallback to projection store (legacy path)
@@ -253,21 +253,11 @@ class SessionCostProjection:
         Returns:
             SessionCost with aggregated metrics, or None if no observations found
         """
-        # Guard: this method should only be called when _observability_writer is set
-        if self._observability_writer is None:
+        # Guard: this method should only be called when _pool is set
+        if self._pool is None:
             return None
 
-        # Lazy-initialize pool if needed (singleton may not be initialized yet)
-        if self._observability_writer.pool is None:
-            try:
-                await self._observability_writer.initialize()
-            except Exception:
-                return None  # TimescaleDB not available
-
-        if self._observability_writer.pool is None:
-            return None
-
-        async with self._observability_writer.pool.acquire() as conn:
+        async with self._pool.acquire() as conn:
             # First try execution_completed which has reliable totals
             # (SDK only provides token usage in ResultMessage, not per-turn)
             exec_result = await conn.fetchrow(
@@ -281,8 +271,8 @@ class SessionCostProjection:
                     execution_id,
                     phase_id,
                     workspace_id
-                FROM agent_observations
-                WHERE session_id = $1 AND observation_type = 'execution_completed'
+                FROM agent_events
+                WHERE session_id = $1 AND event_type = 'execution_completed'
                 ORDER BY time DESC
                 LIMIT 1
                 """,
@@ -303,8 +293,8 @@ class SessionCostProjection:
                         execution_id,
                         phase_id,
                         workspace_id
-                    FROM agent_observations
-                    WHERE session_id = $1 AND observation_type = 'token_usage'
+                    FROM agent_events
+                    WHERE session_id = $1 AND event_type = 'token_usage'
                     GROUP BY execution_id, phase_id, workspace_id
                     """,
                     session_id,
@@ -323,8 +313,8 @@ class SessionCostProjection:
                 tool_count = await conn.fetchval(
                     """
                     SELECT COUNT(*)
-                    FROM agent_observations
-                    WHERE session_id = $1 AND observation_type = 'tool_completed'
+                    FROM agent_events
+                    WHERE session_id = $1 AND event_type = 'tool_completed'
                     """,
                     session_id,
                 )
@@ -333,8 +323,8 @@ class SessionCostProjection:
             started_at = await conn.fetchval(
                 """
                 SELECT MIN(time)
-                FROM agent_observations
-                WHERE session_id = $1 AND observation_type IN ('session_started', 'execution_started')
+                FROM agent_events
+                WHERE session_id = $1 AND event_type IN ('session_started', 'execution_started')
                 """,
                 session_id,
             )
