@@ -45,6 +45,7 @@ class ObservationContext:
     phase_id: str | None = None
     workflow_id: str | None = None
     workspace_id: str | None = None
+    workspace_path: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

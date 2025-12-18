@@ -34,7 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-# Legacy observability imports (deprecated - use OTel-first approach)
+# Observability imports (deprecated - being replaced by AgentEventStore)
 import warnings
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -412,9 +412,9 @@ class WorkflowExecutor:
 
         # Use WorkspaceService for Docker isolation (ADR-024: Setup Phase Secrets)
         # This creates an isolated container with GitHub credentials pre-configured
-        # OTel config is injected for observability correlation (ADR-028)
-        otel_env = self._create_otel_environment(
-            ctx.workflow_id,
+        # Session context is injected for event correlation (ADR-029)
+        agent_env = self._create_agent_environment(
+            obs_context.session_id,
             ctx.execution_id,
             phase.phase_id,
             phase.name,
@@ -426,7 +426,7 @@ class WorkflowExecutor:
             phase_id=phase.phase_id,
             with_sidecar=False,  # Sidecar not needed with setup phase pattern
             inject_tokens=False,  # Handled by setup phase in container
-            extra_environment=otel_env,  # Inject OTel config for telemetry
+            extra_environment=agent_env,  # Inject session context for events
         ) as managed_workspace:
             workspace_path = managed_workspace.path
 
@@ -770,51 +770,32 @@ class WorkflowExecutor:
 
         return task
 
-    def _create_otel_environment(
+    def _create_agent_environment(
         self,
-        workflow_id: str,
+        session_id: str,
         execution_id: str,
         phase_id: str,
         phase_name: str,
     ) -> dict[str, str]:
-        """Create OTel environment variables for container injection.
+        """Create environment variables for agent container.
 
-        This injects AEF resource attributes as OTel environment variables
-        so all telemetry from the container can be correlated back to the
-        workflow execution. See ADR-028: OTel Platform Integration.
+        Injects session context so hooks can emit properly correlated events.
+        Events are emitted as JSONL to stdout (see ADR-029: Simplified Event System).
 
         Args:
-            workflow_id: Workflow template ID
+            session_id: Session ID for event correlation
             execution_id: Workflow execution ID
             phase_id: Phase ID within the execution
             phase_name: Human-readable phase name
 
         Returns:
-            Environment variables for OTel configuration
+            Environment variables for agent session context
         """
-        try:
-            from aef_adapters.observability import (
-                AEFSemanticConventions,
-                get_collector_endpoint,
-            )
-
-            conv = AEFSemanticConventions
-
-            # Build resource attributes string
-            resource_attrs = [
-                f"{conv.WORKFLOW_TEMPLATE_ID}={workflow_id}",
-                f"{conv.WORKFLOW_EXECUTION_ID}={execution_id}",
-                f"{conv.WORKFLOW_PHASE_ID}={phase_id}",
-                f"{conv.WORKFLOW_PHASE_NAME}={phase_name}",
-            ]
-
-            # TODO: Add tenant_id, pr_number, repo when available from context
-
-            return {
-                "OTEL_EXPORTER_OTLP_ENDPOINT": get_collector_endpoint(),
-                "OTEL_SERVICE_NAME": "agentic-agent",
-                "OTEL_RESOURCE_ATTRIBUTES": ",".join(resource_attrs),
-            }
-        except ImportError:
-            logger.warning("agentic_otel not available, skipping OTel injection")
-            return {}
+        return {
+            # Session ID for event correlation (used by hooks)
+            "CLAUDE_SESSION_ID": session_id,
+            # Execution context for event enrichment
+            "AEF_EXECUTION_ID": execution_id,
+            "AEF_PHASE_ID": phase_id,
+            "AEF_PHASE_NAME": phase_name,
+        }

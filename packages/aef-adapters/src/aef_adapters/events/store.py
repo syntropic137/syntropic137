@@ -272,6 +272,7 @@ class AgentEventStore:
         session_id: str,
         event_type: str | None = None,
         limit: int = 1000,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Query events for a session.
 
@@ -279,9 +280,10 @@ class AgentEventStore:
             session_id: Session ID to query
             event_type: Optional event type filter
             limit: Maximum events to return
+            offset: Offset for pagination
 
         Returns:
-            List of event dicts
+            List of event dicts with 'time', 'event_type', 'session_id', etc.
         """
         if not self._initialized:
             await self.initialize()
@@ -297,11 +299,12 @@ class AgentEventStore:
                     FROM agent_events
                     WHERE session_id = $1 AND event_type = $2
                     ORDER BY time DESC
-                    LIMIT $3
+                    LIMIT $3 OFFSET $4
                     """,
                     session_id,
                     event_type,
                     limit,
+                    offset,
                 )
             else:
                 rows = await conn.fetch(
@@ -310,20 +313,21 @@ class AgentEventStore:
                     FROM agent_events
                     WHERE session_id = $1
                     ORDER BY time DESC
-                    LIMIT $3
+                    LIMIT $2 OFFSET $3
                     """,
                     session_id,
                     limit,
+                    offset,
                 )
 
         return [
             {
-                "timestamp": row["time"].isoformat(),
+                "time": row["time"],
                 "event_type": row["event_type"],
                 "session_id": row["session_id"],
                 "execution_id": row["execution_id"],
                 "phase_id": row["phase_id"],
-                **json.loads(row["data"]),
+                "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
             }
             for row in rows
         ]
