@@ -163,8 +163,8 @@ class AgentEventStore:
         if self.pool is None:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
-        # Build COPY data
-        buffer = io.StringIO()
+        # Build COPY data as bytes
+        buffer = io.BytesIO()
         now = datetime.now(UTC)
 
         for event in events:
@@ -196,7 +196,8 @@ class AgentEventStore:
                 evt_phase_id or "\\N",
                 json.dumps(data),
             ]
-            buffer.write("\t".join(str(v) for v in row) + "\n")
+            line = "\t".join(str(v) for v in row) + "\n"
+            buffer.write(line.encode("utf-8"))
 
         buffer.seek(0)
 
@@ -375,7 +376,7 @@ class AgentEventStore:
                     FROM agent_events
                     WHERE execution_id = $1
                     ORDER BY time DESC
-                    LIMIT $3
+                    LIMIT $2
                     """,
                     execution_id,
                     limit,
