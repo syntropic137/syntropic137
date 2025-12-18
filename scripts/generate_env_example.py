@@ -105,6 +105,7 @@ def get_section_from_field_name(field_name: str) -> str:
     prefixes = {
         "app_": "APPLICATION",
         "database_": "DATABASE",
+        "timescale_": "DATABASE",  # Unified TimescaleDB (ADR-030)
         "event_store_": "EVENT STORE",
         "log_": "LOGGING",
         "anthropic_": "AGENT CONFIGURATION",
@@ -113,6 +114,9 @@ def get_section_from_field_name(field_name: str) -> str:
         "default_max_": "AGENT CONFIGURATION",
         "artifact_": "STORAGE",
         "s3_": "STORAGE",
+        "collector_": "OBSERVABILITY",
+        "hook_": "OBSERVABILITY",
+        "dashboard_": "DASHBOARD",
     }
 
     for prefix, section in prefixes.items():
@@ -213,6 +217,8 @@ def generate_env_example() -> str:
         "APPLICATION",
         "DATABASE",
         "EVENT STORE",
+        "OBSERVABILITY",
+        "DASHBOARD",
         "LOGGING",
         "AGENT CONFIGURATION",
         "STORAGE",

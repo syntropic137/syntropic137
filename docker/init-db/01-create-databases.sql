@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS public.agent_events (
     phase_id VARCHAR(255),
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     data JSONB NOT NULL DEFAULT '{}',
-    
+
     -- Composite primary key for hypertable
     PRIMARY KEY (id, timestamp)
 );
@@ -57,13 +57,13 @@ ALTER TABLE public.agent_events SET (
 SELECT add_compression_policy('public.agent_events', INTERVAL '7 days', if_not_exists => TRUE);
 
 -- Indexes for common query patterns
-CREATE INDEX IF NOT EXISTS idx_agent_events_session 
+CREATE INDEX IF NOT EXISTS idx_agent_events_session
 ON public.agent_events (session_id, timestamp DESC);
 
-CREATE INDEX IF NOT EXISTS idx_agent_events_execution 
+CREATE INDEX IF NOT EXISTS idx_agent_events_execution
 ON public.agent_events (execution_id, timestamp DESC);
 
-CREATE INDEX IF NOT EXISTS idx_agent_events_type 
+CREATE INDEX IF NOT EXISTS idx_agent_events_type
 ON public.agent_events (event_type, timestamp DESC);
 
 -- =============================================================================
@@ -92,12 +92,12 @@ CREATE TABLE IF NOT EXISTS public.artifacts (
     content_hash VARCHAR(64),
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     CONSTRAINT unique_workflow_artifact UNIQUE (workflow_id, phase_name, artifact_name)
 );
 
 -- Index for workflow artifact lookups
-CREATE INDEX IF NOT EXISTS idx_artifacts_workflow 
+CREATE INDEX IF NOT EXISTS idx_artifacts_workflow
 ON public.artifacts (workflow_id, phase_name);
 
 -- =============================================================================
