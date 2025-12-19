@@ -1,12 +1,23 @@
 """Workflow execution API endpoint.
 
 This module provides the API endpoint to trigger workflow execution
-using the AgenticWorkflowExecutor. Events are streamed to SSE in real-time.
+using the WorkflowExecutionEngine. Status is queried from the
+WorkflowExecutionDetailProjection which is updated via event sourcing.
+
+Architecture:
+  POST /execute → ExecutionService.run_workflow() → WorkflowExecutionEngine
+                                                         ↓
+                                               Event Store (persisted)
+                                                         ↓
+                                           WorkflowExecutionDetailProjection
+                                                         ↓
+  GET /status  → ExecutionService.get_execution_status() ←────────────┘
 """
 
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
@@ -17,13 +28,14 @@ from aef_dashboard.models.schemas import (
     ExecutionStatusResponse,
 )
 
+if TYPE_CHECKING:
+    from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
+        WorkflowExecutionDetail,
+    )
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workflows", tags=["execution"])
-
-# In-memory execution tracking
-# In production, use Redis or database
-_active_executions: dict[str, dict] = {}
 
 
 @router.post("/{workflow_id}/execute", response_model=ExecuteWorkflowResponse)
@@ -35,8 +47,10 @@ async def execute_workflow(
     """Start workflow execution.
 
     This endpoint triggers asynchronous workflow execution using the
-    AgenticWorkflowExecutor. Events are streamed to the SSE endpoint
-    in real-time as execution progresses.
+    WorkflowExecutionEngine. Events flow through the event store and
+    update the WorkflowExecutionDetailProjection in real-time.
+
+    Query status via GET /workflows/{workflow_id}/executions/{execution_id}
 
     Args:
         workflow_id: The ID of the workflow to execute.
@@ -49,24 +63,13 @@ async def execute_workflow(
     Raises:
         HTTPException: If workflow not found or execution fails to start.
     """
-    # Import here to avoid circular imports and allow worktree imports
+    # Import here to avoid circular imports
     from aef_dashboard.services.execution import ExecutionService
 
     execution_id = str(uuid4())
 
-    # Track execution
-    _active_executions[execution_id] = {
-        "workflow_id": workflow_id,
-        "status": "starting",
-        "current_phase": None,
-        "completed_phases": 0,
-        "total_phases": 0,
-        "started_at": None,
-        "completed_at": None,
-        "error": None,
-    }
-
-    # Start execution in background
+    # Start execution in background - no in-memory tracking needed
+    # Status is persisted via events → WorkflowExecutionDetailProjection
     service = ExecutionService()
     background_tasks.add_task(
         service.run_workflow,
@@ -75,7 +78,6 @@ async def execute_workflow(
         inputs=request.inputs,
         provider=request.provider,
         max_budget_usd=request.max_budget_usd,
-        execution_tracker=_active_executions,
     )
 
     logger.info(
@@ -102,6 +104,9 @@ async def get_execution_status(
 ) -> ExecutionStatusResponse:
     """Get the status of a workflow execution.
 
+    Queries the WorkflowExecutionDetailProjection which is updated
+    in real-time as events flow through the event store.
+
     Args:
         workflow_id: The workflow ID.
         execution_id: The execution ID returned from execute.
@@ -112,31 +117,52 @@ async def get_execution_status(
     Raises:
         HTTPException: If execution not found.
     """
-    if execution_id not in _active_executions:
+    from aef_dashboard.services.execution import ExecutionService
+
+    service = ExecutionService()
+    detail = await service.get_execution_status(execution_id)
+
+    if detail is None:
         raise HTTPException(
             status_code=404,
             detail=f"Execution {execution_id} not found",
         )
 
-    exec_info = _active_executions[execution_id]
-
-    if exec_info["workflow_id"] != workflow_id:
+    if detail.workflow_id != workflow_id:
         raise HTTPException(
             status_code=404,
             detail=f"Execution {execution_id} not found for workflow {workflow_id}",
         )
 
+    # Map projection detail to API response
     return ExecutionStatusResponse(
-        execution_id=execution_id,
-        workflow_id=workflow_id,
-        status=exec_info["status"],
-        current_phase=exec_info.get("current_phase"),
-        completed_phases=exec_info.get("completed_phases", 0),
-        total_phases=exec_info.get("total_phases", 0),
-        started_at=exec_info.get("started_at"),
-        completed_at=exec_info.get("completed_at"),
-        error=exec_info.get("error"),
+        execution_id=detail.execution_id,
+        workflow_id=detail.workflow_id,
+        status=detail.status,
+        current_phase=_get_current_phase(detail),
+        completed_phases=_count_completed_phases(detail),
+        total_phases=len(detail.phases) if detail.phases else 0,
+        started_at=detail.started_at,
+        completed_at=detail.completed_at,
+        error=detail.error_message,
     )
+
+
+def _get_current_phase(detail: WorkflowExecutionDetail) -> str | None:
+    """Get the currently running phase ID from detail."""
+    if not detail.phases:
+        return None
+    for phase in detail.phases:
+        if phase.get("status") == "running":
+            return phase.get("phase_id")
+    return None
+
+
+def _count_completed_phases(detail: WorkflowExecutionDetail) -> int:
+    """Count completed phases from detail."""
+    if not detail.phases:
+        return 0
+    return sum(1 for p in detail.phases if p.get("status") == "completed")
 
 
 @router.get("/executions/active")
@@ -145,23 +171,39 @@ async def list_active_executions(
 ) -> list[ExecutionStatusResponse]:
     """List all active (non-completed) executions.
 
+    Queries the WorkflowExecutionListProjection for running executions.
+
     Returns:
         List of active execution statuses.
     """
-    active = [
-        ExecutionStatusResponse(
-            execution_id=exec_id,
-            workflow_id=info["workflow_id"],
-            status=info["status"],
-            current_phase=info.get("current_phase"),
-            completed_phases=info.get("completed_phases", 0),
-            total_phases=info.get("total_phases", 0),
-            started_at=info.get("started_at"),
-            completed_at=info.get("completed_at"),
-            error=info.get("error"),
-        )
-        for exec_id, info in _active_executions.items()
-        if info["status"] not in ("completed", "failed")
-    ]
+    from aef_adapters.projections import get_projection_manager
 
-    return active[:limit]
+    manager = get_projection_manager()
+
+    # Query executions with status 'running' or 'paused'
+    # The list projection provides a filtered view
+    all_executions = await manager.workflow_execution_list.list_recent(limit=limit * 2)
+
+    active = []
+    for exec_summary in all_executions:
+        if exec_summary.status in ("running", "paused", "starting"):
+            # Get full detail for the response
+            detail = await manager.workflow_execution_detail.get_by_id(exec_summary.execution_id)
+            if detail:
+                active.append(
+                    ExecutionStatusResponse(
+                        execution_id=detail.execution_id,
+                        workflow_id=detail.workflow_id,
+                        status=detail.status,
+                        current_phase=_get_current_phase(detail),
+                        completed_phases=_count_completed_phases(detail),
+                        total_phases=len(detail.phases) if detail.phases else 0,
+                        started_at=detail.started_at,
+                        completed_at=detail.completed_at,
+                        error=detail.error_message,
+                    )
+                )
+            if len(active) >= limit:
+                break
+
+    return active

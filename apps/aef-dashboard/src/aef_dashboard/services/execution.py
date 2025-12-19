@@ -3,14 +3,14 @@
 This service orchestrates workflow execution using the WorkflowExecutionEngine
 from aef_domain. It handles:
 - Wiring up dependencies (repositories, workspace service, agent factory)
-- Tracking execution status for the Dashboard UI
-- Running executions in background tasks
+- Delegating execution to WorkflowExecutionEngine
+- Querying execution status from WorkflowExecutionDetailProjection
 
 Real-time UI updates flow through the event store:
   Event Store → Subscription Service → RealTimeProjection → WebSocket
 
-This follows proper event sourcing patterns - all events flow through the
-event store, and the UI is updated via projections.
+Status queries flow through the projection:
+  Event Store → WorkflowExecutionDetailProjection → Dashboard API
 
 Architecture (ADR-023, ADR-029):
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -26,14 +26,15 @@ Architecture (ADR-023, ADR-029):
 │       ├─> Creates container via WorkspaceService                             │
 │       └─> Runs Claude CLI via workspace.stream()                            │
 │                                                                              │
-│  Event Store → Subscription Service → RealTimeProjection → WebSocket        │
+│  Event Store → Subscription → WorkflowExecutionDetailProjection             │
+│                     │                                                        │
+│                     └─> RealTimeProjection → WebSocket                       │
 └─────────────────────────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentic_logging import get_logger
 
@@ -55,16 +56,21 @@ from aef_domain.contexts.workflows import (
     WorkflowExecutionResult,
 )
 
+if TYPE_CHECKING:
+    from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
+        WorkflowExecutionDetail,
+    )
+
 logger = get_logger(__name__)
 
 
 class ExecutionService:
     """Orchestrates workflow execution via WorkflowExecutionEngine.
 
-    This service is a thin wrapper that:
+    This service:
     1. Wires up dependencies from aef_adapters
     2. Calls WorkflowExecutionEngine.execute()
-    3. Updates the in-memory tracker for Dashboard status polling
+    3. Queries execution status from WorkflowExecutionDetailProjection
 
     All business logic, event persistence, and agent execution is handled
     by WorkflowExecutionEngine in aef_domain.
@@ -113,12 +119,11 @@ class ExecutionService:
         inputs: dict[str, str],
         provider: str = "claude",
         max_budget_usd: float | None = None,  # noqa: ARG002 - Reserved for future budget tracking
-        execution_tracker: dict[str, dict] | None = None,
-    ) -> None:
+    ) -> WorkflowExecutionResult:
         """Run a workflow execution.
 
-        This method runs in a background task and updates the tracker
-        as execution progresses.
+        This method executes the workflow and returns the result.
+        Status is persisted via events → WorkflowExecutionDetailProjection.
 
         Args:
             execution_id: Unique ID for this execution.
@@ -126,89 +131,70 @@ class ExecutionService:
             inputs: Input variables for the workflow.
             provider: Agent provider to use (default: claude).
             max_budget_usd: Optional budget cap (not yet implemented).
-            execution_tracker: Dict to update with execution status.
-        """
-        # TODO: Replace in-memory tracker with WorkflowExecutionDetailProjection query
-        # The proper pattern is: Event Store → Subscription → Projection → API query
-        # This in-memory dict is a temporary workaround for real-time status during execution
-        tracker = execution_tracker or {}
 
-        try:
-            # Initialize tracker
-            tracker[execution_id] = {
-                "status": "starting",
-                "started_at": datetime.now(UTC),
+        Returns:
+            WorkflowExecutionResult with execution outcome.
+        """
+        logger.info(
+            "Starting workflow execution",
+            extra={
+                "execution_id": execution_id,
                 "workflow_id": workflow_id,
                 "provider": provider,
-            }
+            },
+        )
 
+        # Create engine with all dependencies wired up
+        engine = self._create_execution_engine()
+
+        # Execute workflow - engine handles everything:
+        # - Loading workflow definition
+        # - Creating workspace/container
+        # - Running phases with Claude CLI
+        # - Persisting events via aggregates (→ projection updates)
+        # - Creating artifacts
+        result: WorkflowExecutionResult = await engine.execute(
+            workflow_id=workflow_id,
+            inputs=inputs,
+            execution_id=execution_id,
+            use_container=True,  # Run in isolated Docker container
+        )
+
+        if result.is_success:
             logger.info(
-                "Starting workflow execution",
+                "Workflow execution completed",
                 extra={
                     "execution_id": execution_id,
                     "workflow_id": workflow_id,
-                    "provider": provider,
+                    "phases": result.metrics.completed_phases,
+                    "tokens": result.metrics.total_tokens,
+                },
+            )
+        else:
+            logger.warning(
+                "Workflow execution failed",
+                extra={
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "error": result.error_message,
                 },
             )
 
-            # Create engine with all dependencies wired up
-            engine = self._create_execution_engine()
+        return result
 
-            # Update tracker to running
-            tracker[execution_id]["status"] = "running"
+    async def get_execution_status(self, execution_id: str) -> WorkflowExecutionDetail | None:
+        """Get the current status of an execution from the projection.
 
-            # Execute workflow - engine handles everything:
-            # - Loading workflow definition
-            # - Creating workspace/container
-            # - Running phases with Claude CLI
-            # - Persisting events via aggregates
-            # - Creating artifacts
-            result: WorkflowExecutionResult = await engine.execute(
-                workflow_id=workflow_id,
-                inputs=inputs,
-                execution_id=execution_id,
-                use_container=True,  # Run in isolated Docker container
-            )
+        This queries the WorkflowExecutionDetailProjection which is updated
+        in real-time as events flow through the event store.
 
-            # Update tracker with result
-            tracker[execution_id].update(
-                {
-                    "status": "completed" if result.is_success else "failed",
-                    "completed_at": result.completed_at or datetime.now(UTC),
-                    "total_phases": result.metrics.total_phases,
-                    "completed_phases": result.metrics.completed_phases,
-                    "total_tokens": result.metrics.total_tokens,
-                    "total_cost_usd": float(result.metrics.total_cost_usd),
-                    "artifact_ids": result.artifact_ids,
-                    "error": result.error_message,
-                }
-            )
+        Args:
+            execution_id: The execution ID.
 
-            if result.is_success:
-                logger.info(
-                    "Workflow execution completed",
-                    extra={
-                        "execution_id": execution_id,
-                        "workflow_id": workflow_id,
-                        "phases": result.metrics.completed_phases,
-                        "tokens": result.metrics.total_tokens,
-                    },
-                )
-            else:
-                logger.warning(
-                    "Workflow execution failed",
-                    extra={
-                        "execution_id": execution_id,
-                        "workflow_id": workflow_id,
-                        "error": result.error_message,
-                    },
-                )
+        Returns:
+            WorkflowExecutionDetail or None if not found.
+        """
+        from aef_adapters.projections import get_projection_manager
 
-        except Exception as e:
-            logger.exception("Workflow execution failed unexpectedly")
-            tracker[execution_id] = {
-                **tracker.get(execution_id, {}),
-                "status": "failed",
-                "error": str(e),
-                "completed_at": datetime.now(UTC),
-            }
+        manager = get_projection_manager()
+        return await manager.workflow_execution_detail.get_by_id(execution_id)
