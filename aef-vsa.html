@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html><head><title>AEF Vertical Slice Architecture</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:'SF Mono',Monaco,monospace;background:linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);min-height:100vh;padding:20px}
+h1{color:#fff;text-align:center;margin:0 0 10px;font-size:24px}
+.subtitle{color:#888;text-align:center;margin-bottom:30px;font-size:13px}
+.container{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;padding:20px}
+.slice{background:rgba(30,30,50,0.8);border-radius:16px;padding:15px;min-width:140px;border:1px solid rgba(255,255,255,0.1)}
+.slice-name{color:#fff;font-weight:bold;text-align:center;margin-bottom:12px;font-size:14px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.1)}
+.layer{margin:8px 0;padding:10px;border-radius:8px;cursor:pointer;transition:all 0.2s}
+.layer:hover{transform:scale(1.02);box-shadow:0 4px 12px rgba(0,0,0,0.3)}
+.layer-name{font-size:11px;opacity:0.8;margin-bottom:4px}
+.layer-count{font-size:18px;font-weight:bold}
+.layer-health{font-size:10px;opacity:0.7;margin-top:4px}
+.empty-layer{background:rgba(255,255,255,0.03);border:1px dashed rgba(255,255,255,0.1);color:rgba(255,255,255,0.2);text-align:center;font-size:10px;padding:15px 10px}
+.legend{position:fixed;bottom:20px;left:20px;background:rgba(20,20,40,0.95);padding:15px;border-radius:12px;color:#e0e0e0}
+.legend h4{margin:0 0 10px;font-size:13px;color:#fff}
+.legend-item{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:11px}
+.legend-dot{width:16px;height:16px;border-radius:4px}
+#tooltip{position:fixed;padding:12px;background:rgba(10,10,20,0.98);color:#fff;border-radius:10px;display:none;z-index:1000;max-width:250px;font-size:12px;border:1px solid rgba(255,255,255,0.2)}
+.module-chip{display:inline-block;padding:2px 6px;margin:2px;background:rgba(255,255,255,0.1);border-radius:4px;font-size:10px}
+.insight{position:fixed;top:20px;right:20px;background:rgba(20,20,40,0.95);padding:15px;border-radius:12px;color:#e0e0e0;max-width:280px}
+.insight h4{margin:0 0 10px;color:#4ecdc4;font-size:13px}
+.insight p{margin:5px 0;font-size:11px;line-height:1.5}
+.good{color:#4ecdc4}
+.bad{color:#ff6b6b}
+</style></head>
+<body>
+<h1>🍰 Vertical Slice Architecture View</h1>
+<p class="subtitle">Each column = feature slice | Each row = architectural layer | Height = module count</p>
+<div class="container" id="slices"></div>
+<div class="legend">
+  <h4>Layers (Top → Bottom)</h4>
+  <div class="legend-item"><div class="legend-dot" style="background:#ff6b6b"></div>Handlers (API/Controllers)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#4ecdc4"></div>Services (Use Cases)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#45b7d1"></div>Models (Domain/Entities)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#96ceb4"></div>Utils (Shared)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#888888"></div>Other</div>
+</div>
+<div class="insight">
+  <h4>📊 VSA Health Check</h4>
+  <p><span class="good">✓ Good:</span> Tall slices = self-contained features</p>
+  <p><span class="good">✓ Good:</span> Each slice has all layers</p>
+  <p><span class="bad">✗ Bad:</span> Wide "utils" layer = shared coupling</p>
+  <p><span class="bad">✗ Bad:</span> Missing layers = incomplete slices</p>
+</div>
+<div id="tooltip"></div>
+<script>
+const data = {"slices": [{"name": "worktrees", "x": 0, "layers": {"handlers": {"count": 50, "complexity": 366, "health": 95, "modules": ["artifacts", "costs", "handler", "handler", "handler"]}, "services": {"count": 14, "complexity": 522, "health": 92, "modules": ["service", "control", "service", "workspace_service", "control"]}, "models": {"count": 42, "complexity": 276, "health": 99, "modules": ["token_metrics", "models", "token_metrics", "workspace_metrics", "artifact_storage"]}, "utils": {"count": 10, "complexity": 218, "health": 92, "modules": ["router", "main", "protocol", "router", "protocol"]}, "other": {"count": 315, "complexity": 6715, "health": 93, "modules": ["projection", "protocol", "token_vending_adapter", "store", "cli"]}}}, {"name": "packages", "x": 1, "layers": {"handlers": {"count": 11, "complexity": 81, "health": 99, "modules": ["handler", "controller", "handler", "handler", "handler"]}, "services": {"count": 5, "complexity": 160, "health": 93, "modules": ["service", "service", "tool_token_estimator", "artifact_query_service", "workspace_service"]}, "models": {"count": 21, "complexity": 138, "health": 99, "modules": ["workspace_metrics", "tool_execution", "session_cost", "session_summary", "workflow_execution_summary"]}, "other": {"count": 129, "complexity": 2590, "health": 94, "modules": ["storage", "projection", "github_client", "storage", "in_memory"]}}}, {"name": "agentic-primitives", "x": 2, "layers": {"handlers": {"count": 23, "complexity": 88, "health": 100, "modules": ["agent", "session-end", "stop", "pre-tool-use", "sessions"]}, "services": {"count": 15, "complexity": 112, "health": 99, "modules": ["openai", "event_normalizer", "event_publisher", "event_importer", "normalizer"]}, "models": {"count": 5, "complexity": 18, "health": 94, "modules": ["models", "config", "schemas", "hook_input", "models"]}, "utils": {"count": 48, "complexity": 614, "health": 97, "modules": ["exceptions", "scenarios", "github", "firecrawl_scraper", "receiver"]}}}, {"name": "apps", "x": 3, "layers": {"handlers": {"count": 12, "complexity": 89, "health": 93, "modules": ["events", "execution", "metrics", "workflows", "executions"]}, "services": {"count": 2, "complexity": 103, "health": 88, "modules": ["execution", "control"]}, "other": {"count": 8, "complexity": 454, "health": 88, "modules": ["workflow", "read_models", "config", "control", "config"]}}}, {"name": "event-sourcing-platform", "x": 4, "layers": {"utils": {"count": 20, "complexity": 372, "health": 99, "modules": ["eventstore_pb2_grpc", "events", "render_config", "memory_checkpoint", "event_store"]}}}, {"name": "ui-feedback", "x": 5, "layers": {"handlers": {"count": 3, "complexity": 21, "health": 92, "modules": ["media", "feedback", "stats"]}, "utils": {"count": 5, "complexity": 109, "health": 92, "modules": ["memory", "main", "postgres", "protocol", "router"]}}}, {"name": "scripts", "x": 6, "layers": {"other": {"count": 8, "complexity": 154, "health": 92, "modules": ["e2e_true_agentic_workflow", "generate_env_example", "demo_workspace_events", "pre_merge_validation", "e2e_acceptance_tests"]}}}, {"name": "manifest", "x": 7, "layers": {"other": {"count": 3, "complexity": 49, "health": 91, "modules": ["manifest", "manifest", "manifest"]}}}, {"name": "build", "x": 8, "layers": {"other": {"count": 3, "complexity": 29, "health": 89, "modules": ["build", "firecrawl_scraper", "build"]}}}, {"name": "projection", "x": 9, "layers": {"other": {"count": 2, "complexity": 23, "health": 92, "modules": ["projection", "projection"]}}}, {"name": "core", "x": 10, "layers": {"models": {"count": 1, "complexity": 17, "health": 100, "modules": ["models"]}, "other": {"count": 1, "complexity": 52, "health": 78, "modules": ["src"]}}}, {"name": "init", "x": 11, "layers": {"other": {"count": 2, "complexity": 13, "health": 95, "modules": ["init", "init"]}}}], "layers": ["handlers", "services", "models", "utils", "other"], "colors": {"handlers": "#ff6b6b", "services": "#4ecdc4", "models": "#45b7d1", "utils": "#96ceb4", "other": "#888888"}};
+const container = document.getElementById("slices");
+const tooltip = document.getElementById("tooltip");
+
+data.slices.forEach(slice => {
+    const col = document.createElement("div");
+    col.className = "slice";
+    col.innerHTML = `<div class="slice-name">${slice.name}</div>`;
+    
+    data.layers.forEach(layer => {
+        const layerData = slice.layers[layer];
+        if (layerData) {
+            const div = document.createElement("div");
+            div.className = "layer";
+            div.style.background = data.colors[layer];
+            div.style.height = (30 + layerData.count * 15) + "px";
+            div.innerHTML = `
+                <div class="layer-name">${layer}</div>
+                <div class="layer-count">${layerData.count}</div>
+                <div class="layer-health">${layerData.health}% health</div>
+            `;
+            div.onmouseenter = e => {
+                tooltip.style.display = "block";
+                tooltip.innerHTML = `
+                    <div style="font-weight:bold;color:${data.colors[layer]}">${slice.name} / ${layer}</div>
+                    <div style="margin-top:8px">Modules: <b>${layerData.count}</b></div>
+                    <div>Complexity: ${layerData.complexity}</div>
+                    <div>Health: ${layerData.health}%</div>
+                    <div style="margin-top:8px">${layerData.modules.map(m => '<span class="module-chip">' + m + '</span>').join("")}</div>
+                `;
+            };
+            div.onmousemove = e => {
+                tooltip.style.left = e.clientX + 15 + "px";
+                tooltip.style.top = e.clientY + 15 + "px";
+            };
+            div.onmouseleave = () => tooltip.style.display = "none";
+            col.appendChild(div);
+        } else {
+            const empty = document.createElement("div");
+            empty.className = "empty-layer";
+            empty.textContent = "no " + layer;
+            col.appendChild(empty);
+        }
+    });
+    
+    container.appendChild(col);
+});
+</script>
+</body></html>

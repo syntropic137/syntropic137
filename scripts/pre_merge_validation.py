@@ -257,31 +257,27 @@ class PreMergeValidator:
             details=output[-500:] if not success else "",
         )
 
-    async def check_agent_runner_installed(self) -> ValidationResult:
-        """Check aef-agent-runner can be imported."""
-        logger.info("🔍 Checking aef-agent-runner installation...")
+    async def check_agentic_events_installed(self) -> ValidationResult:
+        """Check agentic-events can be imported (ADR-029)."""
+        logger.info("🔍 Checking agentic-events installation...")
 
         success, output, duration = await self.run_command(
             [
                 "uv",
                 "run",
-                "--package",
-                "aef-agent-runner",
                 "python",
                 "-c",
-                "import aef_agent_runner; print(aef_agent_runner.__version__)",
+                "from agentic_events import EventEmitter, parse_jsonl_line; print('OK')",
             ],
-            "Agent runner check",
+            "agentic-events check",
             timeout=60,
         )
 
-        version = output.strip() if success else "not found"
-
         return ValidationResult(
-            name="Agent Runner Package",
+            name="agentic-events Package",
             passed=success,
             duration_ms=duration,
-            message=f"aef-agent-runner available ({version}) ✅" if success else "Not installed ❌",
+            message="agentic-events available ✅" if success else "Not installed ❌",
             details="" if success else output,
         )
 
@@ -327,7 +323,7 @@ class PreMergeValidator:
         self.results.append(await self.check_typecheck())
         self.results.append(await self.check_unit_tests())
         self.results.append(await self.check_docker_image())
-        self.results.append(await self.check_agent_runner_installed())
+        self.results.append(await self.check_agentic_events_installed())
         self.results.append(await self.check_e2e_container_test())
 
         return self._print_summary()

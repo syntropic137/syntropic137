@@ -398,6 +398,41 @@ class AgentEventStore:
             for row in rows
         ]
 
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: str,
+        data: dict[str, Any],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        """Record an observation event (ObservabilityWriter interface for ADR-026).
+
+        This method adapts the WorkflowExecutionEngine's observability API
+        to the AgentEventStore's insert_one method.
+
+        Args:
+            session_id: Session ID
+            observation_type: Type of observation (e.g., "token_usage", "tool_started")
+            data: Observation data
+            execution_id: Optional execution ID
+            phase_id: Optional phase ID
+            workspace_id: Optional workspace ID
+        """
+        event = {
+            "event_type": observation_type,
+            "session_id": session_id,
+            "timestamp": datetime.now(UTC),
+            "workspace_id": workspace_id,
+            **data,
+        }
+        await self.insert_one(
+            event=event,
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
+
     async def close(self) -> None:
         """Close connection pool."""
         if self.pool:

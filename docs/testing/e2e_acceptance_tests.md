@@ -2463,7 +2463,7 @@ docker exec aef-postgres psql -U aef -d aef -c \
 | 17.7.4 | `WORKSPACE_TASK_FILE = /workspace/.context/task.json` | ⬜ |
 | 17.7.5 | `WORKSPACE_ANALYTICS_DIR = /workspace/.agentic/analytics` | ⬜ |
 | 17.7.6 | All paths are `PurePosixPath` type | ⬜ |
-| 17.7.7 | aef-agent-runner imports from aef_shared | ⬜ |
+| 17.7.7 | agentic_events available in container (ADR-029) | ⬜ |
 | 17.7.8 | aef-adapters imports from aef_shared | ⬜ |
 | 17.7.9 | Type checking passes (mypy/pyright) | ⬜ |
 
@@ -2480,7 +2480,7 @@ print(f'TASK: {WORKSPACE_TASK_FILE}')
 
 # Type check
 cd packages/aef-shared && uv run mypy src/
-cd packages/aef-agent-runner && uv run mypy src/
+cd packages/aef-domain && uv run mypy src/
 ```
 
 ### F17.8 End-to-End Container Execution ⭐ CRITICAL

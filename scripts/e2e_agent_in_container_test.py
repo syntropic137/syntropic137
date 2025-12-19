@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """E2E Test: Agent-in-Container Execution Flow.
 
-This script validates the full agent-in-container architecture:
+This script validates the full agent-in-container architecture (ADR-029):
 
-1. Build workspace image with aef-agent-runner
+1. Build workspace image with Claude CLI + agentic_events hooks
 2. Start sidecar proxy container
 3. Create isolated workspace linked to sidecar network
-4. Write task.json
-5. Execute agent runner via streaming
-6. Parse JSONL events
-7. Verify artifacts
-8. Cleanup
+4. Execute Claude CLI via streaming
+5. Parse JSONL events from hooks
+6. Verify artifacts
+7. Cleanup
+
+NOTE: This script uses the simplified event system (ADR-029).
+      Claude CLI runs directly with agentic_events hooks for observability.
 
 Prerequisites:
 - Docker installed and running
-- AEF workspace image built: ./docker/workspace/build.sh
+- AEF workspace image built: just workspace-build
 - Sidecar image built: docker build -t aef-sidecar:latest docker/sidecar-proxy/
 
 Usage:
@@ -241,18 +243,29 @@ async def write_task_to_container(
 
 async def execute_agent_streaming(
     container_name: str,
+    prompt: str,
     timeout: int = 30,
 ) -> list[dict]:
-    """Execute agent runner and collect events."""
+    """Execute Claude CLI and collect events (ADR-029).
+
+    Uses Claude CLI directly with --output-format stream-json.
+    Hook events from agentic_events are interleaved with CLI events.
+    """
     events = []
 
+    # ADR-029: Run Claude CLI directly
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "exec",
+        "-e",
+        "ANTHROPIC_API_KEY",  # Pass from host environment
         container_name,
-        "python",
-        "-m",
-        "aef_agent_runner",
+        "claude",
+        "--print",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--dangerously-skip-permissions",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -266,7 +279,9 @@ async def execute_agent_streaming(
                         try:
                             event = json.loads(line_str)
                             events.append(event)
-                            logger.debug("Event: %s", event.get("type"))
+                            # Log both hook events (event_type) and CLI events (type)
+                            event_type = event.get("event_type") or event.get("type")
+                            logger.debug("Event: %s", event_type)
                         except json.JSONDecodeError:
                             logger.warning("Invalid JSONL: %s", line_str[:50])
     except TimeoutError:
@@ -277,26 +292,25 @@ async def execute_agent_streaming(
     return events
 
 
-async def check_agent_runner_installed(container_name: str) -> bool:
-    """Check if aef-agent-runner is installed."""
+async def check_claude_cli_installed(container_name: str) -> bool:
+    """Check if Claude CLI is installed (ADR-029)."""
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "exec",
         container_name,
-        "python",
-        "-c",
-        "import aef_agent_runner; print(aef_agent_runner.__version__)",
+        "claude",
+        "--version",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
     stdout, stderr = await proc.communicate()
 
     if proc.returncode != 0:
-        logger.error("aef_agent_runner not installed: %s", stderr.decode())
+        logger.error("Claude CLI not installed: %s", stderr.decode())
         return False
 
     version = stdout.decode().strip()
-    logger.info("aef_agent_runner version: %s", version)
+    logger.info("Claude CLI version: %s", version)
     return True
 
 
@@ -465,10 +479,10 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         # Give containers time to start
         await asyncio.sleep(2)
 
-        # Step 4: Verify agent runner is installed
-        logger.info("🔍 Step 4: Verifying aef-agent-runner installation...")
-        if not await check_agent_runner_installed(workspace_container):
-            logger.error("Agent runner not installed!")
+        # Step 4: Verify Claude CLI is installed (ADR-029)
+        logger.info("🔍 Step 4: Verifying Claude CLI installation...")
+        if not await check_claude_cli_installed(workspace_container):
+            logger.error("Claude CLI not installed!")
             return False
 
         # Step 5: F17 Verification - Check workspace setup
@@ -484,23 +498,19 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         # F17.5: Analytics directory
         f17_checks.append(await verify_analytics_directory(workspace_container))
 
-        # Step 6: Write task.json
-        logger.info("📝 Step 6: Writing task.json...")
-        task = {
-            "phase": "test",
-            "prompt": "This is a test phase. Simply output 'Hello from container!'",
-            "execution_id": execution_id,
-            "tenant_id": "e2e-test-tenant",
-            "inputs": {"test_mode": True},
-            "artifacts": [],
-        }
-        await write_task_to_container(workspace_container, task)
+        # Step 6: Define test prompt (ADR-029: no task.json needed)
+        logger.info("📝 Step 6: Preparing test prompt...")
+        test_prompt = "This is a test phase. Simply output 'Hello from container!'"
 
-        # Step 7: Execute agent runner
-        logger.info("🚀 Step 7: Executing agent runner...")
+        # Step 7: Execute Claude CLI directly (ADR-029)
+        logger.info("🚀 Step 7: Executing Claude CLI...")
         logger.info("   (This will fail without API tokens - expected)")
 
-        events = await execute_agent_streaming(workspace_container, timeout=10)
+        events = await execute_agent_streaming(
+            workspace_container,
+            prompt=test_prompt,
+            timeout=10,
+        )
 
         # Step 8: Analyze events
         logger.info("📊 Step 8: Analyzing events...")
@@ -551,11 +561,11 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         if success:
             print("✅ E2E TEST PASSED")
             print()
-            print("The agent-in-container architecture is working:")
+            print("The agent-in-container architecture is working (ADR-029):")
             print("  - Workspace container started")
             print("  - Linked to sidecar proxy network")
-            print("  - aef-agent-runner installed and executable")
-            print("  - JSONL event streaming works")
+            print("  - Claude CLI installed and executable")
+            print("  - JSONL event streaming works (agentic_events hooks)")
             print()
             print("To run a full execution, configure API tokens.")
         else:

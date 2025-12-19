@@ -373,7 +373,7 @@ class WorkflowExecutionEngine:
         #   2. Start sidecar proxy (for token injection)
         #   3. Inject artifacts from previous phases
         #   4. Write task.json with phase config
-        #   5. Execute aef-agent-runner via execute_streaming()
+        #   5. Execute Claude CLI via workspace.stream() (ADR-029)
         #   6. Parse JSONL events and update aggregate
         #   7. Collect artifacts for next phase
         #   8. Destroy workspace (stateless)
@@ -821,7 +821,7 @@ class WorkflowExecutionEngine:
         1. Create isolated workspace with sidecar via WorkspaceService
         2. Inject input artifacts from previous phases
         3. Write task.json with phase configuration
-        4. Execute aef-agent-runner via streaming
+        4. Execute Claude CLI via workspace.stream() (ADR-029)
         5. Parse JSONL events and emit to aggregate
         6. Collect output artifacts
         7. Destroy workspace (stateless)

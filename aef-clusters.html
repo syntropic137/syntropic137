@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html><head><title>AEF Package Clusters</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:'SF Mono',Monaco,monospace;background:#0f1219;overflow:hidden}
+#info{position:absolute;top:10px;left:10px;padding:15px;background:rgba(15,18,25,0.95);color:#e0e0e0;border-radius:12px;z-index:100;max-width:280px;border:1px solid rgba(255,255,255,0.1)}
+#info h3{margin:0 0 10px;color:#6c5ce7;font-size:16px}
+#info p{margin:5px 0;font-size:12px}
+.legend{display:flex;gap:15px;margin-top:10px;font-size:11px}
+.legend-item{display:flex;align-items:center;gap:5px}
+.legend-dot{width:12px;height:12px;border-radius:50%}
+#tooltip{position:absolute;padding:12px;background:rgba(10,10,20,0.98);color:#fff;border-radius:10px;display:none;z-index:1000;max-width:300px;font-size:12px;border:1px solid rgba(108,92,231,0.4)}
+.module-chip{display:inline-block;padding:2px 6px;margin:2px;background:rgba(108,92,231,0.2);border-radius:4px;font-size:10px}
+#canvas{position:absolute;top:0;left:0}
+</style></head>
+<body>
+<div id="info">
+  <h3>🔧 AEF Package Clusters</h3>
+  <p><b>Size</b> = Module Count</p>
+  <p><b>Color</b> = Average Health</p>
+  <p><b>Lines</b> = Package Coupling</p>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#22cc88"></div>Healthy</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ffaa40"></div>Warning</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff4444"></div>Critical</div>
+  </div>
+  <p style="color:#888;margin-top:10px;font-size:11px">Well-separated clusters = good encapsulation</p>
+</div>
+<div id="tooltip"></div>
+<canvas id="canvas"></canvas>
+<script>
+const data = {"packages": [{"id": "worktrees.topology-testing.packages", "label": "packages", "x": 12.0, "y": 0.0, "size": 4, "color": "#ff4444", "moduleCount": 172, "metrics": {"cyclomatic": 3092, "cognitive": 379, "functions": 2968, "health": 0.25}, "modules": ["protocol", "token_vending_adapter", "store", "cli", "docker_sidecar_adapter", "models", "config", "WorkflowExecutionEngine"]}, {"id": "worktrees.otel-first-refactor.packages", "label": "packages", "x": 11.08655439013544, "y": 4.592201188381077, "size": 4, "color": "#ff4444", "moduleCount": 169, "metrics": {"cyclomatic": 3051, "cognitive": 379, "functions": 2927, "health": 0.25}, "modules": ["projection", "service", "token_metrics", "dedup", "SeedWorkflowService", "memory_store", "projection", "WorkflowExecutionAggregate"]}, {"id": "packages.aef-domain.src", "label": "src", "x": 8.485281374238571, "y": 8.48528137423857, "size": 4, "color": "#ff4444", "moduleCount": 72, "metrics": {"cyclomatic": 972, "cognitive": 57, "functions": 950, "health": 0.0}, "modules": ["handler", "workspace_metrics", "projection", "github_client", "tool_execution", "projection", "SeedWorkflowService", "projection"]}, {"id": "packages.aef-adapters.src", "label": "src", "x": 4.592201188381078, "y": 11.08655439013544, "size": 4, "color": "#ffaa40", "moduleCount": 59, "metrics": {"cyclomatic": 1352, "cognitive": 93, "functions": 1322, "health": 0.44}, "modules": ["storage", "in_memory", "executor", "event_store_client", "docker_sidecar_adapter", "supabase", "controller", "ports"]}, {"id": "worktrees.otel-first-refactor.apps", "label": "apps", "x": 7.347880794884119e-16, "y": 12.0, "size": 4, "color": "#ff4444", "moduleCount": 21, "metrics": {"cyclomatic": 636, "cognitive": 1640, "functions": 228, "health": 0.36}, "modules": ["artifacts", "agent", "config", "control", "observability", "workflow", "main", "control"]}, {"id": "worktrees.topology-testing.apps", "label": "apps", "x": -4.592201188381077, "y": 11.08655439013544, "size": 4, "color": "#ff4444", "moduleCount": 21, "metrics": {"cyclomatic": 636, "cognitive": 1640, "functions": 228, "health": 0.36}, "modules": ["costs", "control", "main", "observability", "sessions", "execution", "main", "agent"]}, {"id": "lib.agentic-primitives.lib", "label": "lib", "x": -8.48528137423857, "y": 8.485281374238571, "size": 4, "color": "#ff4444", "moduleCount": 20, "metrics": {"cyclomatic": 357, "cognitive": 293, "functions": 273, "health": 0.0}, "modules": ["exceptions", "config", "bash", "content", "logger", "discovery", "base", "workspace"]}, {"id": "lib.agentic-primitives.services", "label": "services", "x": -11.08655439013544, "y": 4.592201188381079, "size": 4, "color": "#ff4444", "moduleCount": 20, "metrics": {"cyclomatic": 124, "cognitive": 0, "functions": 124, "health": 0.0}, "modules": ["openai", "event_normalizer", "event_publisher", "normalizer", "jsonl", "claude", "config", "base"]}, {"id": "apps.aef-dashboard.src", "label": "src", "x": -12.0, "y": 1.4695761589768238e-15, "size": 4, "color": "#ffaa40", "moduleCount": 17, "metrics": {"cyclomatic": 299, "cognitive": 424, "functions": 200, "health": 0.41}, "modules": ["execution", "events", "execution", "metrics", "workflows", "executions", "sessions", "read_models"]}, {"id": "lib.agentic-primitives.examples", "label": "examples", "x": -11.086554390135442, "y": -4.592201188381076, "size": 4, "color": "#ff4444", "moduleCount": 17, "metrics": {"cyclomatic": 158, "cognitive": 0, "functions": 158, "health": 0.0}, "modules": ["scenarios", "agent", "main", "agent", "event_importer", "models", "database", "schemas"]}, {"id": "lib.agentic-primitives.primitives", "label": "primitives", "x": -8.485281374238571, "y": -8.48528137423857, "size": 4, "color": "#ff4444", "moduleCount": 17, "metrics": {"cyclomatic": 62, "cognitive": 0, "functions": 62, "health": 0.0}, "modules": ["github", "firecrawl_scraper", "session-end", "file", "stop", "post-tool-use", "pii", "pre-compact"]}, {"id": "lib.event-sourcing-platform.event-sourcing", "label": "event-sourcing", "x": -4.592201188381084, "y": -11.086554390135438, "size": 4, "color": "#ff4444", "moduleCount": 17, "metrics": {"cyclomatic": 339, "cognitive": 10, "functions": 334, "health": 0.0}, "modules": ["eventstore_pb2_grpc", "events", "memory_checkpoint", "event_store", "coordinator", "event", "commands", "command"]}, {"id": "lib.agentic-primitives.build", "label": "build", "x": -2.204364238465236e-15, "y": -12.0, "size": 3.2, "color": "#ff4444", "moduleCount": 11, "metrics": {"cyclomatic": 40, "cognitive": 0, "functions": 40, "health": 0.0}, "modules": ["firecrawl_scraper", "pii", "stop", "pre-tool-use", "session-end", "session-start", "bash", "post-tool-use"]}, {"id": "packages.aef-perf.src", "label": "src", "x": 4.59220118838108, "y": -11.08655439013544, "size": 3.0, "color": "#ffaa40", "moduleCount": 10, "metrics": {"cyclomatic": 103, "cognitive": 13, "functions": 98, "health": 0.5}, "modules": ["compare", "throughput", "collector", "single", "base", "cli", "console", "parallel"]}, {"id": "packages.aef-collector.src", "label": "src", "x": 8.485281374238568, "y": -8.485281374238571, "size": 2.8, "color": "#ff4444", "moduleCount": 9, "metrics": {"cyclomatic": 190, "cognitive": 154, "functions": 143, "health": 0.39}, "modules": ["dedup", "ids", "cli", "hooks", "store", "service", "http", "transcript"]}, {"id": "worktrees.topology-testing.lib", "label": "lib", "x": 11.086554390135438, "y": -4.592201188381084, "size": 2.6, "color": "#ffaa40", "moduleCount": 8, "metrics": {"cyclomatic": 130, "cognitive": 0, "functions": 130, "health": 0.5}, "modules": ["router", "media", "main", "feedback", "protocol", "stats", "postgres", "memory"]}], "edges": [{"from": "worktrees.topology-testing.packages", "to": "worktrees.otel-first-refactor.packages", "strength": 0.6}, {"from": "worktrees.topology-testing.packages", "to": "worktrees.otel-first-refactor.apps", "strength": 0.3}, {"from": "worktrees.topology-testing.packages", "to": "worktrees.topology-testing.apps", "strength": 0.6}, {"from": "worktrees.topology-testing.packages", "to": "worktrees.topology-testing.lib", "strength": 0.6}, {"from": "worktrees.otel-first-refactor.packages", "to": "worktrees.otel-first-refactor.apps", "strength": 0.6}, {"from": "worktrees.otel-first-refactor.packages", "to": "worktrees.topology-testing.apps", "strength": 0.3}, {"from": "worktrees.otel-first-refactor.packages", "to": "worktrees.topology-testing.lib", "strength": 0.3}, {"from": "packages.aef-domain.src", "to": "packages.aef-adapters.src", "strength": 0.6}, {"from": "packages.aef-domain.src", "to": "apps.aef-dashboard.src", "strength": 0.3}, {"from": "packages.aef-domain.src", "to": "packages.aef-perf.src", "strength": 0.6}, {"from": "packages.aef-domain.src", "to": "packages.aef-collector.src", "strength": 0.6}, {"from": "packages.aef-adapters.src", "to": "apps.aef-dashboard.src", "strength": 0.3}, {"from": "packages.aef-adapters.src", "to": "packages.aef-perf.src", "strength": 0.6}, {"from": "packages.aef-adapters.src", "to": "packages.aef-collector.src", "strength": 0.6}, {"from": "worktrees.otel-first-refactor.apps", "to": "worktrees.topology-testing.apps", "strength": 0.6}, {"from": "worktrees.otel-first-refactor.apps", "to": "worktrees.topology-testing.lib", "strength": 0.3}, {"from": "worktrees.topology-testing.apps", "to": "worktrees.topology-testing.lib", "strength": 0.6}, {"from": "lib.agentic-primitives.lib", "to": "lib.agentic-primitives.services", "strength": 0.6}, {"from": "lib.agentic-primitives.lib", "to": "lib.agentic-primitives.examples", "strength": 0.6}, {"from": "lib.agentic-primitives.lib", "to": "lib.agentic-primitives.primitives", "strength": 0.6}, {"from": "lib.agentic-primitives.lib", "to": "lib.event-sourcing-platform.event-sourcing", "strength": 0.3}, {"from": "lib.agentic-primitives.lib", "to": "lib.agentic-primitives.build", "strength": 0.6}, {"from": "lib.agentic-primitives.lib", "to": "worktrees.topology-testing.lib", "strength": 0.3}, {"from": "lib.agentic-primitives.services", "to": "lib.agentic-primitives.examples", "strength": 0.6}, {"from": "lib.agentic-primitives.services", "to": "lib.agentic-primitives.primitives", "strength": 0.6}, {"from": "lib.agentic-primitives.services", "to": "lib.event-sourcing-platform.event-sourcing", "strength": 0.3}, {"from": "lib.agentic-primitives.services", "to": "lib.agentic-primitives.build", "strength": 0.6}, {"from": "apps.aef-dashboard.src", "to": "packages.aef-perf.src", "strength": 0.3}, {"from": "apps.aef-dashboard.src", "to": "packages.aef-collector.src", "strength": 0.3}, {"from": "lib.agentic-primitives.examples", "to": "lib.agentic-primitives.primitives", "strength": 0.6}, {"from": "lib.agentic-primitives.examples", "to": "lib.event-sourcing-platform.event-sourcing", "strength": 0.3}, {"from": "lib.agentic-primitives.examples", "to": "lib.agentic-primitives.build", "strength": 0.6}, {"from": "lib.agentic-primitives.primitives", "to": "lib.event-sourcing-platform.event-sourcing", "strength": 0.3}, {"from": "lib.agentic-primitives.primitives", "to": "lib.agentic-primitives.build", "strength": 0.6}, {"from": "lib.event-sourcing-platform.event-sourcing", "to": "lib.agentic-primitives.build", "strength": 0.3}, {"from": "packages.aef-perf.src", "to": "packages.aef-collector.src", "strength": 0.6}]};
+
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+const tooltip = document.getElementById("tooltip");
+
+let width = innerWidth;
+let height = innerHeight;
+let scale = 1;
+let offsetX = width/2;
+let offsetY = height/2;
+let dragging = false;
+let lastX, lastY;
+
+function resize() {
+    width = innerWidth;
+    height = innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    offsetX = width/2;
+    offsetY = height/2;
+    scale = Math.min(width, height) / 35;
+    draw();
+}
+resize();
+
+function toScreen(x, y) {
+    return [offsetX + x * scale, offsetY + y * scale];
+}
+
+function draw() {
+    ctx.fillStyle = "#0f1219";
+    ctx.fillRect(0, 0, width, height);
+    
+    // Draw edges
+    ctx.lineWidth = 2;
+    data.edges.forEach(e => {
+        const from = data.packages.find(p => p.id === e.from);
+        const to = data.packages.find(p => p.id === e.to);
+        if (from && to) {
+            const [x1, y1] = toScreen(from.x, from.y);
+            const [x2, y2] = toScreen(to.x, to.y);
+            ctx.strokeStyle = `rgba(108, 92, 231, ${e.strength})`;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+    });
+    
+    // Draw packages
+    data.packages.forEach(p => {
+        const [x, y] = toScreen(p.x, p.y);
+        const r = p.size * scale * 0.15;
+        
+        // Glow
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 2);
+        grad.addColorStop(0, p.color + "40");
+        grad.addColorStop(1, "transparent");
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, r * 2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Circle
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Border
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Label
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 12px SF Mono, Monaco, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(p.label, x, y + r + 18);
+        
+        // Module count
+        ctx.fillStyle = "#888";
+        ctx.font = "10px SF Mono, Monaco, monospace";
+        ctx.fillText(p.moduleCount + " modules", x, y + r + 32);
+    });
+}
+
+// Tooltip
+canvas.onmousemove = e => {
+    const mx = e.clientX;
+    const my = e.clientY;
+    let found = null;
+    
+    for (const p of data.packages) {
+        const [x, y] = toScreen(p.x, p.y);
+        const r = p.size * scale * 0.15;
+        if (Math.hypot(mx - x, my - y) < r + 10) {
+            found = p;
+            break;
+        }
+    }
+    
+    if (found) {
+        tooltip.style.display = "block";
+        tooltip.style.left = mx + 15 + "px";
+        tooltip.style.top = my + 15 + "px";
+        tooltip.innerHTML = `
+            <div style="font-weight:bold;color:#6c5ce7;margin-bottom:8px">${found.id}</div>
+            <div>Modules: <b>${found.moduleCount}</b></div>
+            <div>Total Cyclomatic: ${found.metrics.cyclomatic}</div>
+            <div>Total Cognitive: ${found.metrics.cognitive}</div>
+            <div>Total Functions: ${found.metrics.functions}</div>
+            <div>Avg Health: ${(found.metrics.health * 100).toFixed(0)}%</div>
+            <div style="margin-top:8px;border-top:1px solid rgba(255,255,255,0.1);padding-top:8px">
+                ${found.modules.map(m => '<span class="module-chip">' + m + '</span>').join("")}
+                ${found.moduleCount > 8 ? '<span class="module-chip">+' + (found.moduleCount - 8) + ' more</span>' : ''}
+            </div>
+        `;
+    } else {
+        tooltip.style.display = "none";
+    }
+};
+
+// Pan
+canvas.onmousedown = e => { dragging = true; lastX = e.clientX; lastY = e.clientY; };
+canvas.onmouseup = () => dragging = false;
+canvas.onmousemove = e => {
+    if (dragging) {
+        offsetX += e.clientX - lastX;
+        offsetY += e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        draw();
+    }
+};
+
+// Zoom
+canvas.onwheel = e => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    scale *= delta;
+    draw();
+};
+
+window.onresize = resize;
+</script>
+</body></html>

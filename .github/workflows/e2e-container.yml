@@ -4,17 +4,17 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/aef-agent-runner/**"
       - "packages/aef-adapters/src/aef_adapters/workspaces/**"
       - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
       - "docker/workspace/**"
+      - "lib/agentic-primitives/**" # ADR-029: hooks in agentic-primitives
       - ".github/workflows/e2e-container.yml"
   pull_request:
     paths:
-      - "packages/aef-agent-runner/**"
       - "packages/aef-adapters/src/aef_adapters/workspaces/**"
       - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
       - "docker/workspace/**"
+      - "lib/agentic-primitives/**" # ADR-029: hooks in agentic-primitives
       - ".github/workflows/e2e-container.yml"
   workflow_dispatch:
     inputs:
@@ -60,7 +60,7 @@ jobs:
       - name: Verify image
         run: |
           docker run --rm aef-workspace:latest python --version
-          docker run --rm aef-workspace:latest python -c "import aef_agent_runner; print('OK')" || true
+          docker run --rm aef-workspace:latest claude --version || true  # ADR-029: Claude CLI
 
   #############################################################################
   # E2E CONTAINER TEST - Full integration (manual trigger only)

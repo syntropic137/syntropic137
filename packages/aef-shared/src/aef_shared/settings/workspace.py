@@ -296,7 +296,7 @@ class WorkspaceSettings(BaseSettings):
         default="aef-workspace-claude:latest",
         description=(
             "Docker image for Claude agent execution. "
-            "Includes aef-agent-runner, claude-agent-sdk, and gh CLI. "
+            "Includes Claude CLI with agentic_events hooks (ADR-029). "
             "Build with: just workspace-build"
         ),
     )
