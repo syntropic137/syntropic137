@@ -507,9 +507,41 @@ class WorkflowExecutionEngine:
         3. Execute agent
         4. Create artifact
         5. Emit phase completed via aggregate
+        6. Track session with token data
         """
+        # Import session classes
+        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
+        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+            CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+            RecordOperationCommand,
+        )
+        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+            StartSessionCommand,
+        )
+
         phase_started_at = datetime.now(UTC)
         session_id = str(uuid4())
+        session: AgentSessionAggregate | None = None
+
+        # Create and start session aggregate
+        if self._sessions is not None:
+            session = AgentSessionAggregate()
+            start_session_cmd = StartSessionCommand(
+                aggregate_id=session_id,
+                workflow_id=ctx.workflow_id,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                agent_provider=phase.agent_config.provider,
+                agent_model=phase.agent_config.model,
+            )
+            session._handle_command(start_session_cmd)
+            await self._sessions.save(session)
+            logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
         # Emit phase started via aggregate
         start_phase_cmd = StartPhaseCommand(
@@ -620,6 +652,32 @@ class WorkflowExecutionEngine:
                 duration_seconds=duration,
             )
             aggregate._handle_command(complete_phase_cmd)
+
+            # Record token usage and complete session
+            if session is not None and self._sessions is not None:
+                # Record operation with tokens
+                if response.input_tokens > 0 or response.output_tokens > 0:
+                    record_op_cmd = RecordOperationCommand(
+                        aggregate_id=session_id,
+                        operation_type=OperationType.MESSAGE_RESPONSE,
+                        input_tokens=response.input_tokens,
+                        output_tokens=response.output_tokens,
+                        total_tokens=response.total_tokens,
+                        success=True,
+                        duration_seconds=duration,
+                        metadata={"phase_id": phase.phase_id, "source": "direct_execution"},
+                    )
+                    session._handle_command(record_op_cmd)
+
+                # Complete session
+                complete_session_cmd = CompleteSessionCommand(
+                    aggregate_id=session_id,
+                    success=True,
+                )
+                session._handle_command(complete_session_cmd)
+                await self._sessions.save(session)
+                logger.debug("Session completed: %s (success, tokens: %d)", session_id, response.total_tokens)
+
             logger.info(
                 "Phase completed: %s (success: True, tokens: %d)",
                 phase.phase_id,
@@ -640,6 +698,20 @@ class WorkflowExecutionEngine:
                 error_message=str(e),
             )
             ctx.phase_results.append(result)
+
+            # Complete session with failure
+            if session is not None and self._sessions is not None:
+                try:
+                    complete_session_cmd = CompleteSessionCommand(
+                        aggregate_id=session_id,
+                        success=False,
+                        error_message=str(e),
+                    )
+                    session._handle_command(complete_session_cmd)
+                    await self._sessions.save(session)
+                    logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
+                except Exception as session_err:
+                    logger.warning("Failed to complete session %s: %s", session_id, session_err)
 
             # Note: We don't emit PhaseCompleted for failures
             # The FailExecutionCommand in execute() will capture the failure
@@ -852,8 +924,12 @@ class WorkflowExecutionEngine:
         from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+            RecordOperationCommand,
         )
         from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
             StartSessionCommand,
@@ -1132,15 +1208,30 @@ class WorkflowExecutionEngine:
             )
             aggregate._handle_command(complete_cmd)
 
-            # Complete session aggregate (success)
+            # Record token usage on session before completing
+            # This ensures SessionCompleted event contains accumulated tokens
             if session is not None and self._sessions is not None:
+                if total_input_tokens > 0 or total_output_tokens > 0:
+                    record_op_cmd = RecordOperationCommand(
+                        aggregate_id=session_id,
+                        operation_type=OperationType.MESSAGE_RESPONSE,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        total_tokens=total_input_tokens + total_output_tokens,
+                        success=True,
+                        duration_seconds=duration,
+                        metadata={"phase_id": phase.phase_id, "source": "container_execution"},
+                    )
+                    session._handle_command(record_op_cmd)
+
+                # Complete session aggregate (success)
                 complete_session_cmd = CompleteSessionCommand(
                     aggregate_id=session_id,
                     success=True,
                 )
                 session._handle_command(complete_session_cmd)
                 await self._sessions.save(session)
-                logger.debug("Session completed: %s (success)", session_id)
+                logger.debug("Session completed: %s (success, tokens: %d)", session_id, total_input_tokens + total_output_tokens)
 
             logger.info(
                 "Phase completed (container mode): %s (tokens: %d)",
