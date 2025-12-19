@@ -237,7 +237,7 @@ class MetricsResponse(BaseModel):
 class ExecutionRunSummary(BaseModel):
     """Summary of a single execution run for list views."""
 
-    execution_id: str
+    workflow_execution_id: str  # ADR-028: OTel correlation naming
     workflow_id: str
     workflow_name: str
     status: str
@@ -262,7 +262,7 @@ class ExecutionRunListResponse(BaseModel):
 class ExecutionRun(BaseModel):
     """A single execution run of a workflow (detailed view)."""
 
-    execution_id: str
+    workflow_execution_id: str  # ADR-028: OTel correlation naming
     status: str
     started_at: datetime | None = None
     completed_at: datetime | None = None

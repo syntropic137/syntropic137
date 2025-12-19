@@ -41,7 +41,7 @@ class PhaseExecutionInfo(BaseModel):
 class ExecutionDetailResponse(BaseModel):
     """Detailed response for a workflow execution run."""
 
-    execution_id: str
+    workflow_execution_id: str  # ADR-028: OTel correlation naming
     workflow_id: str
     workflow_name: str
     status: str
@@ -65,7 +65,7 @@ class ExecutionDetailResponse(BaseModel):
 class ExecutionSummaryResponse(BaseModel):
     """Summary of a workflow execution for list views."""
 
-    execution_id: str
+    workflow_execution_id: str  # ADR-028: OTel correlation naming
     workflow_id: str
     workflow_name: str
     status: str
@@ -119,7 +119,7 @@ async def list_all_executions(
     return ExecutionListResponse(
         executions=[
             ExecutionSummaryResponse(
-                execution_id=e.workflow_execution_id,
+                workflow_execution_id=e.workflow_execution_id,
                 workflow_id=e.workflow_id,
                 workflow_name=e.workflow_name,
                 status=e.status,
@@ -176,7 +176,7 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
     ]
 
     return ExecutionDetailResponse(
-        execution_id=detail.workflow_execution_id,
+        workflow_execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
         workflow_name=detail.workflow_name,
         status=detail.status,
