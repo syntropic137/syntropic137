@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from aef_agent_runner.task import Task
 
 
+@pytest.mark.unit
 class TestTask:
     """Tests for Task class."""
 

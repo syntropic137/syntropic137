@@ -6,7 +6,10 @@ and consistent across the codebase.
 
 from pathlib import PurePosixPath
 
+import pytest
 
+
+@pytest.mark.unit
 class TestWorkspacePathConstants:
     """Test workspace path constants are correctly defined."""
 

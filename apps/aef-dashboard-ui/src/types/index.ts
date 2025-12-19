@@ -171,7 +171,8 @@ export interface MetricsResponse {
 // =============================================================================
 
 export interface ExecutionRun {
-  execution_id: string
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
   status: string
   started_at: string | null
   completed_at: string | null
@@ -193,7 +194,8 @@ export interface ExecutionHistoryResponse {
 // =============================================================================
 
 export interface WorkflowExecutionSummary {
-  execution_id: string
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
   workflow_id: string
   status: string
   started_at: string | null
@@ -206,7 +208,8 @@ export interface WorkflowExecutionSummary {
 
 /** Item in the global execution list (includes workflow_name) */
 export interface ExecutionListItem {
-  execution_id: string
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
   workflow_id: string
   workflow_name: string
   status: string
@@ -227,10 +230,13 @@ export interface ExecutionListResponse {
 }
 
 export interface PhaseExecutionDetail {
-  phase_id: string
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_phase_id: string
   name: string
   status: string
   session_id: string | null
+  /** Claude CLI agent session ID for OTel correlation (ADR-028) */
+  agent_session_id: string | null
   artifact_id: string | null
   input_tokens: number
   output_tokens: number
@@ -241,7 +247,8 @@ export interface PhaseExecutionDetail {
 }
 
 export interface ExecutionDetailResponse {
-  execution_id: string
+  /** Explicit naming for OTel correlation (ADR-028) */
+  workflow_execution_id: string
   workflow_id: string
   workflow_name: string
   status: string

@@ -16,6 +16,7 @@ from aef_domain.contexts.costs.record_cost.SessionCostFinalizedEvent import (
 )
 
 
+@pytest.mark.unit
 class TestCostAmount:
     """Tests for CostAmount value object."""
 

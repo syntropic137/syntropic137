@@ -3,6 +3,8 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from aef_tokens.models import (
     DEFAULT_BUDGETS,
     ScopedToken,
@@ -13,6 +15,7 @@ from aef_tokens.models import (
 )
 
 
+@pytest.mark.unit
 class TestTokenScope:
     """Tests for TokenScope."""
 

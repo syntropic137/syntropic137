@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestEnvironmentEnforcement:
     """Tests for test environment enforcement per ADR-004."""
 

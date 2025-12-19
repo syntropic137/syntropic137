@@ -26,6 +26,7 @@ from aef_adapters.agents.executor import (
 )
 
 
+@pytest.mark.integration
 class TestAgentExecutionMetrics:
     """Tests for AgentExecutionMetrics dataclass."""
 

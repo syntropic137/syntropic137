@@ -81,6 +81,7 @@ class InMemoryEventPublisher:
 # === Aggregate Tests ===
 
 
+@pytest.mark.unit
 class TestWorkflowAggregate:
     """Tests for WorkflowAggregate with @command_handler and @event_sourcing_handler."""
 

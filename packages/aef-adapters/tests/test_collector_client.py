@@ -43,6 +43,7 @@ def check_environment():
     _assert_test_environment()
 
 
+@pytest.mark.unit
 class TestEventIdGeneration:
     """Tests for deterministic event ID generation."""
 

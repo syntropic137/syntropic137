@@ -41,6 +41,7 @@ def development_environment() -> None:
         os.environ["AEF_ENVIRONMENT"] = original
 
 
+@pytest.mark.unit
 class TestGitHubWebhook:
     """Tests for the /webhooks/github endpoint."""
 

@@ -80,6 +80,7 @@ def sample_workflow_id() -> str:
     return "test-workflow-run-123"
 
 
+@pytest.mark.unit
 class TestWorkflowRunCommand:
     """Tests for the workflow run command."""
 

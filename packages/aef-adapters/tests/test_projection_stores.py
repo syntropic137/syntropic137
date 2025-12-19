@@ -34,6 +34,7 @@ def memory_store() -> InMemoryProjectionStore:
     return InMemoryProjectionStore()
 
 
+@pytest.mark.unit
 class TestInMemoryProjectionStore:
     """Tests for InMemoryProjectionStore."""
 

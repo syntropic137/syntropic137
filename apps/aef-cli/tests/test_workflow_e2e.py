@@ -33,6 +33,7 @@ def clean_storage() -> None:
     reset_storage()
 
 
+@pytest.mark.e2e
 @pytest.mark.asyncio
 async def test_create_workflow_e2e() -> None:
     """Test the full path: command → handler → aggregate → event store."""

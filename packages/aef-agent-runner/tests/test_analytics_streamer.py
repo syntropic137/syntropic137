@@ -15,9 +15,12 @@ from __future__ import annotations
 import json
 import time
 
+import pytest
+
 from aef_agent_runner.analytics_streamer import AnalyticsStreamer
 
 
+@pytest.mark.unit
 class TestAnalyticsStreamerLifecycle:
     """Tests for streamer start/stop behavior."""
 

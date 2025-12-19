@@ -9,15 +9,19 @@ These tests verify that WorkflowExecutor:
 from __future__ import annotations
 
 import os
+import warnings
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-# Set test environment before importing NullObservability
+# Set test environment before importing
 os.environ["AEF_ENVIRONMENT"] = "test"
 
-from agentic_observability import NullObservability
+# Import from local protocol (legacy)
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from aef_adapters.observability.protocol import NullObservability
 
 
 @pytest.fixture
@@ -75,6 +79,7 @@ class MockWorkflow:
             self.phases = [MockPhase()]
 
 
+@pytest.mark.unit
 class TestWorkflowExecutorRequiresObservability:
     """Tests verifying observability is REQUIRED (Poka-Yoke)."""
 

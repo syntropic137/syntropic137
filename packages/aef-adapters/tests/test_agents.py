@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestAgentMessage:
     """Tests for AgentMessage dataclass."""
 

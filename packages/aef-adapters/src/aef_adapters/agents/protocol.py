@@ -195,6 +195,25 @@ class AgentProtocol(Protocol):
         """
         ...
 
+    def set_session_context(
+        self,
+        *,
+        session_id: str,
+        workflow_id: str,
+        phase_id: str,
+    ) -> None:
+        """Set session context for observability correlation.
+
+        This context is used to correlate agent operations back to
+        the workflow execution for observability and cost tracking.
+
+        Args:
+            session_id: Unique session identifier
+            workflow_id: Parent workflow ID
+            phase_id: Current phase ID
+        """
+        ...
+
     def stream(
         self,
         messages: list[AgentMessage],

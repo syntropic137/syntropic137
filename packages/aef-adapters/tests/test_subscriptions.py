@@ -213,6 +213,7 @@ def subscription_service(
     )
 
 
+@pytest.mark.unit
 class TestEventSubscriptionService:
     """Tests for EventSubscriptionService."""
 

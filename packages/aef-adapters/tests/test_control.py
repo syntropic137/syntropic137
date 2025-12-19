@@ -21,6 +21,7 @@ from aef_adapters.control.adapters.memory import (
 )
 
 
+@pytest.mark.unit
 class TestExecutionStateMachine:
     """Tests for ExecutionStateMachine."""
 

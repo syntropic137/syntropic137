@@ -280,6 +280,7 @@ def get_workflow_id(workflow: WorkflowAggregate) -> str:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestExecutionValueObjects:
     """Tests for execution value objects."""
 

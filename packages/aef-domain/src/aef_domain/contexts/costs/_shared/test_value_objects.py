@@ -7,6 +7,7 @@ import pytest
 from aef_domain.contexts.costs._shared.value_objects import CostAmount, TokenCount
 
 
+@pytest.mark.unit
 class TestCostAmount:
     """Tests for CostAmount value object."""
 

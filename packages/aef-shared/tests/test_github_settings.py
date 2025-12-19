@@ -11,6 +11,7 @@ from aef_shared.settings.github import (
 )
 
 
+@pytest.mark.unit
 class TestGitHubAppSettings:
     """Tests for GitHubAppSettings.
 

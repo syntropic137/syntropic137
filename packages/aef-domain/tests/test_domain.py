@@ -1,6 +1,9 @@
 """Tests for domain package."""
 
+import pytest
 
+
+@pytest.mark.unit
 class TestDomainPackage:
     """Test domain package initialization."""
 

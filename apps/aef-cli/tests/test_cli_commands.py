@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from typer.testing import CliRunner
 
 from aef_cli.main import app
@@ -9,6 +10,7 @@ from aef_cli.main import app
 runner = CliRunner()
 
 
+@pytest.mark.unit
 class TestVersionCommand:
     """Tests for version command."""
 

@@ -112,7 +112,7 @@ async def test_observability_port() -> bool:
                 "-d",
                 "aef_observability",
                 "-c",
-                f"SELECT COUNT(*) FROM agent_observations WHERE session_id = '{test_session_id}';",
+                f"SELECT COUNT(*) FROM agent_events WHERE session_id = '{test_session_id}';",
             ],
             capture_output=True,
             text=True,

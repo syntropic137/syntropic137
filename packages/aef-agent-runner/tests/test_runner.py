@@ -84,6 +84,7 @@ class MockAssistantMessage:
             self.usage = MockUsage()
 
 
+@pytest.mark.unit
 class TestAgentRunner:
     """Tests for AgentRunner class."""
 

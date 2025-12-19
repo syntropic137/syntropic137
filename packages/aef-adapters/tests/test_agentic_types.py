@@ -21,6 +21,7 @@ from aef_adapters.agents.agentic_types import (
 )
 
 
+@pytest.mark.integration
 class TestAgentTool:
     """Tests for AgentTool enum."""
 

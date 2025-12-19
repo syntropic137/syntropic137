@@ -35,6 +35,7 @@ def mock_websocket() -> MagicMock:
     return ws
 
 
+@pytest.mark.unit
 class TestRealTimeProjectionConnection:
     """Test connection management."""
 

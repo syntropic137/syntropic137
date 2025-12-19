@@ -120,6 +120,16 @@ class MockAgent(AgentProtocol):
         """Set agent availability (for testing)."""
         self._available = available
 
+    def set_session_context(
+        self,
+        *,
+        session_id: str,
+        workflow_id: str,
+        phase_id: str,
+    ) -> None:
+        """Set session context (no-op for mock agent)."""
+        pass  # Mock doesn't need context
+
     async def complete(
         self,
         messages: list[AgentMessage],

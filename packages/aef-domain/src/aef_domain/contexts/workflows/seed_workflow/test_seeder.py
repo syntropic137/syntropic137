@@ -60,6 +60,7 @@ def seeder(handler: CreateWorkflowHandler) -> WorkflowSeeder:
     return WorkflowSeeder(handler)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_seed_from_file(seeder: WorkflowSeeder) -> None:
     """Test seeding a single workflow from file."""
