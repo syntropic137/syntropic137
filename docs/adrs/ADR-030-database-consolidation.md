@@ -143,21 +143,95 @@ Simply:
 2. `docker compose up -d` (starts unified database)
 3. Tables created automatically by ESP migrations and init-db script
 
+## Data Retention Strategy
+
+**Critical distinction between event types:**
+
+| Aspect | Domain Events (ESP) | Observability Events |
+|--------|---------------------|---------------------|
+| **Table** | `events` | `agent_events` |
+| **Purpose** | Business state, audit trail | Debugging, metrics |
+| **Retention** | **Forever** ♾️ | Configurable (7-90 days) |
+| **Compression** | Optional | Required (90% reduction) |
+| **Examples** | WorkflowStarted, PhaseCompleted | tool_execution, token_usage |
+
+### Domain Events: Forever
+
+Domain events are the **source of truth** for event sourcing. They:
+- Enable aggregate replay and rebuilding projections
+- Provide complete audit trail for compliance
+- Support temporal queries ("what was the state on date X?")
+
+**Never auto-delete domain events.** The ESP `events` table has no retention policy.
+
+### Observability Events: Configurable
+
+Observability events are **operational telemetry**. They:
+- Help debug agent behavior
+- Power real-time dashboards
+- Can be safely aged out after analysis
+
+The `agent_events` hypertable supports optional retention:
+
+```sql
+-- Example: Add 30-day retention (only if needed)
+SELECT add_retention_policy('agent_events', INTERVAL '30 days');
+```
+
+Currently **no retention policy is set** - observability events are kept indefinitely.
+Configure based on storage costs vs debugging needs.
+
+## Authentication Strategy
+
+AEF is primarily a **GitHub-integrated service**. Authentication approach:
+
+| Component | Auth Method | Rationale |
+|-----------|-------------|-----------|
+| **Agent Operations** | GitHub App | Native GitHub integration, auto-rotating tokens |
+| **Dashboard UI** | GitHub OAuth | Users already have GitHub accounts |
+| **API Access** | GitHub App tokens | Consistent with agent auth |
+
+### Why Not Supabase Auth?
+
+While Supabase offers convenient auth with Row-Level Security (RLS), we avoid it because:
+
+1. **Vendor lock-in** - RLS policies are Supabase-specific
+2. **GitHub-native** - Our users are developers, already on GitHub
+3. **Simpler model** - One auth system (GitHub) vs two
+
+### Future: Multi-tenant Dashboard
+
+For a managed service with multiple organizations:
+
+```
+┌─────────────────────────────────────────────────┐
+│                 Dashboard App                    │
+│  ┌───────────────────────────────────────────┐  │
+│  │ GitHub OAuth Login                         │  │
+│  │  → Map GitHub org to AEF tenant            │  │
+│  │  → Use GitHub App for repo operations      │  │
+│  └───────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
 ## Related ADRs
 
 - **ADR-026**: TimescaleDB for Observability Storage (introduces TimescaleDB)
 - **ADR-007**: Event Store Integration (describes ESP architecture)
 - **ADR-012**: Artifact Storage (future Supabase consideration)
+- **ADR-022**: Secure Token Architecture (GitHub App tokens)
 
 ## Future Work
 
 ### Supabase Migration Path
 
+For managed PostgreSQL (not auth):
+
 ```
 Current:  Docker TimescaleDB → Future: Supabase PostgreSQL
                                       + Supabase Storage (replaces MinIO)
                                       + Supabase Vector (pgvector)
-                                      + Supabase Auth
+                                      - NOT Supabase Auth (use GitHub)
 ```
 
 ### Hypertable for Domain Events
