@@ -5,9 +5,7 @@ Tests the /events/* endpoints with real TimescaleDB.
 
 from __future__ import annotations
 
-import asyncio
 import os
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
@@ -148,8 +146,10 @@ class TestEventsAPI:
 
         # Filter for timeline-worthy events
         timeline = [
-            e for e in events
-            if e["event_type"] in (
+            e
+            for e in events
+            if e["event_type"]
+            in (
                 "tool_execution_started",
                 "tool_execution_completed",
                 "session_started",
@@ -197,12 +197,14 @@ class TestEventsAPI:
         # Build summary
         from collections import defaultdict
 
-        tool_stats: dict = defaultdict(lambda: {
-            "call_count": 0,
-            "success_count": 0,
-            "error_count": 0,
-            "total_duration_ms": 0,
-        })
+        tool_stats: dict = defaultdict(
+            lambda: {
+                "call_count": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "total_duration_ms": 0,
+            }
+        )
 
         for e in tool_events:
             data = e["data"]

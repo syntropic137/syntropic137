@@ -181,10 +181,12 @@ class AgentEventStore:
             evt_phase_id = event.get("phase_id", phase_id)
 
             # Build data dict (everything else)
-            data = {k: v for k, v in event.items() if k not in (
-                "timestamp", "event_type", "type", "session_id",
-                "execution_id", "phase_id"
-            )}
+            data = {
+                k: v
+                for k, v in event.items()
+                if k
+                not in ("timestamp", "event_type", "type", "session_id", "execution_id", "phase_id")
+            }
 
             # Write tab-separated row
             # Format: time, event_type, session_id, execution_id, phase_id, data
@@ -248,10 +250,12 @@ class AgentEventStore:
         session_id = event.get("session_id", "unknown")
 
         # Build data dict
-        data = {k: v for k, v in event.items() if k not in (
-            "timestamp", "event_type", "type", "session_id",
-            "execution_id", "phase_id"
-        )}
+        data = {
+            k: v
+            for k, v in event.items()
+            if k
+            not in ("timestamp", "event_type", "type", "session_id", "execution_id", "phase_id")
+        }
 
         async with self.pool.acquire() as conn:
             await conn.execute(

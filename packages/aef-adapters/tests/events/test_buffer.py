@@ -1,6 +1,5 @@
 """Tests for EventBuffer."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -57,10 +56,7 @@ class TestEventBuffer:
         """Should add multiple events at once."""
         buffer = EventBuffer(mock_store, flush_size=100)
 
-        events = [
-            {"event_type": f"test{i}", "session_id": "sess-1"}
-            for i in range(10)
-        ]
+        events = [{"event_type": f"test{i}", "session_id": "sess-1"} for i in range(10)]
         await buffer.add_many(events)
 
         assert buffer.size == 10

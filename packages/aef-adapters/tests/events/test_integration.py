@@ -51,7 +51,7 @@ class TestAgentEventStoreIntegration:
             result = await conn.fetchval(
                 """
                 SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
+                    SELECT FROM information_schema.tables
                     WHERE table_name = 'agent_events'
                 )
                 """
@@ -114,7 +114,7 @@ class TestAgentEventStoreIntegration:
         elapsed = time.perf_counter() - start
 
         assert count == 1000
-        print(f"\nInserted 1000 events in {elapsed:.3f}s ({1000/elapsed:.0f} events/sec)")
+        print(f"\nInserted 1000 events in {elapsed:.3f}s ({1000 / elapsed:.0f} events/sec)")
 
         # Verify count
         events_back = await event_store.query(session_id, limit=2000)
@@ -131,17 +131,23 @@ class TestAgentEventStoreIntegration:
         events = [
             {"event_type": "session_started", "session_id": session_id},
             {"event_type": "tool_execution_started", "session_id": session_id, "tool_name": "Read"},
-            {"event_type": "tool_execution_completed", "session_id": session_id, "tool_name": "Read"},
-            {"event_type": "tool_execution_started", "session_id": session_id, "tool_name": "Write"},
+            {
+                "event_type": "tool_execution_completed",
+                "session_id": session_id,
+                "tool_name": "Read",
+            },
+            {
+                "event_type": "tool_execution_started",
+                "session_id": session_id,
+                "tool_name": "Write",
+            },
             {"event_type": "session_completed", "session_id": session_id},
         ]
 
         await event_store.insert_batch(events)
 
         # Query only tool_execution_started
-        tool_events = await event_store.query(
-            session_id, event_type="tool_execution_started"
-        )
+        tool_events = await event_store.query(session_id, event_type="tool_execution_started")
 
         assert len(tool_events) == 2
         assert all(e["event_type"] == "tool_execution_started" for e in tool_events)
@@ -157,7 +163,11 @@ class TestAgentEventStoreIntegration:
 
         events = [
             {"event_type": "session_started", "session_id": session_id, "execution_id": exec_id},
-            {"event_type": "tool_execution_started", "session_id": session_id, "execution_id": exec_id},
+            {
+                "event_type": "tool_execution_started",
+                "session_id": session_id,
+                "execution_id": exec_id,
+            },
             {"event_type": "session_completed", "session_id": session_id, "execution_id": exec_id},
         ]
 
@@ -177,10 +187,7 @@ class TestAgentEventStoreIntegration:
         await event_store.initialize()
 
         # Insert 50 events
-        events = [
-            {"event_type": f"event_{i}", "session_id": session_id}
-            for i in range(50)
-        ]
+        events = [{"event_type": f"event_{i}", "session_id": session_id} for i in range(50)]
         await event_store.insert_batch(events)
 
         # Query first page
@@ -220,11 +227,13 @@ class TestEventBufferIntegration:
 
         # Add 15 events (should trigger one flush at 10)
         for i in range(15):
-            await buffer.add({
-                "event_type": "buffer_test",
-                "session_id": session_id,
-                "index": i,
-            })
+            await buffer.add(
+                {
+                    "event_type": "buffer_test",
+                    "session_id": session_id,
+                    "index": i,
+                }
+            )
 
         # Wait for flush
         await asyncio.sleep(0.2)
