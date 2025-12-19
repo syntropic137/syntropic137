@@ -216,6 +216,32 @@ class EventBuffer:
                     logger.exception("Periodic flush failed")
 
 
+# Singleton event buffer
+_event_buffer: EventBuffer | None = None
+
+
+async def get_event_buffer() -> EventBuffer:
+    """Get or create singleton EventBuffer.
+
+    Creates and starts an EventBuffer connected to the singleton AgentEventStore.
+    The buffer is started automatically on first access.
+
+    Returns:
+        Singleton EventBuffer instance
+    """
+    global _event_buffer
+
+    if _event_buffer is None:
+        from aef_adapters.events.store import get_event_store
+
+        store = get_event_store()
+        await store.initialize()
+        _event_buffer = EventBuffer(store)
+        await _event_buffer.start()
+
+    return _event_buffer
+
+
 def parse_jsonl_events(stdout: str) -> list[dict[str, Any]]:
     """Parse JSONL events from agent stdout.
 

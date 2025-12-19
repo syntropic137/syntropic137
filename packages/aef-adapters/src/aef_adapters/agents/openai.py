@@ -78,6 +78,22 @@ class OpenAIAgent(AgentProtocol):
         """Check if the agent is configured and available."""
         return self._api_key is not None
 
+    def set_session_context(
+        self,
+        *,
+        session_id: str,
+        workflow_id: str,
+        phase_id: str,
+    ) -> None:
+        """Set session context for observability correlation.
+
+        Currently stored but not used - future integration with
+        OpenAI's metadata headers for request correlation.
+        """
+        self._session_id = session_id
+        self._workflow_id = workflow_id
+        self._phase_id = phase_id
+
     def _get_client(self) -> Any:
         """Get or create the OpenAI client.
 

@@ -82,6 +82,7 @@ class ObservabilityPort:
         duration_ms: int | None = None,
         output_preview: str | None = None,
         error: str | None = None,
+        tool_name: str | None = None,  # Added for correlation
     ) -> None:
         """Record tool completed."""
         raise NotImplementedError
@@ -148,11 +149,13 @@ class NullObservability(ObservabilityPort):
         duration_ms: int | None = None,  # noqa: ARG002
         output_preview: str | None = None,  # noqa: ARG002
         error: str | None = None,  # noqa: ARG002
+        tool_name: str | None = None,
     ) -> None:
         """Record tool completed (logs only)."""
         logger.debug(
-            "NullObservability.tool_completed: op=%s success=%s",
+            "NullObservability.tool_completed: op=%s tool=%s success=%s",
             operation_id,
+            tool_name,
             success,
         )
 

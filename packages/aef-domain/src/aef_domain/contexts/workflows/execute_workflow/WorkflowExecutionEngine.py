@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 # ADR-029: Simplified Event System - use agentic_events from agentic-primitives
+from agentic_events import enrich_event, parse_jsonl_line
+
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
     ObservationType,
@@ -993,24 +995,47 @@ class WorkflowExecutionEngine:
                     environment=agent_env,
                 ):
                     line_count += 1
-                    logger.debug("Received line %d from agent runner: %s", line_count, line[:100])
+                    logger.debug("Received line %d: %s", line_count, line[:100])
 
-                    # Parse JSONL event
+                    # ADR-029: Try hook event first (from agentic_events)
+                    hook_event = parse_jsonl_line(line)
+                    if hook_event:
+                        # Enrich with workflow context
+                        enriched = enrich_event(
+                            hook_event,
+                            execution_id=execution_id,
+                            phase_id=phase.phase_id,
+                        )
+                        logger.debug("Hook event: %s", enriched.get("event_type"))
+
+                        # Store hook events directly via observability writer
+                        if self._observability_writer is not None:
+                            await self._record_observation(
+                                observation_type=enriched.get("event_type", "unknown"),
+                                session_id=session_id,
+                                data=enriched.get("context", {}),
+                                execution_id=execution_id,
+                                phase_id=phase.phase_id,
+                                workspace_id=workspace_id,
+                            )
+                        continue
+
+                    # Fall back to Claude CLI native events
                     try:
-                        event = json.loads(line)
-                        event_type = event.get("type", "")
-                        logger.debug("Parsed event type: %s", event_type)
+                        cli_event = json.loads(line)
+                        cli_type = cli_event.get("type", "")
+                        logger.debug("CLI event type: %s", cli_type)
 
-                        # Handle token_usage observations
-                        if event_type == "token_usage":
-                            input_tokens = event.get("input_tokens", 0)
-                            output_tokens = event.get("output_tokens", 0)
-                            cache_creation = event.get("cache_creation_input_tokens", 0)
-                            cache_read = event.get("cache_read_input_tokens", 0)
+                        # Handle token usage from result messages
+                        if cli_type == "result" and "usage" in cli_event:
+                            usage = cli_event.get("usage", {})
+                            input_tokens = usage.get("input_tokens", 0)
+                            output_tokens = usage.get("output_tokens", 0)
+                            cache_creation = usage.get("cache_creation_input_tokens", 0)
+                            cache_read = usage.get("cache_read_input_tokens", 0)
                             total_input_tokens += input_tokens
                             total_output_tokens += output_tokens
 
-                            # Record token usage observation to TimescaleDB
                             if self._observability_writer is not None:
                                 await self._record_observation(
                                     observation_type=ObservationType.TOKEN_USAGE,
@@ -1027,84 +1052,19 @@ class WorkflowExecutionEngine:
                                     workspace_id=workspace_id,
                                 )
                                 logger.debug(
-                                    "Recorded token observation: %d input, %d output",
+                                    "Token usage: %d in, %d out",
                                     input_tokens,
                                     output_tokens,
                                 )
 
-                        # Log progress events
-                        if event_type == "progress":
-                            logger.debug(
-                                "Phase %s progress: turn %d",
-                                phase.phase_id,
-                                event.get("turn", 0),
-                            )
-
-                        # Handle tool_use observations (tool started)
-                        if event_type == "tool_use":
-                            tool_name = event.get("tool", "unknown")
-                            tool_use_id = event.get("tool_use_id")
-                            tool_input = event.get("input", {})
-                            logger.debug(
-                                "Tool use: %s (id=%s)",
-                                tool_name,
-                                tool_use_id,
-                            )
-
-                            # Record tool started observation to TimescaleDB
-                            if self._observability_writer is not None:
-                                import json
-
-                                input_preview = json.dumps(tool_input)[:200] if tool_input else None
-                                await self._record_observation(
-                                    observation_type=ObservationType.TOOL_STARTED,
-                                    session_id=session_id,
-                                    data={
-                                        "tool_name": tool_name,
-                                        "tool_use_id": tool_use_id,
-                                        "input": tool_input,
-                                        "input_preview": input_preview,
-                                    },
-                                    execution_id=execution_id,
-                                    phase_id=phase.phase_id,
-                                    workspace_id=workspace_id,
-                                )
-
-                        # Handle tool_result observations (tool completed)
-                        if event_type == "tool_result":
-                            tool_name = event.get("tool", "unknown")
-                            tool_use_id = event.get("tool_use_id")
-                            success = event.get("success", True)
-                            duration_ms = event.get("duration_ms")
-                            output = event.get("output")
-                            logger.debug(
-                                "Tool result: %s (id=%s, success=%s)",
-                                tool_name,
-                                tool_use_id,
-                                success,
-                            )
-
-                            # Record tool completed observation to TimescaleDB
-                            if self._observability_writer is not None:
-                                output_preview = str(output)[:200] if output else None
-                                await self._record_observation(
-                                    observation_type=ObservationType.TOOL_COMPLETED,
-                                    session_id=session_id,
-                                    data={
-                                        "tool_name": tool_name,
-                                        "tool_use_id": tool_use_id,
-                                        "success": success,
-                                        "output": output,
-                                        "output_preview": output_preview,
-                                        "duration_ms": duration_ms,
-                                    },
-                                    execution_id=execution_id,
-                                    phase_id=phase.phase_id,
-                                    workspace_id=workspace_id,
-                                )
+                        # Tool events now come from hooks (ADR-029)
+                        # Just log progress for debugging
+                        if cli_type in ("assistant", "user", "system"):
+                            logger.debug("CLI message: %s", cli_type)
 
                     except json.JSONDecodeError:
-                        logger.warning("Invalid JSONL line: %s", line[:100])
+                        # Not all lines are JSON (could be plain text output)
+                        logger.debug("Non-JSON line: %s", line[:50])
 
                 logger.info(
                     "Agent runner streaming complete: %d lines, %d input tokens, %d output tokens",

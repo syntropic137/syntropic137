@@ -51,6 +51,7 @@ class AgentConfiguration:
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300
+    allowed_tools: tuple[str, ...] = ()  # Tools allowed during execution
 
 
 @dataclass(frozen=True)
