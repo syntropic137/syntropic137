@@ -101,39 +101,25 @@ dev-fresh:
     @echo "   Feedback API: http://localhost:8001"
     @echo "   API Docs:     http://localhost:8000/docs"
 
-# --- Workspace Image ---
+# --- Workspace Image (from agentic-primitives) ---
 
-# Build the Claude workspace Docker image (aef-workspace-claude)
-# Tags with: latest, git short SHA, and date-based version
+# Build the Claude workspace Docker image using agentic-primitives
+# This uses the fully-tested claude-cli provider from the submodule
 workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
-    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    DATE_TAG=$(date +%Y%m%d)
-    VERSION_TAG="v${DATE_TAG}-${GIT_SHA}"
-    echo "🔨 Building aef-workspace-claude image..."
-    echo "   Version: ${VERSION_TAG}"
-    docker build \
-        -t aef-workspace-claude:latest \
-        -t aef-workspace-claude:${VERSION_TAG} \
-        -t aef-workspace-claude:${GIT_SHA} \
-        --label "org.opencontainers.image.revision=${GIT_SHA}" \
-        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --label "org.opencontainers.image.version=${VERSION_TAG}" \
-        -f docker/workspace/Dockerfile .
-    echo "✅ Image built with tags:"
-    echo "   - aef-workspace-claude:latest"
-    echo "   - aef-workspace-claude:${VERSION_TAG}"
-    echo "   - aef-workspace-claude:${GIT_SHA}"
+    echo "🔨 Building workspace image from agentic-primitives..."
+    cd lib/agentic-primitives && python scripts/build-provider.py claude-cli
+    echo "✅ Image built: agentic-workspace-claude-cli:latest"
 
 # List all workspace image versions
 workspace-versions:
     @echo "📦 Workspace image versions:"
-    @docker images aef-workspace-claude | head -20
+    @docker images agentic-workspace-claude-cli | head -20
 
 # Check if workspace image exists, build if missing
 _workspace-check:
-    @docker image inspect aef-workspace-claude:latest >/dev/null 2>&1 || \
+    @docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1 || \
         (echo "⚠️  Workspace image not found. Building (first time only)..." && just workspace-build)
 
 # Run the CLI application
