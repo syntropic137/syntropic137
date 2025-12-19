@@ -1,7 +1,8 @@
 """Tests for adapters package."""
 
-
 import pytest
+
+
 @pytest.mark.unit
 class TestAdaptersPackage:
     """Test adapters package initialization."""
