@@ -19,6 +19,7 @@ dependencies = [
     "event-sourcing-python",
     "grpcio>=1.60", # Required by event-sourcing SDK
     "minio>=7.2.20",
+    "sqlmodel>=0.0.27",
 ]
 
 # Optional dependencies
