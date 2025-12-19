@@ -18,6 +18,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
+# ADR-029: Simplified Event System - use agentic_events from agentic-primitives
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
     ObservationType,
@@ -932,9 +933,9 @@ class WorkflowExecutionEngine:
                     if files_to_inject:
                         await workspace.inject_files(files_to_inject)
 
-                # Build task.json
+                # Build task.json (kept for future use with task file injection)
                 prompt = await self._build_prompt(phase, ctx)
-                task_data = {
+                _task_data = {
                     "phase": phase.phase_id,
                     "prompt": prompt,
                     "execution_id": ctx.execution_id,
@@ -948,18 +949,32 @@ class WorkflowExecutionEngine:
                     },
                 }
 
-                # Write task.json to .context directory (expected by aef-agent-runner)
-                await workspace.inject_files(
-                    [
-                        (".context/task.json", json.dumps(task_data).encode()),
-                    ]
-                )
+                # ADR-029: Run Claude CLI directly (no aef-agent-runner wrapper)
+                # Build the Claude CLI command
+                claude_cmd = [
+                    "claude",
+                    "--print",  # Non-interactive mode
+                    prompt,
+                    "--output-format",
+                    "stream-json",  # Stream JSON for real-time events
+                    "--dangerously-skip-permissions",  # Agent runs autonomously
+                ]
 
-                # Execute agent runner and stream events
+                # Add allowed tools if specified
+                if phase.agent_config.allowed_tools:
+                    claude_cmd.extend(
+                        [
+                            "--allowedTools",
+                            ",".join(phase.agent_config.allowed_tools),
+                        ]
+                    )
+
+                # Execute Claude CLI and stream events
                 # ANTHROPIC_API_KEY is passed to agent (needed for Claude calls)
                 # GitHub auth uses cached credentials from setup phase (ADR-024)
-                # No raw GitHub token in agent environment
-                agent_env = {}
+                agent_env = {
+                    "CLAUDE_SESSION_ID": session_id,  # For hook event correlation
+                }
                 if secrets.anthropic_api_key:
                     agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
 
@@ -968,12 +983,12 @@ class WorkflowExecutionEngine:
 
                 # Variables for observation events
                 execution_id = ctx.execution_id
-                workspace_id = getattr(workspace, "id", None)  # Get workspace ID if available
+                workspace_id = getattr(workspace, "id", None)
                 agent_model = phase.agent_config.model
 
                 line_count = 0
                 async for line in workspace.stream(
-                    ["python", "-m", "aef_agent_runner"],
+                    claude_cmd,
                     timeout_seconds=phase.timeout_seconds or 300,
                     environment=agent_env,
                 ):
