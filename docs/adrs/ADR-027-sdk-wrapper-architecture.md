@@ -1,9 +1,19 @@
 # ADR-027: SDK Wrapper Architecture via agentic-primitives
 
-**Status:** Proposed
+**Status:** ⚠️ SUPERSEDED by ADR-029 (Simplified Event System)
 **Date:** 2025-12-16
+**Superseded:** 2025-12-19
 **Authors:** @neural
 **Related:** ADR-013 (Testing), ADR-018 (Observability Events), agentic-primitives/ADR-006 (Middleware Hooks)
+
+> **⚠️ Superseded**: This ADR described wrapping the `claude-agent-sdk` with
+> `agentic-primitives` abstractions. ADR-029 simplified this by:
+> 1. Running Claude CLI directly in containers (no SDK wrapper needed)
+> 2. Using `agentic_events` JSONL hooks for observability
+> 3. Storing events directly in TimescaleDB via `AgentEventStore`
+>
+> The `aef-agent-runner` package referenced here has been deleted.
+> See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
 ## Context
 

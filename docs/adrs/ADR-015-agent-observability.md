@@ -4,6 +4,19 @@
 
 **Accepted** - 2025-12-05
 **Updated:** 2025-12-09 - SSE replaced with WebSocket/RealTimeProjection (see ADR-010)
+**Updated:** 2025-12-19 - Observability implementation simplified by ADR-029
+
+> **📝 Note (2025-12-19)**: The observability pipeline described here has been
+> simplified by ADR-029 (Simplified Event System). Key changes:
+> - **Storage**: Events now stored directly in `AgentEventStore` (TimescaleDB)
+>   instead of through the event-sourcing platform
+> - **Emission**: JSONL events from `agentic_events` hooks parsed by
+>   `WorkflowExecutionEngine` and stored via `EventBuffer`
+> - **Schema**: `AgentObservationEvent` in domain remains the canonical event
+>   type for projections
+>
+> The core concepts (operation types, timeline projection) remain valid.
+> See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
 ## Context
 
