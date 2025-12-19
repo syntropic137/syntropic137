@@ -66,7 +66,9 @@ class TestTokenRefreshedEvent:
             expires_at=datetime.now(UTC),
         )
 
-        with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):  # Pydantic raises ValidationError for frozen
             event.installation_id = "changed"  # type: ignore[misc]
 
     def test_validation_empty_installation_id(self) -> None:

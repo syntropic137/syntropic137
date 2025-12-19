@@ -91,10 +91,9 @@ class EventValidator(ast.NodeVisitor):
             return base.id
         if isinstance(base, ast.Attribute):
             return base.attr
-        if isinstance(base, ast.Subscript):
-            # Handle Generic[T] style
-            if isinstance(base.value, ast.Name):
-                return base.value.id
+        # Handle Generic[T] style
+        if isinstance(base, ast.Subscript) and isinstance(base.value, ast.Name):
+            return base.value.id
         return None
 
     def _get_decorator_name(self, decorator: ast.expr) -> str | None:
@@ -112,18 +111,28 @@ class EventValidator(ast.NodeVisitor):
         """Check if model_config has permissive settings."""
         if isinstance(value, ast.Dict):
             for key, val in zip(value.keys, value.values, strict=False):
-                if isinstance(key, ast.Constant) and key.value == "extra":
-                    if isinstance(val, ast.Constant) and val.value == "allow":
-                        self.errors.append(
-                            f"{self.filepath}:{lineno}: {class_name} has extra='allow' "
-                            "(should be 'forbid' for type safety)"
-                        )
-                if isinstance(key, ast.Constant) and key.value == "frozen":
-                    if isinstance(val, ast.Constant) and val.value is False:
-                        self.errors.append(
-                            f"{self.filepath}:{lineno}: {class_name} has frozen=False "
-                            "(events must be immutable)"
-                        )
+                # Check for extra='allow' (should be 'forbid')
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "extra"
+                    and isinstance(val, ast.Constant)
+                    and val.value == "allow"
+                ):
+                    self.errors.append(
+                        f"{self.filepath}:{lineno}: {class_name} has extra='allow' "
+                        "(should be 'forbid' for type safety)"
+                    )
+                # Check for frozen=False (events must be immutable)
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == "frozen"
+                    and isinstance(val, ast.Constant)
+                    and val.value is False
+                ):
+                    self.errors.append(
+                        f"{self.filepath}:{lineno}: {class_name} has frozen=False "
+                        "(events must be immutable)"
+                    )
 
 
 def validate_file(filepath: Path) -> tuple[list[str], list[str], list[str]]:

@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from event_sourcing import DomainEvent, event
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 
 @event("github.AppInstalled", "v1")
@@ -29,7 +29,7 @@ class AppInstalledEvent(DomainEvent):
     account_name: str
     account_type: str
     repositories: tuple[str, ...] = ()
-    permissions: dict[str, str] = {}
+    permissions: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("installation_id")
     @classmethod

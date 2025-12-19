@@ -1,9 +1,7 @@
 """Tests for AgentEvent model."""
 
 from datetime import datetime
-from uuid import UUID, uuid4
-
-import pytest
+from uuid import uuid4
 
 from aef_adapters.events.models import AgentEvent
 

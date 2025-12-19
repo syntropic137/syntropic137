@@ -3,7 +3,7 @@
 Tests both positive (schema matches) and negative (schema mismatch) cases.
 """
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 

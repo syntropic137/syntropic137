@@ -5,10 +5,10 @@ Emitted when an installation token is successfully refreshed.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - Required at runtime for Pydantic
 
 from event_sourcing import DomainEvent, event
-from pydantic import field_validator
+from pydantic import Field, field_validator
 
 
 @event("github.TokenRefreshed", "v1")
@@ -27,7 +27,7 @@ class TokenRefreshedEvent(DomainEvent):
     installation_id: str
     token_hash: str
     expires_at: datetime
-    permissions: dict[str, str] = {}
+    permissions: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("installation_id")
     @classmethod

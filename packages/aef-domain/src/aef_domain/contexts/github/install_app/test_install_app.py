@@ -43,7 +43,9 @@ class TestAppInstalledEvent:
             account_type="Organization",
         )
 
-        with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):  # Pydantic raises ValidationError for frozen
             event.installation_id = "changed"  # type: ignore[misc]
 
     def test_from_webhook(self) -> None:
@@ -98,7 +100,9 @@ class TestAppInstalledEvent:
 
     def test_extra_fields_forbidden(self) -> None:
         """Test that extra fields are rejected (type safety)."""
-        with pytest.raises(Exception):  # Pydantic ValidationError
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
             AppInstalledEvent(
                 installation_id="123",
                 account_id=123,
