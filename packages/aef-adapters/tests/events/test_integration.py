@@ -1,8 +1,8 @@
 """Integration tests for AgentEventStore with real TimescaleDB.
 
-Run with: uv run pytest packages/aef-adapters/tests/events/test_integration.py -v
+Run with: uv run pytest -m integration packages/aef-adapters/tests/events/test_integration.py -v
 
-Requires TimescaleDB running (docker compose up timescaledb).
+Requires: docker compose -f docker/docker-compose.dev.yaml up timescaledb
 """
 
 from __future__ import annotations
@@ -14,11 +14,13 @@ from uuid import uuid4
 
 import pytest
 
-# Skip if no TimescaleDB connection available
 TIMESCALE_URL = os.getenv(
     "TIMESCALE_URL",
     "postgresql://aef:aef_dev_password@localhost:5433/aef_observability",
 )
+
+# Mark all tests as integration - only run when explicitly requested
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture

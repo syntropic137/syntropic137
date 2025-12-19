@@ -1,6 +1,10 @@
 """Integration test for the events API endpoints.
 
 Tests the /events/* endpoints with real TimescaleDB.
+
+Requires: docker compose -f docker/docker-compose.dev.yaml up timescaledb
+
+Run with: uv run pytest -m integration packages/aef-adapters/tests/events/
 """
 
 from __future__ import annotations
@@ -14,6 +18,9 @@ TIMESCALE_URL = os.getenv(
     "TIMESCALE_URL",
     "postgresql://aef:aef_dev_password@localhost:5433/aef_observability",
 )
+
+# Mark all tests as integration - only run when explicitly requested
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture

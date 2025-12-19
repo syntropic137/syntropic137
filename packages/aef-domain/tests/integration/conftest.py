@@ -34,23 +34,9 @@ EVENT_STORE_HOST = os.getenv("EVENT_STORE_HOST", "localhost")
 EVENT_STORE_PORT = os.getenv("EVENT_STORE_PORT", "50051")
 EVENT_STORE_ADDRESS = f"{EVENT_STORE_HOST}:{EVENT_STORE_PORT}"
 
-# Skip if no event store available
+# Mark all tests as integration - only run when explicitly requested
+# Requires: docker compose -f docker/docker-compose.dev.yaml up
 pytestmark = pytest.mark.integration
-
-
-def is_event_store_available() -> bool:
-    """Check if event store is reachable."""
-    import socket
-
-    try:
-        with socket.create_connection((EVENT_STORE_HOST, int(EVENT_STORE_PORT)), timeout=2):
-            return True
-    except (OSError, TimeoutError):
-        return False
-
-
-# Skip all tests in this module if event store not available
-pytest.importorskip("event_sourcing", reason="event_sourcing package required")
 
 
 @pytest.fixture
@@ -59,11 +45,10 @@ async def grpc_client() -> GrpcEventStoreClient:
 
     Note: scope="function" due to pytest-asyncio event loop constraints.
     Each test gets a fresh connection.
+
+    If event store is unavailable, the test will fail with a clear connection error.
     """
     from event_sourcing import GrpcEventStoreClient
-
-    if not is_event_store_available():
-        pytest.skip(f"Event store not available at {EVENT_STORE_ADDRESS}")
 
     client = GrpcEventStoreClient(address=EVENT_STORE_ADDRESS)
     await client.connect()
