@@ -7,6 +7,7 @@ import pytest
 from aef_adapters.events.buffer import EventBuffer, parse_jsonl_events
 
 
+@pytest.mark.unit
 class TestEventBuffer:
     """Tests for EventBuffer class."""
 

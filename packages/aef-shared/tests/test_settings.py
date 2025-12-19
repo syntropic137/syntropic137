@@ -18,6 +18,7 @@ def reset_settings_cache() -> None:
     reset_settings()
 
 
+@pytest.mark.integration
 class TestSettings:
     """Test Settings class."""
 

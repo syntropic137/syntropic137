@@ -42,6 +42,7 @@ def projection(store: MockProjectionStore) -> ExecutionCostProjection:
     return ExecutionCostProjection(store)
 
 
+@pytest.mark.unit
 class TestAgentObservationHandling:
     """Tests for unified AgentObservation event handling."""
 

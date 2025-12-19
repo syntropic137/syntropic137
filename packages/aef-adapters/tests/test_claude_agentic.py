@@ -97,6 +97,7 @@ def execution_config() -> AgentExecutionConfig:
 # ============================================================================
 
 
+@pytest.mark.unit
 class TestClaudeAgenticAgentCreation:
     """Tests for ClaudeAgenticAgent initialization."""
 

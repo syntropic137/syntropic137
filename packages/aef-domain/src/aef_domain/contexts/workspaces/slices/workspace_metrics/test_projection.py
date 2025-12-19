@@ -47,6 +47,7 @@ class MockProjectionStore:
         self._data[collection] = {}
 
 
+@pytest.mark.integration
 class TestWorkspaceMetricsProjection:
     """Tests for workspace metrics projection."""
 

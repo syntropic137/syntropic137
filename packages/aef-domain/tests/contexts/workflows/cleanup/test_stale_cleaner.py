@@ -131,6 +131,7 @@ def _verify_protocols() -> None:
     _: ExecutionRepositoryProtocol = MockRepository()
 
 
+@pytest.mark.unit
 class TestStaleExecutionCleaner:
     """Tests for StaleExecutionCleaner service."""
 

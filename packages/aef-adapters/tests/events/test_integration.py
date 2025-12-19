@@ -35,6 +35,7 @@ def session_id():
     return f"test-session-{uuid4().hex[:8]}"
 
 
+@pytest.mark.integration
 class TestAgentEventStoreIntegration:
     """Integration tests for AgentEventStore with real TimescaleDB."""
 

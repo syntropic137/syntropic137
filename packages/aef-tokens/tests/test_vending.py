@@ -31,6 +31,7 @@ def reset_singleton() -> None:
     reset_token_vending_service()
 
 
+@pytest.mark.unit
 class TestInMemoryTokenStore:
     """Tests for in-memory token store."""
 

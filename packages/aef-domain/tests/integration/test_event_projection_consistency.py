@@ -24,6 +24,7 @@ import pytest
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestWorkflowExecutionEventProjectionConsistency:
     """Test that all workflow execution events are emitted AND projected correctly."""
 

@@ -38,6 +38,7 @@ def handler(projection: DashboardMetricsProjection) -> GetDashboardMetricsHandle
     return GetDashboardMetricsHandler(projection)
 
 
+@pytest.mark.unit
 class TestDashboardMetricsProjection:
     """Tests for DashboardMetricsProjection."""
 

@@ -18,6 +18,7 @@ from aef_collector.watcher.hooks import HookWatcher
 from aef_collector.watcher.transcript import TranscriptWatcher
 
 
+@pytest.mark.unit
 class TestLocalModeIntegration:
     """Integration tests for local file-based operation."""
 

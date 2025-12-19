@@ -10,6 +10,7 @@ from aef_domain.contexts.costs._shared.tool_tokens import (
 )
 
 
+@pytest.mark.unit
 class TestToolTokens:
     """Tests for ToolTokens value object."""
 

@@ -10,6 +10,7 @@ from pydantic import SecretStr
 from aef_shared.settings.storage import StorageProvider, StorageSettings
 
 
+@pytest.mark.integration
 class TestStorageSettings:
     """Tests for StorageSettings configuration."""
 

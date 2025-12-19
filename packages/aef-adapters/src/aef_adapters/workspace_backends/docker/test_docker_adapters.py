@@ -90,6 +90,7 @@ def create_subprocess_mock_factory():
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestDockerIsolationAdapter:
     """Tests for DockerIsolationAdapter."""
 

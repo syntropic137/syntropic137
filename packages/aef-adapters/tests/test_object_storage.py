@@ -22,6 +22,7 @@ from aef_adapters.object_storage import (
 from aef_shared.settings.storage import StorageProvider, StorageSettings
 
 
+@pytest.mark.unit
 class TestLocalStorage:
     """Tests for LocalStorage adapter."""
 

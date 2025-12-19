@@ -79,6 +79,7 @@ class MockWorkflow:
             self.phases = [MockPhase()]
 
 
+@pytest.mark.unit
 class TestWorkflowExecutorRequiresObservability:
     """Tests verifying observability is REQUIRED (Poka-Yoke)."""
 

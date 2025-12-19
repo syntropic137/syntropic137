@@ -62,6 +62,7 @@ def projection(mock_store: MockProjectionStore) -> SessionListProjection:
     return SessionListProjection(mock_store)
 
 
+@pytest.mark.unit
 class TestSessionListProjection:
     """Tests for SessionListProjection event handlers."""
 

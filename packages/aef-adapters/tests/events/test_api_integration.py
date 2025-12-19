@@ -97,6 +97,7 @@ async def seeded_session():
     await store.close()
 
 
+@pytest.mark.integration
 class TestEventsAPI:
     """Test the events API endpoints."""
 

@@ -53,6 +53,7 @@ phases:
 """
 
 
+@pytest.mark.unit
 def test_parse_valid_workflow_yaml() -> None:
     """Test parsing a valid workflow YAML."""
     definition = WorkflowDefinition.from_yaml(VALID_WORKFLOW_YAML)

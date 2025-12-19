@@ -14,6 +14,7 @@ from aef_domain.contexts.github.refresh_token.TokenRefreshedEvent import (
 )
 
 
+@pytest.mark.unit
 class TestRefreshTokenCommand:
     """Tests for RefreshTokenCommand."""
 

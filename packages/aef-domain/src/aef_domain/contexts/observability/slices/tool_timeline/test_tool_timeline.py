@@ -28,6 +28,7 @@ def handler(projection: ToolTimelineProjection) -> ToolTimelineHandler:
     return ToolTimelineHandler(projection)
 
 
+@pytest.mark.unit
 class TestToolTimelineProjection:
     """Tests for ToolTimelineProjection."""
 

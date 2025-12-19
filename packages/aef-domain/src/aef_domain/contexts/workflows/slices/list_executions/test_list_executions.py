@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 
+@pytest.mark.unit
 class TestWorkflowExecutionListProjection:
     """Tests for WorkflowExecutionListProjection."""
 

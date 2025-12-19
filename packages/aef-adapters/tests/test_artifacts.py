@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 from aef_adapters.artifacts import (
@@ -17,6 +18,7 @@ from aef_adapters.artifacts.bundle import ArtifactType
 # ============================================================================
 
 
+@pytest.mark.unit
 class TestArtifactMetadata:
     """Tests for ArtifactMetadata dataclass."""
 

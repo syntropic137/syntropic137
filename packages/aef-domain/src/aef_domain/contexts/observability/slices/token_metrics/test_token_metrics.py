@@ -28,6 +28,7 @@ def handler(projection: TokenMetricsProjection) -> TokenMetricsHandler:
     return TokenMetricsHandler(projection)
 
 
+@pytest.mark.unit
 class TestTokenMetricsProjection:
     """Tests for TokenMetricsProjection."""
 

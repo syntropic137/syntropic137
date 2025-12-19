@@ -33,6 +33,7 @@ def set_test_environment():
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestWorkspaceServiceMemory:
     """Test WorkspaceService with memory adapters."""
 

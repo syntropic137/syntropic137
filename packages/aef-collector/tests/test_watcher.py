@@ -10,6 +10,7 @@ from aef_collector.watcher.hooks import HookWatcher
 from aef_collector.watcher.transcript import TranscriptWatcher
 
 
+@pytest.mark.unit
 class TestHookWatcher:
     """Tests for the hook event watcher."""
 

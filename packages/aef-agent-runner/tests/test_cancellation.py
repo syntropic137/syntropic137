@@ -17,6 +17,7 @@ from aef_agent_runner.cancellation import (
 )
 
 
+@pytest.mark.unit
 class TestCancellationToken:
     """Tests for CancellationToken class."""
 

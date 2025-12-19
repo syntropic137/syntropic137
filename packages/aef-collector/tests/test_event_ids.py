@@ -16,6 +16,7 @@ from aef_collector.events.ids import (
 )
 
 
+@pytest.mark.unit
 class TestGenerateEventId:
     """Tests for the base generate_event_id function."""
 

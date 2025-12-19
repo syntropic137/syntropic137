@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import json
 from unittest import mock
 
@@ -21,6 +22,7 @@ from aef_agent_runner.events import (
 )
 
 
+@pytest.mark.unit
 class TestAgentEvent:
     """Tests for AgentEvent class."""
 

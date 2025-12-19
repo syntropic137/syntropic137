@@ -1,5 +1,6 @@
 """Tests for token and budget models."""
 
+import pytest
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from aef_tokens.models import (
 )
 
 
+@pytest.mark.unit
 class TestTokenScope:
     """Tests for TokenScope."""
 

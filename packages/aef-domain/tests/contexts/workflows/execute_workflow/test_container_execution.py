@@ -44,6 +44,7 @@ class MockExecutionContext:
     artifact_ids: list[str] = field(default_factory=list)
 
 
+@pytest.mark.integration
 class TestPhaseCountingAccuracy:
     """Tests verifying phase counting fix (no duplicate appends)."""
 
