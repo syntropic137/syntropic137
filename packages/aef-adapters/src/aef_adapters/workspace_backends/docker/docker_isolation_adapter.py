@@ -482,6 +482,7 @@ class DockerIsolationAdapter:
             "--security-opt=no-new-privileges",
             "--read-only",
             "--tmpfs=/tmp:rw,noexec,nosuid,size=256m",
+            "--tmpfs=/home/agent:rw,exec,nosuid,size=128m,uid=1000,gid=1000",  # For git config, gh CLI, etc.
             # Resource limits
             f"--memory={security.memory_limit_mb}m",
             f"--cpus={security.cpu_limit_cores}",

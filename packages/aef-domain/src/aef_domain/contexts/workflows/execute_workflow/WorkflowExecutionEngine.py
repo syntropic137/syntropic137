@@ -1032,6 +1032,7 @@ class WorkflowExecutionEngine:
                 claude_cmd = [
                     "claude",
                     "--print",  # Non-interactive mode
+                    "--verbose",  # Required for stream-json output format
                     prompt,
                     "--output-format",
                     "stream-json",  # Stream JSON for real-time events
