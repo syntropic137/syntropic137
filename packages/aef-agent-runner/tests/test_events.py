@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
 import json
 from unittest import mock
+
+import pytest
 
 from aef_agent_runner.events import (
     AgentEvent,

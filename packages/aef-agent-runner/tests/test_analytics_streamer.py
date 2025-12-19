@@ -1,6 +1,5 @@
 """Tests for AnalyticsStreamer.
 
-import pytest
 This module tests the real-time analytics event streaming from
 .agentic/analytics/ directory.
 
@@ -15,6 +14,8 @@ from __future__ import annotations
 
 import json
 import time
+
+import pytest
 
 from aef_agent_runner.analytics_streamer import AnalyticsStreamer
 

@@ -1,6 +1,7 @@
 """Tests for logging module."""
 
 import pytest
+
 from aef_shared.logging import (
     LogConfig,
     Logger,

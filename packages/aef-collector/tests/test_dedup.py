@@ -1,6 +1,7 @@
 """Tests for deduplication filter."""
 
 import pytest
+
 from aef_collector.collector.dedup import DeduplicationFilter
 
 

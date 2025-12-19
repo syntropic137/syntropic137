@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from aef_adapters.artifacts import (
     ArtifactBundle,
