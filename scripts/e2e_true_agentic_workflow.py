@@ -46,7 +46,7 @@ POLL_INTERVAL_SECONDS = 5
 MAX_WAIT_SECONDS = 600  # 10 minutes max
 
 # PostgreSQL connection (via docker exec)
-POSTGRES_CONTAINER = "aef-postgres"
+POSTGRES_CONTAINER = os.getenv("AEF_POSTGRES_CONTAINER", "aef-db")
 POSTGRES_USER = "aef"
 POSTGRES_DB = "aef"
 
