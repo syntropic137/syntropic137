@@ -18,6 +18,7 @@ from aef_collector.events.types import (
 )
 
 
+@pytest.mark.unit
 class TestEventTypes:
     """Tests for event type definitions."""
 

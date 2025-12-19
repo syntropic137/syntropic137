@@ -197,6 +197,7 @@ def executor(mock_agent: MockAgenticAgent, tmp_path: Path) -> AgenticWorkflowExe
 # ============================================================================
 
 
+@pytest.mark.unit
 class TestAgenticWorkflowExecutor:
     """Tests for AgenticWorkflowExecutor."""
 

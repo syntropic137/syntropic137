@@ -41,6 +41,7 @@ def handler(projection: WorkflowListProjection) -> ListWorkflowsHandler:
     return ListWorkflowsHandler(projection)
 
 
+@pytest.mark.unit
 class TestWorkflowListProjection:
     """Tests for WorkflowListProjection (template projection)."""
 

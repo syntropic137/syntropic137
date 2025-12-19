@@ -213,6 +213,7 @@ def projection_manager(projection_store: FailingProjectionStore) -> TrackingProj
     return TrackingProjectionManager(projection_store)
 
 
+@pytest.mark.unit
 class TestSubscriptionPositionAtomicity:
     """Regression tests for subscription position atomicity.
 

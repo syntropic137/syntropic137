@@ -44,6 +44,7 @@ def handler(projection: WorkflowDetailProjection) -> GetWorkflowDetailHandler:
     return GetWorkflowDetailHandler(projection)
 
 
+@pytest.mark.unit
 class TestGetWorkflowDetailQuery:
     """Tests for GetWorkflowDetailQuery DTO."""
 

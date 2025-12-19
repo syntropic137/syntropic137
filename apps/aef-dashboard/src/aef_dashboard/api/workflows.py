@@ -175,7 +175,7 @@ async def list_workflow_runs(workflow_id: str) -> ExecutionRunListResponse:
     # Convert to API response
     runs = [
         ExecutionRunSummary(
-            execution_id=e.execution_id,
+            execution_id=e.workflow_execution_id,
             workflow_id=e.workflow_id,
             workflow_name=e.workflow_name or detail.name,
             status=e.status,

@@ -627,11 +627,12 @@ def run_workflow(
     from aef_adapters.agents import (
         AgentProtocol,
         AgentProvider,
-        InstrumentedAgent,
+        # InstrumentedAgent removed - observability via ADR-029
         MockAgent,
         MockAgentConfig,
     )
-    from aef_adapters.hooks import ValidatorRegistry, get_hook_client
+
+    # Hooks removed - observability via ADR-029
     from aef_adapters.storage import (
         connect_event_store,
         disconnect_event_store,
@@ -811,7 +812,7 @@ def run_workflow(
             artifact_repo = get_artifact_repository()
 
             # Create agent factory - REQUIRES API keys (fail fast)
-            def agent_factory(provider: str) -> InstrumentedAgent:
+            def agent_factory(provider: str) -> AgentProtocol:
                 """Create an instrumented agent for the given provider.
 
                 REQUIRES real agent API keys. Fails fast if not configured.
@@ -866,27 +867,22 @@ def run_workflow(
                     )
                     raise typer.Exit(1)
 
-                hook_client = get_hook_client()
-                validators = ValidatorRegistry()
-                return InstrumentedAgent(
-                    agent=base_agent,
-                    hook_client=hook_client,
-                    validators=validators,
-                )
+                # Observability handled by EventBuffer/AgentEventStore at executor level (ADR-029)
+                return base_agent
 
             # Create engine with ADR-023 compliant dependencies
+            from aef_adapters.events import get_event_store
             from aef_adapters.storage.artifact_storage import get_artifact_storage
-            from aef_adapters.storage.observability_writer import get_observability_writer
             from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.workspace_backends.service import WorkspaceService
 
             execution_repo = get_workflow_execution_repository()
-            observability_writer = get_observability_writer()
+            event_store = get_event_store()
             artifact_content_storage = await get_artifact_storage()
 
-            # Initialize observability writer (creates TimescaleDB schema)
-            # Note: initialization happens lazily on first write
-            # No need to pre-initialize here
+            # Initialize event store (creates TimescaleDB schema)
+            # ADR-029: Simplified event system
+            await event_store.initialize()
 
             # Container environment - non-sensitive config only (ADR-024)
             #
@@ -910,7 +906,7 @@ def run_workflow(
                 session_repository=session_repo,
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,
-                observability_writer=observability_writer,
+                observability_writer=event_store,  # ADR-029: Use AgentEventStore
                 artifact_content_storage=artifact_content_storage,  # ADR-012
             )
 

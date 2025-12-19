@@ -1,8 +1,11 @@
 """Tests for deduplication filter."""
 
+import pytest
+
 from aef_collector.collector.dedup import DeduplicationFilter
 
 
+@pytest.mark.unit
 class TestDeduplicationFilter:
     """Tests for the deduplication filter."""
 

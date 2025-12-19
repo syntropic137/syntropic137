@@ -42,6 +42,7 @@ from aef_domain.contexts.workspaces.terminate_workspace import TerminateWorkspac
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestWorkspaceLifecycleIntegration:
     """Integration tests for full workspace lifecycle.
 

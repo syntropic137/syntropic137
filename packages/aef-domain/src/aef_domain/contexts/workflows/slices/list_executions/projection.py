@@ -131,7 +131,7 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
             return
 
         summary = WorkflowExecutionSummary(
-            execution_id=execution_id,
+            workflow_execution_id=execution_id,
             workflow_id=event_data.get("workflow_id", ""),
             workflow_name=event_data.get("workflow_name", ""),
             status="running",

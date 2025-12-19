@@ -14,6 +14,7 @@ from aef_domain.contexts.github._shared.value_objects import (
 )
 
 
+@pytest.mark.unit
 class TestInstallationId:
     """Tests for InstallationId value object."""
 

@@ -82,6 +82,7 @@ def ready_aggregate() -> WorkspaceAggregate:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestCreateWorkspace:
     """Tests for CreateWorkspaceCommand handling."""
 

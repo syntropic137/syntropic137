@@ -18,6 +18,7 @@ from aef_domain.contexts.artifacts import (
 )
 
 
+@pytest.mark.unit
 class TestComputeContentHash:
     """Tests for content hashing."""
 

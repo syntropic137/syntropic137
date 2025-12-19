@@ -68,6 +68,7 @@ def mock_github_settings() -> MagicMock:
     return settings
 
 
+@pytest.mark.unit
 class TestInstallationToken:
     """Tests for InstallationToken dataclass."""
 

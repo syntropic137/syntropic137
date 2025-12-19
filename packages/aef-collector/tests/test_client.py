@@ -20,6 +20,7 @@ def sample_event() -> CollectedEvent:
     )
 
 
+@pytest.mark.unit
 class TestEventCollectorClient:
     """Tests for the HTTP client."""
 

@@ -13,8 +13,8 @@ class WorkflowExecutionSummary:
     Each execution represents a single run of a workflow template.
     """
 
-    execution_id: str
-    """Unique identifier for this execution run."""
+    workflow_execution_id: str
+    """Unique identifier for this workflow execution run."""
 
     workflow_id: str
     """ID of the workflow template being executed."""
@@ -54,13 +54,19 @@ class WorkflowExecutionSummary:
 
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowExecutionSummary":
-        """Create from dictionary data."""
+        """Create from dictionary data.
+
+        Supports both new naming (workflow_execution_id) and legacy (execution_id).
+        """
         cost = data.get("total_cost_usd", "0")
         if isinstance(cost, str):
             cost = Decimal(cost)
 
+        # Support both new and legacy naming for backward compatibility
+        execution_id = data.get("workflow_execution_id") or data.get("execution_id", "")
+
         return cls(
-            execution_id=data["execution_id"],
+            workflow_execution_id=execution_id,
             workflow_id=data["workflow_id"],
             workflow_name=data.get("workflow_name", ""),
             status=data.get("status", "pending"),
@@ -87,7 +93,7 @@ class WorkflowExecutionSummary:
     def to_dict(self) -> dict:
         """Convert to dictionary for storage."""
         return {
-            "execution_id": self.execution_id,
+            "workflow_execution_id": self.workflow_execution_id,
             "workflow_id": self.workflow_id,
             "workflow_name": self.workflow_name,
             "status": self.status,

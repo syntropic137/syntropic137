@@ -12,6 +12,7 @@ from aef_domain.contexts.github.install_app.InstallationRevokedEvent import (
 )
 
 
+@pytest.mark.unit
 class TestAppInstalledEvent:
     """Tests for AppInstalledEvent."""
 

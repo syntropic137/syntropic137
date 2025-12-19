@@ -24,6 +24,7 @@ from aef_domain.contexts.sessions import (
 )
 
 
+@pytest.mark.unit
 class TestTokenMetrics:
     """Tests for TokenMetrics value object."""
 

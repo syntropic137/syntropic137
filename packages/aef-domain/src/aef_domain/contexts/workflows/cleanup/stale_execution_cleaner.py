@@ -128,7 +128,7 @@ class StaleExecutionCleaner:
         cleaned: list[str] = []
 
         for summary in stale_executions[: self.MAX_BATCH_SIZE]:
-            execution_id = summary.execution_id
+            execution_id = summary.workflow_execution_id
 
             # Also check expected_completion_at if set
             if summary.expected_completion_at:

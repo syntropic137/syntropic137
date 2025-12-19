@@ -241,6 +241,7 @@ async def create_test_artifact(
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestRootEndpoints:
     """Test root and health endpoints."""
 

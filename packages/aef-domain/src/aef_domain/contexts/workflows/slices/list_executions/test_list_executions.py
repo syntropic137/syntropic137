@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 
+@pytest.mark.unit
 class TestWorkflowExecutionListProjection:
     """Tests for WorkflowExecutionListProjection."""
 
@@ -40,7 +41,7 @@ class TestWorkflowExecutionListProjection:
         mock_store.save.assert_called_once()
         saved_data = mock_store.save.call_args[0][2]
 
-        assert saved_data["execution_id"] == "exec-1"
+        assert saved_data["workflow_execution_id"] == "exec-1"
         assert saved_data["workflow_id"] == "workflow-1"
         assert saved_data["workflow_name"] == "Test Workflow"
         assert saved_data["status"] == "running"
@@ -218,5 +219,5 @@ class TestWorkflowExecutionListProjection:
         assert all(e.workflow_id == "workflow-1" for e in executions)
 
         # Should be sorted by started_at descending (most recent first)
-        assert executions[0].execution_id == "exec-2"
-        assert executions[1].execution_id == "exec-1"
+        assert executions[0].workflow_execution_id == "exec-2"
+        assert executions[1].workflow_execution_id == "exec-1"

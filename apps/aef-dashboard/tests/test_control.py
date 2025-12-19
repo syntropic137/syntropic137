@@ -103,6 +103,7 @@ async def paused_execution() -> str:
     return execution_id
 
 
+@pytest.mark.unit
 class TestControlHTTPEndpoints:
     """Tests for HTTP control endpoints."""
 

@@ -10,12 +10,16 @@ from pydantic import SecretStr
 from aef_shared.settings.storage import StorageProvider, StorageSettings
 
 
+@pytest.mark.integration
 class TestStorageSettings:
     """Tests for StorageSettings configuration."""
 
     def test_default_values(self) -> None:
-        """Test default configuration values."""
-        settings = StorageSettings()
+        """Test default configuration values when explicitly set to local.
+
+        Note: We test explicit local provider since .env may configure different defaults.
+        """
+        settings = StorageSettings(provider=StorageProvider.LOCAL)
 
         assert settings.provider == StorageProvider.LOCAL
         assert settings.local_path == Path(".artifacts")

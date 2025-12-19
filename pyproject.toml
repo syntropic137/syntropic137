@@ -62,15 +62,14 @@ aef-perf = { workspace = true }
 aef-tokens = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
-agentic-hooks = { path = "lib/agentic-primitives/lib/python/agentic_hooks" }
 agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging" }
-# NEW: agentic-primitives packages (M1-M4)
+# agentic-primitives packages
 agentic-security = { path = "lib/agentic-primitives/lib/python/agentic_security" }
-agentic-agent = { path = "lib/agentic-primitives/lib/python/agentic_agent" }
 agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation" }
 agentic-adapters = { path = "lib/agentic-primitives/lib/python/agentic_adapters" }
-# M8: Unified Executor Architecture
-agentic-observability = { path = "lib/agentic-primitives/lib/python/agentic_observability" }
+agentic-settings = { path = "lib/agentic-primitives/lib/python/agentic_settings" }
+# Simple event emission (ADR-029)
+agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events" }
 
 [tool.ruff]
 target-version = "py312"
@@ -167,20 +166,22 @@ module = [
     "openai.*",
     "asyncpg",
     "asyncpg.*",
-    "agentic_hooks",
-    "agentic_hooks.*",
     "agentic_logging",
     "agentic_logging.*",
     "agentic_security",
     "agentic_security.*",
-    "agentic_agent",
-    "agentic_agent.*",
     "agentic_isolation",
     "agentic_isolation.*",
     "agentic_adapters",
     "agentic_adapters.*",
+    "agentic_events",
+    "agentic_events.*",
+    "agentic_otel",
+    "agentic_otel.*",
     "agentic_observability",
     "agentic_observability.*",
+    "agentic_settings",
+    "agentic_settings.*",
     "sse_starlette",
     "sse_starlette.*",
     "uvicorn",

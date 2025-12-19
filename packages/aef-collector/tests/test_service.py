@@ -30,6 +30,7 @@ def sample_event() -> CollectedEvent:
     )
 
 
+@pytest.mark.unit
 class TestHealthEndpoint:
     """Tests for health endpoint."""
 

@@ -59,6 +59,7 @@ def create_test_workflow(workflow_id: str = "test-workflow") -> str:
     return workflow_id
 
 
+@pytest.mark.unit
 class TestCLI:
     """Test CLI commands."""
 

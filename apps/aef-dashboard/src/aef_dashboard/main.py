@@ -15,6 +15,7 @@ from aef_dashboard.api import (
     artifacts_router,
     control_router,
     costs_router,
+    events_router,
     execution_router,
     executions_router,
     metrics_router,
@@ -147,7 +148,6 @@ async def _start_subscription_service() -> None:
             connect_event_store,
             get_event_store_client,
         )
-        from aef_adapters.storage.observability_writer import get_observability_writer
         from aef_adapters.subscriptions import create_coordinator_service
         from aef_shared.settings import get_settings
 
@@ -158,14 +158,16 @@ async def _start_subscription_service() -> None:
             logger.info("Skipping subscription service in test environment")
             return
 
-        # Initialize ObservabilityWriter for TimescaleDB queries (ADR-026)
+        # Initialize AgentEventStore for TimescaleDB queries (ADR-029)
         try:
-            observability_writer = get_observability_writer()
-            await observability_writer.initialize()
-            logger.info("ObservabilityWriter initialized for cost projections")
+            from aef_adapters.events import get_event_store
+
+            event_store = get_event_store()
+            await event_store.initialize()
+            logger.info("AgentEventStore initialized for event queries")
         except Exception as e:
             logger.warning(
-                "Could not initialize ObservabilityWriter, cost data may be unavailable: %s", e
+                "Could not initialize AgentEventStore, event data may be unavailable: %s", e
             )
 
         # Connect to event store
@@ -283,6 +285,7 @@ def create_app() -> FastAPI:
     app.include_router(observability_router, prefix="/api")  # Tool/token metrics
     app.include_router(control_router, prefix="/api")  # Execution control (pause/resume/cancel)
     app.include_router(costs_router, prefix="/api")  # Cost tracking
+    app.include_router(events_router, prefix="/api")  # Raw event queries (ADR-029)
 
     # Webhooks (no /api prefix - must match GitHub's webhook URL exactly)
     app.include_router(webhooks_router)

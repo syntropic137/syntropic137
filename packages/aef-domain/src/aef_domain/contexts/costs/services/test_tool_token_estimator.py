@@ -9,6 +9,7 @@ from aef_domain.contexts.costs.services.tool_token_estimator import (
 )
 
 
+@pytest.mark.unit
 class TestToolTokenEstimator:
     """Tests for ToolTokenEstimator."""
 

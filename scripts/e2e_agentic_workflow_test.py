@@ -239,14 +239,25 @@ def test_execution_id():
 class TestAEFIntegration:
     """Integration tests for AEF."""
 
-    def test_github_app_works(self):
-        """Verify GitHub App can create files."""
-        assert True
+    def test_execution_id_format(self):
+        """Verify execution ID follows expected format."""
+        # Level 4 verification: check actual data, not just existence
+        execution_id = "{execution_id}"
+        parts = execution_id.split("-")
+        assert len(parts) >= 3, f"Expected format e2e-workflow-YYYYMMDD-HHMMSS, got {{execution_id}}"
+        assert parts[0] == "e2e", "Execution ID should start with e2e"
+        assert parts[1] == "workflow", "Execution ID should contain workflow type"
 
-    def test_spend_tracking_works(self):
-        """Verify spend tracking is functional."""
+    def test_bot_username_present(self):
+        """Verify bot username is set."""
+        bot = "{github_client.bot_username}"
+        assert bot, "Bot username should not be empty"
+        assert "[bot]" in bot or "app" in bot.lower(), f"Expected bot username, got {{bot}}"
+
+    def test_budget_is_positive(self):
+        """Verify spend budget was allocated."""
         max_cost = {budget.max_cost_usd}
-        assert max_cost > 0
+        assert max_cost > 0, "Budget should be positive"
 '''
 
     import base64
@@ -534,8 +545,11 @@ async def main() -> int:
         branch=results["branch"],
     )
 
-    # Verify event store
-    _ = await verify_event_store(results["execution_id"])  # Validates store
+    # Verify event store (Level 3: Event Verification)
+    events_ok = await verify_event_store(results["execution_id"])
+    if not events_ok:
+        print("\n❌ Event store verification failed!")
+        return 1
 
     # Summary
     print_header("🎉 E2E Integration Test Complete!")

@@ -727,6 +727,7 @@ class WorkspaceService:
         with_sidecar: bool = True,
         inject_tokens: bool = False,
         token_types: list[TokenType] | None = None,
+        extra_environment: dict[str, str] | None = None,
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
@@ -744,6 +745,8 @@ class WorkspaceService:
             with_sidecar: Whether to start sidecar proxy
             inject_tokens: Whether to inject tokens automatically
             token_types: Token types to inject (if inject_tokens=True)
+            extra_environment: Additional environment variables to inject
+                (e.g., OTel configuration for observability)
 
         Yields:
             ManagedWorkspace for command execution
@@ -753,6 +756,7 @@ class WorkspaceService:
                 execution_id="exec-123",
                 workflow_id="wf-456",
                 inject_tokens=True,
+                extra_environment={"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
             ) as workspace:
                 result = await workspace.execute(["python", "script.py"])
         """
@@ -773,7 +777,11 @@ class WorkspaceService:
         )
         aggregate.create_workspace(create_cmd)
 
-        # Build isolation config
+        # Build isolation config with merged environment
+        merged_environment = dict(self._config.environment or {})
+        if extra_environment:
+            merged_environment.update(extra_environment)
+
         isolation_config = IsolationConfig(
             execution_id=execution_id,
             workspace_id=workspace_id,
@@ -786,7 +794,7 @@ class WorkspaceService:
                 memory_limit_mb=self._config.memory_limit_mb,
                 cpu_limit_cores=self._config.cpu_limit_cores,
             ),
-            environment=self._config.environment,
+            environment=merged_environment,
         )
 
         isolation_handle: IsolationHandle | None = None

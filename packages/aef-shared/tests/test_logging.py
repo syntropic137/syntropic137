@@ -1,5 +1,7 @@
 """Tests for logging module."""
 
+import pytest
+
 from aef_shared.logging import (
     LogConfig,
     Logger,
@@ -9,6 +11,7 @@ from aef_shared.logging import (
 )
 
 
+@pytest.mark.unit
 class TestLogConfig:
     """Test LogConfig model."""
 

@@ -185,12 +185,12 @@ export function ExecutionList() {
               {executions.map((exec) => {
                 return (
                   <Link
-                    key={exec.execution_id}
-                    to={`/executions/${exec.execution_id}`}
+                    key={exec.workflow_execution_id}
+                    to={`/executions/${exec.workflow_execution_id}`}
                     className="grid grid-cols-8 gap-4 px-4 py-4 hover:bg-[var(--color-surface-elevated)] transition-colors items-center"
                   >
                     <div className="font-mono text-sm text-[var(--color-text-primary)]">
-                      {exec.execution_id.slice(0, 8)}...
+                      {exec.workflow_execution_id.slice(0, 8)}...
                     </div>
                     <div className="text-sm text-[var(--color-text-secondary)] truncate">
                       <Link

@@ -56,6 +56,7 @@ def sidecar_handle() -> SidecarHandle:
 # =============================================================================
 
 
+@pytest.mark.integration
 class TestTokenVendingServiceAdapter:
     """Tests for TokenVendingServiceAdapter."""
 

@@ -248,13 +248,13 @@ class ProjectionManager:
         """Create SessionToolsProjection with TimescaleDB access.
 
         This projection queries TimescaleDB for tool operations.
-        See ADR-026: TimescaleDB for Observability Storage
+        See ADR-029: Simplified Event System
         """
         try:
-            from aef_adapters.storage.observability_writer import get_observability_writer
+            from aef_adapters.events import get_event_store
 
-            observability_writer = get_observability_writer()
-            return SessionToolsProjection(pool=observability_writer.pool)
+            store = get_event_store()
+            return SessionToolsProjection(pool=store.pool)
         except Exception as e:
             # Return projection without pool - will return empty results
             logger.warning(
@@ -267,13 +267,15 @@ class ProjectionManager:
         """Create SessionCostProjection with TimescaleDB access.
 
         This projection now queries TimescaleDB directly for real-time cost calculation.
-        See ADR-026: TimescaleDB for Observability Storage
+        See ADR-029: Simplified Event System
         """
         try:
-            from aef_adapters.storage.observability_writer import get_observability_writer
+            from aef_adapters.events import get_event_store
 
-            observability_writer = get_observability_writer()
-            return SessionCostProjection(self._store, observability_writer=observability_writer)
+            store = get_event_store()
+            # SessionCostProjection needs to be updated to use the new event store
+            # For now, pass the pool directly
+            return SessionCostProjection(self._store, pool=store.pool)
         except Exception as e:
             # Fallback to event store-based projection if TimescaleDB unavailable
             logger.warning(

@@ -35,6 +35,7 @@ def _reset_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     reset_settings()
 
 
+@pytest.mark.unit
 class TestGetAgent:
     """Tests for get_agent factory function."""
 

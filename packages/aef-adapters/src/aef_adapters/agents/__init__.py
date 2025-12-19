@@ -31,19 +31,6 @@ For Testing (Chat Completion - Legacy):
     mock_config = MockAgentConfig(responses=["Test response"])
     agent = MockAgent(mock_config)
 
-For Instrumented Agents (with observability):
-    from aef_adapters.agents import InstrumentedAgent, SessionContext
-    from aef_adapters.hooks import get_hook_client, ValidatorRegistry
-
-    async with get_hook_client() as client:
-        instrumented = InstrumentedAgent(
-            agent=MockAgent(),
-            hook_client=client,
-            validators=ValidatorRegistry(),
-        )
-        instrumented.set_session_context("session-123")
-        response = await instrumented.complete(messages, config)
-
 For Testing (Agentic):
     Use unittest.mock to patch the claude-agent-sdk directly.
     See tests/test_claude_agentic.py for examples.
@@ -94,7 +81,6 @@ from aef_adapters.agents.factory import (
     get_available_agents,
     is_agent_available,
 )
-from aef_adapters.agents.instrumented import InstrumentedAgent
 from aef_adapters.agents.mock import MockAgent, MockAgentConfig, MockAgentError
 from aef_adapters.agents.protocol import (
     AgentAuthenticationError,
@@ -172,8 +158,7 @@ __all__ = [
     "ExecutionProgress",
     "ExecutionStarted",
     "ExecutionToolUse",
-    # Instrumented & Mock
-    "InstrumentedAgent",
+    # Mock agent
     "MockAgent",
     "MockAgentConfig",
     "MockAgentError",

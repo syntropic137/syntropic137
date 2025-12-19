@@ -98,6 +98,7 @@ def mock_workflow() -> MockWorkflow:
 # =============================================================================
 
 
+@pytest.mark.unit
 class TestExecutorControlSignals:
     """Tests for control signal handling in executor."""
 

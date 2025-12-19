@@ -33,17 +33,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+
+# Observability imports (deprecated - being replaced by AgentEventStore)
+import warnings
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from agentic_observability import (
-    ObservabilityPort,
-    ObservationContext,
-    ObservationType,
-)
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore", DeprecationWarning)
+    from aef_adapters.observability.protocol import (
+        ObservabilityPort,
+        ObservationContext,
+        ObservationType,
+    )
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -407,12 +412,21 @@ class WorkflowExecutor:
 
         # Use WorkspaceService for Docker isolation (ADR-024: Setup Phase Secrets)
         # This creates an isolated container with GitHub credentials pre-configured
+        # Session context is injected for event correlation (ADR-029)
+        agent_env = self._create_agent_environment(
+            obs_context.session_id,
+            ctx.execution_id,
+            phase.phase_id,
+            phase.name,
+        )
+
         async with self._workspace_service.create_workspace(
             execution_id=ctx.execution_id,
             workflow_id=ctx.workflow_id,
             phase_id=phase.phase_id,
             with_sidecar=False,  # Sidecar not needed with setup phase pattern
             inject_tokens=False,  # Handled by setup phase in container
+            extra_environment=agent_env,  # Inject session context for events
         ) as managed_workspace:
             workspace_path = managed_workspace.path
 
@@ -755,3 +769,33 @@ class WorkflowExecutor:
             task = task.replace(f"{{{{{phase_id}_output}}}}", content)
 
         return task
+
+    def _create_agent_environment(
+        self,
+        session_id: str,
+        execution_id: str,
+        phase_id: str,
+        phase_name: str,
+    ) -> dict[str, str]:
+        """Create environment variables for agent container.
+
+        Injects session context so hooks can emit properly correlated events.
+        Events are emitted as JSONL to stdout (see ADR-029: Simplified Event System).
+
+        Args:
+            session_id: Session ID for event correlation
+            execution_id: Workflow execution ID
+            phase_id: Phase ID within the execution
+            phase_name: Human-readable phase name
+
+        Returns:
+            Environment variables for agent session context
+        """
+        return {
+            # Session ID for event correlation (used by hooks)
+            "CLAUDE_SESSION_ID": session_id,
+            # Execution context for event enrichment
+            "AEF_EXECUTION_ID": execution_id,
+            "AEF_PHASE_ID": phase_id,
+            "AEF_PHASE_NAME": phase_name,
+        }

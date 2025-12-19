@@ -13,6 +13,7 @@ from aef_domain.contexts.artifacts.domain.services.artifact_query_service import
 )
 
 
+@pytest.mark.unit
 class TestArtifactQueryServiceProtocol:
     """Tests for the protocol definition."""
 

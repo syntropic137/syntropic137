@@ -32,6 +32,7 @@ def reset_singleton() -> None:
     reset_spend_tracker()
 
 
+@pytest.mark.unit
 class TestCalculateCost:
     """Tests for cost calculation."""
 
