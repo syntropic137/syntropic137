@@ -68,9 +68,9 @@ async def _validate_schema(self, conn: Connection) -> None:
         WHERE table_name = 'my_table'
         AND table_schema = 'public'
     """)
-    
+
     actual = {r["column_name"]: r["data_type"] for r in rows}
-    
+
     mismatches = []
     for col, expected in EXPECTED_COLUMNS.items():
         actual_type = actual.get(col)
@@ -78,7 +78,7 @@ async def _validate_schema(self, conn: Connection) -> None:
             mismatches.append(f"Missing column: {col}")
         elif not actual_type.startswith(expected.split()[0]):
             mismatches.append(f"{col}: expected '{expected}', got '{actual_type}'")
-    
+
     if mismatches:
         raise SchemaValidationError("\\n".join(mismatches))
 
@@ -139,17 +139,32 @@ For these, rely on integration tests and migration tooling.
 - Validation adds ~1 query at startup (negligible)
 - Pydantic validation adds ~microseconds per insert
 
+### Type Safety Spectrum
+
+Different approaches provide different levels of type safety:
+
+| Approach | Static (mypy) | Startup | Runtime | Use Case |
+|----------|---------------|---------|---------|----------|
+| Raw SQL | ❌ | ❌ | ❌ Cryptic | Don't use alone |
+| Raw SQL + Pydantic | ✅ Models | ✅ Schema | ✅ Clear | High-perf paths |
+| gRPC + Protobuf | ⚠️ Stubs | N/A | ✅ | Domain events |
+| SQLModel ORM | ✅ Models | ⚠️ | ✅ | CRUD operations |
+
+**Note:** In Python, "build time" = "mypy/type-check time". True compile-time safety requires a compiled language.
+
 ### Migration Path
 
-Existing adapters using raw SQL should be updated:
+Adapters using raw SQL that need schema validation:
 
 | Adapter | Location | Status | Priority |
 |---------|----------|--------|----------|
 | `AgentEventStore` | `aef-adapters/events/store.py` | ✅ Done | - |
-| `PostgresEventStore` | `aef-adapters/storage/postgres.py` | ❌ TODO | High |
 | `PostgresProjectionStore` | `aef-adapters/projection_stores/postgres_store.py` | ❌ TODO | High |
 | `SessionToolsProjection` | `aef-adapters/projections/session_tools.py` | ❌ TODO | Medium |
 | `SessionCostProjection` | `aef-domain/contexts/costs/.../projection.py` | ❌ TODO | Medium |
+
+**Note:** Domain events use `EventStoreClient` (gRPC), which provides type safety via Protocol Buffers.
+The old `PostgresEventStore` was dead code and has been deleted.
 
 ## Implementation Checklist
 

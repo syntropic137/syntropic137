@@ -254,17 +254,21 @@ async def execute_agent_streaming(
     events = []
 
     # ADR-029: Run Claude CLI directly
+    import os
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     proc = await asyncio.create_subprocess_exec(
         "docker",
         "exec",
         "-e",
-        "ANTHROPIC_API_KEY",  # Pass from host environment
+        f"ANTHROPIC_API_KEY={api_key}",
         container_name,
         "claude",
         "--print",
         prompt,
         "--output-format",
         "stream-json",
+        "--verbose",  # Required for stream-json with --print
         "--dangerously-skip-permissions",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -509,7 +513,7 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         events = await execute_agent_streaming(
             workspace_container,
             prompt=test_prompt,
-            timeout=10,
+            timeout=30,  # Increased for full execution
         )
 
         # Step 8: Analyze events
@@ -519,19 +523,25 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         event_types = [e.get("type") for e in events]
         logger.info("   Event types: %s", event_types)
 
-        # Check for expected events
-        has_started = "started" in event_types
-        has_error = "error" in event_types  # Expected without API tokens
+        # Check for expected events (Claude CLI uses 'system' for init, 'result' for completion)
+        has_system_init = "system" in event_types
+        has_result = "result" in event_types
+        has_assistant = "assistant" in event_types
+        has_error = "error" in event_types
 
-        if has_started:
-            logger.info("   ✅ Agent started event received")
-        else:
-            logger.warning("   ⚠️ No started event received")
-
+        if has_system_init:
+            logger.info("   ✅ System init event received")
+        if has_assistant:
+            logger.info("   ✅ Assistant response event received")
+        if has_result:
+            result_event = next(e for e in events if e.get("type") == "result")
+            logger.info("   ✅ Result event received")
+            logger.info("   Cost: $%.4f", result_event.get("total_cost_usd", 0))
+            usage = result_event.get("usage", {})
+            logger.info("   Tokens: in=%d, out=%d", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
         if has_error:
-            logger.info("   ✅ Error event received (expected without API tokens)")
             error_event = next(e for e in events if e.get("type") == "error")
-            logger.info("   Error: %s", error_event.get("message", "")[:100])
+            logger.info("   ❌ Error: %s", error_event.get("error", {}).get("message", "")[:100])
 
         # F17.1: Verify phase counting
         f17_checks.append(verify_phase_counting(events))
@@ -551,12 +561,13 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
         print(f"Workspace:       {workspace_container}")
         print(f"Events:          {len(events)}")
         print(f"F17 Checks:      {sum(f17_checks)}/{len(f17_checks)} passed")
-        print(f"Started Event:   {'✅' if has_started else '❌'}")
+        print(f"System Init:     {'✅' if has_system_init else '❌'}")
+        print(f"Result:          {'✅' if has_result else '❌'}")
         print()
 
-        # Test is successful if we got a started event
-        # (full execution requires API tokens)
-        success = has_started
+        # Test is successful if we got system init (JSONL streaming works)
+        # Full execution requires sidecar proxy to allow Anthropic API calls
+        success = has_system_init
 
         if success:
             print("✅ E2E TEST PASSED")
@@ -565,13 +576,17 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
             print("  - Workspace container started")
             print("  - Linked to sidecar proxy network")
             print("  - Claude CLI installed and executable")
-            print("  - JSONL event streaming works (agentic_events hooks)")
-            print()
-            print("To run a full execution, configure API tokens.")
+            print("  - JSONL event streaming works")
+            if has_result:
+                print("  - Full execution completed with cost tracking!")
+            else:
+                print()
+                print("Note: Full execution requires sidecar to allow Anthropic API.")
+                print("Run with direct network for full E2E: docker run --rm ...")
         else:
             print("❌ E2E TEST FAILED")
             print()
-            print("The agent runner did not emit a started event.")
+            print("Missing expected events (no system init received).")
 
         return success
 
