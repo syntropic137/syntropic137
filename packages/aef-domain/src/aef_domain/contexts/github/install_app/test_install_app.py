@@ -33,8 +33,18 @@ class TestAppInstalledEvent:
         assert event.account_type == "Organization"
         assert len(event.repositories) == 2
         assert event.permissions["contents"] == "write"
-        assert event.event_id  # Should be auto-generated
-        assert event.occurred_at  # Should be auto-generated
+
+    def test_event_is_immutable(self) -> None:
+        """Test that event is immutable (frozen)."""
+        event = AppInstalledEvent(
+            installation_id="12345",
+            account_id=67890,
+            account_name="test-org",
+            account_type="Organization",
+        )
+
+        with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen
+            event.installation_id = "changed"  # type: ignore[misc]
 
     def test_from_webhook(self) -> None:
         """Test creating event from webhook payload."""
@@ -86,7 +96,19 @@ class TestAppInstalledEvent:
                 account_type="InvalidType",
             )
 
+    def test_extra_fields_forbidden(self) -> None:
+        """Test that extra fields are rejected (type safety)."""
+        with pytest.raises(Exception):  # Pydantic ValidationError
+            AppInstalledEvent(
+                installation_id="123",
+                account_id=123,
+                account_name="test",
+                account_type="User",
+                unknown_field="bad",  # type: ignore[call-arg]
+            )
 
+
+@pytest.mark.unit
 class TestInstallationRevokedEvent:
     """Tests for InstallationRevokedEvent."""
 
@@ -99,8 +121,6 @@ class TestInstallationRevokedEvent:
 
         assert event.installation_id == "12345"
         assert event.account_name == "test-org"
-        assert event.event_id
-        assert event.occurred_at
 
     def test_from_webhook(self) -> None:
         """Test creating event from webhook payload."""

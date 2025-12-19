@@ -5,43 +5,50 @@ Emitted when an installation token is successfully refreshed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import ClassVar
-from uuid import uuid4
+from datetime import datetime
+
+from event_sourcing import DomainEvent, event
+from pydantic import field_validator
 
 
-@dataclass(frozen=True)
-class TokenRefreshedEvent:
+@event("github.TokenRefreshed", "v1")
+class TokenRefreshedEvent(DomainEvent):
     """Event emitted when an installation token is refreshed.
 
     For security, we never store the raw token in events.
     Only a hash is stored for audit/debugging purposes.
 
-    Attributes:
-        event_id: Unique identifier for this event.
-        event_type: Type identifier for event routing.
-        installation_id: GitHub installation ID.
-        token_hash: SHA-256 hash of the token (first 12 chars).
-        expires_at: When the new token expires.
-        permissions: Dict of permission name to level.
-        occurred_at: When the refresh occurred.
+    Inherits from DomainEvent which provides:
+    - Immutability (frozen=True)
+    - Strict validation (extra='forbid')
+    - JSON serialization
     """
-
-    event_type: ClassVar[str] = "github.TokenRefreshed"
 
     installation_id: str
     token_hash: str
     expires_at: datetime
-    permissions: dict[str, str] = field(default_factory=dict)
-    event_id: str = field(default_factory=lambda: str(uuid4()))
-    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    permissions: dict[str, str] = {}
 
-    def __post_init__(self) -> None:
-        """Validate the event."""
-        if not self.installation_id:
+    @field_validator("installation_id")
+    @classmethod
+    def validate_installation_id(cls, v: str) -> str:
+        """Ensure installation_id is provided."""
+        if not v:
             raise ValueError("installation_id is required")
-        if not self.token_hash:
+        return v
+
+    @field_validator("token_hash")
+    @classmethod
+    def validate_token_hash(cls, v: str) -> str:
+        """Ensure token_hash is provided."""
+        if not v:
             raise ValueError("token_hash is required")
-        if self.expires_at.tzinfo is None:
+        return v
+
+    @field_validator("expires_at")
+    @classmethod
+    def validate_expires_at(cls, v: datetime) -> datetime:
+        """Ensure expires_at is timezone-aware."""
+        if v.tzinfo is None:
             raise ValueError("expires_at must be timezone-aware")
+        return v

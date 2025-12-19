@@ -5,41 +5,38 @@ Emitted when a GitHub App installation is uninstalled/revoked.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import ClassVar
-from uuid import uuid4
+from typing import Any
+
+from event_sourcing import DomainEvent, event
+from pydantic import field_validator
 
 
-@dataclass(frozen=True)
-class InstallationRevokedEvent:
+@event("github.InstallationRevoked", "v1")
+class InstallationRevokedEvent(DomainEvent):
     """Event emitted when the GitHub App installation is revoked.
 
     This event is triggered by the GitHub webhook when a user uninstalls
     the app from their account or organization.
 
-    Attributes:
-        event_id: Unique identifier for this event.
-        event_type: Type identifier for event routing.
-        installation_id: GitHub installation ID that was revoked.
-        account_name: GitHub account login name.
-        occurred_at: When the revocation occurred.
+    Inherits from DomainEvent which provides:
+    - Immutability (frozen=True)
+    - Strict validation (extra='forbid')
+    - JSON serialization
     """
-
-    event_type: ClassVar[str] = "github.InstallationRevoked"
 
     installation_id: str
     account_name: str
-    event_id: str = field(default_factory=lambda: str(uuid4()))
-    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-    def __post_init__(self) -> None:
-        """Validate the event."""
-        if not self.installation_id:
+    @field_validator("installation_id")
+    @classmethod
+    def validate_installation_id(cls, v: str) -> str:
+        """Ensure installation_id is provided."""
+        if not v:
             raise ValueError("installation_id is required")
+        return v
 
     @classmethod
-    def from_webhook(cls, payload: dict) -> InstallationRevokedEvent:
+    def from_webhook(cls, payload: dict[str, Any]) -> InstallationRevokedEvent:
         """Create an event from a GitHub webhook payload.
 
         Args:

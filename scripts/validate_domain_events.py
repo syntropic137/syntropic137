@@ -26,12 +26,8 @@ RESET = "\033[0m"
 
 # Known exceptions - events that use @dataclass (legacy, to be migrated)
 # See ADR-032 for migration plan
-KNOWN_DATACLASS_EVENTS = {
-    "AppInstalledEvent",
-    "InstallationRevokedEvent",
-    "InstallationSuspendedEvent",
-    "TokenRefreshedEvent",
-}
+# All legacy events have been migrated! Keep this for future exceptions if needed.
+KNOWN_DATACLASS_EVENTS: set[str] = set()
 
 
 class EventValidator(ast.NodeVisitor):

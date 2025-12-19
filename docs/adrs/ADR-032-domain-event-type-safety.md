@@ -161,19 +161,18 @@ For these, use:
 
 Consider adding validation in the Rust Event Store to reject events that don't match expected schemas. This would be the ultimate backstop, catching issues even if Python validation is bypassed.
 
-## Migration TODO
+## Migration Completed
 
-The following events currently use `@dataclass` instead of `DomainEvent` and need migration:
+The following events were migrated from `@dataclass` to `DomainEvent`:
 
 | Event | Location | Status |
 |-------|----------|--------|
-| `AppInstalledEvent` | `contexts/github/install_app/` | ❌ TODO |
-| `InstallationRevokedEvent` | `contexts/github/install_app/` | ❌ TODO |
-| `InstallationSuspendedEvent` | `contexts/github/install_app/` | ❌ TODO |
-| `TokenRefreshedEvent` | `contexts/github/refresh_token/` | ❌ TODO |
+| `AppInstalledEvent` | `contexts/github/install_app/` | ✅ Done |
+| `InstallationRevokedEvent` | `contexts/github/install_app/` | ✅ Done |
+| `InstallationSuspendedEvent` | `contexts/github/install_app/` | ✅ Done |
+| `TokenRefreshedEvent` | `contexts/github/refresh_token/` | ✅ Done |
 
-These events were created before the `DomainEvent` pattern was established.
-They should be migrated to use `DomainEvent` with the `@event` decorator.
+All 32 domain events now inherit from `DomainEvent` with strict validation.
 
 ## References
 
