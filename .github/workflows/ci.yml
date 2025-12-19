@@ -99,6 +99,33 @@ jobs:
     # Disabled until we add database services to CI
     # Integration tests require TimescaleDB (port 5433) and EventStore (port 50051)
     if: false # github.event_name == 'pull_request'
+
+    # TODO: Uncomment when ready to enable integration tests in CI
+    # services:
+    #   timescaledb:
+    #     image: timescale/timescaledb:latest-pg15
+    #     env:
+    #       POSTGRES_USER: aef
+    #       POSTGRES_PASSWORD: aef_dev_password
+    #       POSTGRES_DB: aef_observability
+    #     ports:
+    #       - 5433:5432
+    #     options: >-
+    #       --health-cmd pg_isready
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
+    #
+    #   eventstore:
+    #     image: ghcr.io/agentparadise/event-store:latest
+    #     ports:
+    #       - 50051:50051
+    #     options: >-
+    #       --health-cmd "grpc_health_probe -addr=:50051"
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
         with:
