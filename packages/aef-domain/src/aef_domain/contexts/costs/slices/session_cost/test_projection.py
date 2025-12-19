@@ -67,7 +67,7 @@ class TestAgentObservationHandling:
         event_data = {
             "session_id": "session-1",
             "execution_id": "exec-1",
-            "observation_type": ObservationType.TOKEN_USAGE.value,
+            "event_type": ObservationType.TOKEN_USAGE.value,
             "data": {
                 "input_tokens": 1000,
                 "output_tokens": 500,
@@ -97,7 +97,7 @@ class TestAgentObservationHandling:
         """Test that TOKEN_USAGE observation calculates cost correctly."""
         event_data = {
             "session_id": "session-1",
-            "observation_type": ObservationType.TOKEN_USAGE.value,
+            "event_type": ObservationType.TOKEN_USAGE.value,
             "data": {
                 "input_tokens": 1_000_000,  # 1M tokens
                 "output_tokens": 1_000_000,  # 1M tokens
@@ -126,7 +126,7 @@ class TestAgentObservationHandling:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {
                     "input_tokens": 1000,
                     "output_tokens": 500,
@@ -140,7 +140,7 @@ class TestAgentObservationHandling:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {
                     "input_tokens": 2000,
                     "output_tokens": 1000,
@@ -166,7 +166,7 @@ class TestAgentObservationHandling:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "event_type": ObservationType.TOOL_COMPLETED.value,
                 "data": {
                     "tool_name": "Read",
                     "tool_use_id": "tool-1",
@@ -180,7 +180,7 @@ class TestAgentObservationHandling:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "event_type": ObservationType.TOOL_COMPLETED.value,
                 "data": {
                     "tool_name": "Write",
                     "tool_use_id": "tool-2",
@@ -203,7 +203,7 @@ class TestAgentObservationHandling:
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {
                     "input_tokens": 5000,
                     "output_tokens": 2000,
@@ -219,7 +219,7 @@ class TestAgentObservationHandling:
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "event_type": ObservationType.TOOL_COMPLETED.value,
                 "data": {
                     "tool_name": "Bash",
                     "tool_use_id": "tool-1",
@@ -243,7 +243,7 @@ class TestAgentObservationHandling:
         """Test that cache token costs are calculated correctly."""
         event_data = {
             "session_id": "session-1",
-            "observation_type": ObservationType.TOKEN_USAGE.value,
+            "event_type": ObservationType.TOKEN_USAGE.value,
             "data": {
                 "input_tokens": 0,
                 "output_tokens": 0,
@@ -268,7 +268,7 @@ class TestAgentObservationHandling:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {
                     "input_tokens": 1_000_000,
                     "output_tokens": 1_000_000,
@@ -291,7 +291,7 @@ class TestAgentObservationHandling:
         """Test that observations without session_id are skipped."""
         await projection.on_agent_observation(
             {
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {
                     "input_tokens": 1000,
                     "output_tokens": 500,
@@ -313,7 +313,7 @@ class TestSessionCostFinalized:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {
                     "input_tokens": 1000,
                     "output_tokens": 500,
@@ -357,7 +357,7 @@ class TestQueryOperations:
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {"input_tokens": 1000, "output_tokens": 500},
             }
         )
@@ -366,7 +366,7 @@ class TestQueryOperations:
             {
                 "session_id": "session-2",
                 "execution_id": "exec-1",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {"input_tokens": 2000, "output_tokens": 1000},
             }
         )
@@ -376,7 +376,7 @@ class TestQueryOperations:
             {
                 "session_id": "session-3",
                 "execution_id": "exec-2",
-                "observation_type": ObservationType.TOKEN_USAGE.value,
+                "event_type": ObservationType.TOKEN_USAGE.value,
                 "data": {"input_tokens": 3000, "output_tokens": 1500},
             }
         )
