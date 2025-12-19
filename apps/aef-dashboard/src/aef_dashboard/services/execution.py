@@ -42,6 +42,8 @@ from agentic_logging import get_logger
 from aef_adapters.agents import AgentProvider, get_agent
 
 # Adapter imports - repositories and services
+from aef_adapters.events import get_event_store
+from aef_adapters.storage.artifact_storage import get_artifact_storage
 from aef_adapters.storage.repositories import (
     get_artifact_repository,
     get_session_repository,
@@ -51,6 +53,7 @@ from aef_adapters.storage.repositories import (
 from aef_adapters.workspace_backends.service import WorkspaceService
 
 # Domain imports - WorkflowExecutionEngine handles everything
+from aef_domain.contexts.artifacts import ArtifactQueryService
 from aef_domain.contexts.workflows import (
     WorkflowExecutionEngine,
     WorkflowExecutionResult,
@@ -80,7 +83,7 @@ class ExecutionService:
         """Initialize the execution service."""
         pass
 
-    def _create_execution_engine(self) -> WorkflowExecutionEngine:
+    async def _create_execution_engine(self) -> WorkflowExecutionEngine:
         """Create a WorkflowExecutionEngine with all required dependencies.
 
         This wires up:
@@ -90,10 +93,14 @@ class ExecutionService:
         - Session repository (for agent session tracking)
         - Artifact repository (for storing phase outputs)
         - Agent factory (for creating instrumented agents)
+        - Observability writer (for agent_events table - tool calls, token usage)
+        - Artifact query service (for multi-phase prompt injection)
+        - Artifact content storage (for MinIO storage)
 
         Returns:
             Configured WorkflowExecutionEngine ready for execution.
         """
+        from aef_adapters.projections.manager import get_projection_manager
 
         def agent_factory(provider: str) -> Any:
             """Create an instrumented agent for the given provider."""
@@ -103,6 +110,17 @@ class ExecutionService:
                 provider_enum = AgentProvider.CLAUDE
             return get_agent(provider_enum)
 
+        # Get observability writer (AgentEventStore) for container events
+        event_store = get_event_store()
+        await event_store.initialize()
+
+        # Get artifact content storage for MinIO
+        artifact_storage = await get_artifact_storage()
+
+        # Get artifact query service for multi-phase workflows
+        manager = await get_projection_manager()
+        artifact_query = ArtifactQueryService(manager.artifact_list)
+
         return WorkflowExecutionEngine(
             workflow_repository=get_workflow_repository(),
             execution_repository=get_workflow_execution_repository(),
@@ -110,6 +128,9 @@ class ExecutionService:
             session_repository=get_session_repository(),
             artifact_repository=get_artifact_repository(),
             agent_factory=agent_factory,
+            observability_writer=event_store,
+            artifact_query_service=artifact_query,
+            artifact_content_storage=artifact_storage,
         )
 
     async def run_workflow(
@@ -145,7 +166,7 @@ class ExecutionService:
         )
 
         # Create engine with all dependencies wired up
-        engine = self._create_execution_engine()
+        engine = await self._create_execution_engine()
 
         # Execute workflow - engine handles everything:
         # - Loading workflow definition

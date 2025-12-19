@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default workspace image - matches image built by `just workspace-build`
-DEFAULT_WORKSPACE_IMAGE = "aef-workspace-claude:latest"
+DEFAULT_WORKSPACE_IMAGE = "agentic-workspace-claude-cli:latest"
 
 # Default network
 DEFAULT_NETWORK = "aef-workspace-net"
