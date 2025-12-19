@@ -304,23 +304,23 @@ class WorkflowExecutionEngine:
         workflow_id: str,
         inputs: dict[str, Any],
         execution_id: str | None = None,
-        use_container: bool = False,
+        use_container: bool = True,
         tenant_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow from start to finish.
 
-        Per ADR-023, agents execute inside isolated workspaces and all events
-        are persisted via the WorkflowExecutionAggregate.
+        Per ADR-021/ADR-023/ADR-029, agents execute inside isolated environments
+        using Claude Code CLI. All events are persisted via aggregates.
 
         Args:
             workflow_id: ID of the workflow to execute.
             inputs: Initial input variables for the workflow.
             execution_id: Optional custom execution ID.
-            use_container: If True, run agent inside isolated container with
-                sidecar proxy for token injection. If False (default), run
-                agent SDK directly in host process.
-            tenant_id: Tenant ID for multi-tenant token vending. Required when
-                use_container=True for proper token attribution.
+            use_container: If True (default), run in isolated container.
+                DEPRECATED: The SDK-based host mode (use_container=False) is
+                legacy and will be removed. All execution should use container
+                mode with the appropriate isolation backend (ADR-021).
+            tenant_id: Tenant ID for multi-tenant token vending.
 
         Returns:
             WorkflowExecutionResult with status and artifacts.

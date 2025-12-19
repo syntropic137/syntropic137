@@ -174,11 +174,11 @@ class ExecutionService:
         # - Running phases with Claude CLI
         # - Persisting events via aggregates (→ projection updates)
         # - Creating artifacts
+        # Container mode is the default per ADR-021/ADR-023
         result: WorkflowExecutionResult = await engine.execute(
             workflow_id=workflow_id,
             inputs=inputs,
             execution_id=execution_id,
-            use_container=True,  # Run in isolated Docker container
         )
 
         if result.is_success:

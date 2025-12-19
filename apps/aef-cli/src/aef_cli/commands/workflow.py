@@ -596,11 +596,11 @@ def run_workflow(
     container: Annotated[
         bool,
         typer.Option(
-            "--container",
+            "--container/--no-container",
             "-c",
-            help="Run agent inside isolated container with sidecar proxy",
+            help="Run agent inside isolated container (default: True per ADR-021)",
         ),
-    ] = False,
+    ] = True,
     tenant_id: Annotated[
         str | None,
         typer.Option(
@@ -611,8 +611,10 @@ def run_workflow(
 ) -> None:
     """Execute a workflow.
 
+    By default, agents run inside isolated containers (per ADR-021/ADR-023).
+
     Examples:
-        # Run workflow with inputs
+        # Run workflow with inputs (runs in container by default)
         aef workflow run research-workflow --input topic="AI agents" --input depth=3
 
         # Dry run to validate
@@ -621,8 +623,8 @@ def run_workflow(
         # Run quietly (minimal output)
         aef workflow run research-workflow --quiet
 
-        # Run in container mode (isolated execution)
-        aef workflow run github-pr-workflow --container --input change_description="Add README"
+        # Disable container mode (legacy, not recommended)
+        aef workflow run research-workflow --no-container --input topic="test"
     """
     from aef_adapters.agents import (
         AgentProtocol,
