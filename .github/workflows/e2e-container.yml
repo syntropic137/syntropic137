@@ -43,19 +43,18 @@ jobs:
         with:
           submodules: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build workspace image
-        uses: docker/build-push-action@v5
+      - name: Set up Python for build script
+        uses: actions/setup-python@v5
         with:
-          context: lib/agentic-primitives/providers/workspaces/claude-cli
-          file: lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile
-          push: false
-          tags: agentic-workspace-claude-cli:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          load: true
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build workspace image via build-provider.py
+        working-directory: lib/agentic-primitives
+        run: |
+          uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:latest
 
       - name: Verify image
         run: |
@@ -91,7 +90,8 @@ jobs:
       - name: Install & Run E2E
         run: |
           uv sync --all-extras
-          docker build -t agentic-workspace-claude-cli:latest lib/agentic-primitives/providers/workspaces/claude-cli/
+          # Build workspace image via build-provider.py (stages required context)
+          cd lib/agentic-primitives && uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:latest && cd ../..
           uv run python scripts/e2e_agent_in_container_test.py
         continue-on-error: true
 
