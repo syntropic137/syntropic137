@@ -21,7 +21,7 @@ import pytest
 
 from aef_adapters.workspace_backends.recording import RecordingEventStreamAdapter
 
-pytestmark = [pytest.mark.integration, pytest.mark.regression]
+pytestmark = [pytest.mark.unit, pytest.mark.integration, pytest.mark.regression]  # Runs in CI
 
 
 # =============================================================================

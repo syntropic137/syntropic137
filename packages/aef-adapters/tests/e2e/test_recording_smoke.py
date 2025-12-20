@@ -17,7 +17,7 @@ import pytest
 
 from aef_adapters.workspace_backends.recording import RecordingEventStreamAdapter
 
-pytestmark = [pytest.mark.e2e]
+pytestmark = [pytest.mark.unit, pytest.mark.e2e]  # Runs in CI - no external services
 
 
 # =============================================================================
