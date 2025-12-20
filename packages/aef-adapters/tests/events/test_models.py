@@ -10,10 +10,10 @@ from aef_adapters.events.models import AgentEvent
 @pytest.mark.unit
 class TestAgentEventWithRealTypes:
     """Tests for AgentEvent with REAL Claude CLI event types.
-    
+
     These tests validate that raw Claude CLI events can be
     processed through AgentEvent.from_dict() without errors.
-    
+
     CRITICAL: This catches the bug where 'tool_started' wasn't
     being mapped to 'tool_execution_started'.
     """
@@ -64,7 +64,7 @@ class TestAgentEventWithRealTypes:
         """All common Claude CLI event types should produce valid AgentEvents."""
         claude_event_types = [
             "tool_started",
-            "tool_result", 
+            "tool_result",
             "tool_use",
             "system.init",
             "system",
@@ -72,7 +72,7 @@ class TestAgentEventWithRealTypes:
             "assistant",
             "user",
         ]
-        
+
         for event_type in claude_event_types:
             # This should NOT raise ValidationError
             event = AgentEvent.from_dict({"type": event_type})
@@ -194,3 +194,105 @@ class TestAgentEvent:
         )
 
         assert event.session_id == uid
+
+
+@pytest.mark.unit
+class TestToolNameExtraction:
+    """Regression tests for extracting tool_name from Claude CLI events.
+
+    CRITICAL: These tests verify the fix for "Tool Calls: unknown" bug.
+    Claude CLI's tool_result events don't include tool_name, only tool_use_id.
+    We must extract tool_name from message.content.
+    """
+
+    def test_tool_use_extracts_name_and_id(self) -> None:
+        """REGRESSION: tool_use in assistant message should extract tool_name and id."""
+        # Raw Claude CLI assistant message with tool_use
+        raw_event = {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_abc123",
+                        "name": "Bash",
+                        "input": {"command": "ls -la"},
+                    }
+                ]
+            },
+        }
+
+        event = AgentEvent.from_dict(raw_event)
+
+        assert event.event_type == "token_usage"  # assistant maps to token_usage
+        assert event.data.get("tool_name") == "Bash"
+        assert event.data.get("tool_use_id") == "toolu_abc123"
+        assert "input_preview" in event.data
+
+    def test_tool_result_extracts_enriched_tool_name(self) -> None:
+        """REGRESSION: tool_result with enriched tool_name should be extracted."""
+        # Enriched Claude CLI user message with tool_result
+        # (tool_name added by container_runner enrichment)
+        raw_event = {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_abc123",
+                        "tool_name": "Bash",  # Added by enrichment
+                        "content": "file.txt",
+                        "is_error": False,
+                    }
+                ]
+            },
+        }
+
+        event = AgentEvent.from_dict(raw_event)
+
+        assert event.event_type == "token_usage"  # user maps to token_usage
+        assert event.data.get("tool_name") == "Bash"
+        assert event.data.get("tool_use_id") == "toolu_abc123"
+        assert event.data.get("success") is True
+
+    def test_tool_result_without_enrichment_has_no_name(self) -> None:
+        """REGRESSION: unenriched tool_result should not have tool_name."""
+        # Raw Claude CLI user message without enrichment
+        raw_event = {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_abc123",
+                        "content": "error output",
+                        "is_error": True,
+                    }
+                ]
+            },
+        }
+
+        event = AgentEvent.from_dict(raw_event)
+
+        assert event.data.get("tool_use_id") == "toolu_abc123"
+        assert event.data.get("tool_name") is None  # Not enriched
+        assert event.data.get("success") is False  # is_error=True
+
+    def test_tool_result_error_sets_success_false(self) -> None:
+        """REGRESSION: tool_result with is_error=True should set success=False."""
+        raw_event = {
+            "type": "user",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_xyz",
+                        "is_error": True,
+                    }
+                ]
+            },
+        }
+
+        event = AgentEvent.from_dict(raw_event)
+
+        assert event.data.get("success") is False

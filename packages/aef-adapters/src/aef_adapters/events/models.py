@@ -140,25 +140,57 @@ class AgentEvent(BaseModel):
         }
         normalized_type = event_type_mapping.get(raw_type, raw_type)
 
+        # Build data dict from remaining fields
+        excluded_keys = {
+            "time",
+            "timestamp",
+            "event_type",
+            "type",
+            "session_id",
+            "execution_id",
+            "phase_id",
+            "id",
+        }
+        event_data: dict[str, Any] = {
+            k: v for k, v in data.items() if k not in excluded_keys
+        }
+
+        # Extract tool info from nested Claude CLI message content
+        # This handles both tool_use (assistant) and tool_result (user) events
+        message = data.get("message", {})
+        content = message.get("content", [])
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    item_type = item.get("type")
+                    # Extract from tool_use (in assistant messages)
+                    if item_type == "tool_use":
+                        if "tool_name" not in event_data:
+                            event_data["tool_name"] = item.get("name")
+                        if "tool_use_id" not in event_data:
+                            event_data["tool_use_id"] = item.get("id")
+                        if "input_preview" not in event_data:
+                            # Store tool input as preview
+                            tool_input = item.get("input")
+                            if tool_input:
+                                import json
+                                event_data["input_preview"] = json.dumps(tool_input)[:500]
+                    # Extract from tool_result (in user messages)
+                    elif item_type == "tool_result":
+                        if "tool_use_id" not in event_data:
+                            event_data["tool_use_id"] = item.get("tool_use_id")
+                        # tool_name may have been added by enrichment
+                        if "tool_name" not in event_data and "tool_name" in item:
+                            event_data["tool_name"] = item["tool_name"]
+                        # Check success from is_error field
+                        if "success" not in event_data:
+                            event_data["success"] = not item.get("is_error", False)
+
         # Normalize field names (only include optional fields if set)
         normalized: dict[str, Any] = {
             "time": time_value,
             "event_type": normalized_type,
-            "data": {
-                k: v
-                for k, v in data.items()
-                if k
-                not in (
-                    "time",
-                    "timestamp",
-                    "event_type",
-                    "type",
-                    "session_id",
-                    "execution_id",
-                    "phase_id",
-                    "id",
-                )
-            },
+            "data": event_data,
         }
 
         # Only include optional UUID fields if they're set
