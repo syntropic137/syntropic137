@@ -1,0 +1,47 @@
+# Test Docker Compose - Overrides for ephemeral test stack
+# Usage: docker compose -f docker-compose.yaml -f docker-compose.test.yaml up
+# Shortcut: just test-stack
+#
+# Ports offset by +10000 from dev to allow simultaneous running
+# NO persistent volumes - ephemeral, clean slate on restart
+#
+# See: ADR-034 - Test Infrastructure Architecture
+
+services:
+  timescaledb:
+    container_name: aef-test-db
+    ports:
+      - "15432:5432"
+    volumes:
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    # No persistent volume - ephemeral
+
+  event-store:
+    container_name: aef-test-event-store
+    ports:
+      - "55051:50051"
+
+  collector:
+    container_name: aef-test-collector
+    ports:
+      - "18080:8080"
+
+  minio:
+    container_name: aef-test-minio
+    ports:
+      - "19000:9000" # S3 API
+      - "19001:9001" # Web Console
+    # No persistent volume - ephemeral
+
+  minio-init:
+    container_name: aef-test-minio-init
+
+  redis:
+    container_name: aef-test-redis
+    ports:
+      - "16379:6379"
+    # No persistent volume - ephemeral
+
+networks:
+  default:
+    name: aef-test-network

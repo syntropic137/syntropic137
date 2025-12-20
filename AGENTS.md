@@ -162,6 +162,60 @@ async with service.create_workspace(execution_id="test") as ws:
 | **Cost tracking** | Total cost USD is accurate |
 | **Tool use** | Each tool invocation is recorded |
 
+## Test Infrastructure (ADR-034)
+
+AEF supports three testing modes that can run simultaneously:
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                        LOCAL DEVELOPMENT                                  │
+│                                                                           │
+│   DEV STACK (just dev)              TEST STACK (just test-stack)         │
+│   ├── TimescaleDB: 5432             ├── TimescaleDB: 15432               │
+│   ├── EventStore: 50051             ├── EventStore: 55051                │
+│   ├── Collector: 8080               ├── Collector: 18080                 │
+│   ├── MinIO: 9000/9001              ├── MinIO: 19000/19001               │
+│   └── Redis: 6379                   └── Redis: 16379                     │
+│                                                                           │
+│   Volumes: PERSISTENT               Volumes: NONE (ephemeral)            │
+│   Network: aef-network              Network: aef-test-network            │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Running Tests
+
+```bash
+# Unit tests (no infrastructure needed, recording-based)
+just test-unit
+
+# Start ephemeral test infrastructure
+just test-stack           # Start test stack (ports +10000)
+just test-stack-down      # Stop and cleanup
+
+# Integration tests (uses test-stack if running, else testcontainers)
+just test-integration     # Run integration tests
+just test-integration-full # start → test → cleanup
+```
+
+### Test Fixture Detection Pattern
+
+Integration tests auto-detect infrastructure in this order:
+
+1. **Environment variables** (`TEST_DATABASE_URL`) - CI override
+2. **Test-stack running** (port 15432) - local continuous testing
+3. **Testcontainers fallback** - hermetic CI environments
+
+```python
+from aef_tests.fixtures import test_infrastructure, db_pool
+
+@pytest.mark.integration
+async def test_events_stored(test_infrastructure, db_pool):
+    # Automatically uses whichever infrastructure is available
+    async with db_pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM event_store.events")
+```
+
 ---
 
 # 🔄 RIPER-5 MODE: STRICT OPERATIONAL PROTOCOL
