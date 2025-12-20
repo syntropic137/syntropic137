@@ -76,10 +76,11 @@ dev-fresh:
     docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
     @echo "Building & starting Docker services (PostgreSQL + Event Store)..."
     docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
-    @sleep 4
-    @echo "🌱 Running database migrations..."
-    just feedback-migrate
-    @echo "🌱 Seeding workflows (before backend starts)..."
+    @echo "⏳ Waiting for services to be healthy..."
+    @sleep 5
+    @echo "🌱 Running database migrations (optional - needs psql)..."
+    -just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
+    @echo "🌱 Seeding workflows..."
     just seed-workflows
     @echo ""
     @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
