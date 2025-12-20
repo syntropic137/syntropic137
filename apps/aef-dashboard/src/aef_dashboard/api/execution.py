@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     )
 
 
-def _to_datetime(value: "DatetimeType | str | None") -> "DatetimeType | None":
+def _to_datetime(value: DatetimeType | str | None) -> DatetimeType | None:
     """Convert datetime or ISO string to datetime."""
     if value is None:
         return None
@@ -45,6 +45,7 @@ def _to_datetime(value: "DatetimeType | str | None") -> "DatetimeType | None":
 
         return datetime.fromisoformat(value)
     return value
+
 
 logger = logging.getLogger(__name__)
 
