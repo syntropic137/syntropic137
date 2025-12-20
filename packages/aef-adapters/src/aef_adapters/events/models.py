@@ -39,38 +39,31 @@ class AgentEvent(BaseModel):
     If you get a validation error, add the event type to aef_shared.events.
     """
 
-    # Primary key (optional - DB generates)
-    id: UUID | None = Field(default=None)
-
     # Time dimension (required for TimescaleDB hypertable)
     time: datetime = Field(default_factory=datetime.now)
 
     # Event classification - validated against VALID_EVENT_TYPES
     event_type: EventType = Field(...)
 
-    # Correlation IDs (UUIDs for type safety)
-    session_id: UUID | None = Field(default=None)
-    execution_id: UUID | None = Field(default=None)
-    phase_id: str | None = Field(default=None, max_length=255)
+    # Correlation IDs (text - simpler schema, matches migration 002_agent_events.sql)
+    session_id: str | None = Field(default=None)
+    execution_id: str | None = Field(default=None)
+    phase_id: str | None = Field(default=None)
 
     # Flexible payload
     data: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("session_id", "execution_id", mode="before")
+    @field_validator("session_id", "execution_id", "phase_id", mode="before")
     @classmethod
-    def parse_uuid(cls, v: str | UUID | None) -> UUID | None:
-        """Parse string UUIDs to UUID objects."""
+    def ensure_string(cls, v: str | UUID | None) -> str | None:
+        """Convert UUID objects to strings if needed."""
         if v is None:
             return None
         if isinstance(v, UUID):
-            return v
+            return str(v)
         if isinstance(v, str):
-            try:
-                return UUID(v)
-            except ValueError:
-                # Invalid UUID string - return None instead of failing
-                return None
-        return None
+            return v
+        return str(v)
 
     @field_validator("data", mode="before")
     @classmethod
@@ -82,7 +75,7 @@ class AgentEvent(BaseModel):
             return v
         return {"value": v}
 
-    def to_insert_tuple(self) -> tuple[datetime, str, UUID | None, UUID | None, str | None, str]:
+    def to_insert_tuple(self) -> tuple[datetime, str, str | None, str | None, str | None, str]:
         """Convert to tuple for asyncpg insert.
 
         Returns:
@@ -122,9 +115,23 @@ class AgentEvent(BaseModel):
         # Get raw event type
         raw_type = data.get("event_type") or data.get("type", "error")
 
+        # Detect tool events from message content (Claude CLI nests them)
+        # assistant + tool_use → tool_execution_started
+        # user + tool_result → tool_execution_completed
+        message = data.get("message", {})
+        content = message.get("content", [])
+        inner_type = None
+        if isinstance(content, list):
+            for item in content:
+                if isinstance(item, dict):
+                    item_type = item.get("type")
+                    if item_type in ("tool_use", "tool_result"):
+                        inner_type = item_type
+                        break
+
         # Map Claude CLI event types to normalized types
         event_type_mapping = {
-            # Tool events
+            # Tool events (inner content type takes precedence)
             "tool_started": "tool_execution_started",
             "tool_use": "tool_execution_started",
             # Tool results
@@ -134,11 +141,14 @@ class AgentEvent(BaseModel):
             "system.init": "session_started",
             "system": "session_started",
             "result": "session_completed",
-            # Content events map to token_usage (they contain tokens)
+            # Content events map to token_usage (only if not tool events)
             "assistant": "token_usage",
             "user": "token_usage",
         }
-        normalized_type = event_type_mapping.get(raw_type, raw_type)
+
+        # Use inner_type if it's a tool event, otherwise use raw_type
+        type_to_map = inner_type if inner_type else raw_type
+        normalized_type = event_type_mapping.get(type_to_map, raw_type)
 
         # Build data dict from remaining fields
         excluded_keys = {
@@ -157,8 +167,7 @@ class AgentEvent(BaseModel):
 
         # Extract tool info from nested Claude CLI message content
         # This handles both tool_use (assistant) and tool_result (user) events
-        message = data.get("message", {})
-        content = message.get("content", [])
+        # Note: message and content were already extracted above for type detection
         if isinstance(content, list):
             for item in content:
                 if isinstance(item, dict):
@@ -205,12 +214,12 @@ class AgentEvent(BaseModel):
 
 
 # Schema for validation (used to check DB matches model)
+# Must match: packages/aef-adapters/src/aef_adapters/projection_stores/migrations/002_agent_events.sql
 EXPECTED_COLUMNS = {
-    "id": "uuid",
     "time": "timestamp with time zone",
-    "event_type": "character varying",
-    "session_id": "uuid",
-    "execution_id": "uuid",
-    "phase_id": "character varying",
+    "event_type": "text",
+    "session_id": "text",
+    "execution_id": "text",
+    "phase_id": "text",
     "data": "jsonb",
 }

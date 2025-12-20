@@ -102,10 +102,11 @@ class TestAgentEvent:
             }
         )
 
-        assert event.session_id == uid
+        # Now returns string (not UUID) per simplified schema
+        assert event.session_id == str(uid)
 
     def test_from_dict_with_invalid_session_id(self) -> None:
-        """Should handle invalid UUID gracefully."""
+        """Should accept any string as session_id (simplified schema)."""
         event = AgentEvent.from_dict(
             {
                 "event_type": "session_started",
@@ -113,8 +114,8 @@ class TestAgentEvent:
             }
         )
 
-        # Invalid UUID becomes None (graceful handling)
-        assert event.session_id is None
+        # Simplified schema accepts any string
+        assert event.session_id == "not-a-uuid"
 
     def test_from_dict_with_timestamp_alias(self) -> None:
         """Should accept 'timestamp' as alias for 'time'."""
@@ -149,7 +150,7 @@ class TestAgentEvent:
 
     def test_to_insert_tuple(self) -> None:
         """Should return tuple for asyncpg insert."""
-        session_id = uuid4()
+        session_id = str(uuid4())  # Now string, not UUID
         event = AgentEvent(
             time=datetime(2025, 1, 1),
             event_type="session_started",
@@ -161,7 +162,7 @@ class TestAgentEvent:
 
         assert time == datetime(2025, 1, 1)
         assert event_type == "session_started"
-        assert sid == session_id
+        assert sid == session_id  # String equality
         assert eid is None
         assert pid is None
         assert '"key": "value"' in data_json
@@ -184,7 +185,7 @@ class TestAgentEvent:
         assert event.data == {"data": {"nested": "value"}}
 
     def test_uuid_validator_accepts_uuid_object(self) -> None:
-        """Should accept UUID objects directly."""
+        """Should accept UUID objects and convert to string."""
         uid = uuid4()
         event = AgentEvent.from_dict(
             {
@@ -193,7 +194,8 @@ class TestAgentEvent:
             }
         )
 
-        assert event.session_id == uid
+        # UUID objects are converted to strings
+        assert event.session_id == str(uid)
 
 
 @pytest.mark.unit
@@ -224,7 +226,8 @@ class TestToolNameExtraction:
 
         event = AgentEvent.from_dict(raw_event)
 
-        assert event.event_type == "token_usage"  # assistant maps to token_usage
+        # assistant + tool_use maps to tool_execution_started (not token_usage)
+        assert event.event_type == "tool_execution_started"
         assert event.data.get("tool_name") == "Bash"
         assert event.data.get("tool_use_id") == "toolu_abc123"
         assert "input_preview" in event.data
@@ -250,7 +253,8 @@ class TestToolNameExtraction:
 
         event = AgentEvent.from_dict(raw_event)
 
-        assert event.event_type == "token_usage"  # user maps to token_usage
+        # user + tool_result maps to tool_execution_completed (not token_usage)
+        assert event.event_type == "tool_execution_completed"
         assert event.data.get("tool_name") == "Bash"
         assert event.data.get("tool_use_id") == "toolu_abc123"
         assert event.data.get("success") is True

@@ -219,25 +219,25 @@ In tests, we need to:
 
 class CLIToolMockRegistry:
     """Registry for mock CLI tool responses during testing.
-    
+
     Provides deterministic, fast tests without external API calls.
     """
-    
+
     _mocks: dict[str, Callable[[list[str]], MockResponse]] = {}
     _recordings: dict[str, list[dict]] = {}  # For record/replay
-    
+
     @classmethod
     def register(cls, tool: str, mock_fn: Callable):
         """Register a mock handler for a CLI tool."""
         cls._mocks[tool] = mock_fn
-    
+
     @classmethod
     def get_response(cls, tool: str, args: list[str]) -> MockResponse | None:
         """Get mock response for a tool invocation."""
         if tool in cls._mocks:
             return cls._mocks[tool](args)
         return None
-    
+
     # Pre-built mocks for common tools
     @classmethod
     def mock_gh_success(cls):
@@ -257,7 +257,7 @@ class CLIToolMockRegistry:
                 )
             return MockResponse(exit_code=0, stdout="", stderr="")
         cls.register("gh", handler)
-    
+
     @classmethod
     def mock_gh_rate_limited(cls):
         """Mock gh CLI hitting rate limit (for testing error handling)."""

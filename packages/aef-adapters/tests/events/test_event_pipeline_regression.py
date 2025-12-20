@@ -301,8 +301,12 @@ class TestTokenUsage:
         "recording_name",
         get_all_recordings() or ["skip"],
     )
-    def test_assistant_events_map_to_token_usage(self, recording_name: str) -> None:
-        """REGRESSION: Assistant events should map to token_usage type."""
+    def test_assistant_events_map_correctly(self, recording_name: str) -> None:
+        """REGRESSION: Assistant events map based on content type.
+
+        - assistant + tool_use → tool_execution_started
+        - assistant + text only → token_usage
+        """
         if recording_name == "skip":
             pytest.skip("No recordings available")
 
@@ -311,9 +315,22 @@ class TestTokenUsage:
 
         for raw_event in assistant_events:
             parsed = AgentEvent.from_dict(raw_event)
-            assert parsed.event_type == "token_usage", (
-                f"Recording {recording_name}: assistant should map to token_usage"
+
+            # Check if assistant message contains tool_use
+            content = raw_event.get("message", {}).get("content", [])
+            has_tool_use = any(
+                isinstance(item, dict) and item.get("type") == "tool_use"
+                for item in content
             )
+
+            if has_tool_use:
+                assert parsed.event_type == "tool_execution_started", (
+                    f"Recording {recording_name}: assistant+tool_use should map to tool_execution_started"
+                )
+            else:
+                assert parsed.event_type == "token_usage", (
+                    f"Recording {recording_name}: assistant+text should map to token_usage"
+                )
 
 
 # =============================================================================

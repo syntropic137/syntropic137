@@ -1067,6 +1067,10 @@ class WorkflowExecutionEngine:
                 workspace_id = getattr(workspace, "id", None)
                 agent_model = phase.agent_config.model
 
+                # Cache tool_use_id → tool_name for enriching tool_result events
+                # Claude CLI's tool_result only has tool_use_id, not tool_name
+                tool_names_cache: dict[str, str] = {}
+
                 line_count = 0
                 async for line in workspace.stream(
                     claude_cmd,
@@ -1147,6 +1151,9 @@ class WorkflowExecutionEngine:
                                     tool_use_id = item.get("id", "unknown")
                                     tool_input = item.get("input", {})
 
+                                    # Cache tool_name for enriching tool_result events
+                                    tool_names_cache[tool_use_id] = tool_name
+
                                     if self._observability_writer is not None:
                                         await self._record_observation(
                                             observation_type=ObservationType.TOOL_STARTED,
@@ -1170,12 +1177,15 @@ class WorkflowExecutionEngine:
                                 if isinstance(item, dict) and item.get("type") == "tool_result":
                                     tool_use_id = item.get("tool_use_id", "unknown")
                                     is_error = item.get("is_error", False)
+                                    # Look up tool_name from cache
+                                    tool_name = tool_names_cache.get(tool_use_id, "unknown")
 
                                     if self._observability_writer is not None:
                                         await self._record_observation(
                                             observation_type=ObservationType.TOOL_COMPLETED,
                                             session_id=session_id,
                                             data={
+                                                "tool_name": tool_name,  # Now included!
                                                 "tool_use_id": tool_use_id,
                                                 "success": not is_error,
                                             },
@@ -1183,7 +1193,7 @@ class WorkflowExecutionEngine:
                                             phase_id=phase.phase_id,
                                             workspace_id=workspace_id,
                                         )
-                                        logger.debug("Tool completed: %s", tool_use_id)
+                                        logger.debug("Tool completed: %s (%s)", tool_use_id, tool_name)
 
                         if cli_type in ("system",):
                             logger.debug("CLI message: %s", cli_type)
