@@ -58,8 +58,9 @@ jobs:
 
       - name: Verify image
         run: |
-          docker run --rm agentic-workspace-claude-cli:latest python --version
-          docker run --rm agentic-workspace-claude-cli:latest claude --version || echo "Claude CLI check (optional)"
+          # Use --entrypoint to bypass node base image entrypoint
+          docker run --rm --entrypoint python3 agentic-workspace-claude-cli:latest --version
+          docker run --rm --entrypoint claude agentic-workspace-claude-cli:latest --version || echo "Claude CLI check (optional)"
 
   #############################################################################
   # E2E CONTAINER TEST - Full integration (manual trigger only)
