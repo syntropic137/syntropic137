@@ -81,14 +81,16 @@ def check_file(filepath: Path) -> list[dict]:
 
         for i, line in enumerate(lines, 1):
             if regex.search(line):
-                issues.append({
-                    "file": str(filepath),
-                    "line": i,
-                    "pattern": pattern_name,
-                    "severity": pattern_info["severity"],
-                    "message": pattern_info["message"],
-                    "content": line.strip()[:80],
-                })
+                issues.append(
+                    {
+                        "file": str(filepath),
+                        "line": i,
+                        "pattern": pattern_name,
+                        "severity": pattern_info["severity"],
+                        "message": pattern_info["message"],
+                        "content": line.strip()[:80],
+                    }
+                )
 
     # POKA-YOKE: Check xfail/skip have issue links
     xfail_skip_pattern = re.compile(r"@pytest\.mark\.(xfail|skip)\(")
@@ -98,14 +100,16 @@ def check_file(filepath: Path) -> list[dict]:
             marker_type = match.group(1)
             # Check if line has an issue link
             if not ISSUE_LINK_PATTERN.search(line):
-                issues.append({
-                    "file": str(filepath),
-                    "line": i,
-                    "pattern": f"{marker_type}_no_issue",
-                    "severity": "error",
-                    "message": f"{marker_type} without issue link - add '#123' to reason",
-                    "content": line.strip()[:80],
-                })
+                issues.append(
+                    {
+                        "file": str(filepath),
+                        "line": i,
+                        "pattern": f"{marker_type}_no_issue",
+                        "severity": "error",
+                        "message": f"{marker_type} without issue link - add '#123' to reason",
+                        "content": line.strip()[:80],
+                    }
+                )
 
     return issues
 
@@ -131,6 +135,7 @@ def main():
 
     if args.json:
         import json
+
         print(json.dumps({"errors": errors, "warnings": warnings}, indent=2))
     else:
         print("=" * 70)

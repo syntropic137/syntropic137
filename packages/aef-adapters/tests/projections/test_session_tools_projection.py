@@ -10,10 +10,11 @@ Now uses shared constants from aef_shared.events for type safety.
 """
 
 import os
-import pytest
 from uuid import uuid4
 
-from aef_shared.events import TOOL_STARTED, TOOL_COMPLETED
+import pytest
+
+from aef_shared.events import TOOL_COMPLETED, TOOL_STARTED
 
 # Mark all tests as requiring database
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -61,13 +62,15 @@ class TestSessionToolsProjection:
     async def test_get_returns_tool_started_events(self, projection, event_store, session_id):
         """Projection returns tool_started events with correct data."""
         # Arrange: Insert a tool_started event using constant
-        await event_store.insert_one(event={
-            "event_type": TOOL_STARTED,
-            "session_id": session_id,
-            "tool_name": "Bash",
-            "tool_use_id": "toolu_123",
-            "input_preview": '{"command": "ls -la"}',
-        })
+        await event_store.insert_one(
+            event={
+                "event_type": TOOL_STARTED,
+                "session_id": session_id,
+                "tool_name": "Bash",
+                "tool_use_id": "toolu_123",
+                "input_preview": '{"command": "ls -la"}',
+            }
+        )
 
         # Act
         result = await projection.get(session_id)
@@ -82,12 +85,14 @@ class TestSessionToolsProjection:
     async def test_get_returns_tool_completed_events(self, projection, event_store, session_id):
         """Projection returns tool_completed events with correct data."""
         # Arrange: Insert a tool_completed event using constant
-        await event_store.insert_one(event={
-            "event_type": TOOL_COMPLETED,
-            "session_id": session_id,
-            "tool_use_id": "toolu_456",
-            "success": True,
-        })
+        await event_store.insert_one(
+            event={
+                "event_type": TOOL_COMPLETED,
+                "session_id": session_id,
+                "tool_use_id": "toolu_456",
+                "success": True,
+            }
+        )
 
         # Act
         result = await projection.get(session_id)
@@ -104,12 +109,14 @@ class TestSessionToolsProjection:
         # Arrange: Insert events in order using constant
         tools = ["Read", "Write", "Bash"]
         for tool_name in tools:
-            await event_store.insert_one(event={
-                "event_type": TOOL_STARTED,
-                "session_id": session_id,
-                "tool_name": tool_name,
-                "tool_use_id": f"toolu_{tool_name}",
-            })
+            await event_store.insert_one(
+                event={
+                    "event_type": TOOL_STARTED,
+                    "session_id": session_id,
+                    "tool_name": tool_name,
+                    "tool_use_id": f"toolu_{tool_name}",
+                }
+            )
 
         # Act
         result = await projection.get(session_id)
@@ -124,16 +131,20 @@ class TestSessionToolsProjection:
         session_2 = str(uuid4())
 
         # Arrange: Insert events for two sessions using constant
-        await event_store.insert_one(event={
-            "event_type": TOOL_STARTED,
-            "session_id": session_1,
-            "tool_name": "Session1Tool",
-        })
-        await event_store.insert_one(event={
-            "event_type": TOOL_STARTED,
-            "session_id": session_2,
-            "tool_name": "Session2Tool",
-        })
+        await event_store.insert_one(
+            event={
+                "event_type": TOOL_STARTED,
+                "session_id": session_1,
+                "tool_name": "Session1Tool",
+            }
+        )
+        await event_store.insert_one(
+            event={
+                "event_type": TOOL_STARTED,
+                "session_id": session_2,
+                "tool_name": "Session2Tool",
+            }
+        )
 
         # Act
         result = await projection.get(session_1)
@@ -160,12 +171,14 @@ class TestSessionToolsProjection:
         producer_event_types = [TOOL_STARTED, TOOL_COMPLETED]
 
         for event_type in producer_event_types:
-            await event_store.insert_one(event={
-                "event_type": event_type,
-                "session_id": session_id,
-                "tool_name": "TestTool",
-                "tool_use_id": f"toolu_{event_type}",
-            })
+            await event_store.insert_one(
+                event={
+                    "event_type": event_type,
+                    "session_id": session_id,
+                    "tool_name": "TestTool",
+                    "tool_use_id": f"toolu_{event_type}",
+                }
+            )
 
         # Projection should find both events
         result = await projection.get(session_id)

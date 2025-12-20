@@ -399,9 +399,10 @@ def validate_agent_events_in_db(session_id: str) -> dict[str, Any]:
 
     # Check 2: Required event types for observability
     # These are the events the UI needs to show tool operations
+    # MUST match agentic_events.EventType (the producer)
     required_types = {
-        "tool_started": "Tool operations - shows what agent is doing",
-        "tool_completed": "Tool results - shows outcomes",
+        "tool_execution_started": "Tool operations - shows what agent is doing",
+        "tool_execution_completed": "Tool results - shows outcomes",
     }
 
     optional_types = {
@@ -596,8 +597,8 @@ async def run_e2e_test() -> bool:
 
     # Show tool event breakdown if available
     if agent_events_validation.get("event_types"):
-        tool_started = agent_events_validation["event_types"].get("tool_started", 0)
-        tool_completed = agent_events_validation["event_types"].get("tool_completed", 0)
+        tool_started = agent_events_validation["event_types"].get("tool_execution_started", 0)
+        tool_completed = agent_events_validation["event_types"].get("tool_execution_completed", 0)
         print(f"   Tool events: {tool_started} started, {tool_completed} completed")
 
     for check in event_validation["checks"]:

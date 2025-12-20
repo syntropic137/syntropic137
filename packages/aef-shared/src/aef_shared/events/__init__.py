@@ -12,8 +12,9 @@ If you add a new event type:
 from typing import Literal, get_args
 
 # Tool execution events
-TOOL_STARTED = "tool_started"
-TOOL_COMPLETED = "tool_completed"
+# MUST match agentic_events.EventType (the producer)
+TOOL_STARTED = "tool_execution_started"
+TOOL_COMPLETED = "tool_execution_completed"
 
 # Session lifecycle events
 SESSION_STARTED = "session_started"
@@ -31,9 +32,10 @@ PHASE_COMPLETED = "phase_completed"
 ERROR = "error"
 
 # Type-safe literal union (like TypeScript)
+# MUST match the constants above and agentic_events.EventType
 EventType = Literal[
-    "tool_started",
-    "tool_completed",
+    "tool_execution_started",
+    "tool_execution_completed",
     "session_started",
     "session_completed",
     "token_usage",
@@ -53,19 +55,16 @@ def is_valid_event_type(event_type: str) -> bool:
 
 
 __all__ = [
-    # Constants
-    "TOOL_STARTED",
-    "TOOL_COMPLETED",
-    "SESSION_STARTED",
-    "SESSION_COMPLETED",
-    "TOKEN_USAGE",
     "COST_RECORDED",
-    "PHASE_STARTED",
-    "PHASE_COMPLETED",
     "ERROR",
-    # Type
-    "EventType",
-    # Validation
+    "PHASE_COMPLETED",
+    "PHASE_STARTED",
+    "SESSION_COMPLETED",
+    "SESSION_STARTED",
+    "TOKEN_USAGE",
+    "TOOL_COMPLETED",
+    "TOOL_STARTED",
     "VALID_EVENT_TYPES",
+    "EventType",
     "is_valid_event_type",
 ]

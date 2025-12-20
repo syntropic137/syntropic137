@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from aef_shared.events import TOOL_STARTED, TOOL_COMPLETED
+from aef_shared.events import TOOL_COMPLETED, TOOL_STARTED
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -129,9 +129,7 @@ class SessionToolsProjection:
                     list(_TOOL_EVENT_TYPES),
                 )
 
-                logger.info(
-                    "SessionToolsProjection.get(%s): found %d rows", session_id, len(rows)
-                )
+                logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
                 return [self._row_to_operation(row) for row in rows]
         except Exception as e:
             logger.error("Failed to query tool operations for %s: %s", session_id, e)
@@ -216,7 +214,7 @@ class SessionToolsProjection:
             data = json.loads(data)
 
         event_type = row["event_type"]
-        is_completed = event_type == "tool_completed"
+        is_completed = event_type == TOOL_COMPLETED
 
         # Generate a unique ID from the row data
         tool_use_id = data.get("tool_use_id", "")

@@ -20,7 +20,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from aef_shared.events import EventType, VALID_EVENT_TYPES
+from aef_shared.events import EventType  # noqa: TC001 - needed at runtime for Pydantic
 
 
 class AgentEvent(BaseModel):

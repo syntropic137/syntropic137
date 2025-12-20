@@ -29,9 +29,22 @@ from aef_dashboard.models.schemas import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime as DatetimeType
+
     from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
         WorkflowExecutionDetail,
     )
+
+
+def _to_datetime(value: "DatetimeType | str | None") -> "DatetimeType | None":
+    """Convert datetime or ISO string to datetime."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        from datetime import datetime
+
+        return datetime.fromisoformat(value)
+    return value
 
 logger = logging.getLogger(__name__)
 
@@ -136,14 +149,14 @@ async def get_execution_status(
 
     # Map projection detail to API response
     return ExecutionStatusResponse(
-        execution_id=detail.execution_id,
+        execution_id=detail.workflow_execution_id,
         workflow_id=detail.workflow_id,
         status=detail.status,
         current_phase=_get_current_phase(detail),
         completed_phases=_count_completed_phases(detail),
         total_phases=len(detail.phases) if detail.phases else 0,
-        started_at=detail.started_at,
-        completed_at=detail.completed_at,
+        started_at=_to_datetime(detail.started_at),
+        completed_at=_to_datetime(detail.completed_at),
         error=detail.error_message,
     )
 
@@ -153,8 +166,8 @@ def _get_current_phase(detail: WorkflowExecutionDetail) -> str | None:
     if not detail.phases:
         return None
     for phase in detail.phases:
-        if phase.get("status") == "running":
-            return phase.get("phase_id")
+        if phase.status == "running":
+            return phase.workflow_phase_id
     return None
 
 
@@ -162,7 +175,7 @@ def _count_completed_phases(detail: WorkflowExecutionDetail) -> int:
     """Count completed phases from detail."""
     if not detail.phases:
         return 0
-    return sum(1 for p in detail.phases if p.get("status") == "completed")
+    return sum(1 for p in detail.phases if p.status == "completed")
 
 
 @router.get("/executions/active")
@@ -182,24 +195,26 @@ async def list_active_executions(
 
     # Query executions with status 'running' or 'paused'
     # The list projection provides a filtered view
-    all_executions = await manager.workflow_execution_list.list_recent(limit=limit * 2)
+    all_executions = await manager.workflow_execution_list.get_all(limit=limit * 2)
 
     active = []
     for exec_summary in all_executions:
         if exec_summary.status in ("running", "paused", "starting"):
             # Get full detail for the response
-            detail = await manager.workflow_execution_detail.get_by_id(exec_summary.execution_id)
+            detail = await manager.workflow_execution_detail.get_by_id(
+                exec_summary.workflow_execution_id
+            )
             if detail:
                 active.append(
                     ExecutionStatusResponse(
-                        execution_id=detail.execution_id,
+                        execution_id=detail.workflow_execution_id,
                         workflow_id=detail.workflow_id,
                         status=detail.status,
                         current_phase=_get_current_phase(detail),
                         completed_phases=_count_completed_phases(detail),
                         total_phases=len(detail.phases) if detail.phases else 0,
-                        started_at=detail.started_at,
-                        completed_at=detail.completed_at,
+                        started_at=_to_datetime(detail.started_at),
+                        completed_at=_to_datetime(detail.completed_at),
                         error=detail.error_message,
                     )
                 )
