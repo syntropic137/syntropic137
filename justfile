@@ -289,13 +289,23 @@ vsa-validate:
     @echo "VSA validation not yet implemented."
     # TODO: Implement VSA validation using the tool from lib/event-sourcing-platform
 
+# Check for test debt (xfail, skip, TODO in tests)
+test-debt:
+    @echo "🔍 Checking for test debt..."
+    uv run python scripts/check_test_debt.py --warn-only
+
+# Check for test debt (strict - fails on errors)
+test-debt-strict:
+    @echo "🔍 Checking for test debt (strict)..."
+    uv run python scripts/check_test_debt.py
+
 # Run all QA checks (Python + Frontend)
-qa: lint format typecheck test dashboard-qa
+qa: lint format typecheck test dashboard-qa test-debt
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Run Python-only QA (faster, no frontend build)
-qa-python: lint format typecheck test
+qa-python: lint format typecheck test test-debt
     @echo ""
     @echo "✅ Python QA checks passed!"
 
