@@ -110,7 +110,8 @@ async def get_session(session_id: str) -> SessionResponse:
         pass  # Workspace path is optional
 
     # Get tool operations from TimescaleDB via SessionToolsProjection (ADR-026)
-    tool_operations = await manager.session_tools.get(timescale_session_id)
+    # Use the actual session_id (from URL), not execution_id
+    tool_operations = await manager.session_tools.get(session_id)
 
     # Convert ToolOperation read models to API OperationInfo
     operations: list[OperationInfo] = []

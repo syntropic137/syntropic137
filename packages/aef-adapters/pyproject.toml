@@ -7,37 +7,31 @@ requires-python = ">=3.12"
 dependencies = [
     "aef-shared",
     "aef-domain",
-    "aef-tokens",  # Token vending service (ADR-022)
-    "agentic-logging",  # Structured logging (ADR-014 from agentic-primitives)
-    "agentic-events",  # Simple event emission (ADR-029)
+    "aef-tokens", # Token vending service (ADR-022)
+    "agentic-logging", # Structured logging (ADR-014 from agentic-primitives)
+    "agentic-events", # Simple event emission (ADR-029)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",
+    "pyjwt>=2.10.1",
+    "cryptography>=46.0.3",
 ]
 
 [project.optional-dependencies]
 postgres = [
     "asyncpg>=0.30.0",
 ]
-# Legacy chat completion adapter (direct Anthropic API)
+# Chat completion adapter (direct Anthropic API)
 claude = [
     "anthropic>=0.42.0",
-]
-# Agentic SDK adapter (recommended)
-claude-agentic = [
-    "claude-agent-sdk>=0.1.9",
 ]
 openai = [
     "openai>=1.59.0",
 ]
-# Install all agent adapters (legacy chat completion style)
+# Install all chat completion agent adapters
 agents = [
     "anthropic>=0.42.0",
     "openai>=1.59.0",
-]
-# Install all agentic SDK adapters (recommended for new code)
-agentic = [
-    "claude-agent-sdk>=0.1.9",
 ]
 # MinIO storage adapter
 minio = [
@@ -48,7 +42,6 @@ all = [
     "asyncpg>=0.30.0",
     "anthropic>=0.42.0",
     "openai>=1.59.0",
-    "claude-agent-sdk>=0.1.9",
     "minio>=7.2.0",
 ]
 

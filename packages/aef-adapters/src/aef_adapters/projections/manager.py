@@ -249,19 +249,12 @@ class ProjectionManager:
 
         This projection queries TimescaleDB for tool operations.
         See ADR-029: Simplified Event System
-        """
-        try:
-            from aef_adapters.events import get_event_store
 
-            store = get_event_store()
-            return SessionToolsProjection(pool=store.pool)
-        except Exception as e:
-            # Return projection without pool - will return empty results
-            logger.warning(
-                "Could not connect to TimescaleDB for tools projection: %s",
-                e,
-            )
-            return SessionToolsProjection(pool=None)
+        Note: We don't pass the pool here because the store may not be
+        initialized yet. The projection will get the pool lazily.
+        """
+        # Return projection without pool initially - it will get pool lazily
+        return SessionToolsProjection(pool=None)
 
     def _create_session_cost_projection(self) -> SessionCostProjection:
         """Create SessionCostProjection with TimescaleDB access.

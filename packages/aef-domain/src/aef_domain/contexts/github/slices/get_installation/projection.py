@@ -6,6 +6,7 @@ Projects installation events into the Installation read model.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from aef_domain.contexts.github.domain.read_models.installation import (
@@ -52,6 +53,8 @@ class InstallationProjection:
         Returns:
             The created Installation.
         """
+        # Note: DomainEvent doesn't have occurred_at - that's in EventMetadata
+        # For webhook-created events, we use current time as the installation time
         installation = Installation(
             installation_id=event.installation_id,
             account_id=event.account_id,
@@ -60,7 +63,7 @@ class InstallationProjection:
             status=InstallationStatus.ACTIVE,
             repositories=list(event.repositories),
             permissions=dict(event.permissions),
-            installed_at=event.occurred_at,
+            installed_at=datetime.now(UTC),
         )
 
         self._installations[event.installation_id] = installation
@@ -105,7 +108,8 @@ class InstallationProjection:
             logger.warning(f"TokenRefreshed for unknown installation: {event.installation_id}")
             return None
 
-        installation.last_token_refresh = event.occurred_at
+        # Note: DomainEvent doesn't have occurred_at - use current time
+        installation.last_token_refresh = datetime.now(UTC)
         installation.last_token_expires_at = event.expires_at
         installation.permissions = dict(event.permissions)
 

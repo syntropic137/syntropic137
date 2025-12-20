@@ -46,7 +46,7 @@ POLL_INTERVAL_SECONDS = 5
 MAX_WAIT_SECONDS = 600  # 10 minutes max
 
 # PostgreSQL connection (via docker exec)
-POSTGRES_CONTAINER = "aef-postgres"
+POSTGRES_CONTAINER = os.getenv("AEF_POSTGRES_CONTAINER", "aef-db")
 POSTGRES_USER = "aef"
 POSTGRES_DB = "aef"
 
@@ -338,6 +338,102 @@ def validate_events_in_db(session_id: str) -> dict[str, Any]:
     return result
 
 
+def validate_agent_events_in_db(session_id: str) -> dict[str, Any]:
+    """Validate observability events in agent_events table.
+
+    This is CRITICAL - validates the observability pipeline that feeds the UI.
+    The agent_events table receives events from hooks (tool_started, tool_completed, etc.)
+    and is queried by SessionToolsProjection for the UI.
+
+    If this fails, the UI will show no tool operations even if the workflow succeeded.
+    """
+    print(f"\n📊 Validating agent_events (observability) for session {session_id}...")
+
+    result = {
+        "total_events": 0,
+        "event_types": {},
+        "checks": [],
+        "passed": True,
+    }
+
+    # Query event counts by type
+    query = f"""
+    SELECT event_type, count(*)
+    FROM agent_events
+    WHERE session_id = '{session_id}'
+    GROUP BY event_type
+    ORDER BY count(*) DESC;
+    """
+
+    ok, output = run_psql(query)
+    if not ok:
+        print(f"   ❌ Failed to query agent_events: {output}")
+        result["passed"] = False
+        result["checks"].append({"name": "query_agent_events", "passed": False, "error": output})
+        return result
+
+    # Parse results
+    if output:
+        for line in output.strip().split("\n"):
+            if "|" in line:
+                parts = line.split("|")
+                if len(parts) >= 2:
+                    event_type = parts[0].strip()
+                    count = int(parts[1].strip()) if parts[1].strip().isdigit() else 0
+                    result["event_types"][event_type] = count
+                    result["total_events"] += count
+
+    print(f"   Found {result['total_events']} total events in agent_events")
+
+    # Check 1: Has any events
+    if result["total_events"] > 0:
+        print(f"   ✅ Events found in agent_events: {result['total_events']}")
+        result["checks"].append({"name": "has_agent_events", "passed": True})
+    else:
+        print("   ❌ No events found in agent_events table!")
+        print("   This means the observability pipeline is broken.")
+        print("   UI will show no tool operations.")
+        result["checks"].append({"name": "has_agent_events", "passed": False})
+        result["passed"] = False
+        return result
+
+    # Check 2: Required event types for observability
+    # These are the events the UI needs to show tool operations
+    # MUST match agentic_events.EventType (the producer)
+    required_types = {
+        "tool_execution_started": "Tool operations - shows what agent is doing",
+        "tool_execution_completed": "Tool results - shows outcomes",
+    }
+
+    optional_types = {
+        "token_usage": "Cost tracking",
+        "session_started": "Session lifecycle",
+        "session_completed": "Session lifecycle",
+    }
+
+    for event_type, description in required_types.items():
+        if event_type in result["event_types"]:
+            count = result["event_types"][event_type]
+            print(f"   ✅ {event_type}: {count} events ({description})")
+            result["checks"].append({"name": f"has_{event_type}", "passed": True, "count": count})
+        else:
+            print(f"   ❌ {event_type}: MISSING ({description})")
+            result["checks"].append({"name": f"has_{event_type}", "passed": False})
+            result["passed"] = False
+
+    for event_type, description in optional_types.items():
+        if event_type in result["event_types"]:
+            count = result["event_types"][event_type]
+            print(f"   ✅ {event_type}: {count} events ({description})")
+        else:
+            print(f"   ⚠️ {event_type}: not found ({description})")
+
+    # Show all event types found
+    print(f"   Event breakdown: {result['event_types']}")
+
+    return result
+
+
 def check_pr_on_github(execution_id: str) -> dict | None:
     """Check if a PR was created on GitHub."""
     print("\n🐙 Checking for PR on GitHub...")
@@ -451,6 +547,10 @@ async def run_e2e_test() -> bool:
     # Step 4: Validate events DIRECTLY in PostgreSQL
     event_validation = validate_events_in_db(session_id)
 
+    # Step 4b: Validate observability events (CRITICAL for UI)
+    # This validates the agent_events table that feeds the UI
+    agent_events_validation = validate_agent_events_in_db(session_id)
+
     # Step 5 & 6: Check GitHub (only for github/pr workflows)
     is_github_workflow = "github" in WORKFLOW_ID.lower() or "pr" in WORKFLOW_ID.lower()
     branch_found = False
@@ -478,12 +578,28 @@ async def run_e2e_test() -> bool:
     else:
         checks_failed += 1
 
-    # Event validation
+    # Event validation (event sourcing)
     print(f"\n   Events in Database: {event_validation['total_events']}")
     if event_validation["passed"]:
         checks_passed += 1
     else:
         checks_failed += 1
+
+    # Agent events validation (observability - CRITICAL for UI)
+    print(f"\n   Agent Events (Observability): {agent_events_validation['total_events']}")
+    if agent_events_validation["passed"]:
+        checks_passed += 1
+        print("   ✅ Observability pipeline working - UI will show tool operations")
+    else:
+        checks_failed += 1
+        print("   ❌ OBSERVABILITY BROKEN - UI will not show tool operations!")
+        print("   This is the bug we spent $100 debugging.")
+
+    # Show tool event breakdown if available
+    if agent_events_validation.get("event_types"):
+        tool_started = agent_events_validation["event_types"].get("tool_execution_started", 0)
+        tool_completed = agent_events_validation["event_types"].get("tool_execution_completed", 0)
+        print(f"   Tool events: {tool_started} started, {tool_completed} completed")
 
     for check in event_validation["checks"]:
         if check["passed"]:

@@ -48,7 +48,7 @@ class CreateWorkspaceCommand(Command):
     security_policy: SecurityPolicy = field(default_factory=SecurityPolicy)
 
     # Image/environment
-    image: str = "aef-workspace-claude:latest"
+    image: str = "agentic-workspace-claude-cli:latest"
     working_directory: str = "/workspace"
 
     # Sidecar

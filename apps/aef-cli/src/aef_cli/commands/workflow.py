@@ -596,11 +596,11 @@ def run_workflow(
     container: Annotated[
         bool,
         typer.Option(
-            "--container",
+            "--container/--no-container",
             "-c",
-            help="Run agent inside isolated container with sidecar proxy",
+            help="Run agent inside isolated container (default: True per ADR-021)",
         ),
-    ] = False,
+    ] = True,
     tenant_id: Annotated[
         str | None,
         typer.Option(
@@ -611,8 +611,10 @@ def run_workflow(
 ) -> None:
     """Execute a workflow.
 
+    By default, agents run inside isolated containers (per ADR-021/ADR-023).
+
     Examples:
-        # Run workflow with inputs
+        # Run workflow with inputs (runs in container by default)
         aef workflow run research-workflow --input topic="AI agents" --input depth=3
 
         # Dry run to validate
@@ -621,8 +623,8 @@ def run_workflow(
         # Run quietly (minimal output)
         aef workflow run research-workflow --quiet
 
-        # Run in container mode (isolated execution)
-        aef workflow run github-pr-workflow --container --input change_description="Add README"
+        # Disable container mode (legacy, not recommended)
+        aef workflow run research-workflow --no-container --input topic="test"
     """
     from aef_adapters.agents import (
         AgentProtocol,
@@ -872,9 +874,11 @@ def run_workflow(
 
             # Create engine with ADR-023 compliant dependencies
             from aef_adapters.events import get_event_store
+            from aef_adapters.projections.manager import get_projection_manager
             from aef_adapters.storage.artifact_storage import get_artifact_storage
             from aef_adapters.storage.repositories import get_workflow_execution_repository
             from aef_adapters.workspace_backends.service import WorkspaceService
+            from aef_domain.contexts.artifacts import ArtifactQueryService
 
             execution_repo = get_workflow_execution_repository()
             event_store = get_event_store()
@@ -883,6 +887,10 @@ def run_workflow(
             # Initialize event store (creates TimescaleDB schema)
             # ADR-029: Simplified event system
             await event_store.initialize()
+
+            # Get artifact query service for multi-phase workflows
+            manager = get_projection_manager()
+            artifact_query = ArtifactQueryService(manager.artifact_list)
 
             # Container environment - non-sensitive config only (ADR-024)
             #
@@ -907,6 +915,7 @@ def run_workflow(
                 artifact_repository=artifact_repo,
                 agent_factory=agent_factory,
                 observability_writer=event_store,  # ADR-029: Use AgentEventStore
+                artifact_query_service=artifact_query,  # For multi-phase prompt injection
                 artifact_content_storage=artifact_content_storage,  # ADR-012
             )
 

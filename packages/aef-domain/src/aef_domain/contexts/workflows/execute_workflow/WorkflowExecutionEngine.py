@@ -304,23 +304,23 @@ class WorkflowExecutionEngine:
         workflow_id: str,
         inputs: dict[str, Any],
         execution_id: str | None = None,
-        use_container: bool = False,
+        use_container: bool = True,
         tenant_id: str | None = None,
     ) -> WorkflowExecutionResult:
         """Execute a workflow from start to finish.
 
-        Per ADR-023, agents execute inside isolated workspaces and all events
-        are persisted via the WorkflowExecutionAggregate.
+        Per ADR-021/ADR-023/ADR-029, agents execute inside isolated environments
+        using Claude Code CLI. All events are persisted via aggregates.
 
         Args:
             workflow_id: ID of the workflow to execute.
             inputs: Initial input variables for the workflow.
             execution_id: Optional custom execution ID.
-            use_container: If True, run agent inside isolated container with
-                sidecar proxy for token injection. If False (default), run
-                agent SDK directly in host process.
-            tenant_id: Tenant ID for multi-tenant token vending. Required when
-                use_container=True for proper token attribution.
+            use_container: If True (default), run in isolated container.
+                DEPRECATED: The SDK-based host mode (use_container=False) is
+                legacy and will be removed. All execution should use container
+                mode with the appropriate isolation backend (ADR-021).
+            tenant_id: Tenant ID for multi-tenant token vending.
 
         Returns:
             WorkflowExecutionResult with status and artifacts.
@@ -373,7 +373,7 @@ class WorkflowExecutionEngine:
         #   2. Start sidecar proxy (for token injection)
         #   3. Inject artifacts from previous phases
         #   4. Write task.json with phase config
-        #   5. Execute aef-agent-runner via execute_streaming()
+        #   5. Execute Claude CLI via workspace.stream() (ADR-029)
         #   6. Parse JSONL events and update aggregate
         #   7. Collect artifacts for next phase
         #   8. Destroy workspace (stateless)
@@ -507,9 +507,41 @@ class WorkflowExecutionEngine:
         3. Execute agent
         4. Create artifact
         5. Emit phase completed via aggregate
+        6. Track session with token data
         """
+        # Import session classes
+        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
+        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+            CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+            RecordOperationCommand,
+        )
+        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+            StartSessionCommand,
+        )
+
         phase_started_at = datetime.now(UTC)
         session_id = str(uuid4())
+        session: AgentSessionAggregate | None = None
+
+        # Create and start session aggregate
+        if self._sessions is not None:
+            session = AgentSessionAggregate()
+            start_session_cmd = StartSessionCommand(
+                aggregate_id=session_id,
+                workflow_id=ctx.workflow_id,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                agent_provider=phase.agent_config.provider,
+                agent_model=phase.agent_config.model,
+            )
+            session._handle_command(start_session_cmd)
+            await self._sessions.save(session)
+            logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
         # Emit phase started via aggregate
         start_phase_cmd = StartPhaseCommand(
@@ -620,6 +652,34 @@ class WorkflowExecutionEngine:
                 duration_seconds=duration,
             )
             aggregate._handle_command(complete_phase_cmd)
+
+            # Record token usage and complete session
+            if session is not None and self._sessions is not None:
+                # Record operation with tokens
+                if response.input_tokens > 0 or response.output_tokens > 0:
+                    record_op_cmd = RecordOperationCommand(
+                        aggregate_id=session_id,
+                        operation_type=OperationType.MESSAGE_RESPONSE,
+                        input_tokens=response.input_tokens,
+                        output_tokens=response.output_tokens,
+                        total_tokens=response.total_tokens,
+                        success=True,
+                        duration_seconds=duration,
+                        metadata={"phase_id": phase.phase_id, "source": "direct_execution"},
+                    )
+                    session._handle_command(record_op_cmd)
+
+                # Complete session
+                complete_session_cmd = CompleteSessionCommand(
+                    aggregate_id=session_id,
+                    success=True,
+                )
+                session._handle_command(complete_session_cmd)
+                await self._sessions.save(session)
+                logger.debug(
+                    "Session completed: %s (success, tokens: %d)", session_id, response.total_tokens
+                )
+
             logger.info(
                 "Phase completed: %s (success: True, tokens: %d)",
                 phase.phase_id,
@@ -640,6 +700,20 @@ class WorkflowExecutionEngine:
                 error_message=str(e),
             )
             ctx.phase_results.append(result)
+
+            # Complete session with failure
+            if session is not None and self._sessions is not None:
+                try:
+                    complete_session_cmd = CompleteSessionCommand(
+                        aggregate_id=session_id,
+                        success=False,
+                        error_message=str(e),
+                    )
+                    session._handle_command(complete_session_cmd)
+                    await self._sessions.save(session)
+                    logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
+                except Exception as session_err:
+                    logger.warning("Failed to complete session %s: %s", session_id, session_err)
 
             # Note: We don't emit PhaseCompleted for failures
             # The FailExecutionCommand in execute() will capture the failure
@@ -821,7 +895,7 @@ class WorkflowExecutionEngine:
         1. Create isolated workspace with sidecar via WorkspaceService
         2. Inject input artifacts from previous phases
         3. Write task.json with phase configuration
-        4. Execute aef-agent-runner via streaming
+        4. Execute Claude CLI via workspace.stream() (ADR-029)
         5. Parse JSONL events and emit to aggregate
         6. Collect output artifacts
         7. Destroy workspace (stateless)
@@ -852,8 +926,12 @@ class WorkflowExecutionEngine:
         from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
+        )
+        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+            RecordOperationCommand,
         )
         from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
             StartSessionCommand,
@@ -956,6 +1034,7 @@ class WorkflowExecutionEngine:
                 claude_cmd = [
                     "claude",
                     "--print",  # Non-interactive mode
+                    "--verbose",  # Required for stream-json output format
                     prompt,
                     "--output-format",
                     "stream-json",  # Stream JSON for real-time events
@@ -1057,9 +1136,56 @@ class WorkflowExecutionEngine:
                                     output_tokens,
                                 )
 
-                        # Tool events now come from hooks (ADR-029)
-                        # Just log progress for debugging
-                        if cli_type in ("assistant", "user", "system"):
+                        # Extract tool events from assistant messages
+                        # Claude CLI emits tool_use in message.content
+                        if cli_type == "assistant":
+                            message = cli_event.get("message", {})
+                            content = message.get("content", [])
+                            for item in content:
+                                if isinstance(item, dict) and item.get("type") == "tool_use":
+                                    tool_name = item.get("name", "unknown")
+                                    tool_use_id = item.get("id", "unknown")
+                                    tool_input = item.get("input", {})
+
+                                    if self._observability_writer is not None:
+                                        await self._record_observation(
+                                            observation_type=ObservationType.TOOL_STARTED,
+                                            session_id=session_id,
+                                            data={
+                                                "tool_name": tool_name,
+                                                "tool_use_id": tool_use_id,
+                                                "input_preview": json.dumps(tool_input)[:500],
+                                            },
+                                            execution_id=execution_id,
+                                            phase_id=phase.phase_id,
+                                            workspace_id=workspace_id,
+                                        )
+                                        logger.debug("Tool started: %s", tool_name)
+
+                        # Handle tool results from user messages
+                        if cli_type == "user":
+                            message = cli_event.get("message", {})
+                            content = message.get("content", [])
+                            for item in content:
+                                if isinstance(item, dict) and item.get("type") == "tool_result":
+                                    tool_use_id = item.get("tool_use_id", "unknown")
+                                    is_error = item.get("is_error", False)
+
+                                    if self._observability_writer is not None:
+                                        await self._record_observation(
+                                            observation_type=ObservationType.TOOL_COMPLETED,
+                                            session_id=session_id,
+                                            data={
+                                                "tool_use_id": tool_use_id,
+                                                "success": not is_error,
+                                            },
+                                            execution_id=execution_id,
+                                            phase_id=phase.phase_id,
+                                            workspace_id=workspace_id,
+                                        )
+                                        logger.debug("Tool completed: %s", tool_use_id)
+
+                        if cli_type in ("system",):
                             logger.debug("CLI message: %s", cli_type)
 
                     except json.JSONDecodeError:
@@ -1132,15 +1258,34 @@ class WorkflowExecutionEngine:
             )
             aggregate._handle_command(complete_cmd)
 
-            # Complete session aggregate (success)
+            # Record token usage on session before completing
+            # This ensures SessionCompleted event contains accumulated tokens
             if session is not None and self._sessions is not None:
+                if total_input_tokens > 0 or total_output_tokens > 0:
+                    record_op_cmd = RecordOperationCommand(
+                        aggregate_id=session_id,
+                        operation_type=OperationType.MESSAGE_RESPONSE,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        total_tokens=total_input_tokens + total_output_tokens,
+                        success=True,
+                        duration_seconds=duration,
+                        metadata={"phase_id": phase.phase_id, "source": "container_execution"},
+                    )
+                    session._handle_command(record_op_cmd)
+
+                # Complete session aggregate (success)
                 complete_session_cmd = CompleteSessionCommand(
                     aggregate_id=session_id,
                     success=True,
                 )
                 session._handle_command(complete_session_cmd)
                 await self._sessions.save(session)
-                logger.debug("Session completed: %s (success)", session_id)
+                logger.debug(
+                    "Session completed: %s (success, tokens: %d)",
+                    session_id,
+                    total_input_tokens + total_output_tokens,
+                )
 
             logger.info(
                 "Phase completed (container mode): %s (tokens: %d)",

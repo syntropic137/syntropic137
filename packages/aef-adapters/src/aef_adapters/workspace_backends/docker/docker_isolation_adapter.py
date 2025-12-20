@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Default workspace image - matches image built by `just workspace-build`
-DEFAULT_WORKSPACE_IMAGE = "aef-workspace-claude:latest"
+DEFAULT_WORKSPACE_IMAGE = "agentic-workspace-claude-cli:latest"
 
 # Default network
 DEFAULT_NETWORK = "aef-workspace-net"
@@ -148,11 +148,13 @@ class DockerIsolationAdapter:
             config=config,
         )
 
+        image_to_use = config.image or self._default_image
         logger.info(
-            "Creating Docker container (name=%s, execution=%s, gvisor=%s)",
+            "Creating Docker container (name=%s, execution=%s, gvisor=%s, image=%s)",
             container_name,
             config.execution_id,
             self._use_gvisor,
+            image_to_use,
         )
 
         try:
@@ -482,6 +484,7 @@ class DockerIsolationAdapter:
             "--security-opt=no-new-privileges",
             "--read-only",
             "--tmpfs=/tmp:rw,noexec,nosuid,size=256m",
+            "--tmpfs=/home/agent:rw,exec,nosuid,size=128m,uid=1000,gid=1000",  # For git config, gh CLI, etc.
             # Resource limits
             f"--memory={security.memory_limit_mb}m",
             f"--cpus={security.cpu_limit_cores}",

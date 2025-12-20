@@ -1,8 +1,9 @@
 ---
 title: "ADR-028: OpenTelemetry Integration for Agent Observability"
-status: accepted
+status: superseded
 created: 2025-12-17
-updated: 2025-12-17
+updated: 2025-12-19
+superseded_by: ADR-029
 author: Neural
 ---
 
@@ -10,11 +11,22 @@ author: Neural
 
 ## Status
 
-**Accepted**
+**⚠️ SUPERSEDED by ADR-029 (Simplified Event System)**
 
 - Created: 2025-12-17
-- Updated: 2025-12-17
+- Superseded: 2025-12-19
 - Author(s): Neural
+
+> **⚠️ Superseded**: This ADR proposed using OpenTelemetry as the primary
+> observability mechanism. ADR-029 simplified this by:
+> 1. Using JSONL (`agentic_events`) instead of OTel for AEF's custom dashboard
+> 2. Storing events directly in TimescaleDB (no OTel Collector required)
+> 3. OTel remains available for external monitoring if needed, but is not
+>    required for AEF's core observability pipeline.
+>
+> The `aef-adapters/observability/otel_config.py` and `conventions.py` files
+> referenced here have been deleted.
+> See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
 ## Context
 

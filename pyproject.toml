@@ -18,18 +18,13 @@ dependencies = [
     "aef-shared",
     "event-sourcing-python",
     "grpcio>=1.60", # Required by event-sourcing SDK
-    "claude-agent-sdk>=0.1.11",
     "minio>=7.2.20",
+    "sqlmodel>=0.0.27",
 ]
 
-# Core agentic SDK (required for full functionality)
+# Optional dependencies
 [project.optional-dependencies]
-agentic = [
-    "claude-agent-sdk>=0.1.9",  # Core Claude Agent SDK
-]
-all = [
-    "claude-agent-sdk>=0.1.9",
-]
+all = []
 
 [dependency-groups]
 dev = [
@@ -176,10 +171,6 @@ module = [
     "agentic_adapters.*",
     "agentic_events",
     "agentic_events.*",
-    "agentic_otel",
-    "agentic_otel.*",
-    "agentic_observability",
-    "agentic_observability.*",
     "agentic_settings",
     "agentic_settings.*",
     "sse_starlette",
@@ -244,10 +235,6 @@ omit = [
     "*/agents/claude.py",  # Requires Anthropic API
     "*/agents/openai.py",  # Requires OpenAI API
     "*/storage/postgres.py",  # Requires running PostgreSQL
-    "*/execute_workflow/WorkflowExecutionEngine.py",  # Legacy - being replaced by WorkflowExecutor (M8)
     "*/workspace_backends/*",  # Requires Docker runtime
-    "*/orchestration/workflow_executor.py",  # Requires Docker + Claude SDK
-    "*/orchestration/executor.py",  # Requires Docker + Claude SDK
-    "*/orchestration/factory.py",  # Requires full DI setup
     "*/stale_execution_cleaner.py",  # Background cleanup - integration tested
 ]

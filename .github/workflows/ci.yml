@@ -46,6 +46,13 @@ jobs:
       - name: Type check
         run: uv run mypy apps packages
 
+      - name: Validate domain events
+        run: uv run python scripts/validate_domain_events.py
+
+      # POKA-YOKE: Fail if xfail/skip without issue links
+      - name: Check test debt
+        run: uv run python scripts/check_test_debt.py
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################

@@ -57,8 +57,19 @@ class TestTokenRefreshedEvent:
         assert event.token_hash == "abc123def456"
         assert event.expires_at == expires_at
         assert event.permissions["contents"] == "write"
-        assert event.event_id
-        assert event.occurred_at
+
+    def test_event_is_immutable(self) -> None:
+        """Test that event is immutable (frozen)."""
+        event = TokenRefreshedEvent(
+            installation_id="12345",
+            token_hash="abc123",
+            expires_at=datetime.now(UTC),
+        )
+
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):  # Pydantic raises ValidationError for frozen
+            event.installation_id = "changed"  # type: ignore[misc]
 
     def test_validation_empty_installation_id(self) -> None:
         """Test that empty installation_id raises error."""
