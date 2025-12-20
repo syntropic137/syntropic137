@@ -14,12 +14,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from aef_shared.events import TOOL_STARTED, TOOL_COMPLETED
+
 if TYPE_CHECKING:
     from datetime import datetime
 
     import asyncpg
 
 logger = logging.getLogger(__name__)
+
+# Use constants for type safety
+_TOOL_EVENT_TYPES = (TOOL_STARTED, TOOL_COMPLETED)
 
 
 @dataclass
@@ -42,12 +47,12 @@ class ToolOperation:
     @property
     def is_started(self) -> bool:
         """Check if this is a tool_started event."""
-        return self.operation_type == "tool_started"
+        return self.operation_type == TOOL_STARTED
 
     @property
     def is_completed(self) -> bool:
         """Check if this is a tool_completed event."""
-        return self.operation_type == "tool_completed"
+        return self.operation_type == TOOL_COMPLETED
 
 
 class SessionToolsProjection:
@@ -108,6 +113,7 @@ class SessionToolsProjection:
 
         try:
             async with pool.acquire() as conn:
+                # Use parameterized query with constants for type safety
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -116,10 +122,11 @@ class SessionToolsProjection:
                         data
                     FROM agent_events
                     WHERE session_id = $1
-                      AND event_type IN ('tool_started', 'tool_completed')
+                      AND event_type = ANY($2)
                     ORDER BY time ASC
                     """,
                     session_id,
+                    list(_TOOL_EVENT_TYPES),
                 )
 
                 logger.info(
@@ -153,10 +160,10 @@ class SessionToolsProjection:
         if pool is None:
             return []
 
-        # Build dynamic query
-        conditions = ["event_type IN ('tool_started', 'tool_completed')"]
-        params: list[Any] = []
-        param_idx = 1
+        # Build dynamic query with type-safe event types
+        conditions = [f"event_type = ANY(${1})"]
+        params: list[Any] = [list(_TOOL_EVENT_TYPES)]
+        param_idx = 2
 
         if execution_id:
             conditions.append(f"execution_id = ${param_idx}")

@@ -20,6 +20,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from aef_shared.events import EventType, VALID_EVENT_TYPES
+
 
 class AgentEvent(BaseModel):
     """Agent event stored in TimescaleDB.
@@ -32,6 +34,9 @@ class AgentEvent(BaseModel):
 
     The model validates types before insertion, catching mismatches
     at runtime rather than letting them fail in the database.
+
+    IMPORTANT: event_type is validated against VALID_EVENT_TYPES.
+    If you get a validation error, add the event type to aef_shared.events.
     """
 
     # Primary key (optional - DB generates)
@@ -40,8 +45,8 @@ class AgentEvent(BaseModel):
     # Time dimension (required for TimescaleDB hypertable)
     time: datetime = Field(default_factory=datetime.now)
 
-    # Event classification
-    event_type: str = Field(max_length=100)
+    # Event classification - validated against VALID_EVENT_TYPES
+    event_type: EventType = Field(...)
 
     # Correlation IDs (UUIDs for type safety)
     session_id: UUID | None = Field(default=None)

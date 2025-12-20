@@ -5,11 +5,15 @@ from TimescaleDB. They use a real database connection to ensure query correctnes
 
 POKA-YOKE: This test would have caught the event type mismatch bug where we
 queried for 'tool_execution_started' but stored 'tool_started'.
+
+Now uses shared constants from aef_shared.events for type safety.
 """
 
 import os
 import pytest
 from uuid import uuid4
+
+from aef_shared.events import TOOL_STARTED, TOOL_COMPLETED
 
 # Mark all tests as requiring database
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -56,9 +60,9 @@ class TestSessionToolsProjection:
 
     async def test_get_returns_tool_started_events(self, projection, event_store, session_id):
         """Projection returns tool_started events with correct data."""
-        # Arrange: Insert a tool_started event
+        # Arrange: Insert a tool_started event using constant
         await event_store.insert_one(event={
-            "event_type": "tool_started",
+            "event_type": TOOL_STARTED,
             "session_id": session_id,
             "tool_name": "Bash",
             "tool_use_id": "toolu_123",
@@ -71,15 +75,15 @@ class TestSessionToolsProjection:
         # Assert
         assert len(result) == 1
         op = result[0]
-        assert op.operation_type == "tool_started"
+        assert op.operation_type == TOOL_STARTED
         assert op.tool_name == "Bash"
         assert op.tool_use_id == "toolu_123"
 
     async def test_get_returns_tool_completed_events(self, projection, event_store, session_id):
         """Projection returns tool_completed events with correct data."""
-        # Arrange: Insert a tool_completed event
+        # Arrange: Insert a tool_completed event using constant
         await event_store.insert_one(event={
-            "event_type": "tool_completed",
+            "event_type": TOOL_COMPLETED,
             "session_id": session_id,
             "tool_use_id": "toolu_456",
             "success": True,
@@ -91,17 +95,17 @@ class TestSessionToolsProjection:
         # Assert
         assert len(result) == 1
         op = result[0]
-        assert op.operation_type == "tool_completed"
+        assert op.operation_type == TOOL_COMPLETED
         assert op.tool_use_id == "toolu_456"
         assert op.success is True
 
     async def test_get_returns_events_in_time_order(self, projection, event_store, session_id):
         """Events are returned in chronological order."""
-        # Arrange: Insert events in order
+        # Arrange: Insert events in order using constant
         tools = ["Read", "Write", "Bash"]
         for tool_name in tools:
             await event_store.insert_one(event={
-                "event_type": "tool_started",
+                "event_type": TOOL_STARTED,
                 "session_id": session_id,
                 "tool_name": tool_name,
                 "tool_use_id": f"toolu_{tool_name}",
@@ -119,14 +123,14 @@ class TestSessionToolsProjection:
         session_1 = str(uuid4())
         session_2 = str(uuid4())
 
-        # Arrange: Insert events for two sessions
+        # Arrange: Insert events for two sessions using constant
         await event_store.insert_one(event={
-            "event_type": "tool_started",
+            "event_type": TOOL_STARTED,
             "session_id": session_1,
             "tool_name": "Session1Tool",
         })
         await event_store.insert_one(event={
-            "event_type": "tool_started",
+            "event_type": TOOL_STARTED,
             "session_id": session_2,
             "tool_name": "Session2Tool",
         })
@@ -141,14 +145,19 @@ class TestSessionToolsProjection:
     async def test_event_type_names_match_producer(self, projection, event_store, session_id):
         """CRITICAL: Verify event types match what WorkflowExecutionEngine produces.
 
-        This test explicitly documents the event type contract:
-        - Producer (WorkflowExecutionEngine) emits: 'tool_started', 'tool_completed'
-        - Consumer (SessionToolsProjection) queries: 'tool_started', 'tool_completed'
+        This test uses the shared constants from aef_shared.events to ensure
+        both producer and consumer use the SAME values. The old bug was caused
+        by hardcoded strings that didn't match.
 
-        If this test fails, there's a mismatch that will cause silent data loss.
+        Now that we use constants:
+        - Producer (WorkflowExecutionEngine) must use TOOL_STARTED, TOOL_COMPLETED
+        - Consumer (SessionToolsProjection) uses TOOL_STARTED, TOOL_COMPLETED
+        - Type checker catches any mismatches at dev time!
+
+        If this test fails, something is very wrong with the shared constants.
         """
-        # These are the EXACT event types the producer emits
-        producer_event_types = ["tool_started", "tool_completed"]
+        # Use the shared constants - these are THE source of truth
+        producer_event_types = [TOOL_STARTED, TOOL_COMPLETED]
 
         for event_type in producer_event_types:
             await event_store.insert_one(event={
