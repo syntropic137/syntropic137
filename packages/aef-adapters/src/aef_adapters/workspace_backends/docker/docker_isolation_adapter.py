@@ -148,11 +148,13 @@ class DockerIsolationAdapter:
             config=config,
         )
 
+        image_to_use = config.image or self._default_image
         logger.info(
-            "Creating Docker container (name=%s, execution=%s, gvisor=%s)",
+            "Creating Docker container (name=%s, execution=%s, gvisor=%s, image=%s)",
             container_name,
             config.execution_id,
             self._use_gvisor,
+            image_to_use,
         )
 
         try:

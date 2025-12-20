@@ -7,12 +7,14 @@ requires-python = ">=3.12"
 dependencies = [
     "aef-shared",
     "aef-domain",
-    "aef-tokens",  # Token vending service (ADR-022)
-    "agentic-logging",  # Structured logging (ADR-014 from agentic-primitives)
-    "agentic-events",  # Simple event emission (ADR-029)
+    "aef-tokens", # Token vending service (ADR-022)
+    "agentic-logging", # Structured logging (ADR-014 from agentic-primitives)
+    "agentic-events", # Simple event emission (ADR-029)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",
+    "pyjwt>=2.10.1",
+    "cryptography>=46.0.3",
 ]
 
 [project.optional-dependencies]
