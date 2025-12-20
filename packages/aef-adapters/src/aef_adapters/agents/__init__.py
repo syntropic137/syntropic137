@@ -2,7 +2,7 @@
 
 This module provides adapters for AI agent providers (Claude, OpenAI).
 
-## Chat Completion (Legacy)
+## Chat Completion
 
     from aef_adapters.agents import get_agent, AgentMessage, AgentConfig
 
@@ -13,68 +13,45 @@ This module provides adapters for AI agent providers (Claude, OpenAI).
     )
     print(response.content)
 
-## Agentic Execution (Recommended)
+## Container Execution (ADR-029)
 
-    from aef_adapters.agents import ClaudeAgenticAgent, AgentExecutionConfig
+    from aef_adapters.agents import get_container_runner
     from aef_adapters.workspace_backends.service import WorkspaceService
 
-    agent = ClaudeAgenticAgent()
+    runner = await get_container_runner()
     service = WorkspaceService.create_docker()
 
     async with service.create_workspace(execution_id="exec-123") as workspace:
-        # Workspace provides execute(), stream(), inject_files(), etc.
-        result = await workspace.execute(["python", "script.py"])
+        async for event in runner.execute(
+            task="Create hello.py",
+            workspace=workspace,
+            session_id="session-123",
+        ):
+            print(event)
 
-For Testing (Chat Completion - Legacy):
+For Testing:
     from aef_adapters.agents import MockAgent, MockAgentConfig
 
     mock_config = MockAgentConfig(responses=["Test response"])
     agent = MockAgent(mock_config)
 
-For Testing (Agentic):
-    Use unittest.mock to patch the claude-agent-sdk directly.
-    See tests/test_claude_agentic.py for examples.
-
 WARNING: MockAgent can ONLY be used when APP_ENVIRONMENT=test.
 It will raise errors in development, staging, or production.
 """
 
-from aef_adapters.agents.agentic_protocol import (
-    AgenticBudgetExceededError,
-    AgenticError,
-    AgenticProtocol,
-    AgenticSDKError,
-    AgenticTimeoutError,
-    AgenticTurnsExceededError,
-)
-from aef_adapters.agents.agentic_types import (
-    AgentEvent,
-    AgentExecutionConfig,
-    AgentExecutionResult,
-    AgentTool,
-    TaskCompleted,
-    TaskFailed,
-    TextOutput,
-    ThinkingUpdate,
-    ToolBlocked,
-    ToolUseCompleted,
-    ToolUseStarted,
-    Workspace,
-    WorkspaceConfig,
-)
-from aef_adapters.agents.executor import (
-    AgentBudgetExceededError,
-    AgentExecutionError,
-    AgentExecutionMetrics,
-    AgentExecutor,
-    AgentNotAvailableError,
-    ExecutionCompleted,
-    ExecutionEvent,
-    ExecutionOutput,
-    ExecutionProgress,
-    ExecutionStarted,
-    ExecutionToolUse,
-    WorkspaceExecutionResult,
+from aef_adapters.agents.container_runner import (
+    ContainerAgentRunner,
+    ContainerCompleted,
+    ContainerEvent,
+    ContainerExecutionConfig,
+    ContainerExecutionResult,
+    ContainerFailed,
+    ContainerOutput,
+    ContainerToolCompleted,
+    ContainerToolStarted,
+    ContainerTurnCompleted,
+    get_container_runner,
+    reset_container_runner,
 )
 from aef_adapters.agents.factory import (
     get_agent,
@@ -97,86 +74,40 @@ from aef_adapters.agents.protocol import (
 )
 from aef_adapters.agents.session_context import SessionContext
 
-# Agentic SDK adapters (require optional dependencies)
-# These import conditionally to avoid ImportError if deps not installed
-try:
-    from aef_adapters.agents.claude_agentic import ClaudeAgenticAgent
-except ImportError:
-    ClaudeAgenticAgent = None  # type: ignore[assignment, misc]
-
-# Agent executors (ADR-023)
-try:
-    from aef_adapters.agents.claude_executor import (
-        ClaudeAgentExecutor,
-        get_claude_executor,
-        reset_claude_executor,
-    )
-except ImportError:
-    ClaudeAgentExecutor = None  # type: ignore[assignment, misc]
-    get_claude_executor = None  # type: ignore[assignment]
-    reset_claude_executor = None  # type: ignore[assignment]
-
-# Lazy imports for legacy adapters to avoid requiring their dependencies
-# Use get_agent(AgentProvider.CLAUDE) or import directly when needed
-
 __all__ = [
-    # Chat Completion Protocol (legacy)
+    # Chat Completion Protocol
     "AgentAuthenticationError",
-    # Agent Executor (ADR-023)
-    "AgentBudgetExceededError",
     "AgentConfig",
     "AgentError",
-    # Agentic Types
-    "AgentEvent",
-    "AgentExecutionConfig",
-    "AgentExecutionError",
-    "AgentExecutionMetrics",
-    "AgentExecutionResult",
-    "AgentExecutor",
     "AgentMessage",
     "AgentMetrics",
-    "AgentNotAvailableError",
     "AgentProtocol",
     "AgentProvider",
     "AgentRateLimitError",
     "AgentResponse",
     "AgentRole",
     "AgentTimeoutError",
-    "AgentTool",
-    # Agentic Protocol (recommended)
-    "AgenticBudgetExceededError",
-    "AgenticError",
-    "AgenticProtocol",
-    "AgenticSDKError",
-    "AgenticTimeoutError",
-    "AgenticTurnsExceededError",
-    "ClaudeAgentExecutor",
-    "ClaudeAgenticAgent",
-    "ExecutionCompleted",
-    "ExecutionEvent",
-    "ExecutionOutput",
-    "ExecutionProgress",
-    "ExecutionStarted",
-    "ExecutionToolUse",
+    # Container Runner (ADR-029)
+    "ContainerAgentRunner",
+    "ContainerCompleted",
+    "ContainerEvent",
+    "ContainerExecutionConfig",
+    "ContainerExecutionResult",
+    "ContainerFailed",
+    "ContainerOutput",
+    "ContainerToolCompleted",
+    "ContainerToolStarted",
+    "ContainerTurnCompleted",
     # Mock agent
     "MockAgent",
     "MockAgentConfig",
     "MockAgentError",
+    # Context
     "SessionContext",
-    "TaskCompleted",
-    "TaskFailed",
-    "TextOutput",
-    "ThinkingUpdate",
-    "ToolBlocked",
-    "ToolUseCompleted",
-    "ToolUseStarted",
-    "Workspace",
-    "WorkspaceConfig",
-    "WorkspaceExecutionResult",
     # Factory
     "get_agent",
     "get_available_agents",
-    "get_claude_executor",
+    "get_container_runner",
     "is_agent_available",
-    "reset_claude_executor",
+    "reset_container_runner",
 ]

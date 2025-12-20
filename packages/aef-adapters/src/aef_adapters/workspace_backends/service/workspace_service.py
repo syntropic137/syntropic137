@@ -224,6 +224,53 @@ else
     echo "Warning: No GITHUB_APP_TOKEN - GitHub operations will fail"
 fi
 
+# Configure Claude CLI hooks (ADR-029)
+# Register hooks from /opt/agentic/hooks with Claude CLI
+HOOKS_DIR="/opt/agentic/hooks/handlers"
+if [ -d "$HOOKS_DIR" ]; then
+    mkdir -p ~/.claude
+    cat > ~/.claude/settings.json << 'SETTINGS_EOF'
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "/opt/agentic/hooks/handlers/pre-tool-use.py",
+        "timeout": 10
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "/opt/agentic/hooks/handlers/post-tool-use.py",
+        "timeout": 10
+      }]
+    }],
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "/opt/agentic/hooks/handlers/session-start.py",
+        "timeout": 5
+      }]
+    }],
+    "SessionEnd": [{
+      "hooks": [{
+        "type": "command",
+        "command": "/opt/agentic/hooks/handlers/session-end.py",
+        "timeout": 5
+      }]
+    }]
+  }
+}
+SETTINGS_EOF
+    chmod 600 ~/.claude/settings.json
+    echo "Claude CLI hooks configured"
+else
+    echo "Warning: Hooks directory not found at $HOOKS_DIR"
+fi
+
 # Any custom setup can be appended here
 """
 
@@ -243,7 +290,7 @@ class WorkspaceServiceConfig:
     """
 
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
-    image: str = "aef-workspace-claude:latest"
+    image: str = "agentic-workspace-claude-cli:latest"
     memory_limit_mb: int = 2048  # 2GB - Claude CLI needs more memory
     cpu_limit_cores: float = 2.0  # Allow more CPU for agent work
     timeout_seconds: int = 3600  # 1 hour

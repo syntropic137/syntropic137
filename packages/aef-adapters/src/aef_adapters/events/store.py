@@ -7,6 +7,9 @@ Key features:
 - Batch inserts using PostgreSQL COPY for maximum throughput
 - Simple schema (no complex observation types)
 - TimescaleDB hypertable with compression
+- Type-safe models via SQLModel (see models.py)
+
+See ADR-029: Simplified Event System
 """
 
 from __future__ import annotations
@@ -18,8 +21,23 @@ from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
+from pydantic import ValidationError
+
+from aef_adapters.events.models import EXPECTED_COLUMNS, AgentEvent
 
 logger = logging.getLogger(__name__)
+
+
+class SchemaValidationError(Exception):
+    """Raised when database schema doesn't match expected schema."""
+
+    pass
+
+
+class EventValidationError(Exception):
+    """Raised when event data fails validation."""
+
+    pass
 
 
 class AgentEventStore:
@@ -73,15 +91,17 @@ class AgentEventStore:
             # Enable TimescaleDB extension
             await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
 
-            # Create events table
+            # Create events table with UUID for proper type safety
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS agent_events (
+                    id UUID DEFAULT gen_random_uuid(),
                     time TIMESTAMPTZ NOT NULL,
-                    event_type TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    execution_id TEXT,
-                    phase_id TEXT,
-                    data JSONB NOT NULL
+                    event_type VARCHAR(100) NOT NULL,
+                    session_id UUID,
+                    execution_id UUID,
+                    phase_id VARCHAR(255),
+                    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    PRIMARY KEY (id, time)
                 )
             """)
 
@@ -132,8 +152,40 @@ class AgentEventStore:
                 # Compression might already be enabled
                 pass
 
+            # Validate schema matches expected columns (inside connection context)
+            await self._validate_schema(conn)
+
         self._initialized = True
         logger.info("AgentEventStore initialized")
+
+    async def _validate_schema(self, conn: asyncpg.Connection) -> None:
+        """Validate that database schema matches expected columns.
+
+        Raises:
+            SchemaValidationError: If schema doesn't match
+        """
+        rows = await conn.fetch("""
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = 'agent_events'
+            AND table_schema = 'public'
+        """)
+
+        actual_schema = {row["column_name"]: row["data_type"] for row in rows}
+
+        mismatches = []
+        for col, expected_type in EXPECTED_COLUMNS.items():
+            actual_type = actual_schema.get(col)
+            if actual_type is None:
+                mismatches.append(f"Missing column: {col}")
+            elif not actual_type.startswith(expected_type.split()[0]):
+                # Partial match (e.g., "character varying" matches "character varying(100)")
+                mismatches.append(f"Column {col}: expected '{expected_type}', got '{actual_type}'")
+
+        if mismatches:
+            msg = "Schema validation failed:\n  " + "\n  ".join(mismatches)
+            logger.error(msg)
+            raise SchemaValidationError(msg)
 
     async def insert_batch(
         self,
@@ -226,14 +278,20 @@ class AgentEventStore:
         execution_id: str | None = None,
         phase_id: str | None = None,
     ) -> None:
-        """Insert a single event.
+        """Insert a single event with type validation.
 
         For high-throughput, prefer insert_batch().
+
+        Uses AgentEvent model for type validation before insert.
+        This catches type mismatches at runtime with clear error messages.
 
         Args:
             event: Event dict with at least 'event_type' and 'session_id'
             execution_id: Optional execution ID
             phase_id: Optional phase ID
+
+        Raises:
+            EventValidationError: If event data fails validation
         """
         if not self._initialized:
             await self.initialize()
@@ -241,21 +299,20 @@ class AgentEventStore:
         if self.pool is None:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
-        # Extract fields
-        time = event.get("timestamp", datetime.now(UTC))
-        if isinstance(time, str):
-            time = datetime.fromisoformat(time.replace("Z", "+00:00"))
+        # Add context IDs if not present
+        if execution_id and "execution_id" not in event:
+            event["execution_id"] = execution_id
+        if phase_id and "phase_id" not in event:
+            event["phase_id"] = phase_id
 
-        event_type = event.get("event_type", event.get("type", "unknown"))
-        session_id = event.get("session_id", "unknown")
+        # Validate through model (type-safe!)
+        try:
+            validated = AgentEvent.from_dict(event)
+        except ValidationError as e:
+            raise EventValidationError(f"Event validation failed: {e}") from e
 
-        # Build data dict
-        data = {
-            k: v
-            for k, v in event.items()
-            if k
-            not in ("timestamp", "event_type", "type", "session_id", "execution_id", "phase_id")
-        }
+        # Get insert tuple from validated model
+        time, event_type, session_id, exec_id, ph_id, data_json = validated.to_insert_tuple()
 
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -267,9 +324,9 @@ class AgentEventStore:
                 time,
                 event_type,
                 session_id,
-                event.get("execution_id", execution_id),
-                event.get("phase_id", phase_id),
-                json.dumps(data),
+                exec_id,
+                ph_id,
+                data_json,
             )
 
     async def query(
@@ -397,6 +454,41 @@ class AgentEventStore:
             }
             for row in rows
         ]
+
+    async def record_observation(
+        self,
+        session_id: str,
+        observation_type: str,
+        data: dict[str, Any],
+        execution_id: str | None = None,
+        phase_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
+        """Record an observation event (ObservabilityWriter interface for ADR-026).
+
+        This method adapts the WorkflowExecutionEngine's observability API
+        to the AgentEventStore's insert_one method.
+
+        Args:
+            session_id: Session ID
+            observation_type: Type of observation (e.g., "token_usage", "tool_started")
+            data: Observation data
+            execution_id: Optional execution ID
+            phase_id: Optional phase ID
+            workspace_id: Optional workspace ID
+        """
+        event = {
+            "event_type": observation_type,
+            "session_id": session_id,
+            "timestamp": datetime.now(UTC),
+            "workspace_id": workspace_id,
+            **data,
+        }
+        await self.insert_one(
+            event=event,
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
 
     async def close(self) -> None:
         """Close connection pool."""

@@ -8,6 +8,7 @@ Observability projections (TimescaleDB-backed):
 - SessionCostProjection: Cost metrics (via domain package)
 
 See ADR-026: TimescaleDB for Observability Storage
+See ADR-029: Simplified Event System (observability via AgentEventStore)
 """
 
 from .manager import (
@@ -16,7 +17,6 @@ from .manager import (
     get_projection_manager,
     reset_projection_manager,
 )
-from .observability_base import ObservabilityProjection
 from .realtime import (
     RealTimeProjection,
     get_realtime_projection,
@@ -26,7 +26,6 @@ from .session_tools import SessionToolsProjection, ToolOperation
 
 __all__ = [
     "EventProvenance",
-    "ObservabilityProjection",
     "ProjectionManager",
     "RealTimeProjection",
     "SessionToolsProjection",

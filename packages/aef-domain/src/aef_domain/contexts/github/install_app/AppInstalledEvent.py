@@ -5,53 +5,58 @@ Emitted when a GitHub App is installed in an organization or user account.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import ClassVar
-from uuid import uuid4
+from typing import Any
+
+from event_sourcing import DomainEvent, event
+from pydantic import Field, field_validator
 
 
-@dataclass(frozen=True)
-class AppInstalledEvent:
+@event("github.AppInstalled", "v1")
+class AppInstalledEvent(DomainEvent):
     """Event emitted when the GitHub App is installed.
 
     This event is triggered by the GitHub webhook when a user installs
     the app on their account or organization.
 
-    Attributes:
-        event_id: Unique identifier for this event.
-        event_type: Type identifier for event routing.
-        installation_id: GitHub installation ID.
-        account_id: GitHub account ID (user or org).
-        account_name: GitHub account login name.
-        account_type: 'User' or 'Organization'.
-        repositories: Tuple of repository full names accessible to the installation.
-        permissions: Dict of permission name to level ('read', 'write', 'admin').
-        occurred_at: When the installation occurred.
+    Inherits from DomainEvent which provides:
+    - Immutability (frozen=True)
+    - Strict validation (extra='forbid')
+    - JSON serialization
     """
-
-    event_type: ClassVar[str] = "github.AppInstalled"
 
     installation_id: str
     account_id: int
     account_name: str
     account_type: str
-    repositories: tuple[str, ...] = field(default_factory=tuple)
-    permissions: dict[str, str] = field(default_factory=dict)
-    event_id: str = field(default_factory=lambda: str(uuid4()))
-    occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    repositories: tuple[str, ...] = ()
+    permissions: dict[str, str] = Field(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        """Validate the event."""
-        if not self.installation_id:
+    @field_validator("installation_id")
+    @classmethod
+    def validate_installation_id(cls, v: str) -> str:
+        """Ensure installation_id is provided."""
+        if not v:
             raise ValueError("installation_id is required")
-        if not self.account_name:
+        return v
+
+    @field_validator("account_name")
+    @classmethod
+    def validate_account_name(cls, v: str) -> str:
+        """Ensure account_name is provided."""
+        if not v:
             raise ValueError("account_name is required")
-        if self.account_type not in ("User", "Organization"):
-            raise ValueError(f"Invalid account_type: {self.account_type}")
+        return v
+
+    @field_validator("account_type")
+    @classmethod
+    def validate_account_type(cls, v: str) -> str:
+        """Ensure account_type is valid."""
+        if v not in ("User", "Organization"):
+            raise ValueError(f"Invalid account_type: {v}")
+        return v
 
     @classmethod
-    def from_webhook(cls, payload: dict) -> AppInstalledEvent:
+    def from_webhook(cls, payload: dict[str, Any]) -> AppInstalledEvent:
         """Create an event from a GitHub webhook payload.
 
         Args:

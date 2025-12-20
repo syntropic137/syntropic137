@@ -101,40 +101,48 @@ dev-fresh:
     @echo "   Feedback API: http://localhost:8001"
     @echo "   API Docs:     http://localhost:8000/docs"
 
-# --- Workspace Image ---
+# --- Workspace Image (from agentic-primitives) ---
 
-# Build the Claude workspace Docker image (aef-workspace-claude)
-# Tags with: latest, git short SHA, and date-based version
+# Build the Claude workspace Docker image using agentic-primitives
+# This uses the fully-tested claude-cli provider from the submodule
 workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
-    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    DATE_TAG=$(date +%Y%m%d)
-    VERSION_TAG="v${DATE_TAG}-${GIT_SHA}"
-    echo "🔨 Building aef-workspace-claude image..."
-    echo "   Version: ${VERSION_TAG}"
-    docker build \
-        -t aef-workspace-claude:latest \
-        -t aef-workspace-claude:${VERSION_TAG} \
-        -t aef-workspace-claude:${GIT_SHA} \
-        --label "org.opencontainers.image.revision=${GIT_SHA}" \
-        --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-        --label "org.opencontainers.image.version=${VERSION_TAG}" \
-        -f docker/workspace/Dockerfile .
-    echo "✅ Image built with tags:"
-    echo "   - aef-workspace-claude:latest"
-    echo "   - aef-workspace-claude:${VERSION_TAG}"
-    echo "   - aef-workspace-claude:${GIT_SHA}"
+    echo "🔨 Building workspace image from agentic-primitives..."
+    cd lib/agentic-primitives && python scripts/build-provider.py claude-cli
+    echo "✅ Image built: agentic-workspace-claude-cli:latest"
 
 # List all workspace image versions
 workspace-versions:
     @echo "📦 Workspace image versions:"
-    @docker images aef-workspace-claude | head -20
+    @docker images agentic-workspace-claude-cli | head -20
 
-# Check if workspace image exists, build if missing
+# Check if workspace image exists AND matches current submodule commit
+# Poka-yoke: Automatically rebuilds if agentic-primitives was updated
 _workspace-check:
-    @docker image inspect aef-workspace-claude:latest >/dev/null 2>&1 || \
-        (echo "⚠️  Workspace image not found. Building (first time only)..." && just workspace-build)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IMAGE="agentic-workspace-claude-cli:latest"
+
+    # Check if image exists
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        echo "⚠️  Workspace image not found. Building..."
+        just workspace-build
+        exit 0
+    fi
+
+    # Get current submodule commit (short hash)
+    SUBMODULE_COMMIT=$(cd lib/agentic-primitives && git rev-parse HEAD 2>/dev/null | cut -c1-12)
+
+    # Get image's build commit from label (use jq for reliable parsing)
+    IMAGE_COMMIT=$(docker inspect "$IMAGE" | jq -r '.[0].Config.Labels["agentic.commit"] // ""' 2>/dev/null || echo "")
+
+    # Compare - rebuild if mismatch
+    if [ "$IMAGE_COMMIT" != "$SUBMODULE_COMMIT" ]; then
+        echo "⚠️  Workspace image is stale (image: ${IMAGE_COMMIT:-none}, submodule: $SUBMODULE_COMMIT)"
+        echo "   Rebuilding to include latest agentic-primitives changes..."
+        just workspace-build
+    fi
 
 # Run the CLI application
 cli *args:
@@ -281,13 +289,23 @@ vsa-validate:
     @echo "VSA validation not yet implemented."
     # TODO: Implement VSA validation using the tool from lib/event-sourcing-platform
 
+# Check for test debt (xfail, skip, TODO in tests)
+test-debt:
+    @echo "🔍 Checking for test debt..."
+    uv run python scripts/check_test_debt.py --warn-only
+
+# Check for test debt (strict - fails on errors)
+test-debt-strict:
+    @echo "🔍 Checking for test debt (strict)..."
+    uv run python scripts/check_test_debt.py
+
 # Run all QA checks (Python + Frontend)
-qa: lint format typecheck test dashboard-qa
+qa: lint format typecheck test dashboard-qa test-debt
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Run Python-only QA (faster, no frontend build)
-qa-python: lint format typecheck test
+qa-python: lint format typecheck test test-debt
     @echo ""
     @echo "✅ Python QA checks passed!"
 

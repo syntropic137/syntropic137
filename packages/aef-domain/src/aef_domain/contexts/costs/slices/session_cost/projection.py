@@ -269,8 +269,7 @@ class SessionCostProjection:
                     (data->>'total_cost_usd')::numeric as sdk_cost,
                     time as completed_at,
                     execution_id,
-                    phase_id,
-                    workspace_id
+                    phase_id
                 FROM agent_events
                 WHERE session_id = $1 AND event_type = 'execution_completed'
                 ORDER BY time DESC
@@ -291,11 +290,10 @@ class SessionCostProjection:
                         MIN(time) as started_at,
                         MAX(time) as last_observation,
                         execution_id,
-                        phase_id,
-                        workspace_id
+                        phase_id
                     FROM agent_events
                     WHERE session_id = $1 AND event_type = 'token_usage'
-                    GROUP BY execution_id, phase_id, workspace_id
+                    GROUP BY execution_id, phase_id
                     """,
                     session_id,
                 )

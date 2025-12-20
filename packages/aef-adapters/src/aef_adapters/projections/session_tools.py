@@ -1,7 +1,7 @@
 """Session tools projection for querying tool operations from TimescaleDB.
 
 This projection provides a clean interface for querying tool operations
-(tool_execution_started, tool_execution_completed) for a given session.
+(tool_started, tool_completed) for a given session.
 
 See ADR-029: Simplified Event System
 """
@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from aef_shared.events import TOOL_COMPLETED, TOOL_STARTED
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -21,18 +23,21 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Use constants for type safety
+_TOOL_EVENT_TYPES = (TOOL_STARTED, TOOL_COMPLETED)
+
 
 @dataclass
 class ToolOperation:
     """Read model for a tool operation from TimescaleDB.
 
-    Represents either a tool_execution_started or tool_execution_completed event.
+    Represents either a tool_started or tool_completed event.
     """
 
     observation_id: str
     tool_name: str
     tool_use_id: str | None
-    operation_type: str  # "tool_execution_started" or "tool_execution_completed"
+    operation_type: str  # "tool_started" or "tool_completed"
     timestamp: datetime
     success: bool | None  # Only for tool_execution_completed
     input_preview: str | None  # Truncated input for display
@@ -41,13 +46,13 @@ class ToolOperation:
 
     @property
     def is_started(self) -> bool:
-        """Check if this is a tool_execution_started event."""
-        return self.operation_type == "tool_execution_started"
+        """Check if this is a tool_started event."""
+        return self.operation_type == TOOL_STARTED
 
     @property
     def is_completed(self) -> bool:
-        """Check if this is a tool_execution_completed event."""
-        return self.operation_type == "tool_execution_completed"
+        """Check if this is a tool_completed event."""
+        return self.operation_type == TOOL_COMPLETED
 
 
 class SessionToolsProjection:
@@ -65,9 +70,32 @@ class SessionToolsProjection:
         """Initialize with optional connection pool.
 
         Args:
-            pool: asyncpg connection pool for TimescaleDB
+            pool: asyncpg connection pool for TimescaleDB.
+                  If None, will attempt to get pool from event store lazily.
         """
         self._pool = pool
+
+    def _get_pool(self) -> asyncpg.Pool | None:
+        """Get the database pool, lazily loading from event store if needed."""
+        if self._pool is not None:
+            logger.debug("Using cached pool")
+            return self._pool
+
+        # Try to get pool from initialized event store
+        try:
+            from aef_adapters.events import get_event_store
+
+            store = get_event_store()
+            logger.debug("Got event store, pool is %s", "available" if store.pool else "None")
+            if store.pool is not None:
+                self._pool = store.pool
+                logger.info("SessionToolsProjection: Acquired pool from event store")
+                return self._pool
+        except Exception as e:
+            logger.warning("Could not get pool from event store: %s", e)
+
+        logger.debug("No pool available for SessionToolsProjection")
+        return None
 
     async def get(self, session_id: str) -> list[ToolOperation]:
         """Get all tool operations for a session.
@@ -78,12 +106,14 @@ class SessionToolsProjection:
         Returns:
             List of tool operations ordered by timestamp
         """
-        if self._pool is None:
+        pool = self._get_pool()
+        if pool is None:
             logger.debug("No pool available, returning empty list")
             return []
 
         try:
-            async with self._pool.acquire() as conn:
+            async with pool.acquire() as conn:
+                # Use parameterized query with constants for type safety
                 rows = await conn.fetch(
                     """
                     SELECT
@@ -92,15 +122,17 @@ class SessionToolsProjection:
                         data
                     FROM agent_events
                     WHERE session_id = $1
-                      AND event_type IN ('tool_execution_started', 'tool_execution_completed')
+                      AND event_type = ANY($2)
                     ORDER BY time ASC
                     """,
                     session_id,
+                    list(_TOOL_EVENT_TYPES),
                 )
 
+                logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
                 return [self._row_to_operation(row) for row in rows]
         except Exception as e:
-            logger.error("Failed to query tool operations: %s", e)
+            logger.error("Failed to query tool operations for %s: %s", session_id, e)
             return []
 
     async def query(
@@ -122,13 +154,14 @@ class SessionToolsProjection:
         Returns:
             List of matching tool operations
         """
-        if self._pool is None:
+        pool = self._get_pool()
+        if pool is None:
             return []
 
-        # Build dynamic query
-        conditions = ["event_type IN ('tool_execution_started', 'tool_execution_completed')"]
-        params: list[Any] = []
-        param_idx = 1
+        # Build dynamic query with type-safe event types
+        conditions = [f"event_type = ANY(${1})"]
+        params: list[Any] = [list(_TOOL_EVENT_TYPES)]
+        param_idx = 2
 
         if execution_id:
             conditions.append(f"execution_id = ${param_idx}")
@@ -159,7 +192,7 @@ class SessionToolsProjection:
         """
 
         try:
-            async with self._pool.acquire() as conn:
+            async with pool.acquire() as conn:
                 rows = await conn.fetch(query, *params)
                 return [self._row_to_operation(row) for row in rows]
         except Exception as e:
@@ -181,7 +214,7 @@ class SessionToolsProjection:
             data = json.loads(data)
 
         event_type = row["event_type"]
-        is_completed = event_type == "tool_execution_completed"
+        is_completed = event_type == TOOL_COMPLETED
 
         # Generate a unique ID from the row data
         tool_use_id = data.get("tool_use_id", "")

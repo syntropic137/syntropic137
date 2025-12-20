@@ -75,7 +75,7 @@ async def check_prerequisites() -> bool:
     )
     containers = result.stdout.strip().split("\n") if result.stdout else []
 
-    required = ["aef-postgres", "aef-event-store", "aef-collector"]
+    required = ["aef-db", "aef-event-store", "aef-collector"]
     for container in required:
         if container in containers:
             print(f"   ✅ {container} running")
@@ -466,7 +466,7 @@ async def verify_event_store(execution_id: str) -> bool:
         [
             "docker",
             "exec",
-            "aef-postgres",
+            "aef-db",
             "psql",
             "-U",
             "aef",

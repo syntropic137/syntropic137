@@ -129,7 +129,7 @@ class IsolationConfig:
     backend: IsolationBackendType = IsolationBackendType.DOCKER_HARDENED
 
     # Image/environment
-    image: str = "aef-workspace-claude:latest"
+    image: str = "agentic-workspace-claude-cli:latest"
     working_directory: str = "/workspace"
 
     # Capabilities

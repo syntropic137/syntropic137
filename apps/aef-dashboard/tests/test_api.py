@@ -324,7 +324,7 @@ class TestWorkflowEndpoints:
         assert response.status_code == 404
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Execution history projection not yet implemented")
+    @pytest.mark.xfail(reason="Not yet implemented - see #38")
     async def test_get_workflow_history(self, client: httpx.AsyncClient) -> None:
         """Test getting workflow execution history."""
         await create_test_workflow("test-wf-1")
@@ -382,7 +382,7 @@ class TestSessionEndpoints:
         assert data[0]["workflow_id"] == "wf-1"
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Session operations projection not yet implemented")
+    @pytest.mark.xfail(reason="Needs TimescaleDB fixture - see #38")
     async def test_get_session(self, client: httpx.AsyncClient) -> None:
         """Test getting a single session."""
         await create_test_workflow("wf-1")
@@ -458,7 +458,7 @@ class TestArtifactEndpoints:
         assert data["content"] is None  # Not included when explicitly requested
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Artifact content storage not yet implemented in projection")
+    @pytest.mark.xfail(reason="Artifact content not implemented - see #38")
     async def test_get_artifact_with_content(self, client: httpx.AsyncClient) -> None:
         """Test getting artifact with content."""
         await create_test_workflow("wf-1")
@@ -471,7 +471,7 @@ class TestArtifactEndpoints:
         assert "Research Summary" in data["content"]
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Artifact content storage not yet implemented in projection")
+    @pytest.mark.xfail(reason="Artifact content not implemented - see #38")
     async def test_get_artifact_content_only(self, client: httpx.AsyncClient) -> None:
         """Test getting artifact content only."""
         await create_test_workflow("wf-1")
@@ -524,7 +524,7 @@ class TestMetricsEndpoints:
         assert data["total_tokens"] == 150
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Per-workflow phase metrics not yet implemented")
+    @pytest.mark.xfail(reason="Per-workflow metrics not implemented - see #38")
     async def test_metrics_for_workflow(self, client: httpx.AsyncClient) -> None:
         """Test metrics for specific workflow."""
         await create_test_workflow("wf-1")

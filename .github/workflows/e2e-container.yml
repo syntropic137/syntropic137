@@ -4,17 +4,17 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/aef-agent-runner/**"
       - "packages/aef-adapters/src/aef_adapters/workspaces/**"
       - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
-      - "docker/workspace/**"
+      - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
+      - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
   pull_request:
     paths:
-      - "packages/aef-agent-runner/**"
       - "packages/aef-adapters/src/aef_adapters/workspaces/**"
       - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
-      - "docker/workspace/**"
+      - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
+      - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
   workflow_dispatch:
     inputs:
@@ -43,24 +43,24 @@ jobs:
         with:
           submodules: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build workspace image
-        uses: docker/build-push-action@v5
+      - name: Set up Python for build script
+        uses: actions/setup-python@v5
         with:
-          context: .
-          file: docker/workspace/Dockerfile
-          push: false
-          tags: aef-workspace:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          load: true
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build workspace image via build-provider.py
+        working-directory: lib/agentic-primitives
+        run: |
+          uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:latest
 
       - name: Verify image
         run: |
-          docker run --rm aef-workspace:latest python --version
-          docker run --rm aef-workspace:latest python -c "import aef_agent_runner; print('OK')" || true
+          # Use --entrypoint to bypass node base image entrypoint
+          docker run --rm --entrypoint python3 agentic-workspace-claude-cli:latest --version
+          docker run --rm --entrypoint claude agentic-workspace-claude-cli:latest --version || echo "Claude CLI check (optional)"
 
   #############################################################################
   # E2E CONTAINER TEST - Full integration (manual trigger only)
@@ -91,7 +91,8 @@ jobs:
       - name: Install & Run E2E
         run: |
           uv sync --all-extras
-          docker build -t aef-workspace:latest docker/workspace/
+          # Build workspace image via build-provider.py (stages required context)
+          cd lib/agentic-primitives && uv run scripts/build-provider.py claude-cli --tag agentic-workspace-claude-cli:latest && cd ../..
           uv run python scripts/e2e_agent_in_container_test.py
         continue-on-error: true
 
