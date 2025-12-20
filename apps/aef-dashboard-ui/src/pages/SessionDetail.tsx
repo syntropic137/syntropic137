@@ -25,6 +25,12 @@ import type { OperationInfo, SessionResponse } from '../types'
 
 // Icons for operation types
 const operationIcons: Record<string, typeof Activity> = {
+  // Current AEF event types (from agent_events table)
+  tool_execution_started: Play,
+  tool_execution_completed: Terminal,
+  token_usage: Activity,
+  session_started: Play,
+  session_completed: CheckCircle2,
   // New v2 types
   message_request: MessageSquare,
   message_response: MessageSquare,
@@ -44,6 +50,12 @@ const operationIcons: Record<string, typeof Activity> = {
 
 // Colors for operation types
 const operationColors: Record<string, string> = {
+  // Current AEF event types (from agent_events table)
+  tool_execution_started: 'text-amber-400 bg-amber-500/10',
+  tool_execution_completed: 'text-emerald-400 bg-emerald-500/10',
+  token_usage: 'text-cyan-400 bg-cyan-500/10',
+  session_started: 'text-blue-400 bg-blue-500/10',
+  session_completed: 'text-green-400 bg-green-500/10',
   // New v2 types
   message_request: 'text-blue-400 bg-blue-500/10',
   message_response: 'text-indigo-400 bg-indigo-500/10',
@@ -273,8 +285,8 @@ export function SessionDetail() {
         <MetricCard
           title="Tool Calls"
           value={session.operations.filter(op =>
-            op.operation_type === 'tool_completed' ||
-            op.operation_type === 'tool_use'
+            op.operation_type === 'tool_execution_completed' ||
+            op.operation_type === 'tool_execution_started'
           ).length.toString()}
           icon={Wrench}
           color="default"
