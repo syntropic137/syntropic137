@@ -85,8 +85,9 @@ phases:
       5. **Push and create PR:**
          ```bash
          git push origin feat/agent-{{execution_id}}
-         gh pr create --title "🤖 Agent: {{change_description}}" --body "$(cat <<'BODY'
-         ## Summary
+         gh pr create \
+           --title "Agent: {{change_description}}" \
+           --body "## Summary
 
          This PR was created by an AEF agent.
 
@@ -98,9 +99,7 @@ phases:
          [Describe the changes you made]
 
          ---
-         *Automated PR by aef-engineer-beta[bot]*
-         BODY
-         )"
+         *Automated PR by aef-engineer-beta[bot]*"
          ```
 
       6. **Output the PR URL:**
