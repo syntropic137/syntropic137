@@ -117,10 +117,32 @@ workspace-versions:
     @echo "📦 Workspace image versions:"
     @docker images agentic-workspace-claude-cli | head -20
 
-# Check if workspace image exists, build if missing
+# Check if workspace image exists AND matches current submodule commit
+# Poka-yoke: Automatically rebuilds if agentic-primitives was updated
 _workspace-check:
-    @docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1 || \
-        (echo "⚠️  Workspace image not found. Building (first time only)..." && just workspace-build)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IMAGE="agentic-workspace-claude-cli:latest"
+
+    # Check if image exists
+    if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+        echo "⚠️  Workspace image not found. Building..."
+        just workspace-build
+        exit 0
+    fi
+
+    # Get current submodule commit (short hash)
+    SUBMODULE_COMMIT=$(cd lib/agentic-primitives && git rev-parse HEAD 2>/dev/null | cut -c1-12)
+
+    # Get image's build commit from label (use jq for reliable parsing)
+    IMAGE_COMMIT=$(docker inspect "$IMAGE" | jq -r '.[0].Config.Labels["agentic.commit"] // ""' 2>/dev/null || echo "")
+
+    # Compare - rebuild if mismatch
+    if [ "$IMAGE_COMMIT" != "$SUBMODULE_COMMIT" ]; then
+        echo "⚠️  Workspace image is stale (image: ${IMAGE_COMMIT:-none}, submodule: $SUBMODULE_COMMIT)"
+        echo "   Rebuilding to include latest agentic-primitives changes..."
+        just workspace-build
+    fi
 
 # Run the CLI application
 cli *args:

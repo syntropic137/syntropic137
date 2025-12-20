@@ -99,9 +99,7 @@ class TestSchemaValidation:
 
         assert "Missing column: session_id" in str(exc_info.value)
 
-    async def test_wrong_type_raises(
-        self, store: AgentEventStore, mock_conn: AsyncMock
-    ) -> None:
+    async def test_wrong_type_raises(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
         """Should raise SchemaValidationError when column type is wrong."""
         # session_id should be uuid, not text
         mock_conn.fetch.return_value = [
@@ -143,9 +141,7 @@ class TestSchemaValidation:
         assert "Missing column: session_id" in error_msg
         assert "event_type" in error_msg
 
-    async def test_empty_table_raises(
-        self, store: AgentEventStore, mock_conn: AsyncMock
-    ) -> None:
+    async def test_empty_table_raises(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
         """Should raise SchemaValidationError when table has no columns (doesn't exist)."""
         mock_conn.fetch.return_value = []
 

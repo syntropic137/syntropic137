@@ -180,9 +180,7 @@ class AgentEventStore:
                 mismatches.append(f"Missing column: {col}")
             elif not actual_type.startswith(expected_type.split()[0]):
                 # Partial match (e.g., "character varying" matches "character varying(100)")
-                mismatches.append(
-                    f"Column {col}: expected '{expected_type}', got '{actual_type}'"
-                )
+                mismatches.append(f"Column {col}: expected '{expected_type}', got '{actual_type}'")
 
         if mismatches:
             msg = "Schema validation failed:\n  " + "\n  ".join(mismatches)

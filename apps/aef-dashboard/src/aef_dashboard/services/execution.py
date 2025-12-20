@@ -118,7 +118,7 @@ class ExecutionService:
         artifact_storage = await get_artifact_storage()
 
         # Get artifact query service for multi-phase workflows
-        manager = await get_projection_manager()
+        manager = get_projection_manager()
         artifact_query = ArtifactQueryService(manager.artifact_list)
 
         return WorkflowExecutionEngine(

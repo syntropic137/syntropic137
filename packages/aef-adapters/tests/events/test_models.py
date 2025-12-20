@@ -21,19 +21,23 @@ class TestAgentEvent:
     def test_from_dict_with_session_id(self) -> None:
         """Should parse valid UUID session_id."""
         uid = uuid4()
-        event = AgentEvent.from_dict({
-            "event_type": "test",
-            "session_id": str(uid),
-        })
+        event = AgentEvent.from_dict(
+            {
+                "event_type": "test",
+                "session_id": str(uid),
+            }
+        )
 
         assert event.session_id == uid
 
     def test_from_dict_with_invalid_session_id(self) -> None:
         """Should handle invalid UUID gracefully."""
-        event = AgentEvent.from_dict({
-            "event_type": "test",
-            "session_id": "not-a-uuid",
-        })
+        event = AgentEvent.from_dict(
+            {
+                "event_type": "test",
+                "session_id": "not-a-uuid",
+            }
+        )
 
         # Invalid UUID becomes None (graceful handling)
         assert event.session_id is None
@@ -41,10 +45,12 @@ class TestAgentEvent:
     def test_from_dict_with_timestamp_alias(self) -> None:
         """Should accept 'timestamp' as alias for 'time'."""
         ts = datetime(2025, 1, 1, 12, 0, 0)
-        event = AgentEvent.from_dict({
-            "event_type": "test",
-            "timestamp": ts,
-        })
+        event = AgentEvent.from_dict(
+            {
+                "event_type": "test",
+                "timestamp": ts,
+            }
+        )
 
         assert event.time == ts
 
@@ -56,11 +62,13 @@ class TestAgentEvent:
 
     def test_from_dict_extra_fields_to_data(self) -> None:
         """Should put extra fields in data dict."""
-        event = AgentEvent.from_dict({
-            "event_type": "tool_started",
-            "tool_name": "Write",
-            "file_path": "/test.py",
-        })
+        event = AgentEvent.from_dict(
+            {
+                "event_type": "tool_started",
+                "tool_name": "Write",
+                "file_path": "/test.py",
+            }
+        )
 
         assert event.data == {"tool_name": "Write", "file_path": "/test.py"}
 
@@ -91,19 +99,23 @@ class TestAgentEvent:
 
     def test_data_field_from_dict_preserved(self) -> None:
         """Extra fields go to data, including 'data' field itself."""
-        event = AgentEvent.from_dict({
-            "event_type": "test",
-            "data": {"nested": "value"},
-        })
+        event = AgentEvent.from_dict(
+            {
+                "event_type": "test",
+                "data": {"nested": "value"},
+            }
+        )
         # The 'data' key in input goes into the data dict as extra field
         assert event.data == {"data": {"nested": "value"}}
 
     def test_uuid_validator_accepts_uuid_object(self) -> None:
         """Should accept UUID objects directly."""
         uid = uuid4()
-        event = AgentEvent.from_dict({
-            "event_type": "test",
-            "session_id": uid,
-        })
+        event = AgentEvent.from_dict(
+            {
+                "event_type": "test",
+                "session_id": uid,
+            }
+        )
 
         assert event.session_id == uid

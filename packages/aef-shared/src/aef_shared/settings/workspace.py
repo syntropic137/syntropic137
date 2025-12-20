@@ -293,7 +293,7 @@ class WorkspaceSettings(BaseSettings):
     # =========================================================================
 
     docker_image: str = Field(
-        default="aef-workspace-claude:latest",
+        default="agentic-workspace-claude-cli:latest",
         description=(
             "Docker image for Claude agent execution. "
             "Includes Claude CLI with agentic_events hooks (ADR-029). "

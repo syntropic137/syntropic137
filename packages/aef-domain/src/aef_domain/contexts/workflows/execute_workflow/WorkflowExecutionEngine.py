@@ -676,7 +676,9 @@ class WorkflowExecutionEngine:
                 )
                 session._handle_command(complete_session_cmd)
                 await self._sessions.save(session)
-                logger.debug("Session completed: %s (success, tokens: %d)", session_id, response.total_tokens)
+                logger.debug(
+                    "Session completed: %s (success, tokens: %d)", session_id, response.total_tokens
+                )
 
             logger.info(
                 "Phase completed: %s (success: True, tokens: %d)",
@@ -1134,9 +1136,56 @@ class WorkflowExecutionEngine:
                                     output_tokens,
                                 )
 
-                        # Tool events now come from hooks (ADR-029)
-                        # Just log progress for debugging
-                        if cli_type in ("assistant", "user", "system"):
+                        # Extract tool events from assistant messages
+                        # Claude CLI emits tool_use in message.content
+                        if cli_type == "assistant":
+                            message = cli_event.get("message", {})
+                            content = message.get("content", [])
+                            for item in content:
+                                if isinstance(item, dict) and item.get("type") == "tool_use":
+                                    tool_name = item.get("name", "unknown")
+                                    tool_use_id = item.get("id", "unknown")
+                                    tool_input = item.get("input", {})
+
+                                    if self._observability_writer is not None:
+                                        await self._record_observation(
+                                            observation_type=ObservationType.TOOL_STARTED,
+                                            session_id=session_id,
+                                            data={
+                                                "tool_name": tool_name,
+                                                "tool_use_id": tool_use_id,
+                                                "input_preview": json.dumps(tool_input)[:500],
+                                            },
+                                            execution_id=execution_id,
+                                            phase_id=phase.phase_id,
+                                            workspace_id=workspace_id,
+                                        )
+                                        logger.debug("Tool started: %s", tool_name)
+
+                        # Handle tool results from user messages
+                        if cli_type == "user":
+                            message = cli_event.get("message", {})
+                            content = message.get("content", [])
+                            for item in content:
+                                if isinstance(item, dict) and item.get("type") == "tool_result":
+                                    tool_use_id = item.get("tool_use_id", "unknown")
+                                    is_error = item.get("is_error", False)
+
+                                    if self._observability_writer is not None:
+                                        await self._record_observation(
+                                            observation_type=ObservationType.TOOL_COMPLETED,
+                                            session_id=session_id,
+                                            data={
+                                                "tool_use_id": tool_use_id,
+                                                "success": not is_error,
+                                            },
+                                            execution_id=execution_id,
+                                            phase_id=phase.phase_id,
+                                            workspace_id=workspace_id,
+                                        )
+                                        logger.debug("Tool completed: %s", tool_use_id)
+
+                        if cli_type in ("system",):
                             logger.debug("CLI message: %s", cli_type)
 
                     except json.JSONDecodeError:
@@ -1232,7 +1281,11 @@ class WorkflowExecutionEngine:
                 )
                 session._handle_command(complete_session_cmd)
                 await self._sessions.save(session)
-                logger.debug("Session completed: %s (success, tokens: %d)", session_id, total_input_tokens + total_output_tokens)
+                logger.debug(
+                    "Session completed: %s (success, tokens: %d)",
+                    session_id,
+                    total_input_tokens + total_output_tokens,
+                )
 
             logger.info(
                 "Phase completed (container mode): %s (tokens: %d)",

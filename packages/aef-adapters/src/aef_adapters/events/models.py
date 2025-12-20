@@ -114,7 +114,17 @@ class AgentEvent(BaseModel):
             "data": {
                 k: v
                 for k, v in data.items()
-                if k not in ("time", "timestamp", "event_type", "type", "session_id", "execution_id", "phase_id", "id")
+                if k
+                not in (
+                    "time",
+                    "timestamp",
+                    "event_type",
+                    "type",
+                    "session_id",
+                    "execution_id",
+                    "phase_id",
+                    "id",
+                )
             },
         }
 

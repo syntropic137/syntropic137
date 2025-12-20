@@ -49,6 +49,7 @@ class DockerEventStreamAdapter:
         timeout_seconds: int | None = None,
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
+        merge_stderr: bool = True,
     ) -> AsyncIterator[str]:
         """Stream stdout lines from command execution.
 
@@ -61,6 +62,7 @@ class DockerEventStreamAdapter:
             timeout_seconds: Max execution time
             working_directory: Working directory override
             environment: Additional environment variables
+            merge_stderr: If True, redirect stderr to stdout (for hook events)
 
         Yields:
             Individual stdout lines (without newlines)
@@ -84,7 +86,15 @@ class DockerEventStreamAdapter:
 
         # Container ID and command
         exec_cmd.append(handle.isolation_id)
-        exec_cmd.extend(command)
+
+        # If merging stderr, wrap command in bash to redirect stderr to stdout
+        # This ensures hook events (written to stderr) are captured
+        if merge_stderr:
+            # Wrap command in bash with stderr redirect
+            escaped_cmd = " ".join(f'"{c}"' if " " in c else c for c in command)
+            exec_cmd.extend(["bash", "-c", f"{escaped_cmd} 2>&1"])
+        else:
+            exec_cmd.extend(command)
 
         logger.info(
             "Starting stream (container=%s, cmd=%s)",

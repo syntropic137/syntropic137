@@ -161,7 +161,8 @@ def main() -> int:
 
     # Find all Python files (excluding test files)
     python_files = [
-        f for f in domain_src.rglob("*.py")
+        f
+        for f in domain_src.rglob("*.py")
         if not f.name.startswith("test_") and "conftest" not in f.name
     ]
 
@@ -176,9 +177,9 @@ def main() -> int:
         all_events.extend(events)
 
     # Print results
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Domain Event Validation Report")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     print(f"Found {len(all_events)} event classes in {len(python_files)} files\n")
 

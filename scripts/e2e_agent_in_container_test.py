@@ -538,7 +538,11 @@ async def run_e2e_test(cleanup: bool = True) -> bool:
             logger.info("   ✅ Result event received")
             logger.info("   Cost: $%.4f", result_event.get("total_cost_usd", 0))
             usage = result_event.get("usage", {})
-            logger.info("   Tokens: in=%d, out=%d", usage.get("input_tokens", 0), usage.get("output_tokens", 0))
+            logger.info(
+                "   Tokens: in=%d, out=%d",
+                usage.get("input_tokens", 0),
+                usage.get("output_tokens", 0),
+            )
         if has_error:
             error_event = next(e for e in events if e.get("type") == "error")
             logger.info("   ❌ Error: %s", error_event.get("error", {}).get("message", "")[:100])
