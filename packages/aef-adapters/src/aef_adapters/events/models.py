@@ -106,16 +106,44 @@ class AgentEvent(BaseModel):
         Handles common field name variations:
         - 'timestamp' -> 'time'
         - 'type' -> 'event_type'
+
+        Maps raw Claude CLI event types to normalized types:
+        - 'tool_started' / 'tool_use' -> 'tool_execution_started'
+        - 'tool_result' / 'tool_completed' -> 'tool_execution_completed'
+        - 'system.init' / 'system' -> 'session_started'
+        - 'result' -> 'session_completed'
+        - 'assistant' / 'user' -> 'token_usage' (they contain content)
         """
         from datetime import datetime
 
         # Get time from data or use default
         time_value = data.get("time") or data.get("timestamp") or datetime.now()
 
+        # Get raw event type
+        raw_type = data.get("event_type") or data.get("type", "error")
+
+        # Map Claude CLI event types to normalized types
+        event_type_mapping = {
+            # Tool events
+            "tool_started": "tool_execution_started",
+            "tool_use": "tool_execution_started",
+            # Tool results
+            "tool_result": "tool_execution_completed",
+            "tool_completed": "tool_execution_completed",
+            # Session lifecycle
+            "system.init": "session_started",
+            "system": "session_started",
+            "result": "session_completed",
+            # Content events map to token_usage (they contain tokens)
+            "assistant": "token_usage",
+            "user": "token_usage",
+        }
+        normalized_type = event_type_mapping.get(raw_type, raw_type)
+
         # Normalize field names (only include optional fields if set)
         normalized: dict[str, Any] = {
             "time": time_value,
-            "event_type": data.get("event_type") or data.get("type", "unknown"),
+            "event_type": normalized_type,
             "data": {
                 k: v
                 for k, v in data.items()
