@@ -20,6 +20,17 @@ router = APIRouter(prefix="/executions", tags=["executions"])
 # =============================================================================
 
 
+class PhaseOperationInfo(BaseModel):
+    """Information about an operation within a phase."""
+
+    operation_id: str
+    operation_type: str
+    timestamp: str | None = None
+    tool_name: str | None = None
+    tool_use_id: str | None = None
+    success: bool = True
+
+
 class PhaseExecutionInfo(BaseModel):
     """Information about a phase execution within a run."""
 
@@ -36,6 +47,7 @@ class PhaseExecutionInfo(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
+    operations: list[PhaseOperationInfo] = []
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -155,25 +167,43 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
             detail=f"Execution {execution_id} not found",
         )
 
-    # Convert phases
-    phases = [
-        PhaseExecutionInfo(
-            phase_id=p.workflow_phase_id,
-            name=p.name,
-            status=p.status,
-            session_id=p.session_id,
-            artifact_id=p.artifact_id,
-            input_tokens=p.input_tokens,
-            output_tokens=p.output_tokens,
-            total_tokens=p.total_tokens,
-            duration_seconds=p.duration_seconds,
-            cost_usd=Decimal(str(p.cost_usd)),
-            started_at=str(p.started_at) if p.started_at else None,
-            completed_at=str(p.completed_at) if p.completed_at else None,
-            error_message=p.error_message,
+    # Convert phases with operations from TimescaleDB
+    phases = []
+    for p in detail.phases:
+        # Fetch operations for this phase's session
+        operations: list[PhaseOperationInfo] = []
+        if p.session_id:
+            tool_ops = await manager.session_tools.get(p.session_id)
+            operations = [
+                PhaseOperationInfo(
+                    operation_id=op.observation_id,
+                    operation_type=op.operation_type,
+                    timestamp=str(op.timestamp) if op.timestamp else None,
+                    tool_name=op.tool_name,
+                    tool_use_id=op.tool_use_id,
+                    success=op.success if op.success is not None else True,
+                )
+                for op in tool_ops
+            ]
+
+        phases.append(
+            PhaseExecutionInfo(
+                phase_id=p.workflow_phase_id,
+                name=p.name,
+                status=p.status,
+                session_id=p.session_id,
+                artifact_id=p.artifact_id,
+                input_tokens=p.input_tokens,
+                output_tokens=p.output_tokens,
+                total_tokens=p.total_tokens,
+                duration_seconds=p.duration_seconds,
+                cost_usd=Decimal(str(p.cost_usd)),
+                started_at=str(p.started_at) if p.started_at else None,
+                completed_at=str(p.completed_at) if p.completed_at else None,
+                error_message=p.error_message,
+                operations=operations,
+            )
         )
-        for p in detail.phases
-    ]
 
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
