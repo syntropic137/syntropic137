@@ -1,11 +1,13 @@
 """Tests for AgentEvent model."""
 
+import pytest
 from datetime import datetime
 from uuid import uuid4
 
 from aef_adapters.events.models import AgentEvent
 
 
+@pytest.mark.integration
 class TestAgentEvent:
     """Tests for AgentEvent model validation."""
 

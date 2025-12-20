@@ -33,6 +33,7 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
+@pytest.mark.integration
 class TestWorkflowExecutionRoundtrip:
     """Level 4 tests: Verify workflow execution persists to real event store."""
 

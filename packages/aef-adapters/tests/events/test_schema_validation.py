@@ -11,6 +11,7 @@ from aef_adapters.events.models import EXPECTED_COLUMNS
 from aef_adapters.events.store import AgentEventStore, SchemaValidationError
 
 
+@pytest.mark.integration
 class TestSchemaValidation:
     """Tests for _validate_schema method."""
 

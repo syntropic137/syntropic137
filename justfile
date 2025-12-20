@@ -196,9 +196,30 @@ dashboard-qa: dashboard-lint dashboard-build
 
 # --- Testing & Quality Assurance ---
 
-# Run all tests with coverage
+# Run all tests
 test:
+    @echo "Running all tests..."
     uv run pytest
+
+# Fast unit tests (parallel execution)
+test-unit:
+    @echo "Running unit tests (parallel)..."
+    uv run pytest -m unit -n auto --tb=short
+
+# Integration tests (may need Docker services)
+test-integration:
+    @echo "Running integration tests..."
+    uv run pytest -m integration --tb=short
+
+# E2E tests
+test-e2e:
+    @echo "Running E2E tests..."
+    uv run pytest -m e2e --tb=short
+
+# Fast CI check (unit tests only, with coverage)
+ci-fast:
+    @echo "Running fast CI tests..."
+    uv run pytest -m unit -n auto --cov --tb=short
 
 # Run tests with coverage report
 test-cov:
