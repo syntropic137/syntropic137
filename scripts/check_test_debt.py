@@ -16,21 +16,17 @@ import sys
 from pathlib import Path
 
 # Patterns to search for
+# POKA-YOKE: xfail/skip MUST include an issue link (e.g., "#123" or "github.com/...")
 PATTERNS = {
-    "xfail": {
-        "regex": r"@pytest\.mark\.xfail|pytest\.xfail|@unittest\.expectedFailure",
+    "xfail_no_reason": {
+        "regex": r"@pytest\.mark\.xfail\s*\n|@pytest\.mark\.xfail\(\s*\)",
         "severity": "error",
-        "message": "Test marked as expected failure - fix or remove",
+        "message": "xfail without reason - add reason='...' with issue link",
     },
-    "skip": {
-        "regex": r"@pytest\.mark\.skip(?!\w)|pytest\.skip\(",
-        "severity": "warning",
-        "message": "Test skipped - consider fixing or removing",
-    },
-    "skip_reason_missing": {
+    "skip_no_reason": {
         "regex": r"@pytest\.mark\.skip\s*\n|@pytest\.mark\.skip\(\s*\)",
         "severity": "error",
-        "message": "Skip without reason - add reason= parameter",
+        "message": "skip without reason - add reason='...' with issue link",
     },
     "todo_in_test": {
         "regex": r"#\s*(TODO|FIXME|XXX|HACK):",
@@ -48,6 +44,9 @@ PATTERNS = {
         "message": "Empty test body - implement or remove",
     },
 }
+
+# Issue link patterns that are acceptable
+ISSUE_LINK_PATTERN = re.compile(r"#\d+|github\.com/[^/]+/[^/]+/issues/\d+")
 
 # Directories to search
 SEARCH_DIRS = ["packages", "apps"]
@@ -76,9 +75,10 @@ def check_file(filepath: Path) -> list[dict]:
     except Exception as e:
         return [{"file": str(filepath), "line": 0, "pattern": "read_error", "message": str(e)}]
 
+    # Check standard patterns
     for pattern_name, pattern_info in PATTERNS.items():
         regex = re.compile(pattern_info["regex"], re.MULTILINE)
-        
+
         for i, line in enumerate(lines, 1):
             if regex.search(line):
                 issues.append({
@@ -87,6 +87,23 @@ def check_file(filepath: Path) -> list[dict]:
                     "pattern": pattern_name,
                     "severity": pattern_info["severity"],
                     "message": pattern_info["message"],
+                    "content": line.strip()[:80],
+                })
+
+    # POKA-YOKE: Check xfail/skip have issue links
+    xfail_skip_pattern = re.compile(r"@pytest\.mark\.(xfail|skip)\(")
+    for i, line in enumerate(lines, 1):
+        match = xfail_skip_pattern.search(line)
+        if match:
+            marker_type = match.group(1)
+            # Check if line has an issue link
+            if not ISSUE_LINK_PATTERN.search(line):
+                issues.append({
+                    "file": str(filepath),
+                    "line": i,
+                    "pattern": f"{marker_type}_no_issue",
+                    "severity": "error",
+                    "message": f"{marker_type} without issue link - add '#123' to reason",
                     "content": line.strip()[:80],
                 })
 

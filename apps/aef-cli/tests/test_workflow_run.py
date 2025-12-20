@@ -133,7 +133,7 @@ class TestWorkflowRunCommand:
         assert "AI agents" in result.stdout
         assert "depth" in result.stdout
 
-    @pytest.mark.skip(reason="Requires mock agent setup - see #TODO")
+    @pytest.mark.skip(reason="Requires mock agent setup - see #38")
     def test_run_workflow_executes_successfully(self, sample_workflow_id: str) -> None:
         """Test actual workflow execution."""
         result = runner.invoke(
@@ -145,7 +145,7 @@ class TestWorkflowRunCommand:
         assert result.exit_code == 0
         assert "completed successfully" in result.stdout or "Summary" in result.stdout
 
-    @pytest.mark.skip(reason="Requires mock agent setup - see #TODO")
+    @pytest.mark.skip(reason="Requires mock agent setup - see #38")
     def test_run_workflow_quiet_mode(self, sample_workflow_id: str) -> None:
         """Test quiet mode has minimal output."""
         result = runner.invoke(
