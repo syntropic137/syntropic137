@@ -6,15 +6,15 @@ on:
     paths:
       - "packages/aef-adapters/src/aef_adapters/workspaces/**"
       - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
-      - "docker/workspace/**"
-      - "lib/agentic-primitives/**" # ADR-029: hooks in agentic-primitives
+      - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
+      - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
   pull_request:
     paths:
       - "packages/aef-adapters/src/aef_adapters/workspaces/**"
       - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
-      - "docker/workspace/**"
-      - "lib/agentic-primitives/**" # ADR-029: hooks in agentic-primitives
+      - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
+      - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
   workflow_dispatch:
     inputs:
@@ -49,18 +49,18 @@ jobs:
       - name: Build workspace image
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: docker/workspace/Dockerfile
+          context: lib/agentic-primitives/providers/workspaces/claude-cli
+          file: lib/agentic-primitives/providers/workspaces/claude-cli/Dockerfile
           push: false
-          tags: aef-workspace:latest
+          tags: agentic-workspace-claude-cli:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           load: true
 
       - name: Verify image
         run: |
-          docker run --rm aef-workspace:latest python --version
-          docker run --rm aef-workspace:latest claude --version || true  # ADR-029: Claude CLI
+          docker run --rm agentic-workspace-claude-cli:latest python --version
+          docker run --rm agentic-workspace-claude-cli:latest claude --version || echo "Claude CLI check (optional)"
 
   #############################################################################
   # E2E CONTAINER TEST - Full integration (manual trigger only)
@@ -91,7 +91,7 @@ jobs:
       - name: Install & Run E2E
         run: |
           uv sync --all-extras
-          docker build -t aef-workspace:latest docker/workspace/
+          docker build -t agentic-workspace-claude-cli:latest lib/agentic-primitives/providers/workspaces/claude-cli/
           uv run python scripts/e2e_agent_in_container_test.py
         continue-on-error: true
 
