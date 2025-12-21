@@ -62,8 +62,8 @@ services:
       dockerfile: packages/aef-collector/Dockerfile
     environment:
       EVENT_COLLECTOR_PORT: "8080"
-      EVENTSTORE_HOST: event-store
-      EVENTSTORE_PORT: "50051"
+      EVENT_STORE_HOST: event-store
+      EVENT_STORE_PORT: "50051"
       EVENT_BATCH_SIZE: "100"
       EVENT_BATCH_INTERVAL_MS: "1000"
     depends_on:
@@ -91,8 +91,8 @@ services:
       DASHBOARD_PORT: "8000"
       DASHBOARD_HOST: "0.0.0.0"
       DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
-      EVENTSTORE_HOST: event-store
-      EVENTSTORE_PORT: "50051"
+      EVENT_STORE_HOST: event-store
+      EVENT_STORE_PORT: "50051"
       # Note: ANTHROPIC_API_KEY should be set via .env or host environment
     depends_on:
       timescaledb:
