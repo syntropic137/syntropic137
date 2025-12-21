@@ -35,10 +35,24 @@ services:
     env_file:
       - ../.env # Load environment variables from root .env file
     environment:
-      # Override .env localhost values with Docker service names
-      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      # Override .env localhost values with Docker service names (ADR-030)
+      AEF_OBSERVABILITY_DB_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
+      # Override MinIO endpoint for Docker network
+      AEF_STORAGE_MINIO_ENDPOINT: minio:9000
+      # Workspace directory configuration for Docker-in-Docker
+      # Container path where workspaces are accessible
+      AEF_WORKSPACE_CONTAINER_DIR: /workspaces
+      # Host path that Docker daemon can mount (must match volume mount below)
+      # This should be absolute path on the host machine
+      AEF_WORKSPACE_HOST_DIR: ${PWD}/workspaces
+    volumes:
+      # Mount Docker socket to create workspace containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount workspace directory for container file sharing
+      # Host path (${PWD}/workspaces) -> Container path (/workspaces)
+      - ../workspaces:/workspaces
 
   minio:
     container_name: aef-minio

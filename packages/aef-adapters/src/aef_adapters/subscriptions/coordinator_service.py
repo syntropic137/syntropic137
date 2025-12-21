@@ -183,9 +183,14 @@ class CoordinatorSubscriptionService:
 
         logger.info("Starting coordinator subscription service...")
 
-        # Create database pool for checkpoint store
+        # Create database pool for checkpoint store (ADR-030)
         settings = get_settings()
-        database_url = str(settings.database_url)
+        if not settings.aef_observability_db_url:
+            raise ValueError(
+                "AEF_OBSERVABILITY_DB_URL must be configured for subscription service. "
+                "Set it in your .env file."
+            )
+        database_url = str(settings.aef_observability_db_url)
         self._db_pool = await asyncpg.create_pool(
             database_url,
             min_size=2,

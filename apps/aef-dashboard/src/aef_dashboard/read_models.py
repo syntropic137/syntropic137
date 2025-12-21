@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -78,11 +77,13 @@ def _is_test_environment() -> bool:
 
 
 def get_database_url() -> str:
-    """Get the database URL from environment."""
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql://aef:aef_dev_password@localhost:5432/aef",
-    )
+    """Get the database URL from centralized settings."""
+    from aef_shared.settings.config import get_settings
+
+    settings = get_settings()
+    if not settings.aef_observability_db_url:
+        raise ValueError("AEF_OBSERVABILITY_DB_URL must be configured. Set it in your .env file.")
+    return str(settings.aef_observability_db_url)
 
 
 def _parse_workflow_from_event(event_data: dict[str, Any]) -> WorkflowReadModel:

@@ -318,7 +318,7 @@ async def create_conversation_storage(
         secret_key=secret_key or os.environ.get("AEF_STORAGE_MINIO_SECRET_KEY", "minioadmin"),
         db_url=db_url
         or os.environ.get(
-            "AEF_DATABASE_URL", "postgresql://aef:aef_dev_password@localhost:5432/aef"
+            "AEF_OBSERVABILITY_DB_URL", "postgresql://aef:aef_dev_password@localhost:5432/aef"
         ),
     )
     await storage.initialize()

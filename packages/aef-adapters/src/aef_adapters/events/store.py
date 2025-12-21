@@ -503,11 +503,16 @@ _event_store: AgentEventStore | None = None
 def get_event_store(connection_string: str | None = None) -> AgentEventStore:
     """Get or create the AgentEventStore singleton.
 
+    Uses AEF_OBSERVABILITY_DB_URL from settings (ADR-030 unified database).
+
     Args:
         connection_string: Optional connection string (uses settings if not provided)
 
     Returns:
         AgentEventStore instance
+
+    Raises:
+        ValueError: If AEF_OBSERVABILITY_DB_URL is not configured
     """
     global _event_store
 
@@ -516,10 +521,15 @@ def get_event_store(connection_string: str | None = None) -> AgentEventStore:
             from aef_shared.settings.config import get_settings
 
             settings = get_settings()
-            connection_string = (
-                f"postgresql://{settings.timescale_user}:{settings.timescale_password.get_secret_value()}"
-                f"@{settings.timescale_host}:{settings.timescale_port}/{settings.timescale_db}"
-            )
+
+            if not settings.aef_observability_db_url:
+                raise ValueError(
+                    "AEF_OBSERVABILITY_DB_URL must be configured. "
+                    "Set it in your .env file: "
+                    "AEF_OBSERVABILITY_DB_URL=postgresql://user:pass@host:port/database"
+                )
+
+            connection_string = str(settings.aef_observability_db_url)
 
         _event_store = AgentEventStore(connection_string)
 

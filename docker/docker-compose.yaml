@@ -90,7 +90,8 @@ services:
     environment:
       DASHBOARD_PORT: "8000"
       DASHBOARD_HOST: "0.0.0.0"
-      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      # ADR-030: Use explicit database URLs
+      AEF_OBSERVABILITY_DB_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       # Note: ANTHROPIC_API_KEY should be set via .env or host environment

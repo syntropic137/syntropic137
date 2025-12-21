@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -109,14 +108,16 @@ def _parse_conversation_line(line: str, line_number: int) -> ConversationLine:
 async def _get_conversation_storage():
     """Get or create conversation storage instance."""
     from aef_adapters.conversations import MinioConversationStorage
+    from aef_shared.settings.config import get_settings
+
+    settings = get_settings()
+    storage_settings = settings.storage
 
     storage = MinioConversationStorage(
-        endpoint=os.environ.get("AEF_STORAGE_MINIO_ENDPOINT", "localhost:9000"),
-        access_key=os.environ.get("AEF_STORAGE_MINIO_ACCESS_KEY", "minioadmin"),
-        secret_key=os.environ.get("AEF_STORAGE_MINIO_SECRET_KEY", "minioadmin"),
-        db_url=os.environ.get(
-            "AEF_DATABASE_URL", "postgresql://aef:aef_dev_password@localhost:5432/aef"
-        ),
+        endpoint=storage_settings.minio_endpoint,
+        access_key=storage_settings.minio_access_key,
+        secret_key=storage_settings.minio_secret_key.get_secret_value(),
+        db_url=str(settings.aef_observability_db_url),
     )
     await storage.initialize()
     return storage

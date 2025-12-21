@@ -36,11 +36,15 @@ RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/aef-shared
 RUN uv pip install ./packages/aef-tokens
 RUN uv pip install ./packages/aef-domain
-RUN uv pip install ./packages/aef-adapters
+RUN uv pip install './packages/aef-adapters[all]'
 RUN uv pip install ./apps/aef-dashboard
 
 # Runtime stage
 FROM python:3.12-slim AS runtime
+
+# Install Docker CLI for workspace container management
+# Copy from official docker image instead of apt install (more reliable)
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /app
 

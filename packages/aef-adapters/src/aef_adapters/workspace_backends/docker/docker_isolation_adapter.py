@@ -78,6 +78,8 @@ class DockerIsolationAdapter:
         default_image: str = DEFAULT_WORKSPACE_IMAGE,
         default_network: str = DEFAULT_NETWORK,
         use_gvisor: bool | None = None,
+        workspace_container_dir: Path | str | None = None,
+        workspace_host_dir: Path | str | None = None,
     ) -> None:
         """Initialize Docker isolation adapter.
 
@@ -85,10 +87,19 @@ class DockerIsolationAdapter:
             default_image: Default Docker image for workspaces
             default_network: Default Docker network
             use_gvisor: Force gVisor runtime (None = auto-detect)
+            workspace_container_dir: Container path where workspaces are created
+                (e.g., /workspaces when running dashboard in Docker)
+            workspace_host_dir: Host path for Docker daemon volume mounts
+                (e.g., /Users/user/repo/workspaces)
+                If None, uses workspace_container_dir as host path
         """
         self._default_image = default_image
         self._default_network = default_network
         self._use_gvisor = use_gvisor if use_gvisor is not None else self._detect_gvisor()
+        self._workspace_container_dir = (
+            Path(workspace_container_dir) if workspace_container_dir else None
+        )
+        self._workspace_host_dir = Path(workspace_host_dir) if workspace_host_dir else None
         self._containers: dict[str, DockerContainerState] = {}
         self._lock = asyncio.Lock()
 
@@ -134,27 +145,42 @@ class DockerIsolationAdapter:
         container_name = f"aef-ws-{config.execution_id[:8]}-{short_id}"
         network_name = self._default_network
 
-        # Create workspace directory on host
-        workspace_dir = Path(tempfile.mkdtemp(prefix=f"aef-workspace-{short_id}-"))
+        # Create workspace directory
+        if self._workspace_container_dir:
+            # Running in Docker: write to container dir, mount from host dir
+            self._workspace_container_dir.mkdir(parents=True, exist_ok=True)
+            workspace_container_path = self._workspace_container_dir / f"ws-{short_id}"
+            workspace_container_path.mkdir(parents=True, exist_ok=True)
+
+            # For docker run -v, we need the host path
+            if self._workspace_host_dir:
+                workspace_host_path = self._workspace_host_dir / f"ws-{short_id}"
+            else:
+                workspace_host_path = workspace_container_path
+        else:
+            # Use temp directory (host mode)
+            workspace_container_path = Path(tempfile.mkdtemp(prefix=f"aef-workspace-{short_id}-"))
+            workspace_host_path = workspace_container_path
 
         # Ensure network exists
         await self._ensure_network(network_name)
 
-        # Build docker run command
+        # Build docker run command (uses host path for volume mount)
         docker_cmd = self._build_docker_command(
             container_name=container_name,
-            workspace_dir=workspace_dir,
+            workspace_dir=workspace_host_path,
             network_name=network_name,
             config=config,
         )
 
         image_to_use = config.image or self._default_image
         logger.info(
-            "Creating Docker container (name=%s, execution=%s, gvisor=%s, image=%s)",
+            "Creating Docker container (name=%s, execution=%s, gvisor=%s, image=%s, host_path=%s)",
             container_name,
             config.execution_id,
             self._use_gvisor,
             image_to_use,
+            workspace_host_path,
         )
 
         try:
@@ -175,11 +201,11 @@ class DockerIsolationAdapter:
             # Wait for container to be running
             await self._wait_for_running(container_name)
 
-            # Store state
+            # Store state (use container path for file operations)
             state = DockerContainerState(
                 container_id=container_id,
                 container_name=container_name,
-                workspace_dir=workspace_dir,
+                workspace_dir=workspace_container_path,
                 network_name=network_name,
                 config=config,
             )
@@ -198,14 +224,14 @@ class DockerIsolationAdapter:
                 isolation_type="docker" if not self._use_gvisor else "gvisor",
                 proxy_url=None,  # Set by sidecar adapter
                 workspace_path="/workspace",
-                host_workspace_path=str(workspace_dir),  # Host path for local agents
+                host_workspace_path=str(workspace_host_path),  # Host path for volume mount
             )
 
         except Exception as e:
             # Cleanup on failure
             logger.exception("Failed to create container: %s", e)
             await self._cleanup_container(container_name)
-            shutil.rmtree(workspace_dir, ignore_errors=True)
+            shutil.rmtree(workspace_container_path, ignore_errors=True)
             raise
 
     async def destroy(self, handle: IsolationHandle) -> None:
