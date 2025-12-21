@@ -20,7 +20,13 @@ dev:
     @echo "🚀 Starting dev stack..."
     uv sync
     docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up --build -d
-    @echo "✅ Dev stack running on ports 5432, 8080, 50051, 9000, 6379"
+    @echo "✅ Dev stack running:"
+    @echo "   • TimescaleDB: 5432"
+    @echo "   • Event Store: 50051"
+    @echo "   • Collector API: 8080"
+    @echo "   • Dashboard API: 8000"
+    @echo "   • MinIO: 9000 (API), 9001 (Console)"
+    @echo "   • Redis: 6379"
     @echo "Development environment ready. Run 'just cli --help' to get started."
 
 # Stop development environment (preserves data)

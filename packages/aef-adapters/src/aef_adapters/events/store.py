@@ -234,7 +234,9 @@ class AgentEventStore:
                 continue
 
             # Get insert tuple from validated model
-            time, event_type, session_id, evt_exec_id, evt_phase_id, data_json = validated.to_insert_tuple()
+            time, event_type, session_id, evt_exec_id, evt_phase_id, data_json = (
+                validated.to_insert_tuple()
+            )
 
             # Write tab-separated row
             # Format: time, event_type, session_id, execution_id, phase_id, data

@@ -3,7 +3,7 @@
 # Build context: repo root (not packages/aef-collector)
 
 # Build stage
-FROM python:3.12-slim as builder
+FROM python:3.12-slim AS builder
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -28,7 +28,7 @@ RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/aef-collector
 
 # Runtime stage
-FROM python:3.12-slim as runtime
+FROM python:3.12-slim AS runtime
 
 WORKDIR /app
 

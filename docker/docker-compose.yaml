@@ -81,6 +81,38 @@ services:
       start_period: 10s
 
   # =============================================================================
+  # DASHBOARD API - Query and Control Service
+  # =============================================================================
+  dashboard:
+    build:
+      context: ..
+      dockerfile: apps/aef-dashboard/Dockerfile
+    environment:
+      DASHBOARD_PORT: "8000"
+      DASHBOARD_HOST: "0.0.0.0"
+      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      EVENTSTORE_HOST: event-store
+      EVENTSTORE_PORT: "50051"
+      # Note: ANTHROPIC_API_KEY should be set via .env or host environment
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      event-store:
+        condition: service_healthy
+      collector:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import http.client; c=http.client.HTTPConnection(''localhost'',8000); c.request(''GET'',''/health''); exit(0 if c.getresponse().status==200 else 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # =============================================================================
   # MINIO - S3-compatible Object Storage
   # =============================================================================
   minio:

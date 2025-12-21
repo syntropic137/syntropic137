@@ -85,9 +85,7 @@ def _extract_tool_uses(event: dict[str, Any]) -> dict[str, str]:
     return tool_names
 
 
-def _enrich_tool_result(
-    event: dict[str, Any], tool_names: dict[str, str]
-) -> dict[str, Any]:
+def _enrich_tool_result(event: dict[str, Any], tool_names: dict[str, str]) -> dict[str, Any]:
     """Enrich tool_result events with tool_name from cache.
 
     Claude CLI's tool_result (in user messages) only has tool_use_id.

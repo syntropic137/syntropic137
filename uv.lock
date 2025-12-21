@@ -192,6 +192,7 @@ source = { editable = "packages/aef-domain" }
 dependencies = [
     { name = "aef-shared" },
     { name = "agentic-events" },
+    { name = "agentic-workspace" },
     { name = "event-sourcing-python" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -201,6 +202,7 @@ dependencies = [
 requires-dist = [
     { name = "aef-shared", editable = "packages/aef-shared" },
     { name = "agentic-events", directory = "lib/agentic-primitives/lib/python/agentic_events" },
+    { name = "agentic-workspace", directory = "lib/agentic-primitives/lib/python/agentic_workspace" },
     { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pyyaml", specifier = ">=6.0.2" },
@@ -361,6 +363,19 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "python-json-logger", specifier = ">=2.0.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "agentic-workspace"
+version = "0.1.0"
+source = { directory = "lib/agentic-primitives/lib/python/agentic_workspace" }
+
+[package.metadata]
+requires-dist = [
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
 ]
 provides-extras = ["dev"]
 

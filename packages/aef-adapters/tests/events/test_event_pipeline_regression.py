@@ -44,7 +44,7 @@ def load_recording(name: str) -> list[dict[str, Any]]:
         pytest.skip(f"Recording {name} not found at {recording_path}")
 
     events = []
-    with open(recording_path) as f:
+    with recording_path.open() as f:
         for line in f:
             line = line.strip()
             if line:
@@ -98,9 +98,8 @@ class TestRecordingsParse:
             except Exception as e:
                 parse_errors.append(f"Event {i}: {e}")
 
-        assert not parse_errors, (
-            f"Recording {recording_name} had parse errors:\n"
-            + "\n".join(parse_errors)
+        assert not parse_errors, f"Recording {recording_name} had parse errors:\n" + "\n".join(
+            parse_errors
         )
 
 
@@ -231,15 +230,12 @@ class TestEventTypeMapping:
             try:
                 parsed = AgentEvent.from_dict(raw_event)
                 if parsed.event_type not in valid_types:
-                    invalid_types.append(
-                        f"Event {i}: '{parsed.event_type}' not in valid types"
-                    )
+                    invalid_types.append(f"Event {i}: '{parsed.event_type}' not in valid types")
             except Exception as e:
                 invalid_types.append(f"Event {i}: Parse failed - {e}")
 
         assert not invalid_types, (
-            f"Recording {recording_name} had invalid event types:\n"
-            + "\n".join(invalid_types)
+            f"Recording {recording_name} had invalid event types:\n" + "\n".join(invalid_types)
         )
 
 
@@ -283,9 +279,7 @@ class TestSessionLifecycle:
         for result in result_events:
             # Result events should have cost_usd or total_cost_usd
             has_cost = "cost_usd" in result or "total_cost_usd" in result
-            assert has_cost, (
-                f"Recording {recording_name}: result event should have cost info"
-            )
+            assert has_cost, f"Recording {recording_name}: result event should have cost info"
 
 
 # =============================================================================
@@ -319,8 +313,7 @@ class TestTokenUsage:
             # Check if assistant message contains tool_use
             content = raw_event.get("message", {}).get("content", [])
             has_tool_use = any(
-                isinstance(item, dict) and item.get("type") == "tool_use"
-                for item in content
+                isinstance(item, dict) and item.get("type") == "tool_use" for item in content
             )
 
             if has_tool_use:

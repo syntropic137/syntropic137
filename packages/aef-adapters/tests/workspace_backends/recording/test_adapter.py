@@ -32,17 +32,13 @@ class TestAssertTestEnvironment:
         monkeypatch.setenv("APP_ENVIRONMENT", "test")
         _assert_test_environment()
 
-    def test_allows_app_environment_testing(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_allows_app_environment_testing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Allows when APP_ENVIRONMENT=testing."""
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.setenv("APP_ENVIRONMENT", "testing")
         _assert_test_environment()
 
-    def test_rejects_production_environment(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_rejects_production_environment(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Rejects when not in test environment."""
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
         monkeypatch.setenv("APP_ENVIRONMENT", "production")

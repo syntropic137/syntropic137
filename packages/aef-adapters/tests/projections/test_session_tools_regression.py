@@ -9,7 +9,8 @@ CRITICAL: These tests should catch issues before they reach the UI.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -26,7 +27,7 @@ class TestToolNameEnrichment:
     @pytest.mark.asyncio
     async def test_completed_event_gets_tool_name_from_started(self) -> None:
         """REGRESSION: tool_execution_completed should get tool_name from started."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from aef_adapters.projections.session_tools import SessionToolsProjection
 
@@ -34,7 +35,7 @@ class TestToolNameEnrichment:
         mock_rows = [
             {
                 "event_type": "tool_execution_started",
-                "time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+                "time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
                 "data": {
                     "tool_name": "Bash",
                     "tool_use_id": "toolu_123",
@@ -43,7 +44,7 @@ class TestToolNameEnrichment:
             },
             {
                 "event_type": "tool_execution_completed",
-                "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
+                "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=UTC),
                 "data": {
                     # After JOIN, this should have tool_name from started
                     "tool_name": "Bash",  # Simulating the JOIN result
@@ -88,7 +89,7 @@ class TestToolNameEnrichment:
     @pytest.mark.asyncio
     async def test_completed_without_started_shows_unknown(self) -> None:
         """Completed event without corresponding started should show 'unknown'."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from aef_adapters.projections.session_tools import SessionToolsProjection
 
@@ -96,7 +97,7 @@ class TestToolNameEnrichment:
         mock_rows = [
             {
                 "event_type": "tool_execution_completed",
-                "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
+                "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=UTC),
                 "data": {
                     # No tool_name, JOIN couldn't find match
                     "tool_use_id": "toolu_orphan",
@@ -127,14 +128,14 @@ class TestRowToOperation:
 
     def test_started_event_extracts_all_fields(self) -> None:
         """Started events should extract tool_name, tool_use_id, input_preview."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from aef_adapters.projections.session_tools import SessionToolsProjection
 
         projection = SessionToolsProjection()
         row = {
             "event_type": "tool_execution_started",
-            "time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            "time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
             "data": {
                 "tool_name": "Read",
                 "tool_use_id": "toolu_abc",
@@ -153,14 +154,14 @@ class TestRowToOperation:
 
     def test_completed_event_extracts_all_fields(self) -> None:
         """Completed events should extract success, duration_ms, output_preview."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from aef_adapters.projections.session_tools import SessionToolsProjection
 
         projection = SessionToolsProjection()
         row = {
             "event_type": "tool_execution_completed",
-            "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=timezone.utc),
+            "time": datetime(2024, 1, 1, 12, 0, 1, tzinfo=UTC),
             "data": {
                 "tool_name": "Write",
                 "tool_use_id": "toolu_def",
@@ -184,18 +185,20 @@ class TestRowToOperation:
     def test_json_string_data_is_parsed(self) -> None:
         """Data field as JSON string should be parsed correctly."""
         import json
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         from aef_adapters.projections.session_tools import SessionToolsProjection
 
         projection = SessionToolsProjection()
         row = {
             "event_type": "tool_execution_started",
-            "time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
-            "data": json.dumps({
-                "tool_name": "Bash",
-                "tool_use_id": "toolu_string",
-            }),
+            "time": datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
+            "data": json.dumps(
+                {
+                    "tool_name": "Bash",
+                    "tool_use_id": "toolu_string",
+                }
+            ),
         }
 
         op = projection._row_to_operation(row)

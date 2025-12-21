@@ -27,6 +27,14 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  dashboard:
+    container_name: aef-dashboard
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    env_file:
+      - ../.env # Load environment variables from root .env file
+
   minio:
     container_name: aef-minio
     ports:

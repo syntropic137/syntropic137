@@ -161,9 +161,7 @@ class AgentEvent(BaseModel):
             "phase_id",
             "id",
         }
-        event_data: dict[str, Any] = {
-            k: v for k, v in data.items() if k not in excluded_keys
-        }
+        event_data: dict[str, Any] = {k: v for k, v in data.items() if k not in excluded_keys}
 
         # Extract tool info from nested Claude CLI message content
         # This handles both tool_use (assistant) and tool_result (user) events
@@ -183,6 +181,7 @@ class AgentEvent(BaseModel):
                             tool_input = item.get("input")
                             if tool_input:
                                 import json
+
                                 event_data["input_preview"] = json.dumps(tool_input)[:500]
                     # Extract from tool_result (in user messages)
                     elif item_type == "tool_result":

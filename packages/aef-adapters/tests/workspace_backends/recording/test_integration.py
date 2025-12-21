@@ -47,9 +47,7 @@ class TestRecordingIntegration:
         assert "tools" in init
         assert "model" in init
 
-    def test_adapter_has_tool_usage(
-        self, simple_bash_adapter: RecordingEventStreamAdapter
-    ) -> None:
+    def test_adapter_has_tool_usage(self, simple_bash_adapter: RecordingEventStreamAdapter) -> None:
         """Recording captures tool usage."""
         events = simple_bash_adapter.get_events()
 
@@ -57,9 +55,7 @@ class TestRecordingIntegration:
         assistant_events = [e for e in events if e.get("type") == "assistant"]
         assert len(assistant_events) > 0
 
-    def test_adapter_has_result(
-        self, simple_bash_adapter: RecordingEventStreamAdapter
-    ) -> None:
+    def test_adapter_has_result(self, simple_bash_adapter: RecordingEventStreamAdapter) -> None:
         """Recording has final result event."""
         events = simple_bash_adapter.get_events()
 

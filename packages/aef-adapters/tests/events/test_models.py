@@ -1,8 +1,9 @@
 """Tests for AgentEvent model."""
 
-import pytest
 from datetime import datetime
 from uuid import uuid4
+
+import pytest
 
 from aef_adapters.events.models import AgentEvent
 
@@ -20,44 +21,54 @@ class TestAgentEventWithRealTypes:
 
     def test_tool_started_event_maps_correctly(self) -> None:
         """Claude CLI 'tool_started' should map to 'tool_execution_started'."""
-        event = AgentEvent.from_dict({
-            "type": "tool_started",
-            "tool": "Bash",
-            "timestamp": "2025-01-01T00:00:00Z",
-        })
+        event = AgentEvent.from_dict(
+            {
+                "type": "tool_started",
+                "tool": "Bash",
+                "timestamp": "2025-01-01T00:00:00Z",
+            }
+        )
         assert event.event_type == "tool_execution_started"
 
     def test_tool_result_event_maps_correctly(self) -> None:
         """Claude CLI 'tool_result' should map to 'tool_execution_completed'."""
-        event = AgentEvent.from_dict({
-            "type": "tool_result",
-            "tool": "Bash",
-            "result": "success",
-        })
+        event = AgentEvent.from_dict(
+            {
+                "type": "tool_result",
+                "tool": "Bash",
+                "result": "success",
+            }
+        )
         assert event.event_type == "tool_execution_completed"
 
     def test_system_init_event_maps_correctly(self) -> None:
         """Claude CLI 'system.init' should map to 'session_started'."""
-        event = AgentEvent.from_dict({
-            "type": "system.init",
-            "model": "claude-3-5-sonnet",
-        })
+        event = AgentEvent.from_dict(
+            {
+                "type": "system.init",
+                "model": "claude-3-5-sonnet",
+            }
+        )
         assert event.event_type == "session_started"
 
     def test_result_event_maps_correctly(self) -> None:
         """Claude CLI 'result' should map to 'session_completed'."""
-        event = AgentEvent.from_dict({
-            "type": "result",
-            "cost_usd": 0.01,
-        })
+        event = AgentEvent.from_dict(
+            {
+                "type": "result",
+                "cost_usd": 0.01,
+            }
+        )
         assert event.event_type == "session_completed"
 
     def test_assistant_event_maps_correctly(self) -> None:
         """Claude CLI 'assistant' should map to 'token_usage'."""
-        event = AgentEvent.from_dict({
-            "type": "assistant",
-            "content": "Hello!",
-        })
+        event = AgentEvent.from_dict(
+            {
+                "type": "assistant",
+                "content": "Hello!",
+            }
+        )
         assert event.event_type == "token_usage"
 
     def test_all_claude_cli_event_types_are_valid(self) -> None:
