@@ -14,6 +14,7 @@ See ADR-029: Simplified Event System
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -81,8 +82,6 @@ class AgentEvent(BaseModel):
         Returns:
             Tuple of (time, event_type, session_id, execution_id, phase_id, data_json)
         """
-        import json
-
         return (
             self.time,
             self.event_type,
@@ -180,8 +179,6 @@ class AgentEvent(BaseModel):
                             # Store tool input as preview
                             tool_input = item.get("input")
                             if tool_input:
-                                import json
-
                                 event_data["input_preview"] = json.dumps(tool_input)[:500]
                     # Extract from tool_result (in user messages)
                     elif item_type == "tool_result":

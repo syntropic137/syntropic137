@@ -50,6 +50,9 @@ const operationIcons: Record<string, typeof Activity> = {
   validation: CheckCircle2,
 }
 
+// Event type constants for filtering
+const TOOL_EVENT_TYPES = ['tool_execution_started', 'tool_execution_completed'] as const
+
 // Colors for operation types
 const operationColors: Record<string, string> = {
   // Current AEF event types (from agent_events table)
@@ -474,8 +477,7 @@ export function SessionDetail() {
         <MetricCard
           title="Tool Calls"
           value={session.operations.filter(op =>
-            op.operation_type === 'tool_execution_completed' ||
-            op.operation_type === 'tool_execution_started'
+            TOOL_EVENT_TYPES.includes(op.operation_type as typeof TOOL_EVENT_TYPES[number])
           ).length.toString()}
           icon={Wrench}
           color="default"

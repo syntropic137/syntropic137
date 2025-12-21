@@ -34,6 +34,11 @@ services:
     restart: unless-stopped
     env_file:
       - ../.env # Load environment variables from root .env file
+    environment:
+      # Override .env localhost values with Docker service names
+      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      EVENT_STORE_HOST: event-store
+      EVENT_STORE_PORT: "50051"
 
   minio:
     container_name: aef-minio
