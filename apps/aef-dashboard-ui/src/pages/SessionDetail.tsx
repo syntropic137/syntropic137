@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { getConversationLog, getSession } from '../api/client'
-import type { ConversationLine, ConversationLogResponse } from '../api/client'
+import type { ConversationLogResponse } from '../api/client'
 import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import type { OperationInfo, SessionResponse } from '../types'
