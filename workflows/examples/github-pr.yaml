@@ -104,25 +104,33 @@ phases:
          ```
 
       6. **Write summary to artifacts (REQUIRED):**
-         After creating the PR, you MUST write a summary to `/workspace/artifacts/output/`:
-         ```bash
-         cat > /workspace/artifacts/output/summary.md << 'EOF'
+         After creating the PR, you MUST write your actual summary to `/workspace/artifacts/output/deliverable.md`.
+
+         **Include these details with your ACTUAL content (not placeholders):**
+         - What changes you made
+         - The commit hash(es)
+         - The PR URL from `gh pr create`
+         - A brief executive summary
+
+         Example:
+         ```markdown
          # PR Creation Summary
 
          ## Changes Made
-         - [Describe what you changed]
+         - Added a new greeting function to hello.py
+         - Updated README with usage examples
 
          ## Commits
-         - `[hash]` feat: {{change_description}}
+         - `a1b2c3d` feat: add new greeting feature
 
          ## Pull Request
-         - URL: [The PR URL from gh pr create]
+         - URL: https://github.com/org/repo/pull/42
          - Branch: feat/agent-{{execution_id}}
          - Status: Open
 
          ## Executive Summary
-         [Brief description of the work completed]
-         EOF
+         Created a new greeting function that supports multiple languages.
+         PR is ready for review.
          ```
 
       ### Important Notes
@@ -154,12 +162,20 @@ phases:
 
       ## Previous Phase Output
 
+      First, check what files are available from the previous phase:
+      ```bash
+      ls -la /workspace/artifacts/input/
+      ```
+
       Read the summary from the previous phase:
       ```bash
       cat /workspace/artifacts/input/create-pr.md
       ```
 
-      This contains the PR URL and summary of changes made.
+      This should contain the PR URL and summary of changes made by the create-pr phase.
+
+      **If the file contains only placeholder text (like "# [Title]" with "..."),
+      that means the previous phase did NOT complete successfully. Report this as a failure.**
 
       ## Instructions
 
@@ -174,19 +190,22 @@ phases:
          ```bash
          gh pr view <PR_NUMBER_OR_URL> --json url,number,state,headRefName,files
          ```
-      4. Write a verification report to artifacts:
-         ```bash
-         cat > /workspace/artifacts/output/verification.md << 'EOF'
+      4. Write a verification report to `/workspace/artifacts/output/deliverable.md`:
+
+         **Include your ACTUAL findings (not placeholders):**
+
+         ```markdown
          # PR Verification Report
 
          ## PR Details
-         - URL: [PR URL]
-         - Number: [PR Number]
-         - State: [open/closed]
-         - Branch: [branch name]
+         - URL: https://github.com/org/repo/pull/42
+         - Number: 42
+         - State: open
+         - Branch: feat/agent-xyz
 
          ## Files Changed
-         - [list of files]
+         - src/hello.py
+         - README.md
 
          ## Verification Status
          - [x] PR exists
@@ -194,6 +213,5 @@ phases:
          - [x] Changes match expectations
 
          ## Notes
-         [Any observations or issues]
-         EOF
+         PR looks good and is ready for review.
          ```
