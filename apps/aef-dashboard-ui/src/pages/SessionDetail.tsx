@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock,
   Coins,
+  Copy,
   Cpu,
   FileText,
   MessageSquare,
@@ -114,6 +115,17 @@ function ConversationLogViewer({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedLines, setExpandedLines] = useState<Set<number>>(new Set())
+  const [copiedLine, setCopiedLine] = useState<number | null>(null)
+
+  const copyToClipboard = async (text: string, lineNumber: number) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedLine(lineNumber)
+      setTimeout(() => setCopiedLine(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
 
   useEffect(() => {
     getConversationLog(sessionId, { limit: 500 })
@@ -248,6 +260,34 @@ function ConversationLogViewer({
                   {/* Expanded content */}
                   {isExpanded && (
                     <div className="border-t border-[var(--color-border)] p-4">
+                      {/* Copy button */}
+                      <div className="flex justify-end mb-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const content = JSON.stringify(line.parsed || JSON.parse(line.raw), null, 2)
+                            copyToClipboard(content, line.line_number)
+                          }}
+                          className={clsx(
+                            'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                            copiedLine === line.line_number
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-accent)] hover:text-white'
+                          )}
+                        >
+                          {copiedLine === line.line_number ? (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5" />
+                              Copy
+                            </>
+                          )}
+                        </button>
+                      </div>
                       <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs text-[var(--color-text-secondary)]">
                         {JSON.stringify(line.parsed || JSON.parse(line.raw), null, 2)}
                       </pre>

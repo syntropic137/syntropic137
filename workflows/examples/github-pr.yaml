@@ -62,8 +62,9 @@ phases:
 
       1. **Clone the repository:**
          ```bash
-         git clone {{repo_url}} /workspace/repo
-         cd /workspace/repo
+         cd /workspace/repos
+         git clone {{repo_url}}
+         cd $(basename {{repo_url}} .git)
          ```
 
       2. **Create a feature branch:**
@@ -102,15 +103,35 @@ phases:
          *Automated PR by aef-engineer-beta[bot]*"
          ```
 
-      6. **Output the PR URL:**
-         After creating the PR, output the URL so it can be captured as an artifact.
+      6. **Write summary to artifacts (REQUIRED):**
+         After creating the PR, you MUST write a summary to `/workspace/artifacts/output/`:
+         ```bash
+         cat > /workspace/artifacts/output/summary.md << 'EOF'
+         # PR Creation Summary
+
+         ## Changes Made
+         - [Describe what you changed]
+
+         ## Commits
+         - `[hash]` feat: {{change_description}}
+
+         ## Pull Request
+         - URL: [The PR URL from gh pr create]
+         - Branch: feat/agent-{{execution_id}}
+         - Status: Open
+
+         ## Executive Summary
+         [Brief description of the work completed]
+         EOF
+         ```
 
       ### Important Notes
 
       - Git credentials are pre-configured via the setup phase (ADR-024)
       - Git user.name and user.email are set to the GitHub App bot identity
       - You have full access to bash commands in the workspace
-      - Work inside `/workspace/repo` after cloning
+      - Clone repositories to `/workspace/repos/`
+      - **The code on GitHub is the deliverable. The artifact is your summary.**
 
   - id: verify-pr
     name: Verify Pull Request
@@ -132,22 +153,47 @@ phases:
       You are verifying that the Pull Request was created successfully.
 
       ## Previous Phase Output
-      {{create-pr}}
+
+      Read the summary from the previous phase:
+      ```bash
+      cat /workspace/artifacts/input/create-pr.md
+      ```
+
+      This contains the PR URL and summary of changes made.
 
       ## Instructions
 
-      1. Extract the PR URL from the previous phase output
-      2. Use `gh pr view` to verify the PR exists and get its details
-      3. Create a verification report with:
-         - PR URL
-         - PR Number
-         - PR State (open/closed)
-         - Branch name
-         - Files changed
+      1. Read the previous phase summary to find the PR URL
+      2. Clone the repository to access gh CLI context:
+         ```bash
+         cd /workspace/repos
+         git clone {{repo_url}}
+         cd $(basename {{repo_url}} .git)
+         ```
+      3. Use `gh pr view` to verify the PR exists:
+         ```bash
+         gh pr view <PR_NUMBER_OR_URL> --json url,number,state,headRefName,files
+         ```
+      4. Write a verification report to artifacts:
+         ```bash
+         cat > /workspace/artifacts/output/verification.md << 'EOF'
+         # PR Verification Report
 
-      ```bash
-      cd /workspace/repo
-      gh pr view --json url,number,state,headRefName,files
-      ```
+         ## PR Details
+         - URL: [PR URL]
+         - Number: [PR Number]
+         - State: [open/closed]
+         - Branch: [branch name]
 
-      Output a JSON verification report.
+         ## Files Changed
+         - [list of files]
+
+         ## Verification Status
+         - [x] PR exists
+         - [x] PR is open
+         - [x] Changes match expectations
+
+         ## Notes
+         [Any observations or issues]
+         EOF
+         ```

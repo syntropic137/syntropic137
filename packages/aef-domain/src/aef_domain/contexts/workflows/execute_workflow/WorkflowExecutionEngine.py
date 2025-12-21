@@ -1007,14 +1007,15 @@ class WorkflowExecutionEngine:
                 logger.info("Setup phase completed, secrets cleared")
 
                 # Inject input artifacts from previous phases
+                # ADR-036: Write to artifacts/input/ (not inputs/)
                 if self._artifact_query and ctx.completed_phase_ids:
                     phase_outputs = await self._artifact_query.get_for_phase_injection(
                         execution_id=ctx.execution_id,
                         completed_phase_ids=ctx.completed_phase_ids,
                     )
-                    # Write artifacts to /workspace/inputs/
+                    # Write artifacts to /workspace/artifacts/input/
                     files_to_inject = [
-                        (f"inputs/{prev_phase_id}.md", content.encode())
+                        (f"artifacts/input/{prev_phase_id}.md", content.encode())
                         for prev_phase_id, content in phase_outputs.items()
                     ]
                     if files_to_inject:
@@ -1280,8 +1281,9 @@ class WorkflowExecutionEngine:
                         )
 
                 # Collect output artifacts
+                # ADR-036: Collect from artifacts/output/ (not artifacts/)
                 artifacts = await workspace.collect_files(
-                    patterns=["artifacts/**/*"],
+                    patterns=["artifacts/output/**/*"],
                 )
 
                 # Create artifact records for each output

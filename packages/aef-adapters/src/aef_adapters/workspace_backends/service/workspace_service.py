@@ -196,10 +196,14 @@ class SetupPhaseSecrets:
 DEFAULT_SETUP_SCRIPT = """#!/bin/bash
 set -e
 
-# Create standard workspace directories
-mkdir -p /workspace/output
-mkdir -p /workspace/artifacts
-mkdir -p /workspace/inputs
+# ADR-036: Workspace structure convention
+# Directories are pre-created in Docker image, validate they exist
+# - artifacts/input/  : Previous phase outputs (read-only)
+# - artifacts/output/ : Current phase deliverables (agent writes here)
+# - repos/            : Clone repositories here
+test -d /workspace/artifacts/input || mkdir -p /workspace/artifacts/input
+test -d /workspace/artifacts/output || mkdir -p /workspace/artifacts/output
+test -d /workspace/repos || mkdir -p /workspace/repos
 
 # Configure Git identity (uses env vars injected by run_setup_phase)
 # These come from the GitHub App bot configuration

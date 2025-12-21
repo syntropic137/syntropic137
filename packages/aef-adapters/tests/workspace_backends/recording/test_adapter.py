@@ -190,3 +190,63 @@ class TestRecordingEventStreamAdapterWithFixtures:
         # Should have system init event
         system_events = [e for e in events if e.get("type") == "system"]
         assert len(system_events) > 0
+
+
+class TestRecordingAdapterWithWorkspace:
+    """Tests for recordings with workspace files."""
+
+    def test_load_with_recording_enum(self) -> None:
+        """Can load recording using Recording enum."""
+        from agentic_events import Recording
+
+        try:
+            adapter = RecordingEventStreamAdapter(Recording.ARTIFACT_WRITE)
+            assert adapter.event_count > 0
+        except FileNotFoundError:
+            pytest.skip("artifact-write recording not available")
+
+    def test_has_workspace(self) -> None:
+        """Adapter reports has_workspace correctly."""
+        from agentic_events import Recording
+
+        try:
+            adapter = RecordingEventStreamAdapter(Recording.ARTIFACT_WRITE)
+            assert adapter.has_workspace is True
+        except FileNotFoundError:
+            pytest.skip("artifact-write recording not available")
+
+    def test_get_workspace_files(self) -> None:
+        """Can get workspace files from recording."""
+        from agentic_events import Recording
+
+        try:
+            adapter = RecordingEventStreamAdapter(Recording.ARTIFACT_WRITE)
+        except FileNotFoundError:
+            pytest.skip("artifact-write recording not available")
+
+        files = adapter.get_workspace_files()
+        assert "artifacts/output/summary.md" in files
+
+    def test_collect_files_with_pattern(self) -> None:
+        """Can collect files matching a pattern."""
+        from agentic_events import Recording
+
+        try:
+            adapter = RecordingEventStreamAdapter(Recording.ARTIFACT_WRITE)
+        except FileNotFoundError:
+            pytest.skip("artifact-write recording not available")
+
+        files = adapter.collect_files(patterns=["artifacts/**/*"])
+        assert len(files) > 0
+        paths = [f[0] for f in files]
+        assert "artifacts/output/summary.md" in paths
+
+    def test_legacy_recording_has_no_workspace(self) -> None:
+        """Legacy .jsonl recordings have no workspace."""
+        try:
+            adapter = RecordingEventStreamAdapter("simple-bash")
+            assert adapter.has_workspace is False
+            assert adapter.get_workspace_files() == {}
+            assert adapter.collect_files() == []
+        except FileNotFoundError:
+            pytest.skip("simple-bash recording not available")

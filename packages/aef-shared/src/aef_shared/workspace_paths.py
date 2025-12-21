@@ -5,12 +5,19 @@ isolated workspaces (Docker containers, VMs, etc.).
 
 All paths are relative to /workspace (the container mount point).
 
+ADR-036: Workspace Structure Convention
+/workspace/
+├── artifacts/
+│   ├── input/   ← Previous phase outputs (read-only)
+│   └── output/  ← Current phase deliverables (agent writes here)
+└── repos/       ← Clone repositories here
+
 Usage:
     from aef_shared.workspace_paths import (
         WORKSPACE_ROOT,
         WORKSPACE_OUTPUT_DIR,
-        WORKSPACE_CONTEXT_DIR,
-        WORKSPACE_TASK_FILE,
+        WORKSPACE_INPUT_DIR,
+        WORKSPACE_REPOS_DIR,
     )
 
 Note:
@@ -24,9 +31,18 @@ from pathlib import PurePosixPath
 # Base workspace root (where host directory is mounted)
 WORKSPACE_ROOT = PurePosixPath("/workspace")
 
+# ADR-036: Artifacts directory structure
+WORKSPACE_ARTIFACTS_DIR = WORKSPACE_ROOT / "artifacts"
+
 # Agent output artifacts - collected after execution
 # This is where the agent should write any output files
-WORKSPACE_OUTPUT_DIR = WORKSPACE_ROOT / "artifacts"
+WORKSPACE_OUTPUT_DIR = WORKSPACE_ARTIFACTS_DIR / "output"
+
+# Input artifacts from previous phases (read-only for agent)
+WORKSPACE_INPUT_DIR = WORKSPACE_ARTIFACTS_DIR / "input"
+
+# Repository directory for git operations
+WORKSPACE_REPOS_DIR = WORKSPACE_ROOT / "repos"
 
 # Injected context directory (task.json, input artifacts)
 # This is where the orchestrator writes files for the agent
@@ -53,11 +69,14 @@ WORKSPACE_LOGS_DIR = WORKSPACE_ROOT / ".logs"
 __all__ = [
     "WORKSPACE_ANALYTICS_DIR",
     "WORKSPACE_ANALYTICS_FILE",
+    "WORKSPACE_ARTIFACTS_DIR",
     "WORKSPACE_CLAUDE_DIR",
     "WORKSPACE_CONTEXT_DIR",
     "WORKSPACE_HOOKS_DIR",
+    "WORKSPACE_INPUT_DIR",
     "WORKSPACE_LOGS_DIR",
     "WORKSPACE_OUTPUT_DIR",
+    "WORKSPACE_REPOS_DIR",
     "WORKSPACE_ROOT",
     "WORKSPACE_SETTINGS_FILE",
     "WORKSPACE_TASK_FILE",
