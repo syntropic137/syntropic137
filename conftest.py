@@ -1,6 +1,11 @@
 """Pytest configuration for all tests in the AEF project.
 
 Sets APP_ENVIRONMENT=test to ensure in-memory storage is used during testing.
+
+Test Infrastructure (ADR-034):
+    - test_infrastructure: Auto-detects test-stack or uses testcontainers
+    - db_pool: Database connection pool
+    - db_connection: Single database connection
 """
 
 from __future__ import annotations
@@ -14,6 +19,11 @@ os.environ["APP_ENVIRONMENT"] = "test"
 import pytest
 
 from aef_adapters.storage import reset_storage
+
+# Register test infrastructure fixtures (ADR-034)
+pytest_plugins = [
+    "aef_tests.fixtures.infrastructure",
+]
 
 
 @pytest.fixture(autouse=True)

@@ -31,7 +31,8 @@ class TestSettings:
             assert settings.app_name == "agentic-engineering-framework"
             assert settings.app_environment == AppEnvironment.DEVELOPMENT
             assert settings.debug is False
-            assert settings.database_url is None
+            assert settings.aef_observability_db_url is None
+            assert settings.esp_event_store_db_url is None
             assert settings.log_level == "INFO"
 
     def test_environment_override(self) -> None:
@@ -49,14 +50,17 @@ class TestSettings:
             assert settings.log_level == "ERROR"
 
     def test_database_url_validation(self) -> None:
-        """Database URL should be validated as PostgreSQL DSN."""
+        """Database URLs should be validated as PostgreSQL DSN."""
         env = {
-            "DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
+            "AEF_OBSERVABILITY_DB_URL": "postgresql://user:pass@localhost:5432/db",
+            "ESP_EVENT_STORE_DB_URL": "postgresql://user:pass@localhost:5432/db",
         }
         with patch.dict(os.environ, env, clear=True):
             settings = Settings()
-            assert settings.database_url is not None
-            assert "postgresql" in str(settings.database_url)
+            assert settings.aef_observability_db_url is not None
+            assert "postgresql" in str(settings.aef_observability_db_url)
+            assert settings.esp_event_store_db_url is not None
+            assert "postgresql" in str(settings.esp_event_store_db_url)
 
     def test_secret_values_protected(self) -> None:
         """Secret values should not be exposed in repr."""

@@ -56,17 +56,29 @@ def show_config(
     db_table.add_column("Setting", style="cyan")
     db_table.add_column("Value")
 
-    if settings.database_url:
+    if settings.aef_observability_db_url:
         # Mask password in URL
-        db_url = str(settings.database_url)
+        db_url = str(settings.aef_observability_db_url)
         if not show_secrets and "@" in db_url:
             parts = db_url.split("@")
             masked = parts[0].rsplit(":", 1)[0] + ":****@" + parts[1]
-            db_table.add_row("Database URL", masked)
+            db_table.add_row("Observability DB", masked)
         else:
-            db_table.add_row("Database URL", db_url)
+            db_table.add_row("Observability DB", db_url)
     else:
-        db_table.add_row("Database URL", "[yellow]Not configured[/yellow]")
+        db_table.add_row("Observability DB", "[yellow]Not configured[/yellow]")
+
+    if settings.esp_event_store_db_url:
+        # Mask password in URL
+        db_url = str(settings.esp_event_store_db_url)
+        if not show_secrets and "@" in db_url:
+            parts = db_url.split("@")
+            masked = parts[0].rsplit(":", 1)[0] + ":****@" + parts[1]
+            db_table.add_row("ESP Event Store", masked)
+        else:
+            db_table.add_row("ESP Event Store", db_url)
+    else:
+        db_table.add_row("ESP Event Store", "[yellow]Not configured[/yellow]")
 
     db_table.add_row("Pool Size", str(settings.database_pool_size))
     db_table.add_row("Pool Overflow", str(settings.database_pool_overflow))
@@ -149,12 +161,12 @@ def validate_config() -> None:
         raise typer.Exit(1) from None
 
     # Check database configuration
-    if settings.database_url is None:
+    if settings.aef_observability_db_url is None:
         if settings.is_test:
-            warnings.append("No DATABASE_URL - using in-memory storage (test mode)")
+            warnings.append("No AEF_OBSERVABILITY_DB_URL - using in-memory storage (test mode)")
         else:
             warnings.append(
-                "No DATABASE_URL configured - run 'just dev' to start Docker PostgreSQL"
+                "No AEF_OBSERVABILITY_DB_URL configured - run 'just dev' to start Docker PostgreSQL"
             )
 
     # Check agent configuration
@@ -166,8 +178,8 @@ def validate_config() -> None:
 
     # Check production requirements
     if settings.is_production:
-        if settings.database_url is None:
-            issues.append("DATABASE_URL is required in production")
+        if settings.aef_observability_db_url is None:
+            issues.append("AEF_OBSERVABILITY_DB_URL is required in production")
         if settings.debug:
             issues.append("Debug mode should be disabled in production")
         if not real_agents:

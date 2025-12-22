@@ -8,7 +8,7 @@ Usage:
     from aef_shared.settings import get_settings
 
     settings = get_settings()
-    print(settings.database_url)
+    print(settings.aef_observability_db_url)
 
     # Git identity for workspace commits
     git = settings.git_identity

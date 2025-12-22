@@ -10,6 +10,7 @@ dependencies = [
     "event-sourcing-python",
     "pyyaml>=6.0.2",
     "agentic-events",  # ADR-029: JSONL parsing utilities
+    "agentic-workspace",  # ADR-012: Workspace prompts for artifact instructions
 ]
 
 [build-system]

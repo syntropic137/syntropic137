@@ -217,38 +217,36 @@ class AgentEventStore:
 
         # Build COPY data as bytes
         buffer = io.BytesIO()
-        now = datetime.now(UTC)
 
         for event in events:
-            # Extract fields
-            time = event.get("timestamp")
-            if time is None:
-                time = now.isoformat()
-            elif isinstance(time, datetime):
-                time = time.isoformat()
+            # Add context IDs if provided
+            if execution_id and "execution_id" not in event:
+                event = {**event, "execution_id": execution_id}
+            if phase_id and "phase_id" not in event:
+                event = {**event, "phase_id": phase_id}
 
-            event_type = event.get("event_type", event.get("type", "unknown"))
-            session_id = event.get("session_id", "unknown")
-            evt_execution_id = event.get("execution_id", execution_id)
-            evt_phase_id = event.get("phase_id", phase_id)
+            # Process through AgentEvent model for proper type mapping and data extraction
+            # This handles Claude CLI's nested event structure (tool_use, tool_result)
+            try:
+                validated = AgentEvent.from_dict(event)
+            except Exception as e:
+                logger.warning("Skipping invalid event: %s", e)
+                continue
 
-            # Build data dict (everything else)
-            data = {
-                k: v
-                for k, v in event.items()
-                if k
-                not in ("timestamp", "event_type", "type", "session_id", "execution_id", "phase_id")
-            }
+            # Get insert tuple from validated model
+            time, event_type, session_id, evt_exec_id, evt_phase_id, data_json = (
+                validated.to_insert_tuple()
+            )
 
             # Write tab-separated row
             # Format: time, event_type, session_id, execution_id, phase_id, data
             row = [
-                time,
+                time.isoformat() if isinstance(time, datetime) else time,
                 event_type,
-                session_id,
-                evt_execution_id or "\\N",  # NULL representation
+                session_id or "unknown",
+                evt_exec_id or "\\N",  # NULL representation
                 evt_phase_id or "\\N",
-                json.dumps(data),
+                data_json,
             ]
             line = "\t".join(str(v) for v in row) + "\n"
             buffer.write(line.encode("utf-8"))
@@ -505,11 +503,16 @@ _event_store: AgentEventStore | None = None
 def get_event_store(connection_string: str | None = None) -> AgentEventStore:
     """Get or create the AgentEventStore singleton.
 
+    Uses AEF_OBSERVABILITY_DB_URL from settings (ADR-030 unified database).
+
     Args:
         connection_string: Optional connection string (uses settings if not provided)
 
     Returns:
         AgentEventStore instance
+
+    Raises:
+        ValueError: If AEF_OBSERVABILITY_DB_URL is not configured
     """
     global _event_store
 
@@ -518,10 +521,15 @@ def get_event_store(connection_string: str | None = None) -> AgentEventStore:
             from aef_shared.settings.config import get_settings
 
             settings = get_settings()
-            connection_string = (
-                f"postgresql://{settings.timescale_user}:{settings.timescale_password.get_secret_value()}"
-                f"@{settings.timescale_host}:{settings.timescale_port}/{settings.timescale_db}"
-            )
+
+            if not settings.aef_observability_db_url:
+                raise ValueError(
+                    "AEF_OBSERVABILITY_DB_URL must be configured. "
+                    "Set it in your .env file: "
+                    "AEF_OBSERVABILITY_DB_URL=postgresql://user:pass@host:port/database"
+                )
+
+            connection_string = str(settings.aef_observability_db_url)
 
         _event_store = AgentEventStore(connection_string)
 

@@ -1,155 +1,84 @@
-# Development Docker Compose
-# Start with: just dev
-
-name: aef
+# Development Docker Compose - Overrides for local development
+# Usage: docker compose -f docker-compose.yaml -f docker-compose.dev.yaml up
+# Shortcut: just dev
+#
+# Adds: container names, ports, persistent volumes, restart policies
+# See: ADR-034 - Test Infrastructure Architecture
 
 services:
-  # =============================================================================
-  # UNIFIED DATABASE - TimescaleDB (ADR-030)
-  # =============================================================================
-  # Single database instance for all AEF data:
-  # - Domain events (event_store.events) - hypertable for append-only workloads
-  # - Observability events (public.agent_events) - hypertable for time-series
-  # - Workflow definitions, artifacts, projections
-  #
-  # TimescaleDB provides 10x-100x better performance for append-only event stores
-  # =============================================================================
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
     container_name: aef-db
-    environment:
-      POSTGRES_DB: aef
-      POSTGRES_USER: aef
-      POSTGRES_PASSWORD: aef_dev_password
     ports:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aef -d aef"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
     restart: unless-stopped
 
   event-store:
-    build:
-      context: ../lib/event-sourcing-platform
-      dockerfile: event-store/Dockerfile
     container_name: aef-event-store
-    environment:
-      BACKEND: postgres
-      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
-      BIND_ADDR: 0.0.0.0:50051
-      RUST_LOG: info
     ports:
       - "50051:50051"
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/50051' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
     restart: unless-stopped
 
   collector:
-    build:
-      context: ..
-      dockerfile: packages/aef-collector/Dockerfile
     container_name: aef-collector
-    environment:
-      EVENT_COLLECTOR_PORT: "8080"
-      EVENTSTORE_HOST: event-store
-      EVENTSTORE_PORT: "50051"
-      EVENT_BATCH_SIZE: "100"
-      EVENT_BATCH_INTERVAL_MS: "1000"
     ports:
       - "8080:8080"
-    depends_on:
-      event-store:
-        condition: service_healthy
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'python -c "import http.client; c=http.client.HTTPConnection(''localhost'',8080); c.request(''GET'',''/health''); exit(0 if c.getresponse().status==200 else 1)"',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
     restart: unless-stopped
 
-  # MinIO - S3-compatible object storage for artifacts
-  # Console: http://localhost:9001 (minioadmin/minioadmin)
-  # API: http://localhost:9000
+  dashboard:
+    container_name: aef-dashboard
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    env_file:
+      - ../.env # Load environment variables from root .env file
+    environment:
+      # Override .env localhost values with Docker service names (ADR-030)
+      AEF_OBSERVABILITY_DB_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      EVENT_STORE_HOST: event-store
+      EVENT_STORE_PORT: "50051"
+      # Override MinIO endpoint for Docker network
+      AEF_STORAGE_MINIO_ENDPOINT: minio:9000
+      # Workspace directory configuration for Docker-in-Docker
+      # Container path where workspaces are accessible
+      AEF_WORKSPACE_CONTAINER_DIR: /workspaces
+      # Host path that Docker daemon can mount (must match volume mount below)
+      # This should be absolute path on the host machine
+      AEF_WORKSPACE_HOST_DIR: ${PWD}/workspaces
+    volumes:
+      # Mount Docker socket to create workspace containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount workspace directory for container file sharing
+      # Host path (${PWD}/workspaces) -> Container path (/workspaces)
+      - ../workspaces:/workspaces
+
   minio:
-    image: minio/minio:latest
     container_name: aef-minio
     ports:
       - "9000:9000" # S3 API
       - "9001:9001" # Web Console
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
     restart: unless-stopped
 
-  # Create default bucket on startup
   minio-init:
-    image: minio/mc:latest
     container_name: aef-minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/aef-artifacts &&
-      echo 'Bucket aef-artifacts ready!'
-      "
-    restart: "no"
 
   redis:
-    image: redis:7-alpine
     container_name: aef-redis
-    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
     restart: unless-stopped
 
-  # Example sidecar proxy for agent containers
-  # This is a template - actual sidecars are deployed per-execution
   sidecar-proxy:
-    build:
-      context: ./sidecar-proxy
-      dockerfile: Dockerfile
     container_name: aef-sidecar-example
-    environment:
-      AEF_EXECUTION_ID: "dev-local"
     ports:
       - "8081:8081"
       - "9901:9901" # Envoy admin
-    profiles:
-      - sidecar # Only start with: docker compose --profile sidecar up
     restart: unless-stopped
 
 volumes:

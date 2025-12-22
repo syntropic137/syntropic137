@@ -170,6 +170,143 @@ class ContinuousVerifier:
 
 ## Implementation
 
+### 0. CLI Tool Mocking Architecture (agentic-primitives)
+
+Agents use external CLI tools (`gh`, `git`, `aws`, etc.) that need to be mockable for testing.
+
+#### The Problem
+
+```yaml
+# Workflow requires gh CLI
+prompt_template: |
+  gh pr create --title "..." --body "..."
+```
+
+In tests, we need to:
+1. Verify the agent CALLS `gh` correctly (contract)
+2. Mock responses without hitting GitHub API
+3. Support different test scenarios (success, failure, rate limit)
+
+#### Solution: Layered Tool Testing
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Level 1: Unit Tests (agentic-primitives)                   │
+│  - Mock CLI binary returns expected responses               │
+│  - Verify command argument parsing                          │
+│  - Test error handling for each tool                        │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Level 2: Contract Tests (AEF)                              │
+│  - Record/Replay: Capture real gh responses, replay in test │
+│  - Verify workflow template renders correct commands        │
+│  - Verify agent receives proper prompt with credentials     │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Level 3: Integration Tests (on-demand)                     │
+│  - Real sandbox repo (AgentParadise/sandbox_*)              │
+│  - Automatic PR cleanup after test                          │
+│  - Run weekly or before release                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Mock Registry Pattern (agentic-primitives)
+
+```python
+# lib/agentic-primitives/lib/python/agentic_events/mocks/cli_tools.py
+
+class CLIToolMockRegistry:
+    """Registry for mock CLI tool responses during testing.
+
+    Provides deterministic, fast tests without external API calls.
+    """
+
+    _mocks: dict[str, Callable[[list[str]], MockResponse]] = {}
+    _recordings: dict[str, list[dict]] = {}  # For record/replay
+
+    @classmethod
+    def register(cls, tool: str, mock_fn: Callable):
+        """Register a mock handler for a CLI tool."""
+        cls._mocks[tool] = mock_fn
+
+    @classmethod
+    def get_response(cls, tool: str, args: list[str]) -> MockResponse | None:
+        """Get mock response for a tool invocation."""
+        if tool in cls._mocks:
+            return cls._mocks[tool](args)
+        return None
+
+    # Pre-built mocks for common tools
+    @classmethod
+    def mock_gh_success(cls):
+        """Mock gh CLI for successful PR creation."""
+        def handler(args: list[str]) -> MockResponse:
+            if args[:2] == ["pr", "create"]:
+                return MockResponse(
+                    exit_code=0,
+                    stdout="https://github.com/test/repo/pull/123\n",
+                    stderr="",
+                )
+            if args[:2] == ["pr", "view"]:
+                return MockResponse(
+                    exit_code=0,
+                    stdout='{"number":123,"state":"OPEN"}',
+                    stderr="",
+                )
+            return MockResponse(exit_code=0, stdout="", stderr="")
+        cls.register("gh", handler)
+
+    @classmethod
+    def mock_gh_rate_limited(cls):
+        """Mock gh CLI hitting rate limit (for testing error handling)."""
+        def handler(args: list[str]) -> MockResponse:
+            return MockResponse(
+                exit_code=1,
+                stdout="",
+                stderr="API rate limit exceeded",
+            )
+        cls.register("gh", handler)
+```
+
+#### Container Integration
+
+```python
+# In container setup, inject mock binaries when MOCK_CLI_TOOLS=true
+if os.getenv("MOCK_CLI_TOOLS"):
+    # Replace gh with mock script
+    mock_gh = """#!/bin/bash
+    # Forward to Python mock handler via named pipe
+    echo "$@" > /tmp/cli_mock_input
+    cat /tmp/cli_mock_output
+    """
+```
+
+#### Recording Real Responses
+
+```python
+# Record actual gh responses for replay in tests
+async def record_cli_invocation(tool: str, args: list[str], response: MockResponse):
+    """Record a CLI invocation for later replay."""
+    recording = {
+        "tool": tool,
+        "args": args,
+        "response": {
+            "exit_code": response.exit_code,
+            "stdout": response.stdout,
+            "stderr": response.stderr,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    # Store in recordings directory
+    recordings_dir = Path("fixtures/cli_recordings")
+    recordings_dir.mkdir(exist_ok=True)
+    recording_file = recordings_dir / f"{tool}.jsonl"
+    with open(recording_file, "a") as f:
+        f.write(json.dumps(recording) + "\n")
+```
+
 ### 1. Verification Registry
 
 Central registry of verifiers for each claim type:
@@ -244,6 +381,8 @@ When writing agent tests:
 - ADR-013: Integration Testing Strategy
 - ADR-020: Event-Projection Consistency
 - ADR-015: Agent Observability
+- ADR-033: Recording-Based Integration Testing
+- ADR-034: Test Infrastructure Architecture
 
 ## References
 

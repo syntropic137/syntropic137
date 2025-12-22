@@ -7,7 +7,9 @@ import {
   ChevronRight,
   Clock,
   Coins,
+  Copy,
   Cpu,
+  FileText,
   MessageSquare,
   Play,
   Terminal,
@@ -18,13 +20,20 @@ import {
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
-import { getSession } from '../api/client'
+import { getConversationLog, getSession } from '../api/client'
+import type { ConversationLogResponse } from '../api/client'
 import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import type { OperationInfo, SessionResponse } from '../types'
 
 // Icons for operation types
 const operationIcons: Record<string, typeof Activity> = {
+  // Current AEF event types (from agent_events table)
+  tool_execution_started: Play,
+  tool_execution_completed: Terminal,
+  token_usage: Activity,
+  session_started: Play,
+  session_completed: CheckCircle2,
   // New v2 types
   message_request: MessageSquare,
   message_response: MessageSquare,
@@ -42,8 +51,17 @@ const operationIcons: Record<string, typeof Activity> = {
   validation: CheckCircle2,
 }
 
+// Event type constants for filtering
+const TOOL_EVENT_TYPES = ['tool_execution_started', 'tool_execution_completed'] as const
+
 // Colors for operation types
 const operationColors: Record<string, string> = {
+  // Current AEF event types (from agent_events table)
+  tool_execution_started: 'text-amber-400 bg-amber-500/10',
+  tool_execution_completed: 'text-emerald-400 bg-emerald-500/10',
+  token_usage: 'text-cyan-400 bg-cyan-500/10',
+  session_started: 'text-blue-400 bg-blue-500/10',
+  session_completed: 'text-green-400 bg-green-500/10',
   // New v2 types
   message_request: 'text-blue-400 bg-blue-500/10',
   message_response: 'text-indigo-400 bg-indigo-500/10',
@@ -75,6 +93,214 @@ function formatDuration(seconds: number | null): string {
   if (seconds < 1) return `${Math.round(seconds * 1000)}ms`
   if (seconds < 60) return `${seconds.toFixed(1)}s`
   return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+}
+
+// Colors for conversation event types
+const conversationEventColors: Record<string, string> = {
+  system: 'text-gray-400 bg-gray-500/10',
+  assistant: 'text-blue-400 bg-blue-500/10',
+  user: 'text-green-400 bg-green-500/10',
+  result: 'text-purple-400 bg-purple-500/10',
+}
+
+// Component for viewing conversation log
+function ConversationLogViewer({
+  sessionId,
+  onClose,
+}: {
+  sessionId: string
+  onClose: () => void
+}) {
+  const [log, setLog] = useState<ConversationLogResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedLines, setExpandedLines] = useState<Set<number>>(new Set())
+  const [copiedLine, setCopiedLine] = useState<number | null>(null)
+
+  const copyToClipboard = async (text: string, lineNumber: number) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedLine(lineNumber)
+      setTimeout(() => setCopiedLine(null), 2000)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  useEffect(() => {
+    getConversationLog(sessionId, { limit: 500 })
+      .then(setLog)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false))
+  }, [sessionId])
+
+  const toggleLine = (lineNumber: number) => {
+    setExpandedLines((prev) => {
+      const next = new Set(prev)
+      if (next.has(lineNumber)) {
+        next.delete(lineNumber)
+      } else {
+        next.add(lineNumber)
+      }
+      return next
+    })
+  }
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="rounded-xl bg-[var(--color-surface)] p-8">
+          <div className="animate-pulse text-[var(--color-text-secondary)]">
+            Loading conversation log...
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="max-w-lg rounded-xl bg-[var(--color-surface)] p-8">
+          <div className="text-red-400">Error: {error}</div>
+          <button
+            onClick={onClose}
+            className="mt-4 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!log || log.lines.length === 0) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="max-w-lg rounded-xl bg-[var(--color-surface)] p-8">
+          <div className="text-[var(--color-text-muted)]">
+            No conversation log available for this session.
+          </div>
+          <button
+            onClick={onClose}
+            className="mt-4 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex h-[90vh] w-full max-w-5xl flex-col rounded-xl bg-[var(--color-surface)] shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-6 py-4">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--color-text-primary)]">
+              Conversation Log
+            </h2>
+            <p className="text-sm text-[var(--color-text-muted)]">
+              {log.total_lines} lines • Session: {sessionId.slice(0, 8)}...
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 hover:bg-[var(--color-surface-elevated)]"
+          >
+            <XCircle className="h-5 w-5 text-[var(--color-text-muted)]" />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-4">
+          <div className="space-y-2">
+            {log.lines.map((line) => {
+              const isExpanded = expandedLines.has(line.line_number)
+              const colorClass =
+                conversationEventColors[line.event_type || ''] ||
+                'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
+              const [textColor, bgColor] = colorClass.split(' ')
+
+              return (
+                <div
+                  key={line.line_number}
+                  className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-elevated)]"
+                >
+                  {/* Summary row */}
+                  <button
+                    onClick={() => toggleLine(line.line_number)}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-[var(--color-surface)]"
+                  >
+                    <span className="font-mono text-xs text-[var(--color-text-muted)] w-8">
+                      {line.line_number + 1}
+                    </span>
+                    <span className={clsx('rounded px-2 py-0.5 text-xs font-medium', bgColor, textColor)}>
+                      {line.event_type || 'unknown'}
+                    </span>
+                    {line.tool_name && (
+                      <span className="flex items-center gap-1 text-xs text-amber-400">
+                        <Wrench className="h-3 w-3" />
+                        {line.tool_name}
+                      </span>
+                    )}
+                    {line.content_preview && (
+                      <span className="flex-1 truncate text-xs text-[var(--color-text-muted)]">
+                        {line.content_preview}
+                      </span>
+                    )}
+                    {isExpanded ? (
+                      <ChevronDown className="h-4 w-4 text-[var(--color-text-muted)]" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4 text-[var(--color-text-muted)]" />
+                    )}
+                  </button>
+
+                  {/* Expanded content */}
+                  {isExpanded && (
+                    <div className="border-t border-[var(--color-border)] p-4">
+                      {/* Copy button */}
+                      <div className="flex justify-end mb-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const content = JSON.stringify(line.parsed || JSON.parse(line.raw), null, 2)
+                            copyToClipboard(content, line.line_number)
+                          }}
+                          className={clsx(
+                            'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                            copiedLine === line.line_number
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-accent)] hover:text-white'
+                          )}
+                        >
+                          {copiedLine === line.line_number ? (
+                            <>
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Copied!
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-3.5 w-3.5" />
+                              Copy
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs text-[var(--color-text-secondary)]">
+                        {JSON.stringify(line.parsed || JSON.parse(line.raw), null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // Component for expandable operation details
@@ -142,6 +368,7 @@ export function SessionDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [showConversationLog, setShowConversationLog] = useState(false)
 
   useEffect(() => {
     if (!sessionId) return
@@ -217,6 +444,14 @@ export function SessionDetail() {
 
   return (
     <div className="space-y-6">
+      {/* Conversation Log Modal */}
+      {showConversationLog && sessionId && (
+        <ConversationLogViewer
+          sessionId={sessionId}
+          onClose={() => setShowConversationLog(false)}
+        />
+      )}
+
       {/* Breadcrumbs */}
       <Breadcrumbs items={breadcrumbs} />
 
@@ -253,6 +488,15 @@ export function SessionDetail() {
               </div>
             </div>
           </div>
+
+          {/* View Conversation Log Button */}
+          <button
+            onClick={() => setShowConversationLog(true)}
+            className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-elevated)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-accent)] hover:text-white transition-colors"
+          >
+            <FileText className="h-4 w-4" />
+            View Conversation Log
+          </button>
         </div>
       </div>
 
@@ -273,8 +517,7 @@ export function SessionDetail() {
         <MetricCard
           title="Tool Calls"
           value={session.operations.filter(op =>
-            op.operation_type === 'tool_completed' ||
-            op.operation_type === 'tool_use'
+            TOOL_EVENT_TYPES.includes(op.operation_type as typeof TOOL_EVENT_TYPES[number])
           ).length.toString()}
           icon={Wrench}
           color="default"

@@ -39,8 +39,12 @@ class PostgresProjectionStore:
         """Get or create the connection pool."""
         if self._pool is None:
             settings = get_settings()
-            # Convert PostgresDsn to string for asyncpg
-            database_url = str(settings.database_url)
+            # Use AEF Observability DB URL (ADR-030)
+            if not settings.aef_observability_db_url:
+                raise ValueError(
+                    "AEF_OBSERVABILITY_DB_URL must be configured. Set it in your .env file."
+                )
+            database_url = str(settings.aef_observability_db_url)
             self._pool = await asyncpg.create_pool(
                 database_url,
                 min_size=2,

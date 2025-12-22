@@ -77,18 +77,36 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # DATABASE (PostgreSQL)
+    # DATABASE CONNECTIONS (ADR-030: Unified TimescaleDB)
     # =========================================================================
+    # After ADR-030, we use a single TimescaleDB instance with explicit URLs
+    # for each concern. Both point to the same database but named explicitly.
 
-    database_url: Annotated[
+    esp_event_store_db_url: Annotated[
         PostgresDsn | None,
         Field(
             default=None,
             description=(
-                "PostgreSQL connection URL. "
+                "Event Sourcing Platform database URL for domain events. "
                 "Format: postgresql://user:password@host:port/database "
-                "For local dev: postgresql://postgres:postgres@localhost:5432/aef "
-                "Required for production. Optional in development (uses in-memory)."
+                "Used by Event Store (Rust) for event sourcing tables: events, aggregates, etc. "
+                "For local dev: postgresql://aef:aef_dev_password@localhost:5432/aef "
+                "For Docker: postgresql://aef:aef_dev_password@timescaledb:5432/aef"
+            ),
+        ),
+    ] = None
+
+    aef_observability_db_url: Annotated[
+        PostgresDsn | None,
+        Field(
+            default=None,
+            description=(
+                "AEF Observability database URL for agent metrics and application data. "
+                "Format: postgresql://user:password@host:port/database "
+                "Used by Dashboard API (Python) for: agent_events, workflows, artifacts, projections. "
+                "For local dev: postgresql://aef:aef_dev_password@localhost:5432/aef "
+                "For Docker: postgresql://aef:aef_dev_password@timescaledb:5432/aef "
+                "NOTE: Points to SAME database as ESP after ADR-030 consolidation."
             ),
         ),
     ] = None
@@ -105,41 +123,6 @@ class Settings(BaseSettings):
         ge=0,
         le=50,
         description="Max overflow connections beyond pool_size for burst traffic.",
-    )
-
-    # =========================================================================
-    # TIMESCALEDB (Observability) - See ADR-026
-    # =========================================================================
-
-    timescale_host: str = Field(
-        default="localhost",
-        description=(
-            "TimescaleDB host for observability events. "
-            "For Docker: timescaledb (service name). "
-            "For local dev: localhost"
-        ),
-    )
-
-    timescale_port: int = Field(
-        default=5433,
-        ge=1024,
-        le=65535,
-        description="TimescaleDB port. Default: 5433 (to avoid conflict with main PostgreSQL on 5432).",
-    )
-
-    timescale_user: str = Field(
-        default="aef",
-        description="TimescaleDB user for observability database.",
-    )
-
-    timescale_password: SecretStr = Field(
-        default=SecretStr("aef_dev_password"),
-        description="TimescaleDB password for observability database.",
-    )
-
-    timescale_db: str = Field(
-        default="aef_observability",
-        description="TimescaleDB database name for observability events.",
     )
 
     # =========================================================================
@@ -185,10 +168,32 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
+    # WORKSPACE SETTINGS - Docker-in-Docker Deployment
+    # =========================================================================
+
+    aef_workspace_container_dir: str | None = Field(
+        default=None,
+        description=(
+            "Container path for workspace directories when running dashboard in Docker. "
+            "Example: /workspaces (mounted volume inside dashboard container)"
+        ),
+    )
+
+    aef_workspace_host_dir: str | None = Field(
+        default=None,
+        description=(
+            "Host path for Docker daemon volume mounts. Required when dashboard runs in Docker. "
+            "Example: /Users/user/repo/workspaces or ${PWD}/workspaces"
+        ),
+    )
+
+    # =========================================================================
     # VALIDATORS - Convert empty strings to None
     # =========================================================================
 
-    @field_validator("database_url", "event_store_url", mode="before")
+    @field_validator(
+        "esp_event_store_db_url", "aef_observability_db_url", "event_store_url", mode="before"
+    )
     @classmethod
     def empty_str_to_none(cls, v: str | None) -> str | None:
         """Convert empty strings to None for optional URL fields."""
@@ -378,9 +383,9 @@ class Settings(BaseSettings):
         """Check if in-memory storage would be used (no database configured).
 
         WARNING: In-memory storage is for TESTING ONLY.
-        For local development, configure DATABASE_URL to use Docker PostgreSQL.
+        For local development, configure AEF_OBSERVABILITY_DB_URL to use Docker PostgreSQL.
         """
-        return self.database_url is None and self.is_test
+        return self.aef_observability_db_url is None and self.is_test
 
     # =========================================================================
     # WORKSPACE ISOLATION - See ADR-021

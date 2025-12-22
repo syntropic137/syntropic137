@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
+@pytest.mark.integration
 class TestAgentSessionRoundtrip:
     """Level 4 tests: Verify agent session persists to real event store."""
 

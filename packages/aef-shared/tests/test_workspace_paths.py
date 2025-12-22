@@ -20,12 +20,33 @@ class TestWorkspacePathConstants:
         assert isinstance(WORKSPACE_ROOT, PurePosixPath)
         assert str(WORKSPACE_ROOT) == "/workspace"
 
+    def test_workspace_artifacts_dir(self):
+        """WORKSPACE_ARTIFACTS_DIR should be /workspace/artifacts."""
+        from aef_shared.workspace_paths import WORKSPACE_ARTIFACTS_DIR
+
+        assert isinstance(WORKSPACE_ARTIFACTS_DIR, PurePosixPath)
+        assert str(WORKSPACE_ARTIFACTS_DIR) == "/workspace/artifacts"
+
     def test_workspace_output_dir(self):
-        """WORKSPACE_OUTPUT_DIR should be /workspace/artifacts."""
+        """WORKSPACE_OUTPUT_DIR should be /workspace/artifacts/output (ADR-036)."""
         from aef_shared.workspace_paths import WORKSPACE_OUTPUT_DIR
 
         assert isinstance(WORKSPACE_OUTPUT_DIR, PurePosixPath)
-        assert str(WORKSPACE_OUTPUT_DIR) == "/workspace/artifacts"
+        assert str(WORKSPACE_OUTPUT_DIR) == "/workspace/artifacts/output"
+
+    def test_workspace_input_dir(self):
+        """WORKSPACE_INPUT_DIR should be /workspace/artifacts/input (ADR-036)."""
+        from aef_shared.workspace_paths import WORKSPACE_INPUT_DIR
+
+        assert isinstance(WORKSPACE_INPUT_DIR, PurePosixPath)
+        assert str(WORKSPACE_INPUT_DIR) == "/workspace/artifacts/input"
+
+    def test_workspace_repos_dir(self):
+        """WORKSPACE_REPOS_DIR should be /workspace/repos (ADR-036)."""
+        from aef_shared.workspace_paths import WORKSPACE_REPOS_DIR
+
+        assert isinstance(WORKSPACE_REPOS_DIR, PurePosixPath)
+        assert str(WORKSPACE_REPOS_DIR) == "/workspace/repos"
 
     def test_workspace_context_dir(self):
         """WORKSPACE_CONTEXT_DIR should be /workspace/.context."""
@@ -87,12 +108,33 @@ class TestWorkspacePathConstants:
 class TestWorkspacePathRelationships:
     """Test that workspace paths have correct parent-child relationships."""
 
-    def test_output_dir_is_child_of_root(self):
-        """WORKSPACE_OUTPUT_DIR should be a child of WORKSPACE_ROOT."""
-        from aef_shared.workspace_paths import WORKSPACE_OUTPUT_DIR, WORKSPACE_ROOT
+    def test_artifacts_dir_is_child_of_root(self):
+        """WORKSPACE_ARTIFACTS_DIR should be a child of WORKSPACE_ROOT."""
+        from aef_shared.workspace_paths import WORKSPACE_ARTIFACTS_DIR, WORKSPACE_ROOT
 
-        rel_path = WORKSPACE_OUTPUT_DIR.relative_to(WORKSPACE_ROOT)
+        rel_path = WORKSPACE_ARTIFACTS_DIR.relative_to(WORKSPACE_ROOT)
         assert str(rel_path) == "artifacts"
+
+    def test_output_dir_is_child_of_artifacts(self):
+        """WORKSPACE_OUTPUT_DIR should be a child of WORKSPACE_ARTIFACTS_DIR (ADR-036)."""
+        from aef_shared.workspace_paths import WORKSPACE_ARTIFACTS_DIR, WORKSPACE_OUTPUT_DIR
+
+        rel_path = WORKSPACE_OUTPUT_DIR.relative_to(WORKSPACE_ARTIFACTS_DIR)
+        assert str(rel_path) == "output"
+
+    def test_input_dir_is_child_of_artifacts(self):
+        """WORKSPACE_INPUT_DIR should be a child of WORKSPACE_ARTIFACTS_DIR (ADR-036)."""
+        from aef_shared.workspace_paths import WORKSPACE_ARTIFACTS_DIR, WORKSPACE_INPUT_DIR
+
+        rel_path = WORKSPACE_INPUT_DIR.relative_to(WORKSPACE_ARTIFACTS_DIR)
+        assert str(rel_path) == "input"
+
+    def test_repos_dir_is_child_of_root(self):
+        """WORKSPACE_REPOS_DIR should be a child of WORKSPACE_ROOT (ADR-036)."""
+        from aef_shared.workspace_paths import WORKSPACE_REPOS_DIR, WORKSPACE_ROOT
+
+        rel_path = WORKSPACE_REPOS_DIR.relative_to(WORKSPACE_ROOT)
+        assert str(rel_path) == "repos"
 
     def test_context_dir_is_child_of_root(self):
         """WORKSPACE_CONTEXT_DIR should be a child of WORKSPACE_ROOT."""
@@ -125,7 +167,10 @@ class TestWorkspacePathExports:
 
         expected_exports = [
             "WORKSPACE_ROOT",
+            "WORKSPACE_ARTIFACTS_DIR",
             "WORKSPACE_OUTPUT_DIR",
+            "WORKSPACE_INPUT_DIR",
+            "WORKSPACE_REPOS_DIR",
             "WORKSPACE_CONTEXT_DIR",
             "WORKSPACE_TASK_FILE",
             "WORKSPACE_ANALYTICS_DIR",
@@ -144,13 +189,17 @@ class TestWorkspacePathExports:
         """Constants should be importable from aef_shared package."""
         from aef_shared import (
             WORKSPACE_CONTEXT_DIR,
+            WORKSPACE_INPUT_DIR,
             WORKSPACE_OUTPUT_DIR,
+            WORKSPACE_REPOS_DIR,
             WORKSPACE_ROOT,
             WORKSPACE_TASK_FILE,
         )
 
-        # Basic sanity check
+        # Basic sanity check (ADR-036 paths)
         assert str(WORKSPACE_ROOT) == "/workspace"
-        assert str(WORKSPACE_OUTPUT_DIR) == "/workspace/artifacts"
+        assert str(WORKSPACE_OUTPUT_DIR) == "/workspace/artifacts/output"
+        assert str(WORKSPACE_INPUT_DIR) == "/workspace/artifacts/input"
+        assert str(WORKSPACE_REPOS_DIR) == "/workspace/repos"
         assert str(WORKSPACE_CONTEXT_DIR) == "/workspace/.context"
         assert str(WORKSPACE_TASK_FILE) == "/workspace/.context/task.json"

@@ -42,6 +42,7 @@ from agentic_logging import get_logger
 from aef_adapters.agents import AgentProvider, get_agent
 
 # Adapter imports - repositories and services
+from aef_adapters.conversations import get_conversation_storage
 from aef_adapters.events import get_event_store
 from aef_adapters.storage.artifact_storage import get_artifact_storage
 from aef_adapters.storage.repositories import (
@@ -117,6 +118,9 @@ class ExecutionService:
         # Get artifact content storage for MinIO
         artifact_storage = await get_artifact_storage()
 
+        # Get conversation storage for full JSONL logs (ADR-035)
+        conversation_storage = await get_conversation_storage()
+
         # Get artifact query service for multi-phase workflows
         manager = get_projection_manager()
         artifact_query = ArtifactQueryService(manager.artifact_list)
@@ -131,6 +135,7 @@ class ExecutionService:
             observability_writer=event_store,
             artifact_query_service=artifact_query,
             artifact_content_storage=artifact_storage,
+            conversation_storage=conversation_storage,
         )
 
     async def run_workflow(
