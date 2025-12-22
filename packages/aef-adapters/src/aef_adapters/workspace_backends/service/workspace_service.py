@@ -244,8 +244,10 @@ if [ -d "$HOOKS_DIR" ]; then
     mkdir -p ~/.claude
     cat > ~/.claude/settings.json << 'SETTINGS_EOF'
 {
-  "disableAttribution": true,
-  "includeAttribution": false,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "hooks": {
     "PreToolUse": [{
       "matcher": "*",
