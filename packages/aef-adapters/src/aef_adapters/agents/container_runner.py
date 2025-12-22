@@ -54,6 +54,70 @@ class ContainerExecutionResult:
     tool_count: int = 0
 
 
+def _extract_tool_uses(event: dict[str, Any]) -> dict[str, str]:
+    """Extract tool_use_id → tool_name mappings from assistant messages.
+
+    Claude CLI emits tool_use in assistant message content, but tool_result
+    in user messages only has tool_use_id (no tool_name). We need to track
+    the mapping to enrich tool_result events.
+
+    Args:
+        event: Raw Claude CLI event (type: "assistant" with tool_use content)
+
+    Returns:
+        Dict mapping tool_use_id to tool_name
+    """
+    tool_names: dict[str, str] = {}
+
+    message = event.get("message", {})
+    content = message.get("content", [])
+
+    if not isinstance(content, list):
+        return tool_names
+
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "tool_use":
+            tool_id = item.get("id")
+            tool_name = item.get("name")
+            if tool_id and tool_name:
+                tool_names[tool_id] = tool_name
+
+    return tool_names
+
+
+def _enrich_tool_result(event: dict[str, Any], tool_names: dict[str, str]) -> dict[str, Any]:
+    """Enrich tool_result events with tool_name from cache.
+
+    Claude CLI's tool_result (in user messages) only has tool_use_id.
+    We look up the tool_name from the cached mappings.
+
+    Args:
+        event: Raw Claude CLI event
+        tool_names: Mapping of tool_use_id → tool_name
+
+    Returns:
+        Enriched event with tool_name added if applicable
+    """
+    message = event.get("message", {})
+    content = message.get("content", [])
+
+    if not isinstance(content, list):
+        return event
+
+    enriched = False
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "tool_result":
+            tool_id = item.get("tool_use_id")
+            if tool_id and tool_id in tool_names:
+                item["tool_name"] = tool_names[tool_id]
+                enriched = True
+
+    if enriched:
+        # Return a modified copy
+        return {**event, "message": {**message, "content": content}}
+    return event
+
+
 @dataclass
 class ContainerExecutionConfig:
     """Configuration for container agent execution."""
@@ -216,6 +280,10 @@ class ContainerAgentRunner:
         turn_number = 0
         estimated_cost: Decimal | None = None
 
+        # Track tool_use_id → tool_name for enriching tool_result events
+        # Claude CLI's tool_result only has tool_use_id, not tool_name
+        tool_names: dict[str, str] = {}
+
         # Emit session_started event
         await self._store_event(
             {
@@ -246,7 +314,20 @@ class ContainerAgentRunner:
 
                 event_type = event.get("type") or event.get("event_type")
 
-                # Store raw event for analytics
+                # Extract tool names from assistant messages for later enrichment
+                # Claude CLI's assistant messages contain tool_use with id and name
+                if event_type == "assistant":
+                    extracted = _extract_tool_uses(event)
+                    tool_names.update(extracted)
+                    if extracted:
+                        logger.debug("Cached tool names: %s", extracted)
+
+                # Enrich user messages (tool_result) with tool_name
+                # Claude CLI's tool_result only has tool_use_id, not tool_name
+                if event_type == "user":
+                    event = _enrich_tool_result(event, tool_names)
+
+                # Store event (now enriched with tool_name if applicable)
                 await self._store_event(
                     {**event, "session_id": session_id},
                     execution_id,

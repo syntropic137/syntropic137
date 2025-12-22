@@ -1,8 +1,223 @@
 ---
-description: 
-globs: 
+description:
+globs:
 alwaysApply: true
 ---
+# AEF System Overview
+
+## 🎯 Core Value Proposition
+
+**AEF provides two first-class capabilities:**
+
+### 1. Orchestration
+- Isolated Docker workspaces for agent execution
+- Secure token injection (API keys never in container env)
+- Lifecycle management (create → execute → cleanup)
+- Multi-phase workflow execution
+
+### 2. Observability
+- **Every agent event is captured** (tool use, tokens, costs, errors)
+- Real-time streaming to dashboard
+- Projections for aggregated metrics (session stats, tool usage)
+- Historical playback and analysis
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     AEF: Orchestration + Observability                  │
+│                                                                         │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │
+│  │  ORCHESTRATION  │───▶│   AGENT RUNS    │───▶│  OBSERVABILITY  │     │
+│  │                 │    │                 │    │                 │     │
+│  │ WorkspaceService│    │ Claude in Docker│    │ Events → Store  │     │
+│  │ Token Injection │    │ Tool Execution  │    │ Projections     │     │
+│  │ Lifecycle Mgmt  │    │ File I/O        │    │ Dashboard       │     │
+│  └─────────────────┘    └─────────────────┘    └─────────────────┘     │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Package Structure
+
+```
+packages/
+├── aef-adapters/      ← Orchestration: WorkspaceService, DockerIsolationAdapter
+│                        Observability: EventStore, Projections, Subscriptions
+├── aef-domain/        ← Domain events, aggregates, ports
+├── aef-collector/     ← Event ingestion API (receives agent events)
+└── aef-tokens/        ← Secure token vending
+
+lib/agentic-primitives/  ← Shared library (git submodule)
+└── lib/python/
+    ├── agentic_events/    ← Event recording/playback for testing
+    ├── agentic_adapters/  ← Claude CLI/SDK integration
+    └── agentic_isolation/ ← Workspace providers
+```
+
+## ⚠️ KEY CONCEPT: Containerized Agent Execution
+
+**Claude CLI runs INSIDE Docker containers, not on the host.**
+
+```
+┌──────────────────┐     ┌─────────────────────────────────────────┐
+│   AEF (Host)     │     │   Docker Container                      │
+│                  │     │   (agentic-workspace-claude-cli)        │
+│  WorkspaceService│────▶│                                         │
+│  creates/manages │     │   /workspace/  ← mounted from host      │
+│                  │     │   claude CLI   ← runs prompts here      │
+│                  │◀────│   stderr       → JSONL events           │
+│  captures events │     │                                         │
+└──────────────────┘     └─────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    OBSERVABILITY PIPELINE                       │
+│                                                                 │
+│  Events → Collector → EventStore → Projections → Dashboard     │
+│                                                                 │
+│  Every tool use, token count, cost, and error is captured      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Points:
+
+1. **Agent runs in container:** Isolated, secure, reproducible
+2. **Events stream from stderr:** Zero overhead, captured externally
+3. **Full observability:** Every event flows to dashboard in real-time
+4. **Testing with recordings:** Replay events without API calls
+
+## Common Tasks
+
+### Run Agent in Container
+```bash
+# Via WorkspaceService (Python)
+async with service.create_workspace(execution_id="test") as ws:
+    result = await ws.execute(["claude", "-p", "Hello"])
+
+# Via Docker Compose
+cd lib/agentic-primitives/providers/workspaces/claude-cli
+docker compose up
+```
+
+### Capture Recording
+```bash
+cd lib/agentic-primitives/providers/workspaces/claude-cli
+PROMPT="Your prompt" TASK="task-slug" \
+docker compose -f docker-compose.record.yaml up
+# Recording saved to fixtures/recordings/
+```
+
+### Use Recording in Tests
+```python
+from agentic_events import load_recording
+
+player = load_recording("simple-bash")
+for event in player:
+    print(event)
+```
+
+### Test Observability Pipeline with Recordings
+```python
+from aef_adapters.workspace_backends.recording import RecordingEventStreamAdapter
+
+# Replay recording through full AEF pipeline (no API calls)
+adapter = RecordingEventStreamAdapter("simple-bash")
+service = WorkspaceService.create_test(event_stream=adapter)
+
+async with service.create_workspace(execution_id="test") as ws:
+    async for line in ws.stream(["claude", "-p", "test"]):
+        # Events flow through collector → projections
+        pass
+    # Assert events appeared in dashboard/projections
+```
+
+## Testing Philosophy: Zero Defects in Manual Testing
+
+**Goal:** Manual testing should find ZERO bugs. All bugs should be caught by automated tests first.
+
+### Test Pyramid
+
+```
+         ┌─────────┐
+         │  E2E    │  ← Real API calls (expensive, few)
+         ├─────────┤
+         │ Integ.  │  ← Recording playback (free, many)
+         ├─────────┤
+         │  Unit   │  ← Fast, parallel (pytest -m unit -n auto)
+         └─────────┘
+```
+
+### Recording-Based Integration Tests
+
+- **7 recordings** available in `lib/agentic-primitives/.../fixtures/recordings/`
+- Use `RecordingEventStreamAdapter` to test full observability pipeline
+- **No API tokens spent** - recordings replay agent events
+
+### What to Test
+
+| Area | What to Verify |
+|------|----------------|
+| **Orchestration** | Workspace creates, executes, cleans up |
+| **Observability** | Events flow from agent → collector → projections → dashboard |
+| **Token counting** | Session shows correct input/output tokens |
+| **Cost tracking** | Total cost USD is accurate |
+| **Tool use** | Each tool invocation is recorded |
+
+## Test Infrastructure (ADR-034)
+
+AEF supports three testing modes that can run simultaneously:
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                        LOCAL DEVELOPMENT                                  │
+│                                                                           │
+│   DEV STACK (just dev)              TEST STACK (just test-stack)         │
+│   ├── TimescaleDB: 5432             ├── TimescaleDB: 15432               │
+│   ├── EventStore: 50051             ├── EventStore: 55051                │
+│   ├── Collector: 8080               ├── Collector: 18080                 │
+│   ├── MinIO: 9000/9001              ├── MinIO: 19000/19001               │
+│   └── Redis: 6379                   └── Redis: 16379                     │
+│                                                                           │
+│   Volumes: PERSISTENT               Volumes: NONE (ephemeral)            │
+│   Network: aef-network              Network: aef-test-network            │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### Running Tests
+
+```bash
+# Unit tests (no infrastructure needed, recording-based)
+just test-unit
+
+# Start ephemeral test infrastructure
+just test-stack           # Start test stack (ports +10000)
+just test-stack-down      # Stop and cleanup
+
+# Integration tests (uses test-stack if running, else testcontainers)
+just test-integration     # Run integration tests
+just test-integration-full # start → test → cleanup
+```
+
+### Test Fixture Detection Pattern
+
+Integration tests auto-detect infrastructure in this order:
+
+1. **Environment variables** (`TEST_DATABASE_URL`) - CI override
+2. **Test-stack running** (port 15432) - local continuous testing
+3. **Testcontainers fallback** - hermetic CI environments
+
+```python
+from aef_tests.fixtures import test_infrastructure, db_pool
+
+@pytest.mark.integration
+async def test_events_stored(test_infrastructure, db_pool):
+    # Automatically uses whichever infrastructure is available
+    async with db_pool.acquire() as conn:
+        count = await conn.fetchval("SELECT COUNT(*) FROM event_store.events")
+```
+
+---
+
 # 🔄 RIPER-5 MODE: STRICT OPERATIONAL PROTOCOL
 v2.0.5 - 20250810
 
@@ -42,7 +257,7 @@ DIRECT EXECUTE MODE or DEM // Used to bypass the plan and go straight to execute
 ```
 
 ## Meta-Instruction
-**BEGIN EVERY RESPONSE WITH YOUR CURRENT MODE IN BRACKETS.**  
+**BEGIN EVERY RESPONSE WITH YOUR CURRENT MODE IN BRACKETS.**
 **Format:** `[MODE: MODE_NAME]`
 
 ## The RIPER-5 Modes

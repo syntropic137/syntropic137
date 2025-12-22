@@ -36,6 +36,7 @@ dev = [
     "types-pyyaml>=6.0.12",
     "psycopg[binary]>=3.3.0",
     "asyncpg>=0.31.0",
+    "testcontainers>=4.13.3",
 ]
 
 [build-system]
@@ -65,6 +66,8 @@ agentic-adapters = { path = "lib/agentic-primitives/lib/python/agentic_adapters"
 agentic-settings = { path = "lib/agentic-primitives/lib/python/agentic_settings" }
 # Simple event emission (ADR-029)
 agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events" }
+# Workspace prompts for artifact instructions (ADR-012)
+agentic-workspace = { path = "lib/agentic-primitives/lib/python/agentic_workspace" }
 
 [tool.ruff]
 target-version = "py312"
@@ -171,6 +174,8 @@ module = [
     "agentic_adapters.*",
     "agentic_events",
     "agentic_events.*",
+    "agentic_workspace",
+    "agentic_workspace.*",
     "agentic_settings",
     "agentic_settings.*",
     "sse_starlette",
@@ -212,6 +217,7 @@ markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may use Docker services)",
     "e2e: End-to-end tests (full system)",
+    "regression: Regression tests for known bugs",
 ]
 
 [tool.coverage.run]

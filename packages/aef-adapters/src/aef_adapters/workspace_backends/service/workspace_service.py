@@ -196,11 +196,24 @@ class SetupPhaseSecrets:
 DEFAULT_SETUP_SCRIPT = """#!/bin/bash
 set -e
 
+# ADR-036: Workspace structure convention
+# Directories are pre-created in Docker image, validate they exist
+# - artifacts/input/  : Previous phase outputs (read-only)
+# - artifacts/output/ : Current phase deliverables (agent writes here)
+# - repos/            : Clone repositories here
+test -d /workspace/artifacts/input || mkdir -p /workspace/artifacts/input
+test -d /workspace/artifacts/output || mkdir -p /workspace/artifacts/output
+test -d /workspace/repos || mkdir -p /workspace/repos
+
 # Configure Git identity (uses env vars injected by run_setup_phase)
 # These come from the GitHub App bot configuration
 git config --global user.name "${GIT_AUTHOR_NAME}"
 git config --global user.email "${GIT_AUTHOR_EMAIL}"
 git config --global init.defaultBranch main
+
+# Disable Claude Code attribution in commits and PRs
+git config --global claude.disableAttribution true
+export ANTHROPIC_NO_ATTRIBUTION=1
 
 # Configure Git credential helper with GitHub App token
 if [ -n "${GITHUB_APP_TOKEN}" ]; then
@@ -231,6 +244,8 @@ if [ -d "$HOOKS_DIR" ]; then
     mkdir -p ~/.claude
     cat > ~/.claude/settings.json << 'SETTINGS_EOF'
 {
+  "disableAttribution": true,
+  "includeAttribution": false,
   "hooks": {
     "PreToolUse": [{
       "matcher": "*",
@@ -697,9 +712,16 @@ class WorkspaceService:
             cfg = WorkspaceServiceConfig(environment=environment or {})
 
         # Create adapters
+        # Get workspace paths from settings (for Docker-in-Docker deployment)
+        from aef_shared.settings.config import get_settings
+
+        settings = get_settings()
+
         isolation = DockerIsolationAdapter(
             default_image=cfg.image,
             use_gvisor=cfg.backend == IsolationBackendType.GVISOR,
+            workspace_container_dir=settings.aef_workspace_container_dir,
+            workspace_host_dir=settings.aef_workspace_host_dir,
         )
         sidecar = DockerSidecarAdapter()
         event_stream = DockerEventStreamAdapter()

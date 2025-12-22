@@ -51,6 +51,7 @@ def session_id():
     return str(uuid4())
 
 
+@pytest.mark.integration
 class TestSessionToolsProjection:
     """Tests for SessionToolsProjection."""
 

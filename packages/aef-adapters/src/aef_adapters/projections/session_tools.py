@@ -113,19 +113,43 @@ class SessionToolsProjection:
 
         try:
             async with pool.acquire() as conn:
-                # Use parameterized query with constants for type safety
+                # Query with LEFT JOIN to get tool_name from started events
+                # for completed events that don't have it (Claude PostToolUse
+                # hook doesn't receive tool_name, only tool_use_id)
                 rows = await conn.fetch(
                     """
+                    WITH tool_names AS (
+                        -- Get tool_name -> tool_use_id mapping from started events
+                        SELECT
+                            data->>'tool_use_id' as tool_use_id,
+                            data->>'tool_name' as tool_name
+                        FROM agent_events
+                        WHERE session_id = $1
+                          AND event_type = $2
+                          AND data->>'tool_name' IS NOT NULL
+                    )
                     SELECT
-                        event_type,
-                        time,
-                        data
-                    FROM agent_events
-                    WHERE session_id = $1
-                      AND event_type = ANY($2)
-                    ORDER BY time ASC
+                        e.event_type,
+                        e.time,
+                        -- Merge tool_name from started event into data for completed
+                        CASE
+                            WHEN e.event_type = $3 AND e.data->>'tool_name' IS NULL
+                            THEN jsonb_set(
+                                e.data::jsonb,
+                                '{tool_name}',
+                                to_jsonb(COALESCE(tn.tool_name, 'unknown'))
+                            )
+                            ELSE e.data::jsonb
+                        END as data
+                    FROM agent_events e
+                    LEFT JOIN tool_names tn ON tn.tool_use_id = e.data->>'tool_use_id'
+                    WHERE e.session_id = $1
+                      AND e.event_type = ANY($4)
+                    ORDER BY e.time ASC
                     """,
                     session_id,
+                    TOOL_STARTED,
+                    TOOL_COMPLETED,
                     list(_TOOL_EVENT_TYPES),
                 )
 

@@ -21,6 +21,9 @@ from uuid import uuid4
 # ADR-029: Simplified Event System - use agentic_events from agentic-primitives
 from agentic_events import enrich_event, parse_jsonl_line
 
+# ADR-012: Workspace prompt for artifact output instructions
+from agentic_workspace import AEF_WORKSPACE_PROMPT
+
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
     ObservationType,
@@ -43,6 +46,7 @@ from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
 
 if TYPE_CHECKING:
     from aef_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
+    from aef_adapters.conversations import ConversationStoragePort
     from aef_adapters.workspace_backends.service import WorkspaceService
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
@@ -227,6 +231,7 @@ class WorkflowExecutionEngine:
         artifact_query_service: ArtifactQueryServiceProtocol | None = None,
         observability_writer: Any | None = None,
         artifact_content_storage: ArtifactContentStoragePort | None = None,
+        conversation_storage: ConversationStoragePort | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
@@ -243,6 +248,7 @@ class WorkflowExecutionEngine:
             observability_writer: ObservabilityWriter for TimescaleDB (ADR-026)
             artifact_content_storage: Storage for artifact content in object storage
                 (MinIO/S3). If None, content stored only in event store. (ADR-012)
+            conversation_storage: Storage for full conversation logs in S3/MinIO (ADR-035)
 
         Raises:
             ValueError: If execution_repository or workspace_service is None
@@ -267,6 +273,7 @@ class WorkflowExecutionEngine:
         self._artifact_query = artifact_query_service
         self._observability_writer = observability_writer
         self._artifact_content_storage = artifact_content_storage
+        self._conversation_storage = conversation_storage
 
     async def _record_observation(
         self,
@@ -1000,14 +1007,15 @@ class WorkflowExecutionEngine:
                 logger.info("Setup phase completed, secrets cleared")
 
                 # Inject input artifacts from previous phases
+                # ADR-036: Write to artifacts/input/ (not inputs/)
                 if self._artifact_query and ctx.completed_phase_ids:
                     phase_outputs = await self._artifact_query.get_for_phase_injection(
                         execution_id=ctx.execution_id,
                         completed_phase_ids=ctx.completed_phase_ids,
                     )
-                    # Write artifacts to /workspace/inputs/
+                    # Write artifacts to /workspace/artifacts/input/
                     files_to_inject = [
-                        (f"inputs/{prev_phase_id}.md", content.encode())
+                        (f"artifacts/input/{prev_phase_id}.md", content.encode())
                         for prev_phase_id, content in phase_outputs.items()
                     ]
                     if files_to_inject:
@@ -1031,10 +1039,13 @@ class WorkflowExecutionEngine:
 
                 # ADR-029: Run Claude CLI directly (no aef-agent-runner wrapper)
                 # Build the Claude CLI command
+                # ADR-012: Append system prompt for artifact output instructions
                 claude_cmd = [
                     "claude",
                     "--print",  # Non-interactive mode
                     "--verbose",  # Required for stream-json output format
+                    "--append-system-prompt",
+                    AEF_WORKSPACE_PROMPT,  # Workspace contract from agentic-primitives
                     prompt,
                     "--output-format",
                     "stream-json",  # Stream JSON for real-time events
@@ -1067,6 +1078,13 @@ class WorkflowExecutionEngine:
                 workspace_id = getattr(workspace, "id", None)
                 agent_model = phase.agent_config.model
 
+                # Cache tool_use_id → tool_name for enriching tool_result events
+                # Claude CLI's tool_result only has tool_use_id, not tool_name
+                tool_names_cache: dict[str, str] = {}
+
+                # ADR-035: Collect all JSONL lines for conversation storage
+                conversation_lines: list[str] = []
+
                 line_count = 0
                 async for line in workspace.stream(
                     claude_cmd,
@@ -1075,6 +1093,10 @@ class WorkflowExecutionEngine:
                 ):
                     line_count += 1
                     logger.debug("Received line %d: %s", line_count, line[:100])
+
+                    # ADR-035: Collect line for conversation storage
+                    if line.strip():
+                        conversation_lines.append(line)
 
                     # ADR-029: Try hook event first (from agentic_events)
                     hook_event = parse_jsonl_line(line)
@@ -1147,6 +1169,9 @@ class WorkflowExecutionEngine:
                                     tool_use_id = item.get("id", "unknown")
                                     tool_input = item.get("input", {})
 
+                                    # Cache tool_name for enriching tool_result events
+                                    tool_names_cache[tool_use_id] = tool_name
+
                                     if self._observability_writer is not None:
                                         await self._record_observation(
                                             observation_type=ObservationType.TOOL_STARTED,
@@ -1170,20 +1195,40 @@ class WorkflowExecutionEngine:
                                 if isinstance(item, dict) and item.get("type") == "tool_result":
                                     tool_use_id = item.get("tool_use_id", "unknown")
                                     is_error = item.get("is_error", False)
+                                    # Extract tool output content
+                                    tool_content = item.get("content", "")
+                                    if isinstance(tool_content, list):
+                                        # Content can be a list of content blocks
+                                        tool_content = " ".join(
+                                            str(c.get("text", c) if isinstance(c, dict) else c)
+                                            for c in tool_content
+                                        )
+                                    output_preview = (
+                                        str(tool_content)[:500] if tool_content else None
+                                    )
+                                    # Look up tool_name from cache
+                                    tool_name = tool_names_cache.get(tool_use_id, "unknown")
 
                                     if self._observability_writer is not None:
                                         await self._record_observation(
                                             observation_type=ObservationType.TOOL_COMPLETED,
                                             session_id=session_id,
                                             data={
+                                                "tool_name": tool_name,  # Now included!
                                                 "tool_use_id": tool_use_id,
                                                 "success": not is_error,
+                                                "output_preview": output_preview,  # Show why it failed!
                                             },
                                             execution_id=execution_id,
                                             phase_id=phase.phase_id,
                                             workspace_id=workspace_id,
                                         )
-                                        logger.debug("Tool completed: %s", tool_use_id)
+                                        logger.debug(
+                                            "Tool completed: %s (%s) success=%s",
+                                            tool_use_id,
+                                            tool_name,
+                                            not is_error,
+                                        )
 
                         if cli_type in ("system",):
                             logger.debug("CLI message: %s", cli_type)
@@ -1199,9 +1244,46 @@ class WorkflowExecutionEngine:
                     total_output_tokens,
                 )
 
+                # ADR-035: Store conversation log to MinIO/S3
+                if self._conversation_storage is not None and conversation_lines:
+                    try:
+                        from aef_adapters.conversations import SessionContext
+
+                        conv_context = SessionContext(
+                            execution_id=ctx.execution_id,
+                            phase_id=phase.phase_id,
+                            workflow_id=ctx.workflow_id,
+                            model=phase.agent_config.model,
+                            event_count=len(conversation_lines),
+                            tool_counts={},  # Could extract from tool_names_cache
+                            total_input_tokens=total_input_tokens,
+                            total_output_tokens=total_output_tokens,
+                            started_at=phase_started_at,
+                            completed_at=datetime.now(UTC),
+                            success=True,
+                        )
+                        await self._conversation_storage.store_session(
+                            session_id=session_id,
+                            lines=conversation_lines,
+                            context=conv_context,
+                        )
+                        logger.info(
+                            "Conversation log stored: %s (%d lines)",
+                            session_id,
+                            len(conversation_lines),
+                        )
+                    except Exception as conv_err:
+                        # Don't fail the phase if conversation storage fails
+                        logger.warning(
+                            "Failed to store conversation log for %s: %s",
+                            session_id,
+                            conv_err,
+                        )
+
                 # Collect output artifacts
+                # ADR-036: Collect from artifacts/output/ (not artifacts/)
                 artifacts = await workspace.collect_files(
-                    patterns=["artifacts/**/*"],
+                    patterns=["artifacts/output/**/*"],
                 )
 
                 # Create artifact records for each output

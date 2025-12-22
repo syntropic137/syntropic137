@@ -13,26 +13,38 @@ help:
     @just --list
 
 # --- Development Commands ---
+# Uses DRY Docker Compose: base + override files (ADR-034)
 
 # Setup and run the development environment
 dev:
-    @echo "Setting up development environment..."
+    @echo "🚀 Starting dev stack..."
     uv sync
-    docker compose -f docker/docker-compose.dev.yaml up --build -d
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up --build -d
+    @echo "✅ Dev stack running:"
+    @echo "   • TimescaleDB: 5432"
+    @echo "   • Event Store: 50051"
+    @echo "   • Collector API: 8080"
+    @echo "   • Dashboard API: 8000"
+    @echo "   • MinIO: 9000 (API), 9001 (Console)"
+    @echo "   • Redis: 6379"
     @echo "Development environment ready. Run 'just cli --help' to get started."
 
-# Stop development environment
+# Stop development environment (preserves data)
+dev-stop:
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml stop
+
+# Stop and remove dev containers (preserves volumes)
 dev-down:
-    docker compose -f docker/docker-compose.dev.yaml down
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down
 
 # View development logs
 dev-logs:
-    docker compose -f docker/docker-compose.dev.yaml logs -f
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml logs -f
 
 # Reset development environment (removes volumes)
 dev-reset:
-    docker compose -f docker/docker-compose.dev.yaml down -v
-    docker compose -f docker/docker-compose.dev.yaml up --build -d
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up --build -d
 
 # Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
 # Builds workspace image if missing
@@ -42,7 +54,7 @@ dev-force: _workspace-check
     -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
     -lsof -ti:8001 | xargs kill -9 2>/dev/null || true
     @echo "Starting Docker services..."
-    docker compose -f docker/docker-compose.dev.yaml up -d
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d
     @sleep 2
     @echo "Starting dashboard backend on :8000..."
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
@@ -67,13 +79,14 @@ dev-force: _workspace-check
 # Clean database, seed workflows, and start full dev stack (fresh start)
 dev-fresh:
     @echo "🧹 Cleaning database and restarting full stack..."
-    docker compose -f docker/docker-compose.dev.yaml down -v
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
     @echo "Building & starting Docker services (PostgreSQL + Event Store)..."
-    docker compose -f docker/docker-compose.dev.yaml up -d --build
-    @sleep 4
-    @echo "🌱 Running database migrations..."
-    just feedback-migrate
-    @echo "🌱 Seeding workflows (before backend starts)..."
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
+    @echo "⏳ Waiting for services to be healthy..."
+    @sleep 5
+    @echo "🌱 Running database migrations (optional - needs psql)..."
+    -just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
+    @echo "🌱 Seeding workflows..."
     just seed-workflows
     @echo ""
     @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
@@ -194,11 +207,64 @@ feedback-install:
 dashboard-qa: dashboard-lint dashboard-build
     @echo "✅ Dashboard UI checks passed!"
 
+# --- Test Stack (ephemeral, different ports) ---
+# See ADR-034: Test Infrastructure Architecture
+
+# Start test stack (ephemeral, ports +10000 from dev)
+test-stack:
+    @echo "🧪 Starting test stack..."
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml up -d --build
+    @echo "✅ Test stack running on ports 15432, 18080, 55051, 19000, 16379"
+
+# Stop test stack
+test-stack-stop:
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml stop
+
+# Stop and remove test stack (cleans everything)
+test-stack-down:
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml down -v
+
+# Restart test stack (clean slate)
+test-stack-restart: test-stack-down test-stack
+
+# View test stack logs
+test-stack-logs:
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml logs -f
+
 # --- Testing & Quality Assurance ---
 
-# Run all tests with coverage
+# Run all tests
 test:
+    @echo "Running all tests..."
     uv run pytest
+
+# Fast unit tests (parallel execution)
+test-unit:
+    @echo "Running unit tests (parallel)..."
+    uv run pytest -m unit -n auto --tb=short
+
+# Integration tests (uses test-stack if running, else testcontainers)
+test-integration:
+    @echo "🧪 Running integration tests..."
+    @echo "   (Uses test-stack if running, otherwise testcontainers)"
+    uv run pytest -m integration --tb=short
+
+# Run integration tests with test-stack lifecycle (start → test → cleanup)
+test-integration-full: test-stack
+    @echo "🧪 Running integration tests against test stack..."
+    uv run pytest -m integration --tb=short || (just test-stack-down && exit 1)
+    @echo "🧹 Cleaning up test stack..."
+    just test-stack-down
+
+# E2E tests
+test-e2e:
+    @echo "Running E2E tests..."
+    uv run pytest -m e2e --tb=short
+
+# Fast CI check (unit tests only, with coverage)
+ci-fast:
+    @echo "Running fast CI tests..."
+    uv run pytest -m unit -n auto --cov --tb=short
 
 # Run tests with coverage report
 test-cov:
@@ -355,7 +421,7 @@ clean:
     find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
     find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
     find . -type f -name "*.pyc" -exec rm {} + 2>/dev/null || true
-    docker compose -f docker/docker-compose.dev.yaml down -v 2>/dev/null || true
+    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v 2>/dev/null || true
     @echo "Cleanup complete."
 
 # Update dependencies to latest versions

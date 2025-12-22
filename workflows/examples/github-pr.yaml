@@ -62,8 +62,9 @@ phases:
 
       1. **Clone the repository:**
          ```bash
-         git clone {{repo_url}} /workspace/repo
-         cd /workspace/repo
+         cd /workspace/repos
+         git clone {{repo_url}}
+         cd $(basename {{repo_url}} .git)
          ```
 
       2. **Create a feature branch:**
@@ -85,8 +86,9 @@ phases:
       5. **Push and create PR:**
          ```bash
          git push origin feat/agent-{{execution_id}}
-         gh pr create --title "🤖 Agent: {{change_description}}" --body "$(cat <<'BODY'
-         ## Summary
+         gh pr create \
+           --title "Agent: {{change_description}}" \
+           --body "## Summary
 
          This PR was created by an AEF agent.
 
@@ -98,20 +100,46 @@ phases:
          [Describe the changes you made]
 
          ---
-         *Automated PR by aef-engineer-beta[bot]*
-         BODY
-         )"
+         *Automated PR by aef-engineer-beta[bot]*"
          ```
 
-      6. **Output the PR URL:**
-         After creating the PR, output the URL so it can be captured as an artifact.
+      6. **Write summary to artifacts (REQUIRED):**
+         After creating the PR, you MUST write your actual summary to `/workspace/artifacts/output/deliverable.md`.
+
+         **Include these details with your ACTUAL content (not placeholders):**
+         - What changes you made
+         - The commit hash(es)
+         - The PR URL from `gh pr create`
+         - A brief executive summary
+
+         Example:
+         ```markdown
+         # PR Creation Summary
+
+         ## Changes Made
+         - Added a new greeting function to hello.py
+         - Updated README with usage examples
+
+         ## Commits
+         - `a1b2c3d` feat: add new greeting feature
+
+         ## Pull Request
+         - URL: https://github.com/org/repo/pull/42
+         - Branch: feat/agent-{{execution_id}}
+         - Status: Open
+
+         ## Executive Summary
+         Created a new greeting function that supports multiple languages.
+         PR is ready for review.
+         ```
 
       ### Important Notes
 
       - Git credentials are pre-configured via the setup phase (ADR-024)
       - Git user.name and user.email are set to the GitHub App bot identity
       - You have full access to bash commands in the workspace
-      - Work inside `/workspace/repo` after cloning
+      - Clone repositories to `/workspace/repos/`
+      - **The code on GitHub is the deliverable. The artifact is your summary.**
 
   - id: verify-pr
     name: Verify Pull Request
@@ -133,22 +161,57 @@ phases:
       You are verifying that the Pull Request was created successfully.
 
       ## Previous Phase Output
-      {{create-pr}}
+
+      First, check what files are available from the previous phase:
+      ```bash
+      ls -la /workspace/artifacts/input/
+      ```
+
+      Read the summary from the previous phase:
+      ```bash
+      cat /workspace/artifacts/input/create-pr.md
+      ```
+
+      This should contain the PR URL and summary of changes made by the create-pr phase.
+
+      **If the file contains only placeholder text (like "# [Title]" with "..."),
+      that means the previous phase did NOT complete successfully. Report this as a failure.**
 
       ## Instructions
 
-      1. Extract the PR URL from the previous phase output
-      2. Use `gh pr view` to verify the PR exists and get its details
-      3. Create a verification report with:
-         - PR URL
-         - PR Number
-         - PR State (open/closed)
-         - Branch name
-         - Files changed
+      1. Read the previous phase summary to find the PR URL
+      2. Clone the repository to access gh CLI context:
+         ```bash
+         cd /workspace/repos
+         git clone {{repo_url}}
+         cd $(basename {{repo_url}} .git)
+         ```
+      3. Use `gh pr view` to verify the PR exists:
+         ```bash
+         gh pr view <PR_NUMBER_OR_URL> --json url,number,state,headRefName,files
+         ```
+      4. Write a verification report to `/workspace/artifacts/output/deliverable.md`:
 
-      ```bash
-      cd /workspace/repo
-      gh pr view --json url,number,state,headRefName,files
-      ```
+         **Include your ACTUAL findings (not placeholders):**
 
-      Output a JSON verification report.
+         ```markdown
+         # PR Verification Report
+
+         ## PR Details
+         - URL: https://github.com/org/repo/pull/42
+         - Number: 42
+         - State: open
+         - Branch: feat/agent-xyz
+
+         ## Files Changed
+         - src/hello.py
+         - README.md
+
+         ## Verification Status
+         - [x] PR exists
+         - [x] PR is open
+         - [x] Changes match expectations
+
+         ## Notes
+         PR looks good and is ready for review.
+         ```

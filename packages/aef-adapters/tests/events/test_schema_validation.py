@@ -1,6 +1,10 @@
 """Tests for schema validation in AgentEventStore.
 
 Tests both positive (schema matches) and negative (schema mismatch) cases.
+
+Updated to match simplified schema (ADR-029):
+- No 'id' column (TimescaleDB manages internally)
+- All string fields use 'text' type
 """
 
 from unittest.mock import AsyncMock
@@ -11,6 +15,7 @@ from aef_adapters.events.models import EXPECTED_COLUMNS
 from aef_adapters.events.store import AgentEventStore, SchemaValidationError
 
 
+@pytest.mark.integration
 class TestSchemaValidation:
     """Tests for _validate_schema method."""
 
@@ -28,35 +33,17 @@ class TestSchemaValidation:
 
     async def test_valid_schema_passes(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
         """Should pass when schema matches expected columns."""
-        # Mock DB returns matching schema
+        # Mock DB returns matching schema (simplified - all text types)
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "character varying"},
-            {"column_name": "session_id", "data_type": "uuid"},
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "event_type", "data_type": "text"},
+            {"column_name": "session_id", "data_type": "text"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
         ]
 
         # Should not raise
-        await store._validate_schema(mock_conn)
-
-    async def test_valid_schema_with_length_suffix(
-        self, store: AgentEventStore, mock_conn: AsyncMock
-    ) -> None:
-        """Should pass when varchar has length suffix like 'character varying(100)'."""
-        mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
-            {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "character varying(100)"},  # With length
-            {"column_name": "session_id", "data_type": "uuid"},
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying(255)"},  # With length
-            {"column_name": "data", "data_type": "jsonb"},
-        ]
-
-        # Should not raise - partial match works
         await store._validate_schema(mock_conn)
 
     async def test_valid_schema_with_extra_columns(
@@ -64,12 +51,11 @@ class TestSchemaValidation:
     ) -> None:
         """Should pass when DB has extra columns beyond expected."""
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "character varying"},
-            {"column_name": "session_id", "data_type": "uuid"},
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "event_type", "data_type": "text"},
+            {"column_name": "session_id", "data_type": "text"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
             {"column_name": "extra_column", "data_type": "text"},  # Extra column is OK
         ]
@@ -85,12 +71,11 @@ class TestSchemaValidation:
         """Should raise SchemaValidationError when a column is missing."""
         # Missing 'session_id' column
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "character varying"},
+            {"column_name": "event_type", "data_type": "text"},
             # session_id MISSING
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
         ]
 
@@ -101,14 +86,13 @@ class TestSchemaValidation:
 
     async def test_wrong_type_raises(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
         """Should raise SchemaValidationError when column type is wrong."""
-        # session_id should be uuid, not text
+        # session_id should be text, not uuid
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "character varying"},
-            {"column_name": "session_id", "data_type": "text"},  # WRONG TYPE
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "event_type", "data_type": "text"},
+            {"column_name": "session_id", "data_type": "uuid"},  # WRONG TYPE
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
         ]
 
@@ -116,8 +100,8 @@ class TestSchemaValidation:
             await store._validate_schema(mock_conn)
 
         assert "session_id" in str(exc_info.value)
-        assert "expected 'uuid'" in str(exc_info.value)
-        assert "got 'text'" in str(exc_info.value)
+        assert "expected 'text'" in str(exc_info.value)
+        assert "got 'uuid'" in str(exc_info.value)
 
     async def test_multiple_errors_reported(
         self, store: AgentEventStore, mock_conn: AsyncMock
@@ -125,12 +109,11 @@ class TestSchemaValidation:
         """Should report all mismatches, not just the first one."""
         # Multiple issues: missing column AND wrong type
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "text"},  # WRONG - should be varchar
+            {"column_name": "event_type", "data_type": "varchar"},  # WRONG - should be text
             # session_id MISSING
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
         ]
 
@@ -162,12 +145,11 @@ class TestSchemaValidation:
         For stricter validation, update the comparison logic.
         """
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp without time zone"},
-            {"column_name": "event_type", "data_type": "character varying"},
-            {"column_name": "session_id", "data_type": "uuid"},
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "event_type", "data_type": "text"},
+            {"column_name": "session_id", "data_type": "text"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
         ]
 
@@ -179,12 +161,11 @@ class TestSchemaValidation:
     ) -> None:
         """Should catch when time column is completely wrong type."""
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
-            {"column_name": "time", "data_type": "text"},  # Completely wrong
-            {"column_name": "event_type", "data_type": "character varying"},
-            {"column_name": "session_id", "data_type": "uuid"},
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "time", "data_type": "bigint"},  # Completely wrong
+            {"column_name": "event_type", "data_type": "text"},
+            {"column_name": "session_id", "data_type": "text"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "jsonb"},
         ]
 
@@ -198,12 +179,11 @@ class TestSchemaValidation:
     ) -> None:
         """Should catch json vs jsonb mismatch."""
         mock_conn.fetch.return_value = [
-            {"column_name": "id", "data_type": "uuid"},
             {"column_name": "time", "data_type": "timestamp with time zone"},
-            {"column_name": "event_type", "data_type": "character varying"},
-            {"column_name": "session_id", "data_type": "uuid"},
-            {"column_name": "execution_id", "data_type": "uuid"},
-            {"column_name": "phase_id", "data_type": "character varying"},
+            {"column_name": "event_type", "data_type": "text"},
+            {"column_name": "session_id", "data_type": "text"},
+            {"column_name": "execution_id", "data_type": "text"},
+            {"column_name": "phase_id", "data_type": "text"},
             {"column_name": "data", "data_type": "json"},  # WRONG - should be jsonb
         ]
 
@@ -218,16 +198,16 @@ class TestExpectedColumnsConstant:
     """Tests for EXPECTED_COLUMNS constant."""
 
     def test_expected_columns_has_all_required(self) -> None:
-        """Verify EXPECTED_COLUMNS has all required columns."""
-        required = {"id", "time", "event_type", "session_id", "execution_id", "phase_id", "data"}
+        """Verify EXPECTED_COLUMNS has all required columns (simplified schema)."""
+        # No 'id' column in simplified schema
+        required = {"time", "event_type", "session_id", "execution_id", "phase_id", "data"}
         assert set(EXPECTED_COLUMNS.keys()) == required
 
     def test_expected_columns_types(self) -> None:
-        """Verify expected column types are correct."""
-        assert EXPECTED_COLUMNS["id"] == "uuid"
-        assert EXPECTED_COLUMNS["session_id"] == "uuid"
-        assert EXPECTED_COLUMNS["execution_id"] == "uuid"
+        """Verify expected column types are correct (simplified - all text)."""
+        assert EXPECTED_COLUMNS["session_id"] == "text"
+        assert EXPECTED_COLUMNS["execution_id"] == "text"
+        assert EXPECTED_COLUMNS["phase_id"] == "text"
+        assert EXPECTED_COLUMNS["event_type"] == "text"
         assert EXPECTED_COLUMNS["time"] == "timestamp with time zone"
-        assert EXPECTED_COLUMNS["event_type"] == "character varying"
-        assert EXPECTED_COLUMNS["phase_id"] == "character varying"
         assert EXPECTED_COLUMNS["data"] == "jsonb"

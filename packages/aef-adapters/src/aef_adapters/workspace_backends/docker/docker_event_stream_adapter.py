@@ -17,6 +17,9 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
+# Use tested shell utilities from agentic-primitives
+from agentic_workspace import escape_for_bash
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -90,8 +93,10 @@ class DockerEventStreamAdapter:
         # If merging stderr, wrap command in bash to redirect stderr to stdout
         # This ensures hook events (written to stderr) are captured
         if merge_stderr:
-            # Wrap command in bash with stderr redirect
-            escaped_cmd = " ".join(f'"{c}"' if " " in c else c for c in command)
+            # Use escape_for_bash from agentic-primitives to properly escape
+            # ALL special characters including newlines, backticks, and shell
+            # metacharacters (fixes issue where multi-line prompts broke)
+            escaped_cmd = escape_for_bash(command)
             exec_cmd.extend(["bash", "-c", f"{escaped_cmd} 2>&1"])
         else:
             exec_cmd.extend(command)

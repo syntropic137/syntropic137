@@ -374,3 +374,42 @@ export async function getExecutionCost(
 export async function getCostSummary(): Promise<CostSummary> {
   return fetchJSON(`${API_BASE}/costs/summary`)
 }
+
+// =============================================================================
+// CONVERSATION LOG API (ADR-035)
+// =============================================================================
+
+export interface ConversationLine {
+  line_number: number
+  raw: string
+  parsed: Record<string, unknown> | null
+  event_type: string | null
+  tool_name: string | null
+  content_preview: string | null
+}
+
+export interface ConversationLogResponse {
+  session_id: string
+  lines: ConversationLine[]
+  total_lines: number
+  metadata: Record<string, unknown> | null
+}
+
+/**
+ * Get conversation log for a session.
+ *
+ * @param sessionId - The session ID
+ * @param options - Pagination options
+ * @returns Conversation log with parsed lines
+ */
+export async function getConversationLog(
+  sessionId: string,
+  options?: { offset?: number; limit?: number }
+): Promise<ConversationLogResponse> {
+  const searchParams = new URLSearchParams()
+  if (options?.offset !== undefined) searchParams.set('offset', String(options.offset))
+  if (options?.limit !== undefined) searchParams.set('limit', String(options.limit))
+
+  const query = searchParams.toString()
+  return fetchJSON(`${API_BASE}/conversations/${sessionId}${query ? `?${query}` : ''}`)
+}
