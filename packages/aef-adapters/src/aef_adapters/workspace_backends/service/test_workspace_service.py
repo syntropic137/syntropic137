@@ -270,8 +270,8 @@ class TestWorkspaceServiceConfig:
         config = WorkspaceServiceConfig()
 
         assert config.backend == IsolationBackendType.DOCKER_HARDENED
-        assert config.memory_limit_mb == 512
-        assert config.cpu_limit_cores == 1.0
+        assert config.memory_limit_mb == 2048
+        assert config.cpu_limit_cores == 2.0
         assert config.timeout_seconds == 3600
         assert "api.anthropic.com" in config.allowed_hosts
         assert config.default_token_ttl == 300
