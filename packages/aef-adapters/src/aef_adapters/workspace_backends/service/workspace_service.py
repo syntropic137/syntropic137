@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING
 
 from aef_domain.contexts.workspaces._shared.value_objects import (
@@ -59,6 +60,34 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+
+class WorkspaceBackend(Enum):
+    """Backend type for workspace isolation.
+
+    Type-safe enum for selecting workspace backend. Use with WorkspaceService.create().
+
+    Backends:
+        DOCKER: Production-grade isolation using Docker containers.
+                Uses agentic_isolation.WorkspaceDockerProvider with security hardening.
+
+        MEMORY: In-memory mocks for fast unit testing.
+                TEST ENVIRONMENT ONLY - will fail if APP_ENVIRONMENT != "test".
+
+        LOCAL: Local filesystem for integration testing without Docker.
+               TEST ENVIRONMENT ONLY - will fail if APP_ENVIRONMENT != "test".
+
+    Usage:
+        # Production (default)
+        service = WorkspaceService.create(backend=WorkspaceBackend.DOCKER)
+
+        # Testing
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
+    """
+
+    DOCKER = "docker"
+    MEMORY = "memory"
+    LOCAL = "local"
 
 
 class GitHubAppNotConfiguredError(Exception):
@@ -552,17 +581,22 @@ class WorkspaceService:
 
     This is the main entry point for creating and managing workspaces.
     It composes:
-    - IsolationBackendPort (container management)
+    - IsolationBackendPort (container management via agentic_isolation)
     - SidecarPort (proxy management)
     - TokenInjectionAdapter (token vending + injection)
     - EventStreamPort (stdout streaming)
 
-    Factory methods:
-    - create_docker(): Production configuration with Docker
-    - create_memory(): Test configuration with mocks
+    Factory method:
+        WorkspaceService.create(backend=WorkspaceBackend.DOCKER)  # Production
+        WorkspaceService.create(backend=WorkspaceBackend.MEMORY)  # Testing
+
+    Backends:
+        DOCKER: Production-grade isolation using Docker containers
+        MEMORY: In-memory mocks (requires APP_ENVIRONMENT=test)
+        LOCAL: Local filesystem (requires APP_ENVIRONMENT=test)
 
     Usage:
-        service = WorkspaceService.create_docker()
+        service = WorkspaceService.create()  # Defaults to DOCKER
 
         async with service.create_workspace(
             execution_id="exec-123",
@@ -604,29 +638,66 @@ class WorkspaceService:
         self._config = config or WorkspaceServiceConfig()
 
     @classmethod
-    def create_docker(
+    def create(
         cls,
+        backend: WorkspaceBackend = WorkspaceBackend.DOCKER,
         config: WorkspaceServiceConfig | None = None,
-        token_service: object | None = None,  # TokenVendingService
+        token_service: object | None = None,
         environment: dict[str, str] | None = None,
     ) -> WorkspaceService:
-        """Create WorkspaceService with Docker adapters.
+        """Create WorkspaceService with explicit backend selection.
 
-        This is the production configuration.
+        This is the main factory method. Pass the backend type explicitly
+        for type-safe, clear configuration.
 
         Args:
+            backend: Which backend to use (DOCKER, MEMORY, LOCAL).
+                     MEMORY and LOCAL only work in test environment.
             config: Optional service configuration
-            token_service: Optional TokenVendingService (uses default if None)
-            environment: Environment variables to pass to containers (e.g., ANTHROPIC_API_KEY)
+            token_service: Optional TokenVendingService
+            environment: Environment variables for containers
 
         Returns:
             Configured WorkspaceService
+
+        Raises:
+            RuntimeError: If MEMORY/LOCAL used outside test environment
+
+        Examples:
+            # Production
+            service = WorkspaceService.create(backend=WorkspaceBackend.DOCKER)
+
+            # Testing (requires APP_ENVIRONMENT=test)
+            service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
         """
-        from aef_adapters.workspace_backends.docker import (
-            DockerEventStreamAdapter,
-            DockerIsolationAdapter,
-            DockerSidecarAdapter,
+        if backend == WorkspaceBackend.MEMORY:
+            return cls._create_memory_impl(config=config)
+
+        if backend == WorkspaceBackend.LOCAL:
+            return cls._create_local_impl(config=config)
+
+        # Default: DOCKER
+        return cls._create_docker_impl(
+            config=config,
+            token_service=token_service,
+            environment=environment,
         )
+
+    @classmethod
+    def _create_docker_impl(
+        cls,
+        config: WorkspaceServiceConfig | None = None,
+        token_service: object | None = None,
+        environment: dict[str, str] | None = None,
+    ) -> WorkspaceService:
+        """Internal: Create WorkspaceService with Docker backend."""
+        from agentic_isolation import SecurityConfig
+
+        from aef_adapters.workspace_backends.agentic import (
+            AgenticEventStreamAdapter,
+            AgenticIsolationAdapter,
+        )
+        from aef_adapters.workspace_backends.docker import DockerSidecarAdapter
         from aef_adapters.workspace_backends.tokens import (
             SidecarTokenInjectionAdapter,
             TokenVendingServiceAdapter,
@@ -637,7 +708,6 @@ class WorkspaceService:
         if config:
             cfg = config
             if environment:
-                # Merge environment into existing config
                 merged_env = dict(cfg.environment)
                 merged_env.update(environment)
                 cfg = WorkspaceServiceConfig(
@@ -654,20 +724,23 @@ class WorkspaceService:
         else:
             cfg = WorkspaceServiceConfig(environment=environment or {})
 
-        # Create adapters
-        # Get workspace paths from settings (for Docker-in-Docker deployment)
-        from aef_shared.settings.config import get_settings
-
-        settings = get_settings()
-
-        isolation = DockerIsolationAdapter(
-            default_image=cfg.image,
-            use_gvisor=cfg.backend == IsolationBackendType.GVISOR,
-            workspace_container_dir=settings.aef_workspace_container_dir,
-            workspace_host_dir=settings.aef_workspace_host_dir,
+        # Choose security profile based on backend type
+        security = (
+            SecurityConfig.production()
+            if cfg.backend == IsolationBackendType.GVISOR
+            else SecurityConfig.development()
         )
+
+        # Create adapters using agentic_isolation
+        isolation = AgenticIsolationAdapter(
+            default_image=cfg.image,
+            security=security,
+        )
+        event_stream = AgenticEventStreamAdapter()
+        event_stream.set_provider(isolation._provider)
+
+        # Sidecar still uses Docker adapter
         sidecar = DockerSidecarAdapter()
-        event_stream = DockerEventStreamAdapter()
 
         # Token vending
         tvs = token_service or get_token_vending_service()
@@ -675,7 +748,7 @@ class WorkspaceService:
         token_injection = SidecarTokenInjectionAdapter(vending, sidecar)
 
         return cls(
-            isolation=isolation,
+            isolation=isolation,  # type: ignore[arg-type]
             sidecar=sidecar,
             token_injection=token_injection,
             event_stream=event_stream,  # type: ignore[arg-type]
@@ -683,20 +756,11 @@ class WorkspaceService:
         )
 
     @classmethod
-    def create_memory(
+    def _create_memory_impl(
         cls,
         config: WorkspaceServiceConfig | None = None,
     ) -> WorkspaceService:
-        """Create WorkspaceService with in-memory adapters for testing.
-
-        ⚠️  TEST ENVIRONMENT ONLY - will fail in production.
-
-        Args:
-            config: Optional service configuration
-
-        Returns:
-            Configured WorkspaceService for testing
-        """
+        """Internal: Create WorkspaceService with memory backend (test only)."""
         from aef_adapters.workspace_backends.memory import (
             MemoryEventStreamAdapter,
             MemoryIsolationAdapter,
@@ -728,6 +792,21 @@ class WorkspaceService:
             event_stream=event_stream,  # type: ignore[arg-type]
             config=cfg,
         )
+
+    @classmethod
+    def _create_local_impl(
+        cls,
+        config: WorkspaceServiceConfig | None = None,
+    ) -> WorkspaceService:
+        """Internal: Create WorkspaceService with local backend (test only)."""
+        from aef_shared.settings.environment import check_test_environment
+
+        check_test_environment()  # Raises if not test
+
+        # TODO: Implement using agentic_isolation.WorkspaceLocalProvider
+        # For now, fall back to memory
+        logger.warning("LOCAL backend not fully implemented, using MEMORY")
+        return cls._create_memory_impl(config=config)
 
     @asynccontextmanager
     async def create_workspace(

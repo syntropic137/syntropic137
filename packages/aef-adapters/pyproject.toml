@@ -10,6 +10,7 @@ dependencies = [
     "aef-tokens", # Token vending service (ADR-022)
     "agentic-logging", # Structured logging (ADR-014 from agentic-primitives)
     "agentic-events", # Simple event emission (ADR-029)
+    "agentic-isolation", # Workspace isolation (ADR-021 from agentic-primitives)
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",

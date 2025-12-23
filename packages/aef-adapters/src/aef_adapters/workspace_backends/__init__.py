@@ -1,21 +1,23 @@
 """Workspace backends - implementations of workspace ports.
 
 This package contains adapter implementations for the workspace bounded context:
+- service/: WorkspaceService facade (RECOMMENDED entry point)
+- agentic/: Adapters using agentic_isolation from agentic-primitives
 - memory/: In-memory adapters for testing (TEST ENVIRONMENT ONLY)
-- docker/: Docker-based adapters for development/production
+- docker/: Sidecar proxy adapter
 - recording/: Recording playback for integration testing (TEST ENVIRONMENT ONLY)
-- firecracker/: Firecracker VM adapters for production (future)
-- cloud/: Cloud sandbox adapters (E2B, Modal) (future)
 
 Usage:
-    # For testing (APP_ENVIRONMENT=test only)
-    from aef_adapters.workspace_backends.memory import MemoryIsolationAdapter
+    from aef_adapters.workspace_backends.service import (
+        WorkspaceService,
+        WorkspaceBackend,
+    )
 
-    # For integration testing with recordings (APP_ENVIRONMENT=test only)
-    from aef_adapters.workspace_backends.recording import RecordingEventStreamAdapter
+    # Production (Docker isolation)
+    service = WorkspaceService.create()
 
-    # For production
-    from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
+    # Testing (requires APP_ENVIRONMENT=test)
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
 See ADR-004 (Mock Objects: Test Environment Only) and ADR-023 (Workspace-First Execution).
 See ADR-033 (Recording-Based Integration Testing).

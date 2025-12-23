@@ -19,9 +19,9 @@ Usage:
     mock_isolation = Mock(spec=IsolationBackendPort)
     aggregate = WorkspaceAggregate(isolation_port=mock_isolation)
 
-    # In production (with real adapters)
-    docker_adapter = DockerIsolationAdapter(docker_client)
-    aggregate = WorkspaceAggregate(isolation_port=docker_adapter)
+    # In production (use WorkspaceService)
+    from aef_adapters.workspace_backends.service import WorkspaceService
+    service = WorkspaceService.create()  # Uses agentic_isolation
 """
 
 from __future__ import annotations
@@ -54,9 +54,9 @@ class IsolationBackendPort(Protocol):
     """Port for creating/managing isolation environments.
 
     Implementations:
-        - DockerIsolationAdapter: Docker containers (dev/prod)
-        - FirecrackerAdapter: Firecracker MicroVMs (prod)
-        - E2BAdapter: E2B cloud sandboxes
+        - AgenticIsolationAdapter: Docker via agentic_isolation (recommended)
+        - FirecrackerAdapter: Firecracker MicroVMs (future)
+        - E2BAdapter: E2B cloud sandboxes (future)
         - MemoryIsolationAdapter: In-memory for testing
 
     Lifecycle:
@@ -412,7 +412,7 @@ class EventStreamPort(Protocol):
     Used to capture agent runner events (JSONL format).
 
     Implementations:
-        - DockerEventStreamAdapter: Stream via docker exec
+        - AgenticEventStreamAdapter: Stream via agentic_isolation
         - MemoryEventStreamAdapter: Mock for testing
     """
 

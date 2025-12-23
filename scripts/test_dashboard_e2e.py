@@ -49,7 +49,7 @@ async def test_workspace_service() -> bool:
     try:
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_docker()
+        service = WorkspaceService.create()
 
         async with service.create_workspace(
             execution_id=f"e2e-test-{datetime.now(UTC).strftime('%H%M%S')}",
@@ -142,7 +142,7 @@ async def test_workflow_executor_integration() -> bool:
         from aef_adapters.workspace_backends.service import WorkspaceService
 
         # Create executor with all dependencies
-        workspace_service = WorkspaceService.create_docker()
+        workspace_service = WorkspaceService.create()
 
         executor = create_workflow_executor(
             workspace_service=workspace_service,
@@ -224,7 +224,7 @@ async def test_full_workflow_execution() -> bool:
                 if self.phases is None:
                     self.phases = [MinimalPhase()]
 
-        workspace_service = WorkspaceService.create_docker()
+        workspace_service = WorkspaceService.create()
         executor = create_workflow_executor(
             workspace_service=workspace_service,
         )
