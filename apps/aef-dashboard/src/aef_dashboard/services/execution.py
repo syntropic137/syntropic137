@@ -128,7 +128,7 @@ class ExecutionService:
         return WorkflowExecutionEngine(
             workflow_repository=get_workflow_repository(),
             execution_repository=get_workflow_execution_repository(),
-            workspace_service=WorkspaceService.create_docker(),
+            workspace_service=WorkspaceService.create(),
             session_repository=get_session_repository(),
             artifact_repository=get_artifact_repository(),
             agent_factory=agent_factory,

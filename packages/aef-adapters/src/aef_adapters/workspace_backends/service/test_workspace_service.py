@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from aef_adapters.workspace_backends.service import WorkspaceBackend
 from aef_domain.contexts.workspaces._shared.value_objects import (
     IsolationBackendType,
     TokenType,
@@ -42,7 +43,7 @@ class TestWorkspaceServiceMemory:
         """Test creating memory service for testing."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
         assert service is not None
 
     @pytest.mark.asyncio
@@ -50,7 +51,7 @@ class TestWorkspaceServiceMemory:
         """Test workspace creation as context manager."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-test-123",
@@ -66,7 +67,7 @@ class TestWorkspaceServiceMemory:
         """Test executing commands in workspace."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-exec-test",
@@ -83,7 +84,7 @@ class TestWorkspaceServiceMemory:
             WorkspaceService,
         )
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-token-test",
@@ -99,7 +100,7 @@ class TestWorkspaceServiceMemory:
         """Test automatic token injection on creation."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-auto-token",
@@ -113,7 +114,7 @@ class TestWorkspaceServiceMemory:
         """Test that workspace is cleaned up on context exit."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-cleanup",
@@ -129,7 +130,7 @@ class TestWorkspaceServiceMemory:
         """Test creating workspace without sidecar."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-no-sidecar",
@@ -143,7 +144,7 @@ class TestWorkspaceServiceMemory:
         """Test proxy URL is available when sidecar is started."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-proxy",
@@ -157,7 +158,7 @@ class TestWorkspaceServiceMemory:
         """Test workspace status through lifecycle."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-lifecycle",
@@ -180,7 +181,7 @@ class TestWorkspaceServiceDocker:
         # Mock the token vending service
         with patch("aef_tokens.vending.get_token_vending_service") as mock_tvs:
             mock_tvs.return_value = MagicMock()
-            service = WorkspaceService.create_docker()
+            service = WorkspaceService.create()
             assert service is not None
 
     @pytest.mark.asyncio
@@ -300,7 +301,7 @@ class TestManagedWorkspace:
         """Test ManagedWorkspace properties."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-props",
@@ -316,7 +317,7 @@ class TestManagedWorkspace:
         """Test that injecting tokens without sidecar raises error."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         async with service.create_workspace(
             execution_id="exec-no-sidecar",
@@ -334,7 +335,7 @@ class TestWorkspaceServiceIntegration:
         """Simulate a full workflow execution."""
         from aef_adapters.workspace_backends.service import WorkspaceService
 
-        service = WorkspaceService.create_memory()
+        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
         # Simulate multi-phase workflow
         for phase in ["research", "implement", "review"]:

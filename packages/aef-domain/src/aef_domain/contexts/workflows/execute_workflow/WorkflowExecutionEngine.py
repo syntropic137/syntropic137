@@ -208,7 +208,7 @@ class WorkflowExecutionEngine:
         engine = WorkflowExecutionEngine(
             workflow_repository=workflow_repo,
             execution_repository=get_workflow_execution_repository(),
-            workspace_service=WorkspaceService.create_docker(),
+            workspace_service=WorkspaceService.create(),
             session_repository=session_repo,
             artifact_repository=artifact_repo,
             agent_factory=create_agent,
@@ -261,7 +261,7 @@ class WorkflowExecutionEngine:
         if workspace_service is None:
             raise ValueError(
                 "workspace_service is required per ADR-023. "
-                "Use WorkspaceService.create_docker() from aef_adapters.workspace_backends.service."
+                "Use WorkspaceService.create() from aef_adapters.workspace_backends.service."
             )
 
         self._workflows = workflow_repository

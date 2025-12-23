@@ -19,7 +19,7 @@ This module provides adapters for AI agent providers (Claude, OpenAI).
     from aef_adapters.workspace_backends.service import WorkspaceService
 
     runner = await get_container_runner()
-    service = WorkspaceService.create_docker()
+    service = WorkspaceService.create()
 
     async with service.create_workspace(execution_id="exec-123") as workspace:
         async for event in runner.execute(
