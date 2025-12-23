@@ -11,7 +11,8 @@ alwaysApply: true
 
 ### 1. Orchestration
 - Isolated Docker workspaces for agent execution
-- Secure token injection (API keys never in container env)
+- Secure token handling via setup phase (ADR-024)
+- GitHub App integration for git operations (short-lived tokens)
 - Lifecycle management (create → execute → cleanup)
 - Multi-phase workflow execution
 
@@ -28,9 +29,9 @@ alwaysApply: true
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐     │
 │  │  ORCHESTRATION  │───▶│   AGENT RUNS    │───▶│  OBSERVABILITY  │     │
 │  │                 │    │                 │    │                 │     │
-│  │ WorkspaceService│    │ Claude in Docker│    │ Events → Store  │     │
-│  │ Token Injection │    │ Tool Execution  │    │ Projections     │     │
-│  │ Lifecycle Mgmt  │    │ File I/O        │    │ Dashboard       │     │
+│  │ WorkspaceService│    │ Claude CLI      │    │ Events → Store  │     │
+│  │ Setup Phase     │    │ in Docker       │    │ Projections     │     │
+│  │ Lifecycle Mgmt  │    │ JSONL stdout    │    │ Dashboard       │     │
 │  └─────────────────┘    └─────────────────┘    └─────────────────┘     │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -42,9 +43,10 @@ alwaysApply: true
 packages/
 ├── aef-adapters/      ← Orchestration: WorkspaceService, DockerIsolationAdapter
 │                        Observability: EventStore, Projections, Subscriptions
+│                        Token Management: SetupPhaseSecrets, GitHub App integration
 ├── aef-domain/        ← Domain events, aggregates, ports
 ├── aef-collector/     ← Event ingestion API (receives agent events)
-└── aef-tokens/        ← Secure token vending
+└── aef-shared/        ← Shared settings, configuration
 
 lib/agentic-primitives/  ← Shared library (git submodule)
 └── lib/python/
@@ -63,8 +65,9 @@ lib/agentic-primitives/  ← Shared library (git submodule)
 │                  │     │   (agentic-workspace-claude-cli)        │
 │  WorkspaceService│────▶│                                         │
 │  creates/manages │     │   /workspace/  ← mounted from host      │
+│  setup phase ────┼────▶│   secrets      → setup git creds        │
 │                  │     │   claude CLI   ← runs prompts here      │
-│                  │◀────│   stderr       → JSONL events           │
+│                  │◀────│   stdout       → JSONL events           │
 │  captures events │     │                                         │
 └──────────────────┘     └─────────────────────────────────────────┘
          │
@@ -81,9 +84,40 @@ lib/agentic-primitives/  ← Shared library (git submodule)
 ### Key Points:
 
 1. **Agent runs in container:** Isolated, secure, reproducible
-2. **Events stream from stderr:** Zero overhead, captured externally
-3. **Full observability:** Every event flows to dashboard in real-time
-4. **Testing with recordings:** Replay events without API calls
+2. **Setup phase secrets:** GitHub App tokens configured during setup, cleared before agent runs (ADR-024)
+3. **Events stream from stdout:** Zero overhead, JSONL events captured externally
+4. **Full observability:** Every event flows to dashboard in real-time
+5. **Testing with recordings:** Replay events without API calls
+
+### Token Security (Current Implementation - ADR-024)
+
+**Setup Phase Secrets Pattern** (OpenAI Codex-inspired):
+
+```
+SETUP PHASE                      AGENT PHASE
+(~30 seconds)                    (main execution)
+┌───────────────────┐            ┌───────────────────┐
+│ Secrets available │───────────▶│ Secrets cleared   │
+│                   │            │                   │
+│ • GitHub App token│            │ • Claude CLI runs │
+│ • ANTHROPIC_API_KEY            │ • Uses git creds  │
+│ • Configure git   │            │   (credential     │
+│   credential      │            │   helper)         │
+│   helper          │            │ • No raw tokens   │
+│ • Authenticate gh │            │   in environment  │
+└───────────────────┘            └───────────────────┘
+```
+
+**Key Security Features:**
+- ✅ **GitHub App integration** - Short-lived tokens (1hr), repo-scoped permissions
+- ✅ **Git credential helper** - Persists git access without exposing raw token
+- ✅ **Secrets cleared** - Environment cleaned before agent execution
+- ✅ **All code on GitHub** - GitHub App is the primary auth mechanism
+
+**Future Enhancement (ADR-022 - On Hold):**
+- Sidecar proxy pattern for zero-trust (when multi-tenant needed)
+- Tokens never enter container, injected via Envoy proxy
+- Egress proxy for network allowlist enforcement
 
 ## Common Tasks
 

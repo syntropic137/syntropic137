@@ -191,39 +191,35 @@ class SetupPhaseSecrets:
         )
 
 
-# Default setup script that configures credentials
-# Uses GITHUB_APP_TOKEN from GitHub App installation (no GH_TOKEN/PAT support)
+# Minimal setup script for credentials that require secure injection.
+#
+# NOTE: Most configuration is now handled by the container's entrypoint.sh
+# (see: agentic-primitives/providers/workspaces/claude-cli/scripts/entrypoint.sh)
+#
+# This script only handles:
+# 1. Git credentials with GITHUB_APP_TOKEN (passed securely during setup phase)
+# 2. Git identity (in case container started without env vars)
+#
+# The entrypoint already handles: ~/.claude/settings.json, workspace dirs, hooks
 DEFAULT_SETUP_SCRIPT = """#!/bin/bash
 set -e
 
-# ADR-036: Workspace structure convention
-# Directories are pre-created in Docker image, validate they exist
-# - artifacts/input/  : Previous phase outputs (read-only)
-# - artifacts/output/ : Current phase deliverables (agent writes here)
-# - repos/            : Clone repositories here
-test -d /workspace/artifacts/input || mkdir -p /workspace/artifacts/input
-test -d /workspace/artifacts/output || mkdir -p /workspace/artifacts/output
-test -d /workspace/repos || mkdir -p /workspace/repos
-
-# Configure Git identity (uses env vars injected by run_setup_phase)
-# These come from the GitHub App bot configuration
-git config --global user.name "${GIT_AUTHOR_NAME}"
-git config --global user.email "${GIT_AUTHOR_EMAIL}"
-git config --global init.defaultBranch main
-
-# Disable Claude Code attribution in commits and PRs
-git config --global claude.disableAttribution true
-export ANTHROPIC_NO_ATTRIBUTION=1
+# Configure Git identity if not already set by entrypoint
+# (entrypoint sets from initial env vars, this ensures setup-phase vars are used)
+if [ -n "${GIT_AUTHOR_NAME}" ]; then
+    git config --global user.name "${GIT_AUTHOR_NAME}"
+    git config --global user.email "${GIT_AUTHOR_EMAIL:-agent@agentic.local}"
+fi
 
 # Configure Git credential helper with GitHub App token
+# This is the ONLY secure way to inject GitHub credentials - via setup phase
+# The token is passed as env var, stored in credentials file, then env is cleared
 if [ -n "${GITHUB_APP_TOKEN}" ]; then
-    # Store credentials for git push (persists after token env var is cleared)
     git config --global credential.helper store
     echo "https://x-access-token:${GITHUB_APP_TOKEN}@github.com" > ~/.git-credentials
     chmod 600 ~/.git-credentials
 
-    # Configure gh CLI by writing config directly
-    # This persists the token for gh commands (pr create, etc.)
+    # Configure gh CLI
     mkdir -p ~/.config/gh
     cat > ~/.config/gh/hosts.yml << EOF
 github.com:
@@ -232,61 +228,8 @@ github.com:
     git_protocol: https
 EOF
     chmod 600 ~/.config/gh/hosts.yml
-    echo "GitHub App token configured for git and gh CLI"
-else
-    echo "Warning: No GITHUB_APP_TOKEN - GitHub operations will fail"
+    echo "GitHub credentials configured"
 fi
-
-# Configure Claude CLI hooks (ADR-029)
-# Register hooks from /opt/agentic/hooks with Claude CLI
-HOOKS_DIR="/opt/agentic/hooks/handlers"
-if [ -d "$HOOKS_DIR" ]; then
-    mkdir -p ~/.claude
-    cat > ~/.claude/settings.json << 'SETTINGS_EOF'
-{
-  "disableAttribution": true,
-  "includeAttribution": false,
-  "hooks": {
-    "PreToolUse": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "/opt/agentic/hooks/handlers/pre-tool-use.py",
-        "timeout": 10
-      }]
-    }],
-    "PostToolUse": [{
-      "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "/opt/agentic/hooks/handlers/post-tool-use.py",
-        "timeout": 10
-      }]
-    }],
-    "SessionStart": [{
-      "hooks": [{
-        "type": "command",
-        "command": "/opt/agentic/hooks/handlers/session-start.py",
-        "timeout": 5
-      }]
-    }],
-    "SessionEnd": [{
-      "hooks": [{
-        "type": "command",
-        "command": "/opt/agentic/hooks/handlers/session-end.py",
-        "timeout": 5
-      }]
-    }]
-  }
-}
-SETTINGS_EOF
-    chmod 600 ~/.claude/settings.json
-    echo "Claude CLI hooks configured"
-else
-    echo "Warning: Hooks directory not found at $HOOKS_DIR"
-fi
-
-# Any custom setup can be appended here
 """
 
 

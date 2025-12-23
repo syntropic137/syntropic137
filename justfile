@@ -15,36 +15,73 @@ help:
 # --- Development Commands ---
 # Uses DRY Docker Compose: base + override files (ADR-034)
 
-# Setup and run the development environment
-dev:
-    @echo "🚀 Starting dev stack..."
-    uv sync
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up --build -d
-    @echo "✅ Dev stack running:"
-    @echo "   • TimescaleDB: 5432"
-    @echo "   • Event Store: 50051"
-    @echo "   • Collector API: 8080"
-    @echo "   • Dashboard API: 8000"
-    @echo "   • MinIO: 9000 (API), 9001 (Console)"
-    @echo "   • Redis: 6379"
-    @echo "Development environment ready. Run 'just cli --help' to get started."
+# Setup and run the FULL development environment (backend + frontend)
+# Always rebuilds images to pick up code changes
+dev: _workspace-check
+    @echo "🚀 Starting full dev stack..."
+    @echo ""
+    @echo "1️⃣ Syncing Python dependencies..."
+    @uv sync
+    @echo ""
+    @echo "2️⃣ Building and starting Docker services..."
+    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
+    @echo ""
+    @echo "3️⃣ Waiting for services to be healthy..."
+    @sleep 5
+    @echo ""
+    @echo "4️⃣ Starting dashboard frontend..."
+    @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
+    @cd apps/aef-dashboard-ui && pnpm run dev &
+    @sleep 3
+    @echo ""
+    @echo "✅ Full development stack ready!"
+    @echo ""
+    @echo "   🌐 Frontend:     http://localhost:5173"
+    @echo "   🚀 Backend API:  http://localhost:8000"
+    @echo "   📊 API Docs:     http://localhost:8000/docs"
+    @echo "   💾 Database:     localhost:5432"
+    @echo "   📦 Event Store:  localhost:50051"
+    @echo "   🗂️  MinIO:        http://localhost:9001"
+    @echo ""
+    @echo "💡 Tips:"
+    @echo "   • View logs:     just dev-logs"
+    @echo "   • Stop stack:    just dev-stop"
+    @echo "   • Fresh start:   just dev-fresh"
+    @echo "   • Run CLI:       just cli --help"
 
 # Stop development environment (preserves data)
 dev-stop:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml stop
+    @echo "🛑 Stopping dev stack..."
+    @echo "   Stopping frontend (port 5173)..."
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
+    @echo "   Stopping Docker services..."
+    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml stop
+    @echo "✅ Dev stack stopped (data preserved)"
 
 # Stop and remove dev containers (preserves volumes)
 dev-down:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down
+    @echo "🛑 Shutting down dev stack..."
+    @echo "   Stopping frontend (port 5173)..."
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
+    @echo "   Removing Docker containers..."
+    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down
+    @echo "✅ Dev stack shut down (volumes preserved)"
 
 # View development logs
 dev-logs:
     docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml logs -f
 
-# Reset development environment (removes volumes)
+# Reset development environment (removes volumes - DATA LOSS!)
 dev-reset:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up --build -d
+    @echo "⚠️  This will DELETE all database data and volumes!"
+    @echo "   Press Ctrl+C to cancel, or wait 5 seconds to continue..."
+    @sleep 5
+    @echo ""
+    @echo "🔄 Resetting dev environment..."
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
+    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
+    @just dev
+    @echo "✅ Dev environment reset complete!"
 
 # Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
 # Builds workspace image if missing
@@ -122,7 +159,7 @@ workspace-build:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "🔨 Building workspace image from agentic-primitives..."
-    cd lib/agentic-primitives && python scripts/build-provider.py claude-cli
+    cd lib/agentic-primitives && uv run scripts/build-provider.py claude-cli
     echo "✅ Image built: agentic-workspace-claude-cli:latest"
 
 # List all workspace image versions
