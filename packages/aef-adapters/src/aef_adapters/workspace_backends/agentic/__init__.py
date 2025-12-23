@@ -8,11 +8,11 @@ AEF just orchestrates and captures observability.
 """
 
 from aef_adapters.workspace_backends.agentic.adapter import (
-    AgenticIsolationAdapter,
     AgenticEventStreamAdapter,
+    AgenticIsolationAdapter,
 )
 
 __all__ = [
-    "AgenticIsolationAdapter",
     "AgenticEventStreamAdapter",
+    "AgenticIsolationAdapter",
 ]

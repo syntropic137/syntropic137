@@ -10,16 +10,18 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
-    AgenticWorkspace,
-    WorkspaceDockerProvider,
     SecurityConfig,
+    WorkspaceDockerProvider,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from agentic_isolation import AgenticWorkspace
+
     from aef_domain.contexts.workspaces._shared.value_objects import (
         ExecutionResult,
         IsolationConfig,
@@ -77,6 +79,7 @@ class AgenticIsolationAdapter:
             IsolationHandle for subsequent operations
         """
         from agentic_isolation import WorkspaceConfig
+
         from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
 
         # Map AEF config to agentic_isolation config
@@ -200,14 +203,16 @@ class AgenticIsolationAdapter:
         Args:
             handle: Handle from create()
             files: List of (path, content) tuples
-            base_path: Base path (unused, always /workspace)
+            base_path: Base path to prepend to relative paths
         """
         workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:
             raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
 
         for path, content in files:
-            await self._provider.write_file(workspace, path, content)
+            # Prepend base_path to relative paths
+            full_path = f"{base_path.rstrip('/')}/{path.lstrip('/')}"
+            await self._provider.write_file(workspace, full_path, content)
 
     async def copy_from(
         self,
@@ -220,14 +225,19 @@ class AgenticIsolationAdapter:
         Args:
             handle: Handle from create()
             patterns: Glob patterns to match
-            base_path: Base path (unused)
+            base_path: Base path for glob matching
 
         Returns:
             List of (path, content) tuples
         """
-        # For now, just return empty - full implementation would glob
-        # This is used for artifact collection which we can implement later
-        logger.warning("copy_from not fully implemented, returning empty")
+        # TODO: Implement file collection from workspace
+        # This would use docker cp or exec to read files matching patterns
+        logger.warning(
+            "copy_from not implemented (workspace=%s, patterns=%s, base=%s)",
+            handle.isolation_id,
+            patterns,
+            base_path,
+        )
         return []
 
 
@@ -269,6 +279,8 @@ class AgenticEventStreamAdapter:
         Yields:
             Individual stdout lines as they are produced
         """
+        # Store timeout for use in the streaming loop
+        stream_timeout = float(timeout_seconds) if timeout_seconds else None
         if self._provider is None:
             raise RuntimeError("Provider not set. Call set_provider first.")
 
@@ -294,7 +306,16 @@ class AgenticEventStreamAdapter:
         exec_cmd.append(container_name)
         exec_cmd.extend(command)
 
-        logger.debug("Starting stream (container=%s, cmd=%s)", container_name, command)
+        logger.debug(
+            "Starting stream (container=%s, cmd=%s, timeout=%s)",
+            container_name,
+            command,
+            stream_timeout,
+        )
+
+        import time
+
+        start_time = time.monotonic()
 
         proc = await asyncio.create_subprocess_exec(
             *exec_cmd,
@@ -304,6 +325,13 @@ class AgenticEventStreamAdapter:
 
         try:
             while True:
+                # Check overall timeout
+                if stream_timeout is not None:
+                    elapsed = time.monotonic() - start_time
+                    if elapsed >= stream_timeout:
+                        logger.warning("Stream timed out after %.1fs", elapsed)
+                        break
+
                 if proc.stdout is None:
                     break
 
