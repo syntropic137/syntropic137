@@ -49,18 +49,42 @@ class AgenticIsolationAdapter:
         *,
         default_image: str = "agentic-workspace-claude-cli:latest",
         security: SecurityConfig | None = None,
+        workspace_container_dir: str | None = None,
+        workspace_host_dir: str | None = None,
     ) -> None:
         """Initialize the adapter.
 
         Args:
             default_image: Default Docker image for workspaces
             security: Security configuration (defaults to production)
+            workspace_container_dir: Path inside orchestrator container (for file I/O)
+            workspace_host_dir: Path on Docker host (for volume mounts)
+
+        When running inside a container, both paths are needed:
+        - container_dir: where this process writes files (/workspaces)
+        - host_dir: what Docker uses for -v mount (host absolute path)
+
+        Uses env vars AEF_WORKSPACE_CONTAINER_DIR and AEF_WORKSPACE_HOST_DIR if not set.
         """
+        import os
+
         self._default_image = default_image
         self._security = security or SecurityConfig.production()
+
+        # Get paths from env or args
+        container_dir = workspace_container_dir or os.environ.get(
+            "AEF_WORKSPACE_CONTAINER_DIR", "/workspaces"
+        )
+        host_dir = workspace_host_dir or os.environ.get("AEF_WORKSPACE_HOST_DIR")
+
+        self._container_base_dir = container_dir
+        self._host_base_dir = host_dir  # May be None if same as container dir
+
         self._provider = WorkspaceDockerProvider(
             default_image=default_image,
             security=self._security,
+            workspace_base_dir=container_dir,
+            workspace_host_dir=host_dir,  # For Docker volume mounts
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
 
@@ -196,23 +220,23 @@ class AgenticIsolationAdapter:
         self,
         handle: IsolationHandle,
         files: list[tuple[str, bytes]],
-        base_path: str = "/workspace",
+        base_path: str = "/workspace",  # noqa: ARG002 - interface param
     ) -> None:
         """Copy files into workspace.
 
         Args:
             handle: Handle from create()
             files: List of (path, content) tuples
-            base_path: Base path to prepend to relative paths
+            base_path: Base path (interface param, docker uses mounted volume)
         """
         workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:
             raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
 
+        # Docker provider writes to mounted workspace_dir, paths are relative
         for path, content in files:
-            # Prepend base_path to relative paths
-            full_path = f"{base_path.rstrip('/')}/{path.lstrip('/')}"
-            await self._provider.write_file(workspace, full_path, content)
+            relative_path = path.lstrip("/")
+            await self._provider.write_file(workspace, relative_path, content)
 
     async def copy_from(
         self,
