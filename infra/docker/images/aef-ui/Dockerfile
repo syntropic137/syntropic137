@@ -27,8 +27,13 @@ COPY apps/aef-dashboard-ui/package.json apps/aef-dashboard-ui/pnpm-lock.yaml ./a
 WORKDIR /workspace/apps/aef-dashboard-ui
 RUN pnpm install --frozen-lockfile
 
-# Copy app source files
-COPY apps/aef-dashboard-ui/ ./
+# Copy app source files (excluding node_modules already installed above)
+COPY apps/aef-dashboard-ui/src ./src
+COPY apps/aef-dashboard-ui/public ./public
+COPY apps/aef-dashboard-ui/index.html ./index.html
+COPY apps/aef-dashboard-ui/vite.config.ts ./vite.config.ts
+COPY apps/aef-dashboard-ui/tsconfig*.json ./
+COPY apps/aef-dashboard-ui/eslint.config.js ./eslint.config.js
 
 # Build for production
 # API_URL is set to /api - nginx will proxy to backend

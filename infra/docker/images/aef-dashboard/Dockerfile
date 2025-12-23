@@ -26,7 +26,10 @@ COPY packages/aef-shared/ ./packages/aef-shared/
 
 # 2. Agentic primitives packages
 COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
-COPY lib/agentic-primitives/lib/python/agentic_hooks/ ./lib/agentic-primitives/lib/python/agentic_hooks/
+COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
+COPY lib/agentic-primitives/lib/python/agentic_workspace/ ./lib/agentic-primitives/lib/python/agentic_workspace/
+COPY lib/agentic-primitives/lib/python/agentic_security/ ./lib/agentic-primitives/lib/python/agentic_security/
+COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
@@ -34,7 +37,10 @@ COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-pla
 # 4. Domain layer (depends on aef-shared)
 COPY packages/aef-domain/ ./packages/aef-domain/
 
-# 5. Adapters layer (depends on domain, shared, agentic packages)
+# 5. Token vending service
+COPY packages/aef-tokens/ ./packages/aef-tokens/
+
+# 6. Adapters layer (depends on domain, shared, agentic packages, tokens)
 COPY packages/aef-adapters/ ./packages/aef-adapters/
 
 # 6. Dashboard application
@@ -49,10 +55,14 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Install in dependency order
 RUN uv pip install ./packages/aef-shared
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_logging
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_hooks
+RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_events
+RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_workspace
+RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_security
+RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_isolation
 RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/aef-domain
-RUN uv pip install ./packages/aef-adapters
+RUN uv pip install ./packages/aef-tokens
+RUN uv pip install "./packages/aef-adapters[minio]"
 RUN uv pip install ./apps/aef-dashboard
 
 # =============================================================================
