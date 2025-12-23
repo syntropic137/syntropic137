@@ -905,7 +905,7 @@ def run_workflow(
             # See ADR-024: Setup Phase Secrets Pattern
             container_env: dict[str, str] = {}
 
-            workspace_service = WorkspaceService.create_docker(environment=container_env)
+            workspace_service = WorkspaceService.create(environment=container_env)
 
             engine = WorkflowExecutionEngine(
                 workflow_repository=workflow_repo,

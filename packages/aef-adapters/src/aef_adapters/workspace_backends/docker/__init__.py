@@ -1,35 +1,20 @@
-"""Docker workspace adapters for development and production.
+"""Docker workspace adapters.
 
-This module provides Docker-based implementations of workspace ports:
-- DockerIsolationAdapter: Creates/manages Docker containers
+This module provides Docker-based sidecar proxy management.
+
+For workspace isolation, use WorkspaceService.create() which uses
+agentic_isolation from agentic-primitives.
+
+Available:
 - DockerSidecarAdapter: Manages Envoy sidecar proxy containers
-- DockerEventStreamAdapter: Streams stdout from containers
 
-These adapters implement the port interfaces from aef_domain.contexts.workspaces.
-
-Usage:
-    from aef_adapters.workspace_backends.docker import DockerIsolationAdapter
-
-    adapter = DockerIsolationAdapter()
-    handle = await adapter.create(config)
-    result = await adapter.execute(handle, ["python", "script.py"])
-    await adapter.destroy(handle)
-
-See ADR-021 (Isolated Workspace Architecture) and ADR-022 (Secure Token Architecture).
+See ADR-021 (Isolated Workspace Architecture).
 """
 
-from aef_adapters.workspace_backends.docker.docker_event_stream_adapter import (
-    DockerEventStreamAdapter,
-)
-from aef_adapters.workspace_backends.docker.docker_isolation_adapter import (
-    DockerIsolationAdapter,
-)
 from aef_adapters.workspace_backends.docker.docker_sidecar_adapter import (
     DockerSidecarAdapter,
 )
 
 __all__ = [
-    "DockerEventStreamAdapter",
-    "DockerIsolationAdapter",
     "DockerSidecarAdapter",
 ]

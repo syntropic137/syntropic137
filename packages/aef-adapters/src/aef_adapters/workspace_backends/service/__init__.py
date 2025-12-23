@@ -4,10 +4,10 @@ This module provides the WorkspaceService facade that composes all workspace
 adapters into a single, easy-to-use interface for the WorkflowExecutionEngine.
 
 The service orchestrates:
-- Container creation and destruction (DockerIsolationAdapter)
+- Container creation and destruction (via agentic_isolation)
 - Setup phase with GitHub App token (ADR-024)
 - Secret clearing before agent phase
-- Event streaming (DockerEventStreamAdapter)
+- Event streaming
 - State management (WorkspaceAggregate)
 
 GitHub Authentication:
@@ -20,13 +20,15 @@ GitHub Authentication:
 Usage:
     from aef_adapters.workspace_backends.service import (
         WorkspaceService,
+        WorkspaceBackend,
         SetupPhaseSecrets,
-        GitHubAppNotConfiguredError,
     )
 
-    service = WorkspaceService.create_docker()  # Production
-    # OR
-    service = WorkspaceService.create_memory()  # Testing
+    # Production (Docker isolation)
+    service = WorkspaceService.create()
+
+    # Testing (in-memory mocks, requires APP_ENVIRONMENT=test)
+    service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
 
     async with service.create_workspace(config) as workspace:
         # Create secrets using GitHub App (required for production)
@@ -45,6 +47,7 @@ from aef_adapters.workspace_backends.service.workspace_service import (
     GitHubAppNotConfiguredError,
     ManagedWorkspace,
     SetupPhaseSecrets,
+    WorkspaceBackend,
     WorkspaceService,
     WorkspaceServiceConfig,
 )
@@ -54,6 +57,7 @@ __all__ = [
     "GitHubAppNotConfiguredError",
     "ManagedWorkspace",
     "SetupPhaseSecrets",
+    "WorkspaceBackend",
     "WorkspaceService",
     "WorkspaceServiceConfig",
 ]

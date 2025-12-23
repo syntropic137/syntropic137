@@ -85,8 +85,9 @@ def _assert_test_environment() -> None:
     raise TestEnvironmentRequiredError(
         f"Memory adapters cannot be used in '{app_env}' environment. "
         f"Memory adapters are for TESTS ONLY.\n\n"
-        f"For development/production, use Docker adapters:\n"
-        f"  from aef_adapters.workspace_backends.docker import DockerIsolationAdapter\n\n"
+        f"For development/production, use WorkspaceService:\n"
+        f"  from aef_adapters.workspace_backends.service import WorkspaceService\n"
+        f"  service = WorkspaceService.create()\n\n"
         f"To run tests, set APP_ENVIRONMENT=test:\n"
         f"  APP_ENVIRONMENT=test pytest ...\n\n"
         f"See ADR-004: Environment Configuration\n"
