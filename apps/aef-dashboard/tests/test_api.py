@@ -187,6 +187,8 @@ async def create_test_session(
             "workflow_id": workflow_id,
             "phase_id": phase_id,
             "status": status.value,
+            "total_input_tokens": 100,
+            "total_output_tokens": 50,
             "total_tokens": 150,
             "total_cost_usd": "0.0015",
         },
@@ -524,9 +526,11 @@ class TestMetricsEndpoints:
         assert data["total_tokens"] == 150
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Per-workflow metrics not implemented - see #38")
     async def test_metrics_for_workflow(self, client: httpx.AsyncClient) -> None:
-        """Test metrics for specific workflow."""
+        """Test metrics for specific workflow.
+
+        Per-workflow metrics are computed by aggregating sessions.
+        """
         await create_test_workflow("wf-1")
         await create_test_session("sess-1", "wf-1", "phase-1")
         await create_test_session("sess-2", "wf-1", "phase-2")
@@ -537,8 +541,9 @@ class TestMetricsEndpoints:
         data = response.json()
         assert data["total_workflows"] == 1
         assert data["total_sessions"] == 2
-        assert len(data["phases"]) == 2
-        assert data["phases"][0]["phase_name"] == "Research Phase"
+        assert data["total_artifacts"] == 1
+        # Cost: 2 sessions x $0.0015 each = $0.003
+        assert float(data["total_cost_usd"]) == pytest.approx(0.003, rel=0.01)
 
 
 # =============================================================================

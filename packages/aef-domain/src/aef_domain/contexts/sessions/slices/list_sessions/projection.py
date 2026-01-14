@@ -24,6 +24,8 @@ _SUBSCRIBED_EVENTS = {
     "SessionStarted",
     "OperationRecorded",
     "SessionCompleted",
+    "SubagentStarted",
+    "SubagentStopped",
 }
 
 
@@ -100,6 +102,10 @@ class SessionListProjection(CheckpointedProjection):
                 await self.on_operation_recorded(event_data)
             elif event_type == "SessionCompleted":
                 await self.on_session_completed(event_data)
+            elif event_type == "SubagentStarted":
+                await self.on_subagent_started(event_data)
+            elif event_type == "SubagentStopped":
+                await self.on_subagent_stopped(event_data)
 
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
@@ -225,6 +231,79 @@ class SessionListProjection(CheckpointedProjection):
             completed_at = event_data.get("completed_at")
             if started_at and completed_at:
                 existing["duration_seconds"] = _calculate_duration(started_at, completed_at)
+
+            # Enhanced metrics from result event (agentic_isolation v0.3.0)
+            if "num_turns" in event_data:
+                existing["num_turns"] = event_data["num_turns"]
+            if "duration_api_ms" in event_data:
+                existing["duration_api_ms"] = event_data["duration_api_ms"]
+
+            await self._store.save(self.PROJECTION_NAME, session_id, existing)
+
+    async def on_subagent_started(self, event_data: dict) -> None:
+        """Handle SubagentStarted event - track subagent spawn.
+
+        Creates a new subagent record and increments subagent_count.
+        """
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, session_id)
+        if existing:
+            # Initialize subagent tracking if needed
+            subagents = existing.get("subagents", [])
+            subagent_count = existing.get("subagent_count", 0)
+
+            # Create new subagent record
+            subagent_record = {
+                "subagent_tool_use_id": event_data.get("subagent_tool_use_id", ""),
+                "agent_name": event_data.get("agent_name", ""),
+                "started_at": event_data.get("timestamp"),
+                "stopped_at": None,
+                "duration_ms": None,
+                "tools_used": {},
+                "success": True,
+            }
+
+            subagents.append(subagent_record)
+            existing["subagents"] = subagents
+            existing["subagent_count"] = subagent_count + 1
+
+            await self._store.save(self.PROJECTION_NAME, session_id, existing)
+
+    async def on_subagent_stopped(self, event_data: dict) -> None:
+        """Handle SubagentStopped event - update subagent record with completion data.
+
+        Updates the matching subagent record with duration and tools used.
+        """
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, session_id)
+        if existing:
+            subagents = existing.get("subagents", [])
+            subagent_tool_use_id = event_data.get("subagent_tool_use_id", "")
+
+            # Find and update the matching subagent record
+            for subagent in subagents:
+                if subagent.get("subagent_tool_use_id") == subagent_tool_use_id:
+                    subagent["stopped_at"] = event_data.get("timestamp")
+                    subagent["duration_ms"] = event_data.get("duration_ms")
+                    subagent["tools_used"] = event_data.get("tools_used", {})
+                    subagent["success"] = event_data.get("success", True)
+                    break
+
+            existing["subagents"] = subagents
+
+            # Aggregate tools_by_subagent
+            tools_by_subagent = existing.get("tools_by_subagent", {})
+            agent_name = event_data.get("agent_name", "unknown")
+            tools_used = event_data.get("tools_used", {})
+            if tools_used:
+                tools_by_subagent[agent_name] = tools_used
+            existing["tools_by_subagent"] = tools_by_subagent
 
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 

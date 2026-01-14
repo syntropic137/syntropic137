@@ -1,0 +1,101 @@
+# Subagent Demo Workflow
+# Demonstrates subagent observability by having the main agent delegate to subagents.
+# Use this to test the SUBAGENT_STARTED/SUBAGENT_STOPPED event flow in the dashboard.
+
+id: subagent-demo-workflow
+name: Subagent Observability Demo
+description: |
+  A demonstration workflow that instructs the agent to spawn subagents
+  via the Task tool. Use this to verify that:
+  - Subagent events appear in the event stream
+  - Session summary shows subagent_count and subagents list
+  - Dashboard displays subagent cards with tool attribution
+  - Real-time WebSocket updates show subagent lifecycle
+
+type: research
+classification: simple
+
+# No repository needed for this demo
+repository: null
+project_name: null
+
+phases:
+  - id: coordinator
+    name: Coordinator Phase
+    order: 1
+    execution_type: sequential
+    description: |
+      Main coordinator agent that delegates work to specialized subagents.
+      Each subagent will perform a focused task and report back.
+    input_artifacts: []
+    output_artifacts:
+      - subagent_results
+      - coordination_summary
+    max_tokens: 8192
+    timeout_seconds: 600
+    prompt_template: |
+      You are a coordination agent demonstrating subagent delegation.
+
+      Your task: Create a simple "Hello World" project by delegating to subagents.
+
+      ## Instructions
+
+      1. **Spawn a Research Subagent**: Use the `Task` tool to create a subagent that:
+         - Researches best practices for "Hello World" programs
+         - Lists 3 programming languages and their syntax
+         - The task description should be: "Research best Hello World implementations in 3 languages"
+
+      2. **Spawn a Code Writing Subagent**: Use the `Task` tool to create a subagent that:
+         - Writes a simple hello.py file
+         - Uses `Write` tool to create the file
+         - The task description should be: "Write a hello.py file that prints Hello World"
+
+      3. **Spawn a Verification Subagent**: Use the `Task` tool to create a subagent that:
+         - Reads the created file
+         - Verifies its contents
+         - The task description should be: "Verify the hello.py file was created correctly"
+
+      ## Important
+      - You MUST use the `Task` tool to delegate to subagents
+      - Each subagent should have a clear, descriptive task name
+      - Wait for each subagent to complete before spawning the next
+      - Summarize what each subagent accomplished
+
+      ## Expected Outcome
+      After completion, the session should show:
+      - 3 subagents in the subagent list
+      - Each subagent's tool usage (Read, Write, etc.)
+      - Duration metrics per subagent
+
+      Begin by spawning the first subagent.
+
+  - id: verify
+    name: Verification Phase
+    order: 2
+    execution_type: sequential
+    description: |
+      Verify the results from the coordination phase.
+      This phase does NOT spawn subagents - it directly checks outcomes.
+    input_artifacts:
+      - subagent_results
+    output_artifacts:
+      - verification_report
+    max_tokens: 2048
+    timeout_seconds: 120
+    prompt_template: |
+      You are a verification agent. Review the coordination phase results.
+
+      Previous Results:
+      {{coordinator}}
+
+      Please:
+      1. Confirm that 3 subagents were spawned
+      2. List what each subagent accomplished
+      3. Check if hello.py was created
+      4. Note any issues or successes
+
+      Output a brief verification report.
+
+      DO NOT spawn any subagents in this phase - just summarize and verify.
+
+

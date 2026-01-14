@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Play,
   Terminal,
+  Users,
   Wrench,
   XCircle,
   Zap,
@@ -22,7 +23,7 @@ import { Link, useParams } from 'react-router-dom'
 
 import { getConversationLog, getSession } from '../api/client'
 import type { ConversationLogResponse } from '../api/client'
-import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge, SubagentList } from '../components'
 import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import type { OperationInfo, SessionResponse } from '../types'
 
@@ -34,6 +35,9 @@ const operationIcons: Record<string, typeof Activity> = {
   token_usage: Activity,
   session_started: Play,
   session_completed: CheckCircle2,
+  // Subagent lifecycle events (agentic_isolation v0.3.0)
+  subagent_started: Users,
+  subagent_stopped: Users,
   // New v2 types
   message_request: MessageSquare,
   message_response: MessageSquare,
@@ -62,6 +66,9 @@ const operationColors: Record<string, string> = {
   token_usage: 'text-cyan-400 bg-cyan-500/10',
   session_started: 'text-blue-400 bg-blue-500/10',
   session_completed: 'text-green-400 bg-green-500/10',
+  // Subagent lifecycle events (agentic_isolation v0.3.0)
+  subagent_started: 'text-violet-400 bg-violet-500/10',
+  subagent_stopped: 'text-violet-400 bg-violet-500/10',
   // New v2 types
   message_request: 'text-blue-400 bg-blue-500/10',
   message_response: 'text-indigo-400 bg-indigo-500/10',
@@ -551,6 +558,22 @@ export function SessionDetail() {
                 {session.error_message}
               </p>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Subagents section (if any) */}
+      {(session.subagents?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader
+            title="Subagents"
+            subtitle={`${session.subagents?.length ?? 0} subagents spawned via Task tool`}
+          />
+          <CardContent>
+            <SubagentList
+              subagents={session.subagents ?? []}
+              title=""
+            />
           </CardContent>
         </Card>
       )}

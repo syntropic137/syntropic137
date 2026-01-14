@@ -31,6 +31,12 @@ from aef_domain.contexts.workflows.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
 from aef_domain.contexts.workflows.slices.list_workflows import WorkflowListProjection
+from aef_shared.events import (
+    TOKEN_USAGE,
+    TOOL_BLOCKED,
+    TOOL_COMPLETED,
+    TOOL_STARTED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +175,15 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("dashboard_metrics", "on_session_completed"),
         ("realtime", "on_session_completed"),  # Real-time UI push
     ],
+    # Subagent lifecycle events (from agentic_isolation v0.3.0)
+    "SubagentStarted": [
+        ("session_list", "on_subagent_started"),
+        ("realtime", "on_subagent_started"),  # Real-time UI push
+    ],
+    "SubagentStopped": [
+        ("session_list", "on_subagent_stopped"),
+        ("realtime", "on_subagent_stopped"),  # Real-time UI push
+    ],
     # Artifact events
     "ArtifactCreated": [
         ("artifact_list", "on_artifact_created"),
@@ -177,16 +192,17 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     ],
     # Observability events (Pattern 2: Event Log + CQRS, see ADR-018)
     # These are observations from aef-collector, not commands
-    "tool_execution_started": [
+    # Use constants from aef_shared.events for type safety
+    TOOL_STARTED: [
         ("tool_timeline", "on_tool_execution_started"),
     ],
-    "tool_execution_completed": [
+    TOOL_COMPLETED: [
         ("tool_timeline", "on_tool_execution_completed"),
     ],
-    "tool_blocked": [
+    TOOL_BLOCKED: [
         ("tool_timeline", "on_tool_blocked"),
     ],
-    "token_usage": [
+    TOKEN_USAGE: [
         ("token_metrics", "on_token_usage"),
     ],
     # Cost tracking events

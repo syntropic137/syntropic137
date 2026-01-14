@@ -1082,6 +1082,10 @@ class WorkflowExecutionEngine:
                 # Claude CLI's tool_result only has tool_use_id, not tool_name
                 tool_names_cache: dict[str, str] = {}
 
+                # ADR-037: Track active subagents (Task tool) for observability
+                # tool_use_id → (agent_name, started_at, tools_used)
+                active_subagents: dict[str, tuple[str, datetime, dict[str, int]]] = {}
+
                 # ADR-035: Collect all JSONL lines for conversation storage
                 conversation_lines: list[str] = []
 
@@ -1119,6 +1123,94 @@ class WorkflowExecutionEngine:
                                 phase_id=phase.phase_id,
                                 workspace_id=workspace_id,
                             )
+
+                        # ADR-037: Detect subagent lifecycle from Task tool events
+                        hook_type = hook_event.get("type", "")
+                        ctx_data = enriched.get("context", {})
+                        tool_name = ctx_data.get("tool_name", "")
+                        tool_use_id = ctx_data.get("tool_use_id", "")
+
+                        if tool_name == "Task" and tool_use_id:
+                            if hook_type == "tool_use_started":
+                                # Parse agent_name from input_preview JSON
+                                agent_name = "unknown"
+                                input_preview = ctx_data.get("input_preview", "")
+                                if input_preview:
+                                    try:
+                                        import json
+
+                                        input_data = json.loads(input_preview)
+                                        agent_name = str(
+                                            input_data.get(
+                                                "subagent_type",
+                                                input_data.get("description", "unknown"),
+                                            )
+                                        )[:50]
+                                    except (json.JSONDecodeError, TypeError):
+                                        pass
+                                active_subagents[tool_use_id] = (agent_name, datetime.now(UTC), {})
+
+                                if self._observability_writer is not None:
+                                    await self._record_observation(
+                                        observation_type=ObservationType.SUBAGENT_STARTED,
+                                        session_id=session_id,
+                                        data={
+                                            "agent_name": agent_name,
+                                            "subagent_tool_use_id": tool_use_id,
+                                        },
+                                        execution_id=execution_id,
+                                        phase_id=phase.phase_id,
+                                        workspace_id=workspace_id,
+                                    )
+                                    logger.info(
+                                        "Subagent started: %s (id=%s)",
+                                        agent_name,
+                                        tool_use_id,
+                                    )
+
+                            elif hook_type == "tool_use_completed":
+                                if tool_use_id in active_subagents:
+                                    agent_name, started_at, tools_used = active_subagents.pop(
+                                        tool_use_id
+                                    )
+                                    duration_ms = int(
+                                        (datetime.now(UTC) - started_at).total_seconds() * 1000
+                                    )
+                                    success = ctx_data.get("success", True)
+
+                                    if self._observability_writer is not None:
+                                        await self._record_observation(
+                                            observation_type=ObservationType.SUBAGENT_STOPPED,
+                                            session_id=session_id,
+                                            data={
+                                                "agent_name": agent_name,
+                                                "subagent_tool_use_id": tool_use_id,
+                                                "duration_ms": duration_ms,
+                                                "success": success,
+                                                "tools_used": tools_used,
+                                            },
+                                            execution_id=execution_id,
+                                            phase_id=phase.phase_id,
+                                            workspace_id=workspace_id,
+                                        )
+                                        logger.info(
+                                            "Subagent stopped: %s (id=%s, duration=%dms, tools=%s)",
+                                            agent_name,
+                                            tool_use_id,
+                                            duration_ms,
+                                            tools_used,
+                                        )
+                                else:
+                                    # Non-Task tool completed - attribute to active subagent
+                                    if active_subagents and tool_name:
+                                        # Attribute to most recently started subagent
+                                        latest_subagent_id = max(
+                                            active_subagents.keys(),
+                                            key=lambda k: active_subagents[k][1],
+                                        )
+                                        _, _, tools_dict = active_subagents[latest_subagent_id]
+                                        tools_dict[tool_name] = tools_dict.get(tool_name, 0) + 1
+
                         continue
 
                     # Fall back to Claude CLI native events
@@ -1187,6 +1279,38 @@ class WorkflowExecutionEngine:
                                         )
                                         logger.debug("Tool started: %s", tool_name)
 
+                                    # ADR-037: Detect Task tool as subagent start (raw CLI format)
+                                    if tool_name == "Task" and tool_use_id:
+                                        agent_name = str(
+                                            tool_input.get(
+                                                "subagent_type",
+                                                tool_input.get("description", "unknown"),
+                                            )
+                                        )[:50]
+                                        active_subagents[tool_use_id] = (
+                                            agent_name,
+                                            datetime.now(UTC),
+                                            {},  # tools_used dict
+                                        )
+
+                                        if self._observability_writer is not None:
+                                            await self._record_observation(
+                                                observation_type=ObservationType.SUBAGENT_STARTED,
+                                                session_id=session_id,
+                                                data={
+                                                    "agent_name": agent_name,
+                                                    "subagent_tool_use_id": tool_use_id,
+                                                },
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                                workspace_id=workspace_id,
+                                            )
+                                            logger.info(
+                                                "Subagent started (CLI): %s (id=%s)",
+                                                agent_name,
+                                                tool_use_id,
+                                            )
+
                         # Handle tool results from user messages
                         if cli_type == "user":
                             message = cli_event.get("message", {})
@@ -1229,6 +1353,46 @@ class WorkflowExecutionEngine:
                                             tool_name,
                                             not is_error,
                                         )
+
+                                    # ADR-037: Detect Task tool completion as subagent stop (raw CLI format)
+                                    if tool_name == "Task" and tool_use_id in active_subagents:
+                                        agent_name, started_at, tools_used = active_subagents.pop(
+                                            tool_use_id
+                                        )
+                                        duration_ms = int(
+                                            (datetime.now(UTC) - started_at).total_seconds() * 1000
+                                        )
+
+                                        if self._observability_writer is not None:
+                                            await self._record_observation(
+                                                observation_type=ObservationType.SUBAGENT_STOPPED,
+                                                session_id=session_id,
+                                                data={
+                                                    "agent_name": agent_name,
+                                                    "subagent_tool_use_id": tool_use_id,
+                                                    "duration_ms": duration_ms,
+                                                    "success": not is_error,
+                                                    "tools_used": tools_used,
+                                                },
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                                workspace_id=workspace_id,
+                                            )
+                                            logger.info(
+                                                "Subagent stopped (CLI): %s (id=%s, duration=%dms, tools=%s)",
+                                                agent_name,
+                                                tool_use_id,
+                                                duration_ms,
+                                                tools_used,
+                                            )
+                                    elif tool_name != "Task" and active_subagents:
+                                        # Attribute non-Task tool to the most recently started subagent
+                                        latest_subagent_id = max(
+                                            active_subagents.keys(),
+                                            key=lambda k: active_subagents[k][1],
+                                        )
+                                        _, _, tools_dict = active_subagents[latest_subagent_id]
+                                        tools_dict[tool_name] = tools_dict.get(tool_name, 0) + 1
 
                         if cli_type in ("system",):
                             logger.debug("CLI message: %s", cli_type)

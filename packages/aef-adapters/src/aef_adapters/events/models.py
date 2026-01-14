@@ -21,7 +21,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from aef_shared.events import EventType  # noqa: TC001 - needed at runtime for Pydantic
+from aef_shared.events import (
+    SESSION_COMPLETED,
+    SESSION_STARTED,
+    SUBAGENT_STARTED,
+    SUBAGENT_STOPPED,
+    TOKEN_USAGE,
+    TOOL_COMPLETED,
+    TOOL_STARTED,
+    EventType,
+)
 
 
 class AgentEvent(BaseModel):
@@ -31,6 +40,7 @@ class AgentEvent(BaseModel):
     - Tool executions (tool_started, tool_completed)
     - Token usage (token_usage)
     - Session lifecycle (session_started, session_completed)
+    - Subagent lifecycle (subagent_started, subagent_stopped)
     - Errors (error)
 
     The model validates types before insertion, catching mismatches
@@ -129,20 +139,24 @@ class AgentEvent(BaseModel):
                         break
 
         # Map Claude CLI event types to normalized types
+        # Output values use constants from aef_shared.events for type safety
         event_type_mapping = {
             # Tool events (inner content type takes precedence)
-            "tool_started": "tool_execution_started",
-            "tool_use": "tool_execution_started",
+            "tool_started": TOOL_STARTED,
+            "tool_use": TOOL_STARTED,
             # Tool results
-            "tool_result": "tool_execution_completed",
-            "tool_completed": "tool_execution_completed",
+            "tool_result": TOOL_COMPLETED,
+            "tool_completed": TOOL_COMPLETED,
             # Session lifecycle
-            "system.init": "session_started",
-            "system": "session_started",
-            "result": "session_completed",
+            "system.init": SESSION_STARTED,
+            "system": SESSION_STARTED,
+            "result": SESSION_COMPLETED,
             # Content events map to token_usage (only if not tool events)
-            "assistant": "token_usage",
-            "user": "token_usage",
+            "assistant": TOKEN_USAGE,
+            "user": TOKEN_USAGE,
+            # Subagent lifecycle events (from EventParser, pass through as-is)
+            SUBAGENT_STARTED: SUBAGENT_STARTED,
+            SUBAGENT_STOPPED: SUBAGENT_STOPPED,
         }
 
         # Use inner_type if it's a tool event, otherwise use raw_type

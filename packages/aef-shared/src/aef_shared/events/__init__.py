@@ -12,13 +12,20 @@ If you add a new event type:
 from typing import Literal, get_args
 
 # Tool execution events
-# MUST match agentic_events.EventType (the producer)
+# MUST match agentic_isolation.EventType (the producer)
 TOOL_STARTED = "tool_execution_started"
 TOOL_COMPLETED = "tool_execution_completed"
+TOOL_BLOCKED = "tool_blocked"
 
 # Session lifecycle events
 SESSION_STARTED = "session_started"
 SESSION_COMPLETED = "session_completed"
+SESSION_ERROR = "session_error"
+
+# Subagent lifecycle events (Task tool spawns nested agents)
+# See agentic_isolation.providers.claude_cli.EventParser for detection logic
+SUBAGENT_STARTED = "subagent_started"
+SUBAGENT_STOPPED = "subagent_stopped"
 
 # Token/cost events
 TOKEN_USAGE = "token_usage"
@@ -32,12 +39,16 @@ PHASE_COMPLETED = "phase_completed"
 ERROR = "error"
 
 # Type-safe literal union (like TypeScript)
-# MUST match the constants above and agentic_events.EventType
+# MUST match the constants above and agentic_isolation.EventType
 EventType = Literal[
     "tool_execution_started",
     "tool_execution_completed",
+    "tool_blocked",
     "session_started",
     "session_completed",
+    "session_error",
+    "subagent_started",
+    "subagent_stopped",
     "token_usage",
     "cost_recorded",
     "phase_started",
@@ -60,8 +71,12 @@ __all__ = [
     "PHASE_COMPLETED",
     "PHASE_STARTED",
     "SESSION_COMPLETED",
+    "SESSION_ERROR",
     "SESSION_STARTED",
+    "SUBAGENT_STARTED",
+    "SUBAGENT_STOPPED",
     "TOKEN_USAGE",
+    "TOOL_BLOCKED",
     "TOOL_COMPLETED",
     "TOOL_STARTED",
     "VALID_EVENT_TYPES",
