@@ -379,5 +379,3 @@ class TestProjectionSubagentHandlers:
         # Check tools_by_subagent was aggregated
         assert "research-agent" in saved_data["tools_by_subagent"]
         assert saved_data["tools_by_subagent"]["research-agent"]["Read"] == 5
-
-
