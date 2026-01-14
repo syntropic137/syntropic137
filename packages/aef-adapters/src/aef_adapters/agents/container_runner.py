@@ -435,7 +435,7 @@ class ContainerAgentRunner:
                             agent_name=agent_name,
                             subagent_tool_use_id=tool_use_id,
                             duration_ms=duration_ms,
-                            tools_used={},
+                            tools_used={},  # Tool attribution handled by EventParser at parsing layer
                             success=success,
                         )
                         logger.info(
