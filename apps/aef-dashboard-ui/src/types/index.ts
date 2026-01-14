@@ -43,6 +43,16 @@ export interface WorkflowListResponse {
 // SESSION TYPES
 // =============================================================================
 
+export interface SubagentRecord {
+  subagent_tool_use_id: string
+  agent_name: string
+  started_at: string | null
+  stopped_at: string | null
+  duration_ms: number | null
+  tools_used: Record<string, number>
+  success: boolean
+}
+
 export interface SessionSummary {
   id: string
   workflow_id: string | null
@@ -54,6 +64,12 @@ export interface SessionSummary {
   total_cost_usd: number
   started_at: string | null
   completed_at: string | null
+  // Subagent metrics (from agentic_isolation v0.3.0)
+  subagent_count?: number
+  subagents?: SubagentRecord[]
+  tools_by_subagent?: Record<string, Record<string, number>>
+  num_turns?: number
+  duration_api_ms?: number | null
 }
 
 export interface OperationInfo {
@@ -102,6 +118,12 @@ export interface SessionResponse {
   duration_seconds: number | null
   error_message: string | null
   metadata: Record<string, unknown>
+  // Subagent metrics (from agentic_isolation v0.3.0)
+  subagent_count?: number
+  subagents?: SubagentRecord[]
+  tools_by_subagent?: Record<string, Record<string, number>>
+  num_turns?: number
+  duration_api_ms?: number | null
 }
 
 // =============================================================================
@@ -285,6 +307,10 @@ export const SSE_EVENTS = {
   // Live streaming (control plane)
   TURN_UPDATE: 'turn_update',
 
+  // Subagent lifecycle events (agentic_isolation v0.3.0)
+  SUBAGENT_STARTED: 'subagent_started',
+  SUBAGENT_STOPPED: 'subagent_stopped',
+
   // Workspace lifecycle events (ADR-021)
   WORKSPACE_CREATING: 'workspace_creating',
   WORKSPACE_CREATED: 'workspace_created',
@@ -312,6 +338,11 @@ export interface EventMessage {
   duration_ms?: number
   success?: boolean
   reason?: string
+
+  // Subagent event properties (for subagent_started, subagent_stopped)
+  agent_name?: string
+  subagent_tool_use_id?: string
+  tools_used?: Record<string, number>
 }
 
 // =============================================================================

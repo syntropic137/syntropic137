@@ -1,9 +1,70 @@
 """Read model for session list views."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+
+
+@dataclass(frozen=True)
+class SubagentRecord:
+    """Record of a subagent spawned during a session.
+
+    Subagents are spawned via the Task tool and run as nested agents.
+    The subagent_tool_use_id correlates events to this subagent.
+    """
+
+    subagent_tool_use_id: str
+    """The Task tool_use_id - unique identifier for this subagent."""
+
+    agent_name: str
+    """Name/description of the subagent from Task input."""
+
+    started_at: str | datetime | None = None
+    """When the subagent was spawned."""
+
+    stopped_at: str | datetime | None = None
+    """When the subagent completed."""
+
+    duration_ms: int | None = None
+    """Execution duration in milliseconds."""
+
+    tools_used: dict[str, int] = field(default_factory=dict)
+    """Tools used by this subagent: {tool_name: count}."""
+
+    success: bool = True
+    """Whether the subagent completed successfully."""
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SubagentRecord":
+        """Create from dictionary."""
+        return cls(
+            subagent_tool_use_id=data.get("subagent_tool_use_id", ""),
+            agent_name=data.get("agent_name", ""),
+            started_at=data.get("started_at"),
+            stopped_at=data.get("stopped_at"),
+            duration_ms=data.get("duration_ms"),
+            tools_used=data.get("tools_used", {}),
+            success=data.get("success", True),
+        )
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        started = self.started_at
+        if isinstance(started, datetime):
+            started = started.isoformat()
+        stopped = self.stopped_at
+        if isinstance(stopped, datetime):
+            stopped = stopped.isoformat()
+        return {
+            "subagent_tool_use_id": self.subagent_tool_use_id,
+            "agent_name": self.agent_name,
+            "started_at": started,
+            "stopped_at": stopped,
+            "duration_ms": self.duration_ms,
+            "tools_used": self.tools_used,
+            "success": self.success,
+        }
 
 
 @dataclass(frozen=True)
@@ -144,12 +205,33 @@ class SessionSummary:
     operations: tuple[OperationRecord, ...] = ()
     """Operations recorded during this session."""
 
+    # Subagent metrics (from agentic_isolation v0.3.0)
+    subagent_count: int = 0
+    """Number of subagents spawned during this session."""
+
+    subagents: tuple[SubagentRecord, ...] = ()
+    """Records of subagents spawned during this session."""
+
+    tools_by_subagent: dict[str, dict[str, int]] = field(default_factory=dict)
+    """Aggregated tool usage per subagent: {subagent_name: {tool_name: count}}."""
+
+    # Enhanced metrics from result event
+    num_turns: int = 0
+    """Number of conversation turns."""
+
+    duration_api_ms: int | None = None
+    """API latency in milliseconds (from result event)."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "SessionSummary":
         """Create from dictionary data."""
         # Parse operations list
         ops_data = data.get("operations", [])
         operations = tuple(OperationRecord.from_dict(op) for op in ops_data)
+
+        # Parse subagents list
+        subagents_data = data.get("subagents", [])
+        subagents = tuple(SubagentRecord.from_dict(s) for s in subagents_data)
 
         return cls(
             id=data["id"],
@@ -166,6 +248,13 @@ class SessionSummary:
             phase_id=data.get("phase_id"),
             execution_id=data.get("execution_id"),
             operations=operations,
+            # Subagent metrics
+            subagent_count=data.get("subagent_count", 0),
+            subagents=subagents,
+            tools_by_subagent=data.get("tools_by_subagent", {}),
+            # Enhanced metrics
+            num_turns=data.get("num_turns", 0),
+            duration_api_ms=data.get("duration_api_ms"),
         )
 
     def to_dict(self) -> dict:
@@ -203,4 +292,11 @@ class SessionSummary:
             "phase_id": self.phase_id,
             "execution_id": self.execution_id,
             "operations": [op.to_dict() for op in self.operations],
+            # Subagent metrics
+            "subagent_count": self.subagent_count,
+            "subagents": [s.to_dict() for s in self.subagents],
+            "tools_by_subagent": self.tools_by_subagent,
+            # Enhanced metrics
+            "num_turns": self.num_turns,
+            "duration_api_ms": self.duration_api_ms,
         }

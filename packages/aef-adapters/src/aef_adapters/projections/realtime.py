@@ -210,6 +210,18 @@ class RealTimeProjection:
         if execution_id:
             await self.broadcast(execution_id, "ArtifactCreated", event)
 
+    async def on_subagent_started(self, event: dict[str, Any]) -> None:
+        """Handle SubagentStarted event - subagent spawned via Task tool."""
+        execution_id = event.get("execution_id")
+        if execution_id:
+            await self.broadcast(execution_id, "SubagentStarted", event)
+
+    async def on_subagent_stopped(self, event: dict[str, Any]) -> None:
+        """Handle SubagentStopped event - subagent completed."""
+        execution_id = event.get("execution_id")
+        if execution_id:
+            await self.broadcast(execution_id, "SubagentStopped", event)
+
 
 # Singleton instance - registered with ProjectionManager at startup
 _realtime_projection: RealTimeProjection | None = None
