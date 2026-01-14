@@ -11,7 +11,8 @@ export function SubagentCard({ subagent, isExpanded: initialExpanded = false }: 
   const [isExpanded, setIsExpanded] = useState(initialExpanded)
 
   const toolCount = Object.values(subagent.tools_used).reduce((sum, count) => sum + count, 0)
-  const duration = subagent.duration_ms ? formatDuration(subagent.duration_ms) : '—'
+  // formatDuration expects seconds, duration_ms is milliseconds
+  const duration = subagent.duration_ms ? formatDuration(subagent.duration_ms / 1000) : '—'
 
   return (
     <div className="border border-slate-700 rounded-lg bg-slate-800/50 overflow-hidden">

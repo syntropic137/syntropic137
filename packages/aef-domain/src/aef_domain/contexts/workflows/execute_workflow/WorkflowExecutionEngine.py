@@ -1086,6 +1086,19 @@ class WorkflowExecutionEngine:
                 # tool_use_id → (agent_name, started_at, tools_used)
                 active_subagents: dict[str, tuple[str, datetime, dict[str, int]]] = {}
 
+                def _attribute_tool_to_latest_subagent(
+                    tool: str, subagents: dict[str, tuple[str, datetime, dict[str, int]]]
+                ) -> None:
+                    """Attribute a tool call to the most recently started subagent."""
+                    if not subagents or not tool:
+                        return
+                    latest_subagent_id = max(
+                        subagents.keys(),
+                        key=lambda k: subagents[k][1],  # Sort by started_at
+                    )
+                    _, _, tools_dict = subagents[latest_subagent_id]
+                    tools_dict[tool] = tools_dict.get(tool, 0) + 1
+
                 # ADR-035: Collect all JSONL lines for conversation storage
                 conversation_lines: list[str] = []
 
@@ -1202,14 +1215,7 @@ class WorkflowExecutionEngine:
                                         )
                                 else:
                                     # Non-Task tool completed - attribute to active subagent
-                                    if active_subagents and tool_name:
-                                        # Attribute to most recently started subagent
-                                        latest_subagent_id = max(
-                                            active_subagents.keys(),
-                                            key=lambda k: active_subagents[k][1],
-                                        )
-                                        _, _, tools_dict = active_subagents[latest_subagent_id]
-                                        tools_dict[tool_name] = tools_dict.get(tool_name, 0) + 1
+                                    _attribute_tool_to_latest_subagent(tool_name, active_subagents)
 
                         continue
 
@@ -1385,14 +1391,11 @@ class WorkflowExecutionEngine:
                                                 duration_ms,
                                                 tools_used,
                                             )
-                                    elif tool_name != "Task" and active_subagents:
+                                    elif tool_name != "Task":
                                         # Attribute non-Task tool to the most recently started subagent
-                                        latest_subagent_id = max(
-                                            active_subagents.keys(),
-                                            key=lambda k: active_subagents[k][1],
+                                        _attribute_tool_to_latest_subagent(
+                                            tool_name, active_subagents
                                         )
-                                        _, _, tools_dict = active_subagents[latest_subagent_id]
-                                        tools_dict[tool_name] = tools_dict.get(tool_name, 0) + 1
 
                         if cli_type in ("system",):
                             logger.debug("CLI message: %s", cli_type)
@@ -1419,7 +1422,7 @@ class WorkflowExecutionEngine:
                             workflow_id=ctx.workflow_id,
                             model=phase.agent_config.model,
                             event_count=len(conversation_lines),
-                            tool_counts={},  # Could extract from tool_names_cache
+                            tool_counts={},  # Tool counts tracked separately via observability events
                             total_input_tokens=total_input_tokens,
                             total_output_tokens=total_output_tokens,
                             started_at=phase_started_at,
