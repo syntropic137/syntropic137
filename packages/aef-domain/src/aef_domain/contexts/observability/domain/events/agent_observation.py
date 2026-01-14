@@ -41,7 +41,8 @@ class ObservationType(str, Enum):
     # Execution lifecycle - from SDK hooks
     PROMPT_SUBMITTED = "prompt_submitted"  # UserPromptSubmit hook
     EXECUTION_STOPPED = "execution_stopped"  # Stop hook
-    SUBAGENT_STOPPED = "subagent_stopped"  # SubagentStop hook
+    SUBAGENT_STARTED = "subagent_started"  # Task tool spawns subagent (ADR-037)
+    SUBAGENT_STOPPED = "subagent_stopped"  # SubagentStop hook / Task completion
     CONTEXT_COMPACTING = "context_compacting"  # PreCompact hook
 
     # Progress tracking
