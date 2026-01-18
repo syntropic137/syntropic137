@@ -389,8 +389,9 @@ typecheck:
 
 # Run VSA validation (requires event-sourcing-platform submodule)
 vsa-validate:
-    @echo "VSA validation not yet implemented."
-    # TODO: Implement VSA validation using the tool from lib/event-sourcing-platform
+    @echo "🔍 Running VSA validation..."
+    vsa validate
+    @echo "✅ VSA validation passed"
 
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
@@ -403,12 +404,12 @@ test-debt-strict:
     uv run python scripts/check_test_debt.py
 
 # Run all QA checks (Python + Frontend)
-qa: lint format typecheck test dashboard-qa test-debt
+qa: lint format typecheck test dashboard-qa test-debt vsa-validate
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Run Python-only QA (faster, no frontend build)
-qa-python: lint format typecheck test test-debt
+qa-python: lint format typecheck test test-debt vsa-validate
     @echo ""
     @echo "✅ Python QA checks passed!"
 
