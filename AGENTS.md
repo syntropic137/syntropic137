@@ -323,7 +323,11 @@ DIRECT EXECUTE MODE or DEM // Used to bypass the plan and go straight to execute
 - **Forbidden:** Deviations from plan, creative additions
 - **Required:** After each milestone, run QA checkpoint and commit changes
 - **Output:** `[MODE: EXECUTE]` + implementation matching the plan
-- During execute, please use TODO comments for things that can be improved or changed in the future and use "FIXME" comments for things that are breaking the app.
+- **TODO/FIXME Standard:** All TODO and FIXME comments MUST reference a GitHub issue
+  - ✅ Good: `# TODO(#55): Add integration tests`
+  - ❌ Bad: `# TODO: Add integration tests`
+  - Use TODO for improvements, FIXME for bugs
+  - Always create/reference issue for tracking
 
 ### MODE 5: REVIEW
 - **Purpose:** Validate implementation against plan
@@ -400,3 +404,38 @@ Types:
 - Flag even the smallest deviation in REVIEW mode
 - Return to PLAN mode if any implementation issue requires deviation
 - Use conventional commit messages for all commits
+
+---
+
+## 🚫 CRITICAL: Scratch Documentation Policy
+
+**ROOT-LEVEL MARKDOWN FILES ARE SCRATCH DOCUMENTS - DO NOT COMMIT**
+
+### Rule
+- ❌ **NEVER commit** root-level `.md` files like:
+  - `*-SUMMARY.md` (e.g., `CI-FIX-SUMMARY.md`)
+  - `*-PLAN.md` (e.g., `TEST-ENHANCEMENT-PLAN.md`)
+  - `PROJECT-PLAN_*.md`
+  - `START-HERE.md`
+  - Any other scratch/working docs in root
+
+### Why
+These are temporary working documents used during development sessions. They clutter the repository and become stale quickly.
+
+### Where to Commit Documentation
+- ✅ `docs/` directory - Permanent, maintained documentation
+- ✅ `docs/adrs/` - Architecture Decision Records
+- ✅ `README.md` - Project overview (specific exceptions)
+- ✅ Package-specific docs within package directories
+
+### Cleanup
+Before committing, always check:
+```bash
+git status
+# If you see root-level .md files (other than README.md), remove them:
+rm -f *-SUMMARY.md *-PLAN.md PROJECT-PLAN_*.md START-HERE.md
+```
+
+---
+
+**Remember:** If it's not in `docs/`, it's probably scratch and shouldn't be committed!
