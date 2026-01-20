@@ -34,7 +34,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Setup VSA CLI
+        uses: ./.github/actions/setup-vsa
+
+      - name: Install Python dependencies
         run: uv sync --all-extras
 
       - name: Check formatting

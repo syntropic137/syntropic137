@@ -1,0 +1,44 @@
+name: 'Setup VSA CLI'
+description: 'Install VSA (Vertical Slice Architecture) CLI tool from submodule'
+inputs:
+  cache-key-suffix:
+    description: 'Optional suffix for cache key (for parallel jobs)'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - name: Cache Rust dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          lib/event-sourcing-platform/vsa/target/
+        key: ${{ runner.os }}-cargo-vsa-${{ hashFiles('lib/event-sourcing-platform/vsa/**/Cargo.lock') }}${{ inputs.cache-key-suffix }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-vsa-
+
+    - name: Install VSA CLI
+      shell: bash
+      run: |
+        # Check if VSA is already cached
+        if ! command -v vsa &> /dev/null; then
+          echo "📦 Installing VSA CLI from submodule..."
+          cd lib/event-sourcing-platform/vsa
+          cargo install --path vsa-cli --locked
+          echo "✅ VSA CLI installed successfully"
+        else
+          echo "✅ VSA CLI already available (cached)"
+        fi
+        
+        # Verify installation
+        vsa --version
+        echo "VSA_INSTALLED=true" >> $GITHUB_ENV
