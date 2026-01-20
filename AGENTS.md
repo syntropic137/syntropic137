@@ -400,3 +400,38 @@ Types:
 - Flag even the smallest deviation in REVIEW mode
 - Return to PLAN mode if any implementation issue requires deviation
 - Use conventional commit messages for all commits
+
+---
+
+## 🚫 CRITICAL: Scratch Documentation Policy
+
+**ROOT-LEVEL MARKDOWN FILES ARE SCRATCH DOCUMENTS - DO NOT COMMIT**
+
+### Rule
+- ❌ **NEVER commit** root-level `.md` files like:
+  - `*-SUMMARY.md` (e.g., `CI-FIX-SUMMARY.md`)
+  - `*-PLAN.md` (e.g., `TEST-ENHANCEMENT-PLAN.md`)
+  - `PROJECT-PLAN_*.md`
+  - `START-HERE.md`
+  - Any other scratch/working docs in root
+
+### Why
+These are temporary working documents used during development sessions. They clutter the repository and become stale quickly.
+
+### Where to Commit Documentation
+- ✅ `docs/` directory - Permanent, maintained documentation
+- ✅ `docs/adrs/` - Architecture Decision Records
+- ✅ `README.md` - Project overview (specific exceptions)
+- ✅ Package-specific docs within package directories
+
+### Cleanup
+Before committing, always check:
+```bash
+git status
+# If you see root-level .md files (other than README.md), remove them:
+rm -f *-SUMMARY.md *-PLAN.md PROJECT-PLAN_*.md START-HERE.md
+```
+
+---
+
+**Remember:** If it's not in `docs/`, it's probably scratch and shouldn't be committed!

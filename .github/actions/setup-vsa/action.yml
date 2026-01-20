@@ -38,7 +38,7 @@ runs:
         else
           echo "✅ VSA CLI already available (cached)"
         fi
-        
+
         # Verify installation
         vsa --version
         echo "VSA_INSTALLED=true" >> $GITHUB_ENV
