@@ -90,7 +90,7 @@ async def test_handler_validates_bundle_id() -> None:
         await handler.handle(command)
 
 
-# TODO: Add integration tests with real storage
-# TODO: Add tests for bundle creation logic
-# TODO: Add tests for storage provider selection
-# TODO: Add tests for custom prefix handling
+# TODO(#55): Add integration tests with real storage
+# TODO(#55): Add tests for bundle creation logic
+# TODO(#55): Add tests for storage provider selection
+# TODO(#55): Add tests for custom prefix handling

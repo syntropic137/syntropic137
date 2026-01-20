@@ -323,7 +323,11 @@ DIRECT EXECUTE MODE or DEM // Used to bypass the plan and go straight to execute
 - **Forbidden:** Deviations from plan, creative additions
 - **Required:** After each milestone, run QA checkpoint and commit changes
 - **Output:** `[MODE: EXECUTE]` + implementation matching the plan
-- During execute, please use TODO comments for things that can be improved or changed in the future and use "FIXME" comments for things that are breaking the app.
+- **TODO/FIXME Standard:** All TODO and FIXME comments MUST reference a GitHub issue
+  - ✅ Good: `# TODO(#55): Add integration tests`
+  - ❌ Bad: `# TODO: Add integration tests`
+  - Use TODO for improvements, FIXME for bugs
+  - Always create/reference issue for tracking
 
 ### MODE 5: REVIEW
 - **Purpose:** Validate implementation against plan

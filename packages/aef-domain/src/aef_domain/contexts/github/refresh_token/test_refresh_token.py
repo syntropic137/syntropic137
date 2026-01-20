@@ -18,6 +18,6 @@ def test_command_exists() -> None:
     assert RefreshTokenCommand is not None
 
 
-# TODO: Add integration tests with GitHub App
-# TODO: Add tests for token expiry handling
-# TODO: Add tests for installation validation
+# TODO(#55): Add integration tests with GitHub App
+# TODO(#55): Add tests for token expiry handling
+# TODO(#55): Add tests for installation validation
