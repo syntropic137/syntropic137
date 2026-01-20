@@ -9,13 +9,13 @@ from aef_domain.contexts.workspaces.execute_command.CommandFailedEvent import (
 from aef_domain.contexts.workspaces.execute_command.ExecuteCommandCommand import (
     ExecuteCommandCommand,
 )
-from aef_domain.contexts.workspaces.execute_command.ExecuteCommandHandler import (
-    ExecuteCommandHandler,
-)
+
+# ExecuteCommandHandler is not exported to avoid import issues
+# It's a VSA compliance stub and can be imported directly if needed:
+# from aef_domain.contexts.workspaces.execute_command.ExecuteCommandHandler import ExecuteCommandHandler
 
 __all__ = [
     "CommandExecutedEvent",
     "CommandFailedEvent",
     "ExecuteCommandCommand",
-    "ExecuteCommandHandler",
 ]
