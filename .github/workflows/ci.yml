@@ -34,7 +34,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Setup VSA CLI
+        uses: ./.github/actions/setup-vsa
+
+      - name: Install Python dependencies
         run: uv sync --all-extras
 
       - name: Check formatting
@@ -48,6 +51,9 @@ jobs:
 
       - name: Validate domain events
         run: uv run python scripts/validate_domain_events.py
+
+      - name: VSA validation
+        run: vsa validate
 
       # POKA-YOKE: Fail if xfail/skip without issue links
       - name: Check test debt

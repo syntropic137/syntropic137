@@ -281,6 +281,40 @@ class PreMergeValidator:
             details="" if success else output,
         )
 
+    async def check_vsa_validation(self) -> ValidationResult:
+        """Run VSA validation to ensure architectural compliance."""
+        logger.info("🏗️  Running VSA validation...")
+
+        success, output, duration = await self.run_command(
+            ["vsa", "validate"],
+            "VSA validation",
+            timeout=60,
+        )
+
+        # VSA validation passes with warnings, but we want to track them
+        warnings_count = 0
+        if "Warning(s)" in output:
+            try:
+                import re
+
+                match = re.search(r"(\d+)\s+Warning\(s\)", output)
+                if match:
+                    warnings_count = int(match.group(1))
+            except Exception:
+                pass
+
+        message = "VSA validation passed ✅"
+        if warnings_count > 0:
+            message = f"VSA validation passed with {warnings_count} warnings ⚠️"
+
+        return ValidationResult(
+            name="VSA Validation",
+            passed=success,
+            duration_ms=duration,
+            message=message,
+            details="" if success else output[-500:],
+        )
+
     async def check_e2e_container_test(self) -> ValidationResult:
         """Run E2E container test."""
         if self.quick_mode:
@@ -322,6 +356,7 @@ class PreMergeValidator:
         self.results.append(await self.check_format())
         self.results.append(await self.check_typecheck())
         self.results.append(await self.check_unit_tests())
+        self.results.append(await self.check_vsa_validation())
         self.results.append(await self.check_docker_image())
         self.results.append(await self.check_agentic_events_installed())
         self.results.append(await self.check_e2e_container_test())

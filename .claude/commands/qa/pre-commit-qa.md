@@ -108,6 +108,12 @@ echo "--- Tests ---"
 $RUNNER test 2>&1
 TEST_RESULT=$?
 
+# VSA Validation (architecture compliance)
+echo ""
+echo "--- VSA Validation ---"
+$RUNNER vsa-validate 2>&1 || vsa validate 2>&1
+VSA_RESULT=$?
+
 # Build (optional but recommended)
 echo ""
 echo "--- Build ---"
@@ -164,6 +170,7 @@ fi
 | Lint | ✅/❌ | |
 | Types | ✅/❌ | |
 | Tests | ✅/❌ | |
+| VSA | ✅/❌ | Architecture validation |
 | Build | ✅/❌/⚪ | (optional) |
 
 ---
