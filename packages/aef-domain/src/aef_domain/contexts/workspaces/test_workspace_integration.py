@@ -32,10 +32,10 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     WorkspaceStatus,
 )
 from aef_domain.contexts.workspaces._shared.WorkspaceAggregate import WorkspaceAggregate
-from aef_domain.contexts.workspaces.create_workspace import CreateWorkspaceCommand
-from aef_domain.contexts.workspaces.execute_command import ExecuteCommandCommand
-from aef_domain.contexts.workspaces.inject_tokens import InjectTokensCommand
-from aef_domain.contexts.workspaces.terminate_workspace import TerminateWorkspaceCommand
+from aef_domain.contexts.workspaces.slices.create_workspace import CreateWorkspaceCommand
+from aef_domain.contexts.workspaces.slices.execute_command import ExecuteCommandCommand
+from aef_domain.contexts.workspaces.slices.inject_tokens import InjectTokensCommand
+from aef_domain.contexts.workspaces.slices.terminate_workspace import TerminateWorkspaceCommand
 
 # =============================================================================
 # INTEGRATION TEST: Full Workspace Lifecycle

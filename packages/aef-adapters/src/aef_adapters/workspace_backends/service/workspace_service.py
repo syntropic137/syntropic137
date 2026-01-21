@@ -33,10 +33,10 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     WorkspaceStatus,
 )
 from aef_domain.contexts.workspaces._shared.WorkspaceAggregate import WorkspaceAggregate
-from aef_domain.contexts.workspaces.create_workspace.CreateWorkspaceCommand import (
+from aef_domain.contexts.workspaces.slices.create_workspace.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
-from aef_domain.contexts.workspaces.terminate_workspace.TerminateWorkspaceCommand import (
+from aef_domain.contexts.workspaces.slices.terminate_workspace.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
 

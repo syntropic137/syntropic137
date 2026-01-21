@@ -13,10 +13,10 @@ from aef_adapters.storage import (
     get_workflow_repository,
     reset_storage,
 )
-from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
+from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
     CreateWorkflowHandler,
 )
-from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
 
 SAMPLE_WORKFLOW_YAML = """
 id: seeder-test-workflow

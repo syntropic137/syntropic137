@@ -27,15 +27,15 @@ from aef_domain.contexts.artifacts._shared import (
     ContentType,
     compute_content_hash,
 )
-from aef_domain.contexts.artifacts.create_artifact import (
-    ArtifactCreatedEvent,
-    CreateArtifactCommand,
-)
 from aef_domain.contexts.artifacts.domain.services import (
     ArtifactQueryService,
     ArtifactQueryServiceProtocol,
 )
-from aef_domain.contexts.artifacts.upload_artifact import (
+from aef_domain.contexts.artifacts.slices.create_artifact import (
+    ArtifactCreatedEvent,
+    CreateArtifactCommand,
+)
+from aef_domain.contexts.artifacts.slices.upload_artifact import (
     ArtifactUploadedEvent,
     UploadArtifactCommand,
 )

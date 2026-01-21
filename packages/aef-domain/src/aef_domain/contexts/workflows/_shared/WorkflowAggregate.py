@@ -9,11 +9,11 @@ from uuid import uuid4
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows._shared.value_objects import PhaseDefinition
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
+    from aef_domain.contexts.workflows._shared.WorkflowValueObjects import PhaseDefinition
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+    from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
         WorkflowCreatedEvent,
     )
 
@@ -84,7 +84,7 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
         Validates business rules and emits WorkflowCreatedEvent.
         """
         # Import here to avoid circular imports at module level
-        from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+        from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
         )
 
@@ -133,7 +133,7 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
         Note: When rehydrating from gRPC event store, event may be a GenericDomainEvent
         with dict attributes instead of proper typed objects. Handle both cases.
         """
-        from aef_domain.contexts.workflows._shared.value_objects import (
+        from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
             PhaseDefinition,
             WorkflowClassification,
             WorkflowType,

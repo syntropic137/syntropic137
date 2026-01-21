@@ -19,17 +19,17 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from aef_domain.contexts.github.install_app.AppInstalledEvent import (
-    AppInstalledEvent,
-)
-from aef_domain.contexts.github.install_app.InstallationRevokedEvent import (
-    InstallationRevokedEvent,
-)
-from aef_domain.contexts.github.install_app.InstallationSuspendedEvent import (
-    InstallationSuspendedEvent,
-)
 from aef_domain.contexts.github.slices.get_installation.projection import (
     get_installation_projection,
+)
+from aef_domain.contexts.github.slices.install_app.AppInstalledEvent import (
+    AppInstalledEvent,
+)
+from aef_domain.contexts.github.slices.install_app.InstallationRevokedEvent import (
+    InstallationRevokedEvent,
+)
+from aef_domain.contexts.github.slices.install_app.InstallationSuspendedEvent import (
+    InstallationSuspendedEvent,
 )
 from aef_shared.settings.github import get_github_settings
 

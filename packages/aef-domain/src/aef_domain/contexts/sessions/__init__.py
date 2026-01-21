@@ -44,11 +44,11 @@ from aef_domain.contexts.sessions._shared import (
     SessionStatus,
     TokenMetrics,
 )
-from aef_domain.contexts.sessions.complete_session import (
+from aef_domain.contexts.sessions.slices.complete_session import (
     CompleteSessionCommand,
     SessionCompletedEvent,
 )
-from aef_domain.contexts.sessions.record_operation import (
+from aef_domain.contexts.sessions.slices.record_operation import (
     OperationRecordedEvent,
     RecordOperationCommand,
     # Convenience factory functions
@@ -60,7 +60,7 @@ from aef_domain.contexts.sessions.record_operation import (
     record_tool_completed,
     record_tool_started,
 )
-from aef_domain.contexts.sessions.start_session import (
+from aef_domain.contexts.sessions.slices.start_session import (
     SessionStartedEvent,
     StartSessionCommand,
 )

@@ -14,7 +14,7 @@ from aef_domain.contexts.workflows._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
 )
-from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
+from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
 from aef_shared.logging import get_logger

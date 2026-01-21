@@ -196,7 +196,7 @@ class StaleExecutionCleaner:
             return
 
         # Only fail if still running
-        from aef_domain.contexts.workflows._shared.execution_value_objects import (
+        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
 

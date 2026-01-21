@@ -14,17 +14,17 @@ from typing import TYPE_CHECKING, Any
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
-from aef_domain.contexts.workflows._shared.execution_value_objects import ExecutionStatus
+from aef_domain.contexts.workflows._shared.ExecutionValueObjects import ExecutionStatus
 
 if TYPE_CHECKING:
     pass  # Additional type hints as needed
-    from aef_domain.contexts.workflows.execute_workflow.WorkflowCompletedEvent import (
+    from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowCompletedEvent import (
         WorkflowCompletedEvent,
     )
-    from aef_domain.contexts.workflows.execute_workflow.WorkflowExecutionStartedEvent import (
+    from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionStartedEvent import (
         WorkflowExecutionStartedEvent,
     )
-    from aef_domain.contexts.workflows.execute_workflow.WorkflowFailedEvent import (
+    from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowFailedEvent import (
         WorkflowFailedEvent,
     )
 
@@ -260,7 +260,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("StartExecutionCommand")
     def start_execution(self, command: StartExecutionCommand) -> None:
         """Handle StartExecutionCommand."""
-        from aef_domain.contexts.workflows.execute_workflow.WorkflowExecutionStartedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionStartedEvent import (
             WorkflowExecutionStartedEvent,
         )
 
@@ -284,7 +284,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("CompleteExecutionCommand")
     def complete_execution(self, command: CompleteExecutionCommand) -> None:
         """Handle CompleteExecutionCommand."""
-        from aef_domain.contexts.workflows.execute_workflow.WorkflowCompletedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowCompletedEvent import (
             WorkflowCompletedEvent,
         )
 
@@ -312,7 +312,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
         """Handle FailExecutionCommand."""
-        from aef_domain.contexts.workflows.execute_workflow.WorkflowFailedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowFailedEvent import (
             WorkflowFailedEvent,
         )
 
@@ -335,7 +335,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("StartPhaseCommand")
     def start_phase(self, command: StartPhaseCommand) -> None:
         """Handle StartPhaseCommand - emit PhaseStartedEvent."""
-        from aef_domain.contexts.workflows.execute_workflow.PhaseStartedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.PhaseStartedEvent import (
             PhaseStartedEvent,
         )
 
@@ -357,7 +357,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
         """Handle CompletePhaseCommand - emit PhaseCompletedEvent."""
-        from aef_domain.contexts.workflows.execute_workflow.PhaseCompletedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.PhaseCompletedEvent import (
             PhaseCompletedEvent,
         )
 
@@ -459,7 +459,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("PauseExecutionCommand")
     def pause_execution(self, command: PauseExecutionCommand) -> None:
         """Handle PauseExecutionCommand."""
-        from aef_domain.contexts.workflows.execute_workflow.ExecutionPausedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.ExecutionPausedEvent import (
             ExecutionPausedEvent,
         )
 
@@ -479,7 +479,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("ResumeExecutionCommand")
     def resume_execution(self, command: ResumeExecutionCommand) -> None:
         """Handle ResumeExecutionCommand."""
-        from aef_domain.contexts.workflows.execute_workflow.ExecutionResumedEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.ExecutionResumedEvent import (
             ExecutionResumedEvent,
         )
 
@@ -498,7 +498,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
         """Handle CancelExecutionCommand."""
-        from aef_domain.contexts.workflows.execute_workflow.ExecutionCancelledEvent import (
+        from aef_domain.contexts.workflows.slices.execute_workflow.ExecutionCancelledEvent import (
             ExecutionCancelledEvent,
         )
 

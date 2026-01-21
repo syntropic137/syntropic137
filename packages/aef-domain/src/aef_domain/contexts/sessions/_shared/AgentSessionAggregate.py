@@ -17,22 +17,22 @@ from aef_domain.contexts.sessions._shared.value_objects import (
 )
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+    from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
         CompleteSessionCommand,
     )
-    from aef_domain.contexts.sessions.complete_session.SessionCompletedEvent import (
+    from aef_domain.contexts.sessions.slices.complete_session.SessionCompletedEvent import (
         SessionCompletedEvent,
     )
-    from aef_domain.contexts.sessions.record_operation.OperationRecordedEvent import (
+    from aef_domain.contexts.sessions.slices.record_operation.OperationRecordedEvent import (
         OperationRecordedEvent,
     )
-    from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+    from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
         RecordOperationCommand,
     )
-    from aef_domain.contexts.sessions.start_session.SessionStartedEvent import (
+    from aef_domain.contexts.sessions.slices.start_session.SessionStartedEvent import (
         SessionStartedEvent,
     )
-    from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+    from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
         StartSessionCommand,
     )
 
@@ -129,7 +129,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
         Creates a new session for tracking agent execution.
         """
-        from aef_domain.contexts.sessions.start_session.SessionStartedEvent import (
+        from aef_domain.contexts.sessions.slices.start_session.SessionStartedEvent import (
             SessionStartedEvent,
         )
 
@@ -166,7 +166,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         Records an operation (message, tool call, thinking, etc.).
         Supports full observability with type-specific fields.
         """
-        from aef_domain.contexts.sessions.record_operation.OperationRecordedEvent import (
+        from aef_domain.contexts.sessions.slices.record_operation.OperationRecordedEvent import (
             OperationRecordedEvent,
         )
 
@@ -212,7 +212,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
         Marks the session as completed (or failed).
         """
-        from aef_domain.contexts.sessions.complete_session.SessionCompletedEvent import (
+        from aef_domain.contexts.sessions.slices.complete_session.SessionCompletedEvent import (
             SessionCompletedEvent,
         )
 
