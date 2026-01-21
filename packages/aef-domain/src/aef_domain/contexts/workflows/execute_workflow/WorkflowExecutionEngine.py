@@ -521,13 +521,13 @@ class WorkflowExecutionEngine:
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -934,13 +934,13 @@ class WorkflowExecutionEngine:
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 

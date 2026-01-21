@@ -3,7 +3,7 @@
 Provides commands and events for recording operations in agent sessions.
 Use the convenience factory functions for type-safe command creation:
 
-    from aef_domain.contexts.sessions.record_operation import (
+    from aef_domain.contexts.sessions.slices.record_operation import (
         record_tool_started,
         record_tool_completed,
         record_message_response,
@@ -12,7 +12,7 @@ Use the convenience factory functions for type-safe command creation:
     cmd = record_tool_started(session_id, "Read", tool_use_id, {"path": "/foo"})
 """
 
-from aef_domain.contexts.sessions.record_operation.commands import (
+from aef_domain.contexts.sessions.slices.record_operation.commands import (
     record_error,
     record_message_request,
     record_message_response,
@@ -21,10 +21,10 @@ from aef_domain.contexts.sessions.record_operation.commands import (
     record_tool_completed,
     record_tool_started,
 )
-from aef_domain.contexts.sessions.record_operation.OperationRecordedEvent import (
+from aef_domain.contexts.sessions.slices.record_operation.OperationRecordedEvent import (
     OperationRecordedEvent,
 )
-from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
     RecordOperationCommand,
 )
 

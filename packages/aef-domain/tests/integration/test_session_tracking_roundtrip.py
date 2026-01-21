@@ -45,7 +45,7 @@ class TestAgentSessionRoundtrip:
         from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -86,10 +86,10 @@ class TestAgentSessionRoundtrip:
         from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -145,10 +145,10 @@ class TestAgentSessionRoundtrip:
         from aef_domain.contexts.sessions._shared.value_objects import (
             SessionStatus,
         )
-        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -199,10 +199,10 @@ class TestAgentSessionTokenAccumulation:
         from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -275,13 +275,13 @@ class TestAgentSessionLifecycle:
         from aef_domain.contexts.sessions._shared.value_objects import (
             SessionStatus,
         )
-        from aef_domain.contexts.sessions.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
             StartSessionCommand,
         )
 
