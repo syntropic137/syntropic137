@@ -129,7 +129,7 @@ class TestWorkflowExecutionRoundtrip:
         unique_execution_id: str,
     ) -> None:
         """Level 4: Execution completion persists WorkflowCompleted event."""
-        from aef_domain.contexts.workflows._shared.execution_value_objects import (
+        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
         from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
@@ -182,7 +182,7 @@ class TestWorkflowExecutionRoundtrip:
         unique_execution_id: str,
     ) -> None:
         """Level 4: Execution failure persists WorkflowFailed event."""
-        from aef_domain.contexts.workflows._shared.execution_value_objects import (
+        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
         from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
@@ -309,7 +309,7 @@ class TestWorkflowExecutionMultipleEvents:
         unique_execution_id: str,
     ) -> None:
         """Level 4: Full execution lifecycle persists and replays correctly."""
-        from aef_domain.contexts.workflows._shared.execution_value_objects import (
+        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
         from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (

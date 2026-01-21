@@ -69,15 +69,15 @@ def create_workflow(
     from uuid import uuid4
 
     from aef_adapters.storage import get_event_publisher, get_workflow_repository
-    from aef_domain.contexts.workflows._shared.value_objects import (
+    from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
         PhaseDefinition,
         WorkflowClassification,
         WorkflowType,
     )
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
 
@@ -352,10 +352,10 @@ def seed_workflows(
         get_event_publisher,
         get_workflow_repository,
     )
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
-    from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
 
     # Determine source
     if file and directory:
@@ -643,11 +643,11 @@ def run_workflow(
         get_session_repository,
         get_workflow_repository,
     )
-    from aef_domain.contexts.workflows._shared.execution_value_objects import (
+    from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
         ExecutionStatus,
         PhaseStatus,
     )
-    from aef_domain.contexts.workflows.execute_workflow.WorkflowExecutionEngine import (
+    from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
         WorkflowExecutionEngine,
         WorkflowNotFoundError,
     )

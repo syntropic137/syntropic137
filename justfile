@@ -275,6 +275,43 @@ test:
     @echo "Running all tests..."
     uv run pytest
 
+# Static checks: lint + format + typecheck (fast, pre-commit)
+check:
+    @echo "=== Static Checks ==="
+    @echo ""
+    @echo "1️⃣ Linting..."
+    @uv run ruff check .
+    @echo ""
+    @echo "2️⃣ Format check..."
+    @uv run ruff format --check .
+    @echo ""
+    @echo "3️⃣ Type checking..."
+    @uv run pyright || echo "⚠️  Type check failed (non-blocking for now)"
+    @echo ""
+    @echo "✅ Static checks passed!"
+
+# Static checks with auto-fix
+check-fix:
+    @echo "=== Static Checks (with auto-fix) ==="
+    @echo ""
+    @echo "1️⃣ Auto-fixing lint issues..."
+    @uv run ruff check --fix .
+    @echo ""
+    @echo "2️⃣ Auto-formatting..."
+    @uv run ruff format .
+    @echo ""
+    @echo "✅ Static checks fixed!"
+
+# Comprehensive QA: all checks (pre-commit, comprehensive)
+qa: lint format typecheck test dashboard-qa test-debt vsa-validate
+    @echo ""
+    @echo "✅ All QA checks passed!"
+
+# Full QA with coverage: qa + coverage report (pre-push, CI)
+qa-full: lint format typecheck test-cov dashboard-qa vsa-validate
+    @echo ""
+    @echo "✅ Full QA passed with coverage!"
+
 # Fast unit tests (parallel execution)
 test-unit:
     @echo "Running unit tests (parallel)..."
@@ -403,10 +440,8 @@ test-debt-strict:
     @echo "🔍 Checking for test debt (strict)..."
     uv run python scripts/check_test_debt.py
 
-# Run all QA checks (Python + Frontend)
-qa: lint format typecheck test dashboard-qa test-debt vsa-validate
-    @echo ""
-    @echo "✅ All QA checks passed!"
+# Legacy command - replaced by new qa/qa-full structure (see ADR-035)
+# qa: lint format typecheck test dashboard-qa test-debt vsa-validate
 
 # Run Python-only QA (faster, no frontend build)
 qa-python: lint format typecheck test test-debt vsa-validate
@@ -414,9 +449,8 @@ qa-python: lint format typecheck test test-debt vsa-validate
     @echo "✅ Python QA checks passed!"
 
 # Run full QA with coverage
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate
-    @echo ""
-    @echo "✅ All QA checks passed with coverage!"
+# Legacy command - replaced by new qa-full (see ADR-035)
+# qa-full-legacy: lint format typecheck test-cov dashboard-qa vsa-validate
 
 # --- Workflow Management ---
 

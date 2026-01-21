@@ -2,6 +2,8 @@
 
 from aef_domain.contexts.workflows._shared import (
     AgentConfiguration,
+    ArtifactSummary,
+    ArtifactUploadResult,
     ExecutablePhase,
     ExecutionMetrics,
     ExecutionStatus,
@@ -10,6 +12,7 @@ from aef_domain.contexts.workflows._shared import (
     PhaseInput,
     PhaseResult,
     PhaseStatus,
+    SessionContext,
     WorkflowAggregate,
     WorkflowClassification,
     WorkflowDefinition,
@@ -17,7 +20,24 @@ from aef_domain.contexts.workflows._shared import (
     load_workflow_definitions,
     validate_workflow_yaml,
 )
-from aef_domain.contexts.workflows.execute_workflow import (
+from aef_domain.contexts.workflows.ports import (
+    AgentFactoryPort,
+    ArtifactContentStoragePort,
+    ArtifactQueryServicePort,
+    ArtifactRepositoryPort,
+    ConversationStoragePort,
+    ObservabilityServicePort,
+    SessionRepositoryPort,
+    WorkflowExecutionRepositoryPort,
+    WorkflowRepositoryPort,
+    WorkspaceServicePort,
+)
+from aef_domain.contexts.workflows.seed_workflow import (
+    SeedReport,
+    SeedResult,
+    WorkflowSeeder,
+)
+from aef_domain.contexts.workflows.slices.execute_workflow import (
     ExecuteWorkflowCommand,
     PhaseCompletedEvent,
     PhaseStartedEvent,
@@ -27,18 +47,25 @@ from aef_domain.contexts.workflows.execute_workflow import (
     WorkflowExecutionStartedEvent,
     WorkflowFailedEvent,
 )
-from aef_domain.contexts.workflows.seed_workflow import (
-    SeedReport,
-    SeedResult,
-    WorkflowSeeder,
-)
 
 __all__ = [
+    # Value Objects & Aggregates
     "AgentConfiguration",
+    # Ports (NEW in M1)
+    "AgentFactoryPort",
+    "ArtifactContentStoragePort",
+    "ArtifactQueryServicePort",
+    "ArtifactRepositoryPort",
+    "ArtifactSummary",
+    "ArtifactUploadResult",
+    "ConversationStoragePort",
     "ExecutablePhase",
+    # Commands
     "ExecuteWorkflowCommand",
     "ExecutionMetrics",
     "ExecutionStatus",
+    "ObservabilityServicePort",
+    # Events
     "PhaseCompletedEvent",
     "PhaseDefinition",
     "PhaseExecutionType",
@@ -46,18 +73,26 @@ __all__ = [
     "PhaseResult",
     "PhaseStartedEvent",
     "PhaseStatus",
+    # Seeders
     "SeedReport",
     "SeedResult",
+    "SessionContext",
+    "SessionRepositoryPort",
     "WorkflowAggregate",
     "WorkflowClassification",
     "WorkflowCompletedEvent",
     "WorkflowDefinition",
+    # Services (will be deprecated in M5)
     "WorkflowExecutionEngine",
+    "WorkflowExecutionRepositoryPort",
     "WorkflowExecutionResult",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
+    "WorkflowRepositoryPort",
     "WorkflowSeeder",
     "WorkflowType",
+    "WorkspaceServicePort",
+    # Utilities
     "load_workflow_definitions",
     "validate_workflow_yaml",
 ]

@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from aef_domain.contexts.workflows._shared.value_objects import (
-    PhaseExecutionType,
-    WorkflowClassification,
-    WorkflowType,
-)
 from aef_domain.contexts.workflows._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
     validate_workflow_yaml,
+)
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+    PhaseExecutionType,
+    WorkflowClassification,
+    WorkflowType,
 )
 
 VALID_WORKFLOW_YAML = """
