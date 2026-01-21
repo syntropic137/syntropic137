@@ -275,6 +275,36 @@ test:
     @echo "Running all tests..."
     uv run pytest
 
+# Run all QA checks (lint, format check, tests)
+check:
+    @echo "=== QA Checks ==="
+    @echo ""
+    @echo "1️⃣ Linting..."
+    @uv run ruff check .
+    @echo ""
+    @echo "2️⃣ Format check..."
+    @uv run ruff format --check .
+    @echo ""
+    @echo "3️⃣ Running tests..."
+    @uv run pytest
+    @echo ""
+    @echo "✅ All checks passed!"
+
+# Run all QA checks with auto-fix
+check-fix:
+    @echo "=== QA Checks (with auto-fix) ==="
+    @echo ""
+    @echo "1️⃣ Auto-fixing lint issues..."
+    @uv run ruff check --fix .
+    @echo ""
+    @echo "2️⃣ Auto-formatting..."
+    @uv run ruff format .
+    @echo ""
+    @echo "3️⃣ Running tests..."
+    @uv run pytest
+    @echo ""
+    @echo "✅ All checks passed!"
+
 # Fast unit tests (parallel execution)
 test-unit:
     @echo "Running unit tests (parallel)..."
