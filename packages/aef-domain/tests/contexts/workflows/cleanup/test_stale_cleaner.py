@@ -87,7 +87,7 @@ class MockAggregate:
         self.commands: list = []
 
         # Import and set status
-        from aef_domain.contexts.workflows._shared.execution_value_objects import (
+        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
 
@@ -97,7 +97,7 @@ class MockAggregate:
         """Record commands for verification."""
         self.commands.append(command)
         # Update status to failed
-        from aef_domain.contexts.workflows._shared.execution_value_objects import (
+        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
 

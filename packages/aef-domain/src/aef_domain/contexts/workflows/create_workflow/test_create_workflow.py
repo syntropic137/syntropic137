@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from aef_domain.contexts.workflows._shared.value_objects import (
-    PhaseDefinition,
-    WorkflowClassification,
-    WorkflowType,
-)
 from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
     WorkflowAggregate,
     WorkflowStatus,
+)
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+    PhaseDefinition,
+    WorkflowClassification,
+    WorkflowType,
 )
 from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
     CreateWorkflowCommand,

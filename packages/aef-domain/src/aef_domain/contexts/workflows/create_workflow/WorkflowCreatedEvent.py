@@ -5,7 +5,7 @@ from __future__ import annotations
 from event_sourcing import DomainEvent, event
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
-from aef_domain.contexts.workflows._shared.value_objects import (  # noqa: TC001
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (  # noqa: TC001
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,

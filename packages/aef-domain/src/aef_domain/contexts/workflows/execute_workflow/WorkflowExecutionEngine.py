@@ -28,7 +28,7 @@ from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.observability.domain.events.agent_observation import (
     ObservationType,
 )
-from aef_domain.contexts.workflows._shared.execution_value_objects import (
+from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     ExecutablePhase,
     ExecutionMetrics,
     ExecutionStatus,

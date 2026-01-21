@@ -4,7 +4,7 @@ from aef_domain.contexts.workflows._shared.ArtifactValueObjects import (
     ArtifactSummary,
     ArtifactUploadResult,
 )
-from aef_domain.contexts.workflows._shared.execution_value_objects import (
+from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     AgentConfiguration,
     ExecutablePhase,
     ExecutionMetrics,
@@ -14,12 +14,6 @@ from aef_domain.contexts.workflows._shared.execution_value_objects import (
     PhaseStatus,
 )
 from aef_domain.contexts.workflows._shared.SessionValueObjects import SessionContext
-from aef_domain.contexts.workflows._shared.value_objects import (
-    PhaseDefinition,
-    PhaseExecutionType,
-    WorkflowClassification,
-    WorkflowType,
-)
 from aef_domain.contexts.workflows._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
@@ -33,6 +27,12 @@ from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
+)
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+    PhaseDefinition,
+    PhaseExecutionType,
+    WorkflowClassification,
+    WorkflowType,
 )
 
 __all__ = [

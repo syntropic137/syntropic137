@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
-from aef_domain.contexts.workflows._shared.execution_value_objects import ExecutionStatus
+from aef_domain.contexts.workflows._shared.ExecutionValueObjects import ExecutionStatus
 
 if TYPE_CHECKING:
     pass  # Additional type hints as needed

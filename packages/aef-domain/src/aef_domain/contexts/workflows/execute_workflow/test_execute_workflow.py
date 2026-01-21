@@ -14,20 +14,20 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-from aef_domain.contexts.workflows._shared.execution_value_objects import (
+from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     ExecutablePhase,
     ExecutionMetrics,
     ExecutionStatus,
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows._shared.value_objects import (
+from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+    WorkflowAggregate,
+)
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
-)
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
-    WorkflowAggregate,
 )
 from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
     CreateWorkflowCommand,
