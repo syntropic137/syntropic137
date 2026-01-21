@@ -29,14 +29,14 @@ from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.execute_workflow.WorkflowExecutionEngine import (
+from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
+    CreateWorkflowCommand,
+)
+from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
     ExecutionContext,
     WorkflowExecutionEngine,
     WorkflowExecutionResult,
     WorkflowNotFoundError,
-)
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
 )
 
 # =============================================================================

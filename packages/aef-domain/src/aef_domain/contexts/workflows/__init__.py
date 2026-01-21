@@ -20,16 +20,6 @@ from aef_domain.contexts.workflows._shared import (
     load_workflow_definitions,
     validate_workflow_yaml,
 )
-from aef_domain.contexts.workflows.execute_workflow import (
-    ExecuteWorkflowCommand,
-    PhaseCompletedEvent,
-    PhaseStartedEvent,
-    WorkflowCompletedEvent,
-    WorkflowExecutionEngine,
-    WorkflowExecutionResult,
-    WorkflowExecutionStartedEvent,
-    WorkflowFailedEvent,
-)
 from aef_domain.contexts.workflows.ports import (
     AgentFactoryPort,
     ArtifactContentStoragePort,
@@ -46,6 +36,16 @@ from aef_domain.contexts.workflows.seed_workflow import (
     SeedReport,
     SeedResult,
     WorkflowSeeder,
+)
+from aef_domain.contexts.workflows.slices.execute_workflow import (
+    ExecuteWorkflowCommand,
+    PhaseCompletedEvent,
+    PhaseStartedEvent,
+    WorkflowCompletedEvent,
+    WorkflowExecutionEngine,
+    WorkflowExecutionResult,
+    WorkflowExecutionStartedEvent,
+    WorkflowFailedEvent,
 )
 
 __all__ = [
