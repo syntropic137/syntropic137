@@ -44,5 +44,3 @@ class AgentFactoryPort(Protocol):
             response = await agent.complete(messages, config)
         """
         ...
-
-

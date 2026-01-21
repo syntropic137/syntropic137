@@ -50,5 +50,3 @@ class WorkflowRepositoryPort(Protocol):
             True if workflow exists, False otherwise.
         """
         ...
-
-

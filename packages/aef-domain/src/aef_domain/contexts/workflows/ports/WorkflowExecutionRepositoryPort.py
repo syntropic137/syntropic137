@@ -53,5 +53,3 @@ class WorkflowExecutionRepositoryPort(Protocol):
             True if execution exists, False otherwise.
         """
         ...
-
-

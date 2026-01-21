@@ -65,5 +65,3 @@ class WorkspaceServicePort(Protocol):
             # Workspace destroyed here
         """
         ...
-
-

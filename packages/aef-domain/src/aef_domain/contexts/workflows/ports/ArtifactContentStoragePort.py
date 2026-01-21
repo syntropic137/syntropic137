@@ -85,5 +85,3 @@ class ArtifactContentStoragePort(Protocol):
             Presigned URL for direct download.
         """
         ...
-
-

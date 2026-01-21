@@ -56,5 +56,3 @@ class ConversationStoragePort(Protocol):
             )
         """
         ...
-
-

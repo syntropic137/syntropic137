@@ -48,5 +48,3 @@ class ArtifactRepositoryPort(Protocol):
             True if artifact exists, False otherwise.
         """
         ...
-
-

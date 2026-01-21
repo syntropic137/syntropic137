@@ -51,5 +51,3 @@ class SessionRepositoryPort(Protocol):
             True if session exists, False otherwise.
         """
         ...
-
-

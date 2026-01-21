@@ -65,5 +65,3 @@ class ObservabilityServicePort(Protocol):
         the TimescaleDB schema exists.
         """
         ...
-
-
