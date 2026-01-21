@@ -4,7 +4,8 @@ Per ADR-023: Workspace-First Execution Model, agents MUST run inside isolated
 workspaces. This port defines the contract for workspace creation and management.
 """
 
-from typing import TYPE_CHECKING, AsyncContextManager, Protocol
+from contextlib import AbstractAsyncContextManager
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from aef_adapters.workspace_backends.service import ManagedWorkspace
@@ -31,7 +32,7 @@ class WorkspaceServicePort(Protocol):
         phase_id: str | None = None,
         with_sidecar: bool = False,
         inject_tokens: bool = False,
-    ) -> AsyncContextManager["ManagedWorkspace"]:
+    ) -> AbstractAsyncContextManager["ManagedWorkspace"]:
         """Create an isolated workspace for agent execution.
 
         The workspace provides:

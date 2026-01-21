@@ -4,7 +4,11 @@ Per ADR-035 (Conversation Storage Architecture), full JSONL conversation logs
 are stored in object storage (MinIO/S3) for debugging and replay.
 """
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    # Placeholder - will be defined in adapters layer
+    SessionContext = Any
 
 
 class ConversationStoragePort(Protocol):

@@ -7,7 +7,16 @@ Per ADR-012 (Artifact Storage), artifact content is stored in:
 This port handles the object storage layer.
 """
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from typing import TypedDict
+
+    class ArtifactUploadResult(TypedDict):
+        """Result of artifact upload operation."""
+
+        storage_uri: str
+        size_bytes: int
 
 
 class ArtifactContentStoragePort(Protocol):

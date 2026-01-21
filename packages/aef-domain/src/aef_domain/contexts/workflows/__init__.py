@@ -48,45 +48,45 @@ from aef_domain.contexts.workflows.seed_workflow import (
 __all__ = [
     # Value Objects & Aggregates
     "AgentConfiguration",
-    "ExecutablePhase",
-    "ExecutionMetrics",
-    "ExecutionStatus",
-    "PhaseDefinition",
-    "PhaseExecutionType",
-    "PhaseInput",
-    "PhaseResult",
-    "PhaseStatus",
-    "WorkflowAggregate",
-    "WorkflowClassification",
-    "WorkflowDefinition",
-    "WorkflowType",
-    # Commands
-    "ExecuteWorkflowCommand",
-    # Events
-    "PhaseCompletedEvent",
-    "PhaseStartedEvent",
-    "WorkflowCompletedEvent",
-    "WorkflowExecutionStartedEvent",
-    "WorkflowFailedEvent",
-    # Services (will be deprecated in M5)
-    "WorkflowExecutionEngine",
-    "WorkflowExecutionResult",
-    # Seeders
-    "SeedReport",
-    "SeedResult",
-    "WorkflowSeeder",
-    # Utilities
-    "load_workflow_definitions",
-    "validate_workflow_yaml",
     # Ports (NEW in M1)
     "AgentFactoryPort",
     "ArtifactContentStoragePort",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
     "ConversationStoragePort",
+    "ExecutablePhase",
+    # Commands
+    "ExecuteWorkflowCommand",
+    "ExecutionMetrics",
+    "ExecutionStatus",
     "ObservabilityServicePort",
+    # Events
+    "PhaseCompletedEvent",
+    "PhaseDefinition",
+    "PhaseExecutionType",
+    "PhaseInput",
+    "PhaseResult",
+    "PhaseStartedEvent",
+    "PhaseStatus",
+    # Seeders
+    "SeedReport",
+    "SeedResult",
     "SessionRepositoryPort",
+    "WorkflowAggregate",
+    "WorkflowClassification",
+    "WorkflowCompletedEvent",
+    "WorkflowDefinition",
+    # Services (will be deprecated in M5)
+    "WorkflowExecutionEngine",
     "WorkflowExecutionRepositoryPort",
+    "WorkflowExecutionResult",
+    "WorkflowExecutionStartedEvent",
+    "WorkflowFailedEvent",
     "WorkflowRepositoryPort",
+    "WorkflowSeeder",
+    "WorkflowType",
     "WorkspaceServicePort",
+    # Utilities
+    "load_workflow_definitions",
+    "validate_workflow_yaml",
 ]
