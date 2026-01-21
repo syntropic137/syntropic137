@@ -14,7 +14,7 @@ from aef_adapters.storage import (
     reset_storage,
 )
 from aef_cli.main import app
-from aef_domain.contexts.workflows._shared.value_objects import (
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,

@@ -69,7 +69,7 @@ def create_workflow(
     from uuid import uuid4
 
     from aef_adapters.storage import get_event_publisher, get_workflow_repository
-    from aef_domain.contexts.workflows._shared.value_objects import (
+    from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
         PhaseDefinition,
         WorkflowClassification,
         WorkflowType,
@@ -643,11 +643,11 @@ def run_workflow(
         get_session_repository,
         get_workflow_repository,
     )
-    from aef_domain.contexts.workflows._shared.execution_value_objects import (
+    from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
         ExecutionStatus,
         PhaseStatus,
     )
-    from aef_domain.contexts.workflows.execute_workflow.WorkflowExecutionEngine import (
+    from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
         WorkflowExecutionEngine,
         WorkflowNotFoundError,
     )

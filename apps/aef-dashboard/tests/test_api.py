@@ -39,12 +39,12 @@ from aef_domain.contexts.sessions.record_operation.RecordOperationCommand import
 from aef_domain.contexts.sessions.start_session.StartSessionCommand import (
     StartSessionCommand,
 )
-from aef_domain.contexts.workflows._shared.value_objects import (
+from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
 from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
