@@ -27,6 +27,18 @@ from aef_domain.contexts.workflows.execute_workflow import (
     WorkflowExecutionStartedEvent,
     WorkflowFailedEvent,
 )
+from aef_domain.contexts.workflows.ports import (
+    AgentFactoryPort,
+    ArtifactContentStoragePort,
+    ArtifactQueryServicePort,
+    ArtifactRepositoryPort,
+    ConversationStoragePort,
+    ObservabilityServicePort,
+    SessionRepositoryPort,
+    WorkflowExecutionRepositoryPort,
+    WorkflowRepositoryPort,
+    WorkspaceServicePort,
+)
 from aef_domain.contexts.workflows.seed_workflow import (
     SeedReport,
     SeedResult,
@@ -34,30 +46,47 @@ from aef_domain.contexts.workflows.seed_workflow import (
 )
 
 __all__ = [
+    # Value Objects & Aggregates
     "AgentConfiguration",
     "ExecutablePhase",
-    "ExecuteWorkflowCommand",
     "ExecutionMetrics",
     "ExecutionStatus",
-    "PhaseCompletedEvent",
     "PhaseDefinition",
     "PhaseExecutionType",
     "PhaseInput",
     "PhaseResult",
-    "PhaseStartedEvent",
     "PhaseStatus",
-    "SeedReport",
-    "SeedResult",
     "WorkflowAggregate",
     "WorkflowClassification",
-    "WorkflowCompletedEvent",
     "WorkflowDefinition",
-    "WorkflowExecutionEngine",
-    "WorkflowExecutionResult",
+    "WorkflowType",
+    # Commands
+    "ExecuteWorkflowCommand",
+    # Events
+    "PhaseCompletedEvent",
+    "PhaseStartedEvent",
+    "WorkflowCompletedEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
+    # Services (will be deprecated in M5)
+    "WorkflowExecutionEngine",
+    "WorkflowExecutionResult",
+    # Seeders
+    "SeedReport",
+    "SeedResult",
     "WorkflowSeeder",
-    "WorkflowType",
+    # Utilities
     "load_workflow_definitions",
     "validate_workflow_yaml",
+    # Ports (NEW in M1)
+    "AgentFactoryPort",
+    "ArtifactContentStoragePort",
+    "ArtifactQueryServicePort",
+    "ArtifactRepositoryPort",
+    "ConversationStoragePort",
+    "ObservabilityServicePort",
+    "SessionRepositoryPort",
+    "WorkflowExecutionRepositoryPort",
+    "WorkflowRepositoryPort",
+    "WorkspaceServicePort",
 ]
