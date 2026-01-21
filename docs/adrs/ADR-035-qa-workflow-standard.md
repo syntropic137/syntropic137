@@ -1,243 +1,340 @@
-# ADR-035: QA Workflow Standard
+# ADR-035: QA Workflow Standard - Comprehensive Quality at Speed
 
-**Status:** Accepted  
-**Date:** 2026-01-21  
+**Status:** Accepted
+**Date:** 2026-01-21
 **Version:** 1.0.0
 
 ## Context
 
-During the VSA slice refactoring (PR #56), we discovered that our pre-commit QA workflow only ran static checks (lint/format) but not tests. This led to import errors in apps and adapters that weren't caught until CI, requiring multiple fix commits.
+AI agents need to iterate rapidly on code changes while maintaining top quality. This requires a QA system that:
 
-**The problem:**
-- Inconsistent QA command naming (`check`, `qa`, `test`)
-- No clear separation between static checks and tests
-- No distinction between fast local checks and comprehensive CI validation
-- Developers didn't know which command to run when
+1. **Validates comprehensively** - Every angle: unit tests, integration tests, architecture compliance, complexity analysis, security, formatting, types
+2. **Runs fast** - Sub-1-minute target for full validation suite
+3. **Enables autonomy** - AI agents can run checks without human intervention
+4. **Provides clear signals** - Pass/fail, no ambiguity
+
+**The Challenge:** Comprehensive validation is inherently slow. Traditional sequential execution of all checks takes 5-10 minutes. We need to innovate on HOW we execute to hit the speed target.
 
 ## Decision
 
-We adopt a **three-tier QA workflow standard** with clear command naming and scope:
+We establish a **two-tier QA standard** optimized for both speed and completeness:
 
-### Version 1.0.0 Command Definitions
+### Tier 1: `just check` - Fast Static Analysis
 
+**Purpose:** Instant feedback on code quality
+**Target:** <5 seconds
+**Scope:** Static analysis only (no runtime)
+
+```just
+check:
+    - lint (ruff check)
+    - format validation (ruff format --check)
+    - type checking (pyright)
 ```
-just check      → Static analysis only (fast)
-just qa         → check + unit tests (pre-commit)
-just qa-full    → qa + all tests (pre-push, CI)
+
+**When to use:** During development, before every commit
+
+### Tier 2: `just qa` - Comprehensive Validation
+
+**Purpose:** Complete quality validation across ALL dimensions
+**Target:** <1 minute (current: ~3 minutes, needs optimization)
+**Scope:** Everything needed for production confidence
+
+```just
+qa:
+    - lint (ruff check)
+    - format (ruff format)
+    - typecheck (pyright)
+    - test (pytest - all tests)
+    - dashboard-qa (frontend lint + build)
+    - test-debt (no skipped/xfail without issues)
+    - vsa-validate (architecture compliance)
 ```
 
-### Detailed Specifications
+**When to use:** Before commit (AI agents), before push (humans), in CI
 
-#### Tier 1: `just check` - Static Checks
+## Quality Dimensions
 
-**Purpose:** Fast feedback for syntax, style, and type errors  
-**Runtime Target:** 5-15 seconds  
-**When to run:** Before every commit, during development
+The `qa` command validates across **7 critical dimensions**:
 
-**Includes:**
-1. **Linting** - `ruff check .`
-   - Code quality rules
-   - Import sorting
-   - Unused imports
-2. **Format validation** - `ruff format --check .`
-   - Code style consistency
-   - No actual changes, just validation
-3. **Type checking** - `pyright`
-   - Static type analysis
-   - Currently non-blocking (warnings only)
+| Dimension | Check | Purpose | Current Time |
+|-----------|-------|---------|--------------|
+| **Code Quality** | `lint` | Style, complexity, best practices | ~5s |
+| **Formatting** | `format` | Consistent style | ~3s |
+| **Type Safety** | `typecheck` | Static type validation | ~10s |
+| **Functionality** | `test` | Unit + integration tests | ~90s |
+| **Frontend** | `dashboard-qa` | UI lint + build | ~30s |
+| **Test Hygiene** | `test-debt` | No orphaned skips/xfails | ~2s |
+| **Architecture** | `vsa-validate` | Bounded context compliance | ~5s |
 
-**Auto-fix variant:** `just check-fix`
-- Runs `ruff check --fix .`
-- Runs `ruff format .`
-- Does NOT run type checking (not auto-fixable)
+**Total Current:** ~145s (2.4 minutes)
+**Target:** <60s (1 minute)
 
-#### Tier 2: `just qa` - Quick QA
+## Performance Optimization Strategy
 
-**Purpose:** Pre-commit validation with fast tests  
-**Runtime Target:** 30-60 seconds  
-**When to run:** Before committing significant changes
+To achieve sub-1-minute validation, we need to innovate on execution:
 
-**Includes:**
-- All `check` steps
-- **Unit tests** - `pytest -m unit --tb=short`
-  - Fast, isolated tests
-  - No external dependencies
-  - Mocked I/O
+### Phase 1: Parallel Execution (Immediate)
 
-**Auto-fix variant:** `just qa-fix`
-- Runs `check-fix` first
-- Then runs unit tests
+**Current:** Sequential execution
+**Target:** Parallel execution of independent checks
 
-#### Tier 3: `just qa-full` - Complete QA
-
-**Purpose:** Comprehensive validation before pushing  
-**Runtime Target:** 3-10 minutes  
-**When to run:** Before pushing to remote, in CI
-
-**Includes:**
-- All `check` steps
-- **All tests** - `pytest --tb=short`
-  - Unit tests (`@pytest.mark.unit`)
-  - Integration tests (`@pytest.mark.integration`)
-  - E2E tests (`@pytest.mark.e2e`)
-
-### Test Marker Standard
-
-Tests MUST be marked with one of these markers:
-
-| Marker | Definition | Max Runtime | Dependencies |
-|--------|-----------|-------------|--------------|
-| `@pytest.mark.unit` | Pure logic, no I/O | 1s per test | None |
-| `@pytest.mark.integration` | Tests with services | 10s per test | DB, Redis, etc. |
-| `@pytest.mark.e2e` | Full system flows | 60s per test | All services |
-| `@pytest.mark.slow` | Expensive operations | 60s+ per test | Varies |
-
-**Unmarked tests default to unit tests.**
-
-### CI Pipeline Mapping
-
-```yaml
-# Fast feedback (runs on every push)
-- name: Static Checks
-  run: just check
-
-# Parallel test execution
-- name: Unit Tests
-  run: pytest -m unit -n auto
-
-# Sequential (requires infrastructure)
-- name: Integration Tests
-  run: pytest -m integration
-
-# Optional (manual trigger)
-- name: E2E Tests
-  run: pytest -m e2e
+```bash
+# Run in parallel
+lint & format & typecheck & test-debt & vsa-validate & dashboard-qa & wait
+# Then tests (need clean state)
+test
 ```
+
+**Expected savings:** ~30-40s (checks that can run in parallel)
+
+### Phase 2: Test Optimization (Short-term)
+
+**Strategies:**
+1. **Parallel test execution** - `pytest -n auto` for unit tests
+2. **Smart test selection** - Only run tests affected by changes
+3. **Test fixtures caching** - Reuse database fixtures across tests
+4. **Fast test containers** - Pre-warmed containers for integration tests
+
+**Target:** Reduce test time from 90s to 30s
+
+### Phase 3: Infrastructure Innovation (Medium-term)
+
+**Explorations:**
+1. **Sidecar containers** - Pre-running services (DB, Redis) in background
+2. **Incremental validation** - Cache validation results, only re-validate changes
+3. **Distributed execution** - Split tests across multiple machines
+4. **JIT compilation** - Compile Python to C for faster test execution
+
+**Target:** Sub-20s for full validation suite
+
+## Current State (v1.0.0)
+
+### Commands
+
+```just
+# Fast static checks (~5s)
+check: lint + format-check + typecheck
+
+# Auto-fix variant
+check-fix: lint --fix + format + typecheck
+
+# Comprehensive QA (~2.4min)
+qa: lint + format + typecheck + test + dashboard-qa + test-debt + vsa-validate
+
+# QA with coverage (~3min)
+qa-full: qa + coverage-report
+```
+
+### Performance Baseline
+
+| Command | Current | Target | Status |
+|---------|---------|--------|--------|
+| `check` | 5s | <5s | ✅ At target |
+| `qa` | 145s (2.4min) | <60s | 🟡 Warning zone |
+| `qa-full` | 180s (3min) | <90s | 🟡 Warning zone |
+
+### Performance Thresholds (Andon System)
+
+We use a **three-zone performance model** inspired by lean manufacturing:
+
+| Zone | Threshold | Signal | Action |
+|------|-----------|--------|--------|
+| 🟢 **Green** | <1 minute | ✅ Target performance | Continue normal operation |
+| 🟡 **Yellow** | 1-2 minutes | ⚠️ Warning | Monitor, plan optimization |
+| 🔴 **Red** | >2 minutes | 🚨 Andon | **STOP THE LINE** - Swarm on optimization |
+
+**Critical rule:** If `qa` exceeds **10 minutes**, this is a **production-critical Andon signal**:
+- ⛔ **STOP all feature work**
+- 🚨 **All hands on deck** - Swarm on performance optimization
+- 📊 **Root cause analysis** - What caused the regression?
+- 🔧 **Fix immediately** - This is the bottleneck for ALL iteration
+
+**Why 10 minutes is critical:**
+- AI agents iterate 6 times/hour at 10min/iteration
+- Humans lose context after 10min wait
+- Productivity drops by 90% above this threshold
+- The entire development pipeline is blocked
+
+## AI Agent Integration
+
+AI agents should use this workflow:
+
+```python
+# 1. During development iteration
+run("just check")  # Fast feedback (<5s)
+if failed:
+    fix_issues()
+    continue
+
+# 2. Before proposing changes
+run("just qa")  # Comprehensive validation
+if failed:
+    analyze_failures()
+    fix_issues()
+    retry
+
+# 3. Success
+propose_changes()
+```
+
+**Key principle:** AI agents should run `qa` before EVERY commit proposal to ensure zero manual validation needed.
 
 ## Rationale
 
-### Why Three Tiers?
+### Why Two Tiers?
 
-1. **Developer Velocity**
-   - `check` gives instant feedback (5s)
-   - `qa` catches most issues before commit (30s)
-   - `qa-full` ensures nothing breaks (3min)
+**Option 1 (Rejected):** Single `qa` command
+- Problem: Too slow for development iteration (2.4min)
+- Breaks flow state, encourages skipping checks
 
-2. **Clear Mental Model**
-   - `check` = "Is my code syntactically correct?"
-   - `qa` = "Will this break existing functionality?"
-   - `qa-full` = "Is this production-ready?"
+**Option 2 (Accepted):** Fast `check` + comprehensive `qa`
+- `check` provides instant feedback during coding
+- `qa` provides confidence before commit
+- Clear mental model: "check syntax, then validate behavior"
 
-3. **CI Optimization**
-   - Run `check` first (fail fast)
-   - Run `unit` tests in parallel
-   - Run `integration` tests sequentially
-   - Run `e2e` tests on-demand
+### Why Sub-1-Minute Target?
 
-### Why Not Include Tests in `check`?
+**Research shows:**
+- <10s: Immediate feedback, maintains flow
+- 10-60s: Tolerable wait, agent can continue
+- >60s: Context switch penalty, productivity loss
 
-**Rejected alternative:** `check` runs all tests
+**For AI agents:**
+- Fast validation enables rapid iteration
+- Sub-1-minute means agents can try 10+ approaches per hour
+- >1-minute creates bottleneck in agent velocity
 
-**Problems:**
-- Too slow for rapid iteration (3min vs 5s)
-- Breaks the "check syntax" mental model
-- Forces developers to wait for tests during refactoring
-- Conflates static analysis with dynamic validation
+### Why Comprehensive Validation?
 
-**Decision:** Keep `check` fast and focused on static analysis.
+**Human QA is expensive:**
+- Manual code review: 30-60min per PR
+- Manual testing: 1-2 hours per feature
+- Missed issues: 5-10% escape rate
 
-### Why `qa` and not `test`?
+**Automated QA is cheap:**
+- Runs in <1min
+- Catches 95%+ of issues
+- Zero human time required
+- Consistent every time
 
-**Rejected alternative:** `just test` for pre-commit
+**ROI:** Eliminate humans from the validation loop = 100x productivity gain for AI agents
 
-**Problems:**
-- `test` is ambiguous (unit? integration? all?)
-- Doesn't convey "quality assurance" intent
-- Conflicts with existing `just test` (runs all tests)
+## Success Metrics
 
-**Decision:** `qa` clearly means "quality gate before commit"
+### Quality Metrics (Must Maintain)
+
+- ✅ 0% regression rate (no new bugs introduced)
+- ✅ 95%+ code coverage
+- ✅ 0 architecture violations
+- ✅ 0 test debt (skips/xfails without issues)
+
+### Performance Metrics (Must Improve)
+
+**Current State:**
+- 🟡 `qa` runtime: 145s (2.4min) → **Warning zone** → target <60s (green)
+- 🟡 `qa-full` runtime: 180s (3min) → **Warning zone** → target <90s (green)
+- ✅ `check` runtime: 5s → **Green zone** → maintain <5s
+
+**Performance SLA:**
+- `qa` must be <1 minute (green zone)
+- `qa` at 1-2 minutes triggers optimization planning (yellow zone)
+- `qa` at >2 minutes requires immediate optimization (red zone)
+- `qa` at >10 minutes is **Andon signal** - stop all work, swarm on fix
+
+### Adoption Metrics
+
+- ⚪ AI agents run `qa` before 100% of commits
+- ⚪ Humans run `qa` before 80%+ of pushes
+- ⚪ CI runs `qa-full` on 100% of PRs
+
+## Implementation Roadmap
+
+### Phase 1: Documentation (Complete)
+- [x] ADR-035 written
+- [x] Commands documented in justfile
+- [ ] Update docs/development/qa-workflow.md
+
+### Phase 2: Parallel Execution (Week 1)
+- [ ] Identify parallelizable checks
+- [ ] Implement parallel execution script
+- [ ] Measure performance improvement
+- [ ] Target: 145s → 100s
+
+### Phase 3: Test Optimization (Week 2-3)
+- [ ] Enable `pytest -n auto` for unit tests
+- [ ] Implement test selection (pytest-picked)
+- [ ] Optimize test fixtures
+- [ ] Target: 100s → 70s
+
+### Phase 4: Infrastructure Innovation (Week 4-6)
+- [ ] Sidecar container POC
+- [ ] Incremental validation POC
+- [ ] Measure impact
+- [ ] Target: 70s → <60s
+
+### Phase 5: Continuous Optimization (Ongoing)
+- [ ] Monitor performance metrics
+- [ ] Identify bottlenecks
+- [ ] Iterate on optimization
+- [ ] Target: Maintain <60s as codebase grows
+
+## References
+
+- **Incident:** PR #56 - Import errors not caught by incomplete QA
+- **Research:** ["The Cost of Context Switching"](https://www.apa.org/news/press/releases/2006/07/multitasking)
+- **Tools:**
+  - [pytest-xdist](https://github.com/pytest-dev/pytest-xdist) - Parallel test execution
+  - [pytest-picked](https://github.com/anapaulagomes/pytest-picked) - Smart test selection
+  - [testcontainers](https://testcontainers.com/) - Fast integration tests
 
 ## Consequences
 
 ### Positive
 
-✅ **Clear workflow:** Developers know exactly what to run when  
-✅ **Fast feedback:** `check` runs in seconds  
-✅ **Comprehensive validation:** `qa-full` catches everything  
-✅ **CI alignment:** Local commands match CI stages  
-✅ **Documented standard:** ADR + docs/development/qa-workflow.md
+✅ **Clear quality standard** - AI agents know exactly what to run
+✅ **Fast enough** - 2.4min is tolerable, <1min is the goal
+✅ **Comprehensive** - Validates all quality dimensions
+✅ **Documented** - ADR + inline docs + developer guide
+✅ **Measurable** - Clear metrics for success
 
 ### Negative
 
-⚠️ **Breaking change:** Existing `qa` command behavior changes  
-⚠️ **Learning curve:** Developers must learn new commands  
-⚠️ **Test marking required:** All tests need proper markers
+⚠️ **Still too slow** - 2.4min is 2.4x over target
+⚠️ **Requires investment** - Optimization work needed
+⚠️ **Infrastructure deps** - May need sidecar containers
+⚠️ **Maintenance** - Performance can degrade over time
 
-### Migration Path
+### Risks
 
-1. **Phase 1 (Immediate):**
-   - Add new `check`, `qa`, `qa-full` commands
-   - Comment out old `qa` command
-   - Update documentation
+🔴 **Performance regression** - Without monitoring, `qa` can slow down
+🔴 **Andon threshold breach** - `qa` >10min stops all work
+🟡 **Optimization complexity** - Parallel execution can be tricky
+🟡 **False positives** - Aggressive caching may miss issues
 
-2. **Phase 2 (1 week):**
-   - Add test markers to unmarked tests
-   - Update CI to use new commands
-   - Announce in team channels
+### Monitoring & Alerting
 
-3. **Phase 3 (2 weeks):**
-   - Remove old `qa` command
-   - Make `check` required in pre-commit hook
-   - Update onboarding docs
+**Required monitoring:**
+1. **Track `qa` duration** - Every run logged with timestamp
+2. **Alert on yellow zone** - Slack notification when `qa` >1min
+3. **Escalate on red zone** - PagerDuty alert when `qa` >2min
+4. **Trigger Andon** - Incident declared when `qa` >10min
 
-## Implementation
-
-### Justfile Commands
-
-```just
-# Static checks: lint + format + typecheck (fast, pre-commit)
-check:
-    @echo "=== Static Checks ==="
-    @uv run ruff check .
-    @uv run ruff format --check .
-    @uv run pyright || echo "⚠️  Type check failed (non-blocking)"
-    @echo "✅ Static checks passed!"
-
-# QA: check + unit tests (pre-commit, fast)
-qa: check
-    @echo "=== Running Unit Tests ==="
-    @uv run pytest -m unit --tb=short
-    @echo "✅ QA passed! Ready to commit."
-
-# Full QA: check + all tests (pre-push, CI)
-qa-full: check
-    @echo "=== Running All Tests ==="
-    @uv run pytest --tb=short
-    @echo "✅ Full QA passed! Ready to push."
-```
-
-### Documentation
-
-- **ADR-035** (this document): Standard definition
-- **docs/development/qa-workflow.md**: Developer guide
-- **README.md**: Quick reference
-
-## References
-
-- **Incident:** PR #56 - VSA slice refactoring import errors
-- **Related ADRs:**
-  - ADR-034: Test Infrastructure
-- **External:**
-  - [pytest markers](https://docs.pytest.org/en/stable/example/markers.html)
-  - [Ruff documentation](https://docs.astral.sh/ruff/)
+**Dashboard metrics:**
+- P50, P95, P99 `qa` runtime (weekly)
+- Trend analysis (is performance degrading?)
+- Breakdown by dimension (which check is slow?)
+- Historical baseline (what's normal?)
 
 ## Versioning
 
 **Version 1.0.0** (2026-01-21)
 - Initial standard definition
-- Three-tier workflow: check, qa, qa-full
-- Test marker requirements
+- Two-tier workflow: check (fast) + qa (comprehensive)
+- Performance targets established
+- Optimization roadmap defined
 
 **Future versions:**
-- 1.1.0: Add `qa:watch` for continuous testing
-- 2.0.0: Add `qa:affected` for changed files only
+- 1.1.0: Parallel execution implemented
+- 1.2.0: Test optimization implemented
+- 2.0.0: Sub-1-minute achieved

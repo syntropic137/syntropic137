@@ -16,8 +16,8 @@ just qa-full    → qa + integration tests (pre-push, CI)
 
 ### `just check` - Static Checks
 
-**Purpose:** Fast static analysis before committing  
-**Runtime:** ~5-10 seconds  
+**Purpose:** Fast static analysis before committing
+**Runtime:** ~5-10 seconds
 **When:** Before every commit
 
 **Includes:**
@@ -36,8 +36,8 @@ just check-fix
 
 ### `just qa` - Quick QA
 
-**Purpose:** Pre-commit validation with fast tests  
-**Runtime:** ~15-30 seconds  
+**Purpose:** Pre-commit validation with fast tests
+**Runtime:** ~15-30 seconds
 **When:** Before committing significant changes
 
 **Includes:**
@@ -55,8 +55,8 @@ just qa-fix
 
 ### `just qa-full` - Complete QA
 
-**Purpose:** Comprehensive validation before pushing  
-**Runtime:** ~2-5 minutes  
+**Purpose:** Comprehensive validation before pushing
+**Runtime:** ~2-5 minutes
 **When:** Before pushing to remote, in CI
 
 **Includes:**

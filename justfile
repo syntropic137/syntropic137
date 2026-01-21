@@ -302,29 +302,15 @@ check-fix:
     @echo ""
     @echo "✅ Static checks fixed!"
 
-# QA: check + unit tests (pre-commit, fast)
-qa: check
+# Comprehensive QA: all checks (pre-commit, comprehensive)
+qa: lint format typecheck test dashboard-qa test-debt vsa-validate
     @echo ""
-    @echo "=== Running Unit Tests ==="
-    @uv run pytest -m unit --tb=short
-    @echo ""
-    @echo "✅ QA passed! Ready to commit."
+    @echo "✅ All QA checks passed!"
 
-# QA with auto-fix
-qa-fix: check-fix
+# Full QA with coverage: qa + coverage report (pre-push, CI)
+qa-full: lint format typecheck test-cov dashboard-qa vsa-validate
     @echo ""
-    @echo "=== Running Unit Tests ==="
-    @uv run pytest -m unit --tb=short
-    @echo ""
-    @echo "✅ QA passed! Ready to commit."
-
-# Full QA: check + all tests including integration (pre-push, CI)
-qa-full: check
-    @echo ""
-    @echo "=== Running All Tests (Unit + Integration) ==="
-    @uv run pytest --tb=short
-    @echo ""
-    @echo "✅ Full QA passed! Ready to push."
+    @echo "✅ Full QA passed with coverage!"
 
 # Fast unit tests (parallel execution)
 test-unit:
@@ -463,9 +449,8 @@ qa-python: lint format typecheck test test-debt vsa-validate
     @echo "✅ Python QA checks passed!"
 
 # Run full QA with coverage
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate
-    @echo ""
-    @echo "✅ All QA checks passed with coverage!"
+# Legacy command - replaced by new qa-full (see ADR-035)
+# qa-full-legacy: lint format typecheck test-cov dashboard-qa vsa-validate
 
 # --- Workflow Management ---
 
