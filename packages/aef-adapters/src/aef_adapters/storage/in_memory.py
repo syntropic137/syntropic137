@@ -167,7 +167,7 @@ class InMemoryWorkflowRepository:
         from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
             WorkflowAggregate,
         )
-        from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+        from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
         )
 
@@ -207,7 +207,7 @@ class InMemoryWorkflowRepository:
         from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
             WorkflowAggregate,
         )
-        from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+        from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
         )
 

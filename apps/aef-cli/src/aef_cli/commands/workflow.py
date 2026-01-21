@@ -74,10 +74,10 @@ def create_workflow(
         WorkflowClassification,
         WorkflowType,
     )
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
 
@@ -352,10 +352,10 @@ def seed_workflows(
         get_event_publisher,
         get_workflow_repository,
     )
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
-    from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
 
     # Determine source
     if file and directory:
