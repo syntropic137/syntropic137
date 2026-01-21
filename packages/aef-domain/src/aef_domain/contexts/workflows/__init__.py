@@ -2,6 +2,8 @@
 
 from aef_domain.contexts.workflows._shared import (
     AgentConfiguration,
+    ArtifactSummary,
+    ArtifactUploadResult,
     ExecutablePhase,
     ExecutionMetrics,
     ExecutionStatus,
@@ -10,6 +12,7 @@ from aef_domain.contexts.workflows._shared import (
     PhaseInput,
     PhaseResult,
     PhaseStatus,
+    SessionContext,
     WorkflowAggregate,
     WorkflowClassification,
     WorkflowDefinition,
@@ -53,6 +56,8 @@ __all__ = [
     "ArtifactContentStoragePort",
     "ArtifactQueryServicePort",
     "ArtifactRepositoryPort",
+    "ArtifactSummary",
+    "ArtifactUploadResult",
     "ConversationStoragePort",
     "ExecutablePhase",
     # Commands
@@ -71,6 +76,7 @@ __all__ = [
     # Seeders
     "SeedReport",
     "SeedResult",
+    "SessionContext",
     "SessionRepositoryPort",
     "WorkflowAggregate",
     "WorkflowClassification",

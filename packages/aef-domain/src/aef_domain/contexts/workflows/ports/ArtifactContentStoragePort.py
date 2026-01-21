@@ -10,13 +10,9 @@ This port handles the object storage layer.
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from typing import TypedDict
-
-    class ArtifactUploadResult(TypedDict):
-        """Result of artifact upload operation."""
-
-        storage_uri: str
-        size_bytes: int
+    from aef_domain.contexts.workflows._shared.ArtifactValueObjects import (
+        ArtifactUploadResult,
+    )
 
 
 class ArtifactContentStoragePort(Protocol):

@@ -4,11 +4,12 @@ This port provides read-only access to artifact projections for multi-phase
 workflows. Artifacts from previous phases are injected into subsequent phase prompts.
 """
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    # Placeholder - will be defined in adapters layer
-    ArtifactSummary = Any
+    from aef_domain.contexts.workflows._shared.ArtifactValueObjects import (
+        ArtifactSummary,
+    )
 
 
 class ArtifactQueryServicePort(Protocol):

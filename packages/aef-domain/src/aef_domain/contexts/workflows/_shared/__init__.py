@@ -1,5 +1,9 @@
 """Shared code within the workflows bounded context."""
 
+from aef_domain.contexts.workflows._shared.ArtifactValueObjects import (
+    ArtifactSummary,
+    ArtifactUploadResult,
+)
 from aef_domain.contexts.workflows._shared.execution_value_objects import (
     AgentConfiguration,
     ExecutablePhase,
@@ -9,6 +13,7 @@ from aef_domain.contexts.workflows._shared.execution_value_objects import (
     PhaseResult,
     PhaseStatus,
 )
+from aef_domain.contexts.workflows._shared.SessionValueObjects import SessionContext
 from aef_domain.contexts.workflows._shared.value_objects import (
     PhaseDefinition,
     PhaseExecutionType,
@@ -32,6 +37,8 @@ from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
 
 __all__ = [
     "AgentConfiguration",
+    "ArtifactSummary",
+    "ArtifactUploadResult",
     "CompleteExecutionCommand",
     "CompletePhaseCommand",
     "ExecutablePhase",
@@ -43,6 +50,7 @@ __all__ = [
     "PhaseInput",
     "PhaseResult",
     "PhaseStatus",
+    "SessionContext",
     "StartExecutionCommand",
     "StartPhaseCommand",
     "WorkflowAggregate",

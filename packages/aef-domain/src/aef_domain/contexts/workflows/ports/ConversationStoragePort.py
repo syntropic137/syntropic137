@@ -4,11 +4,12 @@ Per ADR-035 (Conversation Storage Architecture), full JSONL conversation logs
 are stored in object storage (MinIO/S3) for debugging and replay.
 """
 
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    # Placeholder - will be defined in adapters layer
-    SessionContext = Any
+    from aef_domain.contexts.workflows._shared.SessionValueObjects import (
+        SessionContext,
+    )
 
 
 class ConversationStoragePort(Protocol):
@@ -38,7 +39,7 @@ class ConversationStoragePort(Protocol):
             context: Session metadata (execution_id, phase_id, model, tokens, etc.).
 
         Example:
-            from aef_adapters.conversations import SessionContext
+            from aef_domain.contexts.workflows import SessionContext
 
             context = SessionContext(
                 execution_id="exec-123",
