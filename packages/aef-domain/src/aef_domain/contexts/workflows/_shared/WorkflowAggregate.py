@@ -10,10 +10,10 @@ from event_sourcing import AggregateRoot, aggregate, command_handler, event_sour
 
 if TYPE_CHECKING:
     from aef_domain.contexts.workflows._shared.WorkflowValueObjects import PhaseDefinition
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+    from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
         WorkflowCreatedEvent,
     )
 
@@ -84,7 +84,7 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
         Validates business rules and emits WorkflowCreatedEvent.
         """
         # Import here to avoid circular imports at module level
-        from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+        from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
         )
 

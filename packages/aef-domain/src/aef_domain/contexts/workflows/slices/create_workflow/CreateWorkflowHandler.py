@@ -9,10 +9,10 @@ from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggr
 if TYPE_CHECKING:
     from event_sourcing import EventEnvelope
 
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowCommand import (
+    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.create_workflow.WorkflowCreatedEvent import (
+    from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
         WorkflowCreatedEvent,
     )
 
