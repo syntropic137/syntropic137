@@ -48,7 +48,7 @@ class CreateArtifactHandler:
         Raises:
             ValueError: If artifact already exists or content is missing
         """
-        from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
+        from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
 
         # Create new aggregate
         artifact = ArtifactAggregate()

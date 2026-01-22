@@ -19,7 +19,7 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from aef_domain.contexts.workspaces._shared.WorkspaceAggregate import WorkspaceAggregate
+from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
 from aef_domain.contexts.workspaces.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )

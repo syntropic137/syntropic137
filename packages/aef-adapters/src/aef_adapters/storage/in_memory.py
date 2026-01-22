@@ -23,16 +23,16 @@ if TYPE_CHECKING:
 
     from event_sourcing import EventEnvelope
 
-    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
+    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
         ArtifactAggregate,
     )
     from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
         WorkflowAggregate,
     )
-    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -164,7 +164,7 @@ class InMemoryWorkflowRepository:
         """Retrieve a workflow by ID, replaying events."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
             WorkflowAggregate,
         )
         from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
@@ -204,7 +204,7 @@ class InMemoryWorkflowRepository:
         """Get all workflows."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
             WorkflowAggregate,
         )
         from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (

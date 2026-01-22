@@ -35,7 +35,7 @@ from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
         WorkflowAggregate,
     )
 

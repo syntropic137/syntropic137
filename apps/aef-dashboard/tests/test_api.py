@@ -21,7 +21,7 @@ from aef_adapters.storage import (
     reset_storage,
 )
 from aef_dashboard.main import app
-from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
+from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
     CreateArtifactCommand,

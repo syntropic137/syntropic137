@@ -21,7 +21,7 @@ from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
     WorkflowAggregate,
 )
 from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (

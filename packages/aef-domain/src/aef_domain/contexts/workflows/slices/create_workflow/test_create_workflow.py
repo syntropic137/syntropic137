@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
     WorkflowAggregate,
     WorkflowStatus,
 )
