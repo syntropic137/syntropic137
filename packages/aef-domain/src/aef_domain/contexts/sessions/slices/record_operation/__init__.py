@@ -21,7 +21,7 @@ from aef_domain.contexts.sessions.slices.record_operation.commands import (
     record_tool_completed,
     record_tool_started,
 )
-from aef_domain.contexts.sessions.events.OperationRecordedEvent import (
+from aef_domain.contexts.sessions.domain.events.OperationRecordedEvent import (
     OperationRecordedEvent,
 )
 from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (

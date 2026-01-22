@@ -3,7 +3,7 @@
 from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
     CompleteSessionCommand,
 )
-from aef_domain.contexts.sessions.events.SessionCompletedEvent import (
+from aef_domain.contexts.sessions.domain.events.SessionCompletedEvent import (
     SessionCompletedEvent,
 )
 

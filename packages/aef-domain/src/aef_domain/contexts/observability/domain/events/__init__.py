@@ -3,7 +3,7 @@
 This module contains events for agent observation tracking.
 """
 
-from aef_domain.contexts.observability.events.agent_observation import (
+from aef_domain.contexts.observability.domain.events.agent_observation import (
     AgentObservationEvent,
     ObservationType,
 )

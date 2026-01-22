@@ -1,4 +1,4 @@
-"""Record cost feature - emits cost events."""
+"""Cost-related domain events."""
 
 from aef_domain.contexts.costs.domain.events.CostRecordedEvent import CostRecordedEvent
 from aef_domain.contexts.costs.domain.events.SessionCostFinalizedEvent import (

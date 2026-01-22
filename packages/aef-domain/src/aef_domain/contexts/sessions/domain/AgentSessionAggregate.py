@@ -20,16 +20,16 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
         CompleteSessionCommand,
     )
-    from aef_domain.contexts.sessions.events.SessionCompletedEvent import (
+    from aef_domain.contexts.sessions.domain.events.SessionCompletedEvent import (
         SessionCompletedEvent,
     )
-    from aef_domain.contexts.sessions.events.OperationRecordedEvent import (
+    from aef_domain.contexts.sessions.domain.events.OperationRecordedEvent import (
         OperationRecordedEvent,
     )
     from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
         RecordOperationCommand,
     )
-    from aef_domain.contexts.sessions.events.SessionStartedEvent import (
+    from aef_domain.contexts.sessions.domain.events.SessionStartedEvent import (
         SessionStartedEvent,
     )
     from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
@@ -129,7 +129,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
         Creates a new session for tracking agent execution.
         """
-        from aef_domain.contexts.sessions.events.SessionStartedEvent import (
+        from aef_domain.contexts.sessions.domain.events.SessionStartedEvent import (
             SessionStartedEvent,
         )
 
@@ -166,7 +166,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
         Records an operation (message, tool call, thinking, etc.).
         Supports full observability with type-specific fields.
         """
-        from aef_domain.contexts.sessions.events.OperationRecordedEvent import (
+        from aef_domain.contexts.sessions.domain.events.OperationRecordedEvent import (
             OperationRecordedEvent,
         )
 
@@ -212,7 +212,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
 
         Marks the session as completed (or failed).
         """
-        from aef_domain.contexts.sessions.events.SessionCompletedEvent import (
+        from aef_domain.contexts.sessions.domain.events.SessionCompletedEvent import (
             SessionCompletedEvent,
         )
 

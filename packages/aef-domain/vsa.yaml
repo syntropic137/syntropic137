@@ -8,7 +8,7 @@ root: src/aef_domain/contexts
 
 # Note: Scanner auto-discovers bounded contexts at depth 1 from root
 # With root=src/aef_domain/contexts, it will find:
-#   - agents/, artifacts/, costs/, github/, metrics/, 
+#   - agents/, artifacts/, costs/, github/, metrics/,
 #   - observability/, sessions/, workflows/, workspaces/
 # Each as a separate bounded context.
 
@@ -16,19 +16,19 @@ root: src/aef_domain/contexts
 validation:
   enabled: true
   fail_on_warning: false
-  
+
 # Domain structure (expected by ADR-019)
 domain:
   aggregates_path: "domain"
   commands_path: "domain/commands"
-  events_path: "events"
+  events_path: "domain/events"
   queries_path: "domain/queries"
   value_objects_pattern: "*ValueObjects.*"
 
 # Slice structure
 slices:
   path: "slices"
-  
+
 # Infrastructure
 infrastructure:
   path: "infrastructure"
