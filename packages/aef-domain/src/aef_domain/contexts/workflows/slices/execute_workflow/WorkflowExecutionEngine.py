@@ -812,7 +812,7 @@ class WorkflowExecutionEngine:
         from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
             ArtifactAggregate,
         )
-        from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
+        from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
             CreateArtifactCommand,
         )
 
