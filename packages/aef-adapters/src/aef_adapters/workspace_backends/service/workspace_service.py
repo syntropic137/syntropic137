@@ -32,13 +32,13 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
-from aef_domain.contexts.workspaces.slices.create_workspace.CreateWorkspaceCommand import (
+from aef_domain.contexts.workspaces.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
-from aef_domain.contexts.workspaces.slices.terminate_workspace.TerminateWorkspaceCommand import (
+from aef_domain.contexts.workspaces.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
+from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

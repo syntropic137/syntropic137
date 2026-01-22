@@ -39,7 +39,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_start_execution_emits_event(self) -> None:
         """REGRESSION: StartExecutionCommand must emit WorkflowExecutionStartedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
@@ -66,7 +66,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_phase_emits_event(self) -> None:
         """REGRESSION: CompletePhaseCommand must emit PhaseCompletedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -119,7 +119,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_execution_emits_event(self) -> None:
         """REGRESSION: CompleteExecutionCommand must emit WorkflowCompletedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -160,7 +160,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_fail_execution_emits_event(self) -> None:
         """REGRESSION: FailExecutionCommand must emit WorkflowFailedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             FailExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -267,7 +267,7 @@ class TestSessionEventProjectionConsistency:
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -293,10 +293,10 @@ class TestSessionEventProjectionConsistency:
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -338,10 +338,10 @@ class TestSessionEventProjectionConsistency:
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -805,7 +805,7 @@ class TestSessionExecutionLinkage:
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
