@@ -10,11 +10,11 @@ from event_sourcing import AggregateRoot, aggregate, command_handler, event_sour
 
 if TYPE_CHECKING:
     from aef_domain.contexts.workflows._shared.WorkflowValueObjects import PhaseDefinition
-    from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
-        WorkflowCreatedEvent,
-    )
     from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
         CreateWorkflowCommand,
+    )
+    from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
+        WorkflowCreatedEvent,
     )
 
 

@@ -6,20 +6,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
-    WorkflowAggregate,
-    WorkflowStatus,
-)
 from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
+from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+    CreateWorkflowCommand,
+)
 from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
     WorkflowCreatedEvent,
 )
-from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+    WorkflowAggregate,
+    WorkflowStatus,
 )
 from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
     CreateWorkflowHandler,

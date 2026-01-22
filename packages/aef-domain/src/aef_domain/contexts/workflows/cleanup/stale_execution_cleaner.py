@@ -22,11 +22,11 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
-    )
     from aef_domain.contexts.workflows.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
+    )
+    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
     )
 
 logger = logging.getLogger(__name__)

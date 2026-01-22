@@ -14,11 +14,11 @@ from aef_domain.contexts.artifacts._shared.value_objects import (
 )
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
-        ArtifactCreatedEvent,
-    )
     from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
         CreateArtifactCommand,
+    )
+    from aef_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
+        ArtifactCreatedEvent,
     )
 
 

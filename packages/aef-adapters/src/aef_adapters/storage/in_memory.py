@@ -164,11 +164,11 @@ class InMemoryWorkflowRepository:
         """Retrieve a workflow by ID, replaying events."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
-            WorkflowAggregate,
-        )
         from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
+        )
+        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+            WorkflowAggregate,
         )
 
         str_id = str(workflow_id)
@@ -204,11 +204,11 @@ class InMemoryWorkflowRepository:
         """Get all workflows."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
-            WorkflowAggregate,
-        )
         from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
+        )
+        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+            WorkflowAggregate,
         )
 
         # Get unique aggregate IDs

@@ -139,11 +139,11 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Session completion persists SessionCompletedEvent."""
-        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
-            AgentSessionAggregate,
-        )
         from aef_domain.contexts.sessions._shared.value_objects import (
             SessionStatus,
+        )
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+            AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,
@@ -269,11 +269,11 @@ class TestAgentSessionLifecycle:
         unique_session_id: str,
     ) -> None:
         """Level 4: Complete session lifecycle persists and replays correctly."""
-        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
-            AgentSessionAggregate,
-        )
         from aef_domain.contexts.sessions._shared.value_objects import (
             SessionStatus,
+        )
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+            AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
             CompleteSessionCommand,

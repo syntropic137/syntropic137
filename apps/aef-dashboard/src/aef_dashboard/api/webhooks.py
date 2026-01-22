@@ -19,9 +19,6 @@ from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from aef_domain.contexts.github.slices.get_installation.projection import (
-    get_installation_projection,
-)
 from aef_domain.contexts.github.domain.events.AppInstalledEvent import (
     AppInstalledEvent,
 )
@@ -30,6 +27,9 @@ from aef_domain.contexts.github.domain.events.InstallationRevokedEvent import (
 )
 from aef_domain.contexts.github.domain.events.InstallationSuspendedEvent import (
     InstallationSuspendedEvent,
+)
+from aef_domain.contexts.github.slices.get_installation.projection import (
+    get_installation_projection,
 )
 from aef_shared.settings.github import get_github_settings
 

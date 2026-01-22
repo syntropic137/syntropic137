@@ -289,10 +289,10 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_record_operation_emits_event(self) -> None:
         """REGRESSION: RecordOperationCommand must emit OperationRecordedEvent."""
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
             RecordOperationCommand,
         )

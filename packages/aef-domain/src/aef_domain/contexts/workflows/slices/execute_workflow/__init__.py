@@ -6,6 +6,9 @@ This slice handles the execution of workflows, including:
 - Tracking execution state and metrics
 """
 
+from aef_domain.contexts.workflows.domain.commands.ExecuteWorkflowCommand import (
+    ExecuteWorkflowCommand,
+)
 from aef_domain.contexts.workflows.domain.events.ExecutionCancelledEvent import (
     ExecutionCancelledEvent,
 )
@@ -29,9 +32,6 @@ from aef_domain.contexts.workflows.domain.events.WorkflowExecutionStartedEvent i
 )
 from aef_domain.contexts.workflows.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
-)
-from aef_domain.contexts.workflows.domain.commands.ExecuteWorkflowCommand import (
-    ExecuteWorkflowCommand,
 )
 from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
     WorkflowExecutionEngine,

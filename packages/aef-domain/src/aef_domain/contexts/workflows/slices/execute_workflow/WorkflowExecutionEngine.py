@@ -517,10 +517,10 @@ class WorkflowExecutionEngine:
         6. Track session with token data
         """
         # Import session classes
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
@@ -930,10 +930,10 @@ class WorkflowExecutionEngine:
         """
         import json
 
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions._shared.value_objects import OperationType
         from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
