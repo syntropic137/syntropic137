@@ -2,7 +2,7 @@
 
 import pytest
 
-from .StartSessionCommand import StartSessionCommand
+from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import StartSessionCommand
 from .StartSessionHandler import StartSessionHandler
 
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from .RecordOperationCommand import RecordOperationCommand
+from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import RecordOperationCommand
 from .RecordOperationHandler import RecordOperationHandler
 
 

@@ -1,9 +1,9 @@
 """Start session vertical slice."""
 
-from aef_domain.contexts.sessions.slices.start_session.SessionStartedEvent import (
+from aef_domain.contexts.sessions.events.SessionStartedEvent import (
     SessionStartedEvent,
 )
-from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
 

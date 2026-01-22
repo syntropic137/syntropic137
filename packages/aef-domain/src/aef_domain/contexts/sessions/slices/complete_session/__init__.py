@@ -1,9 +1,9 @@
 """Complete session vertical slice."""
 
-from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
     CompleteSessionCommand,
 )
-from aef_domain.contexts.sessions.slices.complete_session.SessionCompletedEvent import (
+from aef_domain.contexts.sessions.events.SessionCompletedEvent import (
     SessionCompletedEvent,
 )
 
