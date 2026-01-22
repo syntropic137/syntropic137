@@ -8,14 +8,11 @@ See ADR-012: Artifact Storage Architecture
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.read_models.artifact_summary import (
         ArtifactSummary,
-    )
-    from aef_domain.contexts.artifacts.slices.list_artifacts.projection import (
-        ArtifactListProjection,
     )
 
 
@@ -67,11 +64,11 @@ class ArtifactQueryService:
     Replaces in-memory phase_outputs dict with DB-backed queries.
     """
 
-    def __init__(self, projection: ArtifactListProjection) -> None:
+    def __init__(self, projection: Any) -> None:
         """Initialize with an artifact projection.
 
         Args:
-            projection: The ArtifactListProjection to query
+            projection: The artifact projection to query (duck-typed)
         """
         self._projection = projection
 
