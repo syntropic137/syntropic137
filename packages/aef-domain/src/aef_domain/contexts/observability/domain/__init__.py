@@ -5,7 +5,7 @@ Exports:
 - ObservationType: Classification of observation types
 """
 
-from aef_domain.contexts.observability.domain.events import (
+from aef_domain.contexts.observability.events import (
     AgentObservationEvent,
     ObservationType,
 )
