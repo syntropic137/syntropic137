@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
         ArtifactCreatedEvent,
     )
-    from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
+    from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
         CreateArtifactCommand,
     )
 

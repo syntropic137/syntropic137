@@ -30,7 +30,7 @@ from aef_domain.contexts.workflows.domain.events.WorkflowExecutionStartedEvent i
 from aef_domain.contexts.workflows.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
 )
-from aef_domain.contexts.workflows.slices.execute_workflow.ExecuteWorkflowCommand import (
+from aef_domain.contexts.workflows.domain.commands.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
 )
 from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (

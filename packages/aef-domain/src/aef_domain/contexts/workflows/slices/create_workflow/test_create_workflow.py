@@ -18,7 +18,7 @@ from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
 from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
     WorkflowCreatedEvent,
 )
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
+from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
 from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (

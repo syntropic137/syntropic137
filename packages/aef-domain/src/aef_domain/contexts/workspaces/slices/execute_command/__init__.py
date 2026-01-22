@@ -6,7 +6,7 @@ from aef_domain.contexts.workspaces.domain.events.CommandExecutedEvent import (
 from aef_domain.contexts.workspaces.domain.events.CommandFailedEvent import (
     CommandFailedEvent,
 )
-from aef_domain.contexts.workspaces.slices.execute_command.ExecuteCommandCommand import (
+from aef_domain.contexts.workspaces.domain.commands.ExecuteCommandCommand import (
     ExecuteCommandCommand,
 )
 

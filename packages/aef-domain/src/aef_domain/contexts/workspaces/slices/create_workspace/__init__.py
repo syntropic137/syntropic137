@@ -1,6 +1,6 @@
 """Workspace creation slice - commands and events."""
 
-from aef_domain.contexts.workspaces.slices.create_workspace.CreateWorkspaceCommand import (
+from aef_domain.contexts.workspaces.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
 from aef_domain.contexts.workspaces.domain.events.IsolationStartedEvent import (
