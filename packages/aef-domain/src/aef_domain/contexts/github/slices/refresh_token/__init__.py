@@ -6,7 +6,7 @@ Handles installation token refresh for GitHub App.
 from aef_domain.contexts.github.slices.refresh_token.RefreshTokenCommand import (
     RefreshTokenCommand,
 )
-from aef_domain.contexts.github.slices.refresh_token.TokenRefreshedEvent import (
+from aef_domain.contexts.github.domain.events.TokenRefreshedEvent import (
     TokenRefreshedEvent,
 )
 
