@@ -49,19 +49,19 @@ if TYPE_CHECKING:
     from aef_domain.contexts.workspaces.slices.create_workspace.CreateWorkspaceCommand import (
         CreateWorkspaceCommand,
     )
-    from aef_domain.contexts.workspaces.slices.create_workspace.IsolationStartedEvent import (
+    from aef_domain.contexts.workspaces.domain.events.IsolationStartedEvent import (
         IsolationStartedEvent,
     )
-    from aef_domain.contexts.workspaces.slices.create_workspace.WorkspaceCreatedEvent import (
+    from aef_domain.contexts.workspaces.domain.events.WorkspaceCreatedEvent import (
         WorkspaceCreatedEvent,
     )
-    from aef_domain.contexts.workspaces.slices.destroy_workspace.WorkspaceErrorEvent import (
+    from aef_domain.contexts.workspaces.domain.events.WorkspaceErrorEvent import (
         WorkspaceErrorEvent,
     )
-    from aef_domain.contexts.workspaces.slices.execute_command.CommandExecutedEvent import (
+    from aef_domain.contexts.workspaces.domain.events.CommandExecutedEvent import (
         CommandExecutedEvent,
     )
-    from aef_domain.contexts.workspaces.slices.execute_command.CommandFailedEvent import (
+    from aef_domain.contexts.workspaces.domain.events.CommandFailedEvent import (
         CommandFailedEvent,
     )
     from aef_domain.contexts.workspaces.slices.execute_command.ExecuteCommandCommand import (
@@ -70,13 +70,13 @@ if TYPE_CHECKING:
     from aef_domain.contexts.workspaces.slices.inject_tokens.InjectTokensCommand import (
         InjectTokensCommand,
     )
-    from aef_domain.contexts.workspaces.slices.inject_tokens.TokensInjectedEvent import (
+    from aef_domain.contexts.workspaces.domain.events.TokensInjectedEvent import (
         TokensInjectedEvent,
     )
     from aef_domain.contexts.workspaces.slices.terminate_workspace.TerminateWorkspaceCommand import (
         TerminateWorkspaceCommand,
     )
-    from aef_domain.contexts.workspaces.slices.terminate_workspace.WorkspaceTerminatedEvent import (
+    from aef_domain.contexts.workspaces.domain.events.WorkspaceTerminatedEvent import (
         WorkspaceTerminatedEvent,
     )
 
@@ -260,7 +260,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
 
         Creates a new workspace with isolation and optional sidecar.
         """
-        from aef_domain.contexts.workspaces.slices.create_workspace.WorkspaceCreatedEvent import (
+        from aef_domain.contexts.workspaces.domain.events.WorkspaceCreatedEvent import (
             WorkspaceCreatedEvent,
         )
 
@@ -305,7 +305,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
 
         Injects API tokens via sidecar or direct injection.
         """
-        from aef_domain.contexts.workspaces.slices.inject_tokens.TokensInjectedEvent import (
+        from aef_domain.contexts.workspaces.domain.events.TokensInjectedEvent import (
             TokensInjectedEvent,
         )
 
@@ -346,10 +346,10 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
         Records a command execution result.
         Note: Actual execution is done by the application layer via ports.
         """
-        from aef_domain.contexts.workspaces.slices.execute_command.CommandExecutedEvent import (
+        from aef_domain.contexts.workspaces.domain.events.CommandExecutedEvent import (
             CommandExecutedEvent,
         )
-        from aef_domain.contexts.workspaces.slices.execute_command.CommandFailedEvent import (
+        from aef_domain.contexts.workspaces.domain.events.CommandFailedEvent import (
             CommandFailedEvent,
         )
 
@@ -402,7 +402,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
 
         Marks workspace as terminated and records cleanup.
         """
-        from aef_domain.contexts.workspaces.slices.terminate_workspace.WorkspaceTerminatedEvent import (
+        from aef_domain.contexts.workspaces.domain.events.WorkspaceTerminatedEvent import (
             WorkspaceTerminatedEvent,
         )
 
@@ -441,7 +441,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
 
         Called by application layer after IsolationBackendPort.create() succeeds.
         """
-        from aef_domain.contexts.workspaces.slices.create_workspace.IsolationStartedEvent import (
+        from aef_domain.contexts.workspaces.domain.events.IsolationStartedEvent import (
             IsolationStartedEvent,
         )
 
@@ -474,7 +474,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             error_message: Human-readable error message
             operation: Operation that failed (e.g., "create", "execute", "destroy")
         """
-        from aef_domain.contexts.workspaces.slices.destroy_workspace.WorkspaceErrorEvent import (
+        from aef_domain.contexts.workspaces.domain.events.WorkspaceErrorEvent import (
             WorkspaceErrorEvent,
         )
 

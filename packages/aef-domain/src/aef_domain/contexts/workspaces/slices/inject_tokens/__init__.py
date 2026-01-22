@@ -3,7 +3,7 @@
 from aef_domain.contexts.workspaces.slices.inject_tokens.InjectTokensCommand import (
     InjectTokensCommand,
 )
-from aef_domain.contexts.workspaces.slices.inject_tokens.TokensInjectedEvent import (
+from aef_domain.contexts.workspaces.domain.events.TokensInjectedEvent import (
     TokensInjectedEvent,
 )
 
