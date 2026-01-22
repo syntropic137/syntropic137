@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
+    from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
         WorkflowCreatedEvent,
     )
 

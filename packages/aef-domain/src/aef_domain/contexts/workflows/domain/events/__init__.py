@@ -1,14 +1,8 @@
-"""Execute workflow vertical slice.
+"""Domain events for workflows context.
 
-This slice handles the execution of workflows, including:
-- Starting workflow execution
-- Managing phase execution lifecycle
-- Tracking execution state and metrics
+This module contains events for workflow lifecycle and execution management.
 """
 
-from aef_domain.contexts.workflows.slices.execute_workflow.ExecuteWorkflowCommand import (
-    ExecuteWorkflowCommand,
-)
 from aef_domain.contexts.workflows.domain.events.ExecutionCancelledEvent import (
     ExecutionCancelledEvent,
 )
@@ -27,9 +21,8 @@ from aef_domain.contexts.workflows.domain.events.PhaseStartedEvent import (
 from aef_domain.contexts.workflows.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
 )
-from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
-    WorkflowExecutionEngine,
-    WorkflowExecutionResult,
+from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
+    WorkflowCreatedEvent,
 )
 from aef_domain.contexts.workflows.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
@@ -39,15 +32,13 @@ from aef_domain.contexts.workflows.domain.events.WorkflowFailedEvent import (
 )
 
 __all__ = [
-    "ExecuteWorkflowCommand",
     "ExecutionCancelledEvent",
     "ExecutionPausedEvent",
     "ExecutionResumedEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
     "WorkflowCompletedEvent",
-    "WorkflowExecutionEngine",
-    "WorkflowExecutionResult",
+    "WorkflowCreatedEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
 ]
