@@ -22,7 +22,7 @@ from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
@@ -186,7 +186,7 @@ def get_session_repository() -> (
     if _session_repository is not None:
         return _session_repository
 
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 

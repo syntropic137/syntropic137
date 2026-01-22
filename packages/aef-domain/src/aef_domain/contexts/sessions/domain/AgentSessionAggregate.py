@@ -20,20 +20,20 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
         CompleteSessionCommand,
     )
-    from aef_domain.contexts.sessions.domain.events.SessionCompletedEvent import (
-        SessionCompletedEvent,
+    from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
+        RecordOperationCommand,
+    )
+    from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
+        StartSessionCommand,
     )
     from aef_domain.contexts.sessions.domain.events.OperationRecordedEvent import (
         OperationRecordedEvent,
     )
-    from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
-        RecordOperationCommand,
+    from aef_domain.contexts.sessions.domain.events.SessionCompletedEvent import (
+        SessionCompletedEvent,
     )
     from aef_domain.contexts.sessions.domain.events.SessionStartedEvent import (
         SessionStartedEvent,
-    )
-    from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
-        StartSessionCommand,
     )
 
 

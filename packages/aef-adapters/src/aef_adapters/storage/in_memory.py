@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
         ArtifactAggregate,
     )
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
     from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
@@ -167,7 +167,7 @@ class InMemoryWorkflowRepository:
         from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
             WorkflowAggregate,
         )
-        from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
+        from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
         )
 
@@ -207,7 +207,7 @@ class InMemoryWorkflowRepository:
         from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
             WorkflowAggregate,
         )
-        from aef_domain.contexts.workflows.slices.create_workflow.WorkflowCreatedEvent import (
+        from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
             WorkflowCreatedEvent,
         )
 

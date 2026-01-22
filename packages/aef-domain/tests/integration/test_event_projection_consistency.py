@@ -264,7 +264,7 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_start_session_emits_event(self) -> None:
         """REGRESSION: StartSessionCommand must emit SessionStartedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
@@ -289,7 +289,7 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_record_operation_emits_event(self) -> None:
         """REGRESSION: RecordOperationCommand must emit OperationRecordedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
@@ -335,7 +335,7 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_session_emits_event(self) -> None:
         """REGRESSION: CompleteSessionCommand must emit SessionCompletedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
@@ -802,7 +802,7 @@ class TestSessionExecutionLinkage:
     @pytest.mark.asyncio
     async def test_session_started_event_includes_execution_id(self) -> None:
         """REGRESSION: SessionStartedEvent must include execution_id."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (

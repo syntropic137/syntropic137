@@ -26,7 +26,7 @@ from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
     CreateArtifactCommand,
 )
-from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
 from aef_domain.contexts.sessions._shared.value_objects import OperationType, SessionStatus

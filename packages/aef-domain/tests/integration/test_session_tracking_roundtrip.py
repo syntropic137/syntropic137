@@ -24,7 +24,7 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing import EventStoreRepository
 
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 
@@ -42,7 +42,7 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Start command persists SessionStartedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
@@ -83,7 +83,7 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Operation recording persists OperationRecordedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
@@ -139,7 +139,7 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Session completion persists SessionCompletedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions._shared.value_objects import (
@@ -196,7 +196,7 @@ class TestAgentSessionTokenAccumulation:
         unique_session_id: str,
     ) -> None:
         """Level 4: Multiple operations accumulate tokens and costs correctly."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
@@ -269,7 +269,7 @@ class TestAgentSessionLifecycle:
         unique_session_id: str,
     ) -> None:
         """Level 4: Complete session lifecycle persists and replays correctly."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions._shared.value_objects import (

@@ -3,6 +3,7 @@
 import pytest
 
 from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import StartSessionCommand
+
 from .StartSessionHandler import StartSessionHandler
 
 
