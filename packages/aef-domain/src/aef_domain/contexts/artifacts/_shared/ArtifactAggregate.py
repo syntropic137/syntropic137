@@ -14,7 +14,7 @@ from aef_domain.contexts.artifacts._shared.value_objects import (
 )
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts.slices.create_artifact.ArtifactCreatedEvent import (
+    from aef_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
         ArtifactCreatedEvent,
     )
     from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
@@ -137,7 +137,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
 
         Creates a new artifact storing phase output.
         """
-        from aef_domain.contexts.artifacts.slices.create_artifact.ArtifactCreatedEvent import (
+        from aef_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
             ArtifactCreatedEvent,
         )
 
