@@ -1,0 +1,41 @@
+# VSA Configuration for AEF Domain
+# Baseline validation - expect violations against ADR-019
+
+version: 2
+architecture: hexagonal-event-sourced-vsa
+language: python
+root: src/aef_domain/contexts
+
+# Note: Scanner auto-discovers bounded contexts at depth 1 from root
+# With root=src/aef_domain/contexts, it will find:
+#   - agents/, artifacts/, costs/, github/, metrics/, 
+#   - observability/, sessions/, workflows/, workspaces/
+# Each as a separate bounded context.
+
+# Validation settings
+validation:
+  enabled: true
+  fail_on_warning: false
+  
+# Domain structure (expected by ADR-019)
+domain:
+  aggregates_path: "domain"
+  commands_path: "domain/commands"
+  events_path: "events"
+  queries_path: "domain/queries"
+  value_objects_pattern: "*ValueObjects.*"
+
+# Slice structure
+slices:
+  path: "slices"
+  
+# Infrastructure
+infrastructure:
+  path: "infrastructure"
+  buses_path: "infrastructure/buses"
+
+# Framework base types
+framework:
+  name: "aef"
+  commands_base: "aef_domain._shared.commands.BaseCommand"
+  events_base: "aef_domain._shared.events.BaseEvent"
