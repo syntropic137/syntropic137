@@ -1,15 +1,15 @@
 """Workspace destruction events."""
 
-from aef_domain.contexts.workspaces.slices.destroy_workspace.WorkspaceCommandExecutedEvent import (
+from aef_domain.contexts.workspaces.domain.events.WorkspaceCommandExecutedEvent import (
     WorkspaceCommandExecutedEvent,
 )
-from aef_domain.contexts.workspaces.slices.destroy_workspace.WorkspaceDestroyedEvent import (
+from aef_domain.contexts.workspaces.domain.events.WorkspaceDestroyedEvent import (
     WorkspaceDestroyedEvent,
 )
-from aef_domain.contexts.workspaces.slices.destroy_workspace.WorkspaceDestroyingEvent import (
+from aef_domain.contexts.workspaces.domain.events.WorkspaceDestroyingEvent import (
     WorkspaceDestroyingEvent,
 )
-from aef_domain.contexts.workspaces.slices.destroy_workspace.WorkspaceErrorEvent import (
+from aef_domain.contexts.workspaces.domain.events.WorkspaceErrorEvent import (
     WorkspaceErrorEvent,
 )
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from .CreateArtifactCommand import CreateArtifactCommand
+from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
+    CreateArtifactCommand,
+)
+
 from .CreateArtifactHandler import CreateArtifactHandler
 
 

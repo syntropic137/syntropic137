@@ -39,7 +39,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_start_execution_emits_event(self) -> None:
         """REGRESSION: StartExecutionCommand must emit WorkflowExecutionStartedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
@@ -66,7 +66,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_phase_emits_event(self) -> None:
         """REGRESSION: CompletePhaseCommand must emit PhaseCompletedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -119,7 +119,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_execution_emits_event(self) -> None:
         """REGRESSION: CompleteExecutionCommand must emit WorkflowCompletedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -160,7 +160,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_fail_execution_emits_event(self) -> None:
         """REGRESSION: FailExecutionCommand must emit WorkflowFailedEvent."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             FailExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -264,10 +264,10 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_start_session_emits_event(self) -> None:
         """REGRESSION: StartSessionCommand must emit SessionStartedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -289,14 +289,14 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_record_operation_emits_event(self) -> None:
         """REGRESSION: RecordOperationCommand must emit OperationRecordedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -335,13 +335,13 @@ class TestSessionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_session_emits_event(self) -> None:
         """REGRESSION: CompleteSessionCommand must emit SessionCompletedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -802,10 +802,10 @@ class TestSessionExecutionLinkage:
     @pytest.mark.asyncio
     async def test_session_started_event_includes_execution_id(self) -> None:
         """REGRESSION: SessionStartedEvent must include execution_id."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 

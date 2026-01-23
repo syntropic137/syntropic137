@@ -38,7 +38,7 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from aef_domain.contexts.workspaces._shared.WorkspaceAggregate import WorkspaceAggregate
+from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
 
 __all__ = [
     # Sorted alphabetically (ruff RUF022)

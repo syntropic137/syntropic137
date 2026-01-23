@@ -6,7 +6,7 @@ Adapters implement these ports with specific technologies.
 See: Ports & Adapters (Hexagonal Architecture)
 """
 
-from aef_domain.contexts.artifacts.domain.ports.artifact_storage import (
+from aef_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
     StorageResult,
 )

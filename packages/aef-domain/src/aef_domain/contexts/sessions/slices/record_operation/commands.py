@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from aef_domain.contexts.sessions._shared.value_objects import OperationType
-from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
     RecordOperationCommand,
 )
 

@@ -21,33 +21,33 @@ from aef_adapters.storage import (
     reset_storage,
 )
 from aef_dashboard.main import app
-from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
-from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
+from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
+from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
     CreateArtifactCommand,
 )
-from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+from aef_domain.contexts.sessions._shared.value_objects import OperationType, SessionStatus
+from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
-from aef_domain.contexts.sessions._shared.value_objects import OperationType, SessionStatus
-from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
     CompleteSessionCommand,
 )
-from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
     RecordOperationCommand,
 )
-from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
 from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
+from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
+from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
 
 
 @pytest.fixture

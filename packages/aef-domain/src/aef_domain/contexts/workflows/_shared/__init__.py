@@ -19,20 +19,20 @@ from aef_domain.contexts.workflows._shared.workflow_definition import (
     load_workflow_definitions,
     validate_workflow_yaml,
 )
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
-from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+    PhaseDefinition,
+    PhaseExecutionType,
+    WorkflowClassification,
+    WorkflowType,
+)
+from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
+from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
-)
-from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
-    PhaseDefinition,
-    PhaseExecutionType,
-    WorkflowClassification,
-    WorkflowType,
 )
 
 __all__ = [

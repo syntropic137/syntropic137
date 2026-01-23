@@ -3,11 +3,11 @@
 Handles GitHub App installation events from webhooks.
 """
 
-from aef_domain.contexts.github.slices.install_app.AppInstalledEvent import AppInstalledEvent
-from aef_domain.contexts.github.slices.install_app.InstallationRevokedEvent import (
+from aef_domain.contexts.github.domain.events.AppInstalledEvent import AppInstalledEvent
+from aef_domain.contexts.github.domain.events.InstallationRevokedEvent import (
     InstallationRevokedEvent,
 )
-from aef_domain.contexts.github.slices.install_app.InstallationSuspendedEvent import (
+from aef_domain.contexts.github.domain.events.InstallationSuspendedEvent import (
     InstallationSuspendedEvent,
 )
 

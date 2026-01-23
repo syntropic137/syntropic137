@@ -2,7 +2,10 @@
 
 import pytest
 
-from .RefreshTokenCommand import RefreshTokenCommand
+from aef_domain.contexts.github.domain.commands.RefreshTokenCommand import (
+    RefreshTokenCommand,
+)
+
 from .RefreshTokenHandler import RefreshTokenHandler
 
 

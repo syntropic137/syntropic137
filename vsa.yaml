@@ -35,6 +35,22 @@ patterns:
   integration_event: "*IntegrationEvent"
   test: "test_*"
 
+# Domain layer configuration (for manifest --include-domain)
+domain:
+  path: domain
+  aggregates:
+    path: "."
+    pattern: "**/*Aggregate.*"
+  commands:
+    path: "commands"
+    pattern: "**/*Command.*"
+  events:
+    path: "events"
+    pattern: "**/*Event.*"
+  queries:
+    path: "queries"
+    pattern: "**/*Query.*"
+
 # Context-specific configuration
 contexts:
   workflows:

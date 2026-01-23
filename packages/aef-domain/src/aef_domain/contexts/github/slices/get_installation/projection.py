@@ -15,16 +15,16 @@ from aef_domain.contexts.github.domain.read_models.installation import (
 )
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.github.slices.install_app.AppInstalledEvent import (
+    from aef_domain.contexts.github.domain.events.AppInstalledEvent import (
         AppInstalledEvent,
     )
-    from aef_domain.contexts.github.slices.install_app.InstallationRevokedEvent import (
+    from aef_domain.contexts.github.domain.events.InstallationRevokedEvent import (
         InstallationRevokedEvent,
     )
-    from aef_domain.contexts.github.slices.install_app.InstallationSuspendedEvent import (
+    from aef_domain.contexts.github.domain.events.InstallationSuspendedEvent import (
         InstallationSuspendedEvent,
     )
-    from aef_domain.contexts.github.slices.refresh_token.TokenRefreshedEvent import (
+    from aef_domain.contexts.github.domain.events.TokenRefreshedEvent import (
         TokenRefreshedEvent,
     )
 

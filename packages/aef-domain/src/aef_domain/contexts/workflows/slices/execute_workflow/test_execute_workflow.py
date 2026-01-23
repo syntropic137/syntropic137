@@ -11,7 +11,7 @@ import pytest
 
 if TYPE_CHECKING:
     from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
@@ -21,16 +21,16 @@ from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
-    WorkflowAggregate,
-)
 from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
+from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
+)
+from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+    WorkflowAggregate,
 )
 from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
     ExecutionContext,

@@ -167,4 +167,4 @@ DEEP-DIVE_*.md
 assets/
 build/
 HANDOFF-*.md
-workspaces/
+/workspaces/

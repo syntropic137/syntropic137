@@ -19,7 +19,7 @@ from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowCommand import (
+from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
 from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
