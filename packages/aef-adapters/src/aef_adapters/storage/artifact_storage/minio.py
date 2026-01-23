@@ -16,7 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 # Import StorageResult from domain (not local definition)
-from aef_domain.contexts.artifacts.domain.ports import StorageResult
+from aef_domain.contexts.artifacts.ports import StorageResult
 
 if TYPE_CHECKING:
     from aef_adapters.object_storage.minio import MinioStorage

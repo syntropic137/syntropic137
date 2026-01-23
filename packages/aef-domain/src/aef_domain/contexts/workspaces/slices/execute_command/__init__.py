@@ -1,13 +1,13 @@
 """Command execution slice - commands and events."""
 
-from aef_domain.contexts.workspaces.slices.execute_command.CommandExecutedEvent import (
+from aef_domain.contexts.workspaces.domain.commands.ExecuteCommandCommand import (
+    ExecuteCommandCommand,
+)
+from aef_domain.contexts.workspaces.domain.events.CommandExecutedEvent import (
     CommandExecutedEvent,
 )
-from aef_domain.contexts.workspaces.slices.execute_command.CommandFailedEvent import (
+from aef_domain.contexts.workspaces.domain.events.CommandFailedEvent import (
     CommandFailedEvent,
-)
-from aef_domain.contexts.workspaces.slices.execute_command.ExecuteCommandCommand import (
-    ExecuteCommandCommand,
 )
 
 # ExecuteCommandHandler is not exported to avoid import issues

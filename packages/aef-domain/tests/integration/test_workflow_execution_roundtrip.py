@@ -25,7 +25,7 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing import EventStoreRepository
 
-    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -43,7 +43,7 @@ class TestWorkflowExecutionRoundtrip:
         unique_execution_id: str,
     ) -> None:
         """Level 4: Start command persists WorkflowExecutionStarted event."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
@@ -78,7 +78,7 @@ class TestWorkflowExecutionRoundtrip:
         unique_execution_id: str,
     ) -> None:
         """Level 4: Phase completion persists PhaseCompleted event."""
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -132,7 +132,7 @@ class TestWorkflowExecutionRoundtrip:
         from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -185,7 +185,7 @@ class TestWorkflowExecutionRoundtrip:
         from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             FailExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -234,7 +234,7 @@ class TestWorkflowExecutionRoundtrip:
         """Level 4: Verify optimistic concurrency works with real event store."""
         from event_sourcing.core.errors import ConcurrencyConflictError
 
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             StartExecutionCommand,
             StartPhaseCommand,
             WorkflowExecutionAggregate,
@@ -312,7 +312,7 @@ class TestWorkflowExecutionMultipleEvents:
         from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             CompletePhaseCommand,
             StartExecutionCommand,

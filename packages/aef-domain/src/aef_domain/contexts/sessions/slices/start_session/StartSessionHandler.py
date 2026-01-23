@@ -29,7 +29,7 @@ class StartSessionHandler:
         Returns:
             session_id: ID of the started session
         """
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
 

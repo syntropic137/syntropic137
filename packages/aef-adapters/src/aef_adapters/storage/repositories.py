@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING, Any
 from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
-    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
+    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -107,7 +107,7 @@ def get_workflow_repository() -> (
     if _workflow_repository is not None:
         return _workflow_repository
 
-    from aef_domain.contexts.workflows._shared.WorkflowAggregate import WorkflowAggregate
+    from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -146,7 +146,7 @@ def get_workflow_execution_repository() -> (
     if _workflow_execution_repository is not None:
         return _workflow_execution_repository
 
-    from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -186,7 +186,7 @@ def get_session_repository() -> (
     if _session_repository is not None:
         return _session_repository
 
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 
@@ -226,7 +226,7 @@ def get_artifact_repository() -> (
     if _artifact_repository is not None:
         return _artifact_repository
 
-    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
+    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(

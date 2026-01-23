@@ -35,7 +35,7 @@ from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -57,10 +57,10 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows._shared.WorkflowAggregate import (
+    from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
         WorkflowAggregate,
     )
 
@@ -517,17 +517,17 @@ class WorkflowExecutionEngine:
         6. Track session with token data
         """
         # Import session classes
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -812,7 +812,7 @@ class WorkflowExecutionEngine:
         from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
             ArtifactAggregate,
         )
-        from aef_domain.contexts.artifacts.slices.create_artifact.CreateArtifactCommand import (
+        from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
             CreateArtifactCommand,
         )
 
@@ -930,17 +930,17 @@ class WorkflowExecutionEngine:
         """
         import json
 
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions._shared.value_objects import OperationType
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 

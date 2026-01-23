@@ -31,7 +31,7 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from aef_domain.contexts.workspaces._shared.WorkspaceAggregate import WorkspaceAggregate
+from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
 from aef_domain.contexts.workspaces.slices.create_workspace import CreateWorkspaceCommand
 from aef_domain.contexts.workspaces.slices.execute_command import ExecuteCommandCommand
 from aef_domain.contexts.workspaces.slices.inject_tokens import InjectTokensCommand

@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts.domain.ports.artifact_storage import (
+    from aef_domain.contexts.artifacts.ports.ArtifactContentStoragePort import (
         ArtifactContentStoragePort,
     )
 

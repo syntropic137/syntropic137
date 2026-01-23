@@ -24,7 +24,7 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing import EventStoreRepository
 
-    from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 
@@ -42,10 +42,10 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Start command persists SessionStartedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -83,13 +83,13 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Operation recording persists OperationRecordedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -139,16 +139,16 @@ class TestAgentSessionRoundtrip:
         unique_session_id: str,
     ) -> None:
         """Level 4: Session completion persists SessionCompletedEvent."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
-            AgentSessionAggregate,
-        )
         from aef_domain.contexts.sessions._shared.value_objects import (
             SessionStatus,
         )
-        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -196,13 +196,13 @@ class TestAgentSessionTokenAccumulation:
         unique_session_id: str,
     ) -> None:
         """Level 4: Multiple operations accumulate tokens and costs correctly."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 
@@ -269,19 +269,19 @@ class TestAgentSessionLifecycle:
         unique_session_id: str,
     ) -> None:
         """Level 4: Complete session lifecycle persists and replays correctly."""
-        from aef_domain.contexts.sessions._shared.AgentSessionAggregate import (
-            AgentSessionAggregate,
-        )
         from aef_domain.contexts.sessions._shared.value_objects import (
             SessionStatus,
         )
-        from aef_domain.contexts.sessions.slices.complete_session.CompleteSessionCommand import (
+        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+            AgentSessionAggregate,
+        )
+        from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
             CompleteSessionCommand,
         )
-        from aef_domain.contexts.sessions.slices.record_operation.RecordOperationCommand import (
+        from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
             RecordOperationCommand,
         )
-        from aef_domain.contexts.sessions.slices.start_session.StartSessionCommand import (
+        from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
             StartSessionCommand,
         )
 

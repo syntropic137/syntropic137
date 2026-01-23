@@ -1,6 +1,6 @@
 """Aggregates for GitHub context."""
 
-from aef_domain.contexts.github.domain.aggregates.InstallationAggregate import (
+from aef_domain.contexts.github.domain.InstallationAggregate import (
     InstallationAggregate,
 )
 

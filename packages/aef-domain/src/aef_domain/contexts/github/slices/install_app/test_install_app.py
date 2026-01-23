@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from aef_domain.contexts.github.slices.install_app.AppInstalledEvent import (
+from aef_domain.contexts.github.domain.events.AppInstalledEvent import (
     AppInstalledEvent,
 )
-from aef_domain.contexts.github.slices.install_app.InstallationRevokedEvent import (
+from aef_domain.contexts.github.domain.events.InstallationRevokedEvent import (
     InstallationRevokedEvent,
 )
 
