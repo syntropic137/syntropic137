@@ -150,6 +150,8 @@ agentic-engineering-framework/
 
 ## Architecture
 
+![AEF Architecture](./docs/ARCHITECTURE.svg)
+
 ### Bounded Contexts
 
 - **Workflows**: Workflow definitions, phases, and execution lifecycle
@@ -163,9 +165,12 @@ agentic-engineering-framework/
 | Pattern | Implementation |
 |---------|---------------|
 | Event Sourcing | Commands → Aggregates → Events |
+| CQRS | Commands (12) → Events (31) → Projections (13) |
 | Event Processing | Processor/Todo pattern (no complex sagas) |
 | Architecture | Vertical Slice Architecture (VSA) |
 | Logging | Centralized DI logger, structured, detailed |
+
+> **Note:** To regenerate the architecture diagram: `just diagram`
 
 ## Development Commands
 

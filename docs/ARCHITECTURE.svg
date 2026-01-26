@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1000" width="1400" height="1000">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1200" width="1400" height="1200">
   <defs>
     <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
   <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
@@ -80,16 +80,30 @@
   <text x="745" y="605" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• list_repos</text>
   <text x="745" y="623" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• get_installation</text>
   <text x="745" y="641" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• aggregates</text>
-  <text x="40" y="739" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Infrastructure</text>
-  <rect x="40" y="749" width="180" height="70" fill="#cce5ff" stroke="#a0a0a0" stroke-width="1" rx="6" opacity="1" filter="url(#shadow)"/>
-  <text x="130" y="774" font-size="14" font-weight="500" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">PostgreSQL</text>
-  <text x="130" y="794" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Event Store</text>
-  <rect x="230" y="749" width="180" height="70" fill="#cce5ff" stroke="#a0a0a0" stroke-width="1" rx="6" opacity="1" filter="url(#shadow)"/>
-  <text x="320" y="774" font-size="14" font-weight="500" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">Redis</text>
-  <text x="320" y="794" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Cache</text>
-  <rect x="420" y="749" width="180" height="70" fill="#cce5ff" stroke="#a0a0a0" stroke-width="1" rx="6" opacity="1" filter="url(#shadow)"/>
-  <text x="510" y="774" font-size="14" font-weight="500" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">MinIO</text>
-  <text x="510" y="794" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Artifacts</text>
+  <text x="40" y="769" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">CQRS Pattern</text>
+  <rect x="40" y="799" width="333.3333333333333" height="120" fill="#e3f2fd" stroke="#1976d2" stroke-width="2" rx="8" opacity="1"/>
+  <text x="60" y="834" font-size="18" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">Commands</text>
+  <text x="60" y="864" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">12 total</text>
+  <rect x="393.3333333333333" y="799" width="333.3333333333333" height="120" fill="#fff3e0" stroke="#f57c00" stroke-width="2" rx="8" opacity="1"/>
+  <text x="413.3333333333333" y="834" font-size="18" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">Events</text>
+  <text x="413.3333333333333" y="864" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">31 total</text>
+  <rect x="746.6666666666666" y="799" width="333.3333333333333" height="120" fill="#e8f5e9" stroke="#388e3c" stroke-width="2" rx="8" opacity="1"/>
+  <text x="766.6666666666666" y="834" font-size="18" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">Projections</text>
+  <text x="766.6666666666666" y="864" font-size="14" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">13 total</text>
+  <line x1="373.3333333333333" y1="859" x2="393.3333333333333" y2="859" stroke="#666666" stroke-width="2"/>
+  <polygon points="388.3333333333333,859 380.3333333333333,855 380.3333333333333,863" fill="#666666" />
+  <line x1="726.6666666666666" y1="859" x2="746.6666666666666" y2="859" stroke="#666666" stroke-width="2"/>
+  <polygon points="741.6666666666666,859 733.6666666666666,855 733.6666666666666,863" fill="#666666" />
+  <text x="40" y="979" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Infrastructure</text>
+  <rect x="40" y="989" width="180" height="70" fill="#cce5ff" stroke="#a0a0a0" stroke-width="1" rx="6" opacity="1" filter="url(#shadow)"/>
+  <text x="130" y="1014" font-size="14" font-weight="500" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">PostgreSQL</text>
+  <text x="130" y="1034" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Event Store</text>
+  <rect x="230" y="989" width="180" height="70" fill="#cce5ff" stroke="#a0a0a0" stroke-width="1" rx="6" opacity="1" filter="url(#shadow)"/>
+  <text x="320" y="1014" font-size="14" font-weight="500" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">Redis</text>
+  <text x="320" y="1034" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Cache</text>
+  <rect x="420" y="989" width="180" height="70" fill="#cce5ff" stroke="#a0a0a0" stroke-width="1" rx="6" opacity="1" filter="url(#shadow)"/>
+  <text x="510" y="1014" font-size="14" font-weight="500" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">MinIO</text>
+  <text x="510" y="1034" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Artifacts</text>
   <text x="1140" y="100" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Packages</text>
   <rect x="1140" y="120" width="240" height="42" fill="#d4f1d4" stroke="#d0d0d0" stroke-width="1" rx="6" opacity="1"/>
   <text x="1155" y="140" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• aef-domain</text>
