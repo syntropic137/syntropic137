@@ -430,6 +430,13 @@ vsa-validate:
     vsa validate
     @echo "✅ VSA validation passed"
 
+# Generate architecture diagram (SVG from VSA manifest)
+diagram:
+    @echo "🏗️  Generating architecture diagram..."
+    @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
+    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --output docs
+    @echo "✅ Diagram generated: docs/ARCHITECTURE.svg"
+
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
     @echo "🔍 Checking for test debt..."
