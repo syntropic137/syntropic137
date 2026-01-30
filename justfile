@@ -303,12 +303,12 @@ check-fix:
     @echo "✅ Static checks fixed!"
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck test dashboard-qa test-debt vsa-validate docs-validate
+qa: lint format typecheck test dashboard-qa test-debt vsa-validate docs-sync
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate docs-validate
+qa-full: lint format typecheck test-cov dashboard-qa vsa-validate docs-sync
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
@@ -460,15 +460,15 @@ docs-regen: diagram docs-gen
     @echo "   • docs/architecture/docker-workspace-lifecycle.md"
     @echo "   • docs/architecture/infrastructure-data-flow.md"
 
-# Validate architecture documentation is up-to-date
-docs-validate:
-    @echo "🔍 Validating architecture documentation..."
-    @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen-test.txt 2>&1
+# Regenerate docs and fail if uncommitted changes (enforces docs are committed)
+docs-sync:
+    @echo "🔄 Syncing architecture documentation..."
+    @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen.txt 2>&1
     @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
         echo "✅ Architecture docs are up-to-date"; \
     else \
-        echo "⚠️  Architecture docs are out of date"; \
-        echo "   Run: just docs-regen"; \
+        echo "❌ Architecture docs need to be committed:"; \
+        echo "   git add docs/architecture/ README.md && git commit -m 'docs: update generated architecture docs'"; \
         exit 1; \
     fi
 
