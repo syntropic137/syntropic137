@@ -11,6 +11,7 @@ Run with: uv run pytest -m integration packages/aef-adapters/tests/events/
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import uuid4
 
 import pytest
@@ -19,9 +20,20 @@ import pytest
 pytestmark = pytest.mark.integration
 
 
+@dataclass
+class SeededSessionData:
+    """Data returned by seeded_session fixture."""
+
+    session_id: str
+    store: object  # AgentEventStore
+
+
 @pytest.fixture
 async def seeded_session(test_infrastructure):
-    """Create a session with test events using shared test infrastructure."""
+    """Create a session with test events using shared test infrastructure.
+
+    Returns SeededSessionData with both session_id and store for tests to use.
+    """
     from aef_adapters.events import AgentEventStore
 
     store = AgentEventStore(test_infrastructure.timescaledb_url)
@@ -95,7 +107,7 @@ async def seeded_session(test_infrastructure):
 
     await store.insert_batch(events)
 
-    yield session_id
+    yield SeededSessionData(session_id=session_id, store=store)
 
     await store.close()
 
@@ -105,15 +117,9 @@ class TestEventsAPI:
     """Test the events API endpoints."""
 
     @pytest.mark.asyncio
-    async def test_get_session_events(self, seeded_session, test_infrastructure):
+    async def test_get_session_events(self, seeded_session: SeededSessionData):
         """Test GET /events/sessions/{session_id}."""
-        from aef_adapters.events import get_event_store
-
-        # Manually test the query logic (simulating API call)
-        store = get_event_store(test_infrastructure.timescaledb_url)
-        await store.initialize()
-
-        events = await store.query(seeded_session, limit=100)
+        events = await seeded_session.store.query(seeded_session.session_id, limit=100)
 
         assert len(events) == 9
         event_types = [e["event_type"] for e in events]
@@ -122,16 +128,11 @@ class TestEventsAPI:
         assert "session_completed" in event_types
 
     @pytest.mark.asyncio
-    async def test_get_session_events_filtered(self, seeded_session, test_infrastructure):
+    async def test_get_session_events_filtered(self, seeded_session: SeededSessionData):
         """Test GET /events/sessions/{session_id}?event_type=..."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(test_infrastructure.timescaledb_url)
-        await store.initialize()
-
         # Filter by event type
-        tool_events = await store.query(
-            seeded_session,
+        tool_events = await seeded_session.store.query(
+            seeded_session.session_id,
             event_type="tool_execution_completed",
         )
 
@@ -139,14 +140,9 @@ class TestEventsAPI:
         assert all(e["event_type"] == "tool_execution_completed" for e in tool_events)
 
     @pytest.mark.asyncio
-    async def test_timeline_events(self, seeded_session, test_infrastructure):
+    async def test_timeline_events(self, seeded_session: SeededSessionData):
         """Test timeline view of events."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(test_infrastructure.timescaledb_url)
-        await store.initialize()
-
-        events = await store.query(seeded_session)
+        events = await seeded_session.store.query(seeded_session.session_id)
 
         # Filter for timeline-worthy events
         timeline = [
@@ -164,16 +160,11 @@ class TestEventsAPI:
         assert len(timeline) == 8  # 6 tool events + 2 session events
 
     @pytest.mark.asyncio
-    async def test_cost_aggregation(self, seeded_session, test_infrastructure):
+    async def test_cost_aggregation(self, seeded_session: SeededSessionData):
         """Test cost aggregation from token_usage events."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(test_infrastructure.timescaledb_url)
-        await store.initialize()
-
         # Query token usage events
-        token_events = await store.query(
-            seeded_session,
+        token_events = await seeded_session.store.query(
+            seeded_session.session_id,
             event_type="token_usage",
         )
 
@@ -185,16 +176,11 @@ class TestEventsAPI:
         assert total_output == 500
 
     @pytest.mark.asyncio
-    async def test_tool_summary(self, seeded_session, test_infrastructure):
+    async def test_tool_summary(self, seeded_session: SeededSessionData):
         """Test tool usage summary."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(test_infrastructure.timescaledb_url)
-        await store.initialize()
-
         # Query tool completion events
-        tool_events = await store.query(
-            seeded_session,
+        tool_events = await seeded_session.store.query(
+            seeded_session.session_id,
             event_type="tool_execution_completed",
         )
 

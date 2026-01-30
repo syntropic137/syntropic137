@@ -177,8 +177,16 @@ class TestAgentEventStoreIntegration:
         """Test query pagination with offset."""
         await event_store.initialize()
 
-        # Insert 50 events
-        events = [{"event_type": f"event_{i}", "session_id": session_id} for i in range(50)]
+        # Insert 50 events with valid event types and unique tool_use_ids
+        events = [
+            {
+                "event_type": "tool_execution_started",
+                "session_id": session_id,
+                "tool_name": f"Tool_{i}",
+                "tool_use_id": f"pagination-{i}",
+            }
+            for i in range(50)
+        ]
         await event_store.insert_batch(events)
 
         # Query first page
@@ -189,10 +197,10 @@ class TestAgentEventStoreIntegration:
         page2 = await event_store.query(session_id, limit=20, offset=20)
         assert len(page2) == 20
 
-        # Pages should be different
-        page1_types = {e["event_type"] for e in page1}
-        page2_types = {e["event_type"] for e in page2}
-        assert page1_types.isdisjoint(page2_types)
+        # Pages should have different tool_use_ids
+        page1_ids = {e["data"].get("tool_use_id") for e in page1}
+        page2_ids = {e["data"].get("tool_use_id") for e in page2}
+        assert page1_ids.isdisjoint(page2_ids)
 
 
 class TestEventBufferIntegration:
@@ -218,9 +226,10 @@ class TestEventBufferIntegration:
         for i in range(15):
             await buffer.add(
                 {
-                    "event_type": "buffer_test",
+                    "event_type": "tool_execution_started",
                     "session_id": session_id,
-                    "index": i,
+                    "tool_name": f"BufferTool_{i}",
+                    "tool_use_id": f"buffer-{i}",
                 }
             )
 
