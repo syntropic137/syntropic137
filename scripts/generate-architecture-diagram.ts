@@ -8,7 +8,6 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
 import { ArchitectureSvgGenerator } from '../lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/architecture-svg-generator';
 import { parseManifest } from '../lib/event-sourcing-platform/vsa/vsa-visualizer/src/manifest/parser';
 

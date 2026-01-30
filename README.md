@@ -26,6 +26,7 @@ The system is organized into 9 bounded contexts following Vertical Slice Archite
 | **Workspaces** | Isolated workspace management | 6 features |
 | **Observability** | Token and tool metrics | 2 features |
 | **Sessions** | Agent session tracking | 4 features |
+| **Agents** | Core agent runtime and orchestration | 2 features |
 | **GitHub** | GitHub App integration | 4 features |
 | **Artifacts** | Artifact storage and retrieval | 4 features |
 | **Costs** | Cost tracking and aggregation | 4 features |
@@ -147,10 +148,6 @@ agentic-engineering-framework/
 ├── docker/                       # Docker configurations
 └── docs/                         # Documentation
 ```
-
-## Architecture
-
-![AEF Architecture](./docs/architecture/vsa-overview.svg)
 
 ### Bounded Contexts
 
