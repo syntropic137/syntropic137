@@ -2,104 +2,104 @@
 
 Tests the /events/* endpoints with real TimescaleDB.
 
-Requires: docker compose -f docker/docker-compose.dev.yaml up timescaledb
+Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
+- test-stack (just test-stack) on port 15432
+- testcontainers fallback with dynamic ports
 
 Run with: uv run pytest -m integration packages/aef-adapters/tests/events/
 """
 
 from __future__ import annotations
 
-import os
+from dataclasses import dataclass
 from uuid import uuid4
 
 import pytest
 
-TIMESCALE_URL = os.getenv(
-    "TIMESCALE_URL",
-    "postgresql://aef:aef_dev_password@localhost:5433/aef_observability",
+# Use centralized event type constants - NO hardcoded strings!
+from aef_shared.events import (
+    SESSION_COMPLETED,
+    SESSION_STARTED,
+    TOKEN_USAGE,
+    TOOL_COMPLETED,
+    TOOL_STARTED,
+)
+
+# Use typed factories for type-safe event creation
+from aef_shared.events.factories import (
+    session_completed,
+    session_started,
+    token_usage,
+    tool_completed,
+    tool_started,
 )
 
 # Mark all tests as integration - only run when explicitly requested
 pytestmark = pytest.mark.integration
 
 
+@dataclass
+class SeededSessionData:
+    """Data returned by seeded_session fixture."""
+
+    session_id: str
+    store: object  # AgentEventStore
+
+
 @pytest.fixture
-async def seeded_session():
-    """Create a session with test events in the database."""
+async def seeded_session(test_infrastructure):
+    """Create a session with test events using shared test infrastructure.
+
+    Returns SeededSessionData with both session_id and store for tests to use.
+    """
     from aef_adapters.events import AgentEventStore
 
-    store = AgentEventStore(TIMESCALE_URL)
+    store = AgentEventStore(test_infrastructure.timescaledb_url)
     await store.initialize()
 
     session_id = f"api-test-{uuid4().hex[:8]}"
 
-    # Insert a variety of events
+    # Insert a variety of events using type-safe factories
     events = [
-        {
-            "event_type": "session_started",
-            "session_id": session_id,
-            "provider": "claude",
-        },
-        {
-            "event_type": "tool_execution_started",
-            "session_id": session_id,
-            "tool_name": "Read",
-            "tool_use_id": "tool-1",
-        },
-        {
-            "event_type": "tool_execution_completed",
-            "session_id": session_id,
-            "tool_name": "Read",
-            "tool_use_id": "tool-1",
-            "success": True,
-            "duration_ms": 150,
-        },
-        {
-            "event_type": "tool_execution_started",
-            "session_id": session_id,
-            "tool_name": "Write",
-            "tool_use_id": "tool-2",
-        },
-        {
-            "event_type": "tool_execution_completed",
-            "session_id": session_id,
-            "tool_name": "Write",
-            "tool_use_id": "tool-2",
-            "success": True,
-            "duration_ms": 200,
-        },
-        {
-            "event_type": "tool_execution_started",
-            "session_id": session_id,
-            "tool_name": "Bash",
-            "tool_use_id": "tool-3",
-        },
-        {
-            "event_type": "tool_execution_completed",
-            "session_id": session_id,
-            "tool_name": "Bash",
-            "tool_use_id": "tool-3",
-            "success": False,
-            "error": "Command failed",
-            "duration_ms": 50,
-        },
-        {
-            "event_type": "token_usage",
-            "session_id": session_id,
-            "input_tokens": 1000,
-            "output_tokens": 500,
-            "cache_creation_tokens": 100,
-            "cache_read_tokens": 200,
-        },
-        {
-            "event_type": "session_completed",
-            "session_id": session_id,
-        },
+        session_started(session_id=session_id, provider="claude"),
+        tool_started(session_id=session_id, tool_name="Read", tool_use_id="tool-1"),
+        tool_completed(
+            session_id=session_id,
+            tool_name="Read",
+            tool_use_id="tool-1",
+            success=True,
+            duration_ms=150,
+        ),
+        tool_started(session_id=session_id, tool_name="Write", tool_use_id="tool-2"),
+        tool_completed(
+            session_id=session_id,
+            tool_name="Write",
+            tool_use_id="tool-2",
+            success=True,
+            duration_ms=200,
+        ),
+        tool_started(session_id=session_id, tool_name="Bash", tool_use_id="tool-3"),
+        tool_completed(
+            session_id=session_id,
+            tool_name="Bash",
+            tool_use_id="tool-3",
+            success=False,
+            error="Command failed",
+            duration_ms=50,
+        ),
+        token_usage(
+            session_id=session_id,
+            input_tokens=1000,
+            output_tokens=500,
+            cache_creation_tokens=100,
+            cache_read_tokens=200,
+        ),
+        session_completed(session_id=session_id),
     ]
 
     await store.insert_batch(events)
 
-    yield session_id
+    yield SeededSessionData(session_id=session_id, store=store)
 
     await store.close()
 
@@ -109,48 +109,32 @@ class TestEventsAPI:
     """Test the events API endpoints."""
 
     @pytest.mark.asyncio
-    async def test_get_session_events(self, seeded_session):
+    async def test_get_session_events(self, seeded_session: SeededSessionData):
         """Test GET /events/sessions/{session_id}."""
-        from aef_adapters.events import get_event_store
-
-        # Manually test the query logic (simulating API call)
-        store = get_event_store(TIMESCALE_URL)
-        await store.initialize()
-
-        events = await store.query(seeded_session, limit=100)
+        events = await seeded_session.store.query(seeded_session.session_id, limit=100)
 
         assert len(events) == 9
         event_types = [e["event_type"] for e in events]
-        assert "session_started" in event_types
-        assert "tool_execution_completed" in event_types
-        assert "session_completed" in event_types
+        assert SESSION_STARTED in event_types
+        assert TOOL_COMPLETED in event_types
+        assert SESSION_COMPLETED in event_types
 
     @pytest.mark.asyncio
-    async def test_get_session_events_filtered(self, seeded_session):
+    async def test_get_session_events_filtered(self, seeded_session: SeededSessionData):
         """Test GET /events/sessions/{session_id}?event_type=..."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(TIMESCALE_URL)
-        await store.initialize()
-
         # Filter by event type
-        tool_events = await store.query(
-            seeded_session,
-            event_type="tool_execution_completed",
+        tool_events = await seeded_session.store.query(
+            seeded_session.session_id,
+            event_type=TOOL_COMPLETED,
         )
 
         assert len(tool_events) == 3
-        assert all(e["event_type"] == "tool_execution_completed" for e in tool_events)
+        assert all(e["event_type"] == TOOL_COMPLETED for e in tool_events)
 
     @pytest.mark.asyncio
-    async def test_timeline_events(self, seeded_session):
+    async def test_timeline_events(self, seeded_session: SeededSessionData):
         """Test timeline view of events."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(TIMESCALE_URL)
-        await store.initialize()
-
-        events = await store.query(seeded_session)
+        events = await seeded_session.store.query(seeded_session.session_id)
 
         # Filter for timeline-worthy events
         timeline = [
@@ -158,27 +142,22 @@ class TestEventsAPI:
             for e in events
             if e["event_type"]
             in (
-                "tool_execution_started",
-                "tool_execution_completed",
-                "session_started",
-                "session_completed",
+                TOOL_STARTED,
+                TOOL_COMPLETED,
+                SESSION_STARTED,
+                SESSION_COMPLETED,
             )
         ]
 
         assert len(timeline) == 8  # 6 tool events + 2 session events
 
     @pytest.mark.asyncio
-    async def test_cost_aggregation(self, seeded_session):
+    async def test_cost_aggregation(self, seeded_session: SeededSessionData):
         """Test cost aggregation from token_usage events."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(TIMESCALE_URL)
-        await store.initialize()
-
         # Query token usage events
-        token_events = await store.query(
-            seeded_session,
-            event_type="token_usage",
+        token_events = await seeded_session.store.query(
+            seeded_session.session_id,
+            event_type=TOKEN_USAGE,
         )
 
         # Aggregate
@@ -189,17 +168,12 @@ class TestEventsAPI:
         assert total_output == 500
 
     @pytest.mark.asyncio
-    async def test_tool_summary(self, seeded_session):
+    async def test_tool_summary(self, seeded_session: SeededSessionData):
         """Test tool usage summary."""
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store(TIMESCALE_URL)
-        await store.initialize()
-
         # Query tool completion events
-        tool_events = await store.query(
-            seeded_session,
-            event_type="tool_execution_completed",
+        tool_events = await seeded_session.store.query(
+            seeded_session.session_id,
+            event_type=TOOL_COMPLETED,
         )
 
         # Build summary
