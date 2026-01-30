@@ -12,6 +12,13 @@ AEF uses **two distinct event patterns** based on the nature of the data:
 1. **Domain Events** (Full Event Sourcing) - For core business logic with validation
 2. **Observability Events** (Event Log) - For high-volume telemetry and observations
 
+Both patterns use **TimescaleDB as the unified database** (ADR-030), but with different tables and access patterns:
+
+| Pattern | Table | Access Layer |
+|---------|-------|--------------|
+| Domain Events | `event_store.events` | Event Store Server (gRPC) |
+| Observability Events | `public.agent_events` | Direct inserts (hypertable) |
+
 This architectural distinction is fundamental to understanding how data flows through the system.
 
 ---
@@ -25,7 +32,7 @@ flowchart TB
         cmd1["📝 Command<br/>(Intent to change state)"]
         agg1["🏛️ Aggregate<br/>(Business logic + validation)"]
         evt1["✅ Domain Event<br/>(Validated fact)"]
-        store1[("📚 EventStore<br/>(Append-only log)")]
+        store1[("📚 TimescaleDB<br/>(via Event Store Server)")]
         
         cmd1 -->|"1. Validate against<br/>business rules"| agg1
         agg1 -->|"2. Emit after<br/>validation"| evt1
@@ -70,7 +77,8 @@ flowchart TB
 | **Nature** | Intent that needs validation | Fact that already occurred |
 | **Processing** | Command → Aggregate → Event | Observation → Direct append |
 | **Validation** | Business rules enforced | Schema validation only |
-| **Storage** | EventStore (ES) | TimescaleDB (time-series) |
+| **Storage** | TimescaleDB (`event_store.events`) | TimescaleDB (`agent_events` hypertable) |
+| **Access** | Event Store Server (gRPC) | Direct inserts |
 | **Volume** | Low-to-medium | High volume |
 | **Latency** | Can be higher (validation) | Must be low |
 | **Aggregates** | Required | Not used |
@@ -99,7 +107,7 @@ sequenceDiagram
     participant Client
     participant API
     participant Agg as WorkflowAggregate
-    participant ES as EventStore
+    participant ES as Event Store Server
     
     Client->>API: POST /workflows<br/>(CreateWorkflow)
     API->>Agg: handle_create_workflow(cmd)
@@ -180,24 +188,26 @@ sequenceDiagram
 
 ## Why Two Patterns?
 
+Both patterns use TimescaleDB, but with different access layers because the data has fundamentally different characteristics.
+
 ### The Problem with One-Size-Fits-All
 
-**If we used Full ES for everything:**
+**If we used Full ES (via Event Store Server) for everything:**
 - ❌ Loading aggregates for every tool execution would be slow
-- ❌ High-volume telemetry would overwhelm the event store
+- ❌ gRPC overhead for high-volume telemetry
 - ❌ "Tool X executed" isn't a command - it's a fact
 
-**If we used Event Log for everything:**
+**If we used Direct Inserts for everything:**
 - ❌ No way to enforce business rules
 - ❌ No way to reject invalid commands
 - ❌ Can't maintain aggregate invariants
 
 ### The Solution: Pattern Matching
 
-> **Commands represent intent that needs validation.**  
-> **Observations represent facts that already occurred.**
+> **Commands represent intent that needs validation** → Event Store Server (gRPC)  
+> **Observations represent facts that already occurred** → Direct hypertable inserts
 
-Choose the pattern that matches your use case.
+Choose the pattern that matches your use case. Both end up in TimescaleDB.
 
 ---
 
@@ -215,9 +225,9 @@ flowchart LR
         collector[Event Collector<br/>Schema Validation]
     end
     
-    subgraph storage["Primary Storage"]
-        es[(EventStore<br/>Domain Events)]
-        ts[(TimescaleDB<br/>Observability Events)]
+    subgraph storage["TimescaleDB (Unified)"]
+        es[(event_store.events<br/>Domain Events)]
+        ts[(agent_events<br/>Observability)]
     end
     
     subgraph projections["Read Side"]
@@ -226,10 +236,10 @@ flowchart LR
     end
     
     cmd --> agg
-    agg -->|Validated| es
+    agg -->|"via Event Store<br/>Server (gRPC)"| es
     
     obs --> collector
-    collector -->|Validated| ts
+    collector -->|Direct Insert| ts
     
     es --> pm
     ts --> pm
@@ -245,19 +255,22 @@ flowchart LR
 
 ## Storage Characteristics
 
-### EventStore (Domain Events)
-- **Type:** Append-only event log
-- **Optimized for:** Sequential writes, event replay
+Both event types are stored in **TimescaleDB** (ADR-030), but in separate tables with different characteristics:
+
+### Domain Events (`event_store.events`)
+- **Access:** Via Event Store Server (gRPC) for aggregate semantics
+- **Optimized for:** Sequential writes, event replay, optimistic concurrency
 - **Query patterns:** Get events by aggregate ID, stream all events
-- **Retention:** Indefinite (source of truth)
+- **Retention:** Indefinite (source of truth for event sourcing)
 - **Volume:** Lower (business events only)
 
-### TimescaleDB (Observability Events)
-- **Type:** Time-series database (PostgreSQL extension)
+### Observability Events (`agent_events` hypertable)
+- **Access:** Direct inserts for maximum throughput
 - **Optimized for:** High-volume time-series data, aggregations
 - **Query patterns:** Time-range queries, aggregations, metrics
 - **Retention:** Configurable (e.g., 90 days raw, longer for aggregates)
 - **Volume:** High (all telemetry)
+- **Features:** Auto-compression, time-based partitioning
 
 ---
 
@@ -295,8 +308,13 @@ flowchart TD
     q3 -->|Yes| obs[Observability Event<br/>Use Event Log]
     q3 -->|No| domain
     
-    domain --> es[(EventStore)]
-    obs --> ts[(TimescaleDB)]
+    domain --> es[(event_store.events<br/>via gRPC)]
+    obs --> ts[(agent_events<br/>direct insert)]
+    
+    subgraph db["TimescaleDB"]
+        es
+        ts
+    end
     
     style domain fill:#90caf9,color:#000
     style obs fill:#ffcc80,color:#000
@@ -309,5 +327,6 @@ flowchart TD
 - [ADR-018: Commands vs Observations Event Architecture](../adrs/ADR-018-commands-vs-observations-event-architecture.md)
 - [ADR-007: Event Store Integration](../adrs/ADR-007-event-store-integration.md)
 - [ADR-026: TimescaleDB Observability Storage](../adrs/ADR-026-timescaledb-observability-storage.md)
+- [ADR-030: Database Consolidation](../adrs/ADR-030-database-consolidation.md) - Unified TimescaleDB architecture
 - [Event Flow Diagrams](./event-flows/README.md)
 - [Infrastructure Data Flow](./infrastructure-data-flow.md)
