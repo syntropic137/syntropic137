@@ -2,33 +2,31 @@
 
 Run with: uv run pytest -m integration packages/aef-adapters/tests/events/test_integration.py -v
 
-Requires: docker compose -f docker/docker-compose.dev.yaml up timescaledb
+Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
+- test-stack (just test-stack) on port 15432
+- testcontainers fallback with dynamic ports
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
-TIMESCALE_URL = os.getenv(
-    "TIMESCALE_URL",
-    "postgresql://aef:aef_dev_password@localhost:5433/aef_observability",
-)
 
 # Mark all tests as integration - only run when explicitly requested
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def event_store():
-    """Create an AgentEventStore for testing."""
+async def event_store(test_infrastructure):
+    """Create an AgentEventStore using shared test infrastructure."""
     from aef_adapters.events import AgentEventStore
 
-    return AgentEventStore(TIMESCALE_URL)
+    store = AgentEventStore(test_infrastructure.timescaledb_url)
+    yield store
+    await store.close()
 
 
 @pytest.fixture
@@ -61,8 +59,6 @@ class TestAgentEventStoreIntegration:
             )
             assert result is True
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_insert_one_and_query(self, event_store, session_id):
         """Test inserting a single event and querying it back."""
@@ -87,8 +83,6 @@ class TestAgentEventStoreIntegration:
         assert events[0]["event_type"] == "tool_execution_started"
         assert events[0]["session_id"] == session_id
         assert events[0]["data"]["tool_name"] == "Read"
-
-        await event_store.close()
 
     @pytest.mark.asyncio
     async def test_insert_batch_performance(self, event_store, session_id):
@@ -123,8 +117,6 @@ class TestAgentEventStoreIntegration:
         events_back = await event_store.query(session_id, limit=2000)
         assert len(events_back) == 1000
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_query_by_event_type(self, event_store, session_id):
         """Test querying events filtered by type."""
@@ -155,8 +147,6 @@ class TestAgentEventStoreIntegration:
         assert len(tool_events) == 2
         assert all(e["event_type"] == "tool_execution_started" for e in tool_events)
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_query_by_execution(self, event_store, session_id):
         """Test querying events by execution ID."""
@@ -182,8 +172,6 @@ class TestAgentEventStoreIntegration:
         assert len(exec_events) == 3
         assert all(e["execution_id"] == exec_id for e in exec_events)
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_pagination(self, event_store, session_id):
         """Test query pagination with offset."""
@@ -205,8 +193,6 @@ class TestAgentEventStoreIntegration:
         page1_types = {e["event_type"] for e in page1}
         page2_types = {e["event_type"] for e in page2}
         assert page1_types.isdisjoint(page2_types)
-
-        await event_store.close()
 
 
 class TestEventBufferIntegration:
@@ -247,8 +233,6 @@ class TestEventBufferIntegration:
         # Verify all events stored
         events = await event_store.query(session_id)
         assert len(events) == 15
-
-        await event_store.close()
 
 
 if __name__ == "__main__":

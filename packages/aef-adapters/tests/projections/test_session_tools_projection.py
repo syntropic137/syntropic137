@@ -1,7 +1,11 @@
-"""Unit tests for SessionToolsProjection.
+"""Integration tests for SessionToolsProjection.
 
 These tests verify the projection correctly queries and transforms tool events
 from TimescaleDB. They use a real database connection to ensure query correctness.
+
+Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
+- test-stack (just test-stack) on port 15432
+- testcontainers fallback with dynamic ports
 
 POKA-YOKE: This test would have caught the event type mismatch bug where we
 queried for 'tool_execution_started' but stored 'tool_started'.
@@ -9,7 +13,6 @@ queried for 'tool_execution_started' but stored 'tool_started'.
 Now uses shared constants from aef_shared.events for type safety.
 """
 
-import os
 from uuid import uuid4
 
 import pytest
@@ -19,19 +22,13 @@ from aef_shared.events import TOOL_COMPLETED, TOOL_STARTED
 # Mark all tests as requiring database
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
-# Connection string for TimescaleDB (uses main aef database)
-TIMESCALE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://aef:aef_dev_password@localhost:5432/aef",
-)
-
 
 @pytest.fixture
-async def event_store():
-    """Create a fresh event store for testing."""
+async def event_store(test_infrastructure):
+    """Create a fresh event store using shared test infrastructure."""
     from aef_adapters.events import AgentEventStore
 
-    store = AgentEventStore(TIMESCALE_URL)
+    store = AgentEventStore(test_infrastructure.timescaledb_url)
     await store.initialize()
     yield store
     await store.close()

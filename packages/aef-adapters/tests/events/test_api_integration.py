@@ -2,33 +2,29 @@
 
 Tests the /events/* endpoints with real TimescaleDB.
 
-Requires: docker compose -f docker/docker-compose.dev.yaml up timescaledb
+Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
+- test-stack (just test-stack) on port 15432
+- testcontainers fallback with dynamic ports
 
 Run with: uv run pytest -m integration packages/aef-adapters/tests/events/
 """
 
 from __future__ import annotations
 
-import os
 from uuid import uuid4
 
 import pytest
-
-TIMESCALE_URL = os.getenv(
-    "TIMESCALE_URL",
-    "postgresql://aef:aef_dev_password@localhost:5433/aef_observability",
-)
 
 # Mark all tests as integration - only run when explicitly requested
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def seeded_session():
-    """Create a session with test events in the database."""
+async def seeded_session(test_infrastructure):
+    """Create a session with test events using shared test infrastructure."""
     from aef_adapters.events import AgentEventStore
 
-    store = AgentEventStore(TIMESCALE_URL)
+    store = AgentEventStore(test_infrastructure.timescaledb_url)
     await store.initialize()
 
     session_id = f"api-test-{uuid4().hex[:8]}"
@@ -109,12 +105,12 @@ class TestEventsAPI:
     """Test the events API endpoints."""
 
     @pytest.mark.asyncio
-    async def test_get_session_events(self, seeded_session):
+    async def test_get_session_events(self, seeded_session, test_infrastructure):
         """Test GET /events/sessions/{session_id}."""
         from aef_adapters.events import get_event_store
 
         # Manually test the query logic (simulating API call)
-        store = get_event_store(TIMESCALE_URL)
+        store = get_event_store(test_infrastructure.timescaledb_url)
         await store.initialize()
 
         events = await store.query(seeded_session, limit=100)
@@ -126,11 +122,11 @@ class TestEventsAPI:
         assert "session_completed" in event_types
 
     @pytest.mark.asyncio
-    async def test_get_session_events_filtered(self, seeded_session):
+    async def test_get_session_events_filtered(self, seeded_session, test_infrastructure):
         """Test GET /events/sessions/{session_id}?event_type=..."""
         from aef_adapters.events import get_event_store
 
-        store = get_event_store(TIMESCALE_URL)
+        store = get_event_store(test_infrastructure.timescaledb_url)
         await store.initialize()
 
         # Filter by event type
@@ -143,11 +139,11 @@ class TestEventsAPI:
         assert all(e["event_type"] == "tool_execution_completed" for e in tool_events)
 
     @pytest.mark.asyncio
-    async def test_timeline_events(self, seeded_session):
+    async def test_timeline_events(self, seeded_session, test_infrastructure):
         """Test timeline view of events."""
         from aef_adapters.events import get_event_store
 
-        store = get_event_store(TIMESCALE_URL)
+        store = get_event_store(test_infrastructure.timescaledb_url)
         await store.initialize()
 
         events = await store.query(seeded_session)
@@ -168,11 +164,11 @@ class TestEventsAPI:
         assert len(timeline) == 8  # 6 tool events + 2 session events
 
     @pytest.mark.asyncio
-    async def test_cost_aggregation(self, seeded_session):
+    async def test_cost_aggregation(self, seeded_session, test_infrastructure):
         """Test cost aggregation from token_usage events."""
         from aef_adapters.events import get_event_store
 
-        store = get_event_store(TIMESCALE_URL)
+        store = get_event_store(test_infrastructure.timescaledb_url)
         await store.initialize()
 
         # Query token usage events
@@ -189,11 +185,11 @@ class TestEventsAPI:
         assert total_output == 500
 
     @pytest.mark.asyncio
-    async def test_tool_summary(self, seeded_session):
+    async def test_tool_summary(self, seeded_session, test_infrastructure):
         """Test tool usage summary."""
         from aef_adapters.events import get_event_store
 
-        store = get_event_store(TIMESCALE_URL)
+        store = get_event_store(test_infrastructure.timescaledb_url)
         await store.initialize()
 
         # Query tool completion events
