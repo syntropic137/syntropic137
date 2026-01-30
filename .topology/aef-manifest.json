@@ -1,7 +1,7 @@
 {
-  "version": "0.6.1-beta",
-  "schema_version": "2.0.0",
-  "generated_at": "2026-01-26T21:56:03.211018+00:00",
+  "version": "0.7.0",
+  "schema_version": "2.1.0",
+  "generated_at": "2026-01-30T05:56:39.945928+00:00",
   "bounded_contexts": [
     {
       "name": "metrics",
@@ -1267,22 +1267,14 @@
         "name": "DashboardMetricsProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/metrics/slices/get_metrics/projection.py",
         "subscribed_events": [
-          "workflow_createdEvent",
-          "workflow_execution_startedEvent",
-          "phase_startedEvent",
-          "workflow_completedEvent",
-          "workflow_failedEvent",
-          "session_startedEvent",
-          "session_completedEvent",
-          "artifact_createdEvent",
-          "workflow_createdEvent",
-          "workflow_execution_startedEvent",
-          "phase_startedEvent",
-          "workflow_completedEvent",
-          "workflow_failedEvent",
-          "session_startedEvent",
-          "session_completedEvent",
-          "artifact_createdEvent"
+          "artifact_created",
+          "phase_started",
+          "session_completed",
+          "session_started",
+          "workflow_completed",
+          "workflow_created",
+          "workflow_execution_started",
+          "workflow_failed"
         ],
         "read_model": null,
         "context": "metrics",
@@ -1292,17 +1284,8 @@
         "name": "ArtifactListProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/artifacts/slices/list_artifacts/projection.py",
         "subscribed_events": [
-          "artifact_createdEvent",
-          "artifact_createdEvent",
-          "idEvent",
-          "idEvent",
-          "and_phaseEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent"
+          "and_phase",
+          "artifact_created"
         ],
         "read_model": null,
         "context": "artifacts",
@@ -1312,18 +1295,8 @@
         "name": "ExecutionCostProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/costs/slices/execution_cost/projection.py",
         "subscribed_events": [
-          "agent_observationEvent",
-          "idEvent",
-          "typeEvent",
-          "idsEvent",
-          "msEvent",
-          "session_cost_finalizedEvent",
-          "idEvent",
-          "idEvent",
-          "idsEvent",
-          "costEvent",
-          "idEvent",
-          "idEvent"
+          "agent_observation",
+          "session_cost_finalized"
         ],
         "read_model": null,
         "context": "costs",
@@ -1333,18 +1306,8 @@
         "name": "SessionCostProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/costs/slices/session_cost/projection.py",
         "subscribed_events": [
-          "agent_observationEvent",
-          "idEvent",
-          "msEvent",
-          "session_cost_finalizedEvent",
-          "idEvent",
-          "costEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent"
+          "agent_observation",
+          "session_cost_finalized"
         ],
         "read_model": null,
         "context": "costs",
@@ -1354,29 +1317,14 @@
         "name": "WorkflowExecutionDetailProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/get_execution_detail/projection.py",
         "subscribed_events": [
-          "workflow_execution_startedEvent",
-          "phase_startedEvent",
-          "phase_completedEvent",
-          "workflow_completedEvent",
-          "workflow_failedEvent",
-          "workflow_execution_startedEvent",
-          "idEvent",
-          "phase_startedEvent",
-          "idEvent",
-          "phase_completedEvent",
-          "idEvent",
-          "workflow_completedEvent",
-          "idEvent",
-          "workflow_failedEvent",
-          "idEvent",
-          "execution_pausedEvent",
-          "idEvent",
-          "execution_resumedEvent",
-          "idEvent",
-          "execution_cancelledEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent"
+          "execution_cancelled",
+          "execution_paused",
+          "execution_resumed",
+          "phase_completed",
+          "phase_started",
+          "workflow_completed",
+          "workflow_execution_started",
+          "workflow_failed"
         ],
         "read_model": "WorkflowExecutionDetail",
         "context": "workflows",
@@ -1386,10 +1334,8 @@
         "name": "WorkflowDetailProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/get_workflow_detail/projection.py",
         "subscribed_events": [
-          "workflow_createdEvent",
-          "workflow_execution_startedEvent",
-          "workflow_createdEvent",
-          "workflow_execution_startedEvent"
+          "workflow_created",
+          "workflow_execution_started"
         ],
         "read_model": "WorkflowDetail",
         "context": "workflows",
@@ -1399,26 +1345,13 @@
         "name": "WorkflowExecutionListProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/list_executions/projection.py",
         "subscribed_events": [
-          "workflow_execution_startedEvent",
-          "phase_completedEvent",
-          "workflow_completedEvent",
-          "workflow_failedEvent",
-          "workflow_execution_startedEvent",
-          "idEvent",
-          "phase_completedEvent",
-          "idEvent",
-          "workflow_completedEvent",
-          "idEvent",
-          "workflow_failedEvent",
-          "idEvent",
-          "execution_pausedEvent",
-          "idEvent",
-          "execution_resumedEvent",
-          "idEvent",
-          "execution_cancelledEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent"
+          "execution_cancelled",
+          "execution_paused",
+          "execution_resumed",
+          "phase_completed",
+          "workflow_completed",
+          "workflow_execution_started",
+          "workflow_failed"
         ],
         "read_model": null,
         "context": "workflows",
@@ -1428,10 +1361,8 @@
         "name": "WorkflowListProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/list_workflows/projection.py",
         "subscribed_events": [
-          "workflow_createdEvent",
-          "workflow_execution_startedEvent",
-          "workflow_createdEvent",
-          "workflow_execution_startedEvent"
+          "workflow_created",
+          "workflow_execution_started"
         ],
         "read_model": null,
         "context": "workflows",
@@ -1441,9 +1372,7 @@
         "name": "TokenMetricsProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/observability/slices/token_metrics/projection.py",
         "subscribed_events": [
-          "token_usageEvent",
-          "idEvent",
-          "idEvent"
+          "token_usage"
         ],
         "read_model": null,
         "context": "observability",
@@ -1453,11 +1382,9 @@
         "name": "ToolTimelineProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/observability/slices/tool_timeline/projection.py",
         "subscribed_events": [
-          "tool_execution_startedEvent",
-          "tool_execution_completedEvent",
-          "tool_blockedEvent",
-          "idEvent",
-          "idEvent"
+          "tool_blocked",
+          "tool_execution_completed",
+          "tool_execution_started"
         ],
         "read_model": null,
         "context": "observability",
@@ -1467,20 +1394,12 @@
         "name": "WorkspaceMetricsProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/slices/workspace_metrics/projection.py",
         "subscribed_events": [
-          "workspace_creatingEvent",
-          "workspace_createdEvent",
-          "command_executedEvent",
-          "workspace_destroyingEvent",
-          "workspace_destroyedEvent",
-          "workspace_errorEvent",
-          "workspace_creatingEvent",
-          "workspace_createdEvent",
-          "command_executedEvent",
-          "workspace_destroyingEvent",
-          "workspace_destroyedEvent",
-          "workspace_errorEvent",
-          "idEvent",
-          "backendEvent"
+          "command_executed",
+          "workspace_created",
+          "workspace_creating",
+          "workspace_destroyed",
+          "workspace_destroying",
+          "workspace_error"
         ],
         "read_model": null,
         "context": "workspaces",
@@ -1490,20 +1409,11 @@
         "name": "SessionListProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/slices/list_sessions/projection.py",
         "subscribed_events": [
-          "session_startedEvent",
-          "operation_recordedEvent",
-          "session_completedEvent",
-          "subagent_startedEvent",
-          "subagent_stoppedEvent",
-          "session_startedEvent",
-          "operation_recordedEvent",
-          "idEvent",
-          "session_completedEvent",
-          "idEvent",
-          "subagent_startedEvent",
-          "idEvent",
-          "subagent_stoppedEvent",
-          "idEvent"
+          "operation_recorded",
+          "session_completed",
+          "session_started",
+          "subagent_started",
+          "subagent_stopped"
         ],
         "read_model": null,
         "context": "sessions",
@@ -1512,16 +1422,7 @@
       {
         "name": "InstallationProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/slices/get_installation/projection.py",
-        "subscribed_events": [
-          "revokedEvent",
-          "suspendedEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "idEvent",
-          "projectionEvent",
-          "projectionEvent"
-        ],
+        "subscribed_events": [],
         "read_model": null,
         "context": "github",
         "line_count": 224
@@ -1533,224 +1434,108 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "workspace_creatingEvent": [
-          "WorkspaceMetricsProjection",
-          "WorkspaceMetricsProjection"
+        "and_phase": [
+          "ArtifactListProjection"
         ],
-        "token_usageEvent": [
+        "agent_observation": [
+          "ExecutionCostProjection",
+          "SessionCostProjection"
+        ],
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
+        ],
+        "token_usage": [
           "TokenMetricsProjection"
         ],
-        "backendEvent": [
-          "WorkspaceMetricsProjection"
-        ],
-        "subagent_startedEvent": [
-          "SessionListProjection",
-          "SessionListProjection"
-        ],
-        "idsEvent": [
-          "ExecutionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "execution_pausedEvent": [
+        "workflow_completed": [
+          "DashboardMetricsProjection",
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "execution_cancelledEvent": [
+        "execution_paused": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "tool_execution_completedEvent": [
+        "tool_execution_started": [
           "ToolTimelineProjection"
         ],
-        "revokedEvent": [
-          "InstallationProjection"
-        ],
-        "projectionEvent": [
-          "InstallationProjection",
-          "InstallationProjection"
-        ],
-        "workspace_errorEvent": [
-          "WorkspaceMetricsProjection",
-          "WorkspaceMetricsProjection"
-        ],
-        "workflow_createdEvent": [
+        "artifact_created": [
           "DashboardMetricsProjection",
+          "ArtifactListProjection"
+        ],
+        "workflow_created": [
           "DashboardMetricsProjection",
           "WorkflowDetailProjection",
-          "WorkflowDetailProjection",
-          "WorkflowListProjection",
           "WorkflowListProjection"
         ],
-        "tool_execution_startedEvent": [
-          "ToolTimelineProjection"
+        "workflow_execution_started": [
+          "DashboardMetricsProjection",
+          "WorkflowExecutionDetailProjection",
+          "WorkflowDetailProjection",
+          "WorkflowExecutionListProjection",
+          "WorkflowListProjection"
         ],
-        "session_cost_finalizedEvent": [
+        "execution_resumed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "session_cost_finalized": [
           "ExecutionCostProjection",
           "SessionCostProjection"
         ],
-        "typeEvent": [
-          "ExecutionCostProjection"
-        ],
-        "workflow_completedEvent": [
-          "DashboardMetricsProjection",
-          "DashboardMetricsProjection",
+        "phase_completed": [
           "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
           "WorkflowExecutionListProjection"
         ],
-        "phase_startedEvent": [
+        "tool_blocked": [
+          "ToolTimelineProjection"
+        ],
+        "workspace_created": [
+          "WorkspaceMetricsProjection"
+        ],
+        "workspace_error": [
+          "WorkspaceMetricsProjection"
+        ],
+        "execution_cancelled": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "session_completed": [
           "DashboardMetricsProjection",
+          "SessionListProjection"
+        ],
+        "session_started": [
+          "DashboardMetricsProjection",
+          "SessionListProjection"
+        ],
+        "workflow_failed": [
           "DashboardMetricsProjection",
           "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "phase_started": [
+          "DashboardMetricsProjection",
           "WorkflowExecutionDetailProjection"
         ],
-        "msEvent": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
+        "command_executed": [
+          "WorkspaceMetricsProjection"
         ],
-        "tool_blockedEvent": [
-          "ToolTimelineProjection"
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
         ],
-        "phase_completedEvent": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection"
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
         ],
-        "execution_resumedEvent": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "operation_recordedEvent": [
-          "SessionListProjection",
+        "operation_recorded": [
           "SessionListProjection"
         ],
-        "artifact_createdEvent": [
-          "DashboardMetricsProjection",
-          "DashboardMetricsProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection"
-        ],
-        "idEvent": [
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ArtifactListProjection",
-          "ExecutionCostProjection",
-          "ExecutionCostProjection",
-          "ExecutionCostProjection",
-          "ExecutionCostProjection",
-          "ExecutionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "SessionCostProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "TokenMetricsProjection",
-          "TokenMetricsProjection",
-          "ToolTimelineProjection",
-          "ToolTimelineProjection",
-          "WorkspaceMetricsProjection",
-          "SessionListProjection",
-          "SessionListProjection",
-          "SessionListProjection",
-          "SessionListProjection",
-          "InstallationProjection",
-          "InstallationProjection",
-          "InstallationProjection",
-          "InstallationProjection"
-        ],
-        "agent_observationEvent": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
-        ],
-        "command_executedEvent": [
-          "WorkspaceMetricsProjection",
+        "workspace_destroyed": [
           "WorkspaceMetricsProjection"
         ],
-        "costEvent": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
-        ],
-        "workspace_destroyedEvent": [
-          "WorkspaceMetricsProjection",
-          "WorkspaceMetricsProjection"
-        ],
-        "session_completedEvent": [
-          "DashboardMetricsProjection",
-          "DashboardMetricsProjection",
-          "SessionListProjection",
+        "subagent_started": [
           "SessionListProjection"
         ],
-        "workflow_execution_startedEvent": [
-          "DashboardMetricsProjection",
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowDetailProjection",
-          "WorkflowDetailProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowListProjection",
-          "WorkflowListProjection"
-        ],
-        "and_phaseEvent": [
-          "ArtifactListProjection"
-        ],
-        "session_startedEvent": [
-          "DashboardMetricsProjection",
-          "DashboardMetricsProjection",
-          "SessionListProjection",
-          "SessionListProjection"
-        ],
-        "workflow_failedEvent": [
-          "DashboardMetricsProjection",
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "workspace_createdEvent": [
-          "WorkspaceMetricsProjection",
-          "WorkspaceMetricsProjection"
-        ],
-        "workspace_destroyingEvent": [
-          "WorkspaceMetricsProjection",
-          "WorkspaceMetricsProjection"
-        ],
-        "suspendedEvent": [
-          "InstallationProjection"
-        ],
-        "subagent_stoppedEvent": [
-          "SessionListProjection",
+        "subagent_stopped": [
           "SessionListProjection"
         ]
       },

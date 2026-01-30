@@ -10,21 +10,21 @@ This table shows the most important event flows in AEF (events that feed the mos
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|
-| ? | idEvent | ArtifactListProjection, ArtifactListProjection, ArtifactListProjection... | 53 |
-| ? | workflow_execution_startedEvent | DashboardMetricsProjection, DashboardMetricsProjection, WorkflowExecutionDetailProjection... | 10 |
-| ? | workflow_createdEvent | DashboardMetricsProjection, DashboardMetricsProjection, WorkflowDetailProjection... | 6 |
-| ? | workflow_completedEvent | DashboardMetricsProjection, DashboardMetricsProjection, WorkflowExecutionDetailProjection... | 6 |
-| ? | workflow_failedEvent | DashboardMetricsProjection, DashboardMetricsProjection, WorkflowExecutionDetailProjection... | 6 |
-| ? | phase_startedEvent | DashboardMetricsProjection, DashboardMetricsProjection, WorkflowExecutionDetailProjection... | 4 |
-| ? | phase_completedEvent | WorkflowExecutionDetailProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection... | 4 |
-| ? | artifact_createdEvent | DashboardMetricsProjection, DashboardMetricsProjection, ArtifactListProjection... | 4 |
-| ? | session_completedEvent | DashboardMetricsProjection, DashboardMetricsProjection, SessionListProjection... | 4 |
-| ? | session_startedEvent | DashboardMetricsProjection, DashboardMetricsProjection, SessionListProjection... | 4 |
-| ? | workspace_creatingEvent | WorkspaceMetricsProjection, WorkspaceMetricsProjection | 2 |
-| ? | subagent_startedEvent | SessionListProjection, SessionListProjection | 2 |
-| ? | idsEvent | ExecutionCostProjection, ExecutionCostProjection | 2 |
-| ? | execution_pausedEvent | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | execution_cancelledEvent | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | workflow_execution_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 5 |
+| ? | workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
+| ? | workflow_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
+| ? | workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
+| ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
+| ? | execution_paused | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
+| ? | execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | session_cost_finalized | ExecutionCostProjection, SessionCostProjection | 2 |
+| ? | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | session_completed | DashboardMetricsProjection, SessionListProjection | 2 |
+| ? | session_started | DashboardMetricsProjection, SessionListProjection | 2 |
+| ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
+| ? | and_phase | ArtifactListProjection | 1 |
 
 ---
 
