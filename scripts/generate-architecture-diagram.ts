@@ -13,7 +13,7 @@ import { ArchitectureSvgGenerator } from '../lib/event-sourcing-platform/vsa/vsa
 import { parseManifest } from '../lib/event-sourcing-platform/vsa/vsa-visualizer/src/manifest/parser';
 
 const MANIFEST_PATH = '.topology/aef-manifest.json';
-const OUTPUT_PATH = 'docs/ARCHITECTURE.svg';
+const OUTPUT_PATH = 'docs/architecture/vsa-overview.svg';
 
 async function main() {
   console.log('🏗️  Generating AEF Architecture Diagram...\n');
@@ -66,7 +66,7 @@ async function main() {
   console.log(`   File: ${OUTPUT_PATH}`);
   console.log(`   Size: ${sizeKB} KB`);
   console.log(`\n💡 Embed in README.md:`);
-  console.log(`   ![AEF Architecture](./docs/ARCHITECTURE.svg)\n`);
+  console.log(`   ![AEF Architecture](./docs/architecture/vsa-overview.svg)\n`);
 }
 
 main().catch(error => {

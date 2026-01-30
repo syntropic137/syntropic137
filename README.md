@@ -15,7 +15,7 @@ The Agentic Engineering Framework provides:
 
 The system is organized into 9 bounded contexts following Vertical Slice Architecture (VSA) principles:
 
-![AEF Architecture](./docs/ARCHITECTURE.svg)
+![AEF Architecture](./docs/architecture/vsa-overview.svg)
 
 <details>
 <summary>📊 Context Overview</summary>
@@ -49,7 +49,7 @@ The system is organized into 9 bounded contexts following Vertical Slice Archite
 
 To regenerate the diagram:
 ```bash
-just diagram  # Generates docs/ARCHITECTURE.svg
+just diagram  # Generates docs/architecture/vsa-overview.svg
 ```
 
 </details>
@@ -150,7 +150,7 @@ agentic-engineering-framework/
 
 ## Architecture
 
-![AEF Architecture](./docs/ARCHITECTURE.svg)
+![AEF Architecture](./docs/architecture/vsa-overview.svg)
 
 ### Bounded Contexts
 

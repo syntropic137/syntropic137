@@ -1,6 +1,6 @@
 # VSA Validation Baseline Report
-**Date**: 2026-01-22  
-**VSA Version**: 0.6.1-beta  
+**Date**: 2026-01-22
+**VSA Version**: 0.6.1-beta
 **AEF Branch**: feat/vsa-architecture-visualization
 
 ---
@@ -11,14 +11,14 @@ Ran enhanced VSA validation (with all ADR-019 rules) against current AEF domain 
 
 ### Overall Results
 - **Total Errors**: 67
-- **Total Warnings**: 35  
+- **Total Warnings**: 35
 - **Contexts Analyzed**: 9 (agents, artifacts, costs, github, metrics, observability, sessions, workflows, workspaces)
 - **Files Analyzed**: 250 Python files across all contexts
 
 ### Validation Status
-✅ **All validation rules operational** (VSA015-VSA031)  
-✅ **Zero false positives** (VSA015 bug fixed)  
-❌ **67 legitimate structural violations** - Expected for pre-ADR-019 codebase  
+✅ **All validation rules operational** (VSA015-VSA031)
+✅ **Zero false positives** (VSA015 bug fixed)
+❌ **67 legitimate structural violations** - Expected for pre-ADR-019 codebase
 ⚠️ **35 warnings** - Mostly missing tests and naming suggestions (non-blocking)
 
 ---
@@ -197,7 +197,7 @@ Features without test files in slice directory.
 3. **observability** - 1 simple fix
 4. **costs** - 2 events to move
 
-### Phase 3: Moderate Complexity (Milestones 11-13)  
+### Phase 3: Moderate Complexity (Milestones 11-13)
 5. **artifacts** - Full refactoring pattern
 6. **sessions** - Similar to artifacts
 7. **github** - Introduces aggregate move + cross-slice fixes
@@ -211,7 +211,7 @@ Features without test files in slice directory.
 ## Key Technical Challenges
 
 ### Challenge 1: Saga/Orchestrator Pattern (workflows)
-**Issue**: `WorkflowExecutionEngine.py` imports directly from 8 other slices  
+**Issue**: `WorkflowExecutionEngine.py` imports directly from 8 other slices
 **Current Pattern**:
 ```python
 from aef_domain.contexts.workflows.slices.execute_workflow import ExecuteWorkflowCommand
@@ -233,12 +233,12 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 **Resolution**: Refactor saga to use domain commands + event subscriptions instead of direct slice imports.
 
 ### Challenge 2: Domain Importing from Slices (4 violations)
-**Root Cause**: Events and port interfaces currently in wrong locations  
+**Root Cause**: Events and port interfaces currently in wrong locations
 **Fix**: Move events to `events/`, move port interfaces to `ports/` (both at context root)
 
 ### Challenge 3: Aggregate Relocation from _shared/
-**Scope**: 6 aggregates need to move  
-**Complexity**: Each aggregate move requires updating imports across entire context  
+**Scope**: 6 aggregates need to move
+**Complexity**: Each aggregate move requires updating imports across entire context
 **Mitigation**: Use automated refactoring tools (IDE or script)
 
 ---
@@ -266,7 +266,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ## Per-Context Refactoring Checklists
 
 ### Context: metrics (0 errors) ✅
-**Status**: Already ADR-019 compliant!  
+**Status**: Already ADR-019 compliant!
 **Action**: Validate, generate docs, document as reference example
 
 **Checklist**:
@@ -279,8 +279,8 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: agents (0 errors) ✅
-**Status**: Minimal context, compliant  
-**Files**: 1 Python file  
+**Status**: Minimal context, compliant
+**Files**: 1 Python file
 **Action**: May only contain port interfaces, validate and document
 
 **Checklist**:
@@ -291,7 +291,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: observability (1 error)
-**Violations**: 1 domain purity (VSA027)  
+**Violations**: 1 domain purity (VSA027)
 **Files**: 19 Python files, 2 slices
 
 **Issues**:
@@ -309,7 +309,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: costs (2 errors)
-**Violations**: 2 events (VSA021)  
+**Violations**: 2 events (VSA021)
 **Files**: 29 Python files, 3 slices
 
 **Events to Move**:
@@ -328,7 +328,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: artifacts (7 errors)
-**Violations**: 2 commands, 2 events, 1 aggregate, 2 domain purity  
+**Violations**: 2 commands, 2 events, 1 aggregate, 2 domain purity
 **Files**: 28 Python files, 3 slices
 
 **Refactoring Steps**:
@@ -357,7 +357,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: sessions (7 errors)
-**Violations**: 3 commands, 3 events, 1 aggregate  
+**Violations**: 3 commands, 3 events, 1 aggregate
 **Files**: 30 Python files, 4 slices
 
 **Refactoring Steps**:
@@ -379,7 +379,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: github (13 errors)
-**Violations**: 1 command, 4 events, 1 aggregate (subfolder), 3 domain purity, 4 cross-slice  
+**Violations**: 1 command, 4 events, 1 aggregate (subfolder), 3 domain purity, 4 cross-slice
 **Files**: 29 Python files, 3 slices
 
 **Complex Issues**:
@@ -409,7 +409,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: workspaces (15 errors)
-**Violations**: 4 commands, 10 events, 1 aggregate  
+**Violations**: 4 commands, 10 events, 1 aggregate
 **Files**: 36 Python files, 6 slices
 
 **Highest event count** - most domain activity in this context.
@@ -432,7 +432,7 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ---
 
 ### Context: workflows (21 errors) 🔥
-**Violations**: 2 commands, 9 events, 2 aggregates, 8 cross-slice  
+**Violations**: 2 commands, 9 events, 2 aggregates, 8 cross-slice
 **Files**: 67 Python files (largest context), 6 slices
 
 **Most complex refactoring** - contains saga/orchestrator with heavy cross-context coupling.
@@ -471,20 +471,20 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 ## Findings & Recommendations
 
 ### Finding 1: VSA015 Config Issue - RESOLVED ✅
-**Was**: Slices reported "not in slices/" despite being correctly located  
-**Root Cause**: Config `root` pointed to wrong level (`src/aef_domain` instead of `src/aef_domain/contexts`)  
-**Fix**: Updated `vsa.yaml` root to `src/aef_domain/contexts` for proper context auto-discovery  
+**Was**: Slices reported "not in slices/" despite being correctly located
+**Root Cause**: Config `root` pointed to wrong level (`src/aef_domain` instead of `src/aef_domain/contexts`)
+**Fix**: Updated `vsa.yaml` root to `src/aef_domain/contexts` for proper context auto-discovery
 **Result**: Zero VSA015 violations - all slices correctly detected
 
 ### Finding 2: Colocated Pattern is Consistent
-**Observation**: ALL contexts use same pattern (commands/events colocated with slices)  
-**Implication**: Refactoring is **mechanical** and **repeatable** across contexts  
+**Observation**: ALL contexts use same pattern (commands/events colocated with slices)
+**Implication**: Refactoring is **mechanical** and **repeatable** across contexts
 **Benefit**: Lessons learned from early contexts apply to later ones
 
 ### Finding 3: Workflows is a Saga/Orchestrator
-**Pattern**: Workflows coordinates across multiple bounded contexts  
-**Challenge**: Heavy coupling via direct slice imports (8 cross-slice violations)  
-**Solution**: Classic saga pattern with event choreography or command orchestration  
+**Pattern**: Workflows coordinates across multiple bounded contexts
+**Challenge**: Heavy coupling via direct slice imports (8 cross-slice violations)
+**Solution**: Classic saga pattern with event choreography or command orchestration
 **Priority**: Refactor workflows LAST after all other contexts stabilized
 
 ### Finding 4: Domain Purity Violations are Fixable
@@ -496,8 +496,8 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 **Resolution**: Automatically fixed when we move events/ports to correct locations
 
 ### Finding 5: Most Contexts Have No Dependency Violations
-**Good News**: 5/9 contexts have **zero** dependency violations (VSA027-VSA031)  
-**Implication**: Domain layer is already relatively pure  
+**Good News**: 5/9 contexts have **zero** dependency violations (VSA027-VSA031)
+**Implication**: Domain layer is already relatively pure
 **Only Issues**: workflows (saga), github (events in wrong location)
 
 ---

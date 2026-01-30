@@ -303,12 +303,12 @@ check-fix:
     @echo "✅ Static checks fixed!"
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck test dashboard-qa test-debt vsa-validate
+qa: lint format typecheck test dashboard-qa test-debt vsa-validate docs-validate
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate
+qa-full: lint format typecheck test-cov dashboard-qa vsa-validate docs-validate
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
@@ -434,8 +434,43 @@ vsa-validate:
 diagram:
     @echo "🏗️  Generating architecture diagram..."
     @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
-    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --output docs
-    @echo "✅ Diagram generated: docs/ARCHITECTURE.svg"
+    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --output docs/architecture
+    @mv docs/architecture/ARCHITECTURE.svg docs/architecture/vsa-overview.svg
+    @echo "✅ Diagram generated: docs/architecture/vsa-overview.svg"
+
+# Generate auto-generated architecture documentation
+docs-gen:
+    @echo "🤖 Generating architecture documentation..."
+    @uv run python scripts/generate-architecture-docs.py
+
+# Regenerate ALL architecture documentation (diagram + auto-generated docs)
+docs-regen: diagram docs-gen
+    @echo ""
+    @echo "✅ All architecture documentation regenerated!"
+    @echo ""
+    @echo "📊 Auto-generated:"
+    @echo "   • docs/architecture/vsa-overview.svg"
+    @echo "   • docs/architecture/projection-subscriptions.md"
+    @echo "   • docs/architecture/event-flows/README.md"
+    @echo "   • README.md (counts updated)"
+    @echo ""
+    @echo "📝 Manual (edit directly):"
+    @echo "   • docs/architecture/event-architecture.md"
+    @echo "   • docs/architecture/realtime-communication.md"
+    @echo "   • docs/architecture/docker-workspace-lifecycle.md"
+    @echo "   • docs/architecture/infrastructure-data-flow.md"
+
+# Validate architecture documentation is up-to-date
+docs-validate:
+    @echo "🔍 Validating architecture documentation..."
+    @uv run python scripts/generate-architecture-docs.py > /tmp/docs-gen-test.txt 2>&1
+    @if git diff --quiet docs/architecture/projection-subscriptions.md docs/architecture/event-flows/README.md README.md 2>/dev/null; then \
+        echo "✅ Architecture docs are up-to-date"; \
+    else \
+        echo "⚠️  Architecture docs are out of date"; \
+        echo "   Run: just docs-regen"; \
+        exit 1; \
+    fi
 
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
