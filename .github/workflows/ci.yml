@@ -5,6 +5,9 @@ on:
     branches: [main, feat/*]
   pull_request:
   workflow_dispatch:
+  schedule:
+    # Run integration tests weekly on Sunday at 2am UTC
+    - cron: '0 2 * * 0'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -102,42 +105,45 @@ jobs:
 
   #############################################################################
   # PYTHON INTEGRATION TESTS - Requires database services
-  # TODO: Add TimescaleDB and EventStore services when ready for full integration testing
-  # For now, integration tests should be run locally with: docker compose up && pytest -m integration
+  # Runs on: weekly schedule, pushes to main, and workflow_dispatch
+  # Skipped on: feature branch PRs (for fast iteration)
   #############################################################################
 
   python-integration-tests:
     name: Python Integration Tests
     runs-on: ubuntu-latest
-    # Disabled until we add database services to CI
-    # Integration tests require TimescaleDB (port 5433) and EventStore (port 50051)
-    if: false # github.event_name == 'pull_request'
+    # Run on: weekly cron, main branch pushes, manual dispatch
+    # Skip on: feature branch PRs (unit tests are sufficient for fast iteration)
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
 
-    # TODO: Uncomment when ready to enable integration tests in CI
-    # services:
-    #   timescaledb:
-    #     image: timescale/timescaledb:latest-pg15
-    #     env:
-    #       POSTGRES_USER: aef
-    #       POSTGRES_PASSWORD: aef_dev_password
-    #       POSTGRES_DB: aef_observability
-    #     ports:
-    #       - 5433:5432
-    #     options: >-
-    #       --health-cmd pg_isready
-    #       --health-interval 10s
-    #       --health-timeout 5s
-    #       --health-retries 5
-    #
-    #   eventstore:
-    #     image: ghcr.io/agentparadise/event-store:latest
-    #     ports:
-    #       - 50051:50051
-    #     options: >-
-    #       --health-cmd "grpc_health_probe -addr=:50051"
-    #       --health-interval 10s
-    #       --health-timeout 5s
-    #       --health-retries 5
+    services:
+      timescaledb:
+        image: timescale/timescaledb:latest-pg15
+        env:
+          POSTGRES_USER: aef
+          POSTGRES_PASSWORD: aef_dev_password
+          POSTGRES_DB: aef_observability
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # TODO(#62): Enable EventStore service when container is published
+      # eventstore:
+      #   image: ghcr.io/agentparadise/event-store:latest
+      #   ports:
+      #     - 55051:50051
+      #   options: >-
+      #     --health-cmd "grpc_health_probe -addr=:50051"
+      #     --health-interval 10s
+      #     --health-timeout 5s
+      #     --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -163,6 +169,11 @@ jobs:
           TERM: dumb
           NO_COLOR: "1"
           COLUMNS: "200"
+          # Point tests to CI services (test_infrastructure fixture auto-detects)
+          TEST_TIMESCALEDB_HOST: localhost
+          TEST_TIMESCALEDB_PORT: "15432"
+          TEST_EVENTSTORE_HOST: localhost
+          TEST_EVENTSTORE_PORT: "55051"
         run: |
           uv run pytest -m integration -x -q
 

@@ -105,9 +105,22 @@ def _get_test_stack_infrastructure() -> TestInfrastructure:
 
 
 def _get_env_infrastructure() -> TestInfrastructure:
-    """Get infrastructure from environment variables."""
+    """Get infrastructure from environment variables.
+
+    Supports two styles:
+    - Full URL: TEST_DATABASE_URL=postgres://user:pass@host:port/db
+    - Components: TEST_TIMESCALEDB_HOST + TEST_TIMESCALEDB_PORT
+    """
+    # Build TimescaleDB URL from components or use full URL
+    if os.environ.get("TEST_DATABASE_URL"):
+        timescaledb_url = os.environ["TEST_DATABASE_URL"]
+    else:
+        host = os.environ.get("TEST_TIMESCALEDB_HOST", "localhost")
+        port = os.environ.get("TEST_TIMESCALEDB_PORT", "15432")
+        timescaledb_url = f"postgres://aef:aef_dev_password@{host}:{port}/aef_observability"
+
     return TestInfrastructure(
-        timescaledb_url=os.environ["TEST_DATABASE_URL"],
+        timescaledb_url=timescaledb_url,
         eventstore_host=os.environ.get("TEST_EVENTSTORE_HOST", "localhost"),
         eventstore_port=int(os.environ.get("TEST_EVENTSTORE_PORT", "55051")),
         collector_url=os.environ.get("TEST_COLLECTOR_URL", "http://localhost:18080"),
@@ -172,8 +185,8 @@ async def test_infrastructure() -> AsyncGenerator[TestInfrastructure, None]:
     """
     containers: list[Any] = []
 
-    # 1. Check for explicit env var override
-    if os.environ.get("TEST_DATABASE_URL"):
+    # 1. Check for explicit env var override (full URL or host/port components)
+    if os.environ.get("TEST_DATABASE_URL") or os.environ.get("TEST_TIMESCALEDB_HOST"):
         print("📌 Using infrastructure from environment variables")
         yield _get_env_infrastructure()
         return
