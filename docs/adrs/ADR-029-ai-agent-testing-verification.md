@@ -374,6 +374,36 @@ When writing agent tests:
 - [ ] Critical paths use 3-source verification
 - [ ] Verification level >= 3 for all tests
 - [ ] Tests can be re-run as health checks
+- [ ] **Use type-safe event factories** (no raw dicts) - see below
+
+### Type-Safe Event Creation (ADR-038)
+
+Test events MUST use typed factories to catch schema drift at mypy time:
+
+```python
+# ❌ BAD: Raw dict - typos and schema drift not caught until runtime
+event = {
+    "event_type": "tool_execution_started",
+    "sesion_id": session_id,  # Typo! Not caught
+    "tool_naem": "Read",       # Typo! Not caught
+}
+
+# ✅ GOOD: Factory - mypy catches errors immediately
+from aef_shared.events.factories import tool_started
+
+event = tool_started(
+    session_id=session_id,  # Required, type-checked
+    tool_name="Read",       # Required, type-checked
+    tool_use_id="t1",       # Required, type-checked
+)
+```
+
+Available factories in `aef_shared.events.factories`:
+- `tool_started()`, `tool_completed()`
+- `session_started()`, `session_completed()`
+- `token_usage()`
+
+See ADR-038 for full documentation.
 
 ## Related ADRs
 
@@ -381,8 +411,10 @@ When writing agent tests:
 - ADR-013: Integration Testing Strategy
 - ADR-020: Event-Projection Consistency
 - ADR-015: Agent Observability
+- ADR-032: Domain Event Type Safety
 - ADR-033: Recording-Based Integration Testing
 - ADR-034: Test Infrastructure Architecture
+- ADR-038: Test Organization Standard (type-safe factories)
 
 ## References
 

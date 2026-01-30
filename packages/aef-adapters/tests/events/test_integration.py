@@ -2,21 +2,27 @@
 
 Run with: uv run pytest -m integration packages/aef-adapters/tests/events/test_integration.py -v
 
-Requires: docker compose -f docker/docker-compose.dev.yaml up timescaledb
+Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
+- test-stack (just test-stack) on port 15432
+- testcontainers fallback with dynamic ports
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
-TIMESCALE_URL = os.getenv(
-    "TIMESCALE_URL",
-    "postgresql://aef:aef_dev_password@localhost:5433/aef_observability",
+# Use centralized event type constants - NO hardcoded strings!
+from aef_shared.events import TOOL_STARTED
+
+# Use typed factories for type-safe event creation
+from aef_shared.events.factories import (
+    session_completed,
+    session_started,
+    tool_completed,
+    tool_started,
 )
 
 # Mark all tests as integration - only run when explicitly requested
@@ -24,11 +30,13 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def event_store():
-    """Create an AgentEventStore for testing."""
+async def event_store(test_infrastructure):
+    """Create an AgentEventStore using shared test infrastructure."""
     from aef_adapters.events import AgentEventStore
 
-    return AgentEventStore(TIMESCALE_URL)
+    store = AgentEventStore(test_infrastructure.timescaledb_url)
+    yield store
+    await store.close()
 
 
 @pytest.fixture
@@ -61,22 +69,18 @@ class TestAgentEventStoreIntegration:
             )
             assert result is True
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_insert_one_and_query(self, event_store, session_id):
         """Test inserting a single event and querying it back."""
         await event_store.initialize()
 
-        # Insert a test event
-        event = {
-            "event_type": "tool_execution_started",
-            "session_id": session_id,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "tool_name": "Read",
-            "tool_use_id": "test-tool-123",
-            "input_preview": '{"path": "/test.txt"}',
-        }
+        # Insert a test event using type-safe factory
+        event = tool_started(
+            session_id=session_id,
+            tool_name="Read",
+            tool_use_id="test-tool-123",
+            input_preview='{"path": "/test.txt"}',
+        )
 
         await event_store.insert_one(event)
 
@@ -84,28 +88,24 @@ class TestAgentEventStoreIntegration:
         events = await event_store.query(session_id)
 
         assert len(events) == 1
-        assert events[0]["event_type"] == "tool_execution_started"
+        assert events[0]["event_type"] == TOOL_STARTED
         assert events[0]["session_id"] == session_id
         assert events[0]["data"]["tool_name"] == "Read"
-
-        await event_store.close()
 
     @pytest.mark.asyncio
     async def test_insert_batch_performance(self, event_store, session_id):
         """Test batch insert with many events."""
         await event_store.initialize()
 
-        # Create 1000 test events
+        # Create 1000 test events using type-safe factories
         events = [
-            {
-                "event_type": "tool_execution_completed",
-                "session_id": session_id,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "tool_name": f"Tool_{i}",
-                "tool_use_id": f"tool-{i}",
-                "success": True,
-                "duration_ms": i * 10,
-            }
+            tool_completed(
+                session_id=session_id,
+                tool_name=f"Tool_{i}",
+                tool_use_id=f"tool-{i}",
+                success=True,
+                duration_ms=i * 10,
+            )
             for i in range(1000)
         ]
 
@@ -123,39 +123,27 @@ class TestAgentEventStoreIntegration:
         events_back = await event_store.query(session_id, limit=2000)
         assert len(events_back) == 1000
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_query_by_event_type(self, event_store, session_id):
         """Test querying events filtered by type."""
         await event_store.initialize()
 
-        # Insert mixed event types
+        # Insert mixed event types using type-safe factories
         events = [
-            {"event_type": "session_started", "session_id": session_id},
-            {"event_type": "tool_execution_started", "session_id": session_id, "tool_name": "Read"},
-            {
-                "event_type": "tool_execution_completed",
-                "session_id": session_id,
-                "tool_name": "Read",
-            },
-            {
-                "event_type": "tool_execution_started",
-                "session_id": session_id,
-                "tool_name": "Write",
-            },
-            {"event_type": "session_completed", "session_id": session_id},
+            session_started(session_id=session_id),
+            tool_started(session_id=session_id, tool_name="Read", tool_use_id="r1"),
+            tool_completed(session_id=session_id, tool_name="Read", tool_use_id="r1", success=True),
+            tool_started(session_id=session_id, tool_name="Write", tool_use_id="w1"),
+            session_completed(session_id=session_id),
         ]
 
         await event_store.insert_batch(events)
 
         # Query only tool_execution_started
-        tool_events = await event_store.query(session_id, event_type="tool_execution_started")
+        tool_events = await event_store.query(session_id, event_type=TOOL_STARTED)
 
         assert len(tool_events) == 2
-        assert all(e["event_type"] == "tool_execution_started" for e in tool_events)
-
-        await event_store.close()
+        assert all(e["event_type"] == TOOL_STARTED for e in tool_events)
 
     @pytest.mark.asyncio
     async def test_query_by_execution(self, event_store, session_id):
@@ -165,13 +153,14 @@ class TestAgentEventStoreIntegration:
         exec_id = f"exec-{uuid4().hex[:8]}"
 
         events = [
-            {"event_type": "session_started", "session_id": session_id, "execution_id": exec_id},
-            {
-                "event_type": "tool_execution_started",
-                "session_id": session_id,
-                "execution_id": exec_id,
-            },
-            {"event_type": "session_completed", "session_id": session_id, "execution_id": exec_id},
+            session_started(session_id=session_id, execution_id=exec_id),
+            tool_started(
+                session_id=session_id,
+                execution_id=exec_id,
+                tool_name="TestTool",
+                tool_use_id="exec-test",
+            ),
+            session_completed(session_id=session_id, execution_id=exec_id),
         ]
 
         await event_store.insert_batch(events)
@@ -182,15 +171,20 @@ class TestAgentEventStoreIntegration:
         assert len(exec_events) == 3
         assert all(e["execution_id"] == exec_id for e in exec_events)
 
-        await event_store.close()
-
     @pytest.mark.asyncio
     async def test_pagination(self, event_store, session_id):
         """Test query pagination with offset."""
         await event_store.initialize()
 
-        # Insert 50 events
-        events = [{"event_type": f"event_{i}", "session_id": session_id} for i in range(50)]
+        # Insert 50 events with valid event types and unique tool_use_ids
+        events = [
+            tool_started(
+                session_id=session_id,
+                tool_name=f"Tool_{i}",
+                tool_use_id=f"pagination-{i}",
+            )
+            for i in range(50)
+        ]
         await event_store.insert_batch(events)
 
         # Query first page
@@ -201,12 +195,10 @@ class TestAgentEventStoreIntegration:
         page2 = await event_store.query(session_id, limit=20, offset=20)
         assert len(page2) == 20
 
-        # Pages should be different
-        page1_types = {e["event_type"] for e in page1}
-        page2_types = {e["event_type"] for e in page2}
-        assert page1_types.isdisjoint(page2_types)
-
-        await event_store.close()
+        # Pages should have different tool_use_ids
+        page1_ids = {e["data"].get("tool_use_id") for e in page1}
+        page2_ids = {e["data"].get("tool_use_id") for e in page2}
+        assert page1_ids.isdisjoint(page2_ids)
 
 
 class TestEventBufferIntegration:
@@ -231,11 +223,11 @@ class TestEventBufferIntegration:
         # Add 15 events (should trigger one flush at 10)
         for i in range(15):
             await buffer.add(
-                {
-                    "event_type": "buffer_test",
-                    "session_id": session_id,
-                    "index": i,
-                }
+                tool_started(
+                    session_id=session_id,
+                    tool_name=f"BufferTool_{i}",
+                    tool_use_id=f"buffer-{i}",
+                )
             )
 
         # Wait for flush
@@ -247,8 +239,6 @@ class TestEventBufferIntegration:
         # Verify all events stored
         events = await event_store.query(session_id)
         assert len(events) == 15
-
-        await event_store.close()
 
 
 if __name__ == "__main__":

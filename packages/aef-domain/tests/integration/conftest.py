@@ -1,7 +1,10 @@
 """Integration test fixtures for Level 4 (real database) verification.
 
 These fixtures connect to the real event store via gRPC.
-Requires: docker compose -f docker/docker-compose.dev.yaml up
+
+Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
+- test-stack (just test-stack) on port 55051
+- testcontainers fallback with dynamic ports
 
 Level 4 Verification: Real persistence roundtrip
 - Save aggregate to event store
@@ -12,7 +15,6 @@ Level 4 Verification: Real persistence roundtrip
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -29,19 +31,13 @@ if TYPE_CHECKING:
     )
 
 
-# Event store connection settings
-EVENT_STORE_HOST = os.getenv("EVENT_STORE_HOST", "localhost")
-EVENT_STORE_PORT = os.getenv("EVENT_STORE_PORT", "50051")
-EVENT_STORE_ADDRESS = f"{EVENT_STORE_HOST}:{EVENT_STORE_PORT}"
-
 # Mark all tests as integration - only run when explicitly requested
-# Requires: docker compose -f docker/docker-compose.dev.yaml up
 pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def grpc_client() -> GrpcEventStoreClient:
-    """Create gRPC client connected to real event store.
+async def grpc_client(test_infrastructure) -> GrpcEventStoreClient:
+    """Create gRPC client using shared test infrastructure.
 
     Note: scope="function" due to pytest-asyncio event loop constraints.
     Each test gets a fresh connection.
@@ -50,7 +46,8 @@ async def grpc_client() -> GrpcEventStoreClient:
     """
     from event_sourcing import GrpcEventStoreClient
 
-    client = GrpcEventStoreClient(address=EVENT_STORE_ADDRESS)
+    address = f"{test_infrastructure.eventstore_host}:{test_infrastructure.eventstore_port}"
+    client = GrpcEventStoreClient(address=address)
     await client.connect()
     yield client
     await client.disconnect()

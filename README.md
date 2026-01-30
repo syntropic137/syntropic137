@@ -11,6 +11,50 @@ The Agentic Engineering Framework provides:
 - **Metrics & Observability**: Detailed token tracking and execution metrics
 - **Vertical Slice Architecture (VSA)**: Clean bounded contexts for parallel development
 
+## 🏗️ Architecture
+
+The system is organized into 9 bounded contexts following Vertical Slice Architecture (VSA) principles:
+
+![AEF Architecture](./docs/architecture/vsa-overview.svg)
+
+<details>
+<summary>📊 Context Overview</summary>
+
+| Context | Purpose | Features |
+|---------|---------|----------|
+| **Workflows** | Workflow definitions and execution lifecycle | 8 features |
+| **Workspaces** | Isolated workspace management | 6 features |
+| **Observability** | Token and tool metrics | 2 features |
+| **Sessions** | Agent session tracking | 4 features |
+| **Agents** | Core agent runtime and orchestration | 2 features |
+| **GitHub** | GitHub App integration | 4 features |
+| **Artifacts** | Artifact storage and retrieval | 4 features |
+| **Costs** | Cost tracking and aggregation | 4 features |
+| **Metrics** | Dashboard metrics | 1 feature |
+
+**Infrastructure:**
+- TimescaleDB (projections)
+- EventStore (events)
+- Redis (cache)
+- MinIO (artifacts)
+
+**Packages:**
+- `aef-domain` - Core domain logic
+- `aef-adapters` - External integrations
+- `aef-collector` - Event collection
+- `aef-shared` - Shared utilities
+
+**Libraries:**
+- `agentic-primitives` - Composable agent building blocks
+- `event-sourcing-platform` - Event sourcing infrastructure
+
+To regenerate the diagram:
+```bash
+just diagram  # Generates docs/architecture/vsa-overview.svg
+```
+
+</details>
+
 ## Quick Start
 
 ### Prerequisites
@@ -105,8 +149,6 @@ agentic-engineering-framework/
 └── docs/                         # Documentation
 ```
 
-## Architecture
-
 ### Bounded Contexts
 
 - **Workflows**: Workflow definitions, phases, and execution lifecycle
@@ -120,9 +162,12 @@ agentic-engineering-framework/
 | Pattern | Implementation |
 |---------|---------------|
 | Event Sourcing | Commands → Aggregates → Events |
+| CQRS | Commands (12) → Events (31) → Projections (13) |
 | Event Processing | Processor/Todo pattern (no complex sagas) |
 | Architecture | Vertical Slice Architecture (VSA) |
 | Logging | Centralized DI logger, structured, detailed |
+
+> **Note:** To regenerate the architecture diagram: `just diagram`
 
 ## Development Commands
 

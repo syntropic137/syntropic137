@@ -91,18 +91,26 @@ Following the es-p pattern, test fixtures:
 3. Fall back to testcontainers for CI
 
 ```python
+from aef_shared.testing import (
+    ENV_TEST_DATABASE_URL,
+    ENV_TEST_TIMESCALEDB_HOST,
+    TEST_STACK_PORTS,
+)
+
 async def get_test_infrastructure():
-    # 1. Explicit env var
-    if os.environ.get("TEST_DATABASE_URL"):
+    # 1. Explicit env var (use constants, not magic strings!)
+    if os.environ.get(ENV_TEST_DATABASE_URL) or os.environ.get(ENV_TEST_TIMESCALEDB_HOST):
         return from_env_vars()
 
-    # 2. Test-stack running?
-    if _check_test_stack_running():
+    # 2. Test-stack running? (use centralized port constants)
+    if _check_port_open("localhost", TEST_STACK_PORTS["timescaledb"]):
         return _get_test_stack_infrastructure()
 
     # 3. Fallback to testcontainers
     return await _get_testcontainer_infrastructure()
 ```
+
+**Important:** Always use constants from `aef_shared.testing` - never hardcode port numbers or environment variable names. See ADR-038 for full DRY patterns.
 
 ### 6. Justfile Commands
 
