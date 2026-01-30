@@ -1,7 +1,7 @@
 {
   "version": "0.7.0",
   "schema_version": "2.1.0",
-  "generated_at": "2026-01-30T06:12:15.178058+00:00",
+  "generated_at": "2026-01-30T06:29:07.468705+00:00",
   "bounded_contexts": [
     {
       "name": "metrics",
@@ -1438,52 +1438,47 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "phase_started": [
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection"
-        ],
-        "workspace_destroyed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workspace_creating": [
-          "WorkspaceMetricsProjection"
-        ],
-        "session_started": [
-          "DashboardMetricsProjection",
-          "SessionListProjection"
+        "execution_cancelled": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
         ],
         "workflow_failed": [
           "DashboardMetricsProjection",
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "subagent_started": [
-          "SessionListProjection"
-        ],
-        "phase_completed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "installation_revoked": [
-          "InstallationProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
-        ],
-        "execution_resumed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
+        "tool_execution_started": [
+          "ToolTimelineProjection"
         ],
         "installation_suspended": [
           "InstallationProjection"
         ],
-        "workspace_error": [
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
+        ],
+        "agent_observation": [
+          "ExecutionCostProjection",
+          "SessionCostProjection"
+        ],
+        "artifact_created": [
+          "DashboardMetricsProjection",
+          "ArtifactListProjection"
+        ],
+        "app_installed": [
+          "InstallationProjection"
+        ],
+        "installation_revoked": [
+          "InstallationProjection"
+        ],
+        "session_started": [
+          "DashboardMetricsProjection",
+          "SessionListProjection"
+        ],
+        "command_executed": [
           "WorkspaceMetricsProjection"
         ],
-        "workflow_completed": [
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
+        "workspace_destroyed": [
+          "WorkspaceMetricsProjection"
         ],
         "workflow_execution_started": [
           "DashboardMetricsProjection",
@@ -1492,64 +1487,69 @@
           "WorkflowExecutionListProjection",
           "WorkflowListProjection"
         ],
-        "agent_observation": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
-        ],
-        "command_executed": [
+        "workspace_created": [
           "WorkspaceMetricsProjection"
-        ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "token_refreshed": [
-          "InstallationProjection"
-        ],
-        "execution_cancelled": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "token_usage": [
-          "TokenMetricsProjection"
-        ],
-        "tool_blocked": [
-          "ToolTimelineProjection"
-        ],
-        "session_cost_finalized": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
-        ],
-        "app_installed": [
-          "InstallationProjection"
         ],
         "workflow_created": [
           "DashboardMetricsProjection",
           "WorkflowDetailProjection",
           "WorkflowListProjection"
         ],
-        "artifact_created": [
+        "phase_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "phase_started": [
           "DashboardMetricsProjection",
-          "ArtifactListProjection"
+          "WorkflowExecutionDetailProjection"
+        ],
+        "execution_resumed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
+        ],
+        "session_cost_finalized": [
+          "ExecutionCostProjection",
+          "SessionCostProjection"
+        ],
+        "tool_blocked": [
+          "ToolTimelineProjection"
+        ],
+        "subagent_stopped": [
+          "SessionListProjection"
+        ],
+        "token_refreshed": [
+          "InstallationProjection"
+        ],
+        "workspace_error": [
+          "WorkspaceMetricsProjection"
+        ],
+        "subagent_started": [
+          "SessionListProjection"
+        ],
+        "execution_paused": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "token_usage": [
+          "TokenMetricsProjection"
         ],
         "operation_recorded": [
           "SessionListProjection"
-        ],
-        "workspace_created": [
-          "WorkspaceMetricsProjection"
         ],
         "session_completed": [
           "DashboardMetricsProjection",
           "SessionListProjection"
         ],
-        "tool_execution_started": [
-          "ToolTimelineProjection"
-        ],
-        "tool_execution_completed": [
-          "ToolTimelineProjection"
-        ],
-        "execution_paused": [
+        "workflow_completed": [
+          "DashboardMetricsProjection",
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
+        ],
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
         ]
       },
       "projection_to_read_model": {

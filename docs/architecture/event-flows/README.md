@@ -12,19 +12,19 @@ This table shows the most important event flows in AEF (events that feed the mos
 |---------|-------|-------------|-------|
 | ? | workflow_execution_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 5 |
 | ? | workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| ? | workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
 | ? | workflow_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
-| ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
+| ? | workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
+| ? | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
+| ? | artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
 | ? | session_started | DashboardMetricsProjection, SessionListProjection | 2 |
 | ? | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
 | ? | execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
-| ? | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 | ? | session_cost_finalized | ExecutionCostProjection, SessionCostProjection | 2 |
-| ? | artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
-| ? | session_completed | DashboardMetricsProjection, SessionListProjection | 2 |
 | ? | execution_paused | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | workspace_destroyed | WorkspaceMetricsProjection | 1 |
+| ? | session_completed | DashboardMetricsProjection, SessionListProjection | 2 |
+| ? | tool_execution_started | ToolTimelineProjection | 1 |
 
 ---
 

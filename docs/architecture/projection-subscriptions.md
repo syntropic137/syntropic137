@@ -17,14 +17,14 @@ graph LR
     subgraph events["Key Events"]
         e1[workflow_execution_started]
         e2[workflow_failed]
-        e3[workflow_completed]
-        e4[workflow_created]
-        e5[phase_started]
-        e6[session_started]
-        e7[phase_completed]
-        e8[execution_resumed]
-        e9[agent_observation]
-        e10[execution_cancelled]
+        e3[workflow_created]
+        e4[workflow_completed]
+        e5[execution_cancelled]
+        e6[agent_observation]
+        e7[artifact_created]
+        e8[session_started]
+        e9[phase_completed]
+        e10[phase_started]
     end
 
     subgraph projections["Projections"]
@@ -43,32 +43,32 @@ graph LR
         p13[WorkspaceMetricsProjection]
     end
 
-    e5 --> p2
     e5 --> p10
-    e6 --> p2
-    e6 --> p6
+    e5 --> p11
     e2 --> p2
     e2 --> p10
     e2 --> p11
-    e7 --> p10
-    e7 --> p11
-    e8 --> p10
-    e8 --> p11
-    e3 --> p2
-    e3 --> p10
-    e3 --> p11
+    e6 --> p3
+    e6 --> p5
+    e7 --> p2
+    e7 --> p1
+    e8 --> p2
+    e8 --> p6
     e1 --> p2
     e1 --> p10
     e1 --> p9
     e1 --> p11
     e1 --> p12
-    e9 --> p3
-    e9 --> p5
+    e3 --> p2
+    e3 --> p9
+    e3 --> p12
+    e9 --> p10
+    e9 --> p11
+    e10 --> p2
     e10 --> p10
-    e10 --> p11
     e4 --> p2
-    e4 --> p9
-    e4 --> p12
+    e4 --> p10
+    e4 --> p11
 ```
 
 ---
@@ -87,14 +87,14 @@ graph LR
 |-------|-------------|-------|
 | workflow_execution_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 5 |
 | workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
 | workflow_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
-| phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
+| workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
+| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
+| artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
 | session_started | DashboardMetricsProjection, SessionListProjection | 2 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
 
 ---
 
