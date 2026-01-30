@@ -1,7 +1,7 @@
 # Event Architecture: Domain vs Observability Events
 
-**Last Updated:** 2026-01-26  
-**Reference:** [ADR-018: Commands vs Observations](../adrs/ADR-018-commands-vs-observations-event-architecture.md)
+**Last Updated:** 2026-01-29  
+**Reference:** [ADR-018: Commands vs Observations](../adrs/ADR-018-commands-vs-observations-event-architecture.md), [ADR-030: Database Consolidation](../adrs/ADR-030-database-consolidation.md)
 
 ---
 

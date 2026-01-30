@@ -25,6 +25,15 @@ from aef_shared.events import (
     TOOL_STARTED,
 )
 
+# Use typed factories for type-safe event creation
+from aef_shared.events.factories import (
+    session_completed,
+    session_started,
+    token_usage,
+    tool_completed,
+    tool_started,
+)
+
 # Mark all tests as integration - only run when explicitly requested
 pytestmark = pytest.mark.integration
 
@@ -50,68 +59,42 @@ async def seeded_session(test_infrastructure):
 
     session_id = f"api-test-{uuid4().hex[:8]}"
 
-    # Insert a variety of events
+    # Insert a variety of events using type-safe factories
     events = [
-        {
-            "event_type": SESSION_STARTED,
-            "session_id": session_id,
-            "provider": "claude",
-        },
-        {
-            "event_type": TOOL_STARTED,
-            "session_id": session_id,
-            "tool_name": "Read",
-            "tool_use_id": "tool-1",
-        },
-        {
-            "event_type": TOOL_COMPLETED,
-            "session_id": session_id,
-            "tool_name": "Read",
-            "tool_use_id": "tool-1",
-            "success": True,
-            "duration_ms": 150,
-        },
-        {
-            "event_type": TOOL_STARTED,
-            "session_id": session_id,
-            "tool_name": "Write",
-            "tool_use_id": "tool-2",
-        },
-        {
-            "event_type": TOOL_COMPLETED,
-            "session_id": session_id,
-            "tool_name": "Write",
-            "tool_use_id": "tool-2",
-            "success": True,
-            "duration_ms": 200,
-        },
-        {
-            "event_type": TOOL_STARTED,
-            "session_id": session_id,
-            "tool_name": "Bash",
-            "tool_use_id": "tool-3",
-        },
-        {
-            "event_type": TOOL_COMPLETED,
-            "session_id": session_id,
-            "tool_name": "Bash",
-            "tool_use_id": "tool-3",
-            "success": False,
-            "error": "Command failed",
-            "duration_ms": 50,
-        },
-        {
-            "event_type": TOKEN_USAGE,
-            "session_id": session_id,
-            "input_tokens": 1000,
-            "output_tokens": 500,
-            "cache_creation_tokens": 100,
-            "cache_read_tokens": 200,
-        },
-        {
-            "event_type": SESSION_COMPLETED,
-            "session_id": session_id,
-        },
+        session_started(session_id=session_id, provider="claude"),
+        tool_started(session_id=session_id, tool_name="Read", tool_use_id="tool-1"),
+        tool_completed(
+            session_id=session_id,
+            tool_name="Read",
+            tool_use_id="tool-1",
+            success=True,
+            duration_ms=150,
+        ),
+        tool_started(session_id=session_id, tool_name="Write", tool_use_id="tool-2"),
+        tool_completed(
+            session_id=session_id,
+            tool_name="Write",
+            tool_use_id="tool-2",
+            success=True,
+            duration_ms=200,
+        ),
+        tool_started(session_id=session_id, tool_name="Bash", tool_use_id="tool-3"),
+        tool_completed(
+            session_id=session_id,
+            tool_name="Bash",
+            tool_use_id="tool-3",
+            success=False,
+            error="Command failed",
+            duration_ms=50,
+        ),
+        token_usage(
+            session_id=session_id,
+            input_tokens=1000,
+            output_tokens=500,
+            cache_creation_tokens=100,
+            cache_read_tokens=200,
+        ),
+        session_completed(session_id=session_id),
     ]
 
     await store.insert_batch(events)

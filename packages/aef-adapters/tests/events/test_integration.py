@@ -10,13 +10,20 @@ Uses shared test_infrastructure fixture (ADR-034) which auto-detects:
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 # Use centralized event type constants - NO hardcoded strings!
-from aef_shared.events import SESSION_STARTED, TOOL_STARTED
+from aef_shared.events import TOOL_STARTED
+
+# Use typed factories for type-safe event creation
+from aef_shared.events.factories import (
+    session_completed,
+    session_started,
+    tool_completed,
+    tool_started,
+)
 
 # Mark all tests as integration - only run when explicitly requested
 pytestmark = pytest.mark.integration
@@ -67,15 +74,13 @@ class TestAgentEventStoreIntegration:
         """Test inserting a single event and querying it back."""
         await event_store.initialize()
 
-        # Insert a test event
-        event = {
-            "event_type": TOOL_STARTED,
-            "session_id": session_id,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "tool_name": "Read",
-            "tool_use_id": "test-tool-123",
-            "input_preview": '{"path": "/test.txt"}',
-        }
+        # Insert a test event using type-safe factory
+        event = tool_started(
+            session_id=session_id,
+            tool_name="Read",
+            tool_use_id="test-tool-123",
+            input_preview='{"path": "/test.txt"}',
+        )
 
         await event_store.insert_one(event)
 
@@ -92,17 +97,15 @@ class TestAgentEventStoreIntegration:
         """Test batch insert with many events."""
         await event_store.initialize()
 
-        # Create 1000 test events
+        # Create 1000 test events using type-safe factories
         events = [
-            {
-                "event_type": "tool_execution_completed",
-                "session_id": session_id,
-                "timestamp": datetime.now(UTC).isoformat(),
-                "tool_name": f"Tool_{i}",
-                "tool_use_id": f"tool-{i}",
-                "success": True,
-                "duration_ms": i * 10,
-            }
+            tool_completed(
+                session_id=session_id,
+                tool_name=f"Tool_{i}",
+                tool_use_id=f"tool-{i}",
+                success=True,
+                duration_ms=i * 10,
+            )
             for i in range(1000)
         ]
 
@@ -125,21 +128,13 @@ class TestAgentEventStoreIntegration:
         """Test querying events filtered by type."""
         await event_store.initialize()
 
-        # Insert mixed event types
+        # Insert mixed event types using type-safe factories
         events = [
-            {"event_type": SESSION_STARTED, "session_id": session_id},
-            {"event_type": TOOL_STARTED, "session_id": session_id, "tool_name": "Read"},
-            {
-                "event_type": "tool_execution_completed",
-                "session_id": session_id,
-                "tool_name": "Read",
-            },
-            {
-                "event_type": TOOL_STARTED,
-                "session_id": session_id,
-                "tool_name": "Write",
-            },
-            {"event_type": "session_completed", "session_id": session_id},
+            session_started(session_id=session_id),
+            tool_started(session_id=session_id, tool_name="Read", tool_use_id="r1"),
+            tool_completed(session_id=session_id, tool_name="Read", tool_use_id="r1", success=True),
+            tool_started(session_id=session_id, tool_name="Write", tool_use_id="w1"),
+            session_completed(session_id=session_id),
         ]
 
         await event_store.insert_batch(events)
@@ -158,13 +153,14 @@ class TestAgentEventStoreIntegration:
         exec_id = f"exec-{uuid4().hex[:8]}"
 
         events = [
-            {"event_type": SESSION_STARTED, "session_id": session_id, "execution_id": exec_id},
-            {
-                "event_type": TOOL_STARTED,
-                "session_id": session_id,
-                "execution_id": exec_id,
-            },
-            {"event_type": "session_completed", "session_id": session_id, "execution_id": exec_id},
+            session_started(session_id=session_id, execution_id=exec_id),
+            tool_started(
+                session_id=session_id,
+                execution_id=exec_id,
+                tool_name="TestTool",
+                tool_use_id="exec-test",
+            ),
+            session_completed(session_id=session_id, execution_id=exec_id),
         ]
 
         await event_store.insert_batch(events)
@@ -182,12 +178,11 @@ class TestAgentEventStoreIntegration:
 
         # Insert 50 events with valid event types and unique tool_use_ids
         events = [
-            {
-                "event_type": TOOL_STARTED,
-                "session_id": session_id,
-                "tool_name": f"Tool_{i}",
-                "tool_use_id": f"pagination-{i}",
-            }
+            tool_started(
+                session_id=session_id,
+                tool_name=f"Tool_{i}",
+                tool_use_id=f"pagination-{i}",
+            )
             for i in range(50)
         ]
         await event_store.insert_batch(events)
@@ -228,12 +223,11 @@ class TestEventBufferIntegration:
         # Add 15 events (should trigger one flush at 10)
         for i in range(15):
             await buffer.add(
-                {
-                    "event_type": TOOL_STARTED,
-                    "session_id": session_id,
-                    "tool_name": f"BufferTool_{i}",
-                    "tool_use_id": f"buffer-{i}",
-                }
+                tool_started(
+                    session_id=session_id,
+                    tool_name=f"BufferTool_{i}",
+                    tool_use_id=f"buffer-{i}",
+                )
             )
 
         # Wait for flush
