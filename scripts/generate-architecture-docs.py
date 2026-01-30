@@ -17,7 +17,6 @@ Usage:
 import json
 import re
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -85,7 +84,6 @@ def generate_projection_subscriptions(manifest: dict[str, Any]) -> str:
 
 🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
 
-**Last Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 **Data Source:** `.topology/aef-manifest.json`
 
 ---
@@ -180,11 +178,9 @@ def generate_event_flow_summary(manifest: dict[str, Any]) -> str:
         )
 
     # Generate markdown
-    content = f"""# Event Flow Summary
+    content = """# Event Flow Summary
 
 🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
-
-**Last Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 ---
 

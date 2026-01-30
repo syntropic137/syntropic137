@@ -2,8 +2,6 @@
 
 🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
 
-**Last Generated:** 2026-01-29 16:11:18
-
 ---
 
 ## Top Event Flows
