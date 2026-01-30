@@ -82,9 +82,7 @@ sequenceDiagram
         
     else Validation Fails
         WFAgg-->>API: BusinessRuleViolation
-        deactivate WFAgg
         API-->>User: 400 Bad Request<br/>{error: "reason"}
-        deactivate API
     end
 ```
 
