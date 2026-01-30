@@ -10,73 +10,74 @@
 
 This diagram shows which events feed which projections in the AEF system.
 
-**Total Relationships:** 28 events → 12 projections
+**Total Relationships:** 31 events → 13 projections
 
 ```mermaid
 graph LR
     subgraph events["Key Events"]
         e1[workflow_execution_started]
-        e2[workflow_completed]
-        e3[workflow_created]
-        e4[workflow_failed]
-        e5[agent_observation]
-        e6[execution_paused]
-        e7[artifact_created]
+        e2[workflow_failed]
+        e3[workflow_completed]
+        e4[workflow_created]
+        e5[phase_started]
+        e6[session_started]
+        e7[phase_completed]
         e8[execution_resumed]
-        e9[session_cost_finalized]
-        e10[phase_completed]
+        e9[agent_observation]
+        e10[execution_cancelled]
     end
 
     subgraph projections["Projections"]
         p1[ArtifactListProjection]
         p2[DashboardMetricsProjection]
         p3[ExecutionCostProjection]
-        p4[SessionCostProjection]
-        p5[SessionListProjection]
-        p6[TokenMetricsProjection]
-        p7[ToolTimelineProjection]
-        p8[WorkflowDetailProjection]
-        p9[WorkflowExecutionDetailProjection]
-        p10[WorkflowExecutionListProjection]
-        p11[WorkflowListProjection]
-        p12[WorkspaceMetricsProjection]
+        p4[InstallationProjection]
+        p5[SessionCostProjection]
+        p6[SessionListProjection]
+        p7[TokenMetricsProjection]
+        p8[ToolTimelineProjection]
+        p9[WorkflowDetailProjection]
+        p10[WorkflowExecutionDetailProjection]
+        p11[WorkflowExecutionListProjection]
+        p12[WorkflowListProjection]
+        p13[WorkspaceMetricsProjection]
     end
 
-    e5 --> p3
-    e5 --> p4
+    e5 --> p2
+    e5 --> p10
+    e6 --> p2
+    e6 --> p6
     e2 --> p2
-    e2 --> p9
     e2 --> p10
-    e6 --> p9
-    e6 --> p10
-    e7 --> p2
-    e7 --> p1
+    e2 --> p11
+    e7 --> p10
+    e7 --> p11
+    e8 --> p10
+    e8 --> p11
     e3 --> p2
-    e3 --> p8
+    e3 --> p10
     e3 --> p11
     e1 --> p2
-    e1 --> p9
-    e1 --> p8
     e1 --> p10
+    e1 --> p9
     e1 --> p11
-    e8 --> p9
-    e8 --> p10
+    e1 --> p12
     e9 --> p3
-    e9 --> p4
-    e10 --> p9
+    e9 --> p5
     e10 --> p10
+    e10 --> p11
     e4 --> p2
     e4 --> p9
-    e4 --> p10
+    e4 --> p12
 ```
 
 ---
 
 ## Statistics
 
-- **Events with projections:** 28
-- **Unique projections:** 12
-- **Total event-to-projection mappings:** 48
+- **Events with projections:** 31
+- **Unique projections:** 13
+- **Total event-to-projection mappings:** 51
 
 ---
 
@@ -85,15 +86,15 @@ graph LR
 | Event | Projections | Count |
 |-------|-------------|-------|
 | workflow_execution_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 5 |
+| workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
 | workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
 | workflow_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
-| workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
-| execution_paused | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
-| execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| session_cost_finalized | ExecutionCostProjection, SessionCostProjection | 2 |
+| phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
+| session_started | DashboardMetricsProjection, SessionListProjection | 2 |
 | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
+| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 
 ---
 
