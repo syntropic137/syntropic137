@@ -17,6 +17,23 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
+# Use centralized constants - NO hardcoded strings!
+from aef_shared.testing import (
+    DEFAULT_DB_NAME,
+    DEFAULT_DB_PASSWORD,
+    DEFAULT_DB_USER,
+    DEFAULT_HOST,
+    ENV_TEST_COLLECTOR_URL,
+    ENV_TEST_DATABASE_URL,
+    ENV_TEST_EVENTSTORE_HOST,
+    ENV_TEST_EVENTSTORE_PORT,
+    ENV_TEST_MINIO_URL,
+    ENV_TEST_REDIS_URL,
+    ENV_TEST_TIMESCALEDB_HOST,
+    ENV_TEST_TIMESCALEDB_PORT,
+    TEST_STACK_PORTS,
+)
+
 # Set AGENTIC_RECORDINGS_DIR for recording-based tests
 _AEF_ROOT = Path(__file__).parent.parent.parent  # aef_tests/fixtures/infrastructure.py -> AEF root
 _RECORDINGS_DIR = (
@@ -29,26 +46,6 @@ if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
     import asyncpg
-
-# Test stack ports (offset by +10000 from dev)
-TEST_STACK_PORTS = {
-    "timescaledb": 15432,
-    "eventstore": 55051,
-    "collector": 18080,
-    "minio_api": 19000,
-    "minio_console": 19001,
-    "redis": 16379,
-}
-
-# Dev stack ports (for reference)
-DEV_STACK_PORTS = {
-    "timescaledb": 5432,
-    "eventstore": 50051,
-    "collector": 8080,
-    "minio_api": 9000,
-    "minio_console": 9001,
-    "redis": 6379,
-}
 
 
 @dataclass
@@ -94,12 +91,15 @@ def _check_test_stack_running() -> bool:
 def _get_test_stack_infrastructure() -> TestInfrastructure:
     """Get infrastructure config for running test-stack."""
     return TestInfrastructure(
-        timescaledb_url=f"postgres://aef:aef_dev_password@localhost:{TEST_STACK_PORTS['timescaledb']}/aef",
-        eventstore_host="localhost",
+        timescaledb_url=(
+            f"postgres://{DEFAULT_DB_USER}:{DEFAULT_DB_PASSWORD}"
+            f"@{DEFAULT_HOST}:{TEST_STACK_PORTS['timescaledb']}/{DEFAULT_DB_NAME}"
+        ),
+        eventstore_host=DEFAULT_HOST,
         eventstore_port=TEST_STACK_PORTS["eventstore"],
-        collector_url=f"http://localhost:{TEST_STACK_PORTS['collector']}",
-        minio_url=f"http://localhost:{TEST_STACK_PORTS['minio_api']}",
-        redis_url=f"redis://localhost:{TEST_STACK_PORTS['redis']}",
+        collector_url=f"http://{DEFAULT_HOST}:{TEST_STACK_PORTS['collector']}",
+        minio_url=f"http://{DEFAULT_HOST}:{TEST_STACK_PORTS['minio_api']}",
+        redis_url=f"redis://{DEFAULT_HOST}:{TEST_STACK_PORTS['redis']}",
         source="test-stack",
     )
 
@@ -112,20 +112,30 @@ def _get_env_infrastructure() -> TestInfrastructure:
     - Components: TEST_TIMESCALEDB_HOST + TEST_TIMESCALEDB_PORT
     """
     # Build TimescaleDB URL from components or use full URL
-    if os.environ.get("TEST_DATABASE_URL"):
-        timescaledb_url = os.environ["TEST_DATABASE_URL"]
+    if os.environ.get(ENV_TEST_DATABASE_URL):
+        timescaledb_url = os.environ[ENV_TEST_DATABASE_URL]
     else:
-        host = os.environ.get("TEST_TIMESCALEDB_HOST", "localhost")
-        port = os.environ.get("TEST_TIMESCALEDB_PORT", "15432")
-        timescaledb_url = f"postgres://aef:aef_dev_password@{host}:{port}/aef_observability"
+        host = os.environ.get(ENV_TEST_TIMESCALEDB_HOST, DEFAULT_HOST)
+        port = os.environ.get(ENV_TEST_TIMESCALEDB_PORT, str(TEST_STACK_PORTS["timescaledb"]))
+        timescaledb_url = (
+            f"postgres://{DEFAULT_DB_USER}:{DEFAULT_DB_PASSWORD}@{host}:{port}/{DEFAULT_DB_NAME}"
+        )
 
     return TestInfrastructure(
         timescaledb_url=timescaledb_url,
-        eventstore_host=os.environ.get("TEST_EVENTSTORE_HOST", "localhost"),
-        eventstore_port=int(os.environ.get("TEST_EVENTSTORE_PORT", "55051")),
-        collector_url=os.environ.get("TEST_COLLECTOR_URL", "http://localhost:18080"),
-        minio_url=os.environ.get("TEST_MINIO_URL", "http://localhost:19000"),
-        redis_url=os.environ.get("TEST_REDIS_URL", "redis://localhost:16379"),
+        eventstore_host=os.environ.get(ENV_TEST_EVENTSTORE_HOST, DEFAULT_HOST),
+        eventstore_port=int(
+            os.environ.get(ENV_TEST_EVENTSTORE_PORT, str(TEST_STACK_PORTS["eventstore"]))
+        ),
+        collector_url=os.environ.get(
+            ENV_TEST_COLLECTOR_URL, f"http://{DEFAULT_HOST}:{TEST_STACK_PORTS['collector']}"
+        ),
+        minio_url=os.environ.get(
+            ENV_TEST_MINIO_URL, f"http://{DEFAULT_HOST}:{TEST_STACK_PORTS['minio_api']}"
+        ),
+        redis_url=os.environ.get(
+            ENV_TEST_REDIS_URL, f"redis://{DEFAULT_HOST}:{TEST_STACK_PORTS['redis']}"
+        ),
         source="env",
     )
 
@@ -186,7 +196,7 @@ async def test_infrastructure() -> AsyncGenerator[TestInfrastructure, None]:
     containers: list[Any] = []
 
     # 1. Check for explicit env var override (full URL or host/port components)
-    if os.environ.get("TEST_DATABASE_URL") or os.environ.get("TEST_TIMESCALEDB_HOST"):
+    if os.environ.get(ENV_TEST_DATABASE_URL) or os.environ.get(ENV_TEST_TIMESCALEDB_HOST):
         print("📌 Using infrastructure from environment variables")
         yield _get_env_infrastructure()
         return

@@ -16,6 +16,15 @@ from uuid import uuid4
 
 import pytest
 
+# Use centralized event type constants - NO hardcoded strings!
+from aef_shared.events import (
+    SESSION_COMPLETED,
+    SESSION_STARTED,
+    TOKEN_USAGE,
+    TOOL_COMPLETED,
+    TOOL_STARTED,
+)
+
 # Mark all tests as integration - only run when explicitly requested
 pytestmark = pytest.mark.integration
 
@@ -44,18 +53,18 @@ async def seeded_session(test_infrastructure):
     # Insert a variety of events
     events = [
         {
-            "event_type": "session_started",
+            "event_type": SESSION_STARTED,
             "session_id": session_id,
             "provider": "claude",
         },
         {
-            "event_type": "tool_execution_started",
+            "event_type": TOOL_STARTED,
             "session_id": session_id,
             "tool_name": "Read",
             "tool_use_id": "tool-1",
         },
         {
-            "event_type": "tool_execution_completed",
+            "event_type": TOOL_COMPLETED,
             "session_id": session_id,
             "tool_name": "Read",
             "tool_use_id": "tool-1",
@@ -63,13 +72,13 @@ async def seeded_session(test_infrastructure):
             "duration_ms": 150,
         },
         {
-            "event_type": "tool_execution_started",
+            "event_type": TOOL_STARTED,
             "session_id": session_id,
             "tool_name": "Write",
             "tool_use_id": "tool-2",
         },
         {
-            "event_type": "tool_execution_completed",
+            "event_type": TOOL_COMPLETED,
             "session_id": session_id,
             "tool_name": "Write",
             "tool_use_id": "tool-2",
@@ -77,13 +86,13 @@ async def seeded_session(test_infrastructure):
             "duration_ms": 200,
         },
         {
-            "event_type": "tool_execution_started",
+            "event_type": TOOL_STARTED,
             "session_id": session_id,
             "tool_name": "Bash",
             "tool_use_id": "tool-3",
         },
         {
-            "event_type": "tool_execution_completed",
+            "event_type": TOOL_COMPLETED,
             "session_id": session_id,
             "tool_name": "Bash",
             "tool_use_id": "tool-3",
@@ -92,7 +101,7 @@ async def seeded_session(test_infrastructure):
             "duration_ms": 50,
         },
         {
-            "event_type": "token_usage",
+            "event_type": TOKEN_USAGE,
             "session_id": session_id,
             "input_tokens": 1000,
             "output_tokens": 500,
@@ -100,7 +109,7 @@ async def seeded_session(test_infrastructure):
             "cache_read_tokens": 200,
         },
         {
-            "event_type": "session_completed",
+            "event_type": SESSION_COMPLETED,
             "session_id": session_id,
         },
     ]
@@ -123,9 +132,9 @@ class TestEventsAPI:
 
         assert len(events) == 9
         event_types = [e["event_type"] for e in events]
-        assert "session_started" in event_types
-        assert "tool_execution_completed" in event_types
-        assert "session_completed" in event_types
+        assert SESSION_STARTED in event_types
+        assert TOOL_COMPLETED in event_types
+        assert SESSION_COMPLETED in event_types
 
     @pytest.mark.asyncio
     async def test_get_session_events_filtered(self, seeded_session: SeededSessionData):
@@ -133,11 +142,11 @@ class TestEventsAPI:
         # Filter by event type
         tool_events = await seeded_session.store.query(
             seeded_session.session_id,
-            event_type="tool_execution_completed",
+            event_type=TOOL_COMPLETED,
         )
 
         assert len(tool_events) == 3
-        assert all(e["event_type"] == "tool_execution_completed" for e in tool_events)
+        assert all(e["event_type"] == TOOL_COMPLETED for e in tool_events)
 
     @pytest.mark.asyncio
     async def test_timeline_events(self, seeded_session: SeededSessionData):
@@ -150,10 +159,10 @@ class TestEventsAPI:
             for e in events
             if e["event_type"]
             in (
-                "tool_execution_started",
-                "tool_execution_completed",
-                "session_started",
-                "session_completed",
+                TOOL_STARTED,
+                TOOL_COMPLETED,
+                SESSION_STARTED,
+                SESSION_COMPLETED,
             )
         ]
 
@@ -165,7 +174,7 @@ class TestEventsAPI:
         # Query token usage events
         token_events = await seeded_session.store.query(
             seeded_session.session_id,
-            event_type="token_usage",
+            event_type=TOKEN_USAGE,
         )
 
         # Aggregate
@@ -181,7 +190,7 @@ class TestEventsAPI:
         # Query tool completion events
         tool_events = await seeded_session.store.query(
             seeded_session.session_id,
-            event_type="tool_execution_completed",
+            event_type=TOOL_COMPLETED,
         )
 
         # Build summary

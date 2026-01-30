@@ -121,11 +121,11 @@ jobs:
 
     services:
       timescaledb:
-        image: timescale/timescaledb:latest-pg15
+        image: timescale/timescaledb:latest-pg16
         env:
           POSTGRES_USER: aef
           POSTGRES_PASSWORD: aef_dev_password
-          POSTGRES_DB: aef_observability
+          POSTGRES_DB: aef
         ports:
           - 15432:5432
         options: >-
