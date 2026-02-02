@@ -2,11 +2,13 @@
 
 ## Status
 
-**On Hold** - Sidecar proxy pattern deferred due to complexity. See ADR-024 for interim solution.
+**On Hold** - Deferred until auth/multi-tenant work. See ADR-024 for interim solution (GitHub only).
+
+**2026-01-29 Update**: Architecture revised for scale. Per-agent sidecars don't scale (500GB RAM for 10K agents). Use **shared Envoy cluster** instead (5-10 proxies, ~5GB total). See issue #43 for implementation plan.
 
 ## Date
 
-2025-12-12 (Updated: 2025-12-15)
+2025-12-12 (Updated: 2025-12-15, 2026-01-29)
 
 ## Context
 
@@ -444,3 +446,97 @@ When we need the **maximum security** of sidecar proxy (e.g., multi-tenant produ
 3. Full token injection without any secrets in container
 
 For now, ADR-024 provides adequate security for single-tenant and controlled deployments.
+
+---
+
+## 2026-01-29 Update: Shared Envoy Cluster Architecture
+
+### Per-Agent Sidecars Don't Scale
+
+The original architecture assumed per-agent sidecars. This doesn't scale:
+
+```
+❌ Per-Agent Sidecar:
+   10,000 agents × 50MB = 500GB RAM just for proxies
+   10,000 sidecar containers to orchestrate
+```
+
+### Revised Architecture: Shared Envoy Cluster
+
+For 1K-10K+ agents, use a **shared Envoy proxy cluster**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Agent Containers (10,000)                        │
+│                                                                         │
+│  ┌─────┐ ┌─────┐ ┌─────┐         ┌─────┐ ┌─────┐ ┌─────┐              │
+│  │Agent│ │Agent│ │Agent│  . . .  │Agent│ │Agent│ │Agent│              │
+│  │ 001 │ │ 002 │ │ 003 │         │9998 │ │9999 │ │10000│              │
+│  └──┬──┘ └──┬──┘ └──┬──┘         └──┬──┘ └──┬──┘ └──┬──┘              │
+│     └───────┴───────┴───────┬───────┴───────┴───────┘                  │
+│                             │                                           │
+│                             ▼                                           │
+│              ┌──────────────────────────────┐                          │
+│              │     Load Balancer (L4)       │                          │
+│              └──────────────┬───────────────┘                          │
+│         ┌───────────────────┼───────────────────┐                      │
+│         ▼                   ▼                   ▼                      │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐              │
+│  │  Envoy #1   │     │  Envoy #2   │     │  Envoy #N   │              │
+│  │  2K-3K conn │     │  2K-3K conn │     │  2K-3K conn │              │
+│  │  ~500MB RAM │     │  ~500MB RAM │     │  ~500MB RAM │              │
+│  │  ext_authz ─┼─────┼─────────────┼─────┼─► Token     │              │
+│  │  filter     │     │             │     │   Vending   │              │
+│  └──────┬──────┘     └──────┬──────┘     └──────┬──────┘              │
+│         └───────────────────┼───────────────────┘                      │
+│                             │                                           │
+│              Connection Pool (HTTP/2 multiplexing)                      │
+│              ~100-500 connections to Anthropic                          │
+└─────────────────────────────┼───────────────────────────────────────────┘
+                              ▼
+                     api.anthropic.com
+```
+
+### Scaling Numbers
+
+| Component | Capacity | For 10K Agents |
+|-----------|----------|----------------|
+| **Single Envoy** | 2,000-5,000 concurrent connections | - |
+| **Envoy cluster** | 5-10 instances | 10K-50K capacity |
+| **Memory per Envoy** | 500MB-1GB | **5-10GB total** |
+| **Upstream connections** | HTTP/2 multiplexed | ~100-500 to Anthropic |
+
+### How Claude CLI Traffic is Intercepted
+
+Claude CLI and Anthropic SDK support `ANTHROPIC_BASE_URL`:
+
+```bash
+# Agent container environment
+ANTHROPIC_BASE_URL=http://envoy-proxy:8080
+
+# Claude CLI sends to proxy, not api.anthropic.com
+claude -p "Hello"  # → http://envoy-proxy:8080/v1/messages
+```
+
+For maximum isolation (per Anthropic's [Secure Deployment Guide](https://console.anthropic.com/docs/en/agent-sdk/secure-deployment)):
+- `--network none` removes all network interfaces
+- Unix socket mounted for proxy communication
+- socat bridges localhost → socket
+
+### Current Gap: ANTHROPIC_API_KEY Still Exposed
+
+**ADR-024 works for GitHub** (git credential helper pattern) but **NOT for Anthropic API**.
+
+Current implementation in `WorkflowExecutionEngine.py`:
+```python
+# ❌ ANTHROPIC_API_KEY passed directly to agent
+agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+```
+
+The fix requires implementing this shared Envoy architecture. See issue #43 for implementation plan.
+
+### References
+
+- [Anthropic Secure Deployment Guide](https://console.anthropic.com/docs/en/agent-sdk/secure-deployment)
+- [sandbox-runtime (Anthropic's reference)](https://github.com/anthropic-experimental/sandbox-runtime)
+- Issue #43: Implementation tracking

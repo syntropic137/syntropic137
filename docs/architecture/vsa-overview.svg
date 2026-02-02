@@ -18,7 +18,7 @@
       .context-box:hover { opacity: 0.9; }
     
   </style>
-  <text x="580" y="64" font-size="24" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">🏗️ Architecture and Ecosystem</text>
+  <text x="580" y="64" font-size="24" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="middle">Architecture and Ecosystem</text>
   <line x1="40" y1="74" x2="1080" y2="74" stroke="#d0d0d0" stroke-width="2"/>
   <text x="40" y="104" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Domain Contexts (Bounded Contexts)</text>
   <rect x="40" y="114" width="330" height="180" fill="#d6c9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
