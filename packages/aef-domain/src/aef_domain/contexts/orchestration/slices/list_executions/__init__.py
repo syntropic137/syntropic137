@@ -1,6 +1,6 @@
 """List Executions slice - query for workflow execution runs."""
 
-from aef_domain.contexts.workflows.slices.list_executions.projection import (
+from aef_domain.contexts.orchestration.slices.list_executions.projection import (
     WorkflowExecutionListProjection,
 )
 

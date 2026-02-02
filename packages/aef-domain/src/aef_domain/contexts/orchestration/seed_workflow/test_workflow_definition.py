@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from aef_domain.contexts.workflows._shared.workflow_definition import (
+from aef_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
     validate_workflow_yaml,
 )
-from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
     PhaseExecutionType,
     WorkflowClassification,
     WorkflowType,

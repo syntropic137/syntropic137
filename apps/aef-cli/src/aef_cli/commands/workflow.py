@@ -69,15 +69,15 @@ def create_workflow(
     from uuid import uuid4
 
     from aef_adapters.storage import get_event_publisher, get_workflow_repository
-    from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+    from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
         PhaseDefinition,
         WorkflowClassification,
         WorkflowType,
     )
-    from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
 
@@ -352,8 +352,8 @@ def seed_workflows(
         get_event_publisher,
         get_workflow_repository,
     )
-    from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
-    from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+    from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
 
@@ -462,7 +462,7 @@ def validate_workflow(
     Example:
         aef workflow validate workflows/examples/research.yaml
     """
-    from aef_domain.contexts.workflows._shared.workflow_definition import (
+    from aef_domain.contexts.orchestration._shared.workflow_definition import (
         WorkflowDefinition,
         validate_workflow_yaml,
     )
@@ -643,11 +643,11 @@ def run_workflow(
         get_session_repository,
         get_workflow_repository,
     )
-    from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
+    from aef_domain.contexts.orchestration._shared.ExecutionValueObjects import (
         ExecutionStatus,
         PhaseStatus,
     )
-    from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
+    from aef_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
         WorkflowExecutionEngine,
         WorkflowNotFoundError,
     )

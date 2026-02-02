@@ -10,7 +10,7 @@ This port handles the object storage layer.
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows._shared.ArtifactValueObjects import (
+    from aef_domain.contexts.orchestration._shared.ArtifactValueObjects import (
         ArtifactUploadResult,
     )
 

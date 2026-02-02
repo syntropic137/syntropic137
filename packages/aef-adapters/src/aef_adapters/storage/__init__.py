@@ -69,7 +69,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
     )
 

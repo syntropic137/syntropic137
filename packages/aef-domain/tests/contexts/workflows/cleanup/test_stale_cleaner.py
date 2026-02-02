@@ -18,12 +18,12 @@ from decimal import Decimal
 
 import pytest
 
-from aef_domain.contexts.workflows.cleanup.stale_execution_cleaner import (
+from aef_domain.contexts.orchestration.cleanup.stale_execution_cleaner import (
     ExecutionProjectionProtocol,
     ExecutionRepositoryProtocol,
     StaleExecutionCleaner,
 )
-from aef_domain.contexts.workflows.domain.read_models.workflow_execution_summary import (
+from aef_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
 
@@ -87,7 +87,7 @@ class MockAggregate:
         self.commands: list = []
 
         # Import and set status
-        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
+        from aef_domain.contexts.orchestration._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
 
@@ -97,7 +97,7 @@ class MockAggregate:
         """Record commands for verification."""
         self.commands.append(command)
         # Update status to failed
-        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
+        from aef_domain.contexts.orchestration._shared.ExecutionValueObjects import (
             ExecutionStatus,
         )
 

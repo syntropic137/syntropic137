@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from aef_domain.contexts.costs._shared.value_objects import CostAmount, TokenCount
+from aef_domain.contexts.orchestration._shared.value_objects import CostAmount, TokenCount
 
 
 @pytest.mark.unit

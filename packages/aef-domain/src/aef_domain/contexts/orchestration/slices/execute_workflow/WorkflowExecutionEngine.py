@@ -25,17 +25,17 @@ from agentic_events import enrich_event, parse_jsonl_line
 from agentic_workspace import AEF_WORKSPACE_PROMPT
 
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
-from aef_domain.contexts.observability.domain.events.agent_observation import (
+from aef_domain.contexts.sessions.domain.events.agent_observation import (
     ObservationType,
 )
-from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
+from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
     ExecutionStatus,
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     CompleteExecutionCommand,
     CompletePhaseCommand,
     FailExecutionCommand,
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from aef_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
     from aef_adapters.conversations import ConversationStoragePort
     from aef_adapters.workspace_backends.service import WorkspaceService
-    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
+    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
         ArtifactAggregate,
     )
     from aef_domain.contexts.artifacts.domain.ports.artifact_storage import (
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
     )
 
@@ -809,7 +809,7 @@ class WorkflowExecutionEngine:
             content: Artifact content
             title: Human-readable title
         """
-        from aef_domain.contexts.artifacts._shared.ArtifactAggregate import (
+        from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
             ArtifactAggregate,
         )
         from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (

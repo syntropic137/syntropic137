@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from event_sourcing import Command
 
-from aef_domain.contexts.workspaces._shared.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     IsolationBackendType,
     SecurityPolicy,

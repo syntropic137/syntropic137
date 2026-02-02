@@ -1,8 +1,8 @@
 """Handler for session cost queries."""
 
-from aef_domain.contexts.costs.domain.queries.get_session_cost import GetSessionCostQuery
-from aef_domain.contexts.costs.domain.read_models.session_cost import SessionCost
-from aef_domain.contexts.costs.slices.session_cost.projection import SessionCostProjection
+from aef_domain.contexts.sessions.domain.queries.get_session_cost import GetSessionCostQuery
+from aef_domain.contexts.sessions.domain.read_models.session_cost import SessionCost
+from aef_domain.contexts.sessions.slices.session_cost.projection import SessionCostProjection
 
 
 class SessionCostHandler:

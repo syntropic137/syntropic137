@@ -3,7 +3,7 @@
 This slice handles seeding workflows from YAML definitions.
 """
 
-from aef_domain.contexts.workflows.seed_workflow.SeedWorkflowService import (
+from aef_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
     SeedReport,
     SeedResult,
     WorkflowSeeder,

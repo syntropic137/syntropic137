@@ -1,12 +1,12 @@
 """Handler for token metrics queries."""
 
-from aef_domain.contexts.observability.domain.queries.get_token_metrics import (
+from aef_domain.contexts.sessions.domain.queries.get_token_metrics import (
     GetTokenMetricsQuery,
 )
-from aef_domain.contexts.observability.domain.read_models.token_metrics import (
+from aef_domain.contexts.sessions.domain.read_models.token_metrics import (
     SessionTokenMetrics,
 )
-from aef_domain.contexts.observability.slices.token_metrics.projection import (
+from aef_domain.contexts.sessions.slices.token_metrics.projection import (
     TokenMetricsProjection,
 )
 

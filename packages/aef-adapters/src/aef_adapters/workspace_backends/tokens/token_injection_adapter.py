@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from aef_adapters.workspace_backends.tokens.token_vending_adapter import (
         TokenVendingServiceAdapter,
     )
-    from aef_domain.contexts.workspaces._shared.ports import SidecarPort
-    from aef_domain.contexts.workspaces._shared.value_objects import (
+    from aef_domain.contexts.orchestration.ports import SidecarPort
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
         SidecarHandle,
         TokenInjectionResult,
@@ -98,7 +98,7 @@ class SidecarTokenInjectionAdapter:
         Returns:
             TokenInjectionResult with injection details
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             InjectionMethod,
             TokenInjectionResult,
         )
@@ -185,7 +185,7 @@ class DirectTokenInjectionAdapter:
         Returns:
             TokenInjectionResult with environment variable names
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             InjectionMethod,
             TokenInjectionResult,
             TokenType,

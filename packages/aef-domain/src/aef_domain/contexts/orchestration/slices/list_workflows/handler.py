@@ -4,8 +4,8 @@ This handler processes ListWorkflowsQuery requests and returns
 WorkflowSummary data from the projection.
 """
 
-from aef_domain.contexts.workflows.domain.queries import ListWorkflowsQuery
-from aef_domain.contexts.workflows.domain.read_models import WorkflowSummary
+from aef_domain.contexts.orchestration.domain.queries import ListWorkflowsQuery
+from aef_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 
 from .projection import WorkflowListProjection
 

@@ -10,17 +10,17 @@ from dataclasses import dataclass, field
 from pathlib import Path  # noqa: TC003 - needed at runtime for file operations
 from typing import TYPE_CHECKING
 
-from aef_domain.contexts.workflows._shared.workflow_definition import (
+from aef_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
 )
-from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
 from aef_shared.logging import get_logger
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows.create_workflow.CreateWorkflowHandler import (
+    from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
         CreateWorkflowHandler,
     )
 

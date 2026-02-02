@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from aef_adapters.control.state_machine import ExecutionState
 
 # Import projection name constant for type safety - prevents typo bugs
-from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+from aef_domain.contexts.orchestration.slices.get_execution_detail.projection import (
     WorkflowExecutionDetailProjection,
 )
 

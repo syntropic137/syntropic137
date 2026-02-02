@@ -4,7 +4,7 @@ This module provides adapters for token vending and injection:
 - TokenVendingServiceAdapter: Wraps aef-tokens TokenVendingService
 - SidecarTokenInjectionAdapter: Injects tokens via sidecar proxy
 
-These adapters implement the port interfaces from aef_domain.contexts.workspaces.
+These adapters implement the port interfaces from aef_domain.contexts.orchestration.
 
 Usage:
     from aef_adapters.workspace_backends.tokens import (

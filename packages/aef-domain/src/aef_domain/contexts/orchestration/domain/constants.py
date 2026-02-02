@@ -1,4 +1,4 @@
-"""Constants for workflow domain.
+"""Constants for orchestration domain.
 
 Centralizes all magic strings to prevent typos and enable refactoring.
 """

@@ -1,9 +1,9 @@
 """Handler for get_workflow_detail query."""
 
-from aef_domain.contexts.workflows.domain.queries.get_workflow_detail import (
+from aef_domain.contexts.orchestration.domain.queries.get_workflow_detail import (
     GetWorkflowDetailQuery,
 )
-from aef_domain.contexts.workflows.domain.read_models.workflow_detail import (
+from aef_domain.contexts.orchestration.domain.read_models.workflow_detail import (
     WorkflowDetail,
 )
 

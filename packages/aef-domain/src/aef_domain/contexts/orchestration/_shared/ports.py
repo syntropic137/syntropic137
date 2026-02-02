@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from aef_domain.contexts.workspaces._shared.value_objects import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         Artifact,
         ArtifactCollectionResult,
         ExecutionResult,

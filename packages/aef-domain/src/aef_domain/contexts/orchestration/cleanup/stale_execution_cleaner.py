@@ -22,10 +22,10 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows.domain.read_models.workflow_execution_summary import (
+    from aef_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
         WorkflowExecutionSummary,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -186,7 +186,7 @@ class StaleExecutionCleaner:
 
         Loads the aggregate, emits FailExecution command, and saves.
         """
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             FailExecutionCommand,
         )
 
@@ -196,7 +196,7 @@ class StaleExecutionCleaner:
             return
 
         # Only fail if still running
-        from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
             ExecutionStatus,
         )
 

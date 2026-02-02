@@ -1,12 +1,12 @@
 """Handler for tool timeline queries."""
 
-from aef_domain.contexts.observability.domain.queries.get_tool_timeline import (
+from aef_domain.contexts.sessions.domain.queries.get_tool_timeline import (
     GetToolTimelineQuery,
 )
-from aef_domain.contexts.observability.domain.read_models.tool_execution import (
+from aef_domain.contexts.sessions.domain.read_models.tool_execution import (
     ToolTimeline,
 )
-from aef_domain.contexts.observability.slices.tool_timeline.projection import (
+from aef_domain.contexts.sessions.slices.tool_timeline.projection import (
     ToolTimelineProjection,
 )
 

@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from aef_domain.contexts.costs.slices.session_cost.projection import SessionCostProjection
-from aef_domain.contexts.observability.domain.events.agent_observation import ObservationType
+from aef_domain.contexts.sessions.slices.session_cost.projection import SessionCostProjection
+from aef_domain.contexts.sessions.domain.events.agent_observation import ObservationType
 
 
 class MockProjectionStore:

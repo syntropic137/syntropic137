@@ -9,13 +9,13 @@ import pytest
 os.environ["APP_ENVIRONMENT"] = "test"
 
 from aef_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from aef_domain.contexts.metrics.domain.queries.get_dashboard_metrics import (
+from aef_domain.contexts.orchestration.domain.queries.get_dashboard_metrics import (
     GetDashboardMetricsQuery,
 )
-from aef_domain.contexts.metrics.slices.get_metrics.handler import (
+from aef_domain.contexts.orchestration.slices.dashboard_metrics.handler import (
     GetDashboardMetricsHandler,
 )
-from aef_domain.contexts.metrics.slices.get_metrics.projection import (
+from aef_domain.contexts.orchestration.slices.dashboard_metrics.projection import (
     DashboardMetricsProjection,
 )
 

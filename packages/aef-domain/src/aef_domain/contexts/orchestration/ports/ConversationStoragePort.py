@@ -7,7 +7,7 @@ are stored in object storage (MinIO/S3) for debugging and replay.
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows._shared.SessionValueObjects import (
+    from aef_domain.contexts.orchestration._shared.SessionValueObjects import (
         SessionContext,
     )
 
@@ -39,7 +39,7 @@ class ConversationStoragePort(Protocol):
             context: Session metadata (execution_id, phase_id, model, tokens, etc.).
 
         Example:
-            from aef_domain.contexts.workflows import SessionContext
+            from aef_domain.contexts.orchestration._shared import SessionContext
 
             context = SessionContext(
                 execution_id="exec-123",

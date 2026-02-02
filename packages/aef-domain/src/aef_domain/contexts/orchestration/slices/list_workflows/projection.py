@@ -19,7 +19,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
-from aef_domain.contexts.workflows.domain.read_models import WorkflowSummary
+from aef_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 
 # Event types this projection subscribes to
 _SUBSCRIBED_EVENTS = {

@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workspaces._shared.value_objects import TokenType
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import TokenType
     from aef_tokens.vending import TokenVendingService
 
 logger = logging.getLogger(__name__)

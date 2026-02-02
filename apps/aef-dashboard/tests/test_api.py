@@ -39,15 +39,15 @@ from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import 
 from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
-from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
-from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
 
 
 @pytest.fixture

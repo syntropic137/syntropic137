@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from aef_domain.contexts.workspaces.slices.workspace_metrics.projection import (
+from aef_domain.contexts.orchestration.slices.workspace_metrics.projection import (
     WorkspaceMetricsProjection,
 )
 

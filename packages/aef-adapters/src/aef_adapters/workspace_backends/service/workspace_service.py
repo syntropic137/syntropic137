@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from aef_domain.contexts.workspaces._shared.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     IsolationBackendType,
     IsolationConfig,
@@ -32,13 +32,13 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from aef_domain.contexts.workspaces.domain.commands.CreateWorkspaceCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
-from aef_domain.contexts.workspaces.domain.commands.TerminateWorkspaceCommand import (
+from aef_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
-from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import WorkspaceAggregate
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -47,12 +47,12 @@ if TYPE_CHECKING:
     from aef_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
     )
-    from aef_domain.contexts.workspaces._shared.ports import (
+    from aef_domain.contexts.orchestration.ports import (
         EventStreamPort,
         IsolationBackendPort,
         SidecarPort,
     )
-    from aef_domain.contexts.workspaces._shared.value_objects import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationHandle,
         SidecarHandle,

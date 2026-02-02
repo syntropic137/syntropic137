@@ -39,7 +39,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_start_execution_emits_event(self) -> None:
         """REGRESSION: StartExecutionCommand must emit WorkflowExecutionStartedEvent."""
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
@@ -66,7 +66,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_phase_emits_event(self) -> None:
         """REGRESSION: CompletePhaseCommand must emit PhaseCompletedEvent."""
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -119,7 +119,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_complete_execution_emits_event(self) -> None:
         """REGRESSION: CompleteExecutionCommand must emit WorkflowCompletedEvent."""
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -160,7 +160,7 @@ class TestWorkflowExecutionEventProjectionConsistency:
     @pytest.mark.asyncio
     async def test_fail_execution_emits_event(self) -> None:
         """REGRESSION: FailExecutionCommand must emit WorkflowFailedEvent."""
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             FailExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -216,7 +216,7 @@ class TestWorkflowTemplateProjectionHandlesTemplateEvents:
         self, mock_store: AsyncMock
     ) -> None:
         """Template projection should increment runs_count when execution starts."""
-        from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_workflow_detail.projection import (
             WorkflowDetailProjection,
         )
 
@@ -442,7 +442,7 @@ class TestEventHandlerCompleteness:
         Note: WorkflowDetailProjection is for TEMPLATES, not executions.
         Execution events are handled by WorkflowExecutionDetailProjection.
         """
-        from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_workflow_detail.projection import (
             WorkflowDetailProjection,
         )
 
@@ -476,7 +476,7 @@ class TestEventHandlerCompleteness:
 
     def test_workflow_execution_list_projection_has_required_handlers(self) -> None:
         """REGRESSION: Ensure WorkflowExecutionListProjection handles all execution events."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -494,7 +494,7 @@ class TestEventHandlerCompleteness:
 
     def test_workflow_execution_detail_projection_has_required_handlers(self) -> None:
         """REGRESSION: Ensure WorkflowExecutionDetailProjection handles all execution events."""
-        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_execution_detail.projection import (
             WorkflowExecutionDetailProjection,
         )
 
@@ -531,7 +531,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_execution_started(self, mock_store: AsyncMock) -> None:
         """REGRESSION: Projection must create execution summary on start."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -558,7 +558,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_phase_completed_updates_metrics(self, mock_store: AsyncMock) -> None:
         """REGRESSION: Projection must update metrics when phase completes."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -595,7 +595,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_completed(self, mock_store: AsyncMock) -> None:
         """REGRESSION: Projection must mark execution as completed."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -627,7 +627,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_failed(self, mock_store: AsyncMock) -> None:
         """REGRESSION: Projection must mark execution as failed."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -656,7 +656,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_get_by_workflow_id_filters_correctly(self, mock_store: AsyncMock) -> None:
         """REGRESSION: get_by_workflow_id must filter and sort executions."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -722,7 +722,7 @@ class TestWorkflowExecutionDetailProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_execution_started(self, mock_store: AsyncMock) -> None:
         """REGRESSION: Projection must create execution detail on start."""
-        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_execution_detail.projection import (
             WorkflowExecutionDetailProjection,
         )
 
@@ -748,7 +748,7 @@ class TestWorkflowExecutionDetailProjection:
     @pytest.mark.asyncio
     async def test_handles_phase_completed_adds_phase_detail(self, mock_store: AsyncMock) -> None:
         """REGRESSION: Projection must add phase detail when phase completes."""
-        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_execution_detail.projection import (
             WorkflowExecutionDetailProjection,
         )
 

@@ -1,13 +1,32 @@
-"""Commands for workflows context."""
+"""Commands for orchestration bounded context.
 
-from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+All commands for workflow execution and workspace management.
+"""
+
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
-from aef_domain.contexts.workflows.domain.commands.ExecuteWorkflowCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
+    CreateWorkspaceCommand,
+)
+from aef_domain.contexts.orchestration.domain.commands.ExecuteCommandCommand import (
+    ExecuteCommandCommand,
+)
+from aef_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
     ExecuteWorkflowCommand,
+)
+from aef_domain.contexts.orchestration.domain.commands.InjectTokensCommand import (
+    InjectTokensCommand,
+)
+from aef_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
+    TerminateWorkspaceCommand,
 )
 
 __all__ = [
     "CreateWorkflowCommand",
+    "CreateWorkspaceCommand",
+    "ExecuteCommandCommand",
     "ExecuteWorkflowCommand",
+    "InjectTokensCommand",
+    "TerminateWorkspaceCommand",
 ]

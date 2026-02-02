@@ -15,7 +15,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
-from aef_domain.contexts.metrics.domain.read_models.dashboard_metrics import (
+from aef_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
     DashboardMetrics,
 )
 

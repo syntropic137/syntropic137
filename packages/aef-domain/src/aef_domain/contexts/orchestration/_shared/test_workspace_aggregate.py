@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from aef_domain.contexts.workspaces._shared.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     ExecutionResult,
     InjectionMethod,
@@ -19,19 +19,19 @@ from aef_domain.contexts.workspaces._shared.value_objects import (
     TokenType,
     WorkspaceStatus,
 )
-from aef_domain.contexts.workspaces.domain.commands.CreateWorkspaceCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
-from aef_domain.contexts.workspaces.domain.commands.ExecuteCommandCommand import (
+from aef_domain.contexts.orchestration.domain.commands.ExecuteCommandCommand import (
     ExecuteCommandCommand,
 )
-from aef_domain.contexts.workspaces.domain.commands.InjectTokensCommand import (
+from aef_domain.contexts.orchestration.domain.commands.InjectTokensCommand import (
     InjectTokensCommand,
 )
-from aef_domain.contexts.workspaces.domain.commands.TerminateWorkspaceCommand import (
+from aef_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
-from aef_domain.contexts.workspaces.domain.WorkspaceAggregate import WorkspaceAggregate
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import WorkspaceAggregate
 
 # =============================================================================
 # FIXTURES

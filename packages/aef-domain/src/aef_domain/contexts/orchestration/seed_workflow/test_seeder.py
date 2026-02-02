@@ -13,8 +13,8 @@ from aef_adapters.storage import (
     get_workflow_repository,
     reset_storage,
 )
-from aef_domain.contexts.workflows.seed_workflow import WorkflowSeeder
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
+from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
     CreateWorkflowHandler,
 )
 

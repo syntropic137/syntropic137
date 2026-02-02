@@ -1,9 +1,9 @@
 """Handler for get_dashboard_metrics query."""
 
-from aef_domain.contexts.metrics.domain.queries.get_dashboard_metrics import (
+from aef_domain.contexts.orchestration.domain.queries.get_dashboard_metrics import (
     GetDashboardMetricsQuery,
 )
-from aef_domain.contexts.metrics.domain.read_models.dashboard_metrics import (
+from aef_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
     DashboardMetrics,
 )
 

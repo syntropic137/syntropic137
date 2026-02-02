@@ -3,8 +3,8 @@
 import pytest
 
 from aef_adapters.projection_stores import InMemoryProjectionStore
-from aef_domain.contexts.observability.domain.queries import GetToolTimelineQuery
-from aef_domain.contexts.observability.slices.tool_timeline import (
+from aef_domain.contexts.sessions.domain.queries import GetToolTimelineQuery
+from aef_domain.contexts.sessions.slices.tool_timeline import (
     ToolTimelineHandler,
     ToolTimelineProjection,
 )

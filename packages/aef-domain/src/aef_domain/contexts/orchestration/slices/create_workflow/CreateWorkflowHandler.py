@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
 
 if TYPE_CHECKING:
     from event_sourcing import EventEnvelope
 
-    from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
         CreateWorkflowCommand,
     )
-    from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
+    from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
         WorkflowCreatedEvent,
     )
 

@@ -1,1 +1,0 @@
-"""Metrics bounded context."""

@@ -1,9 +1,9 @@
 """Tool timeline slice for observability."""
 
-from aef_domain.contexts.observability.slices.tool_timeline.handler import (
+from aef_domain.contexts.sessions.slices.tool_timeline.handler import (
     ToolTimelineHandler,
 )
-from aef_domain.contexts.observability.slices.tool_timeline.projection import (
+from aef_domain.contexts.sessions.slices.tool_timeline.projection import (
     ToolTimelineProjection,
 )
 

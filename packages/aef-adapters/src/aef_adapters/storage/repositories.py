@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -107,7 +107,7 @@ def get_workflow_repository() -> (
     if _workflow_repository is not None:
         return _workflow_repository
 
-    from aef_domain.contexts.workflows.domain.WorkflowAggregate import WorkflowAggregate
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
@@ -146,7 +146,7 @@ def get_workflow_execution_repository() -> (
     if _workflow_execution_repository is not None:
         return _workflow_execution_repository
 
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
-from aef_domain.contexts.workspaces._shared.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     Artifact,
     CapabilityType,
     IsolationBackendType,
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
         MemorySidecarAdapter,
         MemoryTokenInjectionAdapter,
     )
-    from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
 
 # =============================================================================
 # TEST ENVIRONMENT ENFORCEMENT
@@ -239,7 +239,7 @@ class TestMemorySidecarAdapter:
     @pytest.fixture
     def isolation_handle(self) -> IsolationHandle:
         """Create mock isolation handle."""
-        from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
 
         return IsolationHandle(
             isolation_id="mem-test123",
@@ -319,7 +319,7 @@ class TestMemoryTokenInjectionAdapter:
     @pytest.fixture
     def isolation_handle(self) -> IsolationHandle:
         """Create mock isolation handle."""
-        from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
 
         return IsolationHandle(
             isolation_id="mem-test123",
@@ -380,7 +380,7 @@ class TestMemoryArtifactAdapter:
     @pytest.fixture
     def isolation_handle(self) -> IsolationHandle:
         """Create mock isolation handle."""
-        from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
 
         return IsolationHandle(
             isolation_id="mem-test123",
@@ -440,7 +440,7 @@ class TestMemoryEventStreamAdapter:
     @pytest.fixture
     def isolation_handle(self) -> IsolationHandle:
         """Create mock isolation handle."""
-        from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
 
         return IsolationHandle(
             isolation_id="mem-test123",

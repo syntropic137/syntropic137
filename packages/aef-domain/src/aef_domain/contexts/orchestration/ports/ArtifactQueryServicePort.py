@@ -7,7 +7,7 @@ workflows. Artifacts from previous phases are injected into subsequent phase pro
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows._shared.ArtifactValueObjects import (
+    from aef_domain.contexts.orchestration._shared.ArtifactValueObjects import (
         ArtifactSummary,
     )
 

@@ -14,7 +14,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
-from aef_domain.contexts.workspaces.domain.read_models.workspace_metrics import (
+from aef_domain.contexts.orchestration.domain.read_models.workspace_metrics import (
     WorkspaceMetrics,
     WorkspaceMetricsSummary,
 )

@@ -19,11 +19,17 @@ class TestDomainPackage:
 
         assert contexts is not None
 
-    def test_import_workflows_context(self):
-        """Test that workflows context can be imported."""
-        from aef_domain.contexts import workflows
+    def test_import_orchestration_context(self):
+        """Test that orchestration context can be imported."""
+        from aef_domain.contexts import orchestration
 
-        assert workflows is not None
+        assert orchestration is not None
+
+    def test_import_sessions_context(self):
+        """Test that sessions context can be imported."""
+        from aef_domain.contexts import sessions
+
+        assert sessions is not None
 
     def test_import_agents_context(self):
         """Test that agents context can be imported."""

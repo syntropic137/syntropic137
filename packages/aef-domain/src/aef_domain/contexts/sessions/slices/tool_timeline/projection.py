@@ -10,7 +10,7 @@ Subscribes to observation events from aef-collector:
 
 from typing import Any
 
-from aef_domain.contexts.observability.domain.read_models.tool_execution import (
+from aef_domain.contexts.sessions.domain.read_models.tool_execution import (
     ToolExecution,
     ToolTimeline,
 )

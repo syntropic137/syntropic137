@@ -19,7 +19,7 @@ from event_sourcing import (
     ProjectionResult,
 )
 
-from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
+from aef_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
 

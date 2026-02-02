@@ -15,7 +15,7 @@ Port Naming Convention:
 - "Port" suffix makes the port/adapter distinction explicit
 
 Example Usage:
-    from aef_domain.contexts.workflows.ports import WorkflowRepositoryPort
+    from aef_domain.contexts.orchestration.ports import WorkflowRepositoryPort
 
     def create_workflow_service(
         workflow_repository: WorkflowRepositoryPort,  # Port type
@@ -27,32 +27,32 @@ Example Usage:
 See ADR-040: Ports Per Bounded Context for architectural decisions.
 """
 
-from aef_domain.contexts.workflows.ports.AgentFactoryPort import AgentFactoryPort
-from aef_domain.contexts.workflows.ports.ArtifactContentStoragePort import (
+from aef_domain.contexts.orchestration.ports.AgentFactoryPort import AgentFactoryPort
+from aef_domain.contexts.orchestration.ports.ArtifactContentStoragePort import (
     ArtifactContentStoragePort,
 )
-from aef_domain.contexts.workflows.ports.ArtifactQueryServicePort import (
+from aef_domain.contexts.orchestration.ports.ArtifactQueryServicePort import (
     ArtifactQueryServicePort,
 )
-from aef_domain.contexts.workflows.ports.ArtifactRepositoryPort import (
+from aef_domain.contexts.orchestration.ports.ArtifactRepositoryPort import (
     ArtifactRepositoryPort,
 )
-from aef_domain.contexts.workflows.ports.ConversationStoragePort import (
+from aef_domain.contexts.orchestration.ports.ConversationStoragePort import (
     ConversationStoragePort,
 )
-from aef_domain.contexts.workflows.ports.ObservabilityServicePort import (
+from aef_domain.contexts.orchestration.ports.ObservabilityServicePort import (
     ObservabilityServicePort,
 )
-from aef_domain.contexts.workflows.ports.SessionRepositoryPort import (
+from aef_domain.contexts.orchestration.ports.SessionRepositoryPort import (
     SessionRepositoryPort,
 )
-from aef_domain.contexts.workflows.ports.WorkflowExecutionRepositoryPort import (
+from aef_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
     WorkflowExecutionRepositoryPort,
 )
-from aef_domain.contexts.workflows.ports.WorkflowRepositoryPort import (
+from aef_domain.contexts.orchestration.ports.WorkflowRepositoryPort import (
     WorkflowRepositoryPort,
 )
-from aef_domain.contexts.workflows.ports.WorkspaceServicePort import (
+from aef_domain.contexts.orchestration.ports.WorkspaceServicePort import (
     WorkspaceServicePort,
 )
 

@@ -14,15 +14,15 @@ from aef_adapters.storage import (
     get_workflow_repository,
     reset_storage,
 )
-from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
-from aef_domain.contexts.workflows.slices.create_workflow.CreateWorkflowHandler import (
+from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
     CreateWorkflowHandler,
 )
 

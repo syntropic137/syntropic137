@@ -31,7 +31,7 @@ from aef_dashboard.models.schemas import (
 if TYPE_CHECKING:
     from datetime import datetime as DatetimeType
 
-    from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
+    from aef_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         WorkflowExecutionDetail,
     )
 

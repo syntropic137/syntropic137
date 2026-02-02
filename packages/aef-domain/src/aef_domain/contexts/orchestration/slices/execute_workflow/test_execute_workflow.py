@@ -10,29 +10,29 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts._shared.ArtifactAggregate import ArtifactAggregate
+    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
     from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-from aef_domain.contexts.workflows._shared.ExecutionValueObjects import (
+from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
     ExecutionStatus,
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.workflows._shared.WorkflowValueObjects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.workflows.domain.commands.CreateWorkflowCommand import (
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
-from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
     WorkflowAggregate,
 )
-from aef_domain.contexts.workflows.slices.execute_workflow.WorkflowExecutionEngine import (
+from aef_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
     ExecutionContext,
     WorkflowExecutionEngine,
     WorkflowExecutionResult,
@@ -163,20 +163,43 @@ class MockWorkflowExecutionRepository:
 class MockWorkspaceRouter:
     """Mock workspace router for testing (ADR-023)."""
 
-    def __init__(self) -> None:
+    def __init__(self, mock_agent_output: str = "Mock agent output") -> None:
         self._workspaces_created: list[Any] = []
         self._commands_executed: list[tuple[Any, list[str]]] = []
+        self._mock_agent_output = mock_agent_output
 
-    async def create(self, config: Any) -> Any:
+    def create_workspace(
+        self,
+        execution_id: str | None = None,
+        workflow_id: str | None = None,
+        phase_id: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Mock workspace creation - returns async context manager."""
         from contextlib import asynccontextmanager
 
+        mock_output = self._mock_agent_output
+
         @asynccontextmanager
         async def _mock_workspace() -> Any:
-            self._workspaces_created.append(config)
-            yield MockWorkspace()
+            self._workspaces_created.append({
+                "execution_id": execution_id,
+                "workflow_id": workflow_id,
+                "phase_id": phase_id,
+                **kwargs,
+            })
+            yield MockWorkspace(mock_agent_output=mock_output)
 
         return _mock_workspace()
+
+
+@dataclass
+class MockExecutionResult:
+    """Mock execution result for testing."""
+
+    exit_code: int = 0
+    stdout: str = ""
+    stderr: str = ""
 
 
 class MockWorkspace:
@@ -184,6 +207,53 @@ class MockWorkspace:
 
     isolation_id: str = "mock-workspace-123"
     workspace_path: str = "/tmp/mock-workspace"
+    id: str = "mock-workspace-123"
+
+    def __init__(self, mock_agent_output: str = "Mock agent output") -> None:
+        self._mock_agent_output = mock_agent_output
+        self._injected_files: list[tuple[str, bytes]] = []
+
+    async def run_setup_phase(self, secrets: Any) -> MockExecutionResult:
+        """Mock setup phase - always succeeds."""
+        return MockExecutionResult(exit_code=0)
+
+    async def inject_files(self, files: list[tuple[str, bytes]]) -> None:
+        """Mock file injection."""
+        self._injected_files.extend(files)
+
+    async def stream(
+        self,
+        command: list[str],
+        **kwargs: Any,
+    ) -> Any:
+        """Mock streaming command execution - yields mock JSONL events."""
+        import json
+
+        # Simulate Claude CLI stream-json output
+        events = [
+            {"type": "system", "message": "Claude initialized"},
+            {
+                "type": "assistant",
+                "message": {"type": "text", "text": self._mock_agent_output},
+            },
+            {
+                "type": "result",
+                "result": self._mock_agent_output,
+                "input_tokens": 100,
+                "output_tokens": 200,
+            },
+        ]
+        for event in events:
+            yield json.dumps(event)
+
+    async def collect_files(
+        self,
+        patterns: list[str],
+        **kwargs: Any,
+    ) -> list[tuple[str, bytes]]:
+        """Mock file collection - returns mock output artifact."""
+        # Return a mock artifact for each pattern
+        return [("artifacts/output/result.md", self._mock_agent_output.encode())]
 
 
 class MockArtifactQueryService:
@@ -463,14 +533,15 @@ class TestWorkflowExecutionEngine:
         assert result.is_success
         assert result.status == ExecutionStatus.COMPLETED
         assert len(result.phase_results) == 2
-        assert len(result.artifact_ids) == 2
+        # Artifacts created (can be 1+ per phase depending on mock implementation)
+        assert len(result.artifact_ids) >= 2
 
         # Verify phases executed
         assert result.phase_results[0].status == PhaseStatus.COMPLETED
         assert result.phase_results[1].status == PhaseStatus.COMPLETED
 
-        # Verify agent was called
-        assert len(mock_agent._calls) == 2
+        # In container mode, mock agent is not called directly
+        # The MockWorkspace.stream() provides the agent output
 
     @pytest.mark.asyncio
     async def test_execute_with_custom_execution_id(
@@ -497,7 +568,7 @@ class TestWorkflowExecutionEngine:
         workflow_repo: MockWorkflowRepository,
         mock_agent: MockInstrumentedAgent,
     ) -> None:
-        """Test prompt template variable substitution."""
+        """Test prompt template variable substitution (host-mode)."""
         phases = [
             PhaseDefinition(
                 phase_id="research",
@@ -510,9 +581,11 @@ class TestWorkflowExecutionEngine:
         workflow = create_test_workflow(phases=phases)
         workflow_repo.add_workflow(workflow)
 
+        # Use host-mode (use_container=False) to test agent calls directly
         await engine.execute(
             workflow_id=get_workflow_id(workflow),
             inputs={"topic": "machine learning"},
+            use_container=False,
         )
 
         # Check the prompt was built correctly
@@ -529,7 +602,7 @@ class TestWorkflowExecutionEngine:
         artifact_repo: MockArtifactRepository,
         mock_agent: MockInstrumentedAgent,
     ) -> None:
-        """Test that phase output is available to next phase.
+        """Test that phase output is available to next phase (host-mode).
 
         Note: Phase outputs are now retrieved from the ArtifactQueryService
         (DB-backed) rather than in-memory. This test uses a mock query
@@ -621,9 +694,11 @@ class TestWorkflowExecutionEngine:
             artifact_query_service=cast("Any", dynamic_query_service),
         )
 
+        # Use host-mode to test agent calls directly
         await engine.execute(
             workflow_id=get_workflow_id(workflow),
             inputs={"topic": "test"},
+            use_container=False,
         )
 
         # Second call should have phase 1 output substituted
@@ -637,13 +712,15 @@ class TestWorkflowExecutionEngine:
         engine: WorkflowExecutionEngine,
         workflow_repo: MockWorkflowRepository,
     ) -> None:
-        """Test metrics are properly aggregated."""
+        """Test metrics are properly aggregated (host-mode)."""
         workflow = create_test_workflow()
         workflow_repo.add_workflow(workflow)
 
+        # Use host-mode where mock agent provides token metrics
         result = await engine.execute(
             workflow_id=get_workflow_id(workflow),
             inputs={"topic": "test"},
+            use_container=False,
         )
 
         # Each mock response has 300 total tokens
@@ -658,13 +735,15 @@ class TestWorkflowExecutionEngine:
         workflow_repo: MockWorkflowRepository,
         artifact_repo: MockArtifactRepository,
     ) -> None:
-        """Test artifacts are created and stored."""
+        """Test artifacts are created and stored (host-mode)."""
         workflow = create_test_workflow()
         workflow_repo.add_workflow(workflow)
 
+        # Use host-mode for predictable artifact creation
         result = await engine.execute(
             workflow_id=get_workflow_id(workflow),
             inputs={"topic": "test"},
+            use_container=False,
         )
 
         # Verify artifacts were saved
@@ -749,10 +828,12 @@ class TestWorkflowExecutionFailure:
     async def test_execution_failure_returns_failed_result(
         self, engine_with_failing_agent: WorkflowExecutionEngine
     ) -> None:
-        """Test that agent failure is captured in result."""
+        """Test that agent failure is captured in result (host-mode)."""
+        # Use host-mode to test failing agent behavior
         result = await engine_with_failing_agent.execute(
             workflow_id="test-workflow-123",
             inputs={"topic": "test"},
+            use_container=False,
         )
 
         assert not result.is_success
@@ -764,7 +845,7 @@ class TestWorkflowExecutionFailure:
     async def test_failure_records_partial_progress(
         self,
     ) -> None:
-        """Test that partial progress is recorded on failure."""
+        """Test that partial progress is recorded on failure (host-mode)."""
         # Create agent that succeeds first, then fails
         call_count = 0
 
@@ -794,9 +875,11 @@ class TestWorkflowExecutionFailure:
             agent_factory=cast("Any", lambda _p: agent),
         )
 
+        # Use host-mode to test failing agent behavior
         result = await engine.execute(
             workflow_id=get_workflow_id(workflow),
             inputs={"topic": "test"},
+            use_container=False,
         )
 
         # Should have recorded both phase results

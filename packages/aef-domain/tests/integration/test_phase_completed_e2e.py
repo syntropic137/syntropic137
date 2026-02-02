@@ -32,7 +32,7 @@ class TestPhaseCompletedE2EFlow:
     @pytest.mark.asyncio
     async def test_phase_completed_event_emitted_by_aggregate(self) -> None:
         """Test that PhaseCompletedEvent is properly emitted by aggregate."""
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -92,7 +92,7 @@ class TestPhaseCompletedE2EFlow:
         Note: PhaseCompleted is handled by WorkflowExecutionDetailProjection,
         not WorkflowDetailProjection (which is for templates).
         """
-        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_execution_detail.projection import (
             WorkflowExecutionDetailProjection,
         )
 
@@ -190,12 +190,12 @@ class TestPhaseCompletedE2EFlow:
         4. Event is dispatched to EXECUTION projection
         5. Projection updates read model
         """
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
         )
-        from aef_domain.contexts.workflows.slices.get_execution_detail.projection import (
+        from aef_domain.contexts.orchestration.slices.get_execution_detail.projection import (
             WorkflowExecutionDetailProjection,
         )
 
@@ -307,7 +307,7 @@ class TestEventStoreIntegration:
         """Test that aggregate events are actually persisted to event store."""
         from event_sourcing import EventStoreClientFactory, RepositoryFactory
 
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -378,7 +378,7 @@ class TestEventStoreIntegration:
         """Test that aggregate state is correctly rebuilt from persisted events."""
         from event_sourcing import EventStoreClientFactory, RepositoryFactory
 
-        from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             CompletePhaseCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,

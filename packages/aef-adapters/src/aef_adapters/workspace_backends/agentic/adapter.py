@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
     from agentic_isolation import AgenticWorkspace
 
-    from aef_domain.contexts.workspaces._shared.value_objects import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
         IsolationConfig,
         IsolationHandle,
@@ -104,7 +104,7 @@ class AgenticIsolationAdapter:
         """
         from agentic_isolation import WorkspaceConfig
 
-        from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
 
         # Map AEF config to agentic_isolation config
         ws_config = WorkspaceConfig(
@@ -174,7 +174,7 @@ class AgenticIsolationAdapter:
         Returns:
             ExecutionResult with exit code, stdout, stderr
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import ExecutionResult
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import ExecutionResult
 
         workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:

@@ -15,13 +15,13 @@ import pytest
 os.environ["APP_ENVIRONMENT"] = "test"
 
 from aef_adapters.projection_stores.memory_store import InMemoryProjectionStore
-from aef_domain.contexts.workflows.domain.queries.get_workflow_detail import (
+from aef_domain.contexts.orchestration.domain.queries.get_workflow_detail import (
     GetWorkflowDetailQuery,
 )
-from aef_domain.contexts.workflows.slices.get_workflow_detail.handler import (
+from aef_domain.contexts.orchestration.slices.get_workflow_detail.handler import (
     GetWorkflowDetailHandler,
 )
-from aef_domain.contexts.workflows.slices.get_workflow_detail.projection import (
+from aef_domain.contexts.orchestration.slices.get_workflow_detail.projection import (
     WorkflowDetailProjection,
 )
 

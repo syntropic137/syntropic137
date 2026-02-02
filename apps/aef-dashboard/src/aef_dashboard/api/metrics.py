@@ -8,8 +8,8 @@ from fastapi import APIRouter, Query
 
 from aef_adapters.projections import get_projection_manager
 from aef_dashboard.models.schemas import MetricsResponse
-from aef_domain.contexts.metrics.domain.queries import GetDashboardMetricsQuery
-from aef_domain.contexts.metrics.slices.get_metrics import GetDashboardMetricsHandler
+from aef_domain.contexts.orchestration.domain.queries import GetDashboardMetricsQuery
+from aef_domain.contexts.orchestration.slices.dashboard_metrics import GetDashboardMetricsHandler
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 

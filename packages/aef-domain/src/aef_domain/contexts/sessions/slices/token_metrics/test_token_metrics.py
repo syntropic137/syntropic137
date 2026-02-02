@@ -3,8 +3,8 @@
 import pytest
 
 from aef_adapters.projection_stores import InMemoryProjectionStore
-from aef_domain.contexts.observability.domain.queries import GetTokenMetricsQuery
-from aef_domain.contexts.observability.slices.token_metrics import (
+from aef_domain.contexts.sessions.domain.queries import GetTokenMetricsQuery
+from aef_domain.contexts.sessions.slices.token_metrics import (
     TokenMetricsHandler,
     TokenMetricsProjection,
 )

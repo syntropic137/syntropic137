@@ -22,7 +22,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_execution_started(self, mock_store: AsyncMock) -> None:
         """Test that projection creates execution on WorkflowExecutionStarted."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -52,7 +52,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_phase_completed(self, mock_store: AsyncMock) -> None:
         """Test that projection updates metrics on PhaseCompleted."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -91,7 +91,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_completed(self, mock_store: AsyncMock) -> None:
         """Test that projection marks execution completed."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -131,7 +131,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_handles_workflow_failed(self, mock_store: AsyncMock) -> None:
         """Test that projection marks execution failed."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 
@@ -167,7 +167,7 @@ class TestWorkflowExecutionListProjection:
     @pytest.mark.asyncio
     async def test_get_by_workflow_id(self, mock_store: AsyncMock) -> None:
         """Test that get_by_workflow_id filters and sorts executions."""
-        from aef_domain.contexts.workflows.slices.list_executions.projection import (
+        from aef_domain.contexts.orchestration.slices.list_executions.projection import (
             WorkflowExecutionListProjection,
         )
 

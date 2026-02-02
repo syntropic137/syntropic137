@@ -1,6 +1,6 @@
 """Cleanup utilities for workflow executions."""
 
-from aef_domain.contexts.workflows.cleanup.stale_execution_cleaner import (
+from aef_domain.contexts.orchestration.cleanup.stale_execution_cleaner import (
     StaleExecutionCleaner,
 )
 

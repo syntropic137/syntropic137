@@ -8,7 +8,7 @@ For execution details, see WorkflowExecutionDetail.
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from aef_domain.contexts.workflows.domain.constants import (
+from aef_domain.contexts.orchestration.domain.constants import (
     PhaseDefaults,
     PhaseFields,
     WorkflowFields,
