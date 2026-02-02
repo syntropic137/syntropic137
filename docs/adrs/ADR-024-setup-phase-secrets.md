@@ -2,11 +2,11 @@
 
 ## Status
 
-Accepted
+Accepted (with limitations - see 2026-01-29 update below)
 
 ## Date
 
-2025-12-15
+2025-12-15 (Updated: 2026-01-29)
 
 ## Context
 
@@ -302,3 +302,58 @@ Following Codex's pattern:
 - [OpenAI Codex Cloud Environments](https://developers.openai.com/codex/cloud/environments/)
 - [GitHub App Installation Tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app)
 - [Git Credential Storage](https://git-scm.com/docs/git-credential-store)
+
+---
+
+## 2026-01-29 Update: Scope Limitation
+
+### This ADR Works for GitHub, NOT Anthropic
+
+**Important clarification**: The Setup Phase Secrets pattern works well for **GitHub authentication** but does NOT solve the **Anthropic API key** problem.
+
+| Secret | Setup Phase Works? | Why |
+|--------|-------------------|-----|
+| **GITHUB_APP_TOKEN** | ✅ Yes | Git credential helper persists auth without raw token |
+| **ANTHROPIC_API_KEY** | ❌ No | Claude CLI/SDK needs key at runtime for HTTP requests |
+
+### Current Implementation Gap
+
+In `WorkflowExecutionEngine.py`, the Anthropic API key is still passed directly:
+
+```python
+# GitHub: ✅ Uses credential helper (ADR-024 pattern)
+# Anthropic: ❌ Raw key exposed to agent
+if secrets.anthropic_api_key:
+    agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+```
+
+### Why No "Credential Helper" for HTTP APIs
+
+Git has a credential helper mechanism - configure once, subsequent `git push` commands work without seeing the token.
+
+HTTP APIs (like Anthropic's) have no equivalent:
+- Each request needs the `x-api-key` header
+- Claude CLI reads `ANTHROPIC_API_KEY` from environment
+- No way to "cache" auth like git does
+
+### Path Forward
+
+For Anthropic API key security, implement **ADR-022 (Shared Envoy Cluster)**:
+
+```
+Agent Container                    Envoy Proxy
+ANTHROPIC_BASE_URL=proxy:8080  →  Injects x-api-key  →  api.anthropic.com
+(no API key!)                     (holds the key)
+```
+
+See:
+- ADR-022: Secure Token Architecture (updated 2026-01-29)
+- Issue #43: Implementation tracking
+
+### Acceptable Risk for Single-Tenant
+
+The current implementation (Anthropic key exposed) is acceptable ONLY for:
+- ✅ Single-tenant experimentation
+- ✅ Controlled deployments with trusted prompts
+- ❌ NOT acceptable for multi-tenant production
+- ❌ NOT acceptable for untrusted agent code
