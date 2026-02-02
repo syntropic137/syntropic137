@@ -52,16 +52,24 @@ domain:
     pattern: "**/*Query.*"
 
 # Context-specific configuration
+# NOTE: Reorganized per ADR-020 bounded-context-aggregate-relationship
 contexts:
-  workflows:
-    description: "Workflow definitions, phases, and execution lifecycle"
-  agents:
+  orchestration:
+    description: "Workflow execution and workspace management (merged from workflows + workspaces)"
+  sessions:
     description: "Agent sessions, token tracking, and execution metrics"
   artifacts:
     description: "Artifact storage, metadata, and retrieval"
-  workspaces:
-    description: "Isolated workspace lifecycle, performance metrics, and observability"
   github:
     description: "GitHub App integration, installation tokens, and secure credential management"
-  costs:
-    description: "Session and execution cost tracking with real-time aggregation"
+  # DEPRECATED: These contexts are being phased out (see ADR-020)
+  # workflows:
+  #   description: "DEPRECATED - Use orchestration"
+  # workspaces:
+  #   description: "DEPRECATED - Use orchestration"
+  # costs:
+  #   description: "DEPRECATED - projections moved to orchestration/sessions"
+  # metrics:
+  #   description: "DEPRECATED - projections moved to orchestration"
+  # observability:
+  #   description: "DEPRECATED - projections moved to sessions"

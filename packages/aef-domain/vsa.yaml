@@ -8,9 +8,20 @@ root: src/aef_domain/contexts
 
 # Note: Scanner auto-discovers bounded contexts at depth 1 from root
 # With root=src/aef_domain/contexts, it will find:
-#   - agents/, artifacts/, costs/, github/, metrics/,
-#   - observability/, sessions/, workflows/, workspaces/
-# Each as a separate bounded context.
+#
+# VALID BOUNDED CONTEXTS (have aggregates per ADR-020):
+#   - orchestration/ (merged from workflows + workspaces, has 3 aggregates)
+#   - sessions/ (has AgentSessionAggregate)
+#   - artifacts/ (has ArtifactAggregate)
+#   - github/ (has InstallationAggregate)
+#
+# DEPRECATED (will be removed - no aggregates):
+#   - agents/ (empty)
+#   - costs/ (projections moved to orchestration/sessions)
+#   - metrics/ (projections moved to orchestration)
+#   - observability/ (projections moved to sessions)
+#   - workflows/ (merged into orchestration)
+#   - workspaces/ (merged into orchestration)
 
 # Validation settings
 validation:
