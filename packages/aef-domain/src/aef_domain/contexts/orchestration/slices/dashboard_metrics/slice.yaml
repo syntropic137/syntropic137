@@ -1,0 +1,12 @@
+name: get-dashboard-metrics
+type: query
+projection: DashboardMetricsProjection
+subscribes_to:
+  - WorkflowCreatedEvent
+  - WorkflowExecutionStartedEvent
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+  - SessionStartedEvent
+  - SessionCompletedEvent
+  - ArtifactCreatedEvent
+returns: DashboardMetrics
