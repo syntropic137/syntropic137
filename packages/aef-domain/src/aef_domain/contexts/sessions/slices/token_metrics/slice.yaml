@@ -1,6 +1,6 @@
 name: token_metrics
 description: Token usage metrics for sessions
-context: observability
+context: sessions
 type: query
 
 # Events this slice subscribes to (Pattern 2: observations)

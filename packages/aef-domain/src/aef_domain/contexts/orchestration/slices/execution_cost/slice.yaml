@@ -1,6 +1,6 @@
 name: execution_cost
 description: Execution-level cost tracking (aggregated from sessions)
-context: costs
+context: orchestration
 type: query
 
 # Events this slice subscribes to

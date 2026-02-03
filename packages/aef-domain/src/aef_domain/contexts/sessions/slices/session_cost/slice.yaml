@@ -1,6 +1,6 @@
 name: session_cost
 description: Session-level cost tracking (atomic unit)
-context: costs
+context: sessions
 type: query
 
 # Events this slice subscribes to

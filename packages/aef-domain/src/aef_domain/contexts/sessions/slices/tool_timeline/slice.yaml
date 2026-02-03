@@ -1,6 +1,6 @@
 name: tool_timeline
 description: Tool execution timeline for sessions
-context: observability
+context: sessions
 type: query
 
 # Events this slice subscribes to (Pattern 2: observations)

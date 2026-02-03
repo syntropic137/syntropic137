@@ -1,4 +1,4 @@
-"""Tool timeline slice for observability."""
+"""Tool timeline slice for sessions."""
 
 from aef_domain.contexts.sessions.slices.tool_timeline.handler import (
     ToolTimelineHandler,

@@ -1,4 +1,4 @@
-"""Token metrics slice for observability."""
+"""Token metrics slice for sessions."""
 
 from aef_domain.contexts.sessions.slices.token_metrics.handler import (
     TokenMetricsHandler,
