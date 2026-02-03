@@ -24,6 +24,9 @@ from agentic_events import enrich_event, parse_jsonl_line
 # ADR-012: Workspace prompt for artifact output instructions
 from agentic_workspace import AEF_WORKSPACE_PROMPT
 
+from aef_domain.contexts.agent_sessions.domain.events.agent_observation import (
+    ObservationType,
+)
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -40,14 +43,14 @@ from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
-from aef_domain.contexts.agent_sessions.domain.events.agent_observation import (
-    ObservationType,
-)
 
 if TYPE_CHECKING:
     from aef_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
     from aef_adapters.conversations import ConversationStoragePort
     from aef_adapters.workspace_backends.service import WorkspaceService
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
     from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
@@ -59,9 +62,6 @@ if TYPE_CHECKING:
     )
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
-    )
-    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
     )
 
 

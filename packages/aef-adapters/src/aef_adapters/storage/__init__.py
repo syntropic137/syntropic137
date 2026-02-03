@@ -63,14 +63,14 @@ from aef_adapters.storage.repositories import (
 from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
     from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
-    )
-    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
     )
 
 

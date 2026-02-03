@@ -25,11 +25,11 @@ class TestDomainPackage:
 
         assert orchestration is not None
 
-    def test_import_sessions_context(self):
-        """Test that sessions context can be imported."""
-        from aef_domain.contexts import sessions
+    def test_import_agent_sessions_context(self):
+        """Test that agent_sessions context can be imported."""
+        from aef_domain.contexts import agent_sessions
 
-        assert sessions is not None
+        assert agent_sessions is not None
 
     def test_import_agents_context(self):
         """Test that agents context can be imported."""

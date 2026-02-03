@@ -13,8 +13,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from aef_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from aef_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
+from aef_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 
 class ExecutionCostProjection:

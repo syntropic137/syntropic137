@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
+from aef_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from aef_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
 )
-from aef_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 
 
 class MockProjectionStore:

@@ -21,15 +21,17 @@ from typing import TYPE_CHECKING, Any
 from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import ArtifactAggregate
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        AgentSessionAggregate,
+    )
+    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
     from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
-    )
-    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-        AgentSessionAggregate,
     )
 
 logger = logging.getLogger(__name__)
@@ -230,7 +232,9 @@ def get_artifact_repository() -> (
     if _artifact_repository is not None:
         return _artifact_repository
 
-    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import ArtifactAggregate
+    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(

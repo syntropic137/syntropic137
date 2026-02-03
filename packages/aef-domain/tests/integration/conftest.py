@@ -23,11 +23,11 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing import EventStoreRepository, GrpcEventStoreClient, RepositoryFactory
 
-    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
-    )
     from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
+    )
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
     )
 
 

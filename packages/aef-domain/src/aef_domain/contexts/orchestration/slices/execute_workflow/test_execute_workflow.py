@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import ArtifactAggregate
     from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
+    )
+    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
     )
 from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
