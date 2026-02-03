@@ -279,17 +279,20 @@ test:
     @echo "Running all tests..."
     uv run pytest
 
-# Static checks: lint + format + typecheck (fast, pre-commit)
+# Static checks: lint + format + typecheck + import check (fast, pre-commit)
 check:
     @echo "=== Static Checks ==="
     @echo ""
-    @echo "1️⃣ Linting..."
+    @echo "1️⃣ Import smoke test..."
+    @just import-check
+    @echo ""
+    @echo "2️⃣ Linting..."
     @uv run ruff check .
     @echo ""
-    @echo "2️⃣ Format check..."
+    @echo "3️⃣ Format check..."
     @uv run ruff format --check .
     @echo ""
-    @echo "3️⃣ Type checking..."
+    @echo "4️⃣ Type checking..."
     @uv run pyright || echo "⚠️  Type check failed (non-blocking for now)"
     @echo ""
     @echo "✅ Static checks passed!"
@@ -305,6 +308,10 @@ check-fix:
     @uv run ruff format .
     @echo ""
     @echo "✅ Static checks fixed!"
+
+# Quick import smoke test - catches broken imports fast
+import-check:
+    @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
 qa: lint format typecheck test dashboard-qa test-debt vsa-validate docs-sync
