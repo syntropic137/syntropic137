@@ -517,12 +517,33 @@ class ContainerAgentRunner:
                         if obs_event is not None and obs_event.tokens:
                             input_tokens = obs_event.tokens.input_tokens
                             output_tokens = obs_event.tokens.output_tokens
+                            cache_creation = obs_event.tokens.cache_creation_tokens
+                            cache_read = obs_event.tokens.cache_read_tokens
                             total_input_tokens = input_tokens  # Update cumulative (context window)
                             total_output_tokens += output_tokens
                             logger.debug(
-                                "Token usage: input=%d, output=%d",
+                                "Token usage: input=%d, output=%d, cache_create=%d, cache_read=%d",
                                 input_tokens,
                                 output_tokens,
+                                cache_creation,
+                                cache_read,
+                            )
+
+                            # Store token_usage event for projection to aggregate
+                            await self._store_event(
+                                {
+                                    "event_type": "token_usage",
+                                    "session_id": session_id,
+                                    "data": {
+                                        "input_tokens": input_tokens,
+                                        "output_tokens": output_tokens,
+                                        "cache_creation_tokens": cache_creation,
+                                        "cache_read_tokens": cache_read,
+                                    },
+                                    "timestamp": datetime.now(UTC).isoformat(),
+                                },
+                                execution_id,
+                                phase_id,
                             )
 
                     # ADR-037: Subagent lifecycle events (detected by EventParser)
