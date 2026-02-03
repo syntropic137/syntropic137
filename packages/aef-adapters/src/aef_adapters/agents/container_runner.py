@@ -579,6 +579,7 @@ class ContainerAgentRunner:
                         tool_use_id = obs_event.subagent_tool_use_id or ""
                         duration_ms = obs_event.duration_ms
                         success = obs_event.success if obs_event.success is not None else True
+                        tools_used = obs_event.tools_used or {}
 
                         # Store subagent_stopped event
                         await self._store_event(
@@ -589,6 +590,7 @@ class ContainerAgentRunner:
                                 "subagent_tool_use_id": tool_use_id,
                                 "duration_ms": duration_ms,
                                 "success": success,
+                                "tools_used": tools_used,
                                 "timestamp": datetime.now(UTC).isoformat(),
                             },
                             execution_id,
@@ -599,7 +601,7 @@ class ContainerAgentRunner:
                             agent_name=agent_name,
                             subagent_tool_use_id=tool_use_id,
                             duration_ms=duration_ms,
-                            tools_used={},  # TODO: Get from parser summary if needed
+                            tools_used=tools_used,
                             success=success,
                         )
                         logger.info(

@@ -133,6 +133,7 @@ class ModelRegistry:
         """Load fallback model definitions if primitives not available."""
         # Minimal fallback - uses actual existing API model names
         # Update these when new model versions are released
+        # TODO: hardcoded values. Not maintainable. Should come from a central config.
         self._aliases = {
             # Sonnet aliases
             "sonnet": "claude-sonnet-4-5-20250514",
@@ -148,7 +149,7 @@ class ModelRegistry:
 
     def resolve(self, model: str) -> str:
         """Resolve a model alias to its API name.
-
+        # TODO: hardcoded values. Not maintainable. Should come from a central config.
         Simple aliases resolve directly to API names:
         - "sonnet" -> "claude-sonnet-4-5-20250929"
         - "claude-sonnet" -> "claude-sonnet-4-5-20250929"
