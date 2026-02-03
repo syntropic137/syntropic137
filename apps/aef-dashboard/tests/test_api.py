@@ -22,7 +22,7 @@ from aef_adapters.storage import (
 )
 from aef_dashboard.main import app
 from aef_domain.contexts.agent_sessions._shared.value_objects import OperationType, SessionStatus
-from aef_domain.contexts.agent_sessions.domain.AgentSessionAggregate import (
+from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
 from aef_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
@@ -35,7 +35,9 @@ from aef_domain.contexts.agent_sessions.domain.commands.StartSessionCommand impo
     StartSessionCommand,
 )
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
-from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
+from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+    ArtifactAggregate,
+)
 from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
     CreateArtifactCommand,
 )
