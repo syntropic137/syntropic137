@@ -5,7 +5,7 @@
 All adapters in this module will raise TestEnvironmentRequiredError
 if used outside of APP_ENVIRONMENT=test or APP_ENVIRONMENT=testing.
 
-These adapters implement the port interfaces from aef_domain.contexts.workspaces:
+These adapters implement the port interfaces from aef_domain.contexts.orchestration:
 - MemoryIsolationAdapter: IsolationBackendPort
 - MemorySidecarAdapter: SidecarPort
 - MemoryTokenInjectionAdapter: TokenInjectionPort
@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from aef_domain.contexts.workspaces._shared.value_objects import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         Artifact,
         ArtifactCollectionResult,
         ExecutionResult,
@@ -159,7 +159,9 @@ class MemoryIsolationAdapter:
         Returns:
             IsolationHandle for subsequent operations
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            IsolationHandle,
+        )
 
         isolation_id = f"mem-{uuid.uuid4().hex[:12]}"
 
@@ -209,7 +211,9 @@ class MemoryIsolationAdapter:
         Returns:
             ExecutionResult with mock values
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import ExecutionResult
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
 
         state = self._instances.get(handle.isolation_id)
         if state is None:
@@ -352,7 +356,9 @@ class MemorySidecarAdapter:
         Returns:
             SidecarHandle for managing the mock sidecar
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import SidecarHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            SidecarHandle,
+        )
 
         sidecar_id = f"sidecar-{uuid.uuid4().hex[:8]}"
         proxy_url = f"http://localhost:{config.listen_port}"
@@ -445,7 +451,7 @@ class MemoryTokenInjectionAdapter:
         Returns:
             TokenInjectionResult indicating success
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             InjectionMethod,
             TokenInjectionResult,
         )
@@ -506,7 +512,7 @@ class MemoryArtifactAdapter:
         Returns:
             ArtifactCollectionResult with pre-configured artifacts
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
             ArtifactCollectionResult,
         )
 

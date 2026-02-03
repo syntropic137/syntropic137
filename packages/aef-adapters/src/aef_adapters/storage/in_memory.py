@@ -23,17 +23,17 @@ if TYPE_CHECKING:
 
     from event_sourcing import EventEnvelope
 
-    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
-        ArtifactAggregate,
-    )
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
+    )
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
+        WorkflowAggregate,
     )
 
 
@@ -164,11 +164,11 @@ class InMemoryWorkflowRepository:
         """Retrieve a workflow by ID, replaying events."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
-        )
-        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
             WorkflowAggregate,
+        )
+        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
+            WorkflowCreatedEvent,
         )
 
         str_id = str(workflow_id)
@@ -204,11 +204,11 @@ class InMemoryWorkflowRepository:
         """Get all workflows."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.workflows.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
-        )
-        from aef_domain.contexts.workflows.domain.WorkflowAggregate import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
             WorkflowAggregate,
+        )
+        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
+            WorkflowCreatedEvent,
         )
 
         # Get unique aggregate IDs

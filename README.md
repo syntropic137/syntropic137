@@ -13,24 +13,19 @@ The Agentic Engineering Framework provides:
 
 ## 🏗️ Architecture
 
-The system is organized into 9 bounded contexts following Vertical Slice Architecture (VSA) principles:
+The system is organized into 4 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![AEF Architecture](./docs/architecture/vsa-overview.svg)
 
 <details>
 <summary>📊 Context Overview</summary>
 
-| Context | Purpose | Features |
-|---------|---------|----------|
-| **Workflows** | Workflow definitions and execution lifecycle | 8 features |
-| **Workspaces** | Isolated workspace management | 6 features |
-| **Observability** | Token and tool metrics | 2 features |
-| **Sessions** | Agent session tracking | 4 features |
-| **Agents** | Core agent runtime and orchestration | 2 features |
-| **GitHub** | GitHub App integration | 4 features |
-| **Artifacts** | Artifact storage and retrieval | 4 features |
-| **Costs** | Cost tracking and aggregation | 4 features |
-| **Metrics** | Dashboard metrics | 1 feature |
+| Context | Aggregates | Purpose |
+|---------|------------|---------|
+| **Orchestration** | 3 | Workflow execution and workspace management (WorkflowAggregate, WorkspaceAggregate, WorkflowExecutionAggregate) |
+| **Agent Sessions** | 1 | Agent sessions and observability metrics (AgentSessionAggregate) |
+| **GitHub** | 1 | GitHub App integration and token management (InstallationAggregate) |
+| **Artifacts** | 1 | Artifact storage and retrieval (ArtifactAggregate) |
 
 **Infrastructure:**
 - TimescaleDB (projections)

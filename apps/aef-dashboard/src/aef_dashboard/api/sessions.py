@@ -13,11 +13,11 @@ from aef_dashboard.models.schemas import (
     SessionResponse,
     SessionSummary,
 )
-from aef_domain.contexts.sessions.domain.queries import ListSessionsQuery
-from aef_domain.contexts.sessions.slices.list_sessions import ListSessionsHandler
+from aef_domain.contexts.agent_sessions.domain.queries import ListSessionsQuery
+from aef_domain.contexts.agent_sessions.slices.list_sessions import ListSessionsHandler
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.sessions.domain.read_models import (
+    from aef_domain.contexts.agent_sessions.domain.read_models import (
         SessionSummary as DomainSessionSummary,
     )
 

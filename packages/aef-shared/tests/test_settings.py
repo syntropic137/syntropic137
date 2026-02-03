@@ -119,7 +119,7 @@ class TestComputedProperties:
         # With database configured = never in-memory
         with patch.dict(
             os.environ,
-            {"APP_ENVIRONMENT": "test", "DATABASE_URL": "postgresql://localhost/db"},
+            {"APP_ENVIRONMENT": "test", "AEF_OBSERVABILITY_DB_URL": "postgresql://localhost/db"},
             clear=True,
         ):
             settings = Settings(_env_file=None)

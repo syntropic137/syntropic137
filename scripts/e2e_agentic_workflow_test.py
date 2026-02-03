@@ -395,7 +395,7 @@ async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str)
 
         from decimal import Decimal
 
-        from aef_domain.contexts.workflows._shared.WorkflowExecutionAggregate import (
+        from aef_domain.contexts.orchestration._shared.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,

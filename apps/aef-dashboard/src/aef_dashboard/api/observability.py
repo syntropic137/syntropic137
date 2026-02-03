@@ -9,12 +9,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from aef_adapters.projections import get_projection_manager
-from aef_domain.contexts.observability.domain.queries import (
+from aef_domain.contexts.agent_sessions.domain.queries import (
     GetTokenMetricsQuery,
     GetToolTimelineQuery,
 )
-from aef_domain.contexts.observability.slices.token_metrics import TokenMetricsHandler
-from aef_domain.contexts.observability.slices.tool_timeline import ToolTimelineHandler
+from aef_domain.contexts.agent_sessions.slices.token_metrics import TokenMetricsHandler
+from aef_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineHandler
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 

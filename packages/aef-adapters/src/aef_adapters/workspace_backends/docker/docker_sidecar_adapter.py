@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workspaces._shared.value_objects import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
         SidecarConfig,
         SidecarHandle,
@@ -122,7 +122,9 @@ class DockerSidecarAdapter:
         Raises:
             RuntimeError: If sidecar creation fails
         """
-        from aef_domain.contexts.workspaces._shared.value_objects import SidecarHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            SidecarHandle,
+        )
 
         # Generate unique names
         short_id = uuid.uuid4().hex[:8]

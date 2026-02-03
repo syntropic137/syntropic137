@@ -12,25 +12,25 @@ from typing import Any, Protocol, runtime_checkable
 
 from aef_adapters.projection_stores import get_projection_store
 from aef_adapters.projections.session_tools import SessionToolsProjection
+from aef_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
+from aef_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
+from aef_domain.contexts.agent_sessions.slices.token_metrics import TokenMetricsProjection
+from aef_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
-from aef_domain.contexts.costs.slices.execution_cost.projection import (
+from aef_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
+from aef_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
 )
-from aef_domain.contexts.costs.slices.session_cost.projection import SessionCostProjection
-from aef_domain.contexts.metrics.slices.get_metrics import DashboardMetricsProjection
-from aef_domain.contexts.observability.slices.token_metrics import TokenMetricsProjection
-from aef_domain.contexts.observability.slices.tool_timeline import ToolTimelineProjection
-from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
-from aef_domain.contexts.workflows.slices.get_execution_detail import (
+from aef_domain.contexts.orchestration.slices.get_execution_detail import (
     WorkflowExecutionDetailProjection,
 )
-from aef_domain.contexts.workflows.slices.get_workflow_detail import (
+from aef_domain.contexts.orchestration.slices.get_workflow_detail import (
     WorkflowDetailProjection,
 )
-from aef_domain.contexts.workflows.slices.list_executions import (
+from aef_domain.contexts.orchestration.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
-from aef_domain.contexts.workflows.slices.list_workflows import WorkflowListProjection
+from aef_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
 from aef_shared.events import (
     TOKEN_USAGE,
     TOOL_BLOCKED,

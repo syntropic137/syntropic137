@@ -17,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -88,69 +89,90 @@ class AgentEventStore:
         )
 
         async with self.pool.acquire() as conn:
-            # Enable TimescaleDB extension
+            # =================================================================
+            # SCHEMA MANAGEMENT STRATEGY
+            # =================================================================
+            # Single Source of Truth: projection_stores/migrations/002_agent_events.sql
+            #
+            # The migration file defines the canonical schema. This Python code
+            # auto-creates the table as a fallback for development convenience,
+            # but the migration file is authoritative.
+            #
+            # To prevent schema drift:
+            # 1. Always update the migration file FIRST when changing schema
+            # 2. Run test_schema_consistency.py to verify Python matches SQL
+            # 3. Update EXPECTED_COLUMNS in models.py to match
+            # 4. Update docker/init-db if needed for fresh containers
+            #
+            # In production: Run migrations before deploying. Auto-creation is
+            # disabled when AEF_SKIP_AUTO_CREATE_TABLES=true.
+            # =================================================================
+
+            skip_auto_create = os.environ.get("AEF_SKIP_AUTO_CREATE_TABLES", "").lower() == "true"
+
+            # Enable TimescaleDB extension (always needed)
             await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;")
 
-            # Create events table with UUID for proper type safety
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS agent_events (
-                    id UUID DEFAULT gen_random_uuid(),
-                    time TIMESTAMPTZ NOT NULL,
-                    event_type VARCHAR(100) NOT NULL,
-                    session_id UUID,
-                    execution_id UUID,
-                    phase_id VARCHAR(255),
-                    data JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    PRIMARY KEY (id, time)
-                )
-            """)
-
-            # Create hypertable (partitioned by time)
-            await conn.execute("""
-                SELECT create_hypertable(
-                    'agent_events',
-                    'time',
-                    if_not_exists => TRUE,
-                    chunk_time_interval => INTERVAL '1 day'
-                )
-            """)
-
-            # Create indexes for common queries
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_events_session
-                ON agent_events (session_id, time DESC)
-            """)
-
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_events_execution
-                ON agent_events (execution_id, time DESC)
-            """)
-
-            await conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_events_type
-                ON agent_events (event_type, time DESC)
-            """)
-
-            # Configure compression for scale
-            try:
+            if not skip_auto_create:
+                # Auto-create table and indexes (development fallback)
+                # Schema MUST match: projection_stores/migrations/002_agent_events.sql
                 await conn.execute("""
-                    ALTER TABLE agent_events SET (
-                        timescaledb.compress,
-                        timescaledb.compress_segmentby = 'session_id',
-                        timescaledb.compress_orderby = 'time DESC'
+                    CREATE TABLE IF NOT EXISTS agent_events (
+                        time TIMESTAMPTZ NOT NULL,
+                        event_type TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        execution_id TEXT,
+                        phase_id TEXT,
+                        data JSONB NOT NULL
                     )
                 """)
 
+                # Create hypertable (partitioned by time)
                 await conn.execute("""
-                    SELECT add_compression_policy(
+                    SELECT create_hypertable(
                         'agent_events',
-                        INTERVAL '1 day',
-                        if_not_exists => TRUE
+                        'time',
+                        if_not_exists => TRUE,
+                        chunk_time_interval => INTERVAL '1 day'
                     )
                 """)
-            except asyncpg.PostgresError:
-                # Compression might already be enabled
-                pass
+
+                # Create indexes for common queries
+                await conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_events_session
+                    ON agent_events (session_id, time DESC)
+                """)
+
+                await conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_events_execution
+                    ON agent_events (execution_id, time DESC)
+                """)
+
+                await conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_events_type
+                    ON agent_events (event_type, time DESC)
+                """)
+
+                # Configure compression for scale
+                try:
+                    await conn.execute("""
+                        ALTER TABLE agent_events SET (
+                            timescaledb.compress,
+                            timescaledb.compress_segmentby = 'session_id',
+                            timescaledb.compress_orderby = 'time DESC'
+                        )
+                    """)
+
+                    await conn.execute("""
+                        SELECT add_compression_policy(
+                            'agent_events',
+                            INTERVAL '1 day',
+                            if_not_exists => TRUE
+                        )
+                    """)
+                except asyncpg.PostgresError:
+                    # Compression might already be enabled
+                    pass
 
             # Validate schema matches expected columns (inside connection context)
             await self._validate_schema(conn)

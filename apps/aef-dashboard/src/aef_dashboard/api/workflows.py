@@ -20,20 +20,20 @@ from aef_dashboard.models.schemas import (
     WorkflowResponse,
     WorkflowSummary,
 )
-from aef_domain.contexts.workflows.domain.queries import (
+from aef_domain.contexts.orchestration.domain.queries import (
     GetWorkflowDetailQuery,
     ListWorkflowsQuery,
 )
-from aef_domain.contexts.workflows.slices.get_workflow_detail import (
+from aef_domain.contexts.orchestration.slices.get_workflow_detail import (
     GetWorkflowDetailHandler,
 )
-from aef_domain.contexts.workflows.slices.list_workflows import ListWorkflowsHandler
+from aef_domain.contexts.orchestration.slices.list_workflows import ListWorkflowsHandler
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows.domain.read_models import (
+    from aef_domain.contexts.orchestration.domain.read_models import (
         WorkflowDetail,
     )
-    from aef_domain.contexts.workflows.domain.read_models import (
+    from aef_domain.contexts.orchestration.domain.read_models import (
         WorkflowSummary as DomainWorkflowSummary,
     )
 

@@ -3,7 +3,7 @@
 Contains aggregates, queries, and read models.
 """
 
-from aef_domain.contexts.github.domain.InstallationAggregate import (
+from aef_domain.contexts.github.domain.aggregate_installation.InstallationAggregate import (
     InstallationAggregate,
 )
 

@@ -55,6 +55,65 @@ lib/agentic-primitives/  ← Shared library (git submodule)
     └── agentic_isolation/ ← Workspace providers
 ```
 
+## 🚨 CRITICAL: Bounded Context & Aggregate Rules
+
+> **Reference:** See [ADR-020](lib/event-sourcing-platform/docs/adrs/ADR-020-bounded-context-aggregate-convention.md) and [VSA Quick Reference](lib/event-sourcing-platform/vsa/docs/QUICK-REFERENCE.md)
+
+### ❌ DO NOT
+
+1. **DO NOT create new top-level context directories for projections**
+   - Projections belong in `slices/` of the bounded context that OWNS the data
+   - Example: `session_cost` projection → `sessions/slices/session_cost/` (NOT `costs/`)
+
+2. **DO NOT put aggregate files directly in `domain/`**
+   - Use `domain/aggregate_<name>/` folders
+   - Example: `domain/aggregate_workspace/WorkspaceAggregate.py` (NOT `domain/WorkspaceAggregate.py`)
+
+3. **DO NOT create generic file names**
+   - Use full names: `WorkspaceAggregate.py` (NOT `aggregate.py`)
+   - Editor tabs should be informative
+
+### ✅ DO
+
+1. **Multiple aggregates in ONE bounded context** when they share domain language
+   ```
+   orchestration/domain/
+   ├── aggregate_workspace/WorkspaceAggregate.py
+   ├── aggregate_workflow/WorkflowAggregate.py
+   └── aggregate_execution/WorkflowExecutionAggregate.py
+   ```
+
+2. **Co-locate entities and value objects** with their aggregate root
+   ```
+   domain/aggregate_workspace/
+   ├── WorkspaceAggregate.py    # Root
+   ├── IsolationHandle.py       # Entity
+   └── SecurityPolicy.py        # Value Object
+   ```
+
+3. **Bounded context = Has aggregates**
+   - A valid bounded context MUST have `aggregate_*/` folders
+   - Projection-only modules are NOT bounded contexts
+
+### Current Bounded Contexts
+
+| Context | Aggregates | Purpose |
+|---------|------------|---------|
+| `orchestration` | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
+| `agent_sessions` | AgentSession | Agent sessions and observability |
+| `github` | Installation | GitHub App integration |
+| `artifacts` | Artifact | Artifact storage |
+
+### Quick Checklist
+
+```
+✅ Aggregate in aggregate_*/ folder
+✅ Full file names (WorkspaceAggregate.py not aggregate.py)
+✅ One *Aggregate.py per aggregate_*/ folder
+✅ Projections in owning context's slices/
+✅ No orphan projection modules at top level
+```
+
 ## ⚠️ KEY CONCEPT: Containerized Agent Execution
 
 **Claude CLI runs INSIDE Docker containers, not on the host.**
