@@ -22,12 +22,14 @@ from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
     from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
+    )
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
+        WorkflowAggregate,
+    )
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+        AgentSessionAggregate,
     )
 
 logger = logging.getLogger(__name__)
@@ -107,7 +109,9 @@ def get_workflow_repository() -> (
     if _workflow_repository is not None:
         return _workflow_repository
 
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
+        WorkflowAggregate,
+    )
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(

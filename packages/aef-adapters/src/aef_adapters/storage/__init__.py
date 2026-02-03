@@ -66,11 +66,11 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
         ArtifactAggregate,
     )
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
+    )
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+        AgentSessionAggregate,
     )
 
 

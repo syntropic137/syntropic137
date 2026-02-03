@@ -13,8 +13,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from aef_domain.contexts.sessions.domain.read_models.session_cost import SessionCost
 from aef_domain.contexts.sessions.domain.events.agent_observation import ObservationType
+from aef_domain.contexts.sessions.domain.read_models.session_cost import SessionCost
 
 
 class SessionCostProjection:

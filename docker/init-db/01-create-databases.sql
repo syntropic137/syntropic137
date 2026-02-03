@@ -87,10 +87,48 @@ CREATE TRIGGER update_workflow_definitions_timestamp
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at();
 
+-- Session conversations index table (ADR-035)
+-- Session is the atomic unit - one session = one conversation file in S3
+CREATE TABLE IF NOT EXISTS public.session_conversations (
+    session_id TEXT PRIMARY KEY,
+
+    -- Storage reference (MinIO/S3)
+    bucket TEXT NOT NULL DEFAULT 'aef-conversations',
+    object_key TEXT NOT NULL,
+    size_bytes BIGINT,
+
+    -- Correlation (for projection aggregation)
+    execution_id TEXT,
+    phase_id TEXT,
+    workflow_id TEXT,
+
+    -- Summary metrics (extracted from conversation)
+    event_count INTEGER,
+    total_input_tokens INTEGER,
+    total_output_tokens INTEGER,
+    tool_counts JSONB,  -- {"Bash": 5, "Read": 3, "Write": 2}
+
+    -- Timestamps
+    started_at TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ,
+
+    -- Agent metadata
+    model TEXT,
+    success BOOLEAN,
+
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_session_conv_execution ON session_conversations(execution_id);
+CREATE INDEX IF NOT EXISTS idx_session_conv_workflow ON session_conversations(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_session_conv_time ON session_conversations(started_at DESC);
+
 -- Comments for documentation
 COMMENT ON SCHEMA event_store IS 'Event sourcing infrastructure';
 COMMENT ON TABLE event_store.events IS 'Immutable event log';
 COMMENT ON TABLE event_store.processor_todos IS 'Processor work queue (todo pattern)';
 COMMENT ON TABLE public.workflow_definitions IS 'Workflow templates seeded from YAML';
 COMMENT ON TABLE public.artifacts IS 'Phase output artifacts';
+COMMENT ON TABLE public.session_conversations IS 'Index of conversation logs stored in MinIO/S3. See ADR-035.';
 

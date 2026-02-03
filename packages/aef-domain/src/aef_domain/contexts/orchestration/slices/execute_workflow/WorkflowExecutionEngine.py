@@ -25,9 +25,6 @@ from agentic_events import enrich_event, parse_jsonl_line
 from agentic_workspace import AEF_WORKSPACE_PROMPT
 
 from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
-from aef_domain.contexts.sessions.domain.events.agent_observation import (
-    ObservationType,
-)
 from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -43,6 +40,9 @@ from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from aef_domain.contexts.sessions.domain.events.agent_observation import (
+    ObservationType,
+)
 
 if TYPE_CHECKING:
     from aef_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
@@ -57,11 +57,11 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
-        AgentSessionAggregate,
-    )
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
+    )
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+        AgentSessionAggregate,
     )
 
 
@@ -184,6 +184,9 @@ class ExecutionContext:
     phase_results: list[PhaseResult] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
     completed_phase_ids: list[str] = field(default_factory=list)  # For querying artifacts
+    phase_outputs: dict[str, str] = field(
+        default_factory=dict
+    )  # In-memory cache for phase outputs (phase_id -> content)
 
 
 class WorkflowExecutionEngine:
@@ -623,9 +626,19 @@ class WorkflowExecutionEngine:
                 title=f"{phase.name} Output",
             )
 
-            # Track completed phase for artifact queries (DB-backed, not in-memory)
+            # Track completed phase for artifact queries
             ctx.completed_phase_ids.append(phase.phase_id)
             ctx.artifact_ids.append(artifact_id)
+
+            # Store in in-memory cache for immediate use by next phase
+            # This avoids eventual consistency issues with projection queries
+            if response.content:
+                ctx.phase_outputs[phase.phase_id] = response.content
+                logger.info(
+                    "Phase output cached for injection: %s (%d chars)",
+                    phase.phase_id,
+                    len(response.content),
+                )
 
             # Record phase result
             phase_completed_at = datetime.now(UTC)
@@ -762,23 +775,34 @@ class WorkflowExecutionEngine:
         for key, value in ctx.inputs.items():
             prompt = prompt.replace(f"{{{{{key}}}}}", str(value))
 
-        # Substitute previous phase outputs from DB
-        if self._artifact_query and ctx.completed_phase_ids:
-            phase_outputs = await self._artifact_query.get_for_phase_injection(
-                execution_id=ctx.execution_id,
-                completed_phase_ids=ctx.completed_phase_ids,
-            )
+        # Substitute previous phase outputs (in-memory cache first, then DB)
+        if ctx.completed_phase_ids:
+            # 1. Get from in-memory cache first (immediate, no eventual consistency)
+            phase_outputs: dict[str, str] = {}
+            for pid in ctx.completed_phase_ids:
+                if pid in ctx.phase_outputs:
+                    phase_outputs[pid] = ctx.phase_outputs[pid]
+
+            # 2. Query projection for any missing phases
+            missing_phases = [pid for pid in ctx.completed_phase_ids if pid not in phase_outputs]
+            if missing_phases and self._artifact_query:
+                projection_outputs = await self._artifact_query.get_for_phase_injection(
+                    execution_id=ctx.execution_id,
+                    completed_phase_ids=missing_phases,
+                )
+                phase_outputs.update(projection_outputs)
+            elif missing_phases and not self._artifact_query:
+                logger.warning(
+                    "artifact_query_service not configured - some phase outputs cannot be "
+                    "injected into prompt. Missing phases: %s",
+                    missing_phases,
+                )
+
+            # 3. Substitute into prompt
             for phase_id, content in phase_outputs.items():
                 # Support both {{phase_id}} and {{phase_id_output}} patterns
                 prompt = prompt.replace(f"{{{{{phase_id}}}}}", content)
                 prompt = prompt.replace(f"{{{{{phase_id}_output}}}}", content)
-        elif ctx.completed_phase_ids and not self._artifact_query:
-            logger.warning(
-                "artifact_query_service not configured - phase outputs cannot be "
-                "injected into prompt for phase %s. Configure ArtifactQueryService "
-                "for multi-phase workflows.",
-                phase.phase_id,
-            )
 
         return prompt
 
@@ -980,6 +1004,12 @@ class WorkflowExecutionEngine:
             await self._sessions.save(session)
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
+        # ADR-035: Initialize conversation tracking variables before try block
+        # This ensures we can store partial conversation logs even on early failures
+        conversation_lines: list[str] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+
         try:
             # Create isolated workspace using WorkspaceService
             # Setup phase secrets pattern (ADR-024): secrets available during
@@ -1008,11 +1038,27 @@ class WorkflowExecutionEngine:
 
                 # Inject input artifacts from previous phases
                 # ADR-036: Write to artifacts/input/ (not inputs/)
-                if self._artifact_query and ctx.completed_phase_ids:
-                    phase_outputs = await self._artifact_query.get_for_phase_injection(
-                        execution_id=ctx.execution_id,
-                        completed_phase_ids=ctx.completed_phase_ids,
-                    )
+                if ctx.completed_phase_ids:
+                    # Use in-memory cache first (avoids eventual consistency issues)
+                    # Fall back to projection query for phases not in cache
+                    phase_outputs: dict[str, str] = {}
+
+                    # 1. Get from in-memory cache (immediate, no eventual consistency)
+                    for pid in ctx.completed_phase_ids:
+                        if pid in ctx.phase_outputs:
+                            phase_outputs[pid] = ctx.phase_outputs[pid]
+
+                    # 2. Query projection for any missing phases
+                    missing_phases = [
+                        pid for pid in ctx.completed_phase_ids if pid not in phase_outputs
+                    ]
+                    if missing_phases and self._artifact_query:
+                        projection_outputs = await self._artifact_query.get_for_phase_injection(
+                            execution_id=ctx.execution_id,
+                            completed_phase_ids=missing_phases,
+                        )
+                        phase_outputs.update(projection_outputs)
+
                     # Write artifacts to /workspace/artifacts/input/
                     files_to_inject = [
                         (f"artifacts/input/{prev_phase_id}.md", content.encode())
@@ -1020,6 +1066,16 @@ class WorkflowExecutionEngine:
                     ]
                     if files_to_inject:
                         await workspace.inject_files(files_to_inject)
+                        logger.info(
+                            "Injected %d artifact(s) from previous phases: %s",
+                            len(files_to_inject),
+                            list(phase_outputs.keys()),
+                        )
+                    elif ctx.completed_phase_ids:
+                        logger.warning(
+                            "No artifacts found for completed phases: %s",
+                            ctx.completed_phase_ids,
+                        )
 
                 # Build task.json (kept for future use with task file injection)
                 prompt = await self._build_prompt(phase, ctx)
@@ -1455,8 +1511,10 @@ class WorkflowExecutionEngine:
 
                 # Create artifact records for each output
                 artifact_ids: list[str] = []
+                first_artifact_content: str | None = None
                 for artifact_path, artifact_content in artifacts:
                     artifact_id = str(uuid4())
+                    content_str = artifact_content.decode("utf-8", errors="replace")
                     await self._create_artifact(
                         artifact_id=artifact_id,
                         workflow_id=ctx.workflow_id,
@@ -1464,11 +1522,24 @@ class WorkflowExecutionEngine:
                         execution_id=ctx.execution_id,
                         session_id=session_id,
                         artifact_type=phase.output_artifact_type,
-                        content=artifact_content.decode("utf-8", errors="replace"),
+                        content=content_str,
                         title=f"{phase.name}: {artifact_path}",
                     )
                     artifact_ids.append(artifact_id)
                     ctx.artifact_ids.append(artifact_id)
+                    # Store first artifact for phase-to-phase injection
+                    if first_artifact_content is None:
+                        first_artifact_content = content_str
+
+                # Store in in-memory cache for immediate use by next phase
+                # This avoids eventual consistency issues with projection queries
+                if first_artifact_content:
+                    ctx.phase_outputs[phase.phase_id] = first_artifact_content
+                    logger.info(
+                        "Phase output cached for injection: %s (%d chars)",
+                        phase.phase_id,
+                        len(first_artifact_content),
+                    )
 
             # Workspace destroyed here (context manager exit)
 
@@ -1556,6 +1627,43 @@ class WorkflowExecutionEngine:
                 error_message=str(e),
             )
             ctx.phase_results.append(result)
+
+            # ADR-035: Store conversation log even on failure
+            # This ensures we capture partial conversation for debugging and analysis
+            if self._conversation_storage is not None and conversation_lines:
+                try:
+                    from aef_adapters.conversations import SessionContext
+
+                    conv_context = SessionContext(
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        workflow_id=ctx.workflow_id,
+                        model=phase.agent_config.model,
+                        event_count=len(conversation_lines),
+                        tool_counts={},
+                        total_input_tokens=total_input_tokens,
+                        total_output_tokens=total_output_tokens,
+                        started_at=phase_started_at,
+                        completed_at=phase_completed_at,
+                        success=False,  # Mark as failed
+                    )
+                    await self._conversation_storage.store_session(
+                        session_id=session_id,
+                        lines=conversation_lines,
+                        context=conv_context,
+                    )
+                    logger.info(
+                        "Conversation log stored (failed phase): %s (%d lines)",
+                        session_id,
+                        len(conversation_lines),
+                    )
+                except Exception as conv_err:
+                    # Don't let conversation storage failure hide the original error
+                    logger.warning(
+                        "Failed to store conversation log for failed phase %s: %s",
+                        session_id,
+                        conv_err,
+                    )
 
             # Complete session aggregate (failure)
             if session is not None and self._sessions is not None:

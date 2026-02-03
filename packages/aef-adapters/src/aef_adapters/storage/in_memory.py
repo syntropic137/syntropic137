@@ -26,14 +26,14 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
         ArtifactAggregate,
     )
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
-        AgentSessionAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
     )
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
     )
-    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-        WorkflowExecutionAggregate,
+    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+        AgentSessionAggregate,
     )
 
 
@@ -164,11 +164,11 @@ class InMemoryWorkflowRepository:
         """Retrieve a workflow by ID, replaying events."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
-        )
         from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
             WorkflowAggregate,
+        )
+        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
+            WorkflowCreatedEvent,
         )
 
         str_id = str(workflow_id)
@@ -204,11 +204,11 @@ class InMemoryWorkflowRepository:
         """Get all workflows."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
-        )
         from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
             WorkflowAggregate,
+        )
+        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
+            WorkflowCreatedEvent,
         )
 
         # Get unique aggregate IDs

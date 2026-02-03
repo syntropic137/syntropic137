@@ -5,6 +5,13 @@ Events represent facts - things that have happened.
 """
 
 # Workflow execution events
+# Workspace events
+from aef_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
+    CommandExecutedEvent,
+)
+from aef_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
+    CommandFailedEvent,
+)
 from aef_domain.contexts.orchestration.domain.events.ExecutionCancelledEvent import (
     ExecutionCancelledEvent,
 )
@@ -14,11 +21,17 @@ from aef_domain.contexts.orchestration.domain.events.ExecutionPausedEvent import
 from aef_domain.contexts.orchestration.domain.events.ExecutionResumedEvent import (
     ExecutionResumedEvent,
 )
+from aef_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
+    IsolationStartedEvent,
+)
 from aef_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
     PhaseCompletedEvent,
 )
 from aef_domain.contexts.orchestration.domain.events.PhaseStartedEvent import (
     PhaseStartedEvent,
+)
+from aef_domain.contexts.orchestration.domain.events.TokensInjectedEvent import (
+    TokensInjectedEvent,
 )
 from aef_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
@@ -31,20 +44,6 @@ from aef_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEve
 )
 from aef_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
-)
-
-# Workspace events
-from aef_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
-    CommandExecutedEvent,
-)
-from aef_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
-    CommandFailedEvent,
-)
-from aef_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
-    IsolationStartedEvent,
-)
-from aef_domain.contexts.orchestration.domain.events.TokensInjectedEvent import (
-    TokensInjectedEvent,
 )
 from aef_domain.contexts.orchestration.domain.events.WorkspaceCommandExecutedEvent import (
     WorkspaceCommandExecutedEvent,
@@ -69,21 +68,21 @@ from aef_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent im
 )
 
 __all__ = [
+    # Workspace events
+    "CommandExecutedEvent",
+    "CommandFailedEvent",
     # Workflow execution events
     "ExecutionCancelledEvent",
     "ExecutionPausedEvent",
     "ExecutionResumedEvent",
+    "IsolationStartedEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
+    "TokensInjectedEvent",
     "WorkflowCompletedEvent",
     "WorkflowCreatedEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
-    # Workspace events
-    "CommandExecutedEvent",
-    "CommandFailedEvent",
-    "IsolationStartedEvent",
-    "TokensInjectedEvent",
     "WorkspaceCommandExecutedEvent",
     "WorkspaceCreatedEvent",
     "WorkspaceCreatingEvent",

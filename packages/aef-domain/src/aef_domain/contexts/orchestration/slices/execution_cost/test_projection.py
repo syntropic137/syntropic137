@@ -5,7 +5,9 @@ from typing import Any
 
 import pytest
 
-from aef_domain.contexts.orchestration.slices.execution_cost.projection import ExecutionCostProjection
+from aef_domain.contexts.orchestration.slices.execution_cost.projection import (
+    ExecutionCostProjection,
+)
 from aef_domain.contexts.sessions.domain.events.agent_observation import ObservationType
 
 

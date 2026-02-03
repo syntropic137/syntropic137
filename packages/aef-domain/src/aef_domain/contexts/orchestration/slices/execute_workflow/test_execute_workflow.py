@@ -26,11 +26,11 @@ from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects i
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
-)
 from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
     WorkflowAggregate,
+)
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
+    CreateWorkflowCommand,
 )
 from aef_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
     ExecutionContext,
@@ -182,12 +182,14 @@ class MockWorkspaceRouter:
 
         @asynccontextmanager
         async def _mock_workspace() -> Any:
-            self._workspaces_created.append({
-                "execution_id": execution_id,
-                "workflow_id": workflow_id,
-                "phase_id": phase_id,
-                **kwargs,
-            })
+            self._workspaces_created.append(
+                {
+                    "execution_id": execution_id,
+                    "workflow_id": workflow_id,
+                    "phase_id": phase_id,
+                    **kwargs,
+                }
+            )
             yield MockWorkspace(mock_agent_output=mock_output)
 
         return _mock_workspace()

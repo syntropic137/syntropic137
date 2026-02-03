@@ -19,6 +19,9 @@ from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
     TokenType,
     WorkspaceStatus,
 )
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
+    WorkspaceAggregate,
+)
 from aef_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
@@ -31,7 +34,6 @@ from aef_domain.contexts.orchestration.domain.commands.InjectTokensCommand impor
 from aef_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
-from aef_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import WorkspaceAggregate
 
 # =============================================================================
 # FIXTURES

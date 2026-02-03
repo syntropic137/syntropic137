@@ -104,7 +104,9 @@ class AgenticIsolationAdapter:
         """
         from agentic_isolation import WorkspaceConfig
 
-        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            IsolationHandle,
+        )
 
         # Map AEF config to agentic_isolation config
         ws_config = WorkspaceConfig(
@@ -174,7 +176,9 @@ class AgenticIsolationAdapter:
         Returns:
             ExecutionResult with exit code, stdout, stderr
         """
-        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import ExecutionResult
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
 
         workspace = self._workspaces.get(handle.isolation_id)
         if workspace is None:
@@ -242,27 +246,101 @@ class AgenticIsolationAdapter:
         self,
         handle: IsolationHandle,
         patterns: list[str],
-        base_path: str = "/workspace",
+        base_path: str = "/workspace",  # noqa: ARG002 - used for container path mapping
     ) -> list[tuple[str, bytes]]:
-        """Copy files from workspace.
+        """Copy files from workspace via mounted volume.
+
+        The Docker provider mounts the workspace directory, so files created
+        inside the container are accessible on the host at host_workspace_path.
 
         Args:
             handle: Handle from create()
-            patterns: Glob patterns to match
-            base_path: Base path for glob matching
+            patterns: Glob patterns to match (e.g., ["artifacts/output/**/*"])
+            base_path: Base path inside container (not used - we read from host mount)
 
         Returns:
-            List of (path, content) tuples
+            List of (relative_path, content) tuples for matching files
         """
-        # TODO: Implement file collection from workspace
-        # This would use docker cp or exec to read files matching patterns
-        logger.warning(
-            "copy_from not implemented (workspace=%s, patterns=%s, base=%s)",
+        from pathlib import Path
+
+        host_workspace = handle.host_workspace_path
+        if not host_workspace:
+            logger.warning(
+                "copy_from: No host_workspace_path in handle (workspace=%s)",
+                handle.isolation_id,
+            )
+            return []
+
+        workspace_path = Path(host_workspace)
+        logger.info(
+            "copy_from: Checking path %s (exists=%s, workspace=%s)",
+            workspace_path,
+            workspace_path.exists(),
             handle.isolation_id,
-            patterns,
-            base_path,
         )
-        return []
+
+        if not workspace_path.exists():
+            logger.warning(
+                "copy_from: Workspace path does not exist (workspace=%s, path=%s)",
+                handle.isolation_id,
+                workspace_path,
+            )
+            return []
+
+        # List what's actually in the workspace for debugging
+        try:
+            all_files = list(workspace_path.rglob("*"))
+            logger.info(
+                "copy_from: Found %d total files in workspace: %s",
+                len(all_files),
+                [str(f.relative_to(workspace_path)) for f in all_files[:20]],
+            )
+        except Exception as e:
+            logger.warning("copy_from: Failed to list files: %s", e)
+
+        results: list[tuple[str, bytes]] = []
+        seen_paths: set[str] = set()  # Avoid duplicates if patterns overlap
+
+        # Use Path.glob() for each pattern - this properly handles **
+        for pattern in patterns:
+            # Clean the pattern for glob
+            clean_pattern = pattern.lstrip("/")
+            if clean_pattern.startswith("workspace/"):
+                clean_pattern = clean_pattern[len("workspace/") :]
+
+            logger.debug("copy_from: Globbing pattern: %s", clean_pattern)
+
+            for file_path in workspace_path.glob(clean_pattern):
+                if not file_path.is_file():
+                    continue
+
+                relative_path = str(file_path.relative_to(workspace_path))
+                if relative_path in seen_paths:
+                    continue
+                seen_paths.add(relative_path)
+
+                try:
+                    content = file_path.read_bytes()
+                    results.append((relative_path, content))
+                    logger.info(
+                        "copy_from: Collected file %s (%d bytes)",
+                        relative_path,
+                        len(content),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "copy_from: Failed to read file %s: %s",
+                        relative_path,
+                        e,
+                    )
+
+        logger.info(
+            "copy_from: Collected %d files matching patterns %s (workspace=%s)",
+            len(results),
+            patterns,
+            handle.isolation_id,
+        )
+        return results
 
 
 class AgenticEventStreamAdapter:

@@ -159,7 +159,9 @@ class MemoryIsolationAdapter:
         Returns:
             IsolationHandle for subsequent operations
         """
-        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import IsolationHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            IsolationHandle,
+        )
 
         isolation_id = f"mem-{uuid.uuid4().hex[:12]}"
 
@@ -209,7 +211,9 @@ class MemoryIsolationAdapter:
         Returns:
             ExecutionResult with mock values
         """
-        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import ExecutionResult
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            ExecutionResult,
+        )
 
         state = self._instances.get(handle.isolation_id)
         if state is None:
@@ -352,7 +356,9 @@ class MemorySidecarAdapter:
         Returns:
             SidecarHandle for managing the mock sidecar
         """
-        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import SidecarHandle
+        from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+            SidecarHandle,
+        )
 
         sidecar_id = f"sidecar-{uuid.uuid4().hex[:8]}"
         proxy_url = f"http://localhost:{config.listen_port}"

@@ -11,15 +11,15 @@ from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects i
     WorkflowClassification,
     WorkflowType,
 )
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
+    WorkflowAggregate,
+    WorkflowStatus,
+)
 from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
 from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
     WorkflowCreatedEvent,
-)
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-    WorkflowAggregate,
-    WorkflowStatus,
 )
 from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
     CreateWorkflowHandler,

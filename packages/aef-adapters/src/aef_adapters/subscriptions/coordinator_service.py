@@ -284,8 +284,9 @@ def create_coordinator_service(
         Configured CoordinatorSubscriptionService
     """
     from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
-    from aef_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
-    from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
+    from aef_domain.contexts.orchestration.slices.dashboard_metrics import (
+        DashboardMetricsProjection,
+    )
     from aef_domain.contexts.orchestration.slices.get_execution_detail import (
         WorkflowExecutionDetailProjection,
     )
@@ -296,6 +297,7 @@ def create_coordinator_service(
         WorkflowExecutionListProjection,
     )
     from aef_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+    from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
 
     # Create all checkpointed projections
     projections: list[CheckpointedProjection] = [
