@@ -7,7 +7,9 @@ All execution events MUST be persisted via this repository.
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.orchestration._shared import WorkflowExecutionAggregate
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+        WorkflowExecutionAggregate,
+    )
 
 
 class WorkflowExecutionRepositoryPort(Protocol):

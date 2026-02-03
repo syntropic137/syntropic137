@@ -7,7 +7,9 @@ Adapters in aef-adapters implement this protocol structurally (duck typing).
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.orchestration._shared import WorkflowAggregate
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
+        WorkflowAggregate,
+    )
 
 
 class WorkflowRepositoryPort(Protocol):

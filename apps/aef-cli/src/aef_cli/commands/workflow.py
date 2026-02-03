@@ -996,13 +996,14 @@ def run_workflow(
                             phase_name = p.get("name", phase_result.phase_id)
                             break
 
-                    status_icon = {
+                    status_icons = {
                         PhaseStatus.COMPLETED: "[green]✓[/green]",
                         PhaseStatus.FAILED: "[red]✗[/red]",
                         PhaseStatus.RUNNING: "[yellow]⋯[/yellow]",
                         PhaseStatus.PENDING: "[dim]○[/dim]",
                         PhaseStatus.SKIPPED: "[dim]-[/dim]",
-                    }.get(phase_result.status, "[dim]?[/dim]")
+                    }
+                    status_icon = status_icons.get(PhaseStatus(phase_result.status), "[dim]?[/dim]")
 
                     table.add_row(
                         phase_name,
