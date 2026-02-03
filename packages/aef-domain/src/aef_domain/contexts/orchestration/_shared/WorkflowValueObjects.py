@@ -1,6 +1,7 @@
-"""Value objects for the workflows bounded context.
+"""Value objects for the orchestration bounded context.
 
-Re-exports from the canonical location in aggregate_workflow.
+Compatibility re-exports from the canonical location in aggregate_workflow.
+This module exists for backward compatibility with code that imported from _shared.
 """
 
 from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (

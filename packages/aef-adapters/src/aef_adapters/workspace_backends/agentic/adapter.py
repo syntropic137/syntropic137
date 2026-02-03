@@ -287,16 +287,17 @@ class AgenticIsolationAdapter:
             )
             return []
 
-        # List what's actually in the workspace for debugging
-        try:
-            all_files = list(workspace_path.rglob("*"))
-            logger.info(
-                "copy_from: Found %d total files in workspace: %s",
-                len(all_files),
-                [str(f.relative_to(workspace_path)) for f in all_files[:20]],
-            )
-        except Exception as e:
-            logger.warning("copy_from: Failed to list files: %s", e)
+        # List what's actually in the workspace for debugging (guarded for performance)
+        if logger.isEnabledFor(logging.DEBUG):
+            try:
+                all_files = list(workspace_path.rglob("*"))
+                logger.debug(
+                    "copy_from: Found %d total files in workspace: %s",
+                    len(all_files),
+                    [str(f.relative_to(workspace_path)) for f in all_files[:20]],
+                )
+            except Exception as e:
+                logger.debug("copy_from: Failed to list files: %s", e)
 
         results: list[tuple[str, bytes]] = []
         seen_paths: set[str] = set()  # Avoid duplicates if patterns overlap
