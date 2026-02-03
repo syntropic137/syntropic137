@@ -424,9 +424,18 @@ lint:
 format:
     uv run ruff format .
 
+# Check formatting without changing files (same as CI)
+format-check:
+    uv run ruff format --check .
+
 # Run type checker (strict mode)
 typecheck:
     uv run mypy apps packages
+
+# CI-equivalent checks (run before pushing!)
+ci-check: lint format-check typecheck
+    @echo ""
+    @echo "✅ All CI checks passed! Safe to push."
 
 # Run VSA validation (requires event-sourcing-platform submodule)
 vsa-validate:
