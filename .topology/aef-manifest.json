@@ -1,7 +1,7 @@
 {
   "version": "0.8.0",
   "schema_version": "2.3.0",
-  "generated_at": "2026-02-03T18:43:04.962243+00:00",
+  "generated_at": "2026-02-03T19:07:42.812354+00:00",
   "bounded_contexts": [
     {
       "name": "artifacts",
@@ -1391,32 +1391,67 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "workflow_created": [
-          "WorkflowDetailProjection",
-          "WorkflowListProjection",
+        "installation_revoked": [
+          "InstallationProjection"
+        ],
+        "app_installed": [
+          "InstallationProjection"
+        ],
+        "session_completed": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workspace_created": [
+          "WorkspaceMetricsProjection"
+        ],
+        "session_cost_finalized": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "artifact_created": [
+          "ArtifactListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "tool_execution_started": [
+          "ToolTimelineProjection"
+        ],
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
+        ],
+        "workflow_failed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "session_started": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workflow_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "phase_started": [
+          "WorkflowExecutionDetailProjection",
           "DashboardMetricsProjection"
         ],
         "workspace_error": [
           "WorkspaceMetricsProjection"
         ],
-        "execution_cancelled": [
+        "execution_resumed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
-        ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "token_refreshed": [
-          "InstallationProjection"
-        ],
-        "workspace_created": [
-          "WorkspaceMetricsProjection"
         ],
         "token_usage": [
           "TokenMetricsProjection"
         ],
         "workspace_creating": [
           "WorkspaceMetricsProjection"
+        ],
+        "execution_paused": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
         ],
         "workflow_execution_started": [
           "WorkflowExecutionDetailProjection",
@@ -1425,89 +1460,54 @@
           "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "workflow_failed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
-        ],
         "installation_suspended": [
           "InstallationProjection"
         ],
-        "installation_revoked": [
-          "InstallationProjection"
-        ],
-        "subagent_started": [
-          "SessionListProjection"
-        ],
-        "session_completed": [
-          "SessionListProjection",
+        "workflow_created": [
+          "WorkflowDetailProjection",
+          "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "session_cost_finalized": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "workspace_destroyed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "agent_observation": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "phase_started": [
-          "WorkflowExecutionDetailProjection",
-          "DashboardMetricsProjection"
-        ],
-        "operation_recorded": [
-          "SessionListProjection"
-        ],
-        "phase_completed": [
+        "execution_cancelled": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "command_executed": [
+        "workspace_destroyed": [
           "WorkspaceMetricsProjection"
         ],
         "tool_blocked": [
           "ToolTimelineProjection"
         ],
-        "tool_execution_completed": [
-          "ToolTimelineProjection"
-        ],
-        "artifact_created": [
-          "ArtifactListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "app_installed": [
+        "token_refreshed": [
           "InstallationProjection"
         ],
-        "execution_paused": [
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
+        ],
+        "subagent_stopped": [
+          "SessionListProjection"
+        ],
+        "subagent_started": [
+          "SessionListProjection"
+        ],
+        "operation_recorded": [
+          "SessionListProjection"
+        ],
+        "command_executed": [
+          "WorkspaceMetricsProjection"
+        ],
+        "phase_completed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "workflow_completed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "execution_resumed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "session_started": [
-          "SessionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "tool_execution_started": [
-          "ToolTimelineProjection"
+        "agent_observation": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
         ]
       },
       "projection_to_read_model": {
-        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail",
-        "WorkflowDetailProjection": "WorkflowDetail"
+        "WorkflowDetailProjection": "WorkflowDetail",
+        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail"
       }
     }
   }
