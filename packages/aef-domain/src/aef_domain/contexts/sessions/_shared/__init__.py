@@ -7,7 +7,7 @@ from aef_domain.contexts.sessions._shared.value_objects import (
     SessionStatus,
     TokenMetrics,
 )
-from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
 

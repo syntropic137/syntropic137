@@ -445,11 +445,9 @@ vsa-validate:
 
 # Generate architecture diagram (SVG from VSA manifest)
 diagram:
-    @echo "🏗️  Generating architecture diagram..."
+    @echo "🏗️  Generating architecture diagrams..."
     @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
-    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --output docs/architecture
-    @mv docs/architecture/ARCHITECTURE.svg docs/architecture/vsa-overview.svg
-    @echo "✅ Diagram generated: docs/architecture/vsa-overview.svg"
+    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --type architecture --output docs/architecture
 
 # Generate auto-generated architecture documentation
 docs-gen:

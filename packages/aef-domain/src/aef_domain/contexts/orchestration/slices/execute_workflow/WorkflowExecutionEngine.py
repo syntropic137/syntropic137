@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from aef_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
     from aef_adapters.conversations import ConversationStoragePort
     from aef_adapters.workspace_backends.service import WorkspaceService
-    from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
+    from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
     from aef_domain.contexts.artifacts.domain.ports.artifact_storage import (
@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
     )
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+    from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 
@@ -521,7 +521,7 @@ class WorkflowExecutionEngine:
         """
         # Import session classes
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
@@ -833,7 +833,7 @@ class WorkflowExecutionEngine:
             content: Artifact content
             title: Human-readable title
         """
-        from aef_domain.contexts.artifacts.domain.ArtifactAggregate import (
+        from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
             ArtifactAggregate,
         )
         from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
@@ -955,7 +955,7 @@ class WorkflowExecutionEngine:
         import json
 
         from aef_domain.contexts.sessions._shared.value_objects import OperationType
-        from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+        from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
         from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
