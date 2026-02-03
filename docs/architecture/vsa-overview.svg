@@ -33,7 +33,7 @@
   <text x="60" y="301" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• aggregate_artifact</text>
   <text x="60" y="319" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• services</text>
   <rect x="385" y="114" width="330" height="254" fill="#c9d9ff" stroke="#a0a0a0" stroke-width="1.5" rx="8" opacity="1" filter="url(#shadow)"/>
-  <text x="400" y="139" font-size="14" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">sessions</text>
+  <text x="400" y="139" font-size="14" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">agent_sessions</text>
   <text x="400" y="164" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Aggregates:</text>
   <text x="405" y="184" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• AgentSession</text>
   <text x="400" y="207" font-size="12" font-weight="600" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">📊 Queries</text>

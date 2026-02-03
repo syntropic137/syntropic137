@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
         WorkflowAggregate,
     )
-    from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 
@@ -190,7 +190,7 @@ def get_session_repository() -> (
     if _session_repository is not None:
         return _session_repository
 
-    from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 

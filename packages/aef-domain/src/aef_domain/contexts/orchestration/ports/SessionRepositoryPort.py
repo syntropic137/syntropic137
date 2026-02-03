@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.sessions._shared import AgentSessionAggregate
+    from aef_domain.contexts.agent_sessions._shared import AgentSessionAggregate
 
 
 class SessionRepositoryPort(Protocol):

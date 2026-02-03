@@ -23,7 +23,7 @@ The system is organized into 4 bounded contexts following Vertical Slice Archite
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
 | **Orchestration** | 3 | Workflow execution and workspace management (WorkflowAggregate, WorkspaceAggregate, WorkflowExecutionAggregate) |
-| **Sessions** | 1 | Agent sessions and observability metrics (AgentSessionAggregate) |
+| **Agent Sessions** | 1 | Agent sessions and observability metrics (AgentSessionAggregate) |
 | **GitHub** | 1 | GitHub App integration and token management (InstallationAggregate) |
 | **Artifacts** | 1 | Artifact storage and retrieval (ArtifactAggregate) |
 

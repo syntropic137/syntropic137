@@ -297,7 +297,7 @@ def create_coordinator_service(
         WorkflowExecutionListProjection,
     )
     from aef_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
-    from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
+    from aef_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
 
     # Create all checkpointed projections
     projections: list[CheckpointedProjection] = [

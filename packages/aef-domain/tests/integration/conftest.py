@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
-    from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 
@@ -78,7 +78,7 @@ def agent_session_repository(
     repository_factory: RepositoryFactory,
 ) -> EventStoreRepository[AgentSessionAggregate]:
     """Create repository for AgentSession aggregates."""
-    from aef_domain.contexts.sessions.domain.aggregate_session.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 

@@ -56,7 +56,7 @@ domain:
 contexts:
   orchestration:
     description: "Workflow execution and workspace management (merged from workflows + workspaces)"
-  sessions:
+  agent_sessions:
     description: "Agent sessions, token tracking, and execution metrics"
   artifacts:
     description: "Artifact storage, metadata, and retrieval"
@@ -68,8 +68,8 @@ contexts:
   # workspaces:
   #   description: "DEPRECATED - Use orchestration"
   # costs:
-  #   description: "DEPRECATED - projections moved to orchestration/sessions"
+  #   description: "DEPRECATED - projections moved to orchestration/agent_sessions"
   # metrics:
   #   description: "DEPRECATED - projections moved to orchestration"
   # observability:
-  #   description: "DEPRECATED - projections moved to sessions"
+  #   description: "DEPRECATED - projections moved to agent_sessions"

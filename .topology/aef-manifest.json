@@ -1,7 +1,7 @@
 {
   "version": "0.8.0",
   "schema_version": "2.3.0",
-  "generated_at": "2026-02-03T18:03:21.369400+00:00",
+  "generated_at": "2026-02-03T18:43:04.962243+00:00",
   "bounded_contexts": [
     {
       "name": "artifacts",
@@ -125,15 +125,8 @@
       "aggregate_count": 1
     },
     {
-      "name": "agents",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/agents",
-      "features": [],
-      "context_type": "invalid_module",
-      "aggregate_count": 0
-    },
-    {
-      "name": "sessions",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/sessions",
+      "name": "agent_sessions",
+      "path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions",
       "features": [
         {
           "name": "slices",
@@ -286,6 +279,13 @@
       ],
       "context_type": "bounded_context",
       "aggregate_count": 1
+    },
+    {
+      "name": "agents",
+      "path": "./packages/aef-domain/src/aef_domain/contexts/agents",
+      "features": [],
+      "context_type": "invalid_module",
+      "aggregate_count": 0
     },
     {
       "name": "github",
@@ -723,8 +723,8 @@
       },
       {
         "name": "AgentSessionAggregate",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/aggregate_session/AgentSessionAggregate.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py",
         "line_count": 320,
         "command_handlers": [],
         "event_handlers": [],
@@ -824,22 +824,22 @@
       },
       {
         "name": "RecordOperationCommand",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/commands/RecordOperationCommand.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/commands/RecordOperationCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
       {
         "name": "StartSessionCommand",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/commands/StartSessionCommand.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/commands/StartSessionCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
       {
         "name": "CompleteSessionCommand",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/commands/CompleteSessionCommand.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/commands/CompleteSessionCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
@@ -918,34 +918,34 @@
       },
       {
         "name": "OperationRecordedEvent",
-        "context": "sessions",
+        "context": "agent_sessions",
         "event_type": "OperationRecorded",
         "version": {
           "Simple": "v1"
         },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/events/OperationRecordedEvent.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/events/OperationRecordedEvent.py",
         "fields": [],
         "decorator_present": false
       },
       {
         "name": "SessionStartedEvent",
-        "context": "sessions",
+        "context": "agent_sessions",
         "event_type": "SessionStarted",
         "version": {
           "Simple": "v1"
         },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/events/SessionStartedEvent.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/events/SessionStartedEvent.py",
         "fields": [],
         "decorator_present": false
       },
       {
         "name": "SessionCompletedEvent",
-        "context": "sessions",
+        "context": "agent_sessions",
         "event_type": "SessionCompleted",
         "version": {
           "Simple": "v1"
         },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/events/SessionCompletedEvent.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/events/SessionCompletedEvent.py",
         "fields": [],
         "decorator_present": false
       },
@@ -1228,7 +1228,7 @@
       },
       {
         "name": "SessionListProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/slices/list_sessions/projection.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/list_sessions/projection.py",
         "subscribed_events": [
           "operation_recorded",
           "session_completed",
@@ -1237,40 +1237,40 @@
           "subagent_stopped"
         ],
         "read_model": null,
-        "context": "sessions",
+        "context": "agent_sessions",
         "line_count": 345
       },
       {
         "name": "SessionCostProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/slices/session_cost/projection.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/session_cost/projection.py",
         "subscribed_events": [
           "agent_observation",
           "session_cost_finalized"
         ],
         "read_model": null,
-        "context": "sessions",
+        "context": "agent_sessions",
         "line_count": 385
       },
       {
         "name": "TokenMetricsProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/slices/token_metrics/projection.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/token_metrics/projection.py",
         "subscribed_events": [
           "token_usage"
         ],
         "read_model": null,
-        "context": "sessions",
+        "context": "agent_sessions",
         "line_count": 95
       },
       {
         "name": "ToolTimelineProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/slices/tool_timeline/projection.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/tool_timeline/projection.py",
         "subscribed_events": [
           "tool_blocked",
           "tool_execution_completed",
           "tool_execution_started"
         ],
         "read_model": null,
-        "context": "sessions",
+        "context": "agent_sessions",
         "line_count": 155
       },
       {
@@ -1391,44 +1391,32 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "operation_recorded": [
-          "SessionListProjection"
-        ],
-        "artifact_created": [
-          "ArtifactListProjection",
+        "workflow_created": [
+          "WorkflowDetailProjection",
+          "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "token_refreshed": [
-          "InstallationProjection"
-        ],
-        "workspace_creating": [
+        "workspace_error": [
           "WorkspaceMetricsProjection"
-        ],
-        "installation_revoked": [
-          "InstallationProjection"
-        ],
-        "command_executed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "token_usage": [
-          "TokenMetricsProjection"
-        ],
-        "session_cost_finalized": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "tool_execution_started": [
-          "ToolTimelineProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
         ],
         "execution_cancelled": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "installation_suspended": [
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
+        ],
+        "token_refreshed": [
           "InstallationProjection"
+        ],
+        "workspace_created": [
+          "WorkspaceMetricsProjection"
+        ],
+        "token_usage": [
+          "TokenMetricsProjection"
+        ],
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
         ],
         "workflow_execution_started": [
           "WorkflowExecutionDetailProjection",
@@ -1437,77 +1425,89 @@
           "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "agent_observation": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "app_installed": [
-          "InstallationProjection"
-        ],
-        "phase_completed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "workspace_created": [
-          "WorkspaceMetricsProjection"
-        ],
-        "phase_started": [
-          "WorkflowExecutionDetailProjection",
-          "DashboardMetricsProjection"
-        ],
-        "session_started": [
-          "SessionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "workspace_error": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "execution_resumed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
         "workflow_failed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection",
           "DashboardMetricsProjection"
         ],
-        "tool_blocked": [
-          "ToolTimelineProjection"
+        "subagent_stopped": [
+          "SessionListProjection"
         ],
-        "workflow_created": [
-          "WorkflowDetailProjection",
-          "WorkflowListProjection",
-          "DashboardMetricsProjection"
+        "installation_suspended": [
+          "InstallationProjection"
+        ],
+        "installation_revoked": [
+          "InstallationProjection"
         ],
         "subagent_started": [
           "SessionListProjection"
         ],
-        "workspace_destroyed": [
-          "WorkspaceMetricsProjection"
-        ],
         "session_completed": [
           "SessionListProjection",
           "DashboardMetricsProjection"
+        ],
+        "session_cost_finalized": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "workspace_destroyed": [
+          "WorkspaceMetricsProjection"
+        ],
+        "agent_observation": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "phase_started": [
+          "WorkflowExecutionDetailProjection",
+          "DashboardMetricsProjection"
+        ],
+        "operation_recorded": [
+          "SessionListProjection"
+        ],
+        "phase_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "command_executed": [
+          "WorkspaceMetricsProjection"
+        ],
+        "tool_blocked": [
+          "ToolTimelineProjection"
+        ],
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
+        ],
+        "artifact_created": [
+          "ArtifactListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "app_installed": [
+          "InstallationProjection"
+        ],
+        "execution_paused": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
         ],
         "workflow_completed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection",
           "DashboardMetricsProjection"
         ],
-        "tool_execution_completed": [
-          "ToolTimelineProjection"
-        ],
-        "execution_paused": [
+        "execution_resumed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
+        ],
+        "session_started": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "tool_execution_started": [
+          "ToolTimelineProjection"
         ]
       },
       "projection_to_read_model": {
-        "WorkflowDetailProjection": "WorkflowDetail",
-        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail"
+        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail",
+        "WorkflowDetailProjection": "WorkflowDetail"
       }
     }
   }

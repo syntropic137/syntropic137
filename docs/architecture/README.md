@@ -15,7 +15,7 @@
 **Shows:**
 - 4 Bounded Contexts with 6 Aggregates total
 - **Orchestration** (3 aggregates): Workflow, Workspace, WorkflowExecution
-- **Sessions** (1 aggregate): AgentSession
+- **Agent Sessions** (1 aggregate): AgentSession
 - **GitHub** (1 aggregate): Installation
 - **Artifacts** (1 aggregate): Artifact
 - Infrastructure Layer (TimescaleDB, EventStore, Redis, MinIO)

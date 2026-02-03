@@ -100,7 +100,7 @@ lib/agentic-primitives/  ← Shared library (git submodule)
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
 | `orchestration` | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
-| `sessions` | AgentSession | Agent sessions and observability |
+| `agent_sessions` | AgentSession | Agent sessions and observability |
 | `github` | Installation | GitHub App integration |
 | `artifacts` | Artifact | Artifact storage |
 

@@ -27,10 +27,10 @@ from aef_domain.contexts.orchestration.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
 from aef_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
-from aef_domain.contexts.sessions.slices.list_sessions import SessionListProjection
-from aef_domain.contexts.sessions.slices.session_cost.projection import SessionCostProjection
-from aef_domain.contexts.sessions.slices.token_metrics import TokenMetricsProjection
-from aef_domain.contexts.sessions.slices.tool_timeline import ToolTimelineProjection
+from aef_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
+from aef_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
+from aef_domain.contexts.agent_sessions.slices.token_metrics import TokenMetricsProjection
+from aef_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from aef_shared.events import (
     TOKEN_USAGE,
     TOOL_BLOCKED,
