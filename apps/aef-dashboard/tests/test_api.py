@@ -26,6 +26,17 @@ from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggre
 from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
     CreateArtifactCommand,
 )
+from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
+    PhaseDefinition,
+    WorkflowClassification,
+    WorkflowType,
+)
+from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
+    WorkflowAggregate,
+)
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
+    CreateWorkflowCommand,
+)
 from aef_domain.contexts.sessions._shared.value_objects import OperationType, SessionStatus
 from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
     AgentSessionAggregate,
@@ -39,15 +50,6 @@ from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import 
 from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
-from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-    PhaseDefinition,
-    WorkflowClassification,
-    WorkflowType,
-)
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
-)
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import WorkflowAggregate
 
 
 @pytest.fixture
