@@ -15,13 +15,13 @@ if TYPE_CHECKING:
     from aef_adapters.workspace_backends.tokens.token_vending_adapter import (
         TokenVendingServiceAdapter,
     )
+    from aef_domain.contexts.orchestration._shared.ports import SidecarPort
     from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
         SidecarHandle,
         TokenInjectionResult,
         TokenType,
     )
-    from aef_domain.contexts.orchestration._shared.ports import SidecarPort
 
 logger = logging.getLogger(__name__)
 
