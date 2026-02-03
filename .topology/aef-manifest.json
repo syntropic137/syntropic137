@@ -1,55 +1,8 @@
 {
-  "version": "0.7.0",
-  "schema_version": "2.1.0",
-  "generated_at": "2026-01-30T06:39:32.994439+00:00",
+  "version": "0.8.0",
+  "schema_version": "2.3.0",
+  "generated_at": "2026-02-03T19:07:42.812354+00:00",
   "bounded_contexts": [
-    {
-      "name": "metrics",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/metrics",
-      "features": [
-        {
-          "name": "slices",
-          "path": "slices",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "get_metrics",
-          "path": "slices/get_metrics",
-          "files": [
-            "handler.py",
-            "slice.yaml",
-            "__init__.py",
-            "projection.py",
-            "test_get_metrics.py"
-          ]
-        },
-        {
-          "name": "domain",
-          "path": "domain",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "queries",
-          "path": "domain/queries",
-          "files": [
-            "get_dashboard_metrics.py",
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "read_models",
-          "path": "domain/read_models",
-          "files": [
-            "__init__.py",
-            "dashboard_metrics.py"
-          ]
-        }
-      ]
-    },
     {
       "name": "artifacts",
       "path": "./packages/aef-domain/src/aef_domain/contexts/artifacts",
@@ -59,7 +12,8 @@
           "path": "slices",
           "files": [
             "__init__.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "list_artifacts",
@@ -69,7 +23,8 @@
             "slice.yaml",
             "__init__.py",
             "projection.py"
-          ]
+          ],
+          "slice_type": "query"
         },
         {
           "name": "create_artifact",
@@ -78,7 +33,8 @@
             "CreateArtifactHandler.py",
             "__init__.py",
             "test_create_artifact.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "upload_artifact",
@@ -87,7 +43,8 @@
             "test_upload_artifact.py",
             "__init__.py",
             "UploadArtifactHandler.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "ports",
@@ -95,15 +52,25 @@
           "files": [
             "__init__.py",
             "ArtifactContentStoragePort.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "domain",
           "path": "domain",
           "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_artifact",
+          "path": "domain/aggregate_artifact",
+          "files": [
             "__init__.py",
             "ArtifactAggregate.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "queries",
@@ -111,7 +78,8 @@
           "files": [
             "__init__.py",
             "list_artifacts.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "commands",
@@ -120,7 +88,8 @@
             "__init__.py",
             "CreateArtifactCommand.py",
             "UploadArtifactCommand.py"
-          ]
+          ],
+          "slice_type": "command"
         },
         {
           "name": "events",
@@ -129,7 +98,8 @@
             "ArtifactUploadedEvent.py",
             "__init__.py",
             "ArtifactCreatedEvent.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "read_models",
@@ -137,7 +107,8 @@
           "files": [
             "__init__.py",
             "artifact_summary.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "services",
@@ -146,39 +117,36 @@
             "test_artifact_query_service.py",
             "__init__.py",
             "artifact_query_service.py"
-          ]
+          ],
+          "slice_type": "unknown"
         }
-      ]
+      ],
+      "context_type": "bounded_context",
+      "aggregate_count": 1
     },
     {
-      "name": "costs",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/costs",
+      "name": "agent_sessions",
+      "path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions",
       "features": [
         {
           "name": "slices",
           "path": "slices",
           "files": [
             "__init__.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
-          "name": "execution_cost",
-          "path": "slices/execution_cost",
+          "name": "list_sessions",
+          "path": "slices/list_sessions",
           "files": [
-            "test_projection.py",
             "handler.py",
             "slice.yaml",
             "__init__.py",
+            "test_list_sessions.py",
             "projection.py"
-          ]
-        },
-        {
-          "name": "record_cost",
-          "path": "slices/record_cost",
-          "files": [
-            "__init__.py",
-            "test_record_cost.py"
-          ]
+          ],
+          "slice_type": "query"
         },
         {
           "name": "session_cost",
@@ -189,66 +157,287 @@
             "slice.yaml",
             "__init__.py",
             "projection.py"
-          ]
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "complete_session",
+          "path": "slices/complete_session",
+          "files": [
+            "test_complete_session.py",
+            "__init__.py",
+            "CompleteSessionHandler.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "start_session",
+          "path": "slices/start_session",
+          "files": [
+            "__init__.py",
+            "StartSessionHandler.py",
+            "test_start_session.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "record_operation",
+          "path": "slices/record_operation",
+          "files": [
+            "test_record_operation.py",
+            "__init__.py",
+            "RecordOperationHandler.py",
+            "commands.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "token_metrics",
+          "path": "slices/token_metrics",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py",
+            "test_token_metrics.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "tool_timeline",
+          "path": "slices/tool_timeline",
+          "files": [
+            "test_tool_timeline.py",
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
         },
         {
           "name": "domain",
           "path": "domain",
+          "files": [],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_session",
+          "path": "domain/aggregate_session",
           "files": [
-            "__init__.py"
-          ]
+            "__init__.py",
+            "AgentSessionAggregate.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "queries",
           "path": "domain/queries",
           "files": [
+            "get_token_metrics.py",
+            "list_sessions.py",
             "__init__.py",
-            "get_execution_cost.py",
-            "get_session_cost.py"
-          ]
+            "get_tool_timeline.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "commands",
+          "path": "domain/commands",
+          "files": [
+            "RecordOperationCommand.py",
+            "__init__.py",
+            "StartSessionCommand.py",
+            "CompleteSessionCommand.py"
+          ],
+          "slice_type": "command"
         },
         {
           "name": "events",
           "path": "domain/events",
           "files": [
-            "SessionCostFinalizedEvent.py",
+            "OperationRecordedEvent.py",
+            "SessionStartedEvent.py",
             "__init__.py",
-            "CostRecordedEvent.py"
-          ]
+            "SessionCompletedEvent.py",
+            "agent_observation.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "read_models",
           "path": "domain/read_models",
           "files": [
-            "execution_cost.py",
+            "session_summary.py",
             "session_cost.py",
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "services",
-          "path": "services",
-          "files": [
-            "tool_token_estimator.py",
             "__init__.py",
-            "test_tool_token_estimator.py"
-          ]
+            "tool_execution.py",
+            "token_metrics.py"
+          ],
+          "slice_type": "unknown"
         }
       ],
-      "infrastructure_folders": [
-        "services"
-      ]
+      "context_type": "bounded_context",
+      "aggregate_count": 1
     },
     {
-      "name": "workflows",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/workflows",
+      "name": "agents",
+      "path": "./packages/aef-domain/src/aef_domain/contexts/agents",
+      "features": [],
+      "context_type": "invalid_module",
+      "aggregate_count": 0
+    },
+    {
+      "name": "github",
+      "path": "./packages/aef-domain/src/aef_domain/contexts/github",
       "features": [
         {
           "name": "slices",
           "path": "slices",
           "files": [
             "__init__.py"
-          ]
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "refresh_token",
+          "path": "slices/refresh_token",
+          "files": [
+            "test_refresh_token.py",
+            "__init__.py",
+            "RefreshTokenHandler.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "install_app",
+          "path": "slices/install_app",
+          "files": [
+            "__init__.py",
+            "test_install_app.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "list_repos",
+          "path": "slices/list_repos",
+          "files": [
+            "slice.yaml",
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "get_installation",
+          "path": "slices/get_installation",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "domain",
+          "path": "domain",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_installation",
+          "path": "domain/aggregate_installation",
+          "files": [
+            "__init__.py",
+            "InstallationAggregate.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregates",
+          "path": "domain/aggregates",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "queries",
+          "path": "domain/queries",
+          "files": [
+            "__init__.py",
+            "list_accessible_repos.py",
+            "get_installation.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "commands",
+          "path": "domain/commands",
+          "files": [
+            "__init__.py",
+            "RefreshTokenCommand.py"
+          ],
+          "slice_type": "command"
+        },
+        {
+          "name": "events",
+          "path": "domain/events",
+          "files": [
+            "__init__.py",
+            "InstallationRevokedEvent.py",
+            "InstallationSuspendedEvent.py",
+            "AppInstalledEvent.py",
+            "TokenRefreshedEvent.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "read_models",
+          "path": "domain/read_models",
+          "files": [
+            "installation.py",
+            "__init__.py",
+            "accessible_repository.py"
+          ],
+          "slice_type": "unknown"
+        }
+      ],
+      "context_type": "bounded_context",
+      "aggregate_count": 1
+    },
+    {
+      "name": "orchestration",
+      "path": "./packages/aef-domain/src/aef_domain/contexts/orchestration",
+      "features": [
+        {
+          "name": "slices",
+          "path": "slices",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "terminate_workspace",
+          "path": "slices/terminate_workspace",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "workspace_metrics",
+          "path": "slices/workspace_metrics",
+          "files": [
+            "test_projection.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
         },
         {
           "name": "get_execution_detail",
@@ -256,7 +445,8 @@
           "files": [
             "__init__.py",
             "projection.py"
-          ]
+          ],
+          "slice_type": "query"
         },
         {
           "name": "execute_workflow",
@@ -266,7 +456,28 @@
             "test_execute_workflow.py",
             "ExecuteWorkflowHandler.py",
             "WorkflowExecutionEngine.py"
-          ]
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "execution_cost",
+          "path": "slices/execution_cost",
+          "files": [
+            "test_projection.py",
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "execute_command",
+          "path": "slices/execute_command",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "get_workflow_detail",
@@ -277,7 +488,8 @@
             "__init__.py",
             "projection.py",
             "test_get_workflow_detail.py"
-          ]
+          ],
+          "slice_type": "query"
         },
         {
           "name": "list_executions",
@@ -286,7 +498,32 @@
             "test_list_executions.py",
             "__init__.py",
             "projection.py"
-          ]
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "create_workspace",
+          "path": "slices/create_workspace",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "destroy_workspace",
+          "path": "slices/destroy_workspace",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "inject_tokens",
+          "path": "slices/inject_tokens",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "create_workflow",
@@ -295,7 +532,8 @@
             "test_create_workflow.py",
             "__init__.py",
             "CreateWorkflowHandler.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "list_workflows",
@@ -306,7 +544,20 @@
             "test_list_workflows.py",
             "__init__.py",
             "projection.py"
-          ]
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "dashboard_metrics",
+          "path": "slices/dashboard_metrics",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py",
+            "test_get_metrics.py"
+          ],
+          "slice_type": "query"
         },
         {
           "name": "cleanup",
@@ -314,7 +565,8 @@
           "files": [
             "stale_execution_cleaner.py",
             "__init__.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "ports",
@@ -326,225 +578,64 @@
             "ConversationStoragePort.py",
             "__init__.py",
             "ObservabilityServicePort.py",
-            "py.typed",
             "SessionRepositoryPort.py",
             "WorkspaceServicePort.py",
             "ArtifactContentStoragePort.py",
             "AgentFactoryPort.py",
             "WorkflowExecutionRepositoryPort.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "domain",
           "path": "domain",
           "files": [
-            "WorkflowAggregate.py",
             "constants.py",
-            "WorkflowExecutionAggregate.py",
             "__init__.py"
-          ]
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_workflow",
+          "path": "domain/aggregate_workflow",
+          "files": [
+            "WorkflowAggregate.py",
+            "__init__.py",
+            "value_objects.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "queries",
           "path": "domain/queries",
           "files": [
+            "get_dashboard_metrics.py",
+            "get_workspace_metrics.py",
             "__init__.py",
             "list_workflows.py",
             "get_workflow_detail.py"
-          ]
+          ],
+          "slice_type": "unknown"
         },
         {
-          "name": "commands",
-          "path": "domain/commands",
+          "name": "aggregate_execution",
+          "path": "domain/aggregate_execution",
           "files": [
+            "WorkflowExecutionAggregate.py",
             "__init__.py",
-            "ExecuteWorkflowCommand.py",
-            "CreateWorkflowCommand.py"
-          ]
+            "value_objects.py"
+          ],
+          "slice_type": "unknown"
         },
         {
-          "name": "events",
-          "path": "domain/events",
-          "files": [
-            "WorkflowFailedEvent.py",
-            "ExecutionResumedEvent.py",
-            "WorkflowCompletedEvent.py",
-            "__init__.py",
-            "WorkflowCreatedEvent.py",
-            "WorkflowExecutionStartedEvent.py",
-            "ExecutionPausedEvent.py",
-            "PhaseCompletedEvent.py",
-            "PhaseStartedEvent.py",
-            "ExecutionCancelledEvent.py"
-          ]
-        },
-        {
-          "name": "read_models",
-          "path": "domain/read_models",
-          "files": [
-            "workflow_summary.py",
-            "workflow_detail.py",
-            "__init__.py",
-            "workflow_execution_summary.py",
-            "workflow_execution_detail.py"
-          ]
-        },
-        {
-          "name": "seed_workflow",
-          "path": "seed_workflow",
-          "files": [
-            "test_seeder.py",
-            "SeedWorkflowService.py",
-            "__init__.py",
-            "test_workflow_definition.py"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "agents",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/agents",
-      "features": []
-    },
-    {
-      "name": "observability",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/observability",
-      "features": [
-        {
-          "name": "slices",
-          "path": "slices",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "token_metrics",
-          "path": "slices/token_metrics",
-          "files": [
-            "handler.py",
-            "slice.yaml",
-            "__init__.py",
-            "projection.py",
-            "test_token_metrics.py"
-          ]
-        },
-        {
-          "name": "tool_timeline",
-          "path": "slices/tool_timeline",
-          "files": [
-            "test_tool_timeline.py",
-            "handler.py",
-            "slice.yaml",
-            "__init__.py",
-            "projection.py"
-          ]
-        },
-        {
-          "name": "domain",
-          "path": "domain",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "queries",
-          "path": "domain/queries",
-          "files": [
-            "get_token_metrics.py",
-            "__init__.py",
-            "get_tool_timeline.py"
-          ]
-        },
-        {
-          "name": "events",
-          "path": "domain/events",
-          "files": [
-            "__init__.py",
-            "agent_observation.py"
-          ]
-        },
-        {
-          "name": "read_models",
-          "path": "domain/read_models",
-          "files": [
-            "__init__.py",
-            "tool_execution.py",
-            "token_metrics.py"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "workspaces",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/workspaces",
-      "features": [
-        {
-          "name": "slices",
-          "path": "slices",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "terminate_workspace",
-          "path": "slices/terminate_workspace",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "workspace_metrics",
-          "path": "slices/workspace_metrics",
-          "files": [
-            "test_projection.py",
-            "slice.yaml",
-            "__init__.py",
-            "projection.py"
-          ]
-        },
-        {
-          "name": "execute_command",
-          "path": "slices/execute_command",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "create_workspace",
-          "path": "slices/create_workspace",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "destroy_workspace",
-          "path": "slices/destroy_workspace",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "inject_tokens",
-          "path": "slices/inject_tokens",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "domain",
-          "path": "domain",
+          "name": "aggregate_workspace",
+          "path": "domain/aggregate_workspace",
           "files": [
             "WorkspaceAggregate.py",
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "queries",
-          "path": "domain/queries",
-          "files": [
-            "get_workspace_metrics.py",
-            "__init__.py"
-          ]
+            "__init__.py",
+            "value_objects.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "commands",
@@ -553,9 +644,12 @@
             "__init__.py",
             "InjectTokensCommand.py",
             "ExecuteCommandCommand.py",
+            "ExecuteWorkflowCommand.py",
+            "CreateWorkflowCommand.py",
             "CreateWorkspaceCommand.py",
             "TerminateWorkspaceCommand.py"
-          ]
+          ],
+          "slice_type": "command"
         },
         {
           "name": "events",
@@ -565,220 +659,55 @@
             "WorkspaceTerminatedEvent.py",
             "TokensInjectedEvent.py",
             "IsolationStartedEvent.py",
+            "WorkflowFailedEvent.py",
+            "ExecutionResumedEvent.py",
             "WorkspaceCommandExecutedEvent.py",
             "CommandFailedEvent.py",
+            "WorkflowCompletedEvent.py",
             "__init__.py",
+            "WorkflowCreatedEvent.py",
+            "WorkflowExecutionStartedEvent.py",
+            "ExecutionPausedEvent.py",
             "WorkspaceDestroyingEvent.py",
             "WorkspaceErrorEvent.py",
             "WorkspaceCreatedEvent.py",
+            "PhaseCompletedEvent.py",
             "WorkspaceCreatingEvent.py",
-            "CommandExecutedEvent.py"
-          ]
+            "PhaseStartedEvent.py",
+            "CommandExecutedEvent.py",
+            "ExecutionCancelledEvent.py"
+          ],
+          "slice_type": "unknown"
         },
         {
           "name": "read_models",
           "path": "domain/read_models",
           "files": [
+            "workflow_summary.py",
+            "workflow_detail.py",
+            "execution_cost.py",
             "workspace_metrics.py",
-            "__init__.py"
-          ]
+            "__init__.py",
+            "dashboard_metrics.py",
+            "workflow_execution_summary.py",
+            "workflow_execution_detail.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "seed_workflow",
+          "path": "seed_workflow",
+          "files": [
+            "test_seeder.py",
+            "SeedWorkflowService.py",
+            "__init__.py",
+            "test_workflow_definition.py"
+          ],
+          "slice_type": "unknown"
         }
-      ]
-    },
-    {
-      "name": "sessions",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/sessions",
-      "features": [
-        {
-          "name": "slices",
-          "path": "slices",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "list_sessions",
-          "path": "slices/list_sessions",
-          "files": [
-            "handler.py",
-            "slice.yaml",
-            "__init__.py",
-            "test_list_sessions.py",
-            "projection.py"
-          ]
-        },
-        {
-          "name": "complete_session",
-          "path": "slices/complete_session",
-          "files": [
-            "test_complete_session.py",
-            "__init__.py",
-            "CompleteSessionHandler.py"
-          ]
-        },
-        {
-          "name": "start_session",
-          "path": "slices/start_session",
-          "files": [
-            "__init__.py",
-            "StartSessionHandler.py",
-            "test_start_session.py"
-          ]
-        },
-        {
-          "name": "record_operation",
-          "path": "slices/record_operation",
-          "files": [
-            "test_record_operation.py",
-            "__init__.py",
-            "RecordOperationHandler.py",
-            "commands.py"
-          ]
-        },
-        {
-          "name": "domain",
-          "path": "domain",
-          "files": [
-            "AgentSessionAggregate.py"
-          ]
-        },
-        {
-          "name": "queries",
-          "path": "domain/queries",
-          "files": [
-            "list_sessions.py",
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "commands",
-          "path": "domain/commands",
-          "files": [
-            "RecordOperationCommand.py",
-            "__init__.py",
-            "StartSessionCommand.py",
-            "CompleteSessionCommand.py"
-          ]
-        },
-        {
-          "name": "events",
-          "path": "domain/events",
-          "files": [
-            "OperationRecordedEvent.py",
-            "SessionStartedEvent.py",
-            "__init__.py",
-            "SessionCompletedEvent.py"
-          ]
-        },
-        {
-          "name": "read_models",
-          "path": "domain/read_models",
-          "files": [
-            "session_summary.py",
-            "__init__.py"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "github",
-      "path": "./packages/aef-domain/src/aef_domain/contexts/github",
-      "features": [
-        {
-          "name": "slices",
-          "path": "slices",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "refresh_token",
-          "path": "slices/refresh_token",
-          "files": [
-            "test_refresh_token.py",
-            "__init__.py",
-            "RefreshTokenHandler.py"
-          ]
-        },
-        {
-          "name": "install_app",
-          "path": "slices/install_app",
-          "files": [
-            "__init__.py",
-            "test_install_app.py"
-          ]
-        },
-        {
-          "name": "list_repos",
-          "path": "slices/list_repos",
-          "files": [
-            "slice.yaml",
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "get_installation",
-          "path": "slices/get_installation",
-          "files": [
-            "handler.py",
-            "slice.yaml",
-            "__init__.py",
-            "projection.py"
-          ]
-        },
-        {
-          "name": "domain",
-          "path": "domain",
-          "files": [
-            "__init__.py",
-            "InstallationAggregate.py"
-          ]
-        },
-        {
-          "name": "aggregates",
-          "path": "domain/aggregates",
-          "files": [
-            "__init__.py"
-          ]
-        },
-        {
-          "name": "queries",
-          "path": "domain/queries",
-          "files": [
-            "__init__.py",
-            "list_accessible_repos.py",
-            "get_installation.py"
-          ]
-        },
-        {
-          "name": "commands",
-          "path": "domain/commands",
-          "files": [
-            "__init__.py",
-            "RefreshTokenCommand.py"
-          ]
-        },
-        {
-          "name": "events",
-          "path": "domain/events",
-          "files": [
-            "__init__.py",
-            "InstallationRevokedEvent.py",
-            "InstallationSuspendedEvent.py",
-            "AppInstalledEvent.py",
-            "TokenRefreshedEvent.py"
-          ]
-        },
-        {
-          "name": "read_models",
-          "path": "domain/read_models",
-          "files": [
-            "installation.py",
-            "__init__.py",
-            "accessible_repository.py"
-          ]
-        }
-      ]
+      ],
+      "context_type": "bounded_context",
+      "aggregate_count": 3
     }
   ],
   "domain": {
@@ -786,50 +715,96 @@
       {
         "name": "ArtifactAggregate",
         "context": "artifacts",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/artifacts/domain/ArtifactAggregate.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/artifacts/domain/aggregate_artifact/ArtifactAggregate.py",
         "line_count": 205,
         "command_handlers": [],
-        "event_handlers": []
-      },
-      {
-        "name": "WorkflowAggregate",
-        "context": "workflows",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/WorkflowAggregate.py",
-        "line_count": 195,
-        "command_handlers": [],
-        "event_handlers": []
-      },
-      {
-        "name": "WorkflowExecutionAggregate",
-        "context": "workflows",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/WorkflowExecutionAggregate.py",
-        "line_count": 540,
-        "command_handlers": [],
-        "event_handlers": []
-      },
-      {
-        "name": "WorkspaceAggregate",
-        "context": "workspaces",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/WorkspaceAggregate.py",
-        "line_count": 572,
-        "command_handlers": [],
-        "event_handlers": []
+        "event_handlers": [],
+        "folder_name": "aggregate_artifact"
       },
       {
         "name": "AgentSessionAggregate",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/AgentSessionAggregate.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py",
         "line_count": 320,
         "command_handlers": [],
-        "event_handlers": []
+        "event_handlers": [],
+        "folder_name": "aggregate_session"
       },
       {
         "name": "InstallationAggregate",
         "context": "github",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/InstallationAggregate.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/aggregate_installation/InstallationAggregate.py",
         "line_count": 175,
         "command_handlers": [],
-        "event_handlers": []
+        "event_handlers": [],
+        "folder_name": "aggregate_installation"
+      },
+      {
+        "name": "WorkflowAggregate",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workflow/WorkflowAggregate.py",
+        "line_count": 200,
+        "command_handlers": [],
+        "event_handlers": [],
+        "entities": [
+          {
+            "name": "value_objects",
+            "identity_field": "phase_id",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workflow/value_objects.py",
+            "line_count": 69
+          }
+        ],
+        "folder_name": "aggregate_workflow"
+      },
+      {
+        "name": "WorkflowExecutionAggregate",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py",
+        "line_count": 544,
+        "command_handlers": [],
+        "event_handlers": [],
+        "entities": [
+          {
+            "name": "value_objects",
+            "identity_field": "phase_id",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_execution/value_objects.py",
+            "line_count": 164
+          }
+        ],
+        "value_objects": [
+          {
+            "name": "__init__",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_execution/__init__.py",
+            "is_immutable": false,
+            "line_count": 21
+          }
+        ],
+        "folder_name": "aggregate_execution"
+      },
+      {
+        "name": "WorkspaceAggregate",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workspace/WorkspaceAggregate.py",
+        "line_count": 574,
+        "command_handlers": [],
+        "event_handlers": [],
+        "entities": [
+          {
+            "name": "value_objects",
+            "identity_field": "execution_id",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workspace/value_objects.py",
+            "line_count": 273
+          }
+        ],
+        "value_objects": [
+          {
+            "name": "__init__",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workspace/__init__.py",
+            "is_immutable": false,
+            "line_count": 20
+          }
+        ],
+        "folder_name": "aggregate_workspace"
       }
     ],
     "commands": [
@@ -848,65 +823,23 @@
         "fields": []
       },
       {
-        "name": "ExecuteWorkflowCommand",
-        "context": "workflows",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/commands/ExecuteWorkflowCommand.py",
-        "has_aggregate_id": true,
-        "fields": []
-      },
-      {
-        "name": "CreateWorkflowCommand",
-        "context": "workflows",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/commands/CreateWorkflowCommand.py",
-        "has_aggregate_id": true,
-        "fields": []
-      },
-      {
-        "name": "InjectTokensCommand",
-        "context": "workspaces",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/commands/InjectTokensCommand.py",
-        "has_aggregate_id": false,
-        "fields": []
-      },
-      {
-        "name": "ExecuteCommandCommand",
-        "context": "workspaces",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/commands/ExecuteCommandCommand.py",
-        "has_aggregate_id": false,
-        "fields": []
-      },
-      {
-        "name": "CreateWorkspaceCommand",
-        "context": "workspaces",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/commands/CreateWorkspaceCommand.py",
-        "has_aggregate_id": true,
-        "fields": []
-      },
-      {
-        "name": "TerminateWorkspaceCommand",
-        "context": "workspaces",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/commands/TerminateWorkspaceCommand.py",
-        "has_aggregate_id": true,
-        "fields": []
-      },
-      {
         "name": "RecordOperationCommand",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/commands/RecordOperationCommand.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/commands/RecordOperationCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
       {
         "name": "StartSessionCommand",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/commands/StartSessionCommand.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/commands/StartSessionCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
       {
         "name": "CompleteSessionCommand",
-        "context": "sessions",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/commands/CompleteSessionCommand.py",
+        "context": "agent_sessions",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/commands/CompleteSessionCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
@@ -915,6 +848,48 @@
         "context": "github",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/RefreshTokenCommand.py",
         "has_aggregate_id": false,
+        "fields": []
+      },
+      {
+        "name": "InjectTokensCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/InjectTokensCommand.py",
+        "has_aggregate_id": false,
+        "fields": []
+      },
+      {
+        "name": "ExecuteCommandCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/ExecuteCommandCommand.py",
+        "has_aggregate_id": false,
+        "fields": []
+      },
+      {
+        "name": "ExecuteWorkflowCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/ExecuteWorkflowCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "CreateWorkflowCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/CreateWorkflowCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "CreateWorkspaceCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/CreateWorkspaceCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "TerminateWorkspaceCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/TerminateWorkspaceCommand.py",
+        "has_aggregate_id": true,
         "fields": []
       }
     ],
@@ -942,277 +917,35 @@
         "decorator_present": false
       },
       {
-        "name": "SessionCostFinalizedEvent",
-        "context": "costs",
-        "event_type": "SessionCostFinalized",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/costs/domain/events/SessionCostFinalizedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "CostRecordedEvent",
-        "context": "costs",
-        "event_type": "CostRecorded",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/costs/domain/events/CostRecordedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkflowFailedEvent",
-        "context": "workflows",
-        "event_type": "WorkflowFailed",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/WorkflowFailedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "ExecutionResumedEvent",
-        "context": "workflows",
-        "event_type": "ExecutionResumed",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/ExecutionResumedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkflowCompletedEvent",
-        "context": "workflows",
-        "event_type": "WorkflowCompleted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/WorkflowCompletedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkflowCreatedEvent",
-        "context": "workflows",
-        "event_type": "WorkflowCreated",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/WorkflowCreatedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkflowExecutionStartedEvent",
-        "context": "workflows",
-        "event_type": "WorkflowExecutionStarted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/WorkflowExecutionStartedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "ExecutionPausedEvent",
-        "context": "workflows",
-        "event_type": "ExecutionPaused",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/ExecutionPausedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "PhaseCompletedEvent",
-        "context": "workflows",
-        "event_type": "PhaseCompleted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/PhaseCompletedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "PhaseStartedEvent",
-        "context": "workflows",
-        "event_type": "PhaseStarted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/PhaseStartedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "ExecutionCancelledEvent",
-        "context": "workflows",
-        "event_type": "ExecutionCancelled",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/domain/events/ExecutionCancelledEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceDestroyedEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceDestroyed",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceDestroyedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceTerminatedEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceTerminated",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceTerminatedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "TokensInjectedEvent",
-        "context": "workspaces",
-        "event_type": "TokensInjected",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/TokensInjectedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "IsolationStartedEvent",
-        "context": "workspaces",
-        "event_type": "IsolationStarted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/IsolationStartedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceCommandExecutedEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceCommandExecuted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceCommandExecutedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "CommandFailedEvent",
-        "context": "workspaces",
-        "event_type": "CommandFailed",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/CommandFailedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceDestroyingEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceDestroying",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceDestroyingEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceErrorEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceError",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceErrorEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceCreatedEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceCreated",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceCreatedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkspaceCreatingEvent",
-        "context": "workspaces",
-        "event_type": "WorkspaceCreating",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/WorkspaceCreatingEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "CommandExecutedEvent",
-        "context": "workspaces",
-        "event_type": "CommandExecuted",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/events/CommandExecutedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
         "name": "OperationRecordedEvent",
-        "context": "sessions",
+        "context": "agent_sessions",
         "event_type": "OperationRecorded",
         "version": {
           "Simple": "v1"
         },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/events/OperationRecordedEvent.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/events/OperationRecordedEvent.py",
         "fields": [],
         "decorator_present": false
       },
       {
         "name": "SessionStartedEvent",
-        "context": "sessions",
+        "context": "agent_sessions",
         "event_type": "SessionStarted",
         "version": {
           "Simple": "v1"
         },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/events/SessionStartedEvent.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/events/SessionStartedEvent.py",
         "fields": [],
         "decorator_present": false
       },
       {
         "name": "SessionCompletedEvent",
-        "context": "sessions",
+        "context": "agent_sessions",
         "event_type": "SessionCompleted",
         "version": {
           "Simple": "v1"
         },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/domain/events/SessionCompletedEvent.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/domain/events/SessionCompletedEvent.py",
         "fields": [],
         "decorator_present": false
       },
@@ -1259,27 +992,230 @@
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/TokenRefreshedEvent.py",
         "fields": [],
         "decorator_present": false
+      },
+      {
+        "name": "WorkspaceDestroyedEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceDestroyed",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceDestroyedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkspaceTerminatedEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceTerminated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceTerminatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "TokensInjectedEvent",
+        "context": "orchestration",
+        "event_type": "TokensInjected",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/TokensInjectedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "IsolationStartedEvent",
+        "context": "orchestration",
+        "event_type": "IsolationStarted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/IsolationStartedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkflowFailedEvent",
+        "context": "orchestration",
+        "event_type": "WorkflowFailed",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowFailedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "ExecutionResumedEvent",
+        "context": "orchestration",
+        "event_type": "ExecutionResumed",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/ExecutionResumedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkspaceCommandExecutedEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceCommandExecuted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceCommandExecutedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "CommandFailedEvent",
+        "context": "orchestration",
+        "event_type": "CommandFailed",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/CommandFailedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkflowCompletedEvent",
+        "context": "orchestration",
+        "event_type": "WorkflowCompleted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowCompletedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkflowCreatedEvent",
+        "context": "orchestration",
+        "event_type": "WorkflowCreated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowCreatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkflowExecutionStartedEvent",
+        "context": "orchestration",
+        "event_type": "WorkflowExecutionStarted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowExecutionStartedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "ExecutionPausedEvent",
+        "context": "orchestration",
+        "event_type": "ExecutionPaused",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/ExecutionPausedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkspaceDestroyingEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceDestroying",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceDestroyingEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkspaceErrorEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceError",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceErrorEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkspaceCreatedEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceCreated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceCreatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "PhaseCompletedEvent",
+        "context": "orchestration",
+        "event_type": "PhaseCompleted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/PhaseCompletedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkspaceCreatingEvent",
+        "context": "orchestration",
+        "event_type": "WorkspaceCreating",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceCreatingEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "PhaseStartedEvent",
+        "context": "orchestration",
+        "event_type": "PhaseStarted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/PhaseStartedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "CommandExecutedEvent",
+        "context": "orchestration",
+        "event_type": "CommandExecuted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/CommandExecutedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "ExecutionCancelledEvent",
+        "context": "orchestration",
+        "event_type": "ExecutionCancelled",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/ExecutionCancelledEvent.py",
+        "fields": [],
+        "decorator_present": false
       }
     ],
     "queries": [],
     "projections": [
-      {
-        "name": "DashboardMetricsProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/metrics/slices/get_metrics/projection.py",
-        "subscribed_events": [
-          "artifact_created",
-          "phase_started",
-          "session_completed",
-          "session_started",
-          "workflow_completed",
-          "workflow_created",
-          "workflow_execution_started",
-          "workflow_failed"
-        ],
-        "read_model": null,
-        "context": "metrics",
-        "line_count": 202
-      },
       {
         "name": "ArtifactListProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/artifacts/slices/list_artifacts/projection.py",
@@ -1291,122 +1227,8 @@
         "line_count": 218
       },
       {
-        "name": "ExecutionCostProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/costs/slices/execution_cost/projection.py",
-        "subscribed_events": [
-          "agent_observation",
-          "session_cost_finalized"
-        ],
-        "read_model": null,
-        "context": "costs",
-        "line_count": 195
-      },
-      {
-        "name": "SessionCostProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/costs/slices/session_cost/projection.py",
-        "subscribed_events": [
-          "agent_observation",
-          "session_cost_finalized"
-        ],
-        "read_model": null,
-        "context": "costs",
-        "line_count": 385
-      },
-      {
-        "name": "WorkflowExecutionDetailProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/get_execution_detail/projection.py",
-        "subscribed_events": [
-          "execution_cancelled",
-          "execution_paused",
-          "execution_resumed",
-          "phase_completed",
-          "phase_started",
-          "workflow_completed",
-          "workflow_execution_started",
-          "workflow_failed"
-        ],
-        "read_model": "WorkflowExecutionDetail",
-        "context": "workflows",
-        "line_count": 409
-      },
-      {
-        "name": "WorkflowDetailProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/get_workflow_detail/projection.py",
-        "subscribed_events": [
-          "workflow_created",
-          "workflow_execution_started"
-        ],
-        "read_model": "WorkflowDetail",
-        "context": "workflows",
-        "line_count": 158
-      },
-      {
-        "name": "WorkflowExecutionListProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/list_executions/projection.py",
-        "subscribed_events": [
-          "execution_cancelled",
-          "execution_paused",
-          "execution_resumed",
-          "phase_completed",
-          "workflow_completed",
-          "workflow_execution_started",
-          "workflow_failed"
-        ],
-        "read_model": null,
-        "context": "workflows",
-        "line_count": 332
-      },
-      {
-        "name": "WorkflowListProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workflows/slices/list_workflows/projection.py",
-        "subscribed_events": [
-          "workflow_created",
-          "workflow_execution_started"
-        ],
-        "read_model": null,
-        "context": "workflows",
-        "line_count": 170
-      },
-      {
-        "name": "TokenMetricsProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/observability/slices/token_metrics/projection.py",
-        "subscribed_events": [
-          "token_usage"
-        ],
-        "read_model": null,
-        "context": "observability",
-        "line_count": 95
-      },
-      {
-        "name": "ToolTimelineProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/observability/slices/tool_timeline/projection.py",
-        "subscribed_events": [
-          "tool_blocked",
-          "tool_execution_completed",
-          "tool_execution_started"
-        ],
-        "read_model": null,
-        "context": "observability",
-        "line_count": 155
-      },
-      {
-        "name": "WorkspaceMetricsProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/workspaces/slices/workspace_metrics/projection.py",
-        "subscribed_events": [
-          "command_executed",
-          "workspace_created",
-          "workspace_creating",
-          "workspace_destroyed",
-          "workspace_destroying",
-          "workspace_error"
-        ],
-        "read_model": null,
-        "context": "workspaces",
-        "line_count": 310
-      },
-      {
         "name": "SessionListProjection",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/sessions/slices/list_sessions/projection.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/list_sessions/projection.py",
         "subscribed_events": [
           "operation_recorded",
           "session_completed",
@@ -1415,8 +1237,41 @@
           "subagent_stopped"
         ],
         "read_model": null,
-        "context": "sessions",
+        "context": "agent_sessions",
         "line_count": 345
+      },
+      {
+        "name": "SessionCostProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/session_cost/projection.py",
+        "subscribed_events": [
+          "agent_observation",
+          "session_cost_finalized"
+        ],
+        "read_model": null,
+        "context": "agent_sessions",
+        "line_count": 385
+      },
+      {
+        "name": "TokenMetricsProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/token_metrics/projection.py",
+        "subscribed_events": [
+          "token_usage"
+        ],
+        "read_model": null,
+        "context": "agent_sessions",
+        "line_count": 95
+      },
+      {
+        "name": "ToolTimelineProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/tool_timeline/projection.py",
+        "subscribed_events": [
+          "tool_blocked",
+          "tool_execution_completed",
+          "tool_execution_started"
+        ],
+        "read_model": null,
+        "context": "agent_sessions",
+        "line_count": 155
       },
       {
         "name": "InstallationProjection",
@@ -1430,6 +1285,104 @@
         "read_model": null,
         "context": "github",
         "line_count": 224
+      },
+      {
+        "name": "WorkspaceMetricsProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/workspace_metrics/projection.py",
+        "subscribed_events": [
+          "command_executed",
+          "workspace_created",
+          "workspace_creating",
+          "workspace_destroyed",
+          "workspace_destroying",
+          "workspace_error"
+        ],
+        "read_model": null,
+        "context": "orchestration",
+        "line_count": 310
+      },
+      {
+        "name": "WorkflowExecutionDetailProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/get_execution_detail/projection.py",
+        "subscribed_events": [
+          "execution_cancelled",
+          "execution_paused",
+          "execution_resumed",
+          "phase_completed",
+          "phase_started",
+          "workflow_completed",
+          "workflow_execution_started",
+          "workflow_failed"
+        ],
+        "read_model": "WorkflowExecutionDetail",
+        "context": "orchestration",
+        "line_count": 409
+      },
+      {
+        "name": "ExecutionCostProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/execution_cost/projection.py",
+        "subscribed_events": [
+          "agent_observation",
+          "session_cost_finalized"
+        ],
+        "read_model": null,
+        "context": "orchestration",
+        "line_count": 195
+      },
+      {
+        "name": "WorkflowDetailProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/get_workflow_detail/projection.py",
+        "subscribed_events": [
+          "workflow_created",
+          "workflow_execution_started"
+        ],
+        "read_model": "WorkflowDetail",
+        "context": "orchestration",
+        "line_count": 158
+      },
+      {
+        "name": "WorkflowExecutionListProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/list_executions/projection.py",
+        "subscribed_events": [
+          "execution_cancelled",
+          "execution_paused",
+          "execution_resumed",
+          "phase_completed",
+          "workflow_completed",
+          "workflow_execution_started",
+          "workflow_failed"
+        ],
+        "read_model": null,
+        "context": "orchestration",
+        "line_count": 332
+      },
+      {
+        "name": "WorkflowListProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/list_workflows/projection.py",
+        "subscribed_events": [
+          "workflow_created",
+          "workflow_execution_started"
+        ],
+        "read_model": null,
+        "context": "orchestration",
+        "line_count": 170
+      },
+      {
+        "name": "DashboardMetricsProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/dashboard_metrics/projection.py",
+        "subscribed_events": [
+          "artifact_created",
+          "phase_started",
+          "session_completed",
+          "session_started",
+          "workflow_completed",
+          "workflow_created",
+          "workflow_execution_started",
+          "workflow_failed"
+        ],
+        "read_model": null,
+        "context": "orchestration",
+        "line_count": 202
       }
     ],
     "upcasters": [],
@@ -1438,123 +1391,123 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "operation_recorded": [
-          "SessionListProjection"
-        ],
-        "execution_cancelled": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "execution_paused": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "tool_execution_started": [
-          "ToolTimelineProjection"
-        ],
-        "installation_suspended": [
+        "installation_revoked": [
           "InstallationProjection"
         ],
-        "session_started": [
-          "DashboardMetricsProjection",
-          "SessionListProjection"
+        "app_installed": [
+          "InstallationProjection"
         ],
-        "token_usage": [
-          "TokenMetricsProjection"
-        ],
-        "session_cost_finalized": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
-        ],
-        "workspace_creating": [
-          "WorkspaceMetricsProjection"
-        ],
-        "artifact_created": [
-          "DashboardMetricsProjection",
-          "ArtifactListProjection"
-        ],
-        "tool_blocked": [
-          "ToolTimelineProjection"
+        "session_completed": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
         ],
         "workspace_created": [
           "WorkspaceMetricsProjection"
         ],
-        "token_refreshed": [
-          "InstallationProjection"
+        "session_cost_finalized": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "artifact_created": [
+          "ArtifactListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "tool_execution_started": [
+          "ToolTimelineProjection"
+        ],
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
+        ],
+        "workflow_failed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "session_started": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workflow_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "phase_started": [
+          "WorkflowExecutionDetailProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workspace_error": [
+          "WorkspaceMetricsProjection"
         ],
         "execution_resumed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "agent_observation": [
-          "ExecutionCostProjection",
-          "SessionCostProjection"
+        "token_usage": [
+          "TokenMetricsProjection"
+        ],
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
+        ],
+        "execution_paused": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "workflow_execution_started": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowDetailProjection",
+          "WorkflowExecutionListProjection",
+          "WorkflowListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "installation_suspended": [
+          "InstallationProjection"
+        ],
+        "workflow_created": [
+          "WorkflowDetailProjection",
+          "WorkflowListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "execution_cancelled": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
         ],
         "workspace_destroyed": [
           "WorkspaceMetricsProjection"
         ],
+        "tool_blocked": [
+          "ToolTimelineProjection"
+        ],
+        "token_refreshed": [
+          "InstallationProjection"
+        ],
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
+        ],
+        "subagent_stopped": [
+          "SessionListProjection"
+        ],
         "subagent_started": [
           "SessionListProjection"
+        ],
+        "operation_recorded": [
+          "SessionListProjection"
+        ],
+        "command_executed": [
+          "WorkspaceMetricsProjection"
         ],
         "phase_completed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
-        "phase_started": [
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection"
-        ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "app_installed": [
-          "InstallationProjection"
-        ],
-        "installation_revoked": [
-          "InstallationProjection"
-        ],
-        "workflow_completed": [
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "command_executed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workflow_execution_started": [
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowDetailProjection",
-          "WorkflowExecutionListProjection",
-          "WorkflowListProjection"
-        ],
-        "workflow_failed": [
-          "DashboardMetricsProjection",
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "workflow_created": [
-          "DashboardMetricsProjection",
-          "WorkflowDetailProjection",
-          "WorkflowListProjection"
-        ],
-        "workspace_error": [
-          "WorkspaceMetricsProjection"
-        ],
-        "tool_execution_completed": [
-          "ToolTimelineProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
-        ],
-        "session_completed": [
-          "DashboardMetricsProjection",
-          "SessionListProjection"
+        "agent_observation": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
         ]
       },
       "projection_to_read_model": {
-        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail",
-        "WorkflowDetailProjection": "WorkflowDetail"
+        "WorkflowDetailProjection": "WorkflowDetail",
+        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail"
       }
     }
   }

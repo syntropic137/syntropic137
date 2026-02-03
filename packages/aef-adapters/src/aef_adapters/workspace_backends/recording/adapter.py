@@ -24,7 +24,9 @@ if TYPE_CHECKING:
     from agentic_events import Recording, SessionPlayer
     from agentic_events.player import RecordingMetadata
 
-    from aef_domain.contexts.workspaces._shared.value_objects import IsolationHandle
+    from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationHandle,
+    )
 
 
 class RecordingAdapterTestOnlyError(RuntimeError):

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from aef_domain.contexts.workspaces._shared.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     InjectionMethod,
     IsolationHandle,
     SidecarHandle,

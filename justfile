@@ -114,42 +114,46 @@ dev-force: _workspace-check
     @echo "   API Docs:     http://localhost:8000/docs"
 
 # Clean database, seed workflows, and start full dev stack (fresh start)
-dev-fresh:
-    @echo "🧹 Cleaning database and restarting full stack..."
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
-    @echo "Building & starting Docker services (PostgreSQL + Event Store)..."
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
-    @echo "⏳ Waiting for services to be healthy..."
-    @sleep 5
-    @echo "🌱 Running database migrations (optional - needs psql)..."
-    -just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
-    @echo "🌱 Seeding workflows..."
-    just seed-workflows
+# Fresh start: wipe all data and restart from scratch
+dev-fresh: _workspace-check
+    @echo "🧹 Fresh start: wiping databases and restarting full stack..."
     @echo ""
-    @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
-    -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
-    -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
-    -lsof -ti:8001 | xargs kill -9 2>/dev/null || true
-    @sleep 1
-    @echo "Starting dashboard backend on :8000..."
-    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
-    @sleep 4
-    @echo "Starting feedback API on :8001..."
-    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    cd lib/ui-feedback/backend/ui-feedback-api && \
-    UI_FEEDBACK_DATABASE_URL=$DATABASE_URL \
-    uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
-    @sleep 2
-    @echo "Starting dashboard frontend on :5173..."
+    @echo "1️⃣ Stopping any existing processes..."
+    @-lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+    @echo ""
+    @echo "2️⃣ Tearing down Docker services and volumes..."
+    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v --remove-orphans
+    @echo ""
+    @echo "3️⃣ Syncing Python dependencies..."
+    @uv sync
+    @echo ""
+    @echo "4️⃣ Building and starting Docker services..."
+    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
+    @echo ""
+    @echo "5️⃣ Waiting for services to be healthy..."
+    @sleep 8
+    @echo ""
+    @echo "6️⃣ Running database migrations..."
+    @-just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
+    @echo ""
+    @echo "7️⃣ Seeding workflows..."
+    @just seed-workflows
+    @echo ""
+    @echo "8️⃣ Starting dashboard frontend..."
+    @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm run dev &
-    @sleep 2
+    @sleep 3
     @echo ""
     @echo "✅ Fresh development environment ready!"
-    @echo "   Frontend:     http://localhost:5173"
-    @echo "   Backend:      http://localhost:8000"
-    @echo "   Feedback API: http://localhost:8001"
-    @echo "   API Docs:     http://localhost:8000/docs"
+    @echo ""
+    @echo "   🌐 Frontend:     http://localhost:5173"
+    @echo "   🚀 Backend API:  http://localhost:8000"
+    @echo "   📊 API Docs:     http://localhost:8000/docs"
+    @echo "   💾 Database:     localhost:5432"
+    @echo "   📦 Event Store:  localhost:50051"
+    @echo "   🗂️  MinIO:        http://localhost:9001"
+    @echo ""
+    @echo "💡 All data has been wiped. Workflows have been re-seeded."
 
 # --- Workspace Image (from agentic-primitives) ---
 
@@ -275,17 +279,20 @@ test:
     @echo "Running all tests..."
     uv run pytest
 
-# Static checks: lint + format + typecheck (fast, pre-commit)
+# Static checks: lint + format + typecheck + import check (fast, pre-commit)
 check:
     @echo "=== Static Checks ==="
     @echo ""
-    @echo "1️⃣ Linting..."
+    @echo "1️⃣ Import smoke test..."
+    @just import-check
+    @echo ""
+    @echo "2️⃣ Linting..."
     @uv run ruff check .
     @echo ""
-    @echo "2️⃣ Format check..."
+    @echo "3️⃣ Format check..."
     @uv run ruff format --check .
     @echo ""
-    @echo "3️⃣ Type checking..."
+    @echo "4️⃣ Type checking..."
     @uv run pyright || echo "⚠️  Type check failed (non-blocking for now)"
     @echo ""
     @echo "✅ Static checks passed!"
@@ -301,6 +308,10 @@ check-fix:
     @uv run ruff format .
     @echo ""
     @echo "✅ Static checks fixed!"
+
+# Quick import smoke test - catches broken imports fast
+import-check:
+    @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
 qa: lint format typecheck test dashboard-qa test-debt vsa-validate docs-sync
@@ -420,9 +431,18 @@ lint:
 format:
     uv run ruff format .
 
+# Check formatting without changing files (same as CI)
+format-check:
+    uv run ruff format --check .
+
 # Run type checker (strict mode)
 typecheck:
     uv run mypy apps packages
+
+# CI-equivalent checks (run before pushing!)
+ci-check: lint format-check typecheck
+    @echo ""
+    @echo "✅ All CI checks passed! Safe to push."
 
 # Run VSA validation (requires event-sourcing-platform submodule)
 vsa-validate:
@@ -432,11 +452,9 @@ vsa-validate:
 
 # Generate architecture diagram (SVG from VSA manifest)
 diagram:
-    @echo "🏗️  Generating architecture diagram..."
+    @echo "🏗️  Generating architecture diagrams..."
     @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
-    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --output docs/architecture
-    @mv docs/architecture/ARCHITECTURE.svg docs/architecture/vsa-overview.svg
-    @echo "✅ Diagram generated: docs/architecture/vsa-overview.svg"
+    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --type architecture --output docs/architecture
 
 # Generate auto-generated architecture documentation
 docs-gen:

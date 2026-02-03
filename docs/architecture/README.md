@@ -1,6 +1,6 @@
 # AEF Architecture Documentation
 
-**Last Updated:** 2026-01-26
+**Last Updated:** 2026-02-03
 
 ---
 
@@ -13,11 +13,12 @@
 **🤖 Auto-generated** - This diagram is generated from the VSA manifest.
 
 **Shows:**
-- 9 Bounded Contexts (Workflows, Workspaces, Sessions, etc.)
-- CQRS Pattern: 12 Commands → 31 Events → 13 Projections
+- 4 Bounded Contexts with 6 Aggregates total
+- **Orchestration** (3 aggregates): Workflow, Workspace, WorkflowExecution
+- **Agent Sessions** (1 aggregate): AgentSession
+- **GitHub** (1 aggregate): Installation
+- **Artifacts** (1 aggregate): Artifact
 - Infrastructure Layer (TimescaleDB, EventStore, Redis, MinIO)
-- Package Structure (aef-domain, aef-adapters, aef-collector)
-- Library Dependencies (agentic-primitives, event-sourcing-platform)
 
 **Regenerate:**
 ```bash

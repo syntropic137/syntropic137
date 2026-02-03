@@ -23,10 +23,10 @@ import pytest
 if TYPE_CHECKING:
     from event_sourcing import EventStoreRepository, GrpcEventStoreClient, RepositoryFactory
 
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -66,7 +66,7 @@ def workflow_execution_repository(
     repository_factory: RepositoryFactory,
 ) -> EventStoreRepository[WorkflowExecutionAggregate]:
     """Create repository for WorkflowExecution aggregates."""
-    from aef_domain.contexts.workflows.domain.WorkflowExecutionAggregate import (
+    from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
 
@@ -78,7 +78,7 @@ def agent_session_repository(
     repository_factory: RepositoryFactory,
 ) -> EventStoreRepository[AgentSessionAggregate]:
     """Create repository for AgentSession aggregates."""
-    from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+    from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
 

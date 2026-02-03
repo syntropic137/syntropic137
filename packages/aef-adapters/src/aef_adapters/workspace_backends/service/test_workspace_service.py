@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from aef_adapters.workspace_backends.service import WorkspaceBackend
-from aef_domain.contexts.workspaces._shared.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationBackendType,
     TokenType,
     WorkspaceStatus,

@@ -5,7 +5,9 @@ from aef_domain.contexts.artifacts._shared.value_objects import (
     ContentType,
     compute_content_hash,
 )
-from aef_domain.contexts.artifacts.domain.ArtifactAggregate import ArtifactAggregate
+from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+    ArtifactAggregate,
+)
 
 __all__ = [
     "ArtifactAggregate",

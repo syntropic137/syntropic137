@@ -55,13 +55,13 @@ from aef_adapters.workspace_backends.service import WorkspaceService
 
 # Domain imports - WorkflowExecutionEngine handles everything
 from aef_domain.contexts.artifacts import ArtifactQueryService
-from aef_domain.contexts.workflows import (
+from aef_domain.contexts.orchestration.slices.execute_workflow import (
     WorkflowExecutionEngine,
     WorkflowExecutionResult,
 )
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.workflows.domain.read_models.workflow_execution_detail import (
+    from aef_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
         WorkflowExecutionDetail,
     )
 

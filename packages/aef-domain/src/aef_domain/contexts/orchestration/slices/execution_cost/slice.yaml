@@ -1,0 +1,20 @@
+name: execution_cost
+description: Execution-level cost tracking (aggregated from sessions)
+context: orchestration
+type: query
+
+# Events this slice subscribes to
+subscribes_to:
+  - CostRecorded
+  - SessionCostFinalized
+
+# Query this slice handles
+query:
+  name: GetExecutionCostQuery
+  returns: ExecutionCost
+
+# Read model this slice produces
+read_model: ExecutionCost
+
+# Projection that builds the read model
+projection: ExecutionCostProjection
