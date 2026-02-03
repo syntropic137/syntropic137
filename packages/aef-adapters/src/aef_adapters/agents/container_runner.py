@@ -548,29 +548,65 @@ class ContainerAgentRunner:
 
                     # ADR-037: Subagent lifecycle events (detected by EventParser)
                     elif event_type == EventType.SUBAGENT_STARTED:
+                        agent_name = obs_event.agent_name or "unknown"
+                        tool_use_id = obs_event.subagent_tool_use_id or ""
+
+                        # Store subagent_started event
+                        await self._store_event(
+                            {
+                                "event_type": SUBAGENT_STARTED,
+                                "session_id": session_id,
+                                "agent_name": agent_name,
+                                "subagent_tool_use_id": tool_use_id,
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            },
+                            execution_id,
+                            phase_id,
+                        )
+
                         yield ContainerSubagentStarted(
-                            agent_name=obs_event.agent_name or "unknown",
-                            subagent_tool_use_id=obs_event.subagent_tool_use_id or "",
+                            agent_name=agent_name,
+                            subagent_tool_use_id=tool_use_id,
                         )
                         logger.info(
                             "Subagent started: %s (id=%s)",
-                            obs_event.agent_name,
-                            obs_event.subagent_tool_use_id,
+                            agent_name,
+                            tool_use_id,
                         )
 
                     elif event_type == EventType.SUBAGENT_STOPPED:
+                        agent_name = obs_event.agent_name or "unknown"
+                        tool_use_id = obs_event.subagent_tool_use_id or ""
+                        duration_ms = obs_event.duration_ms
+                        success = obs_event.success if obs_event.success is not None else True
+
+                        # Store subagent_stopped event
+                        await self._store_event(
+                            {
+                                "event_type": SUBAGENT_STOPPED,
+                                "session_id": session_id,
+                                "agent_name": agent_name,
+                                "subagent_tool_use_id": tool_use_id,
+                                "duration_ms": duration_ms,
+                                "success": success,
+                                "timestamp": datetime.now(UTC).isoformat(),
+                            },
+                            execution_id,
+                            phase_id,
+                        )
+
                         yield ContainerSubagentStopped(
-                            agent_name=obs_event.agent_name or "unknown",
-                            subagent_tool_use_id=obs_event.subagent_tool_use_id or "",
-                            duration_ms=obs_event.duration_ms,
+                            agent_name=agent_name,
+                            subagent_tool_use_id=tool_use_id,
+                            duration_ms=duration_ms,
                             tools_used={},  # TODO: Get from parser summary if needed
-                            success=obs_event.success if obs_event.success is not None else True,
+                            success=success,
                         )
                         logger.info(
                             "Subagent stopped: %s (id=%s, duration=%sms)",
-                            obs_event.agent_name,
-                            obs_event.subagent_tool_use_id,
-                            obs_event.duration_ms,
+                            agent_name,
+                            tool_use_id,
+                            duration_ms,
                         )
 
                     # Hook events and other types - just log
