@@ -1156,7 +1156,8 @@ class WorkflowExecutionEngine:
                     tools_dict[tool] = tools_dict.get(tool, 0) + 1
 
                 # ADR-035: Collect all JSONL lines for conversation storage
-                conversation_lines: list[str] = []
+                # (conversation_lines initialized before try block for failure handling)
+                conversation_lines.clear()
 
                 line_count = 0
                 async for line in workspace.stream(

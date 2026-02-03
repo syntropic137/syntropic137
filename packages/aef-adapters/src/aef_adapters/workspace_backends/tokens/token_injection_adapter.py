@@ -21,7 +21,7 @@ if TYPE_CHECKING:
         TokenInjectionResult,
         TokenType,
     )
-    from aef_domain.contexts.orchestration.ports import SidecarPort
+    from aef_domain.contexts.orchestration._shared.ports import SidecarPort
 
 logger = logging.getLogger(__name__)
 
