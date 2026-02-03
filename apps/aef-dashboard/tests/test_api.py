@@ -37,17 +37,17 @@ from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggrega
 from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
     CreateWorkflowCommand,
 )
-from aef_domain.contexts.sessions._shared.value_objects import OperationType, SessionStatus
-from aef_domain.contexts.sessions.domain.AgentSessionAggregate import (
+from aef_domain.contexts.agent_sessions._shared.value_objects import OperationType, SessionStatus
+from aef_domain.contexts.agent_sessions.domain.AgentSessionAggregate import (
     AgentSessionAggregate,
 )
-from aef_domain.contexts.sessions.domain.commands.CompleteSessionCommand import (
+from aef_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
     CompleteSessionCommand,
 )
-from aef_domain.contexts.sessions.domain.commands.RecordOperationCommand import (
+from aef_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
     RecordOperationCommand,
 )
-from aef_domain.contexts.sessions.domain.commands.StartSessionCommand import (
+from aef_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
     StartSessionCommand,
 )
 

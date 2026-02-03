@@ -16,7 +16,7 @@ from aef_dashboard.models.schemas import (
 
 if TYPE_CHECKING:
     from aef_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
-    from aef_domain.contexts.sessions.domain.read_models.session_cost import SessionCost
+    from aef_domain.contexts.agent_sessions.domain.read_models.session_cost import SessionCost
 
 router = APIRouter(prefix="/costs", tags=["costs"])
 
