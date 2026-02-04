@@ -41,7 +41,7 @@ Claude CLI → Task tool → EventParser detects subagent
                     SUBAGENT_STARTED event
                               │
                               ▼
-              ContainerAgentRunner yields ContainerSubagentStarted
+              WorkflowExecutionEngine records observation
                               │
                               ▼
                     EventBuffer → TimescaleDB
@@ -139,9 +139,11 @@ class ContainerSubagentStopped:
 
 **aef-adapters**:
 - `packages/aef-adapters/src/aef_adapters/events/models.py` - Event mapping
-- `packages/aef-adapters/src/aef_adapters/agents/container_runner.py` - Event handling
 - `packages/aef-adapters/src/aef_adapters/projections/manager.py` - Event routing
 - `packages/aef-adapters/src/aef_adapters/projections/realtime.py` - WebSocket push
+
+**aef-domain**:
+- `packages/aef-domain/.../WorkflowExecutionEngine.py` - Subagent event detection and recording
 
 **aef-domain**:
 - `packages/aef-domain/.../session_summary.py` - SubagentRecord dataclass
