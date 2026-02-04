@@ -1331,9 +1331,7 @@ class WorkflowExecutionEngine:
                             if usage:
                                 input_tokens = usage.get("input_tokens", 0)
                                 output_tokens = usage.get("output_tokens", 0)
-                                cache_creation = usage.get(
-                                    "cache_creation_input_tokens", 0
-                                )
+                                cache_creation = usage.get("cache_creation_input_tokens", 0)
                                 cache_read = usage.get("cache_read_input_tokens", 0)
 
                                 # Only record if there's actual token usage

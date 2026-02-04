@@ -378,7 +378,9 @@ class ContainerAgentRunner:
                                 agent_name=agent_name,
                                 subagent_tool_use_id=tool_use_id,
                             )
-                            logger.info("Subagent started (hook): %s (id=%s)", agent_name, tool_use_id)
+                            logger.info(
+                                "Subagent started (hook): %s (id=%s)", agent_name, tool_use_id
+                            )
 
                     elif event_type == EventType.TOOL_EXECUTION_COMPLETED:
                         tool_count += 1
@@ -410,7 +412,9 @@ class ContainerAgentRunner:
                         # hook event fallback only.
                         if tool_name == "Task" and tool_use_id in active_subagents:
                             agent_name, started_at = active_subagents.pop(tool_use_id)
-                            duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
+                            duration_ms = int(
+                                (datetime.now(UTC) - started_at).total_seconds() * 1000
+                            )
 
                             yield ContainerSubagentStopped(
                                 agent_name=agent_name,

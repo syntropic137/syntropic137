@@ -153,7 +153,9 @@ class TestCostTrackingValidation:
             if "cost_usd" in usage:
                 assert usage["cost_usd"] >= 0, f"Model {model} cost should be non-negative"
             if "input_tokens" in usage:
-                assert usage["input_tokens"] >= 0, f"Model {model} input tokens should be non-negative"
+                assert usage["input_tokens"] >= 0, (
+                    f"Model {model} input tokens should be non-negative"
+                )
 
     def test_calculated_cost_approximates_authoritative(
         self, simple_bash_adapter: RecordingEventStreamAdapter
@@ -327,13 +329,15 @@ class TestCollectorIntegration:
             }
             mapped_type = type_mapping.get(event_type, "token_usage")
 
-            batch_events.append({
-                "event_id": _make_event_id(test_session_id, mapped_type, i),
-                "event_type": mapped_type,
-                "session_id": test_session_id,
-                "timestamp": datetime.now(tz=UTC).isoformat(),
-                "data": event,
-            })
+            batch_events.append(
+                {
+                    "event_id": _make_event_id(test_session_id, mapped_type, i),
+                    "event_type": mapped_type,
+                    "session_id": test_session_id,
+                    "timestamp": datetime.now(tz=UTC).isoformat(),
+                    "data": event,
+                }
+            )
 
         batch = {
             "agent_id": "validation-test",
