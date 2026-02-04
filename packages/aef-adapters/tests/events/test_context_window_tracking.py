@@ -63,13 +63,9 @@ def simple_bash_events() -> list[dict[str, Any]]:
 class TestContextWindowFormula:
     """Verify context window calculation formula from ADR-039."""
 
-    def test_context_window_from_usage(
-        self, context_tracking_events: list[dict[str, Any]]
-    ) -> None:
+    def test_context_window_from_usage(self, context_tracking_events: list[dict[str, Any]]) -> None:
         """Context window = input_tokens + cache_creation_input_tokens + cache_read_input_tokens."""
-        assistant_events = [
-            e for e in context_tracking_events if e.get("type") == "assistant"
-        ]
+        assistant_events = [e for e in context_tracking_events if e.get("type") == "assistant"]
         assert len(assistant_events) > 0, "Should have assistant events"
 
         for event in assistant_events:
@@ -97,9 +93,7 @@ class TestContextWindowFormula:
         self, context_tracking_events: list[dict[str, Any]]
     ) -> None:
         """Context window should generally grow as conversation progresses."""
-        assistant_events = [
-            e for e in context_tracking_events if e.get("type") == "assistant"
-        ]
+        assistant_events = [e for e in context_tracking_events if e.get("type") == "assistant"]
 
         context_windows = []
         for event in assistant_events:
@@ -133,13 +127,9 @@ class TestContextWindowFormula:
 class TestCostTracking:
     """Verify cost tracking from result event."""
 
-    def test_result_has_total_cost(
-        self, context_tracking_events: list[dict[str, Any]]
-    ) -> None:
+    def test_result_has_total_cost(self, context_tracking_events: list[dict[str, Any]]) -> None:
         """Result event has authoritative total_cost_usd."""
-        result = next(
-            (e for e in context_tracking_events if e.get("type") == "result"), None
-        )
+        result = next((e for e in context_tracking_events if e.get("type") == "result"), None)
         assert result is not None, "Should have result event"
 
         cost = result.get("total_cost_usd")
@@ -147,13 +137,9 @@ class TestCostTracking:
         assert isinstance(cost, (int, float)), f"Cost should be numeric: {type(cost)}"
         assert cost >= 0, f"Cost should be non-negative: {cost}"
 
-    def test_result_has_usage_totals(
-        self, context_tracking_events: list[dict[str, Any]]
-    ) -> None:
+    def test_result_has_usage_totals(self, context_tracking_events: list[dict[str, Any]]) -> None:
         """Result event has cumulative token usage."""
-        result = next(
-            (e for e in context_tracking_events if e.get("type") == "result"), None
-        )
+        result = next((e for e in context_tracking_events if e.get("type") == "result"), None)
         assert result is not None
 
         usage = result.get("usage", {})
@@ -168,13 +154,9 @@ class TestCostTracking:
 class TestMultiModelUsage:
     """Verify multi-model cost breakdown from modelUsage."""
 
-    def test_result_has_model_usage(
-        self, multi_model_events: list[dict[str, Any]]
-    ) -> None:
+    def test_result_has_model_usage(self, multi_model_events: list[dict[str, Any]]) -> None:
         """Result event has modelUsage breakdown."""
-        result = next(
-            (e for e in multi_model_events if e.get("type") == "result"), None
-        )
+        result = next((e for e in multi_model_events if e.get("type") == "result"), None)
         assert result is not None, "Should have result event"
 
         model_usage = result.get("modelUsage", {})
@@ -184,9 +166,7 @@ class TestMultiModelUsage:
         self, multi_model_events: list[dict[str, Any]]
     ) -> None:
         """modelUsage has per-model cost breakdown."""
-        result = next(
-            (e for e in multi_model_events if e.get("type") == "result"), None
-        )
+        result = next((e for e in multi_model_events if e.get("type") == "result"), None)
         assert result is not None
 
         model_usage = result.get("modelUsage", {})
@@ -196,17 +176,11 @@ class TestMultiModelUsage:
             assert "costUSD" in model_data, (
                 f"Model {model_name} should have costUSD: {model_data.keys()}"
             )
-            assert model_data["costUSD"] >= 0, (
-                f"Model {model_name} cost should be non-negative"
-            )
+            assert model_data["costUSD"] >= 0, f"Model {model_name} cost should be non-negative"
 
-    def test_model_usage_costs_sum_to_total(
-        self, multi_model_events: list[dict[str, Any]]
-    ) -> None:
+    def test_model_usage_costs_sum_to_total(self, multi_model_events: list[dict[str, Any]]) -> None:
         """Sum of per-model costs should equal total_cost_usd."""
-        result = next(
-            (e for e in multi_model_events if e.get("type") == "result"), None
-        )
+        result = next((e for e in multi_model_events if e.get("type") == "result"), None)
         assert result is not None
 
         total_cost = result.get("total_cost_usd", 0)
@@ -215,9 +189,7 @@ class TestMultiModelUsage:
         if not model_usage:
             pytest.skip("No modelUsage in this recording")
 
-        per_model_sum = sum(
-            model_data.get("costUSD", 0) for model_data in model_usage.values()
-        )
+        per_model_sum = sum(model_data.get("costUSD", 0) for model_data in model_usage.values())
 
         # Allow small floating point difference
         assert abs(total_cost - per_model_sum) < 0.0001, (
@@ -242,12 +214,8 @@ class TestTokenReconciliation:
         token counts. The result event contains the authoritative cumulative total.
         Per-turn assistant events may show lower counts due to streaming updates.
         """
-        assistant_events = [
-            e for e in simple_bash_events if e.get("type") == "assistant"
-        ]
-        result = next(
-            (e for e in simple_bash_events if e.get("type") == "result"), None
-        )
+        assistant_events = [e for e in simple_bash_events if e.get("type") == "assistant"]
+        result = next((e for e in simple_bash_events if e.get("type") == "result"), None)
 
         if not result:
             pytest.skip("No result event")
