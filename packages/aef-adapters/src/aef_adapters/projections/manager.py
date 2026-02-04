@@ -14,7 +14,6 @@ from aef_adapters.projection_stores import get_projection_store
 from aef_adapters.projections.session_tools import SessionToolsProjection
 from aef_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
 from aef_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
-from aef_domain.contexts.agent_sessions.slices.token_metrics import TokenMetricsProjection
 from aef_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from aef_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
@@ -32,6 +31,7 @@ from aef_domain.contexts.orchestration.slices.list_executions import (
 )
 from aef_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
 from aef_shared.events import (
+    SESSION_SUMMARY,
     TOKEN_USAGE,
     TOOL_BLOCKED,
     TOOL_COMPLETED,
@@ -198,12 +198,20 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     ],
     TOOL_COMPLETED: [
         ("tool_timeline", "on_tool_execution_completed"),
+        ("session_cost", "on_agent_observation"),
+        ("execution_cost", "on_agent_observation"),
     ],
     TOOL_BLOCKED: [
         ("tool_timeline", "on_tool_blocked"),
     ],
     TOKEN_USAGE: [
-        ("token_metrics", "on_token_usage"),
+        ("session_cost", "on_agent_observation"),
+        ("execution_cost", "on_agent_observation"),
+    ],
+    # Session summary (end of session with accurate cumulative totals)
+    SESSION_SUMMARY: [
+        ("session_cost", "on_session_summary"),
+        ("execution_cost", "on_session_summary"),
     ],
     # Cost tracking events
     "CostRecorded": [
@@ -249,7 +257,6 @@ class ProjectionManager:
             "dashboard_metrics": DashboardMetricsProjection(self._store),
             # Observability projections (Pattern 2: Event Log + CQRS)
             "tool_timeline": ToolTimelineProjection(self._store),
-            "token_metrics": TokenMetricsProjection(self._store),
             # Cost tracking projections (now query TimescaleDB directly)
             "session_cost": self._create_session_cost_projection(),
             "execution_cost": ExecutionCostProjection(self._store),
@@ -462,12 +469,6 @@ class ProjectionManager:
         """Get the tool timeline projection."""
         self._ensure_initialized()
         return self._projections["tool_timeline"]
-
-    @property
-    def token_metrics(self) -> TokenMetricsProjection:
-        """Get the token metrics projection."""
-        self._ensure_initialized()
-        return self._projections["token_metrics"]
 
     @property
     def realtime(self) -> Any:

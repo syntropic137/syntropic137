@@ -52,8 +52,9 @@ class ExecutionCostProjection:
             return
 
         session_id = event_data.get("session_id")
-        observation_type = event_data.get("observation_type")
-        if not observation_type:
+        # Support both domain events (observation_type) and raw JSONL events (event_type)
+        event_type = event_data.get("event_type") or event_data.get("observation_type")
+        if not event_type:
             return
 
         # Get existing execution cost or create new
@@ -82,7 +83,7 @@ class ExecutionCostProjection:
         data = event_data.get("data", {})
 
         # Handle TOKEN_USAGE observations
-        if observation_type == ObservationType.TOKEN_USAGE.value:
+        if event_type == ObservationType.TOKEN_USAGE.value:
             input_tokens = data.get("input_tokens") or 0
             output_tokens = data.get("output_tokens") or 0
             cache_creation = data.get("cache_creation_tokens") or 0
@@ -126,7 +127,7 @@ class ExecutionCostProjection:
             execution_cost.turns += 1
 
         # Handle TOOL_COMPLETED observations
-        elif observation_type == ObservationType.TOOL_COMPLETED.value:
+        elif event_type == ObservationType.TOOL_COMPLETED.value:
             execution_cost.tool_calls += 1
 
             # Track duration if available
@@ -135,6 +136,70 @@ class ExecutionCostProjection:
                 execution_cost.duration_ms += duration_ms
 
         # Save updated execution cost
+        await self._store.save(self.PROJECTION_NAME, execution_id, execution_cost.to_dict())
+
+    async def on_session_summary(self, event_data: dict[str, Any]) -> None:
+        """Handle session_summary event with accurate cumulative totals.
+
+        This event is produced at the end of agent execution and contains
+        the authoritative totals from Claude CLI's result event. We aggregate
+        these to the execution level.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        # Get existing or create new
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        execution_cost = (
+            ExecutionCost.from_dict(existing)
+            if existing
+            else ExecutionCost(execution_id=execution_id)
+        )
+
+        # Track session
+        if session_id not in execution_cost.session_ids:
+            execution_cost.session_ids.append(session_id)
+            execution_cost.session_count = len(execution_cost.session_ids)
+
+        # Extract summary data
+        data = event_data.get("data", {})
+
+        # Use authoritative totals from SessionSummary
+        # Note: We ADD to execution totals since multiple sessions contribute
+        execution_cost.input_tokens += data.get("total_input_tokens", 0)
+        execution_cost.output_tokens += data.get("total_output_tokens", 0)
+        execution_cost.tool_calls += data.get("tool_count", 0)
+        execution_cost.turns += data.get("num_turns", 0)
+        execution_cost.duration_ms += data.get("duration_ms", 0) or 0
+
+        # Use SDK-provided cost if available (most accurate)
+        if data.get("total_cost_usd") is not None:
+            session_cost = Decimal(str(data["total_cost_usd"]))
+            execution_cost.token_cost_usd += session_cost
+            execution_cost.total_cost_usd += session_cost
+
+        # Update completed_at
+        ts = event_data.get("timestamp")
+        if ts:
+            if isinstance(ts, str):
+                completed_at = datetime.fromisoformat(ts)
+            else:
+                completed_at = ts
+            if not execution_cost.completed_at or completed_at > execution_cost.completed_at:
+                execution_cost.completed_at = completed_at
+
+        # Track cost by phase if available
+        phase_id = event_data.get("phase_id")
+        if phase_id and data.get("total_cost_usd") is not None:
+            current = execution_cost.cost_by_phase.get(phase_id, Decimal("0"))
+            execution_cost.cost_by_phase[phase_id] = current + Decimal(str(data["total_cost_usd"]))
+
+        # Save
         await self._store.save(self.PROJECTION_NAME, execution_id, execution_cost.to_dict())
 
     async def on_session_cost_finalized(self, event_data: dict[str, Any]) -> None:

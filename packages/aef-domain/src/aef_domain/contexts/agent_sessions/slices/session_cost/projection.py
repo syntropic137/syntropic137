@@ -57,7 +57,8 @@ class SessionCostProjection:
         if not session_id:
             return
 
-        event_type = event_data.get("event_type")
+        # Support both domain events (observation_type) and raw JSONL events (event_type)
+        event_type = event_data.get("event_type") or event_data.get("observation_type")
         if not event_type:
             return
 
@@ -142,6 +143,57 @@ class SessionCostProjection:
                 pass  # Tool execution itself is free - cost is in tokens
 
         # Save updated session cost
+        await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
+
+    async def on_session_summary(self, event_data: dict[str, Any]) -> None:
+        """Handle session_summary event with accurate cumulative totals.
+
+        This event is produced at the end of agent execution and contains
+        the authoritative totals from Claude CLI's result event.
+        """
+        session_id = event_data.get("session_id")
+        if not session_id:
+            return
+
+        # Get existing or create new
+        existing = await self._store.get(self.PROJECTION_NAME, session_id)
+        session_cost = (
+            SessionCost.from_dict(existing) if existing else SessionCost(session_id=session_id)
+        )
+
+        # Update linkage
+        if event_data.get("execution_id"):
+            session_cost.execution_id = event_data["execution_id"]
+        if event_data.get("phase_id"):
+            session_cost.phase_id = event_data["phase_id"]
+
+        # Extract summary data
+        data = event_data.get("data", {})
+
+        # Use authoritative totals from SessionSummary
+        session_cost.input_tokens = data.get("total_input_tokens", session_cost.input_tokens)
+        session_cost.output_tokens = data.get("total_output_tokens", session_cost.output_tokens)
+        session_cost.tool_calls = data.get("tool_count", session_cost.tool_calls)
+        session_cost.turns = data.get("num_turns", session_cost.turns)
+        session_cost.duration_ms = data.get("duration_ms", session_cost.duration_ms)
+
+        # Use SDK-provided cost if available (most accurate)
+        if data.get("total_cost_usd") is not None:
+            session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
+            session_cost.token_cost_usd = session_cost.total_cost_usd
+
+        # Update timestamp
+        ts = event_data.get("timestamp")
+        if ts:
+            if isinstance(ts, str):
+                session_cost.completed_at = datetime.fromisoformat(ts)
+            elif isinstance(ts, datetime):
+                session_cost.completed_at = ts
+
+        # Mark as finalized since this is the end-of-session summary
+        session_cost.is_finalized = True
+
+        # Save
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
 
     async def on_session_cost_finalized(self, event_data: dict[str, Any]) -> None:

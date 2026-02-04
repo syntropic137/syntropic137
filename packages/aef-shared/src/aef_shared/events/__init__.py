@@ -21,6 +21,7 @@ TOOL_BLOCKED = "tool_blocked"
 SESSION_STARTED = "session_started"
 SESSION_COMPLETED = "session_completed"
 SESSION_ERROR = "session_error"
+SESSION_SUMMARY = "session_summary"  # Aggregated summary with cumulative totals
 
 # Subagent lifecycle events (Task tool spawns nested agents)
 # See agentic_isolation.providers.claude_cli.EventParser for detection logic
@@ -47,6 +48,7 @@ EventType = Literal[
     "session_started",
     "session_completed",
     "session_error",
+    "session_summary",
     "subagent_started",
     "subagent_stopped",
     "token_usage",
@@ -73,6 +75,7 @@ __all__ = [
     "SESSION_COMPLETED",
     "SESSION_ERROR",
     "SESSION_STARTED",
+    "SESSION_SUMMARY",
     "SUBAGENT_STARTED",
     "SUBAGENT_STOPPED",
     "TOKEN_USAGE",
