@@ -163,5 +163,3 @@ Recording-based tests using `v2.0.76_claude-haiku-4-5_subagent-concurrent.jsonl`
 - [agentic-primitives PR #50](https://github.com/NeuralEmpowerment/agentic-primitives/pull/50) - Subagent observability
 - [ADR-015](./ADR-015-agent-observability.md) - Agent Observability
 - [ADR-029](./ADR-029-ai-agent-testing-verification.md) - Recording-based testing
-
-
