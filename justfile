@@ -188,11 +188,21 @@ _workspace-check:
     # Get current submodule commit (short hash)
     SUBMODULE_COMMIT=$(cd lib/agentic-primitives && git rev-parse HEAD 2>/dev/null | cut -c1-12)
 
+    # Check for uncommitted changes in submodule (dirty state)
+    SUBMODULE_DIRTY=""
+    if [ -n "$(cd lib/agentic-primitives && git status --porcelain 2>/dev/null)" ]; then
+        SUBMODULE_DIRTY="-dirty"
+    fi
+
     # Get image's build commit from label (use jq for reliable parsing)
     IMAGE_COMMIT=$(docker inspect "$IMAGE" | jq -r '.[0].Config.Labels["agentic.commit"] // ""' 2>/dev/null || echo "")
 
-    # Compare - rebuild if mismatch
-    if [ "$IMAGE_COMMIT" != "$SUBMODULE_COMMIT" ]; then
+    # Compare - rebuild if mismatch OR if submodule is dirty
+    if [ -n "$SUBMODULE_DIRTY" ]; then
+        echo "⚠️  Workspace submodule has uncommitted changes"
+        echo "   Rebuilding to include latest agentic-primitives changes..."
+        just workspace-build
+    elif [ "$IMAGE_COMMIT" != "$SUBMODULE_COMMIT" ]; then
         echo "⚠️  Workspace image is stale (image: ${IMAGE_COMMIT:-none}, submodule: $SUBMODULE_COMMIT)"
         echo "   Rebuilding to include latest agentic-primitives changes..."
         just workspace-build
