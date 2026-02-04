@@ -246,7 +246,7 @@ class TestToolNameExtraction:
     def test_tool_result_extracts_enriched_tool_name(self) -> None:
         """REGRESSION: tool_result with enriched tool_name should be extracted."""
         # Enriched Claude CLI user message with tool_result
-        # (tool_name added by container_runner enrichment)
+        # (tool_name added by event processing enrichment)
         raw_event = {
             "type": "user",
             "message": {
