@@ -150,50 +150,49 @@ lib/agentic-primitives/  ← Shared library (git submodule)
 
 ### Event Storage Strategy (IMPORTANT)
 
-**Single Source of Truth: `EventParser` from `agentic_isolation`**
+**Single Source of Truth: `WorkflowExecutionEngine`**
 
-Claude CLI outputs raw JSONL events that are complex and require normalization. The `EventParser` class in `agentic_isolation` handles all parsing complexity and produces clean `ObservabilityEvent` objects.
+All observability events are recorded by `WorkflowExecutionEngine` during workflow execution.
+The engine parses Claude CLI JSONL output and records events via `_record_observation()`.
 
 ```
 Claude CLI JSONL stdout
     │
     ▼
-EventParser.parse_line()  ← agentic_isolation handles all parsing
+WorkflowExecutionEngine._execute_agent_phase()
+    │
+    ├── Parse assistant messages → TOKEN_USAGE events
+    ├── Parse tool_use content   → TOOL_STARTED/COMPLETED events
+    ├── Detect Task tool         → SUBAGENT_STARTED/STOPPED events
     │
     ▼
-ObservabilityEvent       ← Clean, normalized events
+_record_observation() → AgentEventStore → TimescaleDB
     │
     ▼
-_store_observability_event()  ← AEF stores via event.to_dict()
-    │
-    ▼
-TimescaleDB agent_events table
+ProjectionManager → session_cost, execution_cost, etc.
 ```
 
 **Key Design Decisions:**
 
-1. **Trust EventParser** - Don't parse raw Claude CLI events in AEF. EventParser handles:
-   - Tool name enrichment (tool_use_id → tool_name mapping)
-   - Token usage extraction from assistant messages
-   - Subagent lifecycle detection (Task tool → SUBAGENT_STARTED/STOPPED)
+1. **WorkflowExecutionEngine owns event recording** - All observability events flow through the engine:
+   - Token usage from `assistant` message `usage` field
+   - Tool lifecycle from `tool_use` and `tool_result` content blocks
+   - Subagent lifecycle from Task tool detection
 
-2. **session_summary vs session_completed** - We store `session_summary` (not `session_completed`) at end of session:
-   - EventParser produces `session_completed` with basic info
-   - We skip storing it to avoid duplication
-   - Instead, we store `session_summary` with rich cumulative totals:
-     - total_input_tokens, total_output_tokens, total_cost_usd
-     - duration_ms, num_turns, tool_count, subagent metrics
+2. **session_id is the primary key** - Events are stored with `session_id` (agent session), not `execution_id` (workflow)
+   - Dashboard API queries by `session_id`
+   - Projections aggregate by `session_id`
 
-3. **Why this matters** - The old approach stored raw events AND EventParser events, causing:
-   - Duplicate events with conflicting data
-   - Lost token_usage events (raw assistant messages transformed to tool_execution_started)
-   - Inaccurate cost tracking
+3. **ContainerAgentRunner removed** - Previously duplicated event parsing. Now deleted.
+   - WorkspaceService provides raw stdout streaming
+   - WorkflowExecutionEngine handles all parsing
 
 **Event Types for Projections:**
-- `token_usage` - Per-turn token counts
-- `tool_execution_started` / `tool_execution_completed` - Tool lifecycle
-- `session_summary` - End-of-session totals (authoritative for cost/tokens)
+- `token_usage` - Per-turn token counts (from assistant message.usage)
+- `tool_started` / `tool_completed` - Tool lifecycle
 - `subagent_started` / `subagent_stopped` - Task tool lifecycle
+
+**Future Optimization:** Consider using `EventParser` from `agentic_isolation` to reduce code duplication.
 
 ### Token Security (Current Implementation - ADR-024)
 
