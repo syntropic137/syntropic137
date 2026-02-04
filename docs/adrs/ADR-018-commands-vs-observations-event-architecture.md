@@ -266,21 +266,34 @@ class WorkflowAggregate(AggregateRoot):
 
 ### For Pattern 2 (Event Log)
 
-Use the collector service from ADR-017:
+**IMPORTANT: Use `EventParser` from `agentic_isolation` as the single source of truth.**
+
+Claude CLI outputs complex raw JSONL that requires careful parsing. The `EventParser` class handles all complexity and produces clean `ObservabilityEvent` objects:
 
 ```python
-# Observation comes from external source (file watcher, webhook, etc.)
-observation = ToolExecutionObserved(
-    event_id=generate_observation_id(...),  # Deterministic!
-    session_id="session-123",
-    tool_name="Read",
-    tool_use_id="toolu_abc",
-    timestamp=datetime.now(UTC),
-)
+from agentic_isolation import EventParser, ObservabilityEvent
 
-# Validate schema + dedup + append (no aggregate)
-await collector.ingest(observation)
+parser = EventParser(session_id)
+
+# Parse each line from Claude CLI stdout
+for line in claude_stdout:
+    events: list[ObservabilityEvent] = parser.parse_line(line)
+    for event in events:
+        # Store each clean event - no raw event storage!
+        await store_observability_event(event.to_dict())
+
+# At end of session, get accurate cumulative totals
+summary = parser.get_summary()
+await store_session_summary(summary)
 ```
+
+**Key Design Decisions:**
+
+1. **Trust EventParser** - Do NOT parse raw Claude CLI events directly in AEF
+2. **One assistant message → multiple events** - EventParser produces both `TOKEN_USAGE` AND `TOOL_EXECUTION_STARTED` from a single assistant message with tool_use
+3. **session_summary over session_completed** - We skip EventParser's `session_completed` and store our richer `session_summary` with cumulative totals
+
+See AGENTS.md "Event Storage Strategy" section for complete details.
 
 ## Pattern 2 Implementation: Cost Tracking
 

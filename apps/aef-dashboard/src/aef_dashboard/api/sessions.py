@@ -78,13 +78,9 @@ async def get_session(session_id: str) -> SessionResponse:
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    # Get execution_id for TimescaleDB queries
-    # Observability data is stored with execution_id as session_id in TimescaleDB
-    execution_id = getattr(session, "execution_id", None)
-    timescale_session_id = execution_id or session_id
-
     # Get cost data from TimescaleDB via SessionCostProjection
-    session_cost = await manager.session_cost.get_session_cost(timescale_session_id)
+    # Note: Events are stored with session_id (agent session), not execution_id (workflow)
+    session_cost = await manager.session_cost.get_session_cost(session_id)
 
     # Get workspace_path from execution_started event (ADR-029)
     workspace_path: str | None = None
@@ -103,7 +99,7 @@ async def get_session(session_id: str) -> SessionResponse:
                     ORDER BY time DESC
                     LIMIT 1
                     """,
-                    timescale_session_id,
+                    session_id,
                 )
                 workspace_path = result
     except Exception:

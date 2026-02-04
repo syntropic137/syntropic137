@@ -148,6 +148,53 @@ lib/agentic-primitives/  ← Shared library (git submodule)
 4. **Full observability:** Every event flows to dashboard in real-time
 5. **Testing with recordings:** Replay events without API calls
 
+### Event Storage Strategy (IMPORTANT)
+
+**Single Source of Truth: `EventParser` from `agentic_isolation`**
+
+Claude CLI outputs raw JSONL events that are complex and require normalization. The `EventParser` class in `agentic_isolation` handles all parsing complexity and produces clean `ObservabilityEvent` objects.
+
+```
+Claude CLI JSONL stdout
+    │
+    ▼
+EventParser.parse_line()  ← agentic_isolation handles all parsing
+    │
+    ▼
+ObservabilityEvent       ← Clean, normalized events
+    │
+    ▼
+_store_observability_event()  ← AEF stores via event.to_dict()
+    │
+    ▼
+TimescaleDB agent_events table
+```
+
+**Key Design Decisions:**
+
+1. **Trust EventParser** - Don't parse raw Claude CLI events in AEF. EventParser handles:
+   - Tool name enrichment (tool_use_id → tool_name mapping)
+   - Token usage extraction from assistant messages
+   - Subagent lifecycle detection (Task tool → SUBAGENT_STARTED/STOPPED)
+
+2. **session_summary vs session_completed** - We store `session_summary` (not `session_completed`) at end of session:
+   - EventParser produces `session_completed` with basic info
+   - We skip storing it to avoid duplication
+   - Instead, we store `session_summary` with rich cumulative totals:
+     - total_input_tokens, total_output_tokens, total_cost_usd
+     - duration_ms, num_turns, tool_count, subagent metrics
+
+3. **Why this matters** - The old approach stored raw events AND EventParser events, causing:
+   - Duplicate events with conflicting data
+   - Lost token_usage events (raw assistant messages transformed to tool_execution_started)
+   - Inaccurate cost tracking
+
+**Event Types for Projections:**
+- `token_usage` - Per-turn token counts
+- `tool_execution_started` / `tool_execution_completed` - Tool lifecycle
+- `session_summary` - End-of-session totals (authoritative for cost/tokens)
+- `subagent_started` / `subagent_stopped` - Task tool lifecycle
+
 ### Token Security (Current Implementation - ADR-024)
 
 **Setup Phase Secrets Pattern** (OpenAI Codex-inspired):

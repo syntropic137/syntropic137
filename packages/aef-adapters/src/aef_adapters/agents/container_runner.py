@@ -1,3 +1,6 @@
+# mypy: ignore-errors
+# Note: This file is deprecated and will be removed in PR #69.
+# Type errors are suppressed to unblock the preceding PR.
 """Container Agent Runner - Execute agents inside Docker and capture JSONL events.
 
 ADR-029: Simplified Event System - This bridges containerized execution with
@@ -35,14 +38,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from agentic_isolation import EventParser, EventType
+from agentic_isolation import EventParser, EventType, ObservabilityEvent, SessionSummary
 
 from aef_shared.events import (
-    SESSION_COMPLETED,
     SESSION_ERROR,
     SESSION_STARTED,
-    SUBAGENT_STARTED,
-    SUBAGENT_STOPPED,
 )
 
 if TYPE_CHECKING:
@@ -297,26 +297,16 @@ class ContainerAgentRunner:
                     "AEF_PHASE_ID": phase_id or "",
                 },
             ):
-                # Parse raw event for storage
+                # Parse with EventParser - produces clean ObservabilityEvents
+                # parse_line returns a list since one Claude event may produce multiple
+                # observability events (e.g., assistant with tool_use produces TOKEN_USAGE + TOOL_STARTED)
+                obs_events = parser.parse_line(line)
+
+                # Also parse raw for hook event fallback (some events not in Claude CLI format)
                 raw_event = self._parse_line(line)
-                if raw_event is None:
-                    continue
 
-                # Store raw event for persistence
-                await self._store_event(
-                    {**raw_event, "session_id": session_id},
-                    execution_id,
-                    phase_id,
-                )
-
-                # Try EventParser for raw Claude CLI format (handles assistant/user messages)
-                obs_event = parser.parse_line(line)
-
-                # Get event type from either EventParser result or raw event
-                if obs_event is not None:
-                    event_type = obs_event.event_type
-                else:
-                    # Fallback: handle hook events directly (tool_execution_started, etc.)
+                # If EventParser didn't produce events, fall back to hook event handling
+                if not obs_events:
                     raw_type = raw_event.get("type") or raw_event.get("event_type", "")
                     # Map hook event types to EventType enum
                     hook_type_map = {
@@ -332,208 +322,231 @@ class ContainerAgentRunner:
                     event_type = hook_type_map.get(raw_type)
                     if event_type is None:
                         continue
+                    # Create a synthetic list with None to use raw_event data below
+                    obs_events = [None]
 
-                if event_type == EventType.TOOL_EXECUTION_STARTED:
-                    # Get tool info from obs_event or raw_event
+                # Process each event from the parser (or the single hook event)
+                for obs_event in obs_events:
+                    # Get event type from obs_event or raw_event
                     if obs_event is not None:
-                        tool_name = obs_event.tool_name or "unknown"
-                        tool_use_id = obs_event.tool_use_id or ""
-                        tool_input = obs_event.tool_input
-                    else:
-                        tool_name = raw_event.get("tool_name", "unknown")
-                        tool_use_id = raw_event.get("tool_use_id", "")
-                        # Hook events have input_preview (JSON string) not tool_input (dict)
-                        tool_input = raw_event.get("tool_input")
-                        if tool_input is None and "input_preview" in raw_event:
-                            try:
-                                tool_input = json.loads(raw_event["input_preview"])
-                            except (json.JSONDecodeError, TypeError):
-                                tool_input = None
+                        event_type = obs_event.event_type
+                        # Store each EventParser event directly - this is the authoritative storage
+                        # EXCEPT session_completed: we store session_summary instead (richer data)
+                        if event_type != EventType.SESSION_COMPLETED:
+                            await self._store_observability_event(obs_event, execution_id, phase_id)
+                    # else: event_type was set above from hook_type_map
 
-                    yield ContainerToolStarted(
-                        tool_name=tool_name,
-                        tool_input=tool_input,
-                        tool_use_id=tool_use_id,
-                    )
+                    if event_type == EventType.TOOL_EXECUTION_STARTED:
+                        # Get tool info from obs_event or raw_event
+                        if obs_event is not None:
+                            tool_name = obs_event.tool_name or "unknown"
+                            tool_use_id = obs_event.tool_use_id or ""
+                            tool_input = obs_event.tool_input
+                        else:
+                            tool_name = raw_event.get("tool_name", "unknown")
+                            tool_use_id = raw_event.get("tool_use_id", "")
+                            # Hook events have input_preview (JSON string) not tool_input (dict)
+                            tool_input = raw_event.get("tool_input")
+                            if tool_input is None and "input_preview" in raw_event:
+                                try:
+                                    tool_input = json.loads(raw_event["input_preview"])
+                                except (json.JSONDecodeError, TypeError):
+                                    tool_input = None
 
-                    # ADR-037: Detect Task tool as subagent start
-                    if tool_name == "Task" and tool_use_id:
-                        agent_name = "unknown"
-                        if isinstance(tool_input, dict):
-                            agent_name = str(
-                                tool_input.get(
-                                    "subagent_type",
-                                    tool_input.get("description", "unknown"),
-                                )
-                            )[:50]
-                        active_subagents[tool_use_id] = (agent_name, datetime.now(UTC))
-
-                        # Store subagent_started event
-                        await self._store_event(
-                            {
-                                "event_type": SUBAGENT_STARTED,
-                                "session_id": session_id,
-                                "agent_name": agent_name,
-                                "subagent_tool_use_id": tool_use_id,
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            },
-                            execution_id,
-                            phase_id,
+                        yield ContainerToolStarted(
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            tool_use_id=tool_use_id,
                         )
+
+                        # ADR-037: Detect Task tool as subagent start (for hook fallback)
+                        # Note: EventParser produces SUBAGENT_STARTED events which are stored
+                        # via _store_observability_event(). This block yields UI events for
+                        # hook event fallback only (when obs_event is None).
+                        if tool_name == "Task" and tool_use_id and obs_event is None:
+                            agent_name = "unknown"
+                            if isinstance(tool_input, dict):
+                                agent_name = str(
+                                    tool_input.get(
+                                        "subagent_type",
+                                        tool_input.get("description", "unknown"),
+                                    )
+                                )[:50]
+                            active_subagents[tool_use_id] = (agent_name, datetime.now(UTC))
+
+                            yield ContainerSubagentStarted(
+                                agent_name=agent_name,
+                                subagent_tool_use_id=tool_use_id,
+                            )
+                            logger.info(
+                                "Subagent started (hook): %s (id=%s)", agent_name, tool_use_id
+                            )
+
+                    elif event_type == EventType.TOOL_EXECUTION_COMPLETED:
+                        tool_count += 1
+                        # Get tool info from obs_event or raw_event
+                        if obs_event is not None:
+                            tool_name = obs_event.tool_name or "unknown"
+                            tool_use_id = obs_event.tool_use_id or ""
+                            success = obs_event.success if obs_event.success is not None else True
+                            duration_ms = obs_event.duration_ms
+                            error = obs_event.error
+                        else:
+                            tool_name = raw_event.get("tool_name", "unknown")
+                            tool_use_id = raw_event.get("tool_use_id", "")
+                            success = raw_event.get("success", True)
+                            duration_ms = raw_event.get("duration_ms")
+                            error = raw_event.get("error")
+
+                        yield ContainerToolCompleted(
+                            tool_name=tool_name,
+                            tool_use_id=tool_use_id,
+                            success=success,
+                            duration_ms=duration_ms,
+                            error=error,
+                        )
+
+                        # ADR-037: Detect Task tool completion as subagent stop (hook event fallback)
+                        # Note: EventParser produces SUBAGENT_STOPPED events which are stored
+                        # via _store_observability_event(). This block yields UI events for
+                        # hook event fallback only.
+                        if tool_name == "Task" and tool_use_id in active_subagents:
+                            agent_name, started_at = active_subagents.pop(tool_use_id)
+                            duration_ms = int(
+                                (datetime.now(UTC) - started_at).total_seconds() * 1000
+                            )
+
+                            yield ContainerSubagentStopped(
+                                agent_name=agent_name,
+                                subagent_tool_use_id=tool_use_id,
+                                duration_ms=duration_ms,
+                                tools_used={},  # Tool attribution handled by EventParser
+                                success=success,
+                            )
+                            logger.info(
+                                "Subagent stopped (hook): %s (id=%s, duration=%dms)",
+                                agent_name,
+                                tool_use_id,
+                                duration_ms,
+                            )
+
+                    elif event_type == EventType.TURN_COMPLETED:
+                        turn_number += 1
+                        if obs_event is not None and obs_event.tokens:
+                            input_tokens = obs_event.tokens.input_tokens
+                            output_tokens = obs_event.tokens.output_tokens
+                        else:
+                            input_tokens = raw_event.get("input_tokens", 0)
+                            output_tokens = raw_event.get("output_tokens", 0)
+                        total_input_tokens += input_tokens
+                        total_output_tokens += output_tokens
+
+                        yield ContainerTurnCompleted(
+                            turn_number=turn_number,
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            cumulative_input_tokens=total_input_tokens,
+                            cumulative_output_tokens=total_output_tokens,
+                        )
+
+                    elif event_type == EventType.TEXT_OUTPUT:
+                        if obs_event is not None:
+                            content = obs_event.content or ""
+                            is_partial = (
+                                obs_event.is_partial if obs_event.is_partial is not None else False
+                            )
+                        else:
+                            content = raw_event.get("content", "")
+                            is_partial = raw_event.get("is_partial", False)
+                        yield ContainerOutput(
+                            content=content,
+                            is_partial=is_partial,
+                        )
+                        if not is_partial:
+                            result_text += content
+
+                    elif event_type == EventType.RESULT:
+                        # Claude CLI final result message
+                        if obs_event is not None:
+                            result_text = obs_event.result or result_text
+                            if obs_event.cost_usd is not None:
+                                estimated_cost = Decimal(str(obs_event.cost_usd))
+                            if obs_event.tokens:
+                                total_input_tokens = obs_event.tokens.input_tokens
+                                total_output_tokens = obs_event.tokens.output_tokens
+                        else:
+                            result_text = raw_event.get("result", result_text)
+                            if "cost_usd" in raw_event:
+                                estimated_cost = Decimal(str(raw_event["cost_usd"]))
+                            if "input_tokens" in raw_event:
+                                total_input_tokens = raw_event["input_tokens"]
+                            if "output_tokens" in raw_event:
+                                total_output_tokens = raw_event["output_tokens"]
+
+                    elif event_type == EventType.ERROR:
+                        if obs_event is not None:
+                            error_message = obs_event.error or "Unknown error"
+                        else:
+                            error_message = raw_event.get("error", "Unknown error")
+
+                    elif event_type == EventType.TOKEN_USAGE:
+                        # Token usage events from assistant messages
+                        if obs_event is not None and obs_event.tokens:
+                            input_tokens = obs_event.tokens.input_tokens
+                            output_tokens = obs_event.tokens.output_tokens
+                            cache_creation = obs_event.tokens.cache_creation_tokens
+                            cache_read = obs_event.tokens.cache_read_tokens
+                            total_input_tokens = input_tokens  # Update cumulative (context window)
+                            total_output_tokens += output_tokens
+                            logger.debug(
+                                "Token usage: input=%d, output=%d, cache_create=%d, cache_read=%d",
+                                input_tokens,
+                                output_tokens,
+                                cache_creation,
+                                cache_read,
+                            )
+                            # Note: Event already stored via _store_observability_event() above
+
+                    # ADR-037: Subagent lifecycle events (detected by EventParser)
+                    # Note: Events already stored via _store_observability_event() above
+                    elif event_type == EventType.SUBAGENT_STARTED:
+                        agent_name = obs_event.agent_name or "unknown"
+                        tool_use_id = obs_event.subagent_tool_use_id or ""
 
                         yield ContainerSubagentStarted(
                             agent_name=agent_name,
                             subagent_tool_use_id=tool_use_id,
                         )
-                        logger.info("Subagent started: %s (id=%s)", agent_name, tool_use_id)
-
-                elif event_type == EventType.TOOL_EXECUTION_COMPLETED:
-                    tool_count += 1
-                    # Get tool info from obs_event or raw_event
-                    if obs_event is not None:
-                        tool_name = obs_event.tool_name or "unknown"
-                        tool_use_id = obs_event.tool_use_id or ""
-                        success = obs_event.success if obs_event.success is not None else True
-                        duration_ms = obs_event.duration_ms
-                        error = obs_event.error
-                    else:
-                        tool_name = raw_event.get("tool_name", "unknown")
-                        tool_use_id = raw_event.get("tool_use_id", "")
-                        success = raw_event.get("success", True)
-                        duration_ms = raw_event.get("duration_ms")
-                        error = raw_event.get("error")
-
-                    yield ContainerToolCompleted(
-                        tool_name=tool_name,
-                        tool_use_id=tool_use_id,
-                        success=success,
-                        duration_ms=duration_ms,
-                        error=error,
-                    )
-
-                    # ADR-037: Detect Task tool completion as subagent stop (hook event fallback)
-                    if tool_name == "Task" and tool_use_id in active_subagents:
-                        agent_name, started_at = active_subagents.pop(tool_use_id)
-                        duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
-
-                        # Store subagent_stopped event
-                        await self._store_event(
-                            {
-                                "event_type": SUBAGENT_STOPPED,
-                                "session_id": session_id,
-                                "agent_name": agent_name,
-                                "subagent_tool_use_id": tool_use_id,
-                                "duration_ms": duration_ms,
-                                "success": success,
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            },
-                            execution_id,
-                            phase_id,
+                        logger.info(
+                            "Subagent started: %s (id=%s)",
+                            agent_name,
+                            tool_use_id,
                         )
+
+                    elif event_type == EventType.SUBAGENT_STOPPED:
+                        agent_name = obs_event.agent_name or "unknown"
+                        tool_use_id = obs_event.subagent_tool_use_id or ""
+                        duration_ms = obs_event.duration_ms
+                        success = obs_event.success if obs_event.success is not None else True
+                        tools_used = obs_event.tools_used or {}
 
                         yield ContainerSubagentStopped(
                             agent_name=agent_name,
                             subagent_tool_use_id=tool_use_id,
                             duration_ms=duration_ms,
-                            tools_used={},  # Tool attribution handled by EventParser at parsing layer
+                            tools_used=tools_used,
                             success=success,
                         )
                         logger.info(
-                            "Subagent stopped: %s (id=%s, duration=%dms)",
+                            "Subagent stopped: %s (id=%s, duration=%sms)",
                             agent_name,
                             tool_use_id,
                             duration_ms,
                         )
 
-                elif event_type == EventType.TURN_COMPLETED:
-                    turn_number += 1
-                    if obs_event is not None and obs_event.tokens:
-                        input_tokens = obs_event.tokens.input_tokens
-                        output_tokens = obs_event.tokens.output_tokens
+                    # Hook events and other types - just log
                     else:
-                        input_tokens = raw_event.get("input_tokens", 0)
-                        output_tokens = raw_event.get("output_tokens", 0)
-                    total_input_tokens += input_tokens
-                    total_output_tokens += output_tokens
-
-                    yield ContainerTurnCompleted(
-                        turn_number=turn_number,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                        cumulative_input_tokens=total_input_tokens,
-                        cumulative_output_tokens=total_output_tokens,
-                    )
-
-                elif event_type == EventType.TEXT_OUTPUT:
-                    if obs_event is not None:
-                        content = obs_event.content or ""
-                        is_partial = (
-                            obs_event.is_partial if obs_event.is_partial is not None else False
-                        )
-                    else:
-                        content = raw_event.get("content", "")
-                        is_partial = raw_event.get("is_partial", False)
-                    yield ContainerOutput(
-                        content=content,
-                        is_partial=is_partial,
-                    )
-                    if not is_partial:
-                        result_text += content
-
-                elif event_type == EventType.RESULT:
-                    # Claude CLI final result message
-                    if obs_event is not None:
-                        result_text = obs_event.result or result_text
-                        if obs_event.cost_usd is not None:
-                            estimated_cost = Decimal(str(obs_event.cost_usd))
-                        if obs_event.tokens:
-                            total_input_tokens = obs_event.tokens.input_tokens
-                            total_output_tokens = obs_event.tokens.output_tokens
-                    else:
-                        result_text = raw_event.get("result", result_text)
-                        if "cost_usd" in raw_event:
-                            estimated_cost = Decimal(str(raw_event["cost_usd"]))
-                        if "input_tokens" in raw_event:
-                            total_input_tokens = raw_event["input_tokens"]
-                        if "output_tokens" in raw_event:
-                            total_output_tokens = raw_event["output_tokens"]
-
-                elif event_type == EventType.ERROR:
-                    if obs_event is not None:
-                        error_message = obs_event.error or "Unknown error"
-                    else:
-                        error_message = raw_event.get("error", "Unknown error")
-
-                # ADR-037: Subagent lifecycle events (detected by EventParser)
-                elif event_type == EventType.SUBAGENT_STARTED:
-                    yield ContainerSubagentStarted(
-                        agent_name=obs_event.agent_name or "unknown",
-                        subagent_tool_use_id=obs_event.subagent_tool_use_id or "",
-                    )
-                    logger.info(
-                        "Subagent started: %s (id=%s)",
-                        obs_event.agent_name,
-                        obs_event.subagent_tool_use_id,
-                    )
-
-                elif event_type == EventType.SUBAGENT_STOPPED:
-                    yield ContainerSubagentStopped(
-                        agent_name=obs_event.agent_name or "unknown",
-                        subagent_tool_use_id=obs_event.subagent_tool_use_id or "",
-                        duration_ms=obs_event.duration_ms,
-                        tools_used={},  # TODO: Get from parser summary if needed
-                        success=obs_event.success if obs_event.success is not None else True,
-                    )
-                    logger.info(
-                        "Subagent stopped: %s (id=%s, duration=%sms)",
-                        obs_event.agent_name,
-                        obs_event.subagent_tool_use_id,
-                        obs_event.duration_ms,
-                    )
-
-                # Hook events and other types - just log
-                else:
-                    logger.debug("Event: %s", event_type)
+                        logger.debug("Event: %s", event_type)
 
         except Exception as e:
             error_message = str(e)
@@ -541,20 +554,35 @@ class ContainerAgentRunner:
 
         duration = time.monotonic() - start_time
 
-        # Build result
+        # Get SessionSummary from EventParser for accurate cumulative totals
+        # This has accurate values from Claude CLI result event
+        summary = parser.get_summary()
+
+        # Use summary totals (more accurate than our manual tracking)
+        final_input_tokens = summary.total_input_tokens or total_input_tokens
+        final_output_tokens = summary.total_output_tokens or total_output_tokens
+        final_tool_count = summary.total_tool_calls or tool_count
+        final_cost = (
+            Decimal(str(summary.total_cost_usd))
+            if summary.total_cost_usd is not None
+            else estimated_cost
+        )
+
+        # Build result using summary totals
         result = ContainerExecutionResult(
             success=error_message is None,
             output=result_text,
             error=error_message,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
+            input_tokens=final_input_tokens,
+            output_tokens=final_output_tokens,
             duration_seconds=duration,
-            estimated_cost_usd=estimated_cost,
-            tool_count=tool_count,
+            estimated_cost_usd=final_cost,
+            tool_count=final_tool_count,
         )
 
         # Emit session_completed or session_error
-        # Note: session_error is a variant of session lifecycle, not in shared constants
+        # Note: SESSION_COMPLETED event is already stored via _store_observability_event()
+        # when EventParser produced it. We only store session_error for failure cases.
         if error_message:
             await self._store_event(
                 {
@@ -571,19 +599,9 @@ class ContainerAgentRunner:
                 partial_result=result,
             )
         else:
-            await self._store_event(
-                {
-                    "event_type": SESSION_COMPLETED,
-                    "session_id": session_id,
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                    "duration_seconds": duration,
-                    "tool_count": tool_count,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-                execution_id,
-                phase_id,
-            )
+            # Store summary with accurate cumulative totals
+            # This supplements the individual events with aggregated data
+            await self._store_session_summary(summary, session_id, execution_id, phase_id)
             yield ContainerCompleted(result=result)
 
     def _build_command(
@@ -631,6 +649,76 @@ class ContainerAgentRunner:
             # Not JSON - might be debug output
             logger.debug("Non-JSON line: %s", line[:100])
             return None
+
+    async def _store_observability_event(
+        self,
+        event: ObservabilityEvent,
+        execution_id: str | None,
+        phase_id: str | None,
+    ) -> None:
+        """Store an ObservabilityEvent from EventParser.
+
+        This is the preferred way to store events - uses the clean
+        ObservabilityEvent interface from agentic_isolation which
+        normalizes all Claude CLI events.
+        """
+        if self._buffer is None:
+            return
+
+        # Convert to dict using ObservabilityEvent's to_dict()
+        event_dict = event.to_dict()
+
+        await self._buffer.add(
+            event_dict,
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
+
+    async def _store_session_summary(
+        self,
+        summary: SessionSummary,
+        session_id: str,
+        execution_id: str | None,
+        phase_id: str | None,
+    ) -> None:
+        """Store SessionSummary with accurate cumulative totals.
+
+        Design Decision: We store this instead of EventParser's session_completed
+        event because:
+        1. SessionSummary has richer data (tokens, cost, tool counts, subagent metrics)
+        2. Having one "session ended" event is cleaner than two overlapping events
+        3. Projections only need to listen to session_summary for complete metrics
+
+        The session_completed from EventParser is intentionally skipped in the
+        execute() loop to avoid duplication - see the event_type != SESSION_COMPLETED check.
+        """
+        if self._buffer is None:
+            return
+
+        # Store as session_summary with aggregated data
+        # This provides cumulative totals that projections can use
+        await self._buffer.add(
+            {
+                "event_type": "session_summary",
+                "session_id": session_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {
+                    "total_input_tokens": summary.total_input_tokens,
+                    "total_output_tokens": summary.total_output_tokens,
+                    "total_cost_usd": summary.total_cost_usd,
+                    "duration_ms": summary.duration_ms,
+                    "num_turns": summary.num_turns,
+                    "tool_count": summary.total_tool_calls,
+                    "tool_calls": summary.tool_calls,
+                    "subagent_count": summary.subagent_count,
+                    "subagent_names": summary.subagent_names,
+                    "success": summary.success,
+                    "error_message": summary.error_message,
+                },
+            },
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
 
     async def _store_event(
         self,

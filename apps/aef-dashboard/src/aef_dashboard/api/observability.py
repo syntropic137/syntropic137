@@ -10,10 +10,8 @@ from fastapi import APIRouter, HTTPException
 
 from aef_adapters.projections import get_projection_manager
 from aef_domain.contexts.agent_sessions.domain.queries import (
-    GetTokenMetricsQuery,
     GetToolTimelineQuery,
 )
-from aef_domain.contexts.agent_sessions.slices.token_metrics import TokenMetricsHandler
 from aef_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineHandler
 
 router = APIRouter(prefix="/observability", tags=["observability"])
@@ -57,30 +55,32 @@ async def get_tool_timeline(
 @router.get("/sessions/{session_id}/tokens")
 async def get_token_metrics(
     session_id: str,
-    include_records: bool = True,
+    include_records: bool = True,  # noqa: ARG001 - kept for API compatibility
 ) -> dict:
     """Get token usage metrics for a session.
 
     Args:
         session_id: The session to get token metrics for.
-        include_records: Whether to include individual token records.
+        include_records: Whether to include individual token records (deprecated).
 
     Returns:
-        Token metrics with aggregated and per-message data.
+        Token metrics with aggregated data from session_cost projection.
     """
     manager = get_projection_manager()
-    handler = TokenMetricsHandler(manager.token_metrics)
+    session_cost = await manager.session_cost.get_session_cost(session_id)
 
-    query = GetTokenMetricsQuery(
-        session_id=session_id,
-        include_records=include_records,
-    )
-    metrics = await handler.handle(query)
-
-    if metrics.message_count == 0:
+    if session_cost is None or (session_cost.input_tokens == 0 and session_cost.output_tokens == 0):
         raise HTTPException(
             status_code=404,
             detail=f"No token usage found for session {session_id}",
         )
 
-    return metrics.to_dict()
+    return {
+        "session_id": session_id,
+        "input_tokens": session_cost.input_tokens,
+        "output_tokens": session_cost.output_tokens,
+        "cache_read_tokens": session_cost.cache_read_tokens,
+        "cache_creation_tokens": session_cost.cache_creation_tokens,
+        "total_cost_usd": float(session_cost.total_cost_usd),
+        "turns": session_cost.turns,
+    }
