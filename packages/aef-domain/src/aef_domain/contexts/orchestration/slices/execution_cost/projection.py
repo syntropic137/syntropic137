@@ -186,10 +186,7 @@ class ExecutionCostProjection:
         # Update completed_at
         ts = event_data.get("timestamp")
         if ts:
-            if isinstance(ts, str):
-                completed_at = datetime.fromisoformat(ts)
-            else:
-                completed_at = ts
+            completed_at = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
             if not execution_cost.completed_at or completed_at > execution_cost.completed_at:
                 execution_cost.completed_at = completed_at
 

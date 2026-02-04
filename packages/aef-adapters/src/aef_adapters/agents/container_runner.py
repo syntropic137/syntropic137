@@ -38,11 +38,8 @@ from typing import TYPE_CHECKING, Any
 from agentic_isolation import EventParser, EventType, ObservabilityEvent, SessionSummary
 
 from aef_shared.events import (
-    SESSION_COMPLETED,
     SESSION_ERROR,
     SESSION_STARTED,
-    SUBAGENT_STARTED,
-    SUBAGENT_STOPPED,
 )
 
 if TYPE_CHECKING:
