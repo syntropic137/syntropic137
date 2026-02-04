@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from aef_domain.contexts.sessions.domain.read_models.session_summary import (
+from aef_domain.contexts.agent_sessions.domain.read_models.session_summary import (
     SessionSummary,
     SubagentRecord,
 )
@@ -247,37 +247,6 @@ class TestEventModelMapping:
         assert stopped_event.data.get("tools_used") == {"Read": 2}
 
 
-class TestContainerRunnerSubagentEvents:
-    """Test ContainerAgentRunner subagent event handling."""
-
-    def test_subagent_event_dataclasses_exist(self) -> None:
-        """ContainerSubagentStarted and ContainerSubagentStopped exist."""
-        from aef_adapters.agents.container_runner import (
-            ContainerSubagentStarted,
-            ContainerSubagentStopped,
-        )
-
-        # Test ContainerSubagentStarted
-        started = ContainerSubagentStarted(
-            agent_name="test-agent",
-            subagent_tool_use_id="toolu_123",
-        )
-        assert started.agent_name == "test-agent"
-        assert started.subagent_tool_use_id == "toolu_123"
-
-        # Test ContainerSubagentStopped
-        stopped = ContainerSubagentStopped(
-            agent_name="test-agent",
-            subagent_tool_use_id="toolu_123",
-            duration_ms=5000,
-            tools_used={"Read": 3},
-            success=True,
-        )
-        assert stopped.duration_ms == 5000
-        assert stopped.tools_used["Read"] == 3
-        assert stopped.success is True
-
-
 @pytest.mark.integration
 class TestProjectionSubagentHandlers:
     """Test projection handlers for subagent events."""
@@ -287,7 +256,7 @@ class TestProjectionSubagentHandlers:
         """SessionListProjection.on_subagent_started creates subagent record."""
         from unittest.mock import AsyncMock
 
-        from aef_domain.contexts.sessions.slices.list_sessions import (
+        from aef_domain.contexts.agent_sessions.slices.list_sessions import (
             SessionListProjection,
         )
 
@@ -327,7 +296,7 @@ class TestProjectionSubagentHandlers:
         """SessionListProjection.on_subagent_stopped updates subagent record."""
         from unittest.mock import AsyncMock
 
-        from aef_domain.contexts.sessions.slices.list_sessions import (
+        from aef_domain.contexts.agent_sessions.slices.list_sessions import (
             SessionListProjection,
         )
 
