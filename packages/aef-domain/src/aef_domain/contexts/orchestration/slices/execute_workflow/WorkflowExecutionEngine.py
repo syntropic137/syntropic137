@@ -1282,42 +1282,88 @@ class WorkflowExecutionEngine:
                         cli_type = cli_event.get("type", "")
                         logger.debug("CLI event type: %s", cli_type)
 
-                        # Handle token usage from result messages
+                        # Handle token usage from result messages (session completion)
                         if cli_type == "result" and "usage" in cli_event:
                             usage = cli_event.get("usage", {})
                             input_tokens = usage.get("input_tokens", 0)
                             output_tokens = usage.get("output_tokens", 0)
                             cache_creation = usage.get("cache_creation_input_tokens", 0)
                             cache_read = usage.get("cache_read_input_tokens", 0)
-                            total_input_tokens += input_tokens
-                            total_output_tokens += output_tokens
 
-                            if self._observability_writer is not None:
-                                await self._record_observation(
-                                    observation_type=ObservationType.TOKEN_USAGE,
-                                    session_id=session_id,
-                                    data={
-                                        "input_tokens": input_tokens,
-                                        "output_tokens": output_tokens,
-                                        "cache_creation_tokens": cache_creation,
-                                        "cache_read_tokens": cache_read,
-                                        "model": agent_model,
-                                    },
-                                    execution_id=execution_id,
-                                    phase_id=phase.phase_id,
-                                    workspace_id=workspace_id,
-                                )
-                                logger.debug(
-                                    "Token usage: %d in, %d out",
-                                    input_tokens,
-                                    output_tokens,
-                                )
+                            # Only record and accumulate if there's actual usage
+                            if input_tokens > 0 or output_tokens > 0:
+                                total_input_tokens += input_tokens
+                                total_output_tokens += output_tokens
+
+                                if self._observability_writer is not None:
+                                    await self._record_observation(
+                                        observation_type=ObservationType.TOKEN_USAGE,
+                                        session_id=session_id,
+                                        data={
+                                            "input_tokens": input_tokens,
+                                            "output_tokens": output_tokens,
+                                            "cache_creation_tokens": cache_creation,
+                                            "cache_read_tokens": cache_read,
+                                            "model": agent_model,
+                                        },
+                                        execution_id=execution_id,
+                                        phase_id=phase.phase_id,
+                                        workspace_id=workspace_id,
+                                    )
+                                    logger.info(
+                                        "Result token usage: %d in, %d out",
+                                        input_tokens,
+                                        output_tokens,
+                                    )
 
                         # Extract tool events from assistant messages
                         # Claude CLI emits tool_use in message.content
                         if cli_type == "assistant":
                             message = cli_event.get("message", {})
                             content = message.get("content", [])
+
+                            # Extract per-turn token usage from assistant messages
+                            # (result event only has cumulative totals at the end)
+                            # Note: Claude CLI streams messages incrementally, and early
+                            # chunks may have empty/zero usage. Only record when we have
+                            # actual token counts.
+                            usage = message.get("usage", {})
+                            if usage:
+                                input_tokens = usage.get("input_tokens", 0)
+                                output_tokens = usage.get("output_tokens", 0)
+                                cache_creation = usage.get(
+                                    "cache_creation_input_tokens", 0
+                                )
+                                cache_read = usage.get("cache_read_input_tokens", 0)
+
+                                # Only record if there's actual token usage
+                                # (skip empty streaming chunks)
+                                if input_tokens > 0 or output_tokens > 0:
+                                    total_input_tokens += input_tokens
+                                    total_output_tokens += output_tokens
+
+                                    if self._observability_writer is not None:
+                                        await self._record_observation(
+                                            observation_type=ObservationType.TOKEN_USAGE,
+                                            session_id=session_id,
+                                            data={
+                                                "input_tokens": input_tokens,
+                                                "output_tokens": output_tokens,
+                                                "cache_creation_tokens": cache_creation,
+                                                "cache_read_tokens": cache_read,
+                                                "model": agent_model,
+                                            },
+                                            execution_id=execution_id,
+                                            phase_id=phase.phase_id,
+                                            workspace_id=workspace_id,
+                                        )
+                                        logger.info(
+                                            "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
+                                            input_tokens,
+                                            output_tokens,
+                                            cache_read,
+                                            cache_creation,
+                                        )
                             for item in content:
                                 if isinstance(item, dict) and item.get("type") == "tool_use":
                                     tool_name = item.get("name", "unknown")

@@ -35,7 +35,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from agentic_isolation import EventParser, EventType
+from agentic_isolation import EventParser, EventType, ObservabilityEvent, SessionSummary
 
 from aef_shared.events import (
     SESSION_COMPLETED,
@@ -297,22 +297,13 @@ class ContainerAgentRunner:
                     "AEF_PHASE_ID": phase_id or "",
                 },
             ):
-                # Parse raw event for storage
-                raw_event = self._parse_line(line)
-                if raw_event is None:
-                    continue
-
-                # Store raw event for persistence
-                await self._store_event(
-                    {**raw_event, "session_id": session_id},
-                    execution_id,
-                    phase_id,
-                )
-
-                # Try EventParser for raw Claude CLI format (handles assistant/user messages)
+                # Parse with EventParser - produces clean ObservabilityEvents
                 # parse_line returns a list since one Claude event may produce multiple
                 # observability events (e.g., assistant with tool_use produces TOKEN_USAGE + TOOL_STARTED)
                 obs_events = parser.parse_line(line)
+
+                # Also parse raw for hook event fallback (some events not in Claude CLI format)
+                raw_event = self._parse_line(line)
 
                 # If EventParser didn't produce events, fall back to hook event handling
                 if not obs_events:
@@ -339,6 +330,10 @@ class ContainerAgentRunner:
                     # Get event type from obs_event or raw_event
                     if obs_event is not None:
                         event_type = obs_event.event_type
+                        # Store each EventParser event directly - this is the authoritative storage
+                        # EXCEPT session_completed: we store session_summary instead (richer data)
+                        if event_type != EventType.SESSION_COMPLETED:
+                            await self._store_observability_event(obs_event, execution_id, phase_id)
                     # else: event_type was set above from hook_type_map
 
                     if event_type == EventType.TOOL_EXECUTION_STARTED:
@@ -364,8 +359,11 @@ class ContainerAgentRunner:
                             tool_use_id=tool_use_id,
                         )
 
-                        # ADR-037: Detect Task tool as subagent start
-                        if tool_name == "Task" and tool_use_id:
+                        # ADR-037: Detect Task tool as subagent start (for hook fallback)
+                        # Note: EventParser produces SUBAGENT_STARTED events which are stored
+                        # via _store_observability_event(). This block yields UI events for
+                        # hook event fallback only (when obs_event is None).
+                        if tool_name == "Task" and tool_use_id and obs_event is None:
                             agent_name = "unknown"
                             if isinstance(tool_input, dict):
                                 agent_name = str(
@@ -376,24 +374,11 @@ class ContainerAgentRunner:
                                 )[:50]
                             active_subagents[tool_use_id] = (agent_name, datetime.now(UTC))
 
-                            # Store subagent_started event
-                            await self._store_event(
-                                {
-                                    "event_type": SUBAGENT_STARTED,
-                                    "session_id": session_id,
-                                    "agent_name": agent_name,
-                                    "subagent_tool_use_id": tool_use_id,
-                                    "timestamp": datetime.now(UTC).isoformat(),
-                                },
-                                execution_id,
-                                phase_id,
-                            )
-
                             yield ContainerSubagentStarted(
                                 agent_name=agent_name,
                                 subagent_tool_use_id=tool_use_id,
                             )
-                            logger.info("Subagent started: %s (id=%s)", agent_name, tool_use_id)
+                            logger.info("Subagent started (hook): %s (id=%s)", agent_name, tool_use_id)
 
                     elif event_type == EventType.TOOL_EXECUTION_COMPLETED:
                         tool_count += 1
@@ -420,34 +405,22 @@ class ContainerAgentRunner:
                         )
 
                         # ADR-037: Detect Task tool completion as subagent stop (hook event fallback)
+                        # Note: EventParser produces SUBAGENT_STOPPED events which are stored
+                        # via _store_observability_event(). This block yields UI events for
+                        # hook event fallback only.
                         if tool_name == "Task" and tool_use_id in active_subagents:
                             agent_name, started_at = active_subagents.pop(tool_use_id)
                             duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
-
-                            # Store subagent_stopped event
-                            await self._store_event(
-                                {
-                                    "event_type": SUBAGENT_STOPPED,
-                                    "session_id": session_id,
-                                    "agent_name": agent_name,
-                                    "subagent_tool_use_id": tool_use_id,
-                                    "duration_ms": duration_ms,
-                                    "success": success,
-                                    "timestamp": datetime.now(UTC).isoformat(),
-                                },
-                                execution_id,
-                                phase_id,
-                            )
 
                             yield ContainerSubagentStopped(
                                 agent_name=agent_name,
                                 subagent_tool_use_id=tool_use_id,
                                 duration_ms=duration_ms,
-                                tools_used={},  # Tool attribution handled by EventParser at parsing layer
+                                tools_used={},  # Tool attribution handled by EventParser
                                 success=success,
                             )
                             logger.info(
-                                "Subagent stopped: %s (id=%s, duration=%dms)",
+                                "Subagent stopped (hook): %s (id=%s, duration=%dms)",
                                 agent_name,
                                 tool_use_id,
                                 duration_ms,
@@ -528,41 +501,13 @@ class ContainerAgentRunner:
                                 cache_creation,
                                 cache_read,
                             )
-
-                            # Store token_usage event for projection to aggregate
-                            await self._store_event(
-                                {
-                                    "event_type": "token_usage",
-                                    "session_id": session_id,
-                                    "data": {
-                                        "input_tokens": input_tokens,
-                                        "output_tokens": output_tokens,
-                                        "cache_creation_tokens": cache_creation,
-                                        "cache_read_tokens": cache_read,
-                                    },
-                                    "timestamp": datetime.now(UTC).isoformat(),
-                                },
-                                execution_id,
-                                phase_id,
-                            )
+                            # Note: Event already stored via _store_observability_event() above
 
                     # ADR-037: Subagent lifecycle events (detected by EventParser)
+                    # Note: Events already stored via _store_observability_event() above
                     elif event_type == EventType.SUBAGENT_STARTED:
                         agent_name = obs_event.agent_name or "unknown"
                         tool_use_id = obs_event.subagent_tool_use_id or ""
-
-                        # Store subagent_started event
-                        await self._store_event(
-                            {
-                                "event_type": SUBAGENT_STARTED,
-                                "session_id": session_id,
-                                "agent_name": agent_name,
-                                "subagent_tool_use_id": tool_use_id,
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            },
-                            execution_id,
-                            phase_id,
-                        )
 
                         yield ContainerSubagentStarted(
                             agent_name=agent_name,
@@ -580,22 +525,6 @@ class ContainerAgentRunner:
                         duration_ms = obs_event.duration_ms
                         success = obs_event.success if obs_event.success is not None else True
                         tools_used = obs_event.tools_used or {}
-
-                        # Store subagent_stopped event
-                        await self._store_event(
-                            {
-                                "event_type": SUBAGENT_STOPPED,
-                                "session_id": session_id,
-                                "agent_name": agent_name,
-                                "subagent_tool_use_id": tool_use_id,
-                                "duration_ms": duration_ms,
-                                "success": success,
-                                "tools_used": tools_used,
-                                "timestamp": datetime.now(UTC).isoformat(),
-                            },
-                            execution_id,
-                            phase_id,
-                        )
 
                         yield ContainerSubagentStopped(
                             agent_name=agent_name,
@@ -621,20 +550,35 @@ class ContainerAgentRunner:
 
         duration = time.monotonic() - start_time
 
-        # Build result
+        # Get SessionSummary from EventParser for accurate cumulative totals
+        # This has accurate values from Claude CLI result event
+        summary = parser.get_summary()
+
+        # Use summary totals (more accurate than our manual tracking)
+        final_input_tokens = summary.total_input_tokens or total_input_tokens
+        final_output_tokens = summary.total_output_tokens or total_output_tokens
+        final_tool_count = summary.total_tool_calls or tool_count
+        final_cost = (
+            Decimal(str(summary.total_cost_usd))
+            if summary.total_cost_usd is not None
+            else estimated_cost
+        )
+
+        # Build result using summary totals
         result = ContainerExecutionResult(
             success=error_message is None,
             output=result_text,
             error=error_message,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
+            input_tokens=final_input_tokens,
+            output_tokens=final_output_tokens,
             duration_seconds=duration,
-            estimated_cost_usd=estimated_cost,
-            tool_count=tool_count,
+            estimated_cost_usd=final_cost,
+            tool_count=final_tool_count,
         )
 
         # Emit session_completed or session_error
-        # Note: session_error is a variant of session lifecycle, not in shared constants
+        # Note: SESSION_COMPLETED event is already stored via _store_observability_event()
+        # when EventParser produced it. We only store session_error for failure cases.
         if error_message:
             await self._store_event(
                 {
@@ -651,19 +595,9 @@ class ContainerAgentRunner:
                 partial_result=result,
             )
         else:
-            await self._store_event(
-                {
-                    "event_type": SESSION_COMPLETED,
-                    "session_id": session_id,
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                    "duration_seconds": duration,
-                    "tool_count": tool_count,
-                    "timestamp": datetime.now(UTC).isoformat(),
-                },
-                execution_id,
-                phase_id,
-            )
+            # Store summary with accurate cumulative totals
+            # This supplements the individual events with aggregated data
+            await self._store_session_summary(summary, session_id, execution_id, phase_id)
             yield ContainerCompleted(result=result)
 
     def _build_command(
@@ -711,6 +645,76 @@ class ContainerAgentRunner:
             # Not JSON - might be debug output
             logger.debug("Non-JSON line: %s", line[:100])
             return None
+
+    async def _store_observability_event(
+        self,
+        event: ObservabilityEvent,
+        execution_id: str | None,
+        phase_id: str | None,
+    ) -> None:
+        """Store an ObservabilityEvent from EventParser.
+
+        This is the preferred way to store events - uses the clean
+        ObservabilityEvent interface from agentic_isolation which
+        normalizes all Claude CLI events.
+        """
+        if self._buffer is None:
+            return
+
+        # Convert to dict using ObservabilityEvent's to_dict()
+        event_dict = event.to_dict()
+
+        await self._buffer.add(
+            event_dict,
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
+
+    async def _store_session_summary(
+        self,
+        summary: SessionSummary,
+        session_id: str,
+        execution_id: str | None,
+        phase_id: str | None,
+    ) -> None:
+        """Store SessionSummary with accurate cumulative totals.
+
+        Design Decision: We store this instead of EventParser's session_completed
+        event because:
+        1. SessionSummary has richer data (tokens, cost, tool counts, subagent metrics)
+        2. Having one "session ended" event is cleaner than two overlapping events
+        3. Projections only need to listen to session_summary for complete metrics
+
+        The session_completed from EventParser is intentionally skipped in the
+        execute() loop to avoid duplication - see the event_type != SESSION_COMPLETED check.
+        """
+        if self._buffer is None:
+            return
+
+        # Store as session_summary with aggregated data
+        # This provides cumulative totals that projections can use
+        await self._buffer.add(
+            {
+                "event_type": "session_summary",
+                "session_id": session_id,
+                "timestamp": datetime.now(UTC).isoformat(),
+                "data": {
+                    "total_input_tokens": summary.total_input_tokens,
+                    "total_output_tokens": summary.total_output_tokens,
+                    "total_cost_usd": summary.total_cost_usd,
+                    "duration_ms": summary.duration_ms,
+                    "num_turns": summary.num_turns,
+                    "tool_count": summary.total_tool_calls,
+                    "tool_calls": summary.tool_calls,
+                    "subagent_count": summary.subagent_count,
+                    "subagent_names": summary.subagent_names,
+                    "success": summary.success,
+                    "error_message": summary.error_message,
+                },
+            },
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
 
     async def _store_event(
         self,
