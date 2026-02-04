@@ -69,9 +69,7 @@ async def get_token_metrics(
     manager = get_projection_manager()
     session_cost = await manager.session_cost.get_session_cost(session_id)
 
-    if session_cost is None or (
-        session_cost.input_tokens == 0 and session_cost.output_tokens == 0
-    ):
+    if session_cost is None or (session_cost.input_tokens == 0 and session_cost.output_tokens == 0):
         raise HTTPException(
             status_code=404,
             detail=f"No token usage found for session {session_id}",
