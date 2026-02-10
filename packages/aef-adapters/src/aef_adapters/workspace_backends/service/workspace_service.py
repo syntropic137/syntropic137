@@ -116,7 +116,8 @@ class SetupPhaseSecrets:
 
     Attributes:
         github_app_token: GitHub App installation token (short-lived, scoped)
-        anthropic_api_key: Claude API key
+        claude_code_oauth_token: Claude Code OAuth token (takes priority over API key)
+        anthropic_api_key: Claude API key (fallback when OAuth token not set)
         git_author_name: Git commit author name (from GitHub App bot)
         git_author_email: Git commit author email (from GitHub App bot)
 
@@ -129,6 +130,7 @@ class SetupPhaseSecrets:
     """
 
     github_app_token: str | None = None
+    claude_code_oauth_token: str | None = None
     anthropic_api_key: str | None = None
     git_author_name: str | None = None
     git_author_email: str | None = None
@@ -182,11 +184,20 @@ class SetupPhaseSecrets:
         elif require_github:
             raise GitHubAppNotConfiguredError()
 
-        # Get Anthropic API key from environment
+        # Get Claude auth from environment
+        # CLAUDE_CODE_OAUTH_TOKEN takes priority over ANTHROPIC_API_KEY
+        claude_code_oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
         anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+        if claude_code_oauth_token and anthropic_api_key:
+            logger.warning(
+                "Both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set. "
+                "Using CLAUDE_CODE_OAUTH_TOKEN."
+            )
 
         return cls(
             github_app_token=github_app_token,
+            claude_code_oauth_token=claude_code_oauth_token,
             anthropic_api_key=anthropic_api_key,
             git_author_name=git_author_name,
             git_author_email=git_author_email,
@@ -196,6 +207,7 @@ class SetupPhaseSecrets:
     def for_testing(
         cls,
         *,
+        claude_code_oauth_token: str | None = None,
         anthropic_api_key: str | None = None,
         git_author_name: str = "Test Agent",
         git_author_email: str = "test@example.com",
@@ -205,6 +217,7 @@ class SetupPhaseSecrets:
         ⚠️  TEST ENVIRONMENT ONLY - no GitHub token is provided.
 
         Args:
+            claude_code_oauth_token: Optional OAuth token for Claude
             anthropic_api_key: Optional API key for Claude
             git_author_name: Git author name (default: "Test Agent")
             git_author_email: Git author email (default: "test@example.com")
@@ -216,6 +229,8 @@ class SetupPhaseSecrets:
 
         return cls(
             github_app_token=None,
+            claude_code_oauth_token=claude_code_oauth_token
+            or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
             anthropic_api_key=anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"),
             git_author_name=git_author_name,
             git_author_email=git_author_email,
@@ -389,6 +404,14 @@ class ManagedWorkspace:
         async for line in stream:  # type: ignore[attr-defined]
             yield line
 
+    @property
+    def last_stream_exit_code(self) -> int | None:
+        """Exit code from the most recent stream() call.
+
+        Returns None if no stream has completed yet.
+        """
+        return self._service._event_stream.last_exit_code
+
     async def inject_tokens(
         self,
         token_types: list[TokenType] | None = None,
@@ -487,6 +510,9 @@ class ManagedWorkspace:
         if secrets.github_app_token:
             # GITHUB_APP_TOKEN is the only supported GitHub auth method
             setup_env["GITHUB_APP_TOKEN"] = secrets.github_app_token
+
+        if secrets.claude_code_oauth_token:
+            setup_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
 
         if secrets.anthropic_api_key:
             setup_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
