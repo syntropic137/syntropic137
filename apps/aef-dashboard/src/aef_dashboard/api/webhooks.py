@@ -136,8 +136,12 @@ async def github_webhook(
     elif x_github_event == "ping":
         return {"status": "pong", "zen": payload.get("zen", "")}
     else:
-        logger.debug(f"Ignoring unsupported webhook event: {x_github_event}")
-        return {"status": "ignored", "event": x_github_event}
+        # Evaluate registered trigger rules for all other events
+        return await _evaluate_trigger_rules(
+            event_type=x_github_event,
+            delivery_id=x_github_delivery,
+            payload=payload,
+        )
 
 
 async def _handle_installation_event(payload: dict[str, Any]) -> dict[str, str | int]:
@@ -240,4 +244,63 @@ async def _handle_installation_repos_event(payload: dict[str, Any]) -> dict[str,
         "installation_id": installation_id,
         "repos_added": len(repos_added),
         "repos_removed": len(repos_removed),
+    }
+
+
+async def _evaluate_trigger_rules(
+    event_type: str,
+    delivery_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate registered trigger rules against an incoming webhook.
+
+    This is the core dispatch logic:
+    1. Find all active trigger rules matching this event type + repository
+    2. Evaluate conditions for each rule
+    3. Run safety guards
+    4. Dispatch workflow execution for matching rules
+
+    Args:
+        event_type: GitHub event type (e.g. "check_run").
+        delivery_id: X-GitHub-Delivery header for idempotency.
+        payload: The webhook payload dict.
+
+    Returns:
+        Status response with triggered execution IDs.
+    """
+    from aef_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+        EvaluateWebhookHandler,
+    )
+    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
+        get_trigger_store,
+    )
+
+    action = payload.get("action", "")
+    full_event = f"{event_type}.{action}" if action else event_type
+    repository = payload.get("repository", {}).get("full_name", "")
+    installation_id = str(payload.get("installation", {}).get("id", ""))
+
+    # Inject delivery ID for idempotency checking
+    payload["_delivery_id"] = delivery_id
+
+    # Find matching rules and dispatch
+    store = get_trigger_store()
+    handler = EvaluateWebhookHandler(store=store)
+    results = await handler.evaluate(
+        event=full_event,
+        repository=repository,
+        installation_id=installation_id,
+        payload=payload,
+    )
+
+    if not results:
+        logger.debug(f"No matching triggers for {full_event} on {repository}")
+        return {"status": "ignored", "event": full_event, "reason": "No matching triggers"}
+
+    logger.info(f"Triggered {len(results)} workflow(s) for {full_event} on {repository}")
+
+    return {
+        "status": "triggered",
+        "event": full_event,
+        "triggers": [{"trigger_id": r.trigger_id, "execution_id": r.execution_id} for r in results],
     }
