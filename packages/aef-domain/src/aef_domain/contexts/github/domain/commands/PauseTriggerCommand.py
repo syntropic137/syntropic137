@@ -1,0 +1,31 @@
+"""Pause Trigger command.
+
+Command to pause an active trigger rule.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from uuid import uuid4
+
+
+@dataclass(frozen=True)
+class PauseTriggerCommand:
+    """Command to pause a trigger rule.
+
+    Attributes:
+        trigger_id: ID of the trigger rule to pause.
+        paused_by: User or agent pausing the trigger.
+        reason: Optional reason for pausing.
+        command_id: Unique identifier for this command.
+    """
+
+    trigger_id: str
+    paused_by: str = ""
+    reason: str | None = None
+    command_id: str = field(default_factory=lambda: str(uuid4()))
+
+    def __post_init__(self) -> None:
+        """Validate the command."""
+        if not self.trigger_id:
+            raise ValueError("trigger_id is required")
