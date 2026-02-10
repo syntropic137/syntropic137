@@ -1,0 +1,5 @@
+id: trigger-history
+name: Trigger History
+description: Query slice to retrieve trigger execution history.
+type: query
+context: github
