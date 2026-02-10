@@ -11,16 +11,16 @@ CREATE TABLE IF NOT EXISTS event_store.events (
     metadata JSONB DEFAULT '{}',
     version INTEGER NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     CONSTRAINT unique_aggregate_version UNIQUE (aggregate_id, version)
 );
 
 -- Index for aggregate queries
-CREATE INDEX IF NOT EXISTS idx_events_aggregate 
+CREATE INDEX IF NOT EXISTS idx_events_aggregate
 ON event_store.events (aggregate_type, aggregate_id, version);
 
 -- Index for event type queries
-CREATE INDEX IF NOT EXISTS idx_events_type 
+CREATE INDEX IF NOT EXISTS idx_events_type
 ON event_store.events (event_type, created_at);
 
 -- Workflow definitions table (seeded from YAML)
@@ -45,12 +45,12 @@ CREATE TABLE IF NOT EXISTS public.artifacts (
     content_hash VARCHAR(64),
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     CONSTRAINT unique_workflow_artifact UNIQUE (workflow_id, phase_name, artifact_name)
 );
 
 -- Index for workflow artifact lookups
-CREATE INDEX IF NOT EXISTS idx_artifacts_workflow 
+CREATE INDEX IF NOT EXISTS idx_artifacts_workflow
 ON public.artifacts (workflow_id, phase_name);
 
 -- Processor todos table (for processor/todo pattern)
@@ -63,13 +63,13 @@ CREATE TABLE IF NOT EXISTS event_store.processor_todos (
     last_error TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     processed_at TIMESTAMPTZ,
-    
+
     CONSTRAINT unique_processor_event UNIQUE (processor_name, event_id)
 );
 
 -- Index for pending todos
-CREATE INDEX IF NOT EXISTS idx_todos_pending 
-ON event_store.processor_todos (processor_name, status) 
+CREATE INDEX IF NOT EXISTS idx_todos_pending
+ON event_store.processor_todos (processor_name, status)
 WHERE status = 'pending';
 
 -- Function to update timestamps
@@ -131,4 +131,3 @@ COMMENT ON TABLE event_store.processor_todos IS 'Processor work queue (todo patt
 COMMENT ON TABLE public.workflow_definitions IS 'Workflow templates seeded from YAML';
 COMMENT ON TABLE public.artifacts IS 'Phase output artifacts';
 COMMENT ON TABLE public.session_conversations IS 'Index of conversation logs stored in MinIO/S3. See ADR-035.';
-
