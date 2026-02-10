@@ -1,0 +1,1 @@
+"""Trigger history query slice."""
