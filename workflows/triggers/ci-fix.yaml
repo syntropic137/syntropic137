@@ -1,0 +1,98 @@
+id: ci-fix-workflow
+name: CI Failure Self-Healing
+description: |
+  Automatically fixes CI failures on pull requests.
+  Clones the repo, analyzes the failure, makes a fix,
+  and pushes to the same branch.
+
+type: implementation
+classification: triggered
+
+repository:
+  url: https://github.com/{{repository}}
+  ref: "{{branch}}"
+
+project_name: null
+
+phases:
+  - id: fix-ci
+    name: Fix CI Failure
+    order: 1
+    execution_type: sequential
+    description: Analyze CI failure and push a fix to the same branch.
+    input_artifacts: []
+    output_artifacts:
+      - fix_summary
+    max_tokens: 16384
+    timeout_seconds: 600
+
+    tools:
+      - bash
+
+    prompt_template: |
+      You are a software engineer fixing a CI failure on PR #{{pr_number}}.
+
+      ## Context
+      - **Repository:** {{repository}}
+      - **Branch:** {{branch}}
+      - **Failed Check:** {{check_name}}
+      - **Error Summary:** {{check_output_title}}
+      - **Error Details:** {{check_output_summary}}
+      - **Check URL:** {{check_html_url}}
+
+      ## Instructions
+
+      1. **Clone and checkout the existing branch:**
+         ```bash
+         cd /workspace/repos
+         git clone https://github.com/{{repository}}.git
+         cd $(basename {{repository}})
+         git checkout {{branch}}
+         ```
+
+      2. **Get the full failure logs:**
+         ```bash
+         # Use gh CLI to get the failed run logs
+         gh run list --branch {{branch}} --status failure --limit 1 --json databaseId --jq '.[0].databaseId'
+         # Then: gh run view <ID> --log-failed | tail -200
+         ```
+
+      3. **Analyze the failure and identify the root cause.**
+
+      4. **Make the fix:**
+         - Fix the actual error (lint, type, test failure, etc.)
+         - Keep changes minimal and focused
+         - Don't introduce new issues
+
+      5. **Run the same check locally if possible:**
+         ```bash
+         # Try to reproduce and verify the fix
+         ```
+
+      6. **Commit and push to the SAME branch:**
+         ```bash
+         git add -A
+         git commit -m "fix: resolve {{check_name}} CI failure
+
+         Automated fix for {{check_output_title}}"
+         git push origin {{branch}}
+         ```
+
+      7. **Comment on the PR:**
+         ```bash
+         gh pr comment {{pr_number}} --body "## CI Auto-Fix Applied
+
+         Fixed **{{check_name}}** failure:
+         - **Error:** {{check_output_title}}
+         - **Fix:** [describe what you changed]
+         - **Commit:** $(git rev-parse --short HEAD)
+
+         CI should re-run automatically."
+         ```
+
+      8. **Write summary to /workspace/artifacts/output/deliverable.md**
+
+      ## Important
+      - Push to the SAME branch ({{branch}}), do NOT create a new PR
+      - Keep fixes minimal - don't refactor unrelated code
+      - If you cannot fix it, comment on the PR explaining why

@@ -1,0 +1,152 @@
+id: fix-review-workflow
+name: Fix Review Comments
+description: |
+  Automatically addresses review comments on a pull request.
+  Reads ALL unresolved review threads, fixes what can be fixed,
+  and replies with rationale for anything that doesn't need a code change.
+
+type: implementation
+classification: triggered
+
+repository:
+  url: https://github.com/{{repository}}
+  ref: "{{branch}}"
+
+project_name: null
+
+phases:
+  - id: fix-review
+    name: Address Review Comments
+    order: 1
+    execution_type: sequential
+    description: Read all review threads, fix or respond to each.
+    input_artifacts: []
+    output_artifacts:
+      - review_fix_summary
+    max_tokens: 32768
+    timeout_seconds: 900
+
+    tools:
+      - bash
+
+    prompt_template: |
+      You are a software engineer addressing review feedback on PR #{{pr_number}}.
+
+      ## Context
+      - **Repository:** {{repository}}
+      - **Branch:** {{branch}}
+      - **PR Number:** {{pr_number}}
+      - **Latest Review By:** {{reviewer}}
+      - **Review Comment:** {{review_body}}
+
+      ## Instructions
+
+      1. **Clone and checkout the existing branch:**
+         ```bash
+         cd /workspace/repos
+         git clone https://github.com/{{repository}}.git
+         cd $(basename {{repository}})
+         git checkout {{branch}}
+         ```
+
+      2. **Fetch ALL unresolved review threads (not just the latest review):**
+         ```bash
+         gh api graphql -f query='
+         query {
+           repository(owner: "OWNER", name: "REPO") {
+             pullRequest(number: {{pr_number}}) {
+               reviewThreads(first: 100) {
+                 nodes {
+                   id
+                   isResolved
+                   isOutdated
+                   comments(first: 10) {
+                     nodes {
+                       author { login }
+                       body
+                       path
+                       line
+                       createdAt
+                     }
+                   }
+                 }
+               }
+             }
+           }
+         }'
+         ```
+         Replace OWNER and REPO from {{repository}} (split on /).
+
+      3. **Categorize each unresolved thread by priority:**
+         - **High:** Security, bugs, crashes, data loss
+         - **Medium:** Performance, error handling, best practices
+         - **Low:** Style, naming, docs, suggestions
+
+      4. **For each unresolved, non-outdated thread:**
+
+         **If fixable (code change needed):**
+         a. Read the file and understand the issue
+         b. Make the fix
+         c. Reply to the thread noting the fix:
+            ```bash
+            gh api graphql -f query='
+            mutation {
+              addPullRequestReviewThreadReply(input: {
+                pullRequestReviewThreadId: "THREAD_ID",
+                body: "Fixed in commit COMMIT_SHA\n\nDESCRIPTION"
+              }) { comment { id } }
+            }'
+            ```
+         d. Resolve the thread:
+            ```bash
+            gh api graphql -f query='
+            mutation {
+              resolveReviewThread(input: { threadId: "THREAD_ID" }) {
+                thread { isResolved }
+              }
+            }'
+            ```
+
+         **If not fixable (intentional design / no change needed):**
+         a. Reply with a clear rationale explaining why no change is needed
+         b. Reference ADRs, documentation, or design decisions if applicable
+         c. Resolve the thread after replying
+
+         **If outdated:**
+         a. Check if the code has already changed to address the comment
+         b. If so, resolve with "Addressed in a previous commit"
+         c. If not, treat as a current comment
+
+      5. **Commit all code changes and push to the SAME branch:**
+         ```bash
+         git add -A
+         git commit -m "fix: address review comments from {{reviewer}}
+
+         - Fixed: [list of fixes]
+         - Acknowledged: [list of rationale-only responses]"
+         git push origin {{branch}}
+         ```
+
+      6. **Comment on the PR with a summary:**
+         ```bash
+         gh pr comment {{pr_number}} --body "## Review Feedback Addressed
+
+         Addressed feedback from @{{reviewer}}:
+
+         **Fixed:**
+         - [list items fixed with commit refs]
+
+         **Acknowledged (no code change):**
+         - [list items with brief rationale]
+
+         All review threads have been resolved. Ready for re-review!"
+         ```
+
+      7. **Write summary to /workspace/artifacts/output/deliverable.md**
+
+      ## Important
+      - Push to the SAME branch ({{branch}}), do NOT create a new PR
+      - Address ALL unresolved threads, not just the latest review
+      - Always provide a rationale when not making a code change
+      - Use conventional commit messages
+      - Be respectful in thread replies - the reviewer is trying to help
