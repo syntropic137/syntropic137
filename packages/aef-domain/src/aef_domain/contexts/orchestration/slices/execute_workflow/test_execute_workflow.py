@@ -216,6 +216,7 @@ class MockWorkspace:
     def __init__(self, mock_agent_output: str = "Mock agent output") -> None:
         self._mock_agent_output = mock_agent_output
         self._injected_files: list[tuple[str, bytes]] = []
+        self.last_stream_exit_code: int | None = 0
 
     async def run_setup_phase(self, secrets: Any) -> MockExecutionResult:
         """Mock setup phase - always succeeds."""

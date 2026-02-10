@@ -442,6 +442,14 @@ class EventStreamPort(Protocol):
         """
         ...
 
+    @property
+    def last_exit_code(self) -> int | None:
+        """Exit code from the most recent stream() call.
+
+        Returns None if no stream has completed yet.
+        """
+        ...
+
 
 # =============================================================================
 # GIT CONFIGURATION PORT

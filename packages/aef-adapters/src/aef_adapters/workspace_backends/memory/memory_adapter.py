@@ -569,6 +569,12 @@ class MemoryEventStreamAdapter:
         """Initialize adapter - validates test environment."""
         _assert_test_environment()
         self._streams: dict[str, list[str]] = {}  # isolation_id -> lines
+        self._last_exit_code: int | None = None
+
+    @property
+    def last_exit_code(self) -> int | None:
+        """Exit code from the most recent stream() call. Always 0 for mock."""
+        return self._last_exit_code
 
     async def stream(
         self,
@@ -592,6 +598,7 @@ class MemoryEventStreamAdapter:
         lines = self._streams.get(handle.isolation_id, [])
         for line in lines:
             yield line
+        self._last_exit_code = 0
 
     def set_stream_output(self, handle: IsolationHandle, lines: list[str]) -> None:
         """Configure stream output for testing.
