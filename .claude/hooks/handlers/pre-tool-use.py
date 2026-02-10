@@ -100,7 +100,6 @@ def main() -> None:
             input_data = sys.stdin.read()
 
         if not input_data:
-            print(json.dumps({"decision": "allow"}))
             return
 
         event = json.loads(input_data)
@@ -139,16 +138,21 @@ def main() -> None:
             analytics_event["audit"] = audit
         log_analytics(analytics_event)
 
-        # Output response
-        response: dict[str, Any] = {"decision": decision}
+        # Output response using PreToolUse-specific schema
+        permission = "deny" if decision == "block" else "allow"
+        response: dict[str, Any] = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreTlUse",
+                "permissionDecision": permission,
+            }
+        }
         if result.get("reason"):
-            response["reason"] = result["reason"]
+            response["hookSpecificOutput"]["permissionDecisionReason"] = result["reason"]
 
         print(json.dumps(response))
 
-    except Exception as e:
-        # Fail open - allow on error
-        print(json.dumps({"decision": "allow", "error": str(e)}))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

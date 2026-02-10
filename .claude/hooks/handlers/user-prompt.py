@@ -90,7 +90,6 @@ def main() -> None:
             input_data = sys.stdin.read()
 
         if not input_data:
-            print(json.dumps({"decision": "allow"}))
             return
 
         event = json.loads(input_data)
@@ -126,15 +125,14 @@ def main() -> None:
         log_analytics(analytics_event)
 
         # Output response
-        response: dict[str, Any] = {"decision": decision}
+        response: dict[str, Any] = {"decision": "approve" if decision == "allow" else "block"}
         if result.get("reason"):
             response["reason"] = result["reason"]
 
         print(json.dumps(response))
 
-    except Exception as e:
-        # Fail open - allow on error
-        print(json.dumps({"decision": "allow", "error": str(e)}))
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
