@@ -142,7 +142,7 @@ def main() -> None:
         permission = "deny" if decision == "block" else "allow"
         response: dict[str, Any] = {
             "hookSpecificOutput": {
-                "hookEventName": "PreTlUse",
+                "hookEventName": "PreToolUse",
                 "permissionDecision": permission,
             }
         }
@@ -152,7 +152,7 @@ def main() -> None:
         print(json.dumps(response))
 
     except Exception:
-        pass
+        pass  # Fail-safe: never block tool use on handler error
 
 
 if __name__ == "__main__":

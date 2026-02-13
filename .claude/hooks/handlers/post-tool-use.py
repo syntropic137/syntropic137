@@ -102,7 +102,7 @@ def main() -> None:
         log_analytics(analytics_event)
 
     except Exception:
-        pass
+        pass  # Fail-safe: never block on post-tool analytics
 
 
 if __name__ == "__main__":

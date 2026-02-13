@@ -24,7 +24,7 @@ def log_analytics(event: dict[str, Any]) -> None:
         with path.open("a") as f:
             f.write(json.dumps({"timestamp": datetime.now(UTC).isoformat(), **event}) + "\n")
     except Exception:
-        pass
+        pass  # Never block on analytics failure
 
 
 def main() -> None:
@@ -54,7 +54,7 @@ def main() -> None:
         )
 
     except Exception:
-        pass
+        pass  # Silent fail - stop events don't block
 
 
 if __name__ == "__main__":

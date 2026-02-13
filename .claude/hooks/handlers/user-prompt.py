@@ -132,7 +132,7 @@ def main() -> None:
         print(json.dumps(response))
 
     except Exception:
-        pass
+        pass  # Fail-safe: allow prompt on handler error
 
 
 if __name__ == "__main__":
