@@ -179,7 +179,9 @@ def list_workflows() -> None:
             try:
                 client = get_event_store_client()
                 events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-                workflow_events = [e for e in events if e.event.event_type == "WorkflowTemplateCreated"]
+                workflow_events = [
+                    e for e in events if e.event.event_type == "WorkflowTemplateCreated"
+                ]
                 return [
                     {
                         "id": e.metadata.aggregate_id,
@@ -374,7 +376,9 @@ def seed_workflows(
             # Get dependencies
             repository = get_workflow_repository()
             publisher = get_event_publisher()
-            handler = CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
+            handler = CreateWorkflowTemplateHandler(
+                repository=repository, event_publisher=publisher
+            )
             seeder = WorkflowSeeder(handler)
 
             if dry_run:
@@ -681,7 +685,9 @@ def run_workflow(
             try:
                 client = get_event_store_client()
                 events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-                workflow_events = [e for e in events if e.event.event_type == "WorkflowTemplateCreated"]
+                workflow_events = [
+                    e for e in events if e.event.event_type == "WorkflowTemplateCreated"
+                ]
                 # Create simple workflow-like objects from events
                 all_workflows = []
                 for e in workflow_events:
