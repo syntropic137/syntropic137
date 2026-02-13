@@ -57,7 +57,8 @@
             "timeout": 5,
             "type": "command"
           }
-        ]
+        ],
+        "matcher": "*"
       }
     ],
     "SessionStart": [
@@ -80,7 +81,8 @@
             "timeout": 5,
             "type": "command"
           }
-        ]
+        ],
+        "matcher": "*"
       }
     ],
     "SubagentStop": [
@@ -91,7 +93,8 @@
             "timeout": 5,
             "type": "command"
           }
-        ]
+        ],
+        "matcher": "*"
       }
     ],
     "UserPromptSubmit": [
@@ -102,7 +105,8 @@
             "timeout": 5,
             "type": "command"
           }
-        ]
+        ],
+        "matcher": "*"
       }
     ]
   }
