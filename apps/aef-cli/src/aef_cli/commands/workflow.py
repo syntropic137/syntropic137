@@ -74,11 +74,11 @@ def create_workflow(
         WorkflowClassification,
         WorkflowType,
     )
-    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-        CreateWorkflowCommand,
+    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+        CreateWorkflowTemplateCommand,
     )
-    from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-        CreateWorkflowHandler,
+    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        CreateWorkflowTemplateHandler,
     )
 
     logger.info(
@@ -109,7 +109,7 @@ def create_workflow(
     )
 
     # Create command
-    command = CreateWorkflowCommand(
+    command = CreateWorkflowTemplateCommand(
         aggregate_id=str(uuid4()),
         name=name,
         description=description or f"Workflow: {name}",
@@ -125,7 +125,7 @@ def create_workflow(
     publisher = get_event_publisher()
 
     # Create handler and execute
-    handler = CreateWorkflowHandler(
+    handler = CreateWorkflowTemplateHandler(
         repository=repository,
         event_publisher=publisher,
     )
@@ -179,7 +179,9 @@ def list_workflows() -> None:
             try:
                 client = get_event_store_client()
                 events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-                workflow_events = [e for e in events if e.event.event_type == "WorkflowCreated"]
+                workflow_events = [
+                    e for e in events if e.event.event_type == "WorkflowTemplateCreated"
+                ]
                 return [
                     {
                         "id": e.metadata.aggregate_id,
@@ -263,7 +265,7 @@ def show_workflow(
                 matching = [
                     e
                     for e in events
-                    if e.event.event_type == "WorkflowCreated"
+                    if e.event.event_type == "WorkflowTemplateCreated"
                     and e.metadata.aggregate_id.startswith(workflow_id)
                 ]
 
@@ -353,8 +355,8 @@ def seed_workflows(
         get_workflow_repository,
     )
     from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
-    from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-        CreateWorkflowHandler,
+    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        CreateWorkflowTemplateHandler,
     )
 
     # Determine source
@@ -374,7 +376,9 @@ def seed_workflows(
             # Get dependencies
             repository = get_workflow_repository()
             publisher = get_event_publisher()
-            handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+            handler = CreateWorkflowTemplateHandler(
+                repository=repository, event_publisher=publisher
+            )
             seeder = WorkflowSeeder(handler)
 
             if dry_run:
@@ -681,7 +685,9 @@ def run_workflow(
             try:
                 client = get_event_store_client()
                 events = await client.read_all_events_from(after_global_nonce=0, limit=10000)
-                workflow_events = [e for e in events if e.event.event_type == "WorkflowCreated"]
+                workflow_events = [
+                    e for e in events if e.event.event_type == "WorkflowTemplateCreated"
+                ]
                 # Create simple workflow-like objects from events
                 all_workflows = []
                 for e in workflow_events:

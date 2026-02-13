@@ -2,7 +2,7 @@ name: get-workflow-detail
 type: query
 projection: WorkflowDetailProjection
 subscribes_to:
-  - WorkflowCreatedEvent
+  - WorkflowTemplateCreatedEvent
   - WorkflowExecutionStartedEvent
   - PhaseStartedEvent
   - PhaseCompletedEvent
