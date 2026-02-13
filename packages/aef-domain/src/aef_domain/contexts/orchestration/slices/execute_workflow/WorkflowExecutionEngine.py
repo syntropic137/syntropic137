@@ -1118,11 +1118,24 @@ class WorkflowExecutionEngine:
                     )
 
                 # Execute Claude CLI and stream events
-                # ANTHROPIC_API_KEY is passed to agent (needed for Claude calls)
+                # Claude auth is passed to agent (needed for Claude calls)
+                # CLAUDE_CODE_OAUTH_TOKEN takes priority over ANTHROPIC_API_KEY
                 # GitHub auth uses cached credentials from setup phase (ADR-024)
+                if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
+                    raise WorkflowExecutionError(
+                        message=(
+                            "No Claude authentication configured. "
+                            "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+                        ),
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                    )
+
                 agent_env = {
                     "CLAUDE_SESSION_ID": session_id,  # For hook event correlation
                 }
+                if secrets.claude_code_oauth_token:
+                    agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
                 if secrets.anthropic_api_key:
                     agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
 
@@ -1512,6 +1525,18 @@ class WorkflowExecutionEngine:
                     total_output_tokens,
                 )
 
+                # Check process exit code — non-zero means agent failed
+                exit_code = workspace.last_stream_exit_code
+                if exit_code is not None and exit_code != 0:
+                    raise WorkflowExecutionError(
+                        message=(
+                            f"Agent process exited with code {exit_code}. "
+                            "Check agent logs for details."
+                        ),
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                    )
+
                 # ADR-035: Store conversation log to MinIO/S3
                 if self._conversation_storage is not None and conversation_lines:
                     try:
@@ -1587,6 +1612,19 @@ class WorkflowExecutionEngine:
                     )
 
             # Workspace destroyed here (context manager exit)
+
+            # Validate agent actually produced output
+            # If line_count == 0 AND no tokens were consumed, the agent failed silently
+            # (e.g., auth failure, crash, missing config)
+            if line_count == 0 and total_input_tokens == 0 and total_output_tokens == 0:
+                raise WorkflowExecutionError(
+                    message=(
+                        "Agent produced no output. Possible causes: "
+                        "authentication failure, missing credentials, or agent crash."
+                    ),
+                    workflow_id=ctx.workflow_id,
+                    phase_id=phase.phase_id,
+                )
 
             # Record success
             phase_completed_at = datetime.now(UTC)

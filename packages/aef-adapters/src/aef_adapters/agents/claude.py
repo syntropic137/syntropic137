@@ -1,7 +1,8 @@
 """Claude (Anthropic) agent adapter.
 
 Integrates with Anthropic's Claude API for AI agent capabilities.
-Requires the `anthropic` package and ANTHROPIC_API_KEY environment variable.
+Requires the `anthropic` package and either CLAUDE_CODE_OAUTH_TOKEN or
+ANTHROPIC_API_KEY environment variable. OAuth token takes priority when both are set.
 """
 
 from __future__ import annotations
@@ -87,16 +88,45 @@ class ClaudeAgent(AgentProtocol):
 
         return get_model_registry().get_context_window(model)
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        oauth_token: str | None = None,
+    ) -> None:
         """Initialize the Claude agent.
 
         Args:
             api_key: Anthropic API key. If not provided, reads from settings.
+            oauth_token: Claude Code OAuth token. Takes priority over api_key.
         """
         settings = get_settings()
+
+        # Resolve OAuth token: explicit arg > env var
+        self._oauth_token = oauth_token or (
+            settings.claude_code_oauth_token.get_secret_value()
+            if settings.claude_code_oauth_token
+            else None
+        )
+
+        # Resolve API key: explicit arg > env var
         self._api_key = api_key or (
             settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
         )
+
+        # OAuth token takes priority over API key
+        if self._oauth_token:
+            if self._api_key:
+                logger.warning(
+                    "claude_auth_precedence",
+                    msg="Both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set. "
+                    "Using CLAUDE_CODE_OAUTH_TOKEN. Remove ANTHROPIC_API_KEY to silence this warning.",
+                )
+            self._auth_mode: str = "oauth"
+        elif self._api_key:
+            self._auth_mode = "api_key"
+        else:
+            self._auth_mode = "none"
+
         self._client: Any | None = None
 
     @property
@@ -107,7 +137,7 @@ class ClaudeAgent(AgentProtocol):
     @property
     def is_available(self) -> bool:
         """Check if the agent is configured and available."""
-        return self._api_key is not None
+        return self._oauth_token is not None or self._api_key is not None
 
     def set_session_context(
         self,
@@ -129,10 +159,14 @@ class ClaudeAgent(AgentProtocol):
         """Get or create the Anthropic client.
 
         Lazy initialization to avoid import errors when anthropic isn't installed.
+        Uses OAuth token (auth_token) when available, otherwise falls back to API key.
         """
         if self._client is None:
-            if not self._api_key:
-                msg = "Anthropic API key not configured"
+            if not self._oauth_token and not self._api_key:
+                msg = (
+                    "No Claude authentication configured. "
+                    "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
+                )
                 raise AgentAuthenticationError(msg, AgentProvider.CLAUDE)
 
             try:
@@ -141,7 +175,12 @@ class ClaudeAgent(AgentProtocol):
                 msg = "anthropic package not installed. Run: uv add anthropic"
                 raise AgentError(msg, AgentProvider.CLAUDE) from e
 
-            self._client = AsyncAnthropic(api_key=self._api_key)
+            if self._auth_mode == "oauth":
+                logger.info("claude_client_init", auth_mode="oauth")
+                self._client = AsyncAnthropic(auth_token=self._oauth_token)
+            else:
+                logger.info("claude_client_init", auth_mode="api_key")
+                self._client = AsyncAnthropic(api_key=self._api_key)
 
         return self._client
 

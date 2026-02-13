@@ -315,10 +315,11 @@ class TestAgentFactory:
     def test_claude_not_available_without_key(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """Test Claude is not available without API key."""
+        """Test Claude is not available without API key or OAuth token."""
         # Change to temp dir to avoid loading project .env file
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         from aef_shared.settings import reset_settings
 
         reset_settings()

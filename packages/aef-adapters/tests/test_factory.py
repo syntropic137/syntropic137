@@ -28,8 +28,9 @@ def _reset_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """
     # Change to temp dir to avoid loading project .env
     monkeypatch.chdir(tmp_path)
-    # Clear any existing API keys from env
+    # Clear any existing API keys / tokens from env
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("APP_ENVIRONMENT", "test")
     reset_settings()
@@ -46,13 +47,15 @@ class TestGetAgent:
         assert agent.provider == AgentProvider.MOCK
 
     def test_get_claude_without_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test Claude agent raises without API key."""
+        """Test Claude agent raises without API key or OAuth token."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         reset_settings()
 
         with pytest.raises(AgentError) as exc_info:
             get_agent(AgentProvider.CLAUDE)
 
+        assert "CLAUDE_CODE_OAUTH_TOKEN" in str(exc_info.value)
         assert "ANTHROPIC_API_KEY" in str(exc_info.value)
 
     def test_get_openai_without_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -87,6 +90,28 @@ class TestGetAgent:
         agent = get_agent(None)
         assert isinstance(agent, ClaudeAgent)
 
+    def test_auto_select_claude_with_oauth_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test auto-selection picks Claude when OAuth token is set."""
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-test-token")
+        reset_settings()
+
+        from aef_adapters.agents.claude import ClaudeAgent
+
+        agent = get_agent(None)
+        assert isinstance(agent, ClaudeAgent)
+
+    def test_get_claude_with_oauth_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test getting Claude agent with OAuth token explicitly."""
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-test-token")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        reset_settings()
+
+        from aef_adapters.agents.claude import ClaudeAgent
+
+        agent = get_agent(AgentProvider.CLAUDE)
+        assert isinstance(agent, ClaudeAgent)
+        assert agent.is_available
+
     def test_auto_select_openai_when_no_claude(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test auto-selection uses OpenAI when Claude unavailable."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
@@ -105,6 +130,14 @@ class TestGetAvailableAgents:
     def test_includes_claude_when_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test Claude included when API key set."""
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        reset_settings()
+
+        available = get_available_agents()
+        assert AgentProvider.CLAUDE in available
+
+    def test_includes_claude_when_oauth_token_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test Claude included when OAuth token set."""
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-test-token")
         reset_settings()
 
         available = get_available_agents()
@@ -146,9 +179,17 @@ class TestIsAgentAvailable:
 
         assert is_agent_available(AgentProvider.CLAUDE) is True
 
+    def test_claude_available_with_oauth_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test Claude availability with OAuth token."""
+        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-test-token")
+        reset_settings()
+
+        assert is_agent_available(AgentProvider.CLAUDE) is True
+
     def test_claude_unavailable_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test Claude unavailability without key."""
+        """Test Claude unavailability without key or OAuth token."""
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
         reset_settings()
 
         assert is_agent_available(AgentProvider.CLAUDE) is False
