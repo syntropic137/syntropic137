@@ -19,11 +19,11 @@ from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
-from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-    CreateWorkflowHandler,
+from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    CreateWorkflowTemplateHandler,
 )
 
 
@@ -40,7 +40,7 @@ async def test_create_workflow_e2e() -> None:
     # Arrange
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    handler = CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
 
     initial_phase = PhaseDefinition(
         phase_id="phase-1",
@@ -49,7 +49,7 @@ async def test_create_workflow_e2e() -> None:
         description="Initial research phase",
     )
 
-    command = CreateWorkflowCommand(
+    command = CreateWorkflowTemplateCommand(
         aggregate_id="test-workflow-123",
         name="E2E Test Workflow",
         description="Testing the tracer bullet",
@@ -70,7 +70,7 @@ async def test_create_workflow_e2e() -> None:
     event_store = get_event_store()
     stored_events = event_store.get_events("test-workflow-123")
     assert len(stored_events) == 1
-    assert stored_events[0].event_type == "WorkflowCreated"
+    assert stored_events[0].event_type == "WorkflowTemplateCreated"
     assert stored_events[0].event_data["name"] == "E2E Test Workflow"
 
     # Assert - event published
@@ -84,7 +84,7 @@ async def test_retrieve_workflow_e2e() -> None:
     # Arrange - create workflow
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    handler = CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
 
     phase = PhaseDefinition(
         phase_id="p1",
@@ -92,7 +92,7 @@ async def test_retrieve_workflow_e2e() -> None:
         order=1,
     )
 
-    command = CreateWorkflowCommand(
+    command = CreateWorkflowTemplateCommand(
         aggregate_id="roundtrip-workflow",
         name="Round Trip Test",
         workflow_type=WorkflowType.PLANNING,
@@ -119,13 +119,13 @@ async def test_create_multiple_workflows_e2e() -> None:
     """Test creating multiple workflows."""
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    handler = CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
 
     phase = PhaseDefinition(phase_id="p1", name="Phase", order=1)
 
     # Create 3 workflows
     for i in range(3):
-        command = CreateWorkflowCommand(
+        command = CreateWorkflowTemplateCommand(
             aggregate_id=f"workflow-{i}",
             name=f"Workflow {i}",
             workflow_type=WorkflowType.CUSTOM,

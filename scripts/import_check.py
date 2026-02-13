@@ -23,11 +23,11 @@ def main() -> int:
 
         modules_tested.append(WorkspaceAggregate.__name__)
 
-        from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-            WorkflowAggregate,
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+            WorkflowTemplateAggregate,
         )
 
-        modules_tested.append(WorkflowAggregate.__name__)
+        modules_tested.append(WorkflowTemplateAggregate.__name__)
 
         from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
             AgentSessionAggregate,

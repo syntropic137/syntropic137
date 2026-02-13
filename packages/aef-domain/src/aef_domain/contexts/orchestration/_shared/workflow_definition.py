@@ -11,7 +11,7 @@ from pathlib import Path  # noqa: TC003 - needed at runtime for file operations
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,

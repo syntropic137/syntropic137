@@ -6,23 +6,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-    WorkflowAggregate,
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowStatus,
+    WorkflowTemplateAggregate,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
-from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-    WorkflowCreatedEvent,
+from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+    WorkflowTemplateCreatedEvent,
 )
-from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-    CreateWorkflowHandler,
+from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    CreateWorkflowTemplateHandler,
 )
 
 if TYPE_CHECKING:
@@ -35,9 +35,9 @@ if TYPE_CHECKING:
 def create_test_command(
     aggregate_id: str | None = None,
     name: str = "Test Workflow",
-) -> CreateWorkflowCommand:
+) -> CreateWorkflowTemplateCommand:
     """Create a test command with default values."""
-    return CreateWorkflowCommand(
+    return CreateWorkflowTemplateCommand(
         aggregate_id=aggregate_id,
         name=name,
         workflow_type=WorkflowType.RESEARCH,
@@ -62,9 +62,9 @@ class InMemoryWorkflowRepository:
     """In-memory repository for testing."""
 
     def __init__(self) -> None:
-        self.saved_aggregates: list[WorkflowAggregate] = []
+        self.saved_aggregates: list[WorkflowTemplateAggregate] = []
 
-    async def save(self, aggregate: WorkflowAggregate) -> None:
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None:
         self.saved_aggregates.append(aggregate)
 
 
@@ -72,9 +72,9 @@ class InMemoryEventPublisher:
     """In-memory event publisher for testing."""
 
     def __init__(self) -> None:
-        self.published_events: list[EventEnvelope[WorkflowCreatedEvent]] = []
+        self.published_events: list[EventEnvelope[WorkflowTemplateCreatedEvent]] = []
 
-    async def publish(self, events: list[EventEnvelope[WorkflowCreatedEvent]]) -> None:
+    async def publish(self, events: list[EventEnvelope[WorkflowTemplateCreatedEvent]]) -> None:
         self.published_events.extend(events)
 
 
@@ -82,13 +82,13 @@ class InMemoryEventPublisher:
 
 
 @pytest.mark.unit
-class TestWorkflowAggregate:
-    """Tests for WorkflowAggregate with @command_handler and @event_sourcing_handler."""
+class TestWorkflowTemplateAggregate:
+    """Tests for WorkflowTemplateAggregate with @command_handler and @event_sourcing_handler."""
 
     def test_create_workflow_emits_event(self) -> None:
-        """Creating a workflow should emit WorkflowCreatedEvent."""
+        """Creating a workflow should emit WorkflowTemplateCreatedEvent."""
         # Arrange
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
         command = create_test_command()
 
         # Act - use _handle_command which routes to @command_handler
@@ -97,12 +97,12 @@ class TestWorkflowAggregate:
         # Assert
         events = aggregate.get_uncommitted_events()
         assert len(events) == 1
-        assert events[0].event.event_type == "WorkflowCreated"
+        assert events[0].event.event_type == "WorkflowTemplateCreated"
 
     def test_create_workflow_updates_state(self) -> None:
         """Creating a workflow should update aggregate state via @event_sourcing_handler."""
         # Arrange
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
         command = create_test_command(name="My Workflow")
 
         # Act
@@ -116,7 +116,7 @@ class TestWorkflowAggregate:
     def test_create_workflow_with_provided_id(self) -> None:
         """Creating a workflow with provided ID should use that ID."""
         # Arrange
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
         command = create_test_command(aggregate_id="my-workflow-id")
 
         # Act
@@ -128,7 +128,7 @@ class TestWorkflowAggregate:
     def test_create_workflow_generates_id_if_not_provided(self) -> None:
         """Creating a workflow without ID should generate one."""
         # Arrange
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
         command = create_test_command(aggregate_id=None)
 
         # Act
@@ -141,7 +141,7 @@ class TestWorkflowAggregate:
     def test_cannot_create_existing_workflow(self) -> None:
         """Cannot create a workflow that already exists."""
         # Arrange
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
         command = create_test_command()
         aggregate._handle_command(command)
 
@@ -152,17 +152,17 @@ class TestWorkflowAggregate:
     def test_aggregate_type_from_decorator(self) -> None:
         """Aggregate type should be set by @aggregate decorator."""
         # Arrange
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
 
         # Assert
-        assert aggregate.get_aggregate_type() == "Workflow"
+        assert aggregate.get_aggregate_type() == "WorkflowTemplate"
 
 
 # === Handler Tests ===
 
 
-class TestCreateWorkflowHandler:
-    """Tests for CreateWorkflowHandler application service."""
+class TestCreateWorkflowTemplateHandler:
+    """Tests for CreateWorkflowTemplateHandler application service."""
 
     @pytest.mark.asyncio
     async def test_handler_saves_aggregate(self) -> None:
@@ -170,7 +170,7 @@ class TestCreateWorkflowHandler:
         # Arrange
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(repository, publisher)
         command = create_test_command()
 
         # Act
@@ -185,7 +185,7 @@ class TestCreateWorkflowHandler:
         # Arrange
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(repository, publisher)
         command = create_test_command()
 
         # Act
@@ -193,7 +193,7 @@ class TestCreateWorkflowHandler:
 
         # Assert
         assert len(publisher.published_events) == 1
-        assert publisher.published_events[0].event.event_type == "WorkflowCreated"
+        assert publisher.published_events[0].event.event_type == "WorkflowTemplateCreated"
 
     @pytest.mark.asyncio
     async def test_handler_returns_workflow_id(self) -> None:
@@ -201,7 +201,7 @@ class TestCreateWorkflowHandler:
         # Arrange
         repository = InMemoryWorkflowRepository()
         publisher = InMemoryEventPublisher()
-        handler = CreateWorkflowHandler(repository, publisher)
+        handler = CreateWorkflowTemplateHandler(repository, publisher)
         command = create_test_command(aggregate_id="test-id")
 
         # Act
@@ -214,13 +214,13 @@ class TestCreateWorkflowHandler:
 # === Event Tests ===
 
 
-class TestWorkflowCreatedEvent:
-    """Tests for WorkflowCreatedEvent domain event."""
+class TestWorkflowTemplateCreatedEvent:
+    """Tests for WorkflowTemplateCreatedEvent domain event."""
 
     def test_event_has_correct_type(self) -> None:
         """Event should have correct event_type from ClassVar."""
         # Arrange & Act
-        event = WorkflowCreatedEvent(
+        event = WorkflowTemplateCreatedEvent(
             workflow_id="test-id",
             name="Test",
             workflow_type=WorkflowType.RESEARCH,
@@ -231,12 +231,12 @@ class TestWorkflowCreatedEvent:
         )
 
         # Assert
-        assert event.event_type == "WorkflowCreated"
+        assert event.event_type == "WorkflowTemplateCreated"
 
     def test_event_is_immutable(self) -> None:
         """Event should be immutable (frozen Pydantic model)."""
         # Arrange
-        event = WorkflowCreatedEvent(
+        event = WorkflowTemplateCreatedEvent(
             workflow_id="test-id",
             name="Test",
             workflow_type=WorkflowType.RESEARCH,

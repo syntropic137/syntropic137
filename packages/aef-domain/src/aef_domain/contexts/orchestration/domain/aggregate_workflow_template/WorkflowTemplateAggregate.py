@@ -1,6 +1,6 @@
 """Workflow aggregate root - shared across workflow slices.
 
-Location: orchestration/domain/aggregate_workflow/ (per ADR-020)
+Location: orchestration/domain/aggregate_workflow_template/ (per ADR-020)
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ from uuid import uuid4
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
         PhaseDefinition,
     )
-    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-        CreateWorkflowCommand,
+    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+        CreateWorkflowTemplateCommand,
     )
-    from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-        WorkflowCreatedEvent,
+    from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+        WorkflowTemplateCreatedEvent,
     )
 
 
@@ -33,8 +33,8 @@ class WorkflowStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-@aggregate("Workflow")
-class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
+@aggregate("WorkflowTemplate")
+class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     """Workflow aggregate root.
 
     Manages the lifecycle of a workflow from creation through completion.
@@ -82,15 +82,15 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
     # COMMAND HANDLERS - Validate business rules, emit events
     # =========================================================================
 
-    @command_handler("CreateWorkflowCommand")
-    def create_workflow(self, command: CreateWorkflowCommand) -> None:
-        """Handle CreateWorkflowCommand.
+    @command_handler("CreateWorkflowTemplateCommand")
+    def create_workflow(self, command: CreateWorkflowTemplateCommand) -> None:
+        """Handle CreateWorkflowTemplateCommand.
 
-        Validates business rules and emits WorkflowCreatedEvent.
+        Validates business rules and emits WorkflowTemplateCreatedEvent.
         """
         # Import here to avoid circular imports at module level
-        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
+        from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+            WorkflowTemplateCreatedEvent,
         )
 
         # Validate: workflow must not already exist
@@ -110,7 +110,7 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
         self._initialize(workflow_id)
 
         # Create and apply the event
-        event = WorkflowCreatedEvent(
+        event = WorkflowTemplateCreatedEvent(
             workflow_id=workflow_id,
             name=command.name,
             workflow_type=command.workflow_type,
@@ -128,9 +128,9 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
     # EVENT SOURCING HANDLERS - Update state only, NO business logic
     # =========================================================================
 
-    @event_sourcing_handler("WorkflowCreated")
-    def on_workflow_created(self, event: WorkflowCreatedEvent) -> None:
-        """Apply WorkflowCreatedEvent to update aggregate state.
+    @event_sourcing_handler("WorkflowTemplateCreated")
+    def on_workflow_created(self, event: WorkflowTemplateCreatedEvent) -> None:
+        """Apply WorkflowTemplateCreatedEvent to update aggregate state.
 
         Event handlers update state only - NO business logic.
         Must be idempotent for rehydration.
@@ -138,7 +138,7 @@ class WorkflowAggregate(AggregateRoot["WorkflowCreatedEvent"]):
         Note: When rehydrating from gRPC event store, event may be a GenericDomainEvent
         with dict attributes instead of proper typed objects. Handle both cases.
         """
-        from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
             PhaseDefinition,
             WorkflowClassification,
             WorkflowType,

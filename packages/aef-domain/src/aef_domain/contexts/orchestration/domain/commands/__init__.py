@@ -3,8 +3,8 @@
 All commands for workflow execution and workspace management.
 """
 
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
 from aef_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
@@ -23,7 +23,7 @@ from aef_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand
 )
 
 __all__ = [
-    "CreateWorkflowCommand",
+    "CreateWorkflowTemplateCommand",
     "CreateWorkspaceCommand",
     "ExecuteCommandCommand",
     "ExecuteWorkflowCommand",

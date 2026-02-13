@@ -5,15 +5,15 @@ from __future__ import annotations
 from event_sourcing import DomainEvent, event
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (  # noqa: TC001
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
 
 
-@event("WorkflowCreated", "v1")
-class WorkflowCreatedEvent(DomainEvent):
+@event("WorkflowTemplateCreated", "v1")
+class WorkflowTemplateCreatedEvent(DomainEvent):
     """Event emitted when a workflow is created.
 
     Extends DomainEvent from event_sourcing SDK.

@@ -1,6 +1,6 @@
 """Workflow aggregate - workflow definitions.
 
-Aggregate Root: WorkflowAggregate
+Aggregate Root: WorkflowTemplateAggregate
 Value Objects: PhaseDefinition, WorkflowType, WorkflowClassification
 
 This aggregate manages workflow definitions:
@@ -11,8 +11,8 @@ This aggregate manages workflow definitions:
 Workflows are long-lived definitions that can have multiple executions.
 """
 
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-    WorkflowAggregate,
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+    WorkflowTemplateAggregate,
 )
 
-__all__ = ["WorkflowAggregate"]
+__all__ = ["WorkflowTemplateAggregate"]

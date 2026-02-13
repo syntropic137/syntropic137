@@ -46,11 +46,11 @@ from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-    WorkflowAggregate,
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+    WorkflowTemplateAggregate,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
 
 
@@ -75,12 +75,12 @@ def reset_storage_fixture() -> None:
     reset_projection_manager()
 
 
-async def create_test_workflow(workflow_id: str = "test-wf-1") -> WorkflowAggregate:
+async def create_test_workflow(workflow_id: str = "test-wf-1") -> WorkflowTemplateAggregate:
     """Create a test workflow and save it, updating projections."""
     from aef_adapters.projections import get_projection_manager
 
     repo = get_workflow_repository()
-    command = CreateWorkflowCommand(
+    command = CreateWorkflowTemplateCommand(
         aggregate_id=workflow_id,
         name="Test Workflow",
         workflow_type=WorkflowType.RESEARCH,
@@ -101,14 +101,14 @@ async def create_test_workflow(workflow_id: str = "test-wf-1") -> WorkflowAggreg
             ),
         ],
     )
-    workflow = WorkflowAggregate()
+    workflow = WorkflowTemplateAggregate()
     workflow._handle_command(command)
     await repo.save(workflow)
 
     # Dispatch event to projections so read models are updated
     manager = get_projection_manager()
     await manager.dispatch_event(
-        "WorkflowCreated",
+        "WorkflowTemplateCreated",
         {
             "workflow_id": workflow_id,
             "name": "Test Workflow",
@@ -568,7 +568,7 @@ class TestExecutionEndpoints:
         # Create a workflow first
         workflow_id = "test-workflow-for-runs"
         await manager.dispatch_event(
-            "WorkflowCreated",
+            "WorkflowTemplateCreated",
             {
                 "workflow_id": workflow_id,
                 "name": "Test Workflow",

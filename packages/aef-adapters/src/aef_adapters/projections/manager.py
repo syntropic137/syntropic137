@@ -110,7 +110,7 @@ class EventProvenance:
 # It doesn't persist data - it's a pure forwarding layer.
 EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     # Workflow TEMPLATE events
-    "WorkflowCreated": [
+    "WorkflowTemplateCreated": [
         ("workflow_list", "on_workflow_created"),
         ("workflow_detail", "on_workflow_created"),
         ("dashboard_metrics", "on_workflow_created"),

@@ -32,8 +32,8 @@ if TYPE_CHECKING:
     from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
 
@@ -143,7 +143,7 @@ class InMemoryWorkflowRepository:
         _assert_test_environment()
         self._event_store = event_store
 
-    async def save(self, aggregate: WorkflowAggregate) -> None:
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None:
         """Save the aggregate's uncommitted events to the store."""
         events = aggregate.get_uncommitted_events()
 
@@ -160,15 +160,15 @@ class InMemoryWorkflowRepository:
                 version=aggregate.version + i + 1,
             )
 
-    async def get_by_id(self, workflow_id: str | UUID) -> WorkflowAggregate | None:
+    async def get_by_id(self, workflow_id: str | UUID) -> WorkflowTemplateAggregate | None:
         """Retrieve a workflow by ID, replaying events."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-            WorkflowAggregate,
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+            WorkflowTemplateAggregate,
         )
-        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
+        from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+            WorkflowTemplateCreatedEvent,
         )
 
         str_id = str(workflow_id)
@@ -178,14 +178,14 @@ class InMemoryWorkflowRepository:
             return None
 
         # Reconstruct aggregate from events using SDK's rehydrate method
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
 
         # Build EventEnvelope list for rehydration
-        envelopes: list[EventEnvelope[WorkflowCreatedEvent]] = []
+        envelopes: list[EventEnvelope[WorkflowTemplateCreatedEvent]] = []
         for stored_event in stored_events:
-            if stored_event.event_type == "WorkflowCreated":
+            if stored_event.event_type == "WorkflowTemplateCreated":
                 # Reconstruct the event from stored data
-                event = WorkflowCreatedEvent(**stored_event.event_data)
+                event = WorkflowTemplateCreatedEvent(**stored_event.event_data)
                 metadata = EventMetadata(
                     event_id=f"evt-{stored_event.sequence}",
                     aggregate_id=stored_event.aggregate_id,
@@ -200,34 +200,34 @@ class InMemoryWorkflowRepository:
 
         return aggregate
 
-    def get_all(self) -> list[WorkflowAggregate]:
+    def get_all(self) -> list[WorkflowTemplateAggregate]:
         """Get all workflows."""
         from event_sourcing import EventEnvelope, EventMetadata
 
-        from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-            WorkflowAggregate,
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+            WorkflowTemplateAggregate,
         )
-        from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-            WorkflowCreatedEvent,
+        from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+            WorkflowTemplateCreatedEvent,
         )
 
         # Get unique aggregate IDs
         aggregate_ids: set[str] = set()
         for event in self._event_store.get_all_events():
-            if event.aggregate_type == "Workflow":
+            if event.aggregate_type == "WorkflowTemplate":
                 aggregate_ids.add(event.aggregate_id)
 
-        workflows: list[WorkflowAggregate] = []
+        workflows: list[WorkflowTemplateAggregate] = []
         for agg_id in aggregate_ids:
             stored_events = self._event_store.get_events(agg_id)
             if not stored_events:
                 continue
 
-            aggregate = WorkflowAggregate()
+            aggregate = WorkflowTemplateAggregate()
             envelopes: list[EventEnvelope[Any]] = []
             for stored_event in stored_events:
-                if stored_event.event_type == "WorkflowCreated":
-                    workflow_event = WorkflowCreatedEvent(**stored_event.event_data)
+                if stored_event.event_type == "WorkflowTemplateCreated":
+                    workflow_event = WorkflowTemplateCreatedEvent(**stored_event.event_data)
                     metadata = EventMetadata(
                         event_id=f"evt-{stored_event.sequence}",
                         aggregate_id=stored_event.aggregate_id,

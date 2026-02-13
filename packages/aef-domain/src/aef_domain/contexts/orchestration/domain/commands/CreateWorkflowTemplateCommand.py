@@ -6,15 +6,15 @@ from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (  # noqa: TC001
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
 
 
-@command("CreateWorkflow", "Creates a new workflow with phases")
-class CreateWorkflowCommand(BaseModel):
+@command("CreateWorkflowTemplate", "Creates a new workflow with phases")
+class CreateWorkflowTemplateCommand(BaseModel):
     """Command to create a new workflow.
 
     Uses @command decorator for VSA discovery.

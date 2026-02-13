@@ -325,7 +325,7 @@ async def _get_workflow_by_id_db(workflow_id: str) -> WorkflowReadModel | None:
 
                     event_type = row["event_type"]
 
-                    if event_type == "WorkflowCreated":
+                    if event_type == "WorkflowTemplateCreated":
                         workflow = _parse_workflow_from_event(event_data)
                         workflow.created_at = row["created_at"]
 

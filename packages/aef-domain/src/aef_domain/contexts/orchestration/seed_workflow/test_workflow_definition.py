@@ -12,7 +12,7 @@ from aef_domain.contexts.orchestration._shared.workflow_definition import (
     load_workflow_definitions,
     validate_workflow_yaml,
 )
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseExecutionType,
     WorkflowClassification,
     WorkflowType,
