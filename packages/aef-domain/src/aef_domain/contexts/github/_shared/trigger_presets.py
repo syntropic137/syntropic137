@@ -5,6 +5,8 @@ Provides pre-configured trigger rules for common use cases.
 
 from __future__ import annotations
 
+from typing import Any
+
 from aef_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
 )
@@ -63,7 +65,7 @@ REVIEW_FIX_PRESET = {
     ),
 }
 
-PRESETS = {
+PRESETS: dict[str, dict[str, Any]] = {
     "self-healing": SELF_HEALING_PRESET,
     "review-fix": REVIEW_FIX_PRESET,
 }

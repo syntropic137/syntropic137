@@ -34,7 +34,7 @@ class TriggerHistoryProjection:
             trigger_id=event.trigger_id,
             execution_id=event.execution_id,
             webhook_delivery_id=event.webhook_delivery_id,
-            event_type=event.event_type,
+            github_event_type=event.github_event_type,
             repository=event.repository,
             pr_number=event.pr_number,
             payload_summary=dict(event.payload_summary),

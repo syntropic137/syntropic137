@@ -25,6 +25,12 @@ from aef_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
 from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
     ResumeTriggerCommand,
 )
+from aef_domain.contexts.github.domain.events.TriggerPausedEvent import (
+    TriggerPausedEvent,
+)
+from aef_domain.contexts.github.domain.events.TriggerResumedEvent import (
+    TriggerResumedEvent,
+)
 from aef_domain.contexts.github.domain.queries.get_trigger_history import (
     GetTriggerHistoryQuery,
 )
@@ -176,6 +182,7 @@ async def update_trigger(trigger_id: str, body: dict[str, Any]) -> dict[str, Any
     store = get_trigger_store()
     handler = ManageTriggerHandler(store=store)
 
+    event: TriggerPausedEvent | TriggerResumedEvent | None
     if action == "pause":
         event = await handler.pause(
             PauseTriggerCommand(
@@ -293,7 +300,7 @@ async def get_trigger_history(
                 "fired_at": e.fired_at.isoformat() if e.fired_at else None,
                 "execution_id": e.execution_id,
                 "webhook_delivery_id": e.webhook_delivery_id,
-                "event_type": e.event_type,
+                "event_type": e.github_event_type,
                 "pr_number": e.pr_number,
                 "status": e.status,
                 "cost_usd": e.cost_usd,
@@ -326,7 +333,7 @@ async def get_all_history(limit: int = 50) -> dict[str, Any]:
                 "trigger_id": e.trigger_id,
                 "fired_at": e.fired_at.isoformat() if e.fired_at else None,
                 "execution_id": e.execution_id,
-                "event_type": e.event_type,
+                "event_type": e.github_event_type,
                 "pr_number": e.pr_number,
                 "status": e.status,
             }

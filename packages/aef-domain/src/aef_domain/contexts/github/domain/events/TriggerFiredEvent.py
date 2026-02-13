@@ -19,7 +19,7 @@ class TriggerFiredEvent(DomainEvent):
         trigger_id: Unique identifier for the trigger rule.
         execution_id: ID of the dispatched workflow execution.
         webhook_delivery_id: X-GitHub-Delivery header for idempotency.
-        event_type: GitHub event type (e.g. "check_run.completed").
+        github_event_type: GitHub event type (e.g. "check_run.completed").
         repository: Repository that received the webhook.
         pr_number: PR number if applicable.
         payload_summary: Key fields from the webhook payload (not full payload).
@@ -28,7 +28,7 @@ class TriggerFiredEvent(DomainEvent):
     trigger_id: str
     execution_id: str
     webhook_delivery_id: str = ""
-    event_type: str = ""
+    github_event_type: str = ""
     repository: str = ""
     pr_number: Any = None
     payload_summary: dict = Field(default_factory=dict)

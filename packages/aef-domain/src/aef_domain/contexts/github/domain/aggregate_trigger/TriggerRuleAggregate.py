@@ -6,7 +6,7 @@ Aggregate root for GitHub webhook trigger rules.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 from aef_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
@@ -103,12 +103,12 @@ class TriggerRuleAggregate:
 
         config_dict = dict(cmd.config) if cmd.config else {}
         config = TriggerConfig(
-            max_attempts=config_dict.get("max_attempts", 3),
-            budget_per_trigger_usd=config_dict.get("budget_per_trigger_usd", 5.00),
-            daily_limit=config_dict.get("daily_limit", 20),
-            debounce_seconds=config_dict.get("debounce_seconds", 0),
-            cooldown_seconds=config_dict.get("cooldown_seconds", 300),
-            skip_if_sender_is_bot=config_dict.get("skip_if_sender_is_bot", True),
+            max_attempts=cast("int", config_dict.get("max_attempts", 3)),
+            budget_per_trigger_usd=cast("float", config_dict.get("budget_per_trigger_usd", 5.00)),
+            daily_limit=cast("int", config_dict.get("daily_limit", 20)),
+            debounce_seconds=cast("int", config_dict.get("debounce_seconds", 0)),
+            cooldown_seconds=cast("int", config_dict.get("cooldown_seconds", 300)),
+            skip_if_sender_is_bot=cast("bool", config_dict.get("skip_if_sender_is_bot", True)),
         )
 
         input_mapping = dict(cmd.input_mapping) if cmd.input_mapping else {}
@@ -239,7 +239,7 @@ class TriggerRuleAggregate:
             trigger_id=self.trigger_id,
             execution_id=execution_id,
             webhook_delivery_id=webhook_delivery_id,
-            event_type=event_type,
+            github_event_type=event_type,
             repository=repository,
             pr_number=pr_number,
             payload_summary=payload_summary or {},

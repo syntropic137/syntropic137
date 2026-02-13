@@ -253,7 +253,7 @@ def trigger_history(
         table.add_row(
             fired_at,
             entry.execution_id,
-            entry.event_type,
+            entry.github_event_type,
             str(entry.pr_number or "-"),
             entry.status,
         )

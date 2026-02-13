@@ -25,7 +25,7 @@ class TestTriggerHistoryProjection:
                 trigger_id="tr-1",
                 execution_id="exec-1",
                 webhook_delivery_id="del-1",
-                event_type="check_run.completed",
+                github_event_type="check_run.completed",
                 repository="AgentParadise/test",
                 pr_number=42,
             )
@@ -45,7 +45,7 @@ class TestTriggerHistoryProjection:
                 TriggerFiredEvent(
                     trigger_id="tr-1",
                     execution_id=f"exec-{i}",
-                    event_type="check_run.completed",
+                    github_event_type="check_run.completed",
                 )
             )
 
@@ -61,7 +61,7 @@ class TestTriggerHistoryProjection:
                 TriggerFiredEvent(
                     trigger_id="tr-1",
                     execution_id=f"exec-{i}",
-                    event_type="check_run.completed",
+                    github_event_type="check_run.completed",
                 )
             )
 
@@ -73,13 +73,13 @@ class TestTriggerHistoryProjection:
         projection = TriggerHistoryProjection()
 
         projection.handle_trigger_fired(
-            TriggerFiredEvent(trigger_id="tr-1", execution_id="exec-1", event_type="x")
+            TriggerFiredEvent(trigger_id="tr-1", execution_id="exec-1", github_event_type="x")
         )
         projection.handle_trigger_fired(
-            TriggerFiredEvent(trigger_id="tr-2", execution_id="exec-2", event_type="x")
+            TriggerFiredEvent(trigger_id="tr-2", execution_id="exec-2", github_event_type="x")
         )
         projection.handle_trigger_fired(
-            TriggerFiredEvent(trigger_id="tr-1", execution_id="exec-3", event_type="x")
+            TriggerFiredEvent(trigger_id="tr-1", execution_id="exec-3", github_event_type="x")
         )
 
         history = projection.get_history("tr-1")
@@ -91,10 +91,10 @@ class TestTriggerHistoryProjection:
         projection = TriggerHistoryProjection()
 
         projection.handle_trigger_fired(
-            TriggerFiredEvent(trigger_id="tr-1", execution_id="exec-1", event_type="x")
+            TriggerFiredEvent(trigger_id="tr-1", execution_id="exec-1", github_event_type="x")
         )
         projection.handle_trigger_fired(
-            TriggerFiredEvent(trigger_id="tr-2", execution_id="exec-2", event_type="x")
+            TriggerFiredEvent(trigger_id="tr-2", execution_id="exec-2", github_event_type="x")
         )
 
         history = projection.get_all_history()

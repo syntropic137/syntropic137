@@ -72,7 +72,7 @@ class TestTriggerRuleProjection:
             TriggerFiredEvent(
                 trigger_id="tr-1",
                 execution_id="exec-1",
-                event_type="check_run.completed",
+                github_event_type="check_run.completed",
             )
         )
 
