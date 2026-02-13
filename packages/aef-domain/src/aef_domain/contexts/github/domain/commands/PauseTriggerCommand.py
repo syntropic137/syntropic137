@@ -25,6 +25,10 @@ class PauseTriggerCommand:
     reason: str | None = None
     command_id: str = field(default_factory=lambda: str(uuid4()))
 
+    @property
+    def aggregate_id(self) -> str:
+        return self.trigger_id
+
     def __post_init__(self) -> None:
         """Validate the command."""
         if not self.trigger_id:

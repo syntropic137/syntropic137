@@ -11,11 +11,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
-        TriggerRuleAggregate,
-    )
     from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        TriggerStore,
+        TriggerQueryStore,
     )
 
 logger = logging.getLogger(__name__)
@@ -34,9 +31,9 @@ class SafetyGuards:
 
     async def check_all(
         self,
-        rule: TriggerRuleAggregate,
+        rule: Any,
         payload: dict[str, Any],
-        store: TriggerStore,
+        store: TriggerQueryStore,
     ) -> GuardResult:
         """Run all safety checks. Returns first failure or success.
 

@@ -14,7 +14,7 @@ from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler i
     RegisterTriggerHandler,
 )
 from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerStore,
+    InMemoryTriggerQueryStore,
 )
 
 
@@ -39,8 +39,8 @@ class TestRegisterTriggerHandler:
 
     @pytest.mark.asyncio
     async def test_register_creates_and_persists(self) -> None:
-        """Test that handler creates aggregate and saves to store."""
-        store = InMemoryTriggerStore()
+        """Test that handler creates aggregate and indexes in query store."""
+        store = InMemoryTriggerQueryStore()
         handler = RegisterTriggerHandler(store=store)
 
         aggregate = await handler.handle(_make_command())
@@ -48,14 +48,16 @@ class TestRegisterTriggerHandler:
         assert aggregate.trigger_id.startswith("tr-")
         assert aggregate.status == TriggerStatus.ACTIVE
 
-        stored = await store.get(aggregate.trigger_id)
-        assert stored is not None
-        assert stored.name == "ci-self-heal"
+        # Query store has the indexed trigger
+        indexed = await store.get(aggregate.trigger_id)
+        assert indexed is not None
+        assert indexed.name == "ci-self-heal"
+        assert indexed.status == "active"
 
     @pytest.mark.asyncio
     async def test_register_multiple_triggers(self) -> None:
         """Test registering multiple triggers."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = RegisterTriggerHandler(store=store)
 
         t1 = await handler.handle(_make_command(name="trigger-1"))

@@ -35,6 +35,7 @@ class RegisterTriggerCommand:
     input_mapping: tuple[tuple[str, str], ...] = ()
     config: tuple[tuple[str, object], ...] = ()
     created_by: str = ""
+    aggregate_id: str = ""
     command_id: str = field(default_factory=lambda: str(uuid4()))
 
     def __post_init__(self) -> None:

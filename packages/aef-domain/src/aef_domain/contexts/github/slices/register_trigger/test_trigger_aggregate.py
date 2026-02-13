@@ -16,23 +16,26 @@ from aef_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate im
 from aef_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
     TriggerStatus,
 )
+from aef_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
+    DeleteTriggerCommand,
+)
+from aef_domain.contexts.github.domain.commands.PauseTriggerCommand import (
+    PauseTriggerCommand,
+)
+from aef_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
+    RecordTriggerFiredCommand,
+)
 from aef_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
 )
-from aef_domain.contexts.github.domain.events.TriggerDeletedEvent import (
-    TriggerDeletedEvent,
+from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
+    ResumeTriggerCommand,
 )
 from aef_domain.contexts.github.domain.events.TriggerFiredEvent import (
     TriggerFiredEvent,
 )
-from aef_domain.contexts.github.domain.events.TriggerPausedEvent import (
-    TriggerPausedEvent,
-)
 from aef_domain.contexts.github.domain.events.TriggerRegisteredEvent import (
     TriggerRegisteredEvent,
-)
-from aef_domain.contexts.github.domain.events.TriggerResumedEvent import (
-    TriggerResumedEvent,
 )
 
 
@@ -53,14 +56,21 @@ def _make_register_command(**overrides) -> RegisterTriggerCommand:
     return RegisterTriggerCommand(**defaults)
 
 
+def _register_aggregate(**overrides) -> TriggerRuleAggregate:
+    """Create and register a TriggerRuleAggregate."""
+    cmd = _make_register_command(**overrides)
+    aggregate = TriggerRuleAggregate()
+    aggregate.register(cmd)
+    return aggregate
+
+
 @pytest.mark.unit
 class TestTriggerRuleAggregateRegister:
     """Tests for trigger registration."""
 
     def test_register_creates_aggregate_with_correct_state(self) -> None:
         """Test that register creates an aggregate with the right fields."""
-        cmd = _make_register_command()
-        aggregate = TriggerRuleAggregate.register(cmd)
+        aggregate = _register_aggregate()
 
         assert aggregate.trigger_id.startswith("tr-")
         assert aggregate.name == "ci-self-heal"
@@ -77,11 +87,11 @@ class TestTriggerRuleAggregateRegister:
 
     def test_register_emits_trigger_registered_event(self) -> None:
         """Test that register emits a TriggerRegisteredEvent."""
-        cmd = _make_register_command()
-        aggregate = TriggerRuleAggregate.register(cmd)
+        aggregate = _register_aggregate()
 
-        assert len(aggregate.pending_events) == 1
-        event = aggregate.pending_events[0]
+        uncommitted = aggregate.get_uncommitted_events()
+        assert len(uncommitted) == 1
+        event = uncommitted[0].event
         assert isinstance(event, TriggerRegisteredEvent)
         assert event.trigger_id == aggregate.trigger_id
         assert event.name == "ci-self-heal"
@@ -92,85 +102,87 @@ class TestTriggerRuleAggregateRegister:
 class TestTriggerRuleAggregatePause:
     """Tests for trigger pausing."""
 
-    def test_pause_active_trigger_returns_event(self) -> None:
-        """Test pausing an active trigger returns a TriggerPausedEvent."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.pending_events.clear()
+    def test_pause_active_trigger(self) -> None:
+        """Test pausing an active trigger changes status."""
+        aggregate = _register_aggregate()
+        aggregate.mark_events_as_committed()
 
-        event = aggregate.pause(paused_by="admin", reason="maintenance")
+        cmd = PauseTriggerCommand(
+            trigger_id=aggregate.trigger_id, paused_by="admin", reason="maintenance"
+        )
+        aggregate.pause(cmd)
 
-        assert event is not None
-        assert isinstance(event, TriggerPausedEvent)
-        assert event.trigger_id == aggregate.trigger_id
-        assert event.paused_by == "admin"
-        assert event.reason == "maintenance"
         assert aggregate.status == TriggerStatus.PAUSED
+        uncommitted = aggregate.get_uncommitted_events()
+        assert len(uncommitted) == 1
 
-    def test_pause_already_paused_returns_none(self) -> None:
-        """Test pausing an already-paused trigger returns None."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.pause(paused_by="admin")
+    def test_pause_already_paused_raises(self) -> None:
+        """Test pausing an already-paused trigger raises ValueError."""
+        aggregate = _register_aggregate()
+        aggregate.pause(PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin"))
 
-        result = aggregate.pause(paused_by="admin")
-        assert result is None
+        with pytest.raises(ValueError, match="Cannot pause"):
+            aggregate.pause(PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin"))
 
-    def test_pause_deleted_returns_none(self) -> None:
-        """Test pausing a deleted trigger returns None."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.delete(deleted_by="admin")
+    def test_pause_deleted_raises(self) -> None:
+        """Test pausing a deleted trigger raises ValueError."""
+        aggregate = _register_aggregate()
+        aggregate.delete(DeleteTriggerCommand(trigger_id=aggregate.trigger_id, deleted_by="admin"))
 
-        result = aggregate.pause(paused_by="admin")
-        assert result is None
+        with pytest.raises(ValueError, match="Cannot pause"):
+            aggregate.pause(PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin"))
 
 
 @pytest.mark.unit
 class TestTriggerRuleAggregateResume:
     """Tests for trigger resuming."""
 
-    def test_resume_paused_trigger_returns_event(self) -> None:
-        """Test resuming a paused trigger returns a TriggerResumedEvent."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.pause(paused_by="admin")
-        aggregate.pending_events.clear()
+    def test_resume_paused_trigger(self) -> None:
+        """Test resuming a paused trigger returns to active."""
+        aggregate = _register_aggregate()
+        aggregate.pause(PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin"))
+        aggregate.mark_events_as_committed()
 
-        event = aggregate.resume(resumed_by="admin")
+        aggregate.resume(ResumeTriggerCommand(trigger_id=aggregate.trigger_id, resumed_by="admin"))
 
-        assert event is not None
-        assert isinstance(event, TriggerResumedEvent)
-        assert event.trigger_id == aggregate.trigger_id
         assert aggregate.status == TriggerStatus.ACTIVE
+        uncommitted = aggregate.get_uncommitted_events()
+        assert len(uncommitted) == 1
 
-    def test_resume_active_returns_none(self) -> None:
-        """Test resuming an already-active trigger returns None."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
+    def test_resume_active_raises(self) -> None:
+        """Test resuming an already-active trigger raises ValueError."""
+        aggregate = _register_aggregate()
 
-        result = aggregate.resume(resumed_by="admin")
-        assert result is None
+        with pytest.raises(ValueError, match="Cannot resume"):
+            aggregate.resume(
+                ResumeTriggerCommand(trigger_id=aggregate.trigger_id, resumed_by="admin")
+            )
 
 
 @pytest.mark.unit
 class TestTriggerRuleAggregateDelete:
     """Tests for trigger deletion."""
 
-    def test_delete_trigger_returns_event(self) -> None:
-        """Test deleting a trigger returns a TriggerDeletedEvent."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.pending_events.clear()
+    def test_delete_trigger(self) -> None:
+        """Test deleting a trigger sets status to DELETED."""
+        aggregate = _register_aggregate()
+        aggregate.mark_events_as_committed()
 
-        event = aggregate.delete(deleted_by="admin")
+        aggregate.delete(DeleteTriggerCommand(trigger_id=aggregate.trigger_id, deleted_by="admin"))
 
-        assert event is not None
-        assert isinstance(event, TriggerDeletedEvent)
-        assert event.trigger_id == aggregate.trigger_id
         assert aggregate.status == TriggerStatus.DELETED
+        uncommitted = aggregate.get_uncommitted_events()
+        assert len(uncommitted) == 1
 
-    def test_delete_already_deleted_returns_none(self) -> None:
-        """Test deleting an already-deleted trigger returns None."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.delete(deleted_by="admin")
+    def test_delete_already_deleted_raises(self) -> None:
+        """Test deleting an already-deleted trigger raises ValueError."""
+        aggregate = _register_aggregate()
+        aggregate.delete(DeleteTriggerCommand(trigger_id=aggregate.trigger_id, deleted_by="admin"))
 
-        result = aggregate.delete(deleted_by="admin")
-        assert result is None
+        with pytest.raises(ValueError, match="already deleted"):
+            aggregate.delete(
+                DeleteTriggerCommand(trigger_id=aggregate.trigger_id, deleted_by="admin")
+            )
 
 
 @pytest.mark.unit
@@ -179,87 +191,43 @@ class TestTriggerRuleAggregateFireAndCanFire:
 
     def test_record_fired_increments_count(self) -> None:
         """Test that record_fired increments fire_count and emits event."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-        aggregate.pending_events.clear()
+        aggregate = _register_aggregate()
+        aggregate.mark_events_as_committed()
 
-        event = aggregate.record_fired(
+        cmd = RecordTriggerFiredCommand(
+            trigger_id=aggregate.trigger_id,
             execution_id="exec-abc",
             webhook_delivery_id="del-123",
             event_type="check_run.completed",
             repository="AgentParadise/my-project",
+            workflow_id="ci-fix-workflow",
             pr_number=42,
             payload_summary={"check_name": "lint"},
         )
+        aggregate.record_fired(cmd)
 
         assert aggregate.fire_count == 1
+        uncommitted = aggregate.get_uncommitted_events()
+        assert len(uncommitted) == 1
+        event = uncommitted[0].event
         assert isinstance(event, TriggerFiredEvent)
         assert event.execution_id == "exec-abc"
         assert event.pr_number == 42
+        assert event.workflow_id == "ci-fix-workflow"
 
     def test_can_fire_only_when_active(self) -> None:
         """Test that can_fire returns True only when status is active."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
+        aggregate = _register_aggregate()
         assert aggregate.can_fire() is True
 
-        aggregate.pause(paused_by="admin")
+        aggregate.pause(PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin"))
         assert aggregate.can_fire() is False
 
-        aggregate.resume(resumed_by="admin")
+        aggregate.resume(ResumeTriggerCommand(trigger_id=aggregate.trigger_id, resumed_by="admin"))
         assert aggregate.can_fire() is True
 
-        aggregate.delete(deleted_by="admin")
+        aggregate.delete(DeleteTriggerCommand(trigger_id=aggregate.trigger_id, deleted_by="admin"))
         assert aggregate.can_fire() is False
-
-
-@pytest.mark.unit
-class TestTriggerRuleAggregateEventSourcing:
-    """Tests for event sourcing reconstitution."""
-
-    def test_from_events_reconstitutes_state(self) -> None:
-        """Test that from_events rebuilds aggregate state correctly."""
-        registered = TriggerRegisteredEvent(
-            trigger_id="tr-abc123",
-            name="test-trigger",
-            event="check_run.completed",
-            conditions=({"field": "check_run.conclusion", "operator": "eq", "value": "failure"},),
-            repository="AgentParadise/test",
-            installation_id="inst-1",
-            workflow_id="ci-fix-workflow",
-            input_mapping={"repo": "repository.full_name"},
-            config={"max_attempts": 3},
-            created_by="test",
-        )
-        paused = TriggerPausedEvent(trigger_id="tr-abc123", paused_by="admin")
-        resumed = TriggerResumedEvent(trigger_id="tr-abc123", resumed_by="admin")
-        fired = TriggerFiredEvent(
-            trigger_id="tr-abc123",
-            execution_id="exec-1",
-            webhook_delivery_id="del-1",
-            github_event_type="check_run.completed",
-            repository="AgentParadise/test",
-        )
-
-        aggregate = TriggerRuleAggregate.from_events([registered, paused, resumed, fired])
-
-        assert aggregate is not None
-        assert aggregate.trigger_id == "tr-abc123"
-        assert aggregate.name == "test-trigger"
-        assert aggregate.status == TriggerStatus.ACTIVE
-        assert aggregate.fire_count == 1
-        assert len(aggregate.conditions) == 1
-
-    def test_from_events_empty_returns_none(self) -> None:
-        """Test that from_events with empty list returns None."""
-        assert TriggerRuleAggregate.from_events([]) is None
-
-    def test_clear_pending_events(self) -> None:
-        """Test that clear_pending_events returns and clears events."""
-        aggregate = TriggerRuleAggregate.register(_make_register_command())
-
-        assert len(aggregate.pending_events) == 1
-        cleared = aggregate.clear_pending_events()
-        assert len(cleared) == 1
-        assert len(aggregate.pending_events) == 0
 
 
 @pytest.mark.unit

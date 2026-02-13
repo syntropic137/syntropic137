@@ -32,6 +32,8 @@ class TriggerFiredEvent(DomainEvent):
     repository: str = ""
     pr_number: Any = None
     payload_summary: dict = Field(default_factory=dict)
+    workflow_id: str = ""
+    workflow_inputs: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("trigger_id")
     @classmethod

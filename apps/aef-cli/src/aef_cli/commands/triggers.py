@@ -96,12 +96,15 @@ def register_trigger(
     handler = RegisterTriggerHandler(store=store)
     aggregate = _run_async(handler.handle(cmd))
 
+    status_val = (
+        aggregate.status.value if hasattr(aggregate.status, "value") else str(aggregate.status)
+    )
     console.print(f"[green]Trigger registered:[/green] {aggregate.trigger_id}")
     console.print(f"  Name: {aggregate.name}")
     console.print(f"  Event: {aggregate.event}")
     console.print(f"  Repository: {aggregate.repository}")
     console.print(f"  Workflow: {aggregate.workflow_id}")
-    console.print(f"  Status: {aggregate.status.value}")
+    console.print(f"  Status: {status_val}")
 
 
 @app.command("enable")
@@ -170,17 +173,18 @@ def list_triggers(
     table.add_column("Fires", justify="right")
 
     for t in triggers:
+        status_val = t.status.value if hasattr(t.status, "value") else str(t.status)
         status_style = {
             "active": "green",
             "paused": "yellow",
             "deleted": "red",
-        }.get(t.status.value, "")
+        }.get(status_val, "")
         table.add_row(
             t.trigger_id,
             t.name,
             t.event,
             t.repository,
-            f"[{status_style}]{t.status.value}[/{status_style}]",
+            f"[{status_style}]{status_val}[/{status_style}]",
             str(t.fire_count),
         )
 
@@ -203,21 +207,29 @@ def show_trigger(
         console.print(f"[red]Trigger not found: {trigger_id}[/red]")
         raise typer.Exit(1)
 
+    status_val = trigger.status.value if hasattr(trigger.status, "value") else str(trigger.status)
     console.print(f"[bold]Trigger: {trigger.name}[/bold]")
     console.print(f"  ID: {trigger.trigger_id}")
-    console.print(f"  Status: {trigger.status.value}")
+    console.print(f"  Status: {status_val}")
     console.print(f"  Event: {trigger.event}")
     console.print(f"  Repository: {trigger.repository}")
     console.print(f"  Workflow: {trigger.workflow_id}")
     console.print(f"  Fire Count: {trigger.fire_count}")
     console.print(f"  Conditions: {len(trigger.conditions)}")
     for c in trigger.conditions:
-        console.print(f"    - {c.field} {c.operator} {c.value}")
-    console.print("  Config:")
-    console.print(f"    Max Attempts: {trigger.config.max_attempts}")
-    console.print(f"    Daily Limit: {trigger.config.daily_limit}")
-    console.print(f"    Cooldown: {trigger.config.cooldown_seconds}s")
-    console.print(f"    Budget: ${trigger.config.budget_per_trigger_usd:.2f}")
+        if isinstance(c, dict):
+            console.print(
+                f"    - {c.get('field', '')} {c.get('operator', '')} {c.get('value', '')}"
+            )
+        else:
+            console.print(f"    - {c.field} {c.operator} {c.value}")
+    config = trigger.config
+    if hasattr(config, "max_attempts"):
+        console.print("  Config:")
+        console.print(f"    Max Attempts: {config.max_attempts}")
+        console.print(f"    Daily Limit: {config.daily_limit}")
+        console.print(f"    Cooldown: {config.cooldown_seconds}s")
+        console.print(f"    Budget: ${config.budget_per_trigger_usd:.2f}")
 
 
 @app.command("history")

@@ -72,6 +72,7 @@ _workflow_repository: RepositoryAdapter[WorkflowTemplateAggregate] | None = None
 _workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
 _artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
+_trigger_repository: RepositoryAdapter[Any] | None = None
 
 
 def _get_repository_factory() -> Any:
@@ -247,6 +248,44 @@ def get_artifact_repository() -> (
     return _artifact_repository
 
 
+def get_trigger_repository() -> Any:
+    """Get a TriggerRuleAggregate repository.
+
+    For TEST: Returns in-memory query store (backward-compatible)
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
+
+    Returns:
+        Repository for TriggerRuleAggregate with get_by_id/save interface.
+    """
+    settings = get_settings()
+
+    if settings.is_test:
+        from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
+            InMemoryTriggerQueryStore,
+        )
+
+        return InMemoryTriggerQueryStore()
+
+    global _trigger_repository
+
+    if _trigger_repository is not None:
+        return _trigger_repository
+
+    from aef_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+        TriggerRuleAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        TriggerRuleAggregate,
+        aggregate_type="TriggerRule",
+    )
+    _trigger_repository = RepositoryAdapter(sdk_repo)
+
+    logger.debug("Created TriggerRuleAggregate repository (SDK wrapped)")
+    return _trigger_repository
+
+
 def reset_repositories() -> None:
     """Reset all cached repositories (for testing).
 
@@ -257,11 +296,13 @@ def reset_repositories() -> None:
         _workflow_repository, \
         _workflow_execution_repository, \
         _session_repository, \
-        _artifact_repository
+        _artifact_repository, \
+        _trigger_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _session_repository = None
     _artifact_repository = None
+    _trigger_repository = None
 
     # Also reset in-memory repos if we're in test mode
     settings = get_settings()
