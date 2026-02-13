@@ -16,8 +16,8 @@ Per ADR-020:
 # Note: Imports may fail during transition period while old contexts still exist
 # Use lazy imports or try/except when importing aggregates
 __all__ = [
-    "WorkflowTemplateAggregate",
     "WorkflowExecutionAggregate",
+    "WorkflowTemplateAggregate",
     "WorkspaceAggregate",
 ]
 

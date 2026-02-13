@@ -36,14 +36,14 @@ from aef_domain.contexts.orchestration.domain.events.TokensInjectedEvent import 
 from aef_domain.contexts.orchestration.domain.events.WorkflowCompletedEvent import (
     WorkflowCompletedEvent,
 )
-from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
-    WorkflowTemplateCreatedEvent,
-)
 from aef_domain.contexts.orchestration.domain.events.WorkflowExecutionStartedEvent import (
     WorkflowExecutionStartedEvent,
 )
 from aef_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import (
     WorkflowFailedEvent,
+)
+from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+    WorkflowTemplateCreatedEvent,
 )
 from aef_domain.contexts.orchestration.domain.events.WorkspaceCommandExecutedEvent import (
     WorkspaceCommandExecutedEvent,
@@ -80,9 +80,9 @@ __all__ = [
     "PhaseStartedEvent",
     "TokensInjectedEvent",
     "WorkflowCompletedEvent",
-    "WorkflowTemplateCreatedEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
+    "WorkflowTemplateCreatedEvent",
     "WorkspaceCommandExecutedEvent",
     "WorkspaceCreatedEvent",
     "WorkspaceCreatingEvent",

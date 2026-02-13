@@ -12,8 +12,8 @@ from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowType,
 )
 from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-    WorkflowTemplateAggregate,
     WorkflowStatus,
+    WorkflowTemplateAggregate,
 )
 from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
     CreateWorkflowTemplateCommand,
