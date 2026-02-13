@@ -59,15 +59,8 @@ aef-tokens = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging" }
-# agentic-primitives packages
-agentic-security = { path = "lib/agentic-primitives/lib/python/agentic_security" }
 agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation" }
-agentic-adapters = { path = "lib/agentic-primitives/lib/python/agentic_adapters" }
-agentic-settings = { path = "lib/agentic-primitives/lib/python/agentic_settings" }
-# Simple event emission (ADR-029)
 agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events" }
-# Workspace prompts for artifact instructions (ADR-012)
-agentic-workspace = { path = "lib/agentic-primitives/lib/python/agentic_workspace" }
 
 [tool.ruff]
 target-version = "py312"
@@ -166,18 +159,10 @@ module = [
     "asyncpg.*",
     "agentic_logging",
     "agentic_logging.*",
-    "agentic_security",
-    "agentic_security.*",
     "agentic_isolation",
     "agentic_isolation.*",
-    "agentic_adapters",
-    "agentic_adapters.*",
     "agentic_events",
     "agentic_events.*",
-    "agentic_workspace",
-    "agentic_workspace.*",
-    "agentic_settings",
-    "agentic_settings.*",
     "sse_starlette",
     "sse_starlette.*",
     "uvicorn",
@@ -212,7 +197,7 @@ pythonpath = [
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
-addopts = ["-ra", "-q", "--strict-markers"]
+addopts = ["-ra", "-q", "--strict-markers", "-m", "not integration"]
 markers = [
     "unit: Unit tests (fast, no external dependencies)",
     "integration: Integration tests (may use Docker services)",

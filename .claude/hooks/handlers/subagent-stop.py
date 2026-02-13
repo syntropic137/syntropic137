@@ -44,7 +44,6 @@ def main() -> None:
                 "event_type": "hook_decision",
                 "handler": "subagent-stop",
                 "hook_event": event.get("hook_event_name", "SubagentStop"),
-                "decision": "allow",
                 "session_id": event.get("session_id"),
                 "subagent_id": event.get("subagent_id"),
                 "audit": {

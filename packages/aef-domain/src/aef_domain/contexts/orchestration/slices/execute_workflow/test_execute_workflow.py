@@ -528,10 +528,11 @@ class TestWorkflowExecutionEngine:
         workflow = create_test_workflow()
         workflow_repo.add_workflow(workflow)
 
-        # Execute
+        # Execute (use_container=False for unit test without GitHub App config)
         result = await engine.execute(
             workflow_id=get_workflow_id(workflow),
             inputs={"topic": "AI agents"},
+            use_container=False,
         )
 
         # Verify result
@@ -544,9 +545,6 @@ class TestWorkflowExecutionEngine:
         # Verify phases executed
         assert result.phase_results[0].status == PhaseStatus.COMPLETED
         assert result.phase_results[1].status == PhaseStatus.COMPLETED
-
-        # In container mode, mock agent is not called directly
-        # The MockWorkspace.stream() provides the agent output
 
     @pytest.mark.asyncio
     async def test_execute_with_custom_execution_id(
