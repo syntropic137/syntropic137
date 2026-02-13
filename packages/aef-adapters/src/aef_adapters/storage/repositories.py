@@ -30,8 +30,8 @@ if TYPE_CHECKING:
     from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ class RepositoryAdapter[TAggregate]:
 
 
 # Cached repository instances (wrapped adapters for SDK-based repos)
-_workflow_repository: RepositoryAdapter[WorkflowAggregate] | None = None
+_workflow_repository: RepositoryAdapter[WorkflowTemplateAggregate] | None = None
 _workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | None = None
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
 _artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
@@ -86,14 +86,14 @@ def _get_repository_factory() -> Any:
 
 def get_workflow_repository() -> (
     Any
-):  # RepositoryAdapter[WorkflowAggregate] or InMemoryWorkflowRepository
-    """Get a WorkflowAggregate repository.
+):  # RepositoryAdapter[WorkflowTemplateAggregate] or InMemoryWorkflowRepository
+    """Get a WorkflowTemplateAggregate repository.
 
     For TEST: Returns InMemoryWorkflowRepository (synchronous API)
     For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository (async SDK-based)
 
     Returns:
-        Repository for WorkflowAggregate with get_by_id/save/exists interface.
+        Repository for WorkflowTemplateAggregate with get_by_id/save/exists interface.
     """
     settings = get_settings()
 
@@ -111,18 +111,18 @@ def get_workflow_repository() -> (
     if _workflow_repository is not None:
         return _workflow_repository
 
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
     factory = _get_repository_factory()
     sdk_repo = factory.create_repository(
-        WorkflowAggregate,
-        aggregate_type="Workflow",
+        WorkflowTemplateAggregate,
+        aggregate_type="WorkflowTemplate",
     )
     _workflow_repository = RepositoryAdapter(sdk_repo)
 
-    logger.debug("Created WorkflowAggregate repository (SDK wrapped)")
+    logger.debug("Created WorkflowTemplateAggregate repository (SDK wrapped)")
     return _workflow_repository
 
 

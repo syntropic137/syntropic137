@@ -4,7 +4,7 @@ This module exports the aggregate roots and shared domain objects.
 
 Aggregates (each in its own aggregate_* folder):
 - WorkspaceAggregate: Isolated workspace lifecycle
-- WorkflowAggregate: Workflow definition
+- WorkflowTemplateAggregate: Workflow definition
 - WorkflowExecutionAggregate: Execution lifecycle with phases
 
 Per ADR-020:
@@ -16,7 +16,7 @@ Per ADR-020:
 # Note: Imports may fail during transition period while old contexts still exist
 # Use lazy imports or try/except when importing aggregates
 __all__ = [
-    "WorkflowAggregate",
+    "WorkflowTemplateAggregate",
     "WorkflowExecutionAggregate",
     "WorkspaceAggregate",
 ]
@@ -30,12 +30,12 @@ def __getattr__(name: str) -> type:
         )
 
         return WorkspaceAggregate
-    elif name == "WorkflowAggregate":
-        from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-            WorkflowAggregate,
+    elif name == "WorkflowTemplateAggregate":
+        from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+            WorkflowTemplateAggregate,
         )
 
-        return WorkflowAggregate
+        return WorkflowTemplateAggregate
     elif name == "WorkflowExecutionAggregate":
         from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
             WorkflowExecutionAggregate,

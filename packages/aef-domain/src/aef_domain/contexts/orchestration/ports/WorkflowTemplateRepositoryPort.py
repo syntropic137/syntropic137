@@ -1,4 +1,4 @@
-"""Port interface for WorkflowAggregate repository.
+"""Port interface for WorkflowTemplateAggregate repository.
 
 This port defines the contract for persisting and retrieving Workflow aggregates.
 Adapters in aef-adapters implement this protocol structurally (duck typing).
@@ -7,30 +7,30 @@ Adapters in aef-adapters implement this protocol structurally (duck typing).
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
 
-class WorkflowRepositoryPort(Protocol):
-    """Repository port for WorkflowAggregate persistence.
+class WorkflowTemplateRepositoryPort(Protocol):
+    """Repository port for WorkflowTemplateAggregate persistence.
 
     This port follows the Repository pattern from DDD. Adapters provide
     concrete implementations (e.g., EventStoreRepository, InMemoryRepository).
     """
 
-    async def get_by_id(self, workflow_id: str) -> "WorkflowAggregate | None":
+    async def get_by_id(self, workflow_id: str) -> "WorkflowTemplateAggregate | None":
         """Retrieve workflow aggregate by ID.
 
         Args:
             workflow_id: The unique identifier of the workflow.
 
         Returns:
-            WorkflowAggregate if found, None otherwise.
+            WorkflowTemplateAggregate if found, None otherwise.
         """
         ...
 
-    async def save(self, aggregate: "WorkflowAggregate") -> None:
+    async def save(self, aggregate: "WorkflowTemplateAggregate") -> None:
         """Persist workflow aggregate with uncommitted events.
 
         This method should:

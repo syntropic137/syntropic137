@@ -23,16 +23,16 @@ from aef_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
     PhaseResult,
     PhaseStatus,
 )
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.value_objects import (
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-    WorkflowAggregate,
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+    WorkflowTemplateAggregate,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
 from aef_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
     ExecutionContext,
@@ -108,16 +108,16 @@ class MockWorkflowRepository:
     """Mock workflow repository for testing."""
 
     def __init__(self) -> None:
-        self._workflows: dict[str, WorkflowAggregate] = {}
+        self._workflows: dict[str, WorkflowTemplateAggregate] = {}
 
-    async def get_by_id(self, workflow_id: str) -> WorkflowAggregate | None:
+    async def get_by_id(self, workflow_id: str) -> WorkflowTemplateAggregate | None:
         return self._workflows.get(workflow_id)
 
-    async def save(self, aggregate: WorkflowAggregate) -> None:
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None:
         if aggregate.id:
             self._workflows[aggregate.id] = aggregate
 
-    def add_workflow(self, workflow: WorkflowAggregate) -> None:
+    def add_workflow(self, workflow: WorkflowTemplateAggregate) -> None:
         """Add a workflow to the mock store."""
         if workflow.id:
             self._workflows[workflow.id] = workflow
@@ -305,7 +305,7 @@ def create_test_workflow(
     workflow_id: str = "test-workflow-123",
     name: str = "Test Workflow",
     phases: list[PhaseDefinition] | None = None,
-) -> WorkflowAggregate:
+) -> WorkflowTemplateAggregate:
     """Create a test workflow aggregate."""
     if phases is None:
         phases = [
@@ -327,8 +327,8 @@ def create_test_workflow(
             ),
         ]
 
-    workflow = WorkflowAggregate()
-    command = CreateWorkflowCommand(
+    workflow = WorkflowTemplateAggregate()
+    command = CreateWorkflowTemplateCommand(
         aggregate_id=workflow_id,
         name=name,
         workflow_type=WorkflowType.RESEARCH,
@@ -342,7 +342,7 @@ def create_test_workflow(
     return workflow
 
 
-def get_workflow_id(workflow: WorkflowAggregate) -> str:
+def get_workflow_id(workflow: WorkflowTemplateAggregate) -> str:
     """Get workflow ID, asserting it's not None."""
     workflow_id = workflow.id
     assert workflow_id is not None, "Workflow ID should not be None after creation"

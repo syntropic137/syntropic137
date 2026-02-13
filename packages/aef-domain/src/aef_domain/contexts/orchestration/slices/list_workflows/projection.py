@@ -23,7 +23,7 @@ from aef_domain.contexts.orchestration.domain.read_models import WorkflowSummary
 
 # Event types this projection subscribes to
 _SUBSCRIBED_EVENTS = {
-    "WorkflowCreated",
+    "WorkflowTemplateCreated",
     "WorkflowExecutionStarted",  # To increment runs_count
 }
 
@@ -69,7 +69,7 @@ class WorkflowListProjection(CheckpointedProjection):
         global_nonce = envelope.metadata.global_nonce or 0
 
         try:
-            if event_type == "WorkflowCreated":
+            if event_type == "WorkflowTemplateCreated":
                 await self.on_workflow_created(event_data)
             elif event_type == "WorkflowExecutionStarted":
                 await self.on_workflow_execution_started(event_data)

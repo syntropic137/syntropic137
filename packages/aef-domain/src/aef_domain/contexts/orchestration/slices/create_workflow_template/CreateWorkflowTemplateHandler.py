@@ -4,25 +4,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
-from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-    WorkflowAggregate,
+from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+    WorkflowTemplateAggregate,
 )
 
 if TYPE_CHECKING:
     from event_sourcing import EventEnvelope
 
-    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-        CreateWorkflowCommand,
+    from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+        CreateWorkflowTemplateCommand,
     )
-    from aef_domain.contexts.orchestration.domain.events.WorkflowCreatedEvent import (
-        WorkflowCreatedEvent,
+    from aef_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
+        WorkflowTemplateCreatedEvent,
     )
 
 
 class WorkflowRepository(Protocol):
     """Repository protocol for Workflow aggregates."""
 
-    async def save(self, aggregate: WorkflowAggregate) -> None:
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None:
         """Save the aggregate and its uncommitted events."""
         ...
 
@@ -30,13 +30,13 @@ class WorkflowRepository(Protocol):
 class EventPublisher(Protocol):
     """Protocol for publishing domain events."""
 
-    async def publish(self, events: list[EventEnvelope[WorkflowCreatedEvent]]) -> None:
+    async def publish(self, events: list[EventEnvelope[WorkflowTemplateCreatedEvent]]) -> None:
         """Publish domain events for integration."""
         ...
 
 
-class CreateWorkflowHandler:
-    """Application service handler for CreateWorkflowCommand.
+class CreateWorkflowTemplateHandler:
+    """Application service handler for CreateWorkflowTemplateCommand.
 
     This is a thin adapter that:
     1. Creates the aggregate
@@ -53,14 +53,14 @@ class CreateWorkflowHandler:
         self._repository = repository
         self._event_publisher = event_publisher
 
-    async def handle(self, command: CreateWorkflowCommand) -> str:
-        """Handle the CreateWorkflowCommand.
+    async def handle(self, command: CreateWorkflowTemplateCommand) -> str:
+        """Handle the CreateWorkflowTemplateCommand.
 
         Returns:
             The created workflow ID.
         """
         # Create new aggregate
-        aggregate = WorkflowAggregate()
+        aggregate = WorkflowTemplateAggregate()
 
         # Dispatch command to aggregate (uses @command_handler decorator)
         aggregate._handle_command(command)

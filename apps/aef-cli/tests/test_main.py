@@ -14,11 +14,11 @@ from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
-from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-    CreateWorkflowHandler,
+from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    CreateWorkflowTemplateHandler,
 )
 
 runner = CliRunner()
@@ -36,9 +36,9 @@ def create_test_workflow(workflow_id: str = "test-workflow") -> str:
 
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    handler = CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
 
-    command = CreateWorkflowCommand(
+    command = CreateWorkflowTemplateCommand(
         aggregate_id=workflow_id,
         name="Test Workflow",
         workflow_type=WorkflowType.RESEARCH,

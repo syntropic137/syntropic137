@@ -274,7 +274,7 @@ class TestEventSubscriptionService:
         """Test that catch-up phase processes historical events."""
         # Add historical events
         event_store.events = [
-            MockEventEnvelope("WorkflowCreated", 1, {"id": "wf-1"}),
+            MockEventEnvelope("WorkflowTemplateCreated", 1, {"id": "wf-1"}),
             MockEventEnvelope("SessionStarted", 2, {"id": "session-1"}),
             MockEventEnvelope("PhaseCompleted", 3, {"id": "phase-1"}),
         ]
@@ -293,7 +293,7 @@ class TestEventSubscriptionService:
 
         # Verify event types were dispatched
         event_types = [e[0] for e in projection_manager.dispatched_events]
-        assert "WorkflowCreated" in event_types
+        assert "WorkflowTemplateCreated" in event_types
         assert "SessionStarted" in event_types
         assert "PhaseCompleted" in event_types
 
@@ -308,9 +308,9 @@ class TestEventSubscriptionService:
     ):
         """Test that position is saved after catch-up."""
         event_store.events = [
-            MockEventEnvelope("WorkflowCreated", 1),
-            MockEventEnvelope("WorkflowCreated", 2),
-            MockEventEnvelope("WorkflowCreated", 3),
+            MockEventEnvelope("WorkflowTemplateCreated", 1),
+            MockEventEnvelope("WorkflowTemplateCreated", 2),
+            MockEventEnvelope("WorkflowTemplateCreated", 3),
         ]
 
         await subscription_service.start()

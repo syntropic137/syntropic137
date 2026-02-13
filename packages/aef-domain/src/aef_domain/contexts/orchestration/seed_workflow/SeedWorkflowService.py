@@ -14,14 +14,14 @@ from aef_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
     load_workflow_definitions,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
 from aef_shared.logging import get_logger
 
 if TYPE_CHECKING:
-    from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-        CreateWorkflowHandler,
+    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        CreateWorkflowTemplateHandler,
     )
 
 logger = get_logger(__name__)
@@ -58,14 +58,14 @@ class WorkflowSeeder:
 
     def __init__(
         self,
-        handler: CreateWorkflowHandler,
+        handler: CreateWorkflowTemplateHandler,
         *,
         skip_existing: bool = True,
     ) -> None:
         """Initialize the seeder.
 
         Args:
-            handler: The CreateWorkflowHandler to use for creating workflows.
+            handler: The CreateWorkflowTemplateHandler to use for creating workflows.
             skip_existing: If True, skip workflows that already exist.
         """
         self._handler = handler
@@ -181,7 +181,7 @@ class WorkflowSeeder:
 
         # Build the command - use placeholder URL if no repository configured
         default_url = "https://github.com/placeholder/not-configured"
-        command = CreateWorkflowCommand(
+        command = CreateWorkflowTemplateCommand(
             aggregate_id=workflow_id,
             name=definition.name,
             workflow_type=definition.type,

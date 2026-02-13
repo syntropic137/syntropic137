@@ -2,7 +2,7 @@ name: get-dashboard-metrics
 type: query
 projection: DashboardMetricsProjection
 subscribes_to:
-  - WorkflowCreatedEvent
+  - WorkflowTemplateCreatedEvent
   - WorkflowExecutionStartedEvent
   - WorkflowCompletedEvent
   - WorkflowFailedEvent

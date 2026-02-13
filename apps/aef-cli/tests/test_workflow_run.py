@@ -19,11 +19,11 @@ from aef_domain.contexts.orchestration._shared.WorkflowValueObjects import (
     WorkflowClassification,
     WorkflowType,
 )
-from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowCommand import (
-    CreateWorkflowCommand,
+from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+    CreateWorkflowTemplateCommand,
 )
-from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-    CreateWorkflowHandler,
+from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    CreateWorkflowTemplateHandler,
 )
 
 runner = CliRunner()
@@ -42,7 +42,7 @@ def sample_workflow_id() -> str:
 
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    handler = CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    handler = CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
 
     phases = [
         PhaseDefinition(
@@ -66,7 +66,7 @@ def sample_workflow_id() -> str:
         ),
     ]
 
-    command = CreateWorkflowCommand(
+    command = CreateWorkflowTemplateCommand(
         aggregate_id="test-workflow-run-123",
         name="Test Run Workflow",
         description="A workflow for testing run command",

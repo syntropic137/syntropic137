@@ -14,8 +14,8 @@ from aef_adapters.storage import (
     reset_storage,
 )
 from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
-from aef_domain.contexts.orchestration.slices.create_workflow.CreateWorkflowHandler import (
-    CreateWorkflowHandler,
+from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    CreateWorkflowTemplateHandler,
 )
 
 SAMPLE_WORKFLOW_YAML = """
@@ -47,15 +47,15 @@ def _reset_stores() -> None:
 
 
 @pytest.fixture
-def handler() -> CreateWorkflowHandler:
+def handler() -> CreateWorkflowTemplateHandler:
     """Create a handler for testing."""
     repository = get_workflow_repository()
     publisher = get_event_publisher()
-    return CreateWorkflowHandler(repository=repository, event_publisher=publisher)
+    return CreateWorkflowTemplateHandler(repository=repository, event_publisher=publisher)
 
 
 @pytest.fixture
-def seeder(handler: CreateWorkflowHandler) -> WorkflowSeeder:
+def seeder(handler: CreateWorkflowTemplateHandler) -> WorkflowSeeder:
     """Create a seeder for testing."""
     return WorkflowSeeder(handler)
 

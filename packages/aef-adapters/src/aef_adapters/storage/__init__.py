@@ -69,8 +69,8 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
 
@@ -121,8 +121,8 @@ def get_event_publisher() -> InMemoryEventPublisher | NoOpEventPublisher:
 class WorkflowRepositoryProtocol(Protocol):
     """Protocol for workflow repositories."""
 
-    async def load(self, aggregate_id: str) -> WorkflowAggregate | None: ...
-    async def save(self, aggregate: WorkflowAggregate) -> None: ...
+    async def load(self, aggregate_id: str) -> WorkflowTemplateAggregate | None: ...
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None: ...
     async def exists(self, aggregate_id: str) -> bool: ...
 
 

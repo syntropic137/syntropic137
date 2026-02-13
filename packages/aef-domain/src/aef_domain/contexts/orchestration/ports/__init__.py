@@ -15,10 +15,10 @@ Port Naming Convention:
 - "Port" suffix makes the port/adapter distinction explicit
 
 Example Usage:
-    from aef_domain.contexts.orchestration.ports import WorkflowRepositoryPort
+    from aef_domain.contexts.orchestration.ports import WorkflowTemplateRepositoryPort
 
     def create_workflow_service(
-        workflow_repository: WorkflowRepositoryPort,  # Port type
+        workflow_repository: WorkflowTemplateRepositoryPort,  # Port type
         execution_repository: WorkflowExecutionRepositoryPort,
         workspace_service: WorkspaceServicePort,
     ) -> WorkflowExecutionService:
@@ -49,8 +49,8 @@ from aef_domain.contexts.orchestration.ports.SessionRepositoryPort import (
 from aef_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort import (
     WorkflowExecutionRepositoryPort,
 )
-from aef_domain.contexts.orchestration.ports.WorkflowRepositoryPort import (
-    WorkflowRepositoryPort,
+from aef_domain.contexts.orchestration.ports.WorkflowTemplateRepositoryPort import (
+    WorkflowTemplateRepositoryPort,
 )
 from aef_domain.contexts.orchestration.ports.WorkspaceServicePort import (
     WorkspaceServicePort,
@@ -67,7 +67,7 @@ __all__ = [
     "SessionRepositoryPort",
     "WorkflowExecutionRepositoryPort",
     # Repository Ports
-    "WorkflowRepositoryPort",
+    "WorkflowTemplateRepositoryPort",
     # Service Ports
     "WorkspaceServicePort",
 ]

@@ -60,8 +60,8 @@ if TYPE_CHECKING:
     from aef_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
-    from aef_domain.contexts.orchestration.domain.aggregate_workflow.WorkflowAggregate import (
-        WorkflowAggregate,
+    from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
 
@@ -71,11 +71,11 @@ logger = logging.getLogger(__name__)
 class WorkflowRepository(Protocol):
     """Repository protocol for Workflow aggregates."""
 
-    async def get_by_id(self, workflow_id: str) -> WorkflowAggregate | None:
+    async def get_by_id(self, workflow_id: str) -> WorkflowTemplateAggregate | None:
         """Get a workflow by ID."""
         ...
 
-    async def save(self, aggregate: WorkflowAggregate) -> None:
+    async def save(self, aggregate: WorkflowTemplateAggregate) -> None:
         """Save the aggregate and its uncommitted events."""
         ...
 
@@ -480,7 +480,7 @@ class WorkflowExecutionEngine:
                 error_message=str(e),
             )
 
-    def _get_executable_phases(self, workflow: WorkflowAggregate) -> list[ExecutablePhase]:
+    def _get_executable_phases(self, workflow: WorkflowTemplateAggregate) -> list[ExecutablePhase]:
         """Convert workflow phases to executable phases.
 
         In a real implementation, this would include full agent config
@@ -505,7 +505,7 @@ class WorkflowExecutionEngine:
 
     async def _execute_phase(
         self,
-        _workflow: WorkflowAggregate,
+        _workflow: WorkflowTemplateAggregate,
         phase: ExecutablePhase,
         ctx: ExecutionContext,
         aggregate: WorkflowExecutionAggregate,

@@ -7,7 +7,7 @@ This context manages:
 
 Aggregates:
 - WorkspaceAggregate: Isolated execution environments
-- WorkflowAggregate: Workflow definitions
+- WorkflowTemplateAggregate: Workflow definitions
 - WorkflowExecutionAggregate: Execution lifecycle
 
 Refactored from: workflows/ + workspaces/ bounded contexts (2026-02-02)
