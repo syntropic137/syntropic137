@@ -6,9 +6,17 @@ REST API for managing self-healing trigger rules.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
+
+if TYPE_CHECKING:
+    from aef_domain.contexts.github.domain.events.TriggerPausedEvent import (
+        TriggerPausedEvent,
+    )
+    from aef_domain.contexts.github.domain.events.TriggerResumedEvent import (
+        TriggerResumedEvent,
+    )
 
 from aef_domain.contexts.github._shared.trigger_presets import (
     create_preset_command,
@@ -24,12 +32,6 @@ from aef_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
 )
 from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
     ResumeTriggerCommand,
-)
-from aef_domain.contexts.github.domain.events.TriggerPausedEvent import (
-    TriggerPausedEvent,
-)
-from aef_domain.contexts.github.domain.events.TriggerResumedEvent import (
-    TriggerResumedEvent,
 )
 from aef_domain.contexts.github.domain.queries.get_trigger_history import (
     GetTriggerHistoryQuery,
