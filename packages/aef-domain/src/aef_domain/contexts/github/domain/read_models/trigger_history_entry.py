@@ -17,7 +17,7 @@ class TriggerHistoryEntry:
         trigger_id: Trigger rule that fired.
         execution_id: Dispatched workflow execution ID.
         webhook_delivery_id: X-GitHub-Delivery header for idempotency.
-        event_type: GitHub event type (e.g. "check_run.completed").
+        github_event_type: GitHub event type (e.g. "check_run.completed").
         repository: Repository that received the webhook.
         pr_number: PR number if applicable.
         payload_summary: Key fields from the webhook payload.
@@ -29,7 +29,7 @@ class TriggerHistoryEntry:
     trigger_id: str
     execution_id: str
     webhook_delivery_id: str = ""
-    event_type: str = ""
+    github_event_type: str = ""
     repository: str = ""
     pr_number: int | None = None
     payload_summary: dict = field(default_factory=dict)

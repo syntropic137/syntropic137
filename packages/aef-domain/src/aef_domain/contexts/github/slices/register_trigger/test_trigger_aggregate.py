@@ -235,7 +235,7 @@ class TestTriggerRuleAggregateEventSourcing:
             trigger_id="tr-abc123",
             execution_id="exec-1",
             webhook_delivery_id="del-1",
-            event_type="check_run.completed",
+            github_event_type="check_run.completed",
             repository="AgentParadise/test",
         )
 
