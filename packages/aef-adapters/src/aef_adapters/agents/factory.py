@@ -45,8 +45,8 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
         claude = ClaudeAgent()
         if not claude.is_available:
             msg = (
-                "Claude agent not available. Set ANTHROPIC_API_KEY in environment. "
-                "Get key from: https://console.anthropic.com/settings/keys"
+                "Claude agent not available. "
+                "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
             )
             raise AgentError(msg, AgentProvider.CLAUDE)
         return claude
@@ -65,8 +65,8 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
 
     # Auto-select: try Claude first, then OpenAI
     if provider is None:
-        # Check Claude
-        if settings.anthropic_api_key:
+        # Check Claude (OAuth token or API key)
+        if settings.claude_code_oauth_token or settings.anthropic_api_key:
             from aef_adapters.agents.claude import ClaudeAgent
 
             claude_agent = ClaudeAgent()
@@ -92,7 +92,7 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
 
         msg = (
             "No agent provider configured. Set one of: "
-            "ANTHROPIC_API_KEY (Claude), OPENAI_API_KEY (OpenAI)"
+            "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude), OPENAI_API_KEY (OpenAI)"
         )
         raise AgentError(msg, AgentProvider.MOCK)
 
@@ -109,7 +109,7 @@ def get_available_agents() -> list[AgentProvider]:
     settings = get_settings()
     available: list[AgentProvider] = []
 
-    if settings.anthropic_api_key:
+    if settings.claude_code_oauth_token or settings.anthropic_api_key:
         available.append(AgentProvider.CLAUDE)
 
     if settings.openai_api_key:

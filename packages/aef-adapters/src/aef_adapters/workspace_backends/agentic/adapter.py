@@ -353,6 +353,15 @@ class AgenticEventStreamAdapter:
     def __init__(self) -> None:
         """Initialize the adapter."""
         self._provider: WorkspaceDockerProvider | None = None
+        self._last_exit_code: int | None = None
+
+    @property
+    def last_exit_code(self) -> int | None:
+        """Exit code from the most recent stream() call.
+
+        Returns None if no stream has completed yet.
+        """
+        return self._last_exit_code
 
     def set_provider(self, provider: WorkspaceDockerProvider) -> None:
         """Set the provider for streaming.
@@ -462,3 +471,15 @@ class AgenticEventStreamAdapter:
                     await asyncio.wait_for(proc.wait(), timeout=5.0)
                 except (TimeoutError, ProcessLookupError):
                     proc.kill()
+
+            # Wait for process to fully exit if not already done
+            if proc.returncode is None:
+                await proc.wait()
+
+            self._last_exit_code = proc.returncode
+            if proc.returncode and proc.returncode != 0:
+                logger.warning(
+                    "Stream process exited with code %d (container=%s)",
+                    proc.returncode,
+                    container_name,
+                )

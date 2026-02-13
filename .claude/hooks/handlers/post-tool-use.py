@@ -68,7 +68,6 @@ def main() -> None:
             input_data = sys.stdin.read()
 
         if not input_data:
-            print(json.dumps({"decision": "allow"}))
             return
 
         event = json.loads(input_data)
@@ -102,12 +101,8 @@ def main() -> None:
             analytics_event["audit"] = audit
         log_analytics(analytics_event)
 
-        # Always allow (post-execution)
-        print(json.dumps({"decision": "allow"}))
-
-    except Exception as e:
-        # Fail open
-        print(json.dumps({"decision": "allow", "error": str(e)}))
+    except Exception:
+        pass  # Fail-safe: never block on post-tool analytics
 
 
 if __name__ == "__main__":

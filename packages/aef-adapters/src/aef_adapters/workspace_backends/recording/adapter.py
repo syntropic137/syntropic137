@@ -161,6 +161,7 @@ class RecordingEventStreamAdapter:
 
         self._realtime = realtime
         self._speed = speed
+        self._last_exit_code: int | None = None
 
     async def stream(
         self,
@@ -195,6 +196,12 @@ class RecordingEventStreamAdapter:
             # Instant replay - yield all events immediately
             for event in self._player:
                 yield json.dumps(event)
+        self._last_exit_code = 0
+
+    @property
+    def last_exit_code(self) -> int | None:
+        """Exit code from the most recent stream() call. Always 0 for recordings."""
+        return self._last_exit_code
 
     @property
     def metadata(self) -> RecordingMetadata | None:

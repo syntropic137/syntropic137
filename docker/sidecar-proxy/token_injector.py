@@ -53,9 +53,15 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
         """Load tokens from environment (for local dev) or token service."""
         # In production, would fetch from Token Vending Service
         # For now, check environment variables
-        if anthropic_key := os.getenv("ANTHROPIC_API_KEY"):
+        # CLAUDE_CODE_OAUTH_TOKEN takes priority over ANTHROPIC_API_KEY
+        if oauth_token := os.getenv("CLAUDE_CODE_OAUTH_TOKEN"):
+            self.tokens["anthropic"] = oauth_token
+            self.tokens["anthropic_auth_mode"] = "oauth"
+            logger.info("Loaded Anthropic OAuth token from environment")
+        elif anthropic_key := os.getenv("ANTHROPIC_API_KEY"):
             self.tokens["anthropic"] = anthropic_key
-            logger.info("Loaded Anthropic token from environment")
+            self.tokens["anthropic_auth_mode"] = "api_key"
+            logger.info("Loaded Anthropic API key from environment")
 
         if github_token := os.getenv("AEF_GITHUB_PRIVATE_KEY"):
             # Would generate installation token here
@@ -103,10 +109,17 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
         _ = ok_response.headers  # Headers are modified in-place below
 
         if token_type == "anthropic":
-            # Anthropic uses x-api-key header
-            header = ok_response.headers.add()
-            header.header.key = "x-api-key"
-            header.header.value = token
+            auth_mode = self.tokens.get("anthropic_auth_mode", "api_key")
+            if auth_mode == "oauth":
+                # OAuth uses Authorization Bearer header
+                header = ok_response.headers.add()
+                header.header.key = "Authorization"
+                header.header.value = f"Bearer {token}"
+            else:
+                # API key uses x-api-key header
+                header = ok_response.headers.add()
+                header.header.key = "x-api-key"
+                header.header.value = token
         elif token_type == "github":
             # GitHub uses Authorization Bearer
             header = ok_response.headers.add()
