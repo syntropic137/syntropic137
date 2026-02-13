@@ -257,27 +257,30 @@ class PreMergeValidator:
             details=output[-500:] if not success else "",
         )
 
-    async def check_agentic_events_installed(self) -> ValidationResult:
-        """Check agentic-events can be imported (ADR-029)."""
-        logger.info("🔍 Checking agentic-events installation...")
+    async def check_agentic_packages_installed(self) -> ValidationResult:
+        """Check all agentic-primitives packages can be imported."""
+        logger.info("🔍 Checking agentic-primitives packages...")
+
+        import_checks = "; ".join(
+            [
+                "from agentic_events import EventEmitter, parse_jsonl_line",
+                "from agentic_logging import get_logger, setup_logging",
+                "from agentic_isolation import AgenticWorkspace, SecurityConfig, WorkspaceConfig",
+                "print('OK')",
+            ]
+        )
 
         success, output, duration = await self.run_command(
-            [
-                "uv",
-                "run",
-                "python",
-                "-c",
-                "from agentic_events import EventEmitter, parse_jsonl_line; print('OK')",
-            ],
-            "agentic-events check",
+            ["uv", "run", "python", "-c", import_checks],
+            "agentic-primitives check",
             timeout=60,
         )
 
         return ValidationResult(
-            name="agentic-events Package",
+            name="agentic-primitives Packages",
             passed=success,
             duration_ms=duration,
-            message="agentic-events available ✅" if success else "Not installed ❌",
+            message="agentic-primitives available ✅" if success else "Not installed ❌",
             details="" if success else output,
         )
 
@@ -358,7 +361,7 @@ class PreMergeValidator:
         self.results.append(await self.check_unit_tests())
         self.results.append(await self.check_vsa_validation())
         self.results.append(await self.check_docker_image())
-        self.results.append(await self.check_agentic_events_installed())
+        self.results.append(await self.check_agentic_packages_installed())
         self.results.append(await self.check_e2e_container_test())
 
         return self._print_summary()

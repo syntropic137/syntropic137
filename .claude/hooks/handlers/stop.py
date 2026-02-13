@@ -44,7 +44,6 @@ def main() -> None:
                 "event_type": "hook_decision",
                 "handler": "stop",
                 "hook_event": event.get("hook_event_name", "Stop"),
-                "decision": "allow",
                 "session_id": event.get("session_id"),
                 "audit": {
                     "transcript_path": event.get("transcript_path"),

@@ -21,9 +21,6 @@ from uuid import uuid4
 # ADR-029: Simplified Event System - use agentic_events from agentic-primitives
 from agentic_events import enrich_event, parse_jsonl_line
 
-# ADR-012: Workspace prompt for artifact output instructions
-from agentic_workspace import AEF_WORKSPACE_PROMPT
-
 from aef_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
@@ -42,6 +39,9 @@ from aef_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartExecutionCommand,
     StartPhaseCommand,
     WorkflowExecutionAggregate,
+)
+from aef_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
+    AEF_WORKSPACE_PROMPT,
 )
 
 if TYPE_CHECKING:

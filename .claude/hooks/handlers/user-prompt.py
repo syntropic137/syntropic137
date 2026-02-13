@@ -106,7 +106,7 @@ def main() -> None:
 
         # Run validators
         result = run_validators(prompt, context)
-        decision = "block" if not result.get("safe", True) else "allow"
+        decision = "block" if not result.get("safe", True) else "approve"
 
         # Log to analytics with audit trail
         analytics_event = {
