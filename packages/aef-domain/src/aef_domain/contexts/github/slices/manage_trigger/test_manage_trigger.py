@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from aef_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
-    TriggerStatus,
-)
 from aef_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
     DeleteTriggerCommand,
 )
@@ -26,11 +23,11 @@ from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler i
     RegisterTriggerHandler,
 )
 from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerStore,
+    InMemoryTriggerQueryStore,
 )
 
 
-async def _setup_trigger(store: InMemoryTriggerStore) -> str:
+async def _setup_trigger(store: InMemoryTriggerQueryStore) -> str:
     """Register a trigger and return its ID."""
     handler = RegisterTriggerHandler(store=store)
     cmd = RegisterTriggerCommand(
@@ -52,21 +49,21 @@ class TestManageTriggerHandler:
     @pytest.mark.asyncio
     async def test_pause_active_trigger(self) -> None:
         """Test pausing an active trigger."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         trigger_id = await _setup_trigger(store)
         handler = ManageTriggerHandler(store=store)
 
-        event = await handler.pause(PauseTriggerCommand(trigger_id=trigger_id, paused_by="admin"))
+        result = await handler.pause(PauseTriggerCommand(trigger_id=trigger_id, paused_by="admin"))
 
-        assert event is not None
-        stored = await store.get(trigger_id)
-        assert stored is not None
-        assert stored.status == TriggerStatus.PAUSED
+        assert result is not None
+        indexed = await store.get(trigger_id)
+        assert indexed is not None
+        assert indexed.status == "paused"
 
     @pytest.mark.asyncio
     async def test_pause_nonexistent_returns_none(self) -> None:
         """Test pausing a nonexistent trigger returns None."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = ManageTriggerHandler(store=store)
 
         result = await handler.pause(
@@ -77,40 +74,40 @@ class TestManageTriggerHandler:
     @pytest.mark.asyncio
     async def test_resume_paused_trigger(self) -> None:
         """Test resuming a paused trigger."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         trigger_id = await _setup_trigger(store)
         handler = ManageTriggerHandler(store=store)
 
         await handler.pause(PauseTriggerCommand(trigger_id=trigger_id, paused_by="admin"))
-        event = await handler.resume(
+        result = await handler.resume(
             ResumeTriggerCommand(trigger_id=trigger_id, resumed_by="admin")
         )
 
-        assert event is not None
-        stored = await store.get(trigger_id)
-        assert stored is not None
-        assert stored.status == TriggerStatus.ACTIVE
+        assert result is not None
+        indexed = await store.get(trigger_id)
+        assert indexed is not None
+        assert indexed.status == "active"
 
     @pytest.mark.asyncio
     async def test_delete_trigger(self) -> None:
         """Test deleting a trigger."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         trigger_id = await _setup_trigger(store)
         handler = ManageTriggerHandler(store=store)
 
-        event = await handler.delete(
+        result = await handler.delete(
             DeleteTriggerCommand(trigger_id=trigger_id, deleted_by="admin")
         )
 
-        assert event is not None
-        stored = await store.get(trigger_id)
-        assert stored is not None
-        assert stored.status == TriggerStatus.DELETED
+        assert result is not None
+        indexed = await store.get(trigger_id)
+        assert indexed is not None
+        assert indexed.status == "deleted"
 
     @pytest.mark.asyncio
     async def test_delete_already_deleted_returns_none(self) -> None:
         """Test deleting an already-deleted trigger returns None."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         trigger_id = await _setup_trigger(store)
         handler = ManageTriggerHandler(store=store)
 

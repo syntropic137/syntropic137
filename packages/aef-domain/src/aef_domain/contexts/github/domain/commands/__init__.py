@@ -6,6 +6,9 @@ from aef_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
 from aef_domain.contexts.github.domain.commands.PauseTriggerCommand import (
     PauseTriggerCommand,
 )
+from aef_domain.contexts.github.domain.commands.RecordTriggerFiredCommand import (
+    RecordTriggerFiredCommand,
+)
 from aef_domain.contexts.github.domain.commands.RefreshTokenCommand import (
     RefreshTokenCommand,
 )
@@ -19,6 +22,7 @@ from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
 __all__ = [
     "DeleteTriggerCommand",
     "PauseTriggerCommand",
+    "RecordTriggerFiredCommand",
     "RefreshTokenCommand",
     "RegisterTriggerCommand",
     "ResumeTriggerCommand",

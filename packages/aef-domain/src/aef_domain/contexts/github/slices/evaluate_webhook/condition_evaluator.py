@@ -5,6 +5,7 @@ Evaluates trigger conditions against GitHub webhook payloads.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -14,69 +15,101 @@ if TYPE_CHECKING:
 
 
 def evaluate_conditions(
-    conditions: list[TriggerCondition],
+    conditions: list[TriggerCondition | dict],
     payload: dict[str, Any],
 ) -> bool:
-    """Evaluate all conditions against a webhook payload.
-
-    All conditions must be true (AND logic).
-    Uses dot-notation to traverse nested payload.
-
-    Args:
-        conditions: List of conditions to evaluate.
-        payload: The webhook payload dict.
-
-    Returns:
-        True if all conditions pass, False otherwise.
-    """
     for condition in conditions:
-        value = _resolve_field(payload, condition.field)
+        if isinstance(condition, dict):
+            field = condition.get("field", "")
+            operator = condition.get("operator", "eq")
+            value = condition.get("value")
+        else:
+            field = condition.field
+            operator = condition.operator
+            value = condition.value
 
-        match condition.operator:
+        resolved = _resolve_field(payload, field)
+        match operator:
             case "eq":
-                if value != condition.value:
+                if resolved != value:
                     return False
             case "neq":
-                if value == condition.value:
+                if resolved == value:
                     return False
             case "not_empty":
-                if not value:
+                if not resolved:
                     return False
             case "is_empty":
-                if value:
+                if resolved:
                     return False
             case "in":
-                if value not in (condition.value or []):
+                if resolved not in (value or []):
                     return False
             case "not_in":
-                if value in (condition.value or []):
+                if resolved in (value or []):
                     return False
             case "contains":
-                if condition.value not in (value or ""):
+                if value not in (resolved or ""):
                     return False
             case _:
-                raise ValueError(f"Unknown operator: {condition.operator}")
-
+                raise ValueError(f"Unknown operator: {operator}")
     return True
 
 
+# Regex to match array index access like "pull_requests[0]"
+_ARRAY_INDEX_RE = re.compile(r"^(.+)\[(\d+)\]$")
+
+
 def _resolve_field(payload: dict, field_path: str) -> Any:
-    """Resolve a dot-notation field path against a payload.
+    """Resolve a dot-notation field path from a payload dict.
 
-    Example: "check_run.conclusion" -> payload["check_run"]["conclusion"]
-
-    Args:
-        payload: The nested dict to traverse.
-        field_path: Dot-notation path.
-
-    Returns:
-        The resolved value, or None if path not found.
+    Supports array indexing: "check_run.pull_requests[0].number"
     """
     parts = field_path.split(".")
     current: Any = payload
     for part in parts:
-        if isinstance(current, dict):
+        if current is None:
+            return None
+
+        # Check for array index access
+        match = _ARRAY_INDEX_RE.match(part)
+        if match:
+            key, index_str = match.groups()
+            if isinstance(current, dict):
+                current = current.get(key)
+            else:
+                return None
+            if isinstance(current, (list, tuple)):
+                idx = int(index_str)
+                if idx < len(current):
+                    current = current[idx]
+                else:
+                    return None
+            else:
+                return None
+        elif isinstance(current, dict):
             current = current.get(part)
         else:
             return None
     return current
+
+
+def extract_inputs(
+    payload: dict[str, Any],
+    input_mapping: dict[str, str],
+) -> dict[str, Any]:
+    """Extract workflow inputs from a payload using input_mapping.
+
+    Args:
+        payload: The webhook payload.
+        input_mapping: Map of workflow input names to payload field paths.
+
+    Returns:
+        Dict of extracted input values.
+    """
+    inputs: dict[str, Any] = {}
+    for input_name, field_path in input_mapping.items():
+        value = _resolve_field(payload, field_path)
+        if value is not None:
+            inputs[input_name] = value
+    return inputs

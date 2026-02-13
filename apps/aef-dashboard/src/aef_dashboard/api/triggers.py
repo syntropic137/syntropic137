@@ -6,17 +6,9 @@ REST API for managing self-healing trigger rules.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
-
-if TYPE_CHECKING:
-    from aef_domain.contexts.github.domain.events.TriggerPausedEvent import (
-        TriggerPausedEvent,
-    )
-    from aef_domain.contexts.github.domain.events.TriggerResumedEvent import (
-        TriggerResumedEvent,
-    )
 
 from aef_domain.contexts.github._shared.trigger_presets import (
     create_preset_command,
@@ -90,7 +82,9 @@ async def register_trigger(body: dict[str, Any]) -> dict[str, Any]:
     return {
         "trigger_id": aggregate.trigger_id,
         "name": aggregate.name,
-        "status": aggregate.status.value,
+        "status": aggregate.status.value
+        if hasattr(aggregate.status, "value")
+        else str(aggregate.status),
     }
 
 
@@ -119,7 +113,7 @@ async def list_triggers(
                 "event": t.event,
                 "repository": t.repository,
                 "workflow_id": t.workflow_id,
-                "status": t.status.value,
+                "status": t.status.value if hasattr(t.status, "value") else str(t.status),
                 "fire_count": t.fire_count,
             }
             for t in triggers
@@ -149,13 +143,16 @@ async def get_trigger(trigger_id: str) -> dict[str, Any]:
         "name": trigger.name,
         "event": trigger.event,
         "conditions": [
-            {"field": c.field, "operator": c.operator, "value": c.value} for c in trigger.conditions
+            c
+            if isinstance(c, dict)
+            else {"field": c.field, "operator": c.operator, "value": c.value}
+            for c in trigger.conditions
         ],
         "repository": trigger.repository,
         "installation_id": trigger.installation_id,
         "workflow_id": trigger.workflow_id,
         "input_mapping": trigger.input_mapping,
-        "status": trigger.status.value,
+        "status": trigger.status.value if hasattr(trigger.status, "value") else str(trigger.status),
         "fire_count": trigger.fire_count,
         "config": {
             "max_attempts": trigger.config.max_attempts,
@@ -184,7 +181,7 @@ async def update_trigger(trigger_id: str, body: dict[str, Any]) -> dict[str, Any
     store = get_trigger_store()
     handler = ManageTriggerHandler(store=store)
 
-    event: TriggerPausedEvent | TriggerResumedEvent | None
+    event: object | None
     if action == "pause":
         event = await handler.pause(
             PauseTriggerCommand(
@@ -210,9 +207,12 @@ async def update_trigger(trigger_id: str, body: dict[str, Any]) -> dict[str, Any
         )
 
     trigger = await store.get(trigger_id)
+    status = "unknown"
+    if trigger is not None:
+        status = trigger.status.value if hasattr(trigger.status, "value") else str(trigger.status)
     return {
         "trigger_id": trigger_id,
-        "status": trigger.status.value if trigger else "unknown",
+        "status": status,
         "action": action,
     }
 
@@ -272,7 +272,9 @@ async def enable_preset(preset_name: str, body: dict[str, Any]) -> dict[str, Any
     return {
         "trigger_id": aggregate.trigger_id,
         "name": aggregate.name,
-        "status": aggregate.status.value,
+        "status": aggregate.status.value
+        if hasattr(aggregate.status, "value")
+        else str(aggregate.status),
         "preset": preset_name,
     }
 

@@ -24,7 +24,7 @@ from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler i
     RegisterTriggerHandler,
 )
 from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerStore,
+    InMemoryTriggerQueryStore,
 )
 
 
@@ -92,7 +92,7 @@ class TestE2ERegisterAndFire:
     @pytest.mark.asyncio
     async def test_register_trigger_then_webhook_fires(self) -> None:
         """Full flow: register CI self-heal, send failure webhook, verify dispatch."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         # Register a CI self-healing trigger
@@ -126,10 +126,10 @@ class TestE2ERegisterAndFire:
         assert results[0].trigger_id == trigger_id
         assert results[0].execution_id.startswith("exec-")
 
-        # Verify: fire count incremented
-        stored = await store.get(trigger_id)
-        assert stored is not None
-        assert stored.fire_count == 1
+        # Verify: fire count incremented in query store
+        indexed = await store.get(trigger_id)
+        assert indexed is not None
+        assert indexed.fire_count == 1
 
 
 @pytest.mark.integration
@@ -139,7 +139,7 @@ class TestE2ESafetyGuards:
     @pytest.mark.asyncio
     async def test_bot_sender_prevented(self) -> None:
         """Verify that bot senders don't trigger workflows."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         cmd = RegisterTriggerCommand(
@@ -166,7 +166,7 @@ class TestE2ESafetyGuards:
     @pytest.mark.asyncio
     async def test_max_attempts_prevents_infinite_loop(self) -> None:
         """Verify that max attempts prevents infinite retry loops."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         cmd = RegisterTriggerCommand(
@@ -211,7 +211,7 @@ class TestE2ESafetyGuards:
     @pytest.mark.asyncio
     async def test_duplicate_delivery_prevented(self) -> None:
         """Verify that duplicate X-GitHub-Delivery IDs are rejected."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         cmd = RegisterTriggerCommand(
@@ -252,7 +252,7 @@ class TestE2EPresets:
     @pytest.mark.asyncio
     async def test_self_healing_preset_flow(self) -> None:
         """Enable self-healing preset, send CI failure, verify dispatch."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         # Enable preset
@@ -281,7 +281,7 @@ class TestE2EPresets:
     @pytest.mark.asyncio
     async def test_review_fix_preset_flow(self) -> None:
         """Enable review-fix preset, send review webhook, verify dispatch."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         # Enable preset
@@ -308,7 +308,7 @@ class TestE2EPresets:
     @pytest.mark.asyncio
     async def test_review_fix_success_status_does_not_fire(self) -> None:
         """Verify that an 'approved' review doesn't trigger review-fix."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         cmd = create_preset_command(
@@ -337,7 +337,7 @@ class TestE2EPauseResume:
     @pytest.mark.asyncio
     async def test_paused_trigger_does_not_fire(self) -> None:
         """Verify paused triggers don't dispatch workflows."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
 
         cmd = RegisterTriggerCommand(

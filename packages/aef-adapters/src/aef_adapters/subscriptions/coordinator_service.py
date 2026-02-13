@@ -285,6 +285,9 @@ def create_coordinator_service(
     """
     from aef_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
     from aef_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
+    from aef_domain.contexts.github.slices.dispatch_triggered_workflow import (
+        WorkflowDispatchProjection,
+    )
     from aef_domain.contexts.orchestration.slices.dashboard_metrics import (
         DashboardMetricsProjection,
     )
@@ -308,6 +311,7 @@ def create_coordinator_service(
         SessionListProjection(projection_store),
         ArtifactListProjection(projection_store),
         DashboardMetricsProjection(projection_store),
+        WorkflowDispatchProjection(),
     ]
 
     return CoordinatorSubscriptionService(

@@ -1,6 +1,11 @@
-"""Trigger store port and in-memory adapter.
+"""Trigger query store port and in-memory adapter.
 
-Provides storage abstraction for TriggerRuleAggregates.
+The query store handles read-side concerns:
+- Trigger index for fast webhook matching
+- Safety guard queries (fire counts, cooldowns)
+- Delivery idempotency tracking
+
+Write-side persistence is handled by EventStoreRepository (ADR-007).
 """
 
 from __future__ import annotations
@@ -8,60 +13,84 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from aef_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
-        TriggerRuleAggregate,
-    )
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class TriggerStore(ABC):
-    """Abstract port for trigger rule persistence."""
+class TriggerQueryStore(ABC):
+    """Read-side query store for trigger rules.
+
+    Provides fast lookups and safety guard queries.
+    Write-side persistence is handled by the repository.
+    """
 
     @abstractmethod
-    async def save(self, aggregate: TriggerRuleAggregate) -> None:
-        """Persist a trigger rule aggregate."""
+    async def index_trigger(
+        self,
+        trigger_id: str,
+        name: str,
+        event: str,
+        repository: str,
+        workflow_id: str,
+        conditions: list[Any],
+        input_mapping: dict[str, str],
+        config: Any,
+        installation_id: str,
+        created_by: str,
+        status: str,
+    ) -> None:
+        """Index a trigger for fast lookups."""
+        ...
 
     @abstractmethod
-    async def get(self, trigger_id: str) -> TriggerRuleAggregate | None:
-        """Get a trigger rule by ID."""
+    async def update_status(self, trigger_id: str, status: str) -> None:
+        """Update a trigger's status in the index."""
+        ...
 
     @abstractmethod
-    async def list_by_event_and_repo(
-        self, event: str, repository: str
-    ) -> list[TriggerRuleAggregate]:
-        """List active trigger rules matching event type and repository."""
+    async def get(self, trigger_id: str) -> Any | None:
+        """Get a trigger by ID from the index."""
+        ...
+
+    @abstractmethod
+    async def list_by_event_and_repo(self, event: str, repository: str) -> list[Any]:
+        """List active triggers matching an event and repository."""
+        ...
 
     @abstractmethod
     async def list_all(
         self,
         repository: str | None = None,
         status: str | None = None,
-    ) -> list[TriggerRuleAggregate]:
-        """List all trigger rules with optional filters."""
+    ) -> list[Any]:
+        """List all triggers with optional filters."""
+        ...
 
     @abstractmethod
     async def get_fire_count(self, trigger_id: str, pr_number: int) -> int:
-        """Get the fire count for a trigger on a specific PR."""
+        """Get fire count for a trigger+PR combination."""
+        ...
 
     @abstractmethod
     async def get_last_fired_at(self, trigger_id: str, pr_number: int) -> datetime | None:
-        """Get the last fired timestamp for a trigger on a specific PR."""
+        """Get the last fire time for a trigger+PR combination."""
+        ...
 
     @abstractmethod
     async def get_daily_fire_count(self, trigger_id: str) -> int:
-        """Get the number of times a trigger has fired today."""
+        """Get today's fire count for a trigger."""
+        ...
 
     @abstractmethod
     async def was_delivery_processed(self, delivery_id: str) -> bool:
-        """Check if a webhook delivery has already been processed."""
+        """Check if a webhook delivery has been processed."""
+        ...
 
     @abstractmethod
     async def record_delivery(self, delivery_id: str, trigger_id: str) -> None:
-        """Record that a webhook delivery has been processed."""
+        """Record a processed webhook delivery."""
+        ...
 
     @abstractmethod
     async def record_fire(
@@ -70,56 +99,110 @@ class TriggerStore(ABC):
         pr_number: int | None,
         execution_id: str,
     ) -> None:
-        """Record a trigger firing for tracking purposes."""
+        """Record a trigger firing."""
+        ...
 
 
-class InMemoryTriggerStore(TriggerStore):
-    """In-memory implementation of TriggerStore for development and testing."""
+class _IndexedTrigger:
+    """Lightweight indexed trigger for query store."""
+
+    def __init__(
+        self,
+        trigger_id: str,
+        name: str,
+        event: str,
+        repository: str,
+        workflow_id: str,
+        conditions: list[Any],
+        input_mapping: dict[str, str],
+        config: Any,
+        installation_id: str,
+        created_by: str,
+        status: str,
+    ) -> None:
+        self.trigger_id = trigger_id
+        self.name = name
+        self.event = event
+        self.repository = repository
+        self.workflow_id = workflow_id
+        self.conditions = conditions
+        self.input_mapping = input_mapping
+        self.config = config
+        self.installation_id = installation_id
+        self.created_by = created_by
+        self.status = status
+        self.fire_count = 0
+
+
+class InMemoryTriggerQueryStore(TriggerQueryStore):
+    """In-memory implementation of TriggerQueryStore.
+
+    Suitable for:
+    - Tests (always)
+    - Development (with acknowledgment that data is not persisted)
+    """
 
     def __init__(self) -> None:
-        """Initialize the store."""
-        self._triggers: dict[str, TriggerRuleAggregate] = {}
+        self._triggers: dict[str, _IndexedTrigger] = {}
         self._fire_records: list[dict] = []
         self._processed_deliveries: set[str] = set()
 
-    async def save(self, aggregate: TriggerRuleAggregate) -> None:
-        """Persist a trigger rule aggregate."""
-        self._triggers[aggregate.trigger_id] = aggregate
-        aggregate.clear_pending_events()
-
-    async def get(self, trigger_id: str) -> TriggerRuleAggregate | None:
-        """Get a trigger rule by ID."""
-        return self._triggers.get(trigger_id)
-
-    async def list_by_event_and_repo(
-        self, event: str, repository: str
-    ) -> list[TriggerRuleAggregate]:
-        """List active trigger rules matching event type and repository."""
-        from aef_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
-            TriggerStatus,
+    async def index_trigger(
+        self,
+        trigger_id: str,
+        name: str,
+        event: str,
+        repository: str,
+        workflow_id: str,
+        conditions: list[Any],
+        input_mapping: dict[str, str],
+        config: Any,
+        installation_id: str,
+        created_by: str,
+        status: str,
+    ) -> None:
+        self._triggers[trigger_id] = _IndexedTrigger(
+            trigger_id=trigger_id,
+            name=name,
+            event=event,
+            repository=repository,
+            workflow_id=workflow_id,
+            conditions=conditions,
+            input_mapping=input_mapping,
+            config=config,
+            installation_id=installation_id,
+            created_by=created_by,
+            status=status,
         )
 
+    async def update_status(self, trigger_id: str, status: str) -> None:
+        trigger = self._triggers.get(trigger_id)
+        if trigger:
+            trigger.status = status
+
+    async def get(self, trigger_id: str) -> _IndexedTrigger | None:
+        return self._triggers.get(trigger_id)
+
+    async def list_by_event_and_repo(self, event: str, repository: str) -> list[_IndexedTrigger]:
         return [
             t
             for t in self._triggers.values()
-            if t.event == event and t.repository == repository and t.status == TriggerStatus.ACTIVE
+            if t.event == event and t.repository == repository and t.status == "active"
         ]
 
     async def list_all(
         self,
         repository: str | None = None,
         status: str | None = None,
-    ) -> list[TriggerRuleAggregate]:
-        """List all trigger rules with optional filters."""
+    ) -> list[_IndexedTrigger]:
         results = list(self._triggers.values())
         if repository:
             results = [t for t in results if t.repository == repository]
         if status:
-            results = [t for t in results if t.status.value == status]
+            results = [t for t in results if t.status == status]
         return results
 
     async def get_fire_count(self, trigger_id: str, pr_number: int) -> int:
-        """Get the fire count for a trigger on a specific PR."""
         return sum(
             1
             for r in self._fire_records
@@ -127,7 +210,6 @@ class InMemoryTriggerStore(TriggerStore):
         )
 
     async def get_last_fired_at(self, trigger_id: str, pr_number: int) -> datetime | None:
-        """Get the last fired timestamp for a trigger on a specific PR."""
         matching = [
             r
             for r in self._fire_records
@@ -138,7 +220,6 @@ class InMemoryTriggerStore(TriggerStore):
         return max(r["fired_at"] for r in matching)
 
     async def get_daily_fire_count(self, trigger_id: str) -> int:
-        """Get the number of times a trigger has fired today."""
         today = datetime.now(UTC).date()
         return sum(
             1
@@ -147,11 +228,9 @@ class InMemoryTriggerStore(TriggerStore):
         )
 
     async def was_delivery_processed(self, delivery_id: str) -> bool:
-        """Check if a webhook delivery has already been processed."""
         return delivery_id in self._processed_deliveries
 
     async def record_delivery(self, delivery_id: str, trigger_id: str) -> None:  # noqa: ARG002
-        """Record that a webhook delivery has been processed."""
         self._processed_deliveries.add(delivery_id)
 
     async def record_fire(
@@ -160,7 +239,6 @@ class InMemoryTriggerStore(TriggerStore):
         pr_number: int | None,
         execution_id: str,
     ) -> None:
-        """Record a trigger firing for tracking purposes."""
         self._fire_records.append(
             {
                 "trigger_id": trigger_id,
@@ -169,27 +247,38 @@ class InMemoryTriggerStore(TriggerStore):
                 "fired_at": datetime.now(UTC),
             }
         )
+        trigger = self._triggers.get(trigger_id)
+        if trigger:
+            trigger.fire_count += 1
 
 
-# Singleton
-_store: TriggerStore | None = None
+# --- Backward-compatible aliases ---
+TriggerStore = TriggerQueryStore
+InMemoryTriggerStore = InMemoryTriggerQueryStore
 
 
-def get_trigger_store() -> TriggerStore:
-    """Get the global trigger store instance."""
+_store: TriggerQueryStore | None = None
+
+
+def get_trigger_query_store() -> TriggerQueryStore:
+    """Get the global trigger query store instance."""
     global _store
     if _store is None:
-        _store = InMemoryTriggerStore()
+        _store = InMemoryTriggerQueryStore()
     return _store
 
 
-def set_trigger_store(store: TriggerStore) -> None:
-    """Set the global trigger store instance (for DI/testing)."""
+# Backward-compatible alias
+get_trigger_store = get_trigger_query_store
+
+
+def set_trigger_store(store: TriggerQueryStore) -> None:
+    """Set the global trigger query store instance."""
     global _store
     _store = store
 
 
 def reset_trigger_store() -> None:
-    """Reset the global trigger store (for testing)."""
+    """Reset the global store (for testing)."""
     global _store
     _store = None

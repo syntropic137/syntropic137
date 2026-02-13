@@ -25,7 +25,7 @@ from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler i
     RegisterTriggerHandler,
 )
 from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerStore,
+    InMemoryTriggerQueryStore,
 )
 
 # --- Condition evaluator tests ---
@@ -123,7 +123,7 @@ class TestSafetyGuards:
     @pytest.mark.asyncio
     async def test_bot_sender_blocked(self) -> None:
         """Test that bot senders are blocked."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="test",
@@ -141,7 +141,7 @@ class TestSafetyGuards:
     @pytest.mark.asyncio
     async def test_human_sender_allowed(self) -> None:
         """Test that human senders pass the bot check."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="test",
@@ -158,7 +158,7 @@ class TestSafetyGuards:
     @pytest.mark.asyncio
     async def test_max_attempts_reached(self) -> None:
         """Test that max attempts blocks the trigger."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="test",
@@ -185,7 +185,7 @@ class TestSafetyGuards:
     @pytest.mark.asyncio
     async def test_idempotency_blocks_duplicate_delivery(self) -> None:
         """Test that duplicate delivery IDs are blocked."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="test",
@@ -230,7 +230,7 @@ class TestEvaluateWebhookHandler:
     @pytest.mark.asyncio
     async def test_matching_trigger_fires(self) -> None:
         """Test that a matching trigger fires and returns result."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -265,7 +265,7 @@ class TestEvaluateWebhookHandler:
     @pytest.mark.asyncio
     async def test_no_matching_rules_returns_empty(self) -> None:
         """Test that no matching rules returns empty list."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         handler = EvaluateWebhookHandler(store=store)
 
         results = await handler.evaluate(
@@ -280,7 +280,7 @@ class TestEvaluateWebhookHandler:
     @pytest.mark.asyncio
     async def test_conditions_not_met_skips(self) -> None:
         """Test that conditions not met skips the trigger."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -309,7 +309,7 @@ class TestEvaluateWebhookHandler:
     @pytest.mark.asyncio
     async def test_bot_sender_blocked_by_guard(self) -> None:
         """Test that bot senders are blocked by safety guard."""
-        store = InMemoryTriggerStore()
+        store = InMemoryTriggerQueryStore()
         reg_handler = RegisterTriggerHandler(store=store)
         cmd = RegisterTriggerCommand(
             name="ci-heal",
