@@ -58,7 +58,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "*"
       }
     ],
     "SessionStart": [
@@ -82,7 +82,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "*"
       }
     ],
     "SubagentStop": [
@@ -94,7 +94,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "*"
       }
     ],
     "UserPromptSubmit": [
@@ -106,7 +106,7 @@
             "type": "command"
           }
         ],
-        "matcher": ""
+        "matcher": "*"
       }
     ]
   }
