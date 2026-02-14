@@ -1,6 +1,6 @@
 [project]
 name = "agentic-engineering-framework"
-version = "0.2.0"
+version = "0.3.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
