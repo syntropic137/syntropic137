@@ -92,8 +92,10 @@ def register_trigger(
         created_by=created_by,
     )
 
+    from aef_adapters.storage.repositories import get_trigger_repository
+
     store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store)
+    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
     aggregate = _run_async(handler.handle(cmd))
 
     status_val = (
@@ -136,8 +138,10 @@ def enable_preset(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1) from e
 
+    from aef_adapters.storage.repositories import get_trigger_repository
+
     store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store)
+    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
     aggregate = _run_async(handler.handle(cmd))
 
     console.print(f"[green]Preset '{preset}' enabled:[/green] {aggregate.trigger_id}")
@@ -279,6 +283,7 @@ def pause_trigger(
     reason: Annotated[str | None, typer.Option(help="Reason for pausing")] = None,
 ) -> None:
     """Pause a trigger rule."""
+    from aef_adapters.storage.repositories import get_trigger_repository
     from aef_domain.contexts.github.domain.commands.PauseTriggerCommand import (
         PauseTriggerCommand,
     )
@@ -290,7 +295,7 @@ def pause_trigger(
     )
 
     store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store)
+    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
     event = _run_async(
         handler.pause(PauseTriggerCommand(trigger_id=trigger_id, paused_by="cli", reason=reason))
     )
@@ -306,6 +311,7 @@ def resume_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Resume a paused trigger rule."""
+    from aef_adapters.storage.repositories import get_trigger_repository
     from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
         ResumeTriggerCommand,
     )
@@ -317,7 +323,7 @@ def resume_trigger(
     )
 
     store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store)
+    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
     event = _run_async(
         handler.resume(ResumeTriggerCommand(trigger_id=trigger_id, resumed_by="cli"))
     )
@@ -333,6 +339,7 @@ def delete_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Delete a trigger rule."""
+    from aef_adapters.storage.repositories import get_trigger_repository
     from aef_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
         DeleteTriggerCommand,
     )
@@ -344,7 +351,7 @@ def delete_trigger(
     )
 
     store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store)
+    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
     event = _run_async(
         handler.delete(DeleteTriggerCommand(trigger_id=trigger_id, deleted_by="cli"))
     )
@@ -381,7 +388,9 @@ def disable_all(
         console.print(f"[dim]No active triggers for {repository}.[/dim]")
         return
 
-    handler = ManageTriggerHandler(store=store)
+    from aef_adapters.storage.repositories import get_trigger_repository
+
+    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
     paused = 0
     for t in triggers:
         event = _run_async(

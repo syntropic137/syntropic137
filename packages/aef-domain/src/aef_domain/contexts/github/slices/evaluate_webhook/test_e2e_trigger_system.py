@@ -28,6 +28,49 @@ from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
 )
 
 
+class NullRepository:
+    """No-op repository for tests that don't need persistence."""
+
+    async def get_by_id(self, id):
+        return None
+
+    async def save(self, aggregate):
+        pass
+
+
+class InMemoryRepository:
+    """In-memory repository for tests that need aggregate retrieval."""
+
+    def __init__(self):
+        self._store: dict = {}
+
+    async def get_by_id(self, id):
+        return self._store.get(id)
+
+    async def save(self, aggregate):
+        self._store[aggregate.trigger_id] = aggregate
+
+
+async def _index_aggregate(store: InMemoryTriggerQueryStore, aggregate) -> None:
+    """Manually index an aggregate in the query store (simulates projection)."""
+    await store.index_trigger(
+        trigger_id=aggregate.trigger_id,
+        name=aggregate.name,
+        event=aggregate.event,
+        repository=aggregate.repository,
+        workflow_id=aggregate.workflow_id,
+        conditions=[
+            {"field": c.field, "operator": c.operator, "value": c.value}
+            for c in aggregate.conditions
+        ],
+        input_mapping=aggregate.input_mapping,
+        config=aggregate.config,
+        installation_id=aggregate.installation_id,
+        created_by=aggregate.created_by,
+        status=aggregate.status.value,
+    )
+
+
 def _ci_failure_payload(
     repo: str = "AgentParadise/my-project",
     pr_number: int = 42,
@@ -93,7 +136,7 @@ class TestE2ERegisterAndFire:
     async def test_register_trigger_then_webhook_fires(self) -> None:
         """Full flow: register CI self-heal, send failure webhook, verify dispatch."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
 
         # Register a CI self-healing trigger
         cmd = RegisterTriggerCommand(
@@ -109,9 +152,10 @@ class TestE2ERegisterAndFire:
         )
         aggregate = await reg_handler.handle(cmd)
         trigger_id = aggregate.trigger_id
+        await _index_aggregate(store, aggregate)
 
         # Simulate webhook
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
         payload = _ci_failure_payload()
 
         results = await eval_handler.evaluate(
@@ -126,11 +170,6 @@ class TestE2ERegisterAndFire:
         assert results[0].trigger_id == trigger_id
         assert results[0].execution_id.startswith("exec-")
 
-        # Verify: fire count incremented in query store
-        indexed = await store.get(trigger_id)
-        assert indexed is not None
-        assert indexed.fire_count == 1
-
 
 @pytest.mark.integration
 class TestE2ESafetyGuards:
@@ -140,7 +179,7 @@ class TestE2ESafetyGuards:
     async def test_bot_sender_prevented(self) -> None:
         """Verify that bot senders don't trigger workflows."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
 
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -149,9 +188,10 @@ class TestE2ESafetyGuards:
             repository="org/repo",
             workflow_id="ci-fix",
         )
-        await reg_handler.handle(cmd)
+        agg = await reg_handler.handle(cmd)
+        await _index_aggregate(store, agg)
 
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
         payload = _ci_failure_payload(repo="org/repo", sender="aef-engineer-beta[bot]")
 
         results = await eval_handler.evaluate(
@@ -167,7 +207,8 @@ class TestE2ESafetyGuards:
     async def test_max_attempts_prevents_infinite_loop(self) -> None:
         """Verify that max attempts prevents infinite retry loops."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        repo = InMemoryRepository()
+        reg_handler = RegisterTriggerHandler(store=store, repository=repo)
 
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -177,9 +218,10 @@ class TestE2ESafetyGuards:
             workflow_id="ci-fix",
             config=(("max_attempts", 2), ("cooldown_seconds", 0)),
         )
-        await reg_handler.handle(cmd)
+        agg = await reg_handler.handle(cmd)
+        await _index_aggregate(store, agg)
 
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=repo)
 
         # Fire 1 - should succeed
         r1 = await eval_handler.evaluate(
@@ -189,6 +231,9 @@ class TestE2ESafetyGuards:
             payload=_ci_failure_payload(repo="org/repo", delivery_id="del-1"),
         )
         assert len(r1) == 1
+        # Simulate projection recording the fire
+        await store.record_fire(agg.trigger_id, 42, r1[0].execution_id)
+        await store.record_delivery("del-1", agg.trigger_id)
 
         # Fire 2 - should succeed
         r2 = await eval_handler.evaluate(
@@ -198,6 +243,8 @@ class TestE2ESafetyGuards:
             payload=_ci_failure_payload(repo="org/repo", delivery_id="del-2"),
         )
         assert len(r2) == 1
+        await store.record_fire(agg.trigger_id, 42, r2[0].execution_id)
+        await store.record_delivery("del-2", agg.trigger_id)
 
         # Fire 3 - should be blocked (max_attempts=2)
         r3 = await eval_handler.evaluate(
@@ -212,7 +259,8 @@ class TestE2ESafetyGuards:
     async def test_duplicate_delivery_prevented(self) -> None:
         """Verify that duplicate X-GitHub-Delivery IDs are rejected."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        repo = InMemoryRepository()
+        reg_handler = RegisterTriggerHandler(store=store, repository=repo)
 
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -222,9 +270,10 @@ class TestE2ESafetyGuards:
             workflow_id="ci-fix",
             config=(("cooldown_seconds", 0),),
         )
-        await reg_handler.handle(cmd)
+        agg = await reg_handler.handle(cmd)
+        await _index_aggregate(store, agg)
 
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=repo)
 
         # First delivery - succeeds
         r1 = await eval_handler.evaluate(
@@ -234,6 +283,8 @@ class TestE2ESafetyGuards:
             payload=_ci_failure_payload(repo="org/repo", delivery_id="same-delivery"),
         )
         assert len(r1) == 1
+        # Simulate projection recording the delivery
+        await store.record_delivery("same-delivery", agg.trigger_id)
 
         # Same delivery ID - rejected
         r2 = await eval_handler.evaluate(
@@ -253,7 +304,7 @@ class TestE2EPresets:
     async def test_self_healing_preset_flow(self) -> None:
         """Enable self-healing preset, send CI failure, verify dispatch."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
 
         # Enable preset
         cmd = create_preset_command(
@@ -263,9 +314,10 @@ class TestE2EPresets:
             created_by="test",
         )
         aggregate = await reg_handler.handle(cmd)
+        await _index_aggregate(store, aggregate)
 
         # Send CI failure
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
         payload = _ci_failure_payload(repo="org/repo")
 
         results = await eval_handler.evaluate(
@@ -282,7 +334,7 @@ class TestE2EPresets:
     async def test_review_fix_preset_flow(self) -> None:
         """Enable review-fix preset, send review webhook, verify dispatch."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
 
         # Enable preset
         cmd = create_preset_command(
@@ -290,9 +342,10 @@ class TestE2EPresets:
             repository="org/repo",
         )
         aggregate = await reg_handler.handle(cmd)
+        await _index_aggregate(store, aggregate)
 
         # Send review webhook
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
         payload = _review_submitted_payload(repo="org/repo")
 
         results = await eval_handler.evaluate(
@@ -309,15 +362,16 @@ class TestE2EPresets:
     async def test_review_fix_success_status_does_not_fire(self) -> None:
         """Verify that an 'approved' review doesn't trigger review-fix."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
 
         cmd = create_preset_command(
             preset_name="review-fix",
             repository="org/repo",
         )
-        await reg_handler.handle(cmd)
+        agg = await reg_handler.handle(cmd)
+        await _index_aggregate(store, agg)
 
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
         payload = _review_submitted_payload(repo="org/repo", review_state="approved")
 
         results = await eval_handler.evaluate(
@@ -338,7 +392,8 @@ class TestE2EPauseResume:
     async def test_paused_trigger_does_not_fire(self) -> None:
         """Verify paused triggers don't dispatch workflows."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store)
+        repo = InMemoryRepository()
+        reg_handler = RegisterTriggerHandler(store=store, repository=repo)
 
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -348,15 +403,18 @@ class TestE2EPauseResume:
             workflow_id="ci-fix",
         )
         aggregate = await reg_handler.handle(cmd)
+        await _index_aggregate(store, aggregate)
 
         # Pause
-        manage_handler = ManageTriggerHandler(store=store)
+        manage_handler = ManageTriggerHandler(store=store, repository=repo)
         await manage_handler.pause(
             PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin")
         )
+        # Simulate projection updating status
+        await store.update_status(aggregate.trigger_id, "paused")
 
         # Try to fire - should not work
-        eval_handler = EvaluateWebhookHandler(store=store)
+        eval_handler = EvaluateWebhookHandler(store=store, repository=repo)
         results = await eval_handler.evaluate(
             event="check_run.completed",
             repository="org/repo",

@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # Event types this projection subscribes to
 _SUBSCRIBED_EVENTS = {
-    "TriggerFired",
+    "github.TriggerFired",
 }
 
 
@@ -64,7 +64,7 @@ class WorkflowDispatchProjection(CheckpointedProjection):
         global_nonce = envelope.metadata.global_nonce or 0
 
         try:
-            if event_type == "TriggerFired":
+            if event_type == "github.TriggerFired":
                 await self._on_trigger_fired(event_data)
 
             await checkpoint_store.save_checkpoint(

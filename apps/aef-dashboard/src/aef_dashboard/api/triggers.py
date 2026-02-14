@@ -75,8 +75,10 @@ async def register_trigger(body: dict[str, Any]) -> dict[str, Any]:
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    from aef_adapters.storage.repositories import get_trigger_repository
+
     store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store)
+    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
     aggregate = await handler.handle(cmd)
 
     return {
@@ -177,9 +179,11 @@ async def update_trigger(trigger_id: str, body: dict[str, Any]) -> dict[str, Any
     Returns:
         Updated trigger status.
     """
+    from aef_adapters.storage.repositories import get_trigger_repository
+
     action = body.get("action", "")
     store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store)
+    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
 
     event: object | None
     if action == "pause":
@@ -227,8 +231,10 @@ async def delete_trigger(trigger_id: str) -> dict[str, Any]:
     Returns:
         Deletion confirmation.
     """
+    from aef_adapters.storage.repositories import get_trigger_repository
+
     store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store)
+    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
     event = await handler.delete(DeleteTriggerCommand(trigger_id=trigger_id, deleted_by="api"))
 
     if event is None:
@@ -265,8 +271,10 @@ async def enable_preset(preset_name: str, body: dict[str, Any]) -> dict[str, Any
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    from aef_adapters.storage.repositories import get_trigger_repository
+
     store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store)
+    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
     aggregate = await handler.handle(cmd)
 
     return {

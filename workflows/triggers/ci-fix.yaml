@@ -6,7 +6,7 @@ description: |
   and pushes to the same branch.
 
 type: implementation
-classification: triggered
+classification: simple
 
 repository:
   url: https://github.com/{{repository}}

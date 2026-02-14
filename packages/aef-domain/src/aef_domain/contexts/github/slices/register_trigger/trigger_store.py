@@ -93,6 +93,13 @@ class TriggerQueryStore(ABC):
         ...
 
     @abstractmethod
+    async def get_last_any_fired_at(
+        self, pr_number: int, exclude_trigger_id: str | None = None
+    ) -> datetime | None:
+        """Get the last fire time for ANY trigger on this PR (excluding a specific trigger)."""
+        ...
+
+    @abstractmethod
     async def record_fire(
         self,
         trigger_id: str,
@@ -227,6 +234,19 @@ class InMemoryTriggerQueryStore(TriggerQueryStore):
             if r["trigger_id"] == trigger_id and r["fired_at"].date() == today
         )
 
+    async def get_last_any_fired_at(
+        self, pr_number: int, exclude_trigger_id: str | None = None
+    ) -> datetime | None:
+        matching = [
+            r
+            for r in self._fire_records
+            if r.get("pr_number") == pr_number
+            and (exclude_trigger_id is None or r["trigger_id"] != exclude_trigger_id)
+        ]
+        if not matching:
+            return None
+        return max(r["fired_at"] for r in matching)
+
     async def was_delivery_processed(self, delivery_id: str) -> bool:
         return delivery_id in self._processed_deliveries
 
@@ -264,7 +284,16 @@ def get_trigger_query_store() -> TriggerQueryStore:
     """Get the global trigger query store instance."""
     global _store
     if _store is None:
-        _store = InMemoryTriggerQueryStore()
+        from aef_shared.settings import get_settings
+
+        settings = get_settings()
+        if settings.is_test:
+            _store = InMemoryTriggerQueryStore()
+        else:
+            from aef_adapters.projection_stores import get_projection_store
+            from aef_adapters.storage.trigger_query_store import PersistentTriggerQueryStore
+
+            _store = PersistentTriggerQueryStore(get_projection_store())
     return _store
 
 
