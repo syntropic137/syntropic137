@@ -22,6 +22,7 @@ from aef_dashboard.api import (
     metrics_router,
     observability_router,
     sessions_router,
+    triggers_router,
     webhooks_router,
     websocket_router,
     workflows_router,
@@ -176,10 +177,13 @@ async def _start_subscription_service() -> None:
         logger.info("Connected to event store")
 
         # Create and start coordinator subscription service (ADR-014)
+        from aef_dashboard.services.execution import ExecutionService
+
         _subscription_service = create_coordinator_service(
             event_store=get_event_store_client(),
             projection_store=get_projection_store(),
             realtime_projection=get_realtime_projection(),
+            execution_service=ExecutionService(),
         )
         await _subscription_service.start()
         logger.info("Coordinator subscription service started (ADR-014)")
@@ -288,6 +292,7 @@ def create_app() -> FastAPI:
     app.include_router(costs_router, prefix="/api")  # Cost tracking
     app.include_router(events_router, prefix="/api")  # Raw event queries (ADR-029)
     app.include_router(conversations_router, prefix="/api")  # Conversation logs (ADR-035)
+    app.include_router(triggers_router, prefix="/api")  # Trigger rules (self-healing)
 
     # Webhooks (no /api prefix - must match GitHub's webhook URL exactly)
     app.include_router(webhooks_router)

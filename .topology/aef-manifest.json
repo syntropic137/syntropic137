@@ -1,7 +1,7 @@
 {
   "version": "0.8.0",
   "schema_version": "2.3.0",
-  "generated_at": "2026-02-03T19:07:42.812354+00:00",
+  "generated_at": "2026-02-13T23:23:33.893863+00:00",
   "bounded_contexts": [
     {
       "name": "artifacts",
@@ -300,6 +300,54 @@
           "slice_type": "unknown"
         },
         {
+          "name": "trigger_history",
+          "path": "slices/trigger_history",
+          "files": [
+            "handler.py",
+            "test_trigger_history.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "manage_trigger",
+          "path": "slices/manage_trigger",
+          "files": [
+            "test_manage_trigger.py",
+            "__init__.py",
+            "ManageTriggerHandler.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "evaluate_webhook",
+          "path": "slices/evaluate_webhook",
+          "files": [
+            "EvaluateWebhookHandler.py",
+            "debouncer.py",
+            "__init__.py",
+            "safety_guards.py",
+            "test_e2e_trigger_system.py",
+            "condition_evaluator.py",
+            "test_evaluate_webhook.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "register_trigger",
+          "path": "slices/register_trigger",
+          "files": [
+            "RegisterTriggerHandler.py",
+            "trigger_store.py",
+            "__init__.py",
+            "test_register_trigger.py",
+            "test_trigger_aggregate.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
           "name": "refresh_token",
           "path": "slices/refresh_token",
           "files": [
@@ -308,6 +356,18 @@
             "RefreshTokenHandler.py"
           ],
           "slice_type": "unknown"
+        },
+        {
+          "name": "list_triggers",
+          "path": "slices/list_triggers",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "test_list_triggers.py",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
         },
         {
           "name": "install_app",
@@ -325,7 +385,7 @@
             "slice.yaml",
             "__init__.py"
           ],
-          "slice_type": "unknown"
+          "slice_type": "query"
         },
         {
           "name": "get_installation",
@@ -333,6 +393,15 @@
           "files": [
             "handler.py",
             "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "dispatch_triggered_workflow",
+          "path": "slices/dispatch_triggered_workflow",
+          "files": [
             "__init__.py",
             "projection.py"
           ],
@@ -367,9 +436,23 @@
           "name": "queries",
           "path": "domain/queries",
           "files": [
+            "get_trigger_history.py",
             "__init__.py",
+            "list_triggers.py",
             "list_accessible_repos.py",
             "get_installation.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_trigger",
+          "path": "domain/aggregate_trigger",
+          "files": [
+            "TriggerCondition.py",
+            "__init__.py",
+            "TriggerConfig.py",
+            "TriggerRuleAggregate.py",
+            "TriggerStatus.py"
           ],
           "slice_type": "unknown"
         },
@@ -377,7 +460,12 @@
           "name": "commands",
           "path": "domain/commands",
           "files": [
+            "RegisterTriggerCommand.py",
+            "ResumeTriggerCommand.py",
             "__init__.py",
+            "DeleteTriggerCommand.py",
+            "PauseTriggerCommand.py",
+            "RecordTriggerFiredCommand.py",
             "RefreshTokenCommand.py"
           ],
           "slice_type": "command"
@@ -386,8 +474,13 @@
           "name": "events",
           "path": "domain/events",
           "files": [
+            "TriggerDeletedEvent.py",
+            "TriggerPausedEvent.py",
+            "TriggerFiredEvent.py",
             "__init__.py",
             "InstallationRevokedEvent.py",
+            "TriggerRegisteredEvent.py",
+            "TriggerResumedEvent.py",
             "InstallationSuspendedEvent.py",
             "AppInstalledEvent.py",
             "TokenRefreshedEvent.py"
@@ -398,15 +491,17 @@
           "name": "read_models",
           "path": "domain/read_models",
           "files": [
+            "trigger_rule.py",
             "installation.py",
             "__init__.py",
-            "accessible_repository.py"
+            "accessible_repository.py",
+            "trigger_history_entry.py"
           ],
           "slice_type": "unknown"
         }
       ],
       "context_type": "bounded_context",
-      "aggregate_count": 1
+      "aggregate_count": 2
     },
     {
       "name": "orchestration",
@@ -453,6 +548,7 @@
           "path": "slices/execute_workflow",
           "files": [
             "__init__.py",
+            "workspace_prompt.py",
             "test_execute_workflow.py",
             "ExecuteWorkflowHandler.py",
             "WorkflowExecutionEngine.py"
@@ -492,6 +588,16 @@
           "slice_type": "query"
         },
         {
+          "name": "create_workflow_template",
+          "path": "slices/create_workflow_template",
+          "files": [
+            "test_create_workflow_template.py",
+            "__init__.py",
+            "CreateWorkflowTemplateHandler.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
           "name": "list_executions",
           "path": "slices/list_executions",
           "files": [
@@ -528,11 +634,7 @@
         {
           "name": "create_workflow",
           "path": "slices/create_workflow",
-          "files": [
-            "test_create_workflow.py",
-            "__init__.py",
-            "CreateWorkflowHandler.py"
-          ],
+          "files": [],
           "slice_type": "unknown"
         },
         {
@@ -572,10 +674,10 @@
           "name": "ports",
           "path": "ports",
           "files": [
-            "WorkflowRepositoryPort.py",
             "ArtifactQueryServicePort.py",
             "ArtifactRepositoryPort.py",
             "ConversationStoragePort.py",
+            "WorkflowTemplateRepositoryPort.py",
             "__init__.py",
             "ObservabilityServicePort.py",
             "SessionRepositoryPort.py",
@@ -598,8 +700,14 @@
         {
           "name": "aggregate_workflow",
           "path": "domain/aggregate_workflow",
+          "files": [],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_workflow_template",
+          "path": "domain/aggregate_workflow_template",
           "files": [
-            "WorkflowAggregate.py",
+            "WorkflowTemplateAggregate.py",
             "__init__.py",
             "value_objects.py"
           ],
@@ -642,10 +750,10 @@
           "path": "domain/commands",
           "files": [
             "__init__.py",
+            "CreateWorkflowTemplateCommand.py",
             "InjectTokensCommand.py",
             "ExecuteCommandCommand.py",
             "ExecuteWorkflowCommand.py",
-            "CreateWorkflowCommand.py",
             "CreateWorkspaceCommand.py",
             "TerminateWorkspaceCommand.py"
           ],
@@ -656,6 +764,7 @@
           "path": "domain/events",
           "files": [
             "WorkspaceDestroyedEvent.py",
+            "WorkflowTemplateCreatedEvent.py",
             "WorkspaceTerminatedEvent.py",
             "TokensInjectedEvent.py",
             "IsolationStartedEvent.py",
@@ -665,7 +774,6 @@
             "CommandFailedEvent.py",
             "WorkflowCompletedEvent.py",
             "__init__.py",
-            "WorkflowCreatedEvent.py",
             "WorkflowExecutionStartedEvent.py",
             "ExecutionPausedEvent.py",
             "WorkspaceDestroyingEvent.py",
@@ -740,9 +848,44 @@
         "folder_name": "aggregate_installation"
       },
       {
-        "name": "WorkflowAggregate",
+        "name": "TriggerRuleAggregate",
+        "context": "github",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/aggregate_trigger/TriggerRuleAggregate.py",
+        "line_count": 282,
+        "command_handlers": [],
+        "event_handlers": [],
+        "value_objects": [
+          {
+            "name": "TriggerCondition",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/aggregate_trigger/TriggerCondition.py",
+            "is_immutable": true,
+            "line_count": 40
+          },
+          {
+            "name": "__init__",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/aggregate_trigger/__init__.py",
+            "is_immutable": false,
+            "line_count": 21
+          },
+          {
+            "name": "TriggerConfig",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/aggregate_trigger/TriggerConfig.py",
+            "is_immutable": true,
+            "line_count": 42
+          },
+          {
+            "name": "TriggerStatus",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/aggregate_trigger/TriggerStatus.py",
+            "is_immutable": false,
+            "line_count": 11
+          }
+        ],
+        "folder_name": "aggregate_trigger"
+      },
+      {
+        "name": "WorkflowTemplateAggregate",
         "context": "orchestration",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workflow/WorkflowAggregate.py",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py",
         "line_count": 200,
         "command_handlers": [],
         "event_handlers": [],
@@ -750,11 +893,11 @@
           {
             "name": "value_objects",
             "identity_field": "phase_id",
-            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workflow/value_objects.py",
+            "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/aggregate_workflow_template/value_objects.py",
             "line_count": 69
           }
         ],
-        "folder_name": "aggregate_workflow"
+        "folder_name": "aggregate_workflow_template"
       },
       {
         "name": "WorkflowExecutionAggregate",
@@ -844,10 +987,52 @@
         "fields": []
       },
       {
+        "name": "RegisterTriggerCommand",
+        "context": "github",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/RegisterTriggerCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "ResumeTriggerCommand",
+        "context": "github",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/ResumeTriggerCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "DeleteTriggerCommand",
+        "context": "github",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/DeleteTriggerCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "PauseTriggerCommand",
+        "context": "github",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/PauseTriggerCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "RecordTriggerFiredCommand",
+        "context": "github",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/RecordTriggerFiredCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
         "name": "RefreshTokenCommand",
         "context": "github",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/commands/RefreshTokenCommand.py",
         "has_aggregate_id": false,
+        "fields": []
+      },
+      {
+        "name": "CreateWorkflowTemplateCommand",
+        "context": "orchestration",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/CreateWorkflowTemplateCommand.py",
+        "has_aggregate_id": true,
         "fields": []
       },
       {
@@ -868,13 +1053,6 @@
         "name": "ExecuteWorkflowCommand",
         "context": "orchestration",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/ExecuteWorkflowCommand.py",
-        "has_aggregate_id": true,
-        "fields": []
-      },
-      {
-        "name": "CreateWorkflowCommand",
-        "context": "orchestration",
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/commands/CreateWorkflowCommand.py",
         "has_aggregate_id": true,
         "fields": []
       },
@@ -950,6 +1128,39 @@
         "decorator_present": false
       },
       {
+        "name": "TriggerDeletedEvent",
+        "context": "github",
+        "event_type": "TriggerDeleted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/TriggerDeletedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "TriggerPausedEvent",
+        "context": "github",
+        "event_type": "TriggerPaused",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/TriggerPausedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "TriggerFiredEvent",
+        "context": "github",
+        "event_type": "TriggerFired",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/TriggerFiredEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
         "name": "InstallationRevokedEvent",
         "context": "github",
         "event_type": "InstallationRevoked",
@@ -957,6 +1168,28 @@
           "Simple": "v1"
         },
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/InstallationRevokedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "TriggerRegisteredEvent",
+        "context": "github",
+        "event_type": "TriggerRegistered",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/TriggerRegisteredEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "TriggerResumedEvent",
+        "context": "github",
+        "event_type": "TriggerResumed",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/domain/events/TriggerResumedEvent.py",
         "fields": [],
         "decorator_present": false
       },
@@ -1001,6 +1234,17 @@
           "Simple": "v1"
         },
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkspaceDestroyedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "WorkflowTemplateCreatedEvent",
+        "context": "orchestration",
+        "event_type": "WorkflowTemplateCreated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowTemplateCreatedEvent.py",
         "fields": [],
         "decorator_present": false
       },
@@ -1089,17 +1333,6 @@
           "Simple": "v1"
         },
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowCompletedEvent.py",
-        "fields": [],
-        "decorator_present": false
-      },
-      {
-        "name": "WorkflowCreatedEvent",
-        "context": "orchestration",
-        "event_type": "WorkflowCreated",
-        "version": {
-          "Simple": "v1"
-        },
-        "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/domain/events/WorkflowCreatedEvent.py",
         "fields": [],
         "decorator_present": false
       },
@@ -1245,11 +1478,12 @@
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/agent_sessions/slices/session_cost/projection.py",
         "subscribed_events": [
           "agent_observation",
-          "session_cost_finalized"
+          "session_cost_finalized",
+          "session_summary"
         ],
         "read_model": null,
         "context": "agent_sessions",
-        "line_count": 385
+        "line_count": 437
       },
       {
         "name": "TokenMetricsProjection",
@@ -1274,6 +1508,30 @@
         "line_count": 155
       },
       {
+        "name": "TriggerHistoryProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/slices/trigger_history/projection.py",
+        "subscribed_events": [
+          "trigger_fired"
+        ],
+        "read_model": null,
+        "context": "github",
+        "line_count": 74
+      },
+      {
+        "name": "TriggerRuleProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/slices/list_triggers/projection.py",
+        "subscribed_events": [
+          "trigger_deleted",
+          "trigger_fired",
+          "trigger_paused",
+          "trigger_registered",
+          "trigger_resumed"
+        ],
+        "read_model": null,
+        "context": "github",
+        "line_count": 140
+      },
+      {
         "name": "InstallationProjection",
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/slices/get_installation/projection.py",
         "subscribed_events": [
@@ -1285,6 +1543,14 @@
         "read_model": null,
         "context": "github",
         "line_count": 224
+      },
+      {
+        "name": "WorkflowDispatchProjection",
+        "file_path": "./packages/aef-domain/src/aef_domain/contexts/github/slices/dispatch_triggered_workflow/projection.py",
+        "subscribed_events": [],
+        "read_model": null,
+        "context": "github",
+        "line_count": 135
       },
       {
         "name": "WorkspaceMetricsProjection",
@@ -1323,11 +1589,12 @@
         "file_path": "./packages/aef-domain/src/aef_domain/contexts/orchestration/slices/execution_cost/projection.py",
         "subscribed_events": [
           "agent_observation",
-          "session_cost_finalized"
+          "session_cost_finalized",
+          "session_summary"
         ],
         "read_model": null,
         "context": "orchestration",
-        "line_count": 195
+        "line_count": 257
       },
       {
         "name": "WorkflowDetailProjection",
@@ -1391,67 +1658,36 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "installation_revoked": [
-          "InstallationProjection"
+        "subagent_started": [
+          "SessionListProjection"
+        ],
+        "trigger_deleted": [
+          "TriggerRuleProjection"
+        ],
+        "tool_execution_started": [
+          "ToolTimelineProjection"
         ],
         "app_installed": [
           "InstallationProjection"
+        ],
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
         ],
         "session_completed": [
           "SessionListProjection",
           "DashboardMetricsProjection"
         ],
-        "workspace_created": [
-          "WorkspaceMetricsProjection"
+        "installation_revoked": [
+          "InstallationProjection"
         ],
-        "session_cost_finalized": [
+        "workflow_created": [
+          "WorkflowDetailProjection",
+          "WorkflowListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "session_summary": [
           "SessionCostProjection",
           "ExecutionCostProjection"
-        ],
-        "artifact_created": [
-          "ArtifactListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "tool_execution_started": [
-          "ToolTimelineProjection"
-        ],
-        "tool_execution_completed": [
-          "ToolTimelineProjection"
-        ],
-        "workflow_failed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "session_started": [
-          "SessionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "workflow_completed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "phase_started": [
-          "WorkflowExecutionDetailProjection",
-          "DashboardMetricsProjection"
-        ],
-        "workspace_error": [
-          "WorkspaceMetricsProjection"
-        ],
-        "execution_resumed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "token_usage": [
-          "TokenMetricsProjection"
-        ],
-        "workspace_creating": [
-          "WorkspaceMetricsProjection"
-        ],
-        "execution_paused": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
         ],
         "workflow_execution_started": [
           "WorkflowExecutionDetailProjection",
@@ -1460,13 +1696,45 @@
           "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "installation_suspended": [
-          "InstallationProjection"
+        "execution_paused": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
         ],
-        "workflow_created": [
-          "WorkflowDetailProjection",
-          "WorkflowListProjection",
+        "subagent_stopped": [
+          "SessionListProjection"
+        ],
+        "session_cost_finalized": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "token_usage": [
+          "TokenMetricsProjection"
+        ],
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
+        ],
+        "trigger_resumed": [
+          "TriggerRuleProjection"
+        ],
+        "trigger_fired": [
+          "TriggerHistoryProjection",
+          "TriggerRuleProjection"
+        ],
+        "operation_recorded": [
+          "SessionListProjection"
+        ],
+        "trigger_paused": [
+          "TriggerRuleProjection"
+        ],
+        "tool_blocked": [
+          "ToolTimelineProjection"
+        ],
+        "phase_started": [
+          "WorkflowExecutionDetailProjection",
           "DashboardMetricsProjection"
+        ],
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
         ],
         "execution_cancelled": [
           "WorkflowExecutionDetailProjection",
@@ -1475,39 +1743,58 @@
         "workspace_destroyed": [
           "WorkspaceMetricsProjection"
         ],
-        "tool_blocked": [
-          "ToolTimelineProjection"
+        "workflow_failed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
         ],
-        "token_refreshed": [
-          "InstallationProjection"
-        ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
-        ],
-        "subagent_started": [
-          "SessionListProjection"
-        ],
-        "operation_recorded": [
-          "SessionListProjection"
-        ],
-        "command_executed": [
-          "WorkspaceMetricsProjection"
+        "artifact_created": [
+          "ArtifactListProjection",
+          "DashboardMetricsProjection"
         ],
         "phase_completed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection"
         ],
+        "workspace_error": [
+          "WorkspaceMetricsProjection"
+        ],
+        "execution_resumed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "installation_suspended": [
+          "InstallationProjection"
+        ],
+        "command_executed": [
+          "WorkspaceMetricsProjection"
+        ],
+        "workflow_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "trigger_registered": [
+          "TriggerRuleProjection"
+        ],
+        "workspace_created": [
+          "WorkspaceMetricsProjection"
+        ],
         "agent_observation": [
           "SessionCostProjection",
           "ExecutionCostProjection"
+        ],
+        "token_refreshed": [
+          "InstallationProjection"
+        ],
+        "session_started": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
         ]
       },
       "projection_to_read_model": {
-        "WorkflowDetailProjection": "WorkflowDetail",
-        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail"
+        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail",
+        "WorkflowDetailProjection": "WorkflowDetail"
       }
     }
   }

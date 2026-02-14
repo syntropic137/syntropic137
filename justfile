@@ -12,6 +12,20 @@ default: help
 help:
     @just --list
 
+# --- First-Time Setup ---
+
+# Run interactive setup wizard (git clone → running stack)
+setup *args:
+    @uv run python infra/scripts/setup.py {{args}}
+
+# Check prerequisites only (no changes)
+setup-check:
+    @uv run python infra/scripts/setup.py --stage check_prerequisites
+
+# Re-run a specific setup stage
+setup-stage stage:
+    @uv run python infra/scripts/setup.py --stage {{stage}}
+
 # --- Development Commands ---
 # Uses DRY Docker Compose: base + override files (ADR-034)
 
@@ -34,6 +48,8 @@ dev: _workspace-check
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 3
     @echo ""
+    @just _smee-start
+    @echo ""
     @echo "✅ Full development stack ready!"
     @echo ""
     @echo "   🌐 Frontend:     http://localhost:5173"
@@ -52,6 +68,7 @@ dev: _workspace-check
 # Stop development environment (preserves data)
 dev-stop:
     @echo "🛑 Stopping dev stack..."
+    @just _smee-stop
     @echo "   Stopping frontend (port 5173)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @echo "   Stopping Docker services..."
@@ -61,6 +78,7 @@ dev-stop:
 # Stop and remove dev containers (preserves volumes)
 dev-down:
     @echo "🛑 Shutting down dev stack..."
+    @just _smee-stop
     @echo "   Stopping frontend (port 5173)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @echo "   Removing Docker containers..."
@@ -78,6 +96,7 @@ dev-reset:
     @sleep 5
     @echo ""
     @echo "🔄 Resetting dev environment..."
+    @just _smee-stop
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
     @just dev
@@ -106,6 +125,7 @@ dev-force: _workspace-check
     @echo "Starting dashboard frontend on :5173..."
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 2
+    @just _smee-start
     @echo ""
     @echo "✅ Development stack ready!"
     @echo "   Frontend:     http://localhost:5173"
@@ -144,6 +164,8 @@ dev-fresh: _workspace-check
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 3
     @echo ""
+    @just _smee-start
+    @echo ""
     @echo "✅ Fresh development environment ready!"
     @echo ""
     @echo "   🌐 Frontend:     http://localhost:5173"
@@ -154,6 +176,55 @@ dev-fresh: _workspace-check
     @echo "   🗂️  MinIO:        http://localhost:9001"
     @echo ""
     @echo "💡 All data has been wiped. Workflows have been re-seeded."
+
+# --- Webhook Forwarding (smee.io) ---
+
+# Start smee webhook proxy (reads SMEE_URL from .env, no-op if unset)
+_smee-start:
+    #!/usr/bin/env bash
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+    if [ -z "${SMEE_URL:-}" ]; then
+        echo "   ℹ️  Webhook proxy skipped (SMEE_URL not set in .env)"
+        echo "   💡 To receive GitHub webhooks locally:"
+        echo "      1. Visit https://smee.io/new"
+        echo "      2. Add SMEE_URL=<your-url> to .env"
+        echo "      3. Set the same URL as your GitHub App webhook URL"
+        exit 0
+    fi
+    # Kill any existing smee process
+    pkill -f "smee-client.*${SMEE_URL}" 2>/dev/null || true
+    echo "5️⃣  Starting webhook proxy (smee.io → localhost:8000)..."
+    npx -y smee-client --url "$SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+    echo "   🔗 Webhook proxy: $SMEE_URL → http://localhost:8000/webhooks/github"
+
+# Stop smee webhook proxy
+_smee-stop:
+    @-pkill -f "smee-client" 2>/dev/null || true
+
+# Start smee webhook proxy standalone (for use without full dev stack)
+dev-webhooks:
+    #!/usr/bin/env bash
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+    if [ -z "${SMEE_URL:-}" ]; then
+        echo "❌ SMEE_URL not set in .env"
+        echo ""
+        echo "To set up local webhook forwarding:"
+        echo "  1. Visit https://smee.io/new to create a channel"
+        echo "  2. Add SMEE_URL=<your-url> to .env"
+        echo "  3. Set the same URL as your GitHub App webhook URL"
+        exit 1
+    fi
+    echo "🔗 Starting webhook proxy..."
+    echo "   Source: $SMEE_URL"
+    echo "   Target: http://localhost:8000/webhooks/github"
+    echo ""
+    echo "   Press Ctrl+C to stop"
+    echo ""
+    npx -y smee-client --url "$SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github
+
+# View smee proxy logs
+dev-webhooks-logs:
+    @if [ -f /tmp/smee.log ]; then tail -f /tmp/smee.log; else echo "No smee logs found. Is the webhook proxy running?"; fi
 
 # --- Workspace Image (from agentic-primitives) ---
 
@@ -808,12 +879,28 @@ homelab-restart service:
     @echo "Restarting {{service}}..."
     @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml restart {{service}}
 
-# Pull latest images and restart homelab
-homelab-upgrade:
-    @echo "⬆️ Upgrading AEF homelab..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml pull
+# Pull latest code, rebuild, and restart homelab (turnkey update)
+homelab-update:
+    @echo "⬆️ Updating AEF homelab..."
+    @echo ""
+    @echo "1️⃣ Pulling latest code..."
+    @git pull --ff-only
+    @echo ""
+    @echo "2️⃣ Syncing submodules..."
+    @git submodule update --init --recursive
+    @echo ""
+    @echo "3️⃣ Syncing Python dependencies..."
+    @uv sync
+    @echo ""
+    @echo "4️⃣ Rebuilding and restarting services..."
     @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
-    @echo "✅ Upgrade complete!"
+    @echo ""
+    @echo "5️⃣ Waiting for services to be healthy..."
+    @uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    @echo ""
+    @just homelab-status
+    @echo ""
+    @echo "✅ Update complete!"
 
 # Full homelab reset (removes volumes - DATA LOSS!)
 homelab-reset:
