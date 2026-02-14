@@ -125,7 +125,7 @@ def main() -> None:
         log_analytics(analytics_event)
 
         # Output response
-        response: dict[str, Any] = {"decision": "approve" if decision == "allow" else "block"}
+        response: dict[str, Any] = {"decision": decision}
         if result.get("reason"):
             response["reason"] = result["reason"]
 

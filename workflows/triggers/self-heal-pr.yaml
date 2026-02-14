@@ -1,0 +1,179 @@
+id: self-heal-pr
+name: Self-Heal PR
+description: |
+  Unified self-healing workflow for pull requests.
+  Handles both CI failures AND review comments in a single pass.
+  Checks CI status, reads review threads, fixes everything possible,
+  resolves fixed comments, explains skipped ones, and pushes once.
+
+type: implementation
+classification: simple
+
+repository:
+  url: https://github.com/{{repository}}
+  ref: "{{branch}}"
+
+project_name: null
+
+phases:
+  - id: self-heal
+    name: Self-Heal PR
+    order: 1
+    execution_type: sequential
+    description: Analyze CI + review threads, fix everything, push once.
+    input_artifacts: []
+    output_artifacts:
+      - heal_summary
+    max_tokens: 32768
+    timeout_seconds: 900
+
+    tools:
+      - bash
+
+    prompt_template: |
+      You are a software engineer fixing issues on PR #{{pr_number}}.
+
+      ## Context
+      - **Repository:** {{repository}}
+      - **Branch:** {{branch}}
+      - **PR Number:** {{pr_number}}
+      - **Check Name (if CI trigger):** {{check_name}}
+      - **Check Error (if CI trigger):** {{check_output_title}}
+      - **Check Details (if CI trigger):** {{check_output_summary}}
+      - **Check URL (if CI trigger):** {{check_html_url}}
+      - **Latest Reviewer (if review trigger):** {{reviewer}}
+      - **Review Comment (if review trigger):** {{review_body}}
+      - **Review URL (if review trigger):** {{review_html_url}}
+
+      Some fields above may be empty depending on what triggered this workflow.
+      Always check BOTH CI status and review threads regardless.
+
+      ## Instructions
+
+      1. **Clone and checkout the existing branch:**
+         ```bash
+         cd /workspace/repos
+         git clone https://github.com/{{repository}}.git
+         cd $(basename {{repository}})
+         git checkout {{branch}}
+         ```
+
+      2. **Check CI status:**
+         ```bash
+         # Get recent failed runs on this branch
+         gh run list --branch {{branch}} --status failure --limit 3 --json databaseId,name,conclusion
+         # If failures exist, get the logs:
+         # gh run view <ID> --log-failed | tail -200
+         ```
+         If there are no CI failures, skip to step 3.
+         If there are failures, analyze the logs and identify fixes needed.
+
+      3. **Read ALL unresolved review threads:**
+         ```bash
+         # Split repository into owner/repo
+         OWNER=$(echo "{{repository}}" | cut -d/ -f1)
+         REPO=$(echo "{{repository}}" | cut -d/ -f2)
+
+         gh api graphql -f query="
+         query {
+           repository(owner: \"$OWNER\", name: \"$REPO\") {
+             pullRequest(number: {{pr_number}}) {
+               reviewThreads(first: 100) {
+                 nodes {
+                   id
+                   isResolved
+                   isOutdated
+                   comments(first: 10) {
+                     nodes {
+                       author { login }
+                       body
+                       path
+                       line
+                       createdAt
+                     }
+                   }
+                 }
+               }
+             }
+           }
+         }"
+         ```
+         If there are no unresolved threads, skip to step 5.
+
+      4. **For each unresolved, non-outdated review thread, categorize and handle:**
+
+         **If fixable (code change needed):**
+         a. Read the file and understand the issue
+         b. Make the fix
+         c. Reply to the thread noting the fix and resolve it:
+            ```bash
+            gh api graphql -f query='
+            mutation {
+              addPullRequestReviewThreadReply(input: {
+                pullRequestReviewThreadId: "THREAD_ID",
+                body: "Fixed in this commit.\n\nDESCRIPTION_OF_FIX"
+              }) { comment { id } }
+            }'
+            gh api graphql -f query='
+            mutation {
+              resolveReviewThread(input: { threadId: "THREAD_ID" }) {
+                thread { isResolved }
+              }
+            }'
+            ```
+
+         **If not fixable (intentional design, out of scope, or disagree):**
+         a. Reply with a clear rationale explaining why no change is being made
+         b. Reference ADRs, documentation, or design decisions if applicable
+         c. Do NOT resolve the thread — leave it open for the reviewer to decide
+            ```bash
+            gh api graphql -f query='
+            mutation {
+              addPullRequestReviewThreadReply(input: {
+                pullRequestReviewThreadId: "THREAD_ID",
+                body: "Skipping this change: RATIONALE\n\nLeaving open for reviewer."
+              }) { comment { id } }
+            }'
+            ```
+
+         **If outdated:**
+         a. Check if the code has already changed to address the comment
+         b. If addressed, resolve with "Already addressed in a previous commit"
+         c. If not addressed, treat as a current comment
+
+      5. **Commit all code changes and push to the SAME branch:**
+         ```bash
+         git add -A
+         git commit -m "fix: self-heal PR #{{pr_number}}
+
+         [list what was fixed: CI issues, review comments, etc.]"
+         git push origin {{branch}}
+         ```
+
+      6. **Comment on the PR with a summary:**
+         ```bash
+         gh pr comment {{pr_number}} --body "## Self-Heal Summary
+
+         **CI Fixes:**
+         - [list CI fixes applied, or 'No CI failures found']
+
+         **Review Comments Addressed:**
+         - [list fixed items with commit ref]
+
+         **Review Comments Skipped (with rationale):**
+         - [list skipped items with explanation, or 'None']
+
+         All fixable issues have been addressed. Commit: $(git rev-parse --short HEAD)"
+         ```
+
+      7. **Write summary to /workspace/artifacts/output/deliverable.md**
+
+      ## Important
+      - Push to the SAME branch ({{branch}}), do NOT create a new PR
+      - Keep fixes minimal and focused — don't refactor unrelated code
+      - **Resolve** review threads you fixed (so the reviewer sees them checked off)
+      - **Comment but do NOT resolve** threads you intentionally skip — explain why and let the reviewer decide
+      - If you cannot fix something, explain why in the PR comment
+      - Address ALL unresolved threads, not just the latest review
+      - Use conventional commit messages
+      - Be respectful in thread replies — the reviewer is trying to help

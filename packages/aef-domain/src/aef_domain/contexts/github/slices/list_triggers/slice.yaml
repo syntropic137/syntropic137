@@ -1,0 +1,5 @@
+id: list-triggers
+name: List Triggers
+description: Query slice to list registered trigger rules with optional filters.
+type: query
+context: github

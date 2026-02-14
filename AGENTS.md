@@ -101,7 +101,7 @@ lib/agentic-primitives/  ← Shared library (git submodule)
 |---------|------------|---------|
 | `orchestration` | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
 | `agent_sessions` | AgentSession | Agent sessions and observability |
-| `github` | Installation | GitHub App integration |
+| `github` | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | `artifacts` | Artifact | Artifact storage |
 
 ### Quick Checklist

@@ -1,9 +1,9 @@
 # Research Spec: Phase 2 - Webhook-Triggered Workflows
 
-**Status**: Research
+**Status**: Superseded by [ADR-040](adrs/ADR-040-github-trigger-architecture.md) and [PROJECT-PLAN: GitHub Trigger System](../PROJECT-PLAN_20260204_GITHUB-TRIGGER-SYSTEM.md)
 **Created**: 2025-12-11
-**Related**: ADR-022, ADR-023, F15 (GitHub App)
-**Priority**: Medium
+**Related**: ADR-022, ADR-023, ADR-040, F15 (GitHub App)
+**Priority**: Implemented
 
 ---
 

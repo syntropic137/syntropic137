@@ -101,7 +101,7 @@ async def github_webhook(
     x_github_event: str = Header(..., alias="X-GitHub-Event"),
     x_github_delivery: str = Header(..., alias="X-GitHub-Delivery"),
     x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
-) -> dict[str, str | int]:
+) -> dict[str, Any]:
     """Handle GitHub webhooks.
 
     Processes installation and installation_repositories events
@@ -136,11 +136,15 @@ async def github_webhook(
     elif x_github_event == "ping":
         return {"status": "pong", "zen": payload.get("zen", "")}
     else:
-        logger.debug(f"Ignoring unsupported webhook event: {x_github_event}")
-        return {"status": "ignored", "event": x_github_event}
+        # Evaluate registered trigger rules for all other events
+        return await _evaluate_trigger_rules(
+            event_type=x_github_event,
+            delivery_id=x_github_delivery,
+            payload=payload,
+        )
 
 
-async def _handle_installation_event(payload: dict[str, Any]) -> dict[str, str | int]:
+async def _handle_installation_event(payload: dict[str, Any]) -> dict[str, Any]:
     """Handle installation webhook events.
 
     Actions:
@@ -206,7 +210,7 @@ async def _handle_installation_event(payload: dict[str, Any]) -> dict[str, str |
         return {"status": "ignored", "action": action}
 
 
-async def _handle_installation_repos_event(payload: dict[str, Any]) -> dict[str, str | int]:
+async def _handle_installation_repos_event(payload: dict[str, Any]) -> dict[str, Any]:
     """Handle installation_repositories webhook events.
 
     This event fires when repositories are added or removed from an installation.
@@ -240,4 +244,120 @@ async def _handle_installation_repos_event(payload: dict[str, Any]) -> dict[str,
         "installation_id": installation_id,
         "repos_added": len(repos_added),
         "repos_removed": len(repos_removed),
+    }
+
+
+async def _evaluate_trigger_rules(
+    event_type: str,
+    delivery_id: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate registered trigger rules against an incoming webhook.
+
+    This is the core dispatch logic:
+    1. Find all active trigger rules matching this event type + repository
+    2. Evaluate conditions for each rule
+    3. Run safety guards
+    4. Dispatch workflow execution for matching rules
+
+    Args:
+        event_type: GitHub event type (e.g. "check_run").
+        delivery_id: X-GitHub-Delivery header for idempotency.
+        payload: The webhook payload dict.
+
+    Returns:
+        Status response with triggered execution IDs.
+    """
+    from aef_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+        EvaluateWebhookHandler,
+        TriggerDeferredResult,
+        TriggerMatchResult,
+    )
+    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
+        get_trigger_store,
+    )
+
+    action = payload.get("action", "")
+    full_event = f"{event_type}.{action}" if action else event_type
+    repository = payload.get("repository", {}).get("full_name", "")
+    installation_id = str(payload.get("installation", {}).get("id", ""))
+
+    # Inject delivery ID for idempotency checking
+    payload["_delivery_id"] = delivery_id
+
+    # Find matching rules and dispatch (with debouncer for retry support)
+    from aef_adapters.storage.repositories import get_trigger_repository
+    from aef_domain.contexts.github.slices.evaluate_webhook.debouncer import (
+        get_debouncer,
+    )
+
+    store = get_trigger_store()
+
+    async def _post_activation_comment(result: TriggerMatchResult, p: dict) -> None:
+        """Post PR activation comment when a trigger fires (immediate or deferred)."""
+        from aef_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
+            _extract_pr_number,
+        )
+
+        pr_number = _extract_pr_number(p)
+        repo_name = p.get("repository", {}).get("full_name", "")
+        if not pr_number or not repo_name:
+            return
+        try:
+            from aef_adapters.github.client import get_github_client
+
+            client = get_github_client()
+            owner, name = repo_name.split("/", 1)
+            trigger_info = await store.get(result.trigger_id)
+            trigger_name = trigger_info.name if trigger_info else result.trigger_id
+            workflow_id = trigger_info.workflow_id if trigger_info else "unknown"
+            await client.api_post(
+                f"/repos/{owner}/{name}/issues/{pr_number}/comments",
+                json={"body": f"**{trigger_name}** trigger activated — running `{workflow_id}`..."},
+            )
+        except Exception:
+            logger.warning("Failed to post activation comment", exc_info=True)
+
+    handler = EvaluateWebhookHandler(
+        store=store,
+        repository=get_trigger_repository(),
+        debouncer=get_debouncer(),
+        on_fire=_post_activation_comment,
+    )
+    results = await handler.evaluate(
+        event=full_event,
+        repository=repository,
+        installation_id=installation_id,
+        payload=payload,
+    )
+
+    if not results:
+        logger.debug(f"No matching triggers for {full_event} on {repository}")
+        return {"status": "ignored", "event": full_event, "reason": "No matching triggers"}
+
+    # Partition into fired vs deferred
+    fired = [r for r in results if isinstance(r, TriggerMatchResult)]
+    deferred = [r for r in results if isinstance(r, TriggerDeferredResult)]
+
+    deferred_list = [
+        {"trigger_id": d.trigger_id, "reason": d.reason, "defer_seconds": d.defer_seconds}
+        for d in deferred
+    ]
+
+    if fired:
+        logger.info(f"Triggered {len(fired)} workflow(s) for {full_event} on {repository}")
+        return {
+            "status": "triggered",
+            "event": full_event,
+            "triggers": [
+                {"trigger_id": r.trigger_id, "execution_id": r.execution_id} for r in fired
+            ],
+            "deferred": deferred_list,
+        }
+
+    logger.info(f"Deferred {len(deferred)} trigger(s) for {full_event} on {repository}")
+    return {
+        "status": "deferred",
+        "event": full_event,
+        "deferred": deferred_list,
     }
