@@ -5,6 +5,7 @@ Core dispatch logic: evaluates registered trigger rules against incoming webhook
 
 from __future__ import annotations
 
+import copy
 import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -72,7 +73,7 @@ class EvaluateWebhookHandler:
         self,
         event: str,
         repository: str,
-        installation_id: str,  # noqa: ARG002
+        installation_id: str,
         payload: dict[str, Any],
     ) -> list[TriggerMatchResult | TriggerDeferredResult]:
         rules = await self._store.list_by_event_and_repo(event, repository)
@@ -98,6 +99,7 @@ class EvaluateWebhookHandler:
                         rule=rule,
                         event=event,
                         repository=repository,
+                        installation_id=installation_id,
                         payload=payload,
                         delay=guard_result.retry_after_seconds,
                         reason=guard_result.reason,
@@ -110,12 +112,13 @@ class EvaluateWebhookHandler:
                     )
                 continue
 
-            # Guards passed — check for debounce
+            # Guards passed — check for debounce (0 = disabled)
             if rule.config.debounce_seconds > 0 and self._debouncer is not None:
                 deferred = await self._schedule_deferred(
                     rule=rule,
                     event=event,
                     repository=repository,
+                    installation_id=installation_id,
                     payload=payload,
                     delay=rule.config.debounce_seconds,
                     reason=f"Debouncing for {rule.config.debounce_seconds}s",
@@ -173,13 +176,15 @@ class EvaluateWebhookHandler:
         rule: Any,
         event: str,
         repository: str,
+        installation_id: str,
         payload: dict[str, Any],
         delay: float,
         reason: str,
         key_suffix: str,
     ) -> TriggerDeferredResult:
         """Schedule a deferred evaluation via the debouncer."""
-        assert self._debouncer is not None
+        if self._debouncer is None:
+            raise RuntimeError("_schedule_deferred called without debouncer")
 
         pr_number = _extract_pr_number(payload)
         key = rule.trigger_id
@@ -187,8 +192,8 @@ class EvaluateWebhookHandler:
             key = f"{key}:pr-{pr_number}"
         key = f"{key}{key_suffix}"
 
-        # Capture latest payload for last-write-wins semantics
-        captured_payload = dict(payload)
+        # Deep-copy payload for last-write-wins semantics (nested dicts are shared refs otherwise)
+        captured_payload = copy.deepcopy(payload)
         store = self._store
         repo = self._repository
         on_fire = self._on_fire
@@ -204,7 +209,7 @@ class EvaluateWebhookHandler:
             await handler.evaluate(
                 event=event,
                 repository=repository,
-                installation_id="",
+                installation_id=installation_id,
                 payload=captured_payload,
             )
 

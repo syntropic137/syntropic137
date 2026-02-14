@@ -569,3 +569,51 @@ class TestDebounceAndRetry:
         assert result.passed is False
         assert result.retryable is False
         assert result.retry_after_seconds == 0
+
+    @pytest.mark.asyncio
+    async def test_on_fire_callback_invoked_on_immediate_fire(self) -> None:
+        """on_fire callback is called when a trigger fires immediately."""
+        store = InMemoryTriggerQueryStore()
+        await _register_trigger(store)
+
+        fired_results: list[TriggerMatchResult] = []
+
+        async def mock_on_fire(result: TriggerMatchResult, payload: dict) -> None:
+            fired_results.append(result)
+
+        handler = EvaluateWebhookHandler(
+            store=store, repository=NullRepository(), on_fire=mock_on_fire
+        )
+        results = await handler.evaluate(
+            event="check_run.completed",
+            repository="org/repo",
+            installation_id="inst-1",
+            payload=_make_payload(),
+        )
+
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerMatchResult)
+        assert len(fired_results) == 1
+        assert fired_results[0].trigger_id == results[0].trigger_id
+
+    @pytest.mark.asyncio
+    async def test_debounce_zero_fires_immediately_with_debouncer(self) -> None:
+        """debounce_seconds=0 with debouncer present fires immediately."""
+        store = InMemoryTriggerQueryStore()
+        debouncer = TriggerDebouncer()
+        await _register_trigger(store, debounce_seconds=0)
+
+        handler = EvaluateWebhookHandler(
+            store=store, repository=NullRepository(), debouncer=debouncer
+        )
+        results = await handler.evaluate(
+            event="check_run.completed",
+            repository="org/repo",
+            installation_id="inst-1",
+            payload=_make_payload(),
+        )
+
+        assert len(results) == 1
+        assert isinstance(results[0], TriggerMatchResult)
+        assert debouncer.pending_count == 0
+        debouncer.cancel_all()
