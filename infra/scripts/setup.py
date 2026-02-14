@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import platform
 import re
 import shutil
 import socket
@@ -134,9 +133,7 @@ def run(
 def cmd_version(cmd: str, flag: str = "--version") -> str | None:
     """Get version string from a command, or None if not found."""
     try:
-        result = subprocess.run(
-            [cmd, flag], capture_output=True, text=True, check=False
-        )
+        result = subprocess.run([cmd, flag], capture_output=True, text=True, check=False)
         output = result.stdout.strip() or result.stderr.strip()
         return output
     except FileNotFoundError:
@@ -164,7 +161,7 @@ def port_in_use(port: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def check_prerequisites(ctx: dict) -> bool:
+def check_prerequisites(ctx: dict) -> bool:  # noqa: ARG001
     """Validate that required tools are installed."""
     banner("Stage: Check Prerequisites")
     all_ok = True
@@ -252,7 +249,7 @@ def check_prerequisites(ctx: dict) -> bool:
     return all_ok
 
 
-def init_submodules(ctx: dict) -> bool:
+def init_submodules(ctx: dict) -> bool:  # noqa: ARG001
     """Initialize git submodules."""
     banner("Stage: Initialize Submodules")
     result = run(
@@ -266,7 +263,7 @@ def init_submodules(ctx: dict) -> bool:
     return False
 
 
-def generate_secrets(ctx: dict) -> bool:
+def generate_secrets(ctx: dict) -> bool:  # noqa: ARG001
     """Generate deployment secrets via secrets_setup.py."""
     banner("Stage: Generate Secrets")
     secrets_script = SCRIPT_DIR / "secrets_setup.py"
@@ -353,10 +350,13 @@ def configure_env(ctx: dict) -> bool:
         fail(f"Template not found: {ENV_EXAMPLE}")
         return False
 
-    if ENV_FILE.exists() and not ctx.get("non_interactive"):
-        if not confirm(f"{ENV_FILE} already exists. Overwrite?", default=False):
-            ok("Keeping existing .env")
-            return True
+    if (
+        ENV_FILE.exists()
+        and not ctx.get("non_interactive")
+        and not confirm(f"{ENV_FILE} already exists. Overwrite?", default=False)
+    ):
+        ok("Keeping existing .env")
+        return True
 
     content = ENV_EXAMPLE.read_text()
 
@@ -481,7 +481,7 @@ def build_and_start(ctx: dict) -> bool:
                 env[key.strip()] = value.strip()
 
     result = subprocess.run(
-        ["docker", "compose"] + compose_files + ["up", "-d", "--build"],
+        ["docker", "compose", *compose_files, "up", "-d", "--build"],
         cwd=COMPOSE_DIR,
         env=env,
         check=False,
@@ -494,7 +494,7 @@ def build_and_start(ctx: dict) -> bool:
     return False
 
 
-def wait_for_health(ctx: dict) -> bool:
+def wait_for_health(ctx: dict) -> bool:  # noqa: ARG001
     """Wait for all services to become healthy."""
     banner("Stage: Health Check")
 
@@ -510,7 +510,7 @@ def wait_for_health(ctx: dict) -> bool:
     return True  # Non-blocking
 
 
-def seed_workflows(ctx: dict) -> bool:
+def seed_workflows(ctx: dict) -> bool:  # noqa: ARG001
     """Seed workflow definitions."""
     banner("Stage: Seed Workflows")
 
@@ -544,10 +544,10 @@ def print_summary(ctx: dict) -> bool:
         print("  Dashboard API: http://localhost:8000")
         print("  API Docs:      http://localhost:8000/docs")
 
-    print(f"  MinIO Console: http://localhost:9001")
-    print(f"  PostgreSQL:    localhost:5432")
-    print(f"  Event Store:   localhost:50051")
-    print(f"  Redis:         localhost:6379")
+    print("  MinIO Console: http://localhost:9001")
+    print("  PostgreSQL:    localhost:5432")
+    print("  Event Store:   localhost:50051")
+    print("  Redis:         localhost:6379")
 
     print()
     print("  Useful commands:")
