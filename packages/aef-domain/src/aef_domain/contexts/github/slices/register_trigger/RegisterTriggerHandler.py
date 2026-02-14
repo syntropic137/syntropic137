@@ -27,7 +27,7 @@ class RegisterTriggerHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any | None = None,
+        repository: Any,
     ) -> None:
         self._store = store
         self._repository = repository
@@ -36,27 +36,8 @@ class RegisterTriggerHandler:
         aggregate = TriggerRuleAggregate()
         aggregate.register(command)
 
-        # Persist via EventStoreRepository if available
-        if self._repository is not None:
-            await self._repository.save(aggregate)
-
-        # Index in query store for fast lookups
-        await self._store.index_trigger(
-            trigger_id=aggregate.trigger_id,
-            name=aggregate.name,
-            event=aggregate.event,
-            repository=aggregate.repository,
-            workflow_id=aggregate.workflow_id,
-            conditions=[
-                {"field": c.field, "operator": c.operator, "value": c.value}
-                for c in aggregate.conditions
-            ],
-            input_mapping=aggregate.input_mapping,
-            config=aggregate.config,
-            installation_id=aggregate.installation_id,
-            created_by=aggregate.created_by,
-            status=aggregate.status.value,
-        )
+        # Persist via EventStoreRepository
+        await self._repository.save(aggregate)
 
         logger.info(
             f"Registered trigger '{aggregate.name}' ({aggregate.trigger_id}) "
