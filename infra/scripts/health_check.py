@@ -86,6 +86,19 @@ SERVICES = [
         health_path="/health",
         description="AEF Dashboard UI",
     ),
+    Service(
+        name="MinIO",
+        host="localhost",
+        port=9000,
+        health_path="/minio/health/live",
+        description="Object storage",
+    ),
+    Service(
+        name="Redis",
+        host="localhost",
+        port=6379,
+        description="Cache and message broker",
+    ),
 ]
 
 
