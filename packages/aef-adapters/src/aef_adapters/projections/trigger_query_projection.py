@@ -149,9 +149,7 @@ class TriggerQueryProjection(CheckpointedProjection):
             existing["status"] = "deleted"
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
-    async def _on_trigger_fired(
-        self, data: dict[str, Any], envelope: EventEnvelope[Any]
-    ) -> None:
+    async def _on_trigger_fired(self, data: dict[str, Any], envelope: EventEnvelope[Any]) -> None:
         trigger_id = data.get("trigger_id", "")
         execution_id = data.get("execution_id", "")
         delivery_id = data.get("webhook_delivery_id", "")
