@@ -30,7 +30,7 @@ class TriggerDebouncer:
     async def debounce(
         self,
         key: str,
-        delay_seconds: int,
+        delay_seconds: float,
         callback: Callable[[], Coroutine[Any, Any, Any]],
     ) -> None:
         """Schedule callback after delay. Resets if called again with same key.

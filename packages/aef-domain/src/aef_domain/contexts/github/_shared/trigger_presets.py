@@ -19,7 +19,7 @@ SELF_HEALING_PRESET = {
         {"field": "check_run.conclusion", "operator": "eq", "value": "failure"},
         {"field": "check_run.pull_requests", "operator": "not_empty"},
     ),
-    "workflow_id": "ci-fix-workflow",
+    "workflow_id": "self-heal-pr",
     "input_mapping": (
         ("repository", "repository.full_name"),
         ("pr_number", "check_run.pull_requests[0].number"),
@@ -46,7 +46,7 @@ REVIEW_FIX_PRESET = {
         {"field": "review.state", "operator": "in", "value": ["changes_requested", "commented"]},
         {"field": "pull_request.draft", "operator": "eq", "value": False},
     ),
-    "workflow_id": "fix-review-workflow",
+    "workflow_id": "self-heal-pr",
     "input_mapping": (
         ("repository", "repository.full_name"),
         ("pr_number", "pull_request.number"),
@@ -96,7 +96,7 @@ def create_preset_command(
         raise ValueError(f"Unknown preset: '{preset_name}'. Available: {list(PRESETS.keys())}")
 
     return RegisterTriggerCommand(
-        name=f"{preset['name']} ({repository})",
+        name=preset["name"],
         event=preset["event"],
         conditions=preset["conditions"],
         repository=repository,

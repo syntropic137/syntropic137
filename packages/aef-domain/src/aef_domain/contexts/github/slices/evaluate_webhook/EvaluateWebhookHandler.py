@@ -6,6 +6,7 @@ Core dispatch logic: evaluates registered trigger rules against incoming webhook
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -19,11 +20,15 @@ from aef_domain.contexts.github.slices.evaluate_webhook.condition_evaluator impo
 )
 from aef_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
     SafetyGuards,
+    _extract_pr_number,
 )
 
 if TYPE_CHECKING:
     from aef_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
+    )
+    from aef_domain.contexts.github.slices.evaluate_webhook.debouncer import (
+        TriggerDebouncer,
     )
     from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
         TriggerQueryStore,
@@ -38,14 +43,29 @@ class TriggerMatchResult:
     execution_id: str
 
 
+@dataclass
+class TriggerDeferredResult:
+    trigger_id: str
+    reason: str
+    defer_seconds: float
+
+
+OnFireCallback = Callable[[Any, dict[str, Any]], Coroutine[Any, Any, None]]
+"""Called when a trigger fires: (result: TriggerMatchResult, payload: dict)."""
+
+
 class EvaluateWebhookHandler:
     def __init__(
         self,
         store: TriggerQueryStore,
-        repository: Any | None = None,
+        repository: Any,
+        debouncer: TriggerDebouncer | None = None,
+        on_fire: OnFireCallback | None = None,
     ) -> None:
         self._store = store
         self._repository = repository
+        self._debouncer = debouncer
+        self._on_fire = on_fire
         self._guards = SafetyGuards()
 
     async def evaluate(
@@ -54,13 +74,13 @@ class EvaluateWebhookHandler:
         repository: str,
         installation_id: str,  # noqa: ARG002
         payload: dict[str, Any],
-    ) -> list[TriggerMatchResult]:
+    ) -> list[TriggerMatchResult | TriggerDeferredResult]:
         rules = await self._store.list_by_event_and_repo(event, repository)
         if not rules:
             logger.debug(f"No trigger rules for {event} on {repository}")
             return []
 
-        results: list[TriggerMatchResult] = []
+        results: list[TriggerMatchResult | TriggerDeferredResult] = []
         for rule in rules:
             if rule.status != "active":
                 continue
@@ -70,57 +90,131 @@ class EvaluateWebhookHandler:
                 continue
 
             guard_result = await self._guards.check_all(rule, payload, self._store)
+
             if not guard_result.passed:
-                logger.info(f"Trigger {rule.trigger_id} blocked by guard: {guard_result.reason}")
+                # Retryable guard block + debouncer available → schedule retry
+                if guard_result.retryable and self._debouncer is not None:
+                    deferred = await self._schedule_deferred(
+                        rule=rule,
+                        event=event,
+                        repository=repository,
+                        payload=payload,
+                        delay=guard_result.retry_after_seconds,
+                        reason=guard_result.reason,
+                        key_suffix=":retry",
+                    )
+                    results.append(deferred)
+                else:
+                    logger.info(
+                        f"Trigger {rule.trigger_id} blocked by guard: {guard_result.reason}"
+                    )
                 continue
 
-            execution_id = f"exec-{uuid4().hex[:12]}"
-            delivery_id = payload.get("_delivery_id", "")
-            from aef_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
-                _extract_pr_number,
-            )
-
-            pr_number = _extract_pr_number(payload)
-
-            # Extract workflow inputs from payload
-            workflow_inputs = extract_inputs(payload, rule.input_mapping)
-
-            # Record the firing via command on the aggregate
-            if self._repository is not None:
-                aggregate: TriggerRuleAggregate | None = await self._repository.get_by_id(
-                    rule.trigger_id
+            # Guards passed — check for debounce
+            if rule.config.debounce_seconds > 0 and self._debouncer is not None:
+                deferred = await self._schedule_deferred(
+                    rule=rule,
+                    event=event,
+                    repository=repository,
+                    payload=payload,
+                    delay=rule.config.debounce_seconds,
+                    reason=f"Debouncing for {rule.config.debounce_seconds}s",
+                    key_suffix="",
                 )
-                if aggregate is not None:
-                    cmd = RecordTriggerFiredCommand(
-                        trigger_id=rule.trigger_id,
-                        execution_id=execution_id,
-                        webhook_delivery_id=delivery_id,
-                        event_type=event,
-                        repository=repository,
-                        workflow_id=rule.workflow_id,
-                        workflow_inputs=workflow_inputs,
-                        pr_number=pr_number,
-                        payload_summary=_build_payload_summary(payload, event),
-                    )
-                    aggregate.record_fired(cmd)
-                    await self._repository.save(aggregate)
+                results.append(deferred)
+                continue
 
-            if delivery_id:
-                await self._store.record_delivery(delivery_id, rule.trigger_id)
-            await self._store.record_fire(
-                trigger_id=rule.trigger_id,
-                pr_number=pr_number,
-                execution_id=execution_id,
-            )
+            # Fire immediately
+            result = await self._fire_trigger(rule, event, repository, payload)
+            results.append(result)
 
-            logger.info(
-                f"Trigger {rule.trigger_id} fired for {event} on {repository} "
-                f"-> execution {execution_id}"
-            )
-            results.append(
-                TriggerMatchResult(trigger_id=rule.trigger_id, execution_id=execution_id)
-            )
         return results
+
+    async def _fire_trigger(
+        self,
+        rule: Any,
+        event: str,
+        repository: str,
+        payload: dict[str, Any],
+    ) -> TriggerMatchResult:
+        """Execute a trigger firing: record command + return result."""
+        execution_id = f"exec-{uuid4().hex[:12]}"
+        delivery_id = payload.get("_delivery_id", "")
+        pr_number = _extract_pr_number(payload)
+        workflow_inputs = extract_inputs(payload, rule.input_mapping)
+
+        aggregate: TriggerRuleAggregate | None = await self._repository.get_by_id(rule.trigger_id)
+        if aggregate is not None:
+            cmd = RecordTriggerFiredCommand(
+                trigger_id=rule.trigger_id,
+                execution_id=execution_id,
+                webhook_delivery_id=delivery_id,
+                event_type=event,
+                repository=repository,
+                workflow_id=rule.workflow_id,
+                workflow_inputs=workflow_inputs,
+                pr_number=pr_number,
+                payload_summary=_build_payload_summary(payload, event),
+            )
+            aggregate.record_fired(cmd)
+            await self._repository.save(aggregate)
+
+        result = TriggerMatchResult(trigger_id=rule.trigger_id, execution_id=execution_id)
+        logger.info(
+            f"Trigger {rule.trigger_id} fired for {event} on {repository} "
+            f"-> execution {execution_id}"
+        )
+        if self._on_fire is not None:
+            await self._on_fire(result, payload)
+        return result
+
+    async def _schedule_deferred(
+        self,
+        rule: Any,
+        event: str,
+        repository: str,
+        payload: dict[str, Any],
+        delay: float,
+        reason: str,
+        key_suffix: str,
+    ) -> TriggerDeferredResult:
+        """Schedule a deferred evaluation via the debouncer."""
+        assert self._debouncer is not None
+
+        pr_number = _extract_pr_number(payload)
+        key = rule.trigger_id
+        if pr_number is not None:
+            key = f"{key}:pr-{pr_number}"
+        key = f"{key}{key_suffix}"
+
+        # Capture latest payload for last-write-wins semantics
+        captured_payload = dict(payload)
+        store = self._store
+        repo = self._repository
+        on_fire = self._on_fire
+
+        async def _on_timer() -> None:
+            # Re-evaluate without debouncer to prevent infinite loops
+            handler = EvaluateWebhookHandler(
+                store=store,
+                repository=repo,
+                debouncer=None,
+                on_fire=on_fire,
+            )
+            await handler.evaluate(
+                event=event,
+                repository=repository,
+                installation_id="",
+                payload=captured_payload,
+            )
+
+        await self._debouncer.debounce(key, delay, _on_timer)
+        logger.info(f"Trigger {rule.trigger_id} deferred ({reason}), key={key}, delay={delay:.0f}s")
+        return TriggerDeferredResult(
+            trigger_id=rule.trigger_id,
+            reason=reason,
+            defer_seconds=delay,
+        )
 
 
 def _build_payload_summary(payload: dict[str, Any], event: str) -> dict:
