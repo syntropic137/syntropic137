@@ -115,9 +115,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         )
         today = datetime.now(UTC).date()
         return sum(
-            1
-            for r in records
-            if datetime.fromisoformat(r.get("fired_at", "")).date() == today
+            1 for r in records if datetime.fromisoformat(r.get("fired_at", "")).date() == today
         )
 
     async def get_last_any_fired_at(
