@@ -23,10 +23,10 @@ class TestTriggerPresets:
             created_by="test-user",
         )
 
-        assert cmd.name == "self-healing (AgentParadise/my-project)"
+        assert cmd.name == "self-healing"
         assert cmd.event == "check_run.completed"
         assert cmd.repository == "AgentParadise/my-project"
-        assert cmd.workflow_id == "ci-fix-workflow"
+        assert cmd.workflow_id == "self-heal-pr"
         assert len(cmd.conditions) == 2
 
     def test_review_fix_preset_creates_command(self) -> None:
@@ -36,9 +36,9 @@ class TestTriggerPresets:
             repository="AgentParadise/my-project",
         )
 
-        assert cmd.name == "review-fix (AgentParadise/my-project)"
+        assert cmd.name == "review-fix"
         assert cmd.event == "pull_request_review.submitted"
-        assert cmd.workflow_id == "fix-review-workflow"
+        assert cmd.workflow_id == "self-heal-pr"
 
     def test_unknown_preset_raises_error(self) -> None:
         """Test that an unknown preset name raises ValueError."""

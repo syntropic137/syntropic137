@@ -17,6 +17,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Guard policy constants — centralised here for visibility and tuning.
+# ---------------------------------------------------------------------------
+
+# Extra seconds added when scheduling a retry after a cooldown/cross-trigger
+# block. Gives a buffer so the retry doesn't land right on the boundary.
+RETRY_BUFFER_SECONDS: float = 5
+
+# Window (seconds) during which a fire from *any* trigger on the same PR
+# blocks other triggers from firing (prevents concurrent workflows).
+CROSS_TRIGGER_COOLDOWN_SECONDS: float = 120
+
 
 @dataclass
 class GuardResult:
@@ -24,6 +36,8 @@ class GuardResult:
 
     passed: bool
     reason: str
+    retryable: bool = False
+    retry_after_seconds: float = 0
 
 
 class SafetyGuards:
@@ -74,7 +88,12 @@ class SafetyGuards:
                 elapsed = (datetime.now(UTC) - last_fired).total_seconds()
                 if elapsed < rule.config.cooldown_seconds:
                     remaining = rule.config.cooldown_seconds - elapsed
-                    return GuardResult(False, f"Cooldown: {remaining:.0f}s remaining")
+                    return GuardResult(
+                        False,
+                        f"Cooldown: {remaining:.0f}s remaining",
+                        retryable=True,
+                        retry_after_seconds=remaining + RETRY_BUFFER_SECONDS,
+                    )
 
         # 4. Daily limit
         today_count = await store.get_daily_fire_count(rule.trigger_id)
@@ -87,6 +106,22 @@ class SafetyGuards:
             already_processed = await store.was_delivery_processed(delivery_id)
             if already_processed:
                 return GuardResult(False, f"Delivery {delivery_id} already processed")
+
+        # 6. Cross-trigger PR cooldown — prevent concurrent workflows on same PR
+        if pr_number is not None:
+            last_any = await store.get_last_any_fired_at(
+                pr_number, exclude_trigger_id=rule.trigger_id
+            )
+            if last_any:
+                elapsed = (datetime.now(UTC) - last_any).total_seconds()
+                if elapsed < CROSS_TRIGGER_COOLDOWN_SECONDS:
+                    return GuardResult(
+                        False,
+                        f"Another trigger fired on PR #{pr_number} {elapsed:.0f}s ago",
+                        retryable=True,
+                        retry_after_seconds=(CROSS_TRIGGER_COOLDOWN_SECONDS - elapsed)
+                        + RETRY_BUFFER_SECONDS,
+                    )
 
         return GuardResult(True, "All guards passed")
 
