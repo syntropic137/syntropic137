@@ -1,7 +1,4 @@
-"""Trigger management API endpoints.
-
-REST API for managing self-healing trigger rules.
-"""
+"""Trigger management API endpoints — thin wrapper over aef_api."""
 
 from __future__ import annotations
 
@@ -10,36 +7,8 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from aef_domain.contexts.github._shared.trigger_presets import (
-    create_preset_command,
-)
-from aef_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
-    DeleteTriggerCommand,
-)
-from aef_domain.contexts.github.domain.commands.PauseTriggerCommand import (
-    PauseTriggerCommand,
-)
-from aef_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
-    RegisterTriggerCommand,
-)
-from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
-    ResumeTriggerCommand,
-)
-from aef_domain.contexts.github.domain.queries.get_trigger_history import (
-    GetTriggerHistoryQuery,
-)
-from aef_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-    ManageTriggerHandler,
-)
-from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-    RegisterTriggerHandler,
-)
-from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-    get_trigger_store,
-)
-from aef_domain.contexts.github.slices.trigger_history.handler import (
-    GetTriggerHistoryHandler,
-)
+import aef_api.v1.triggers as trig
+from aef_api.types import Err
 
 logger = logging.getLogger(__name__)
 
@@ -48,46 +17,26 @@ router = APIRouter(prefix="/triggers", tags=["triggers"])
 
 @router.post("")
 async def register_trigger(body: dict[str, Any]) -> dict[str, Any]:
-    """Register a new trigger rule.
-
-    Args:
-        body: Trigger configuration including name, event, conditions, etc.
-
-    Returns:
-        Created trigger details.
-    """
+    """Register a new trigger rule."""
     try:
-        conditions = body.get("conditions", [])
-        input_mapping = body.get("input_mapping", {})
-        config = body.get("config", {})
-
-        cmd = RegisterTriggerCommand(
+        result = await trig.register_trigger(
             name=body["name"],
             event=body["event"],
-            conditions=tuple(conditions),
             repository=body.get("repository", ""),
-            installation_id=body.get("installation_id", ""),
             workflow_id=body.get("workflow_id", ""),
-            input_mapping=tuple(input_mapping.items()) if isinstance(input_mapping, dict) else (),
-            config=tuple(config.items()) if isinstance(config, dict) else (),
+            conditions=body.get("conditions"),
+            installation_id=body.get("installation_id", ""),
+            input_mapping=body.get("input_mapping"),
+            config=body.get("config"),
             created_by=body.get("created_by", "api"),
         )
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    from aef_adapters.storage.repositories import get_trigger_repository
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
 
-    store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
-    aggregate = await handler.handle(cmd)
-
-    return {
-        "trigger_id": aggregate.trigger_id,
-        "name": aggregate.name,
-        "status": aggregate.status.value
-        if hasattr(aggregate.status, "value")
-        else str(aggregate.status),
-    }
+    return {"trigger_id": result.value, "name": body["name"], "status": "active"}
 
 
 @router.get("")
@@ -95,17 +44,11 @@ async def list_triggers(
     repository: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
-    """List all trigger rules.
+    """List all trigger rules."""
+    result = await trig.list_triggers(repository=repository, status=status)
 
-    Args:
-        repository: Filter by repository.
-        status: Filter by status.
-
-    Returns:
-        List of trigger summaries.
-    """
-    store = get_trigger_store()
-    triggers = await store.list_all(repository=repository, status=status)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=result.message)
 
     return {
         "triggers": [
@@ -115,132 +58,77 @@ async def list_triggers(
                 "event": t.event,
                 "repository": t.repository,
                 "workflow_id": t.workflow_id,
-                "status": t.status.value if hasattr(t.status, "value") else str(t.status),
+                "status": str(t.status),
                 "fire_count": t.fire_count,
             }
-            for t in triggers
+            for t in result.value
         ],
-        "total": len(triggers),
+        "total": len(result.value),
     }
 
 
 @router.get("/{trigger_id}")
 async def get_trigger(trigger_id: str) -> dict[str, Any]:
-    """Get trigger details.
+    """Get trigger details."""
+    result = await trig.get_trigger(trigger_id)
 
-    Args:
-        trigger_id: The trigger ID.
-
-    Returns:
-        Full trigger details.
-    """
-    store = get_trigger_store()
-    trigger = await store.get(trigger_id)
-
-    if trigger is None:
+    if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Trigger not found: {trigger_id}")
 
+    t = result.value
     return {
-        "trigger_id": trigger.trigger_id,
-        "name": trigger.name,
-        "event": trigger.event,
-        "conditions": [
-            c
-            if isinstance(c, dict)
-            else {"field": c.field, "operator": c.operator, "value": c.value}
-            for c in trigger.conditions
-        ],
-        "repository": trigger.repository,
-        "installation_id": trigger.installation_id,
-        "workflow_id": trigger.workflow_id,
-        "input_mapping": trigger.input_mapping,
-        "status": trigger.status.value if hasattr(trigger.status, "value") else str(trigger.status),
-        "fire_count": trigger.fire_count,
-        "config": {
-            "max_attempts": trigger.config.max_attempts,
-            "budget_per_trigger_usd": trigger.config.budget_per_trigger_usd,
-            "daily_limit": trigger.config.daily_limit,
-            "debounce_seconds": trigger.config.debounce_seconds,
-            "cooldown_seconds": trigger.config.cooldown_seconds,
-            "skip_if_sender_is_bot": trigger.config.skip_if_sender_is_bot,
-        },
-        "created_by": trigger.created_by,
+        "trigger_id": t.trigger_id,
+        "name": t.name,
+        "event": t.event,
+        "conditions": t.conditions,
+        "repository": t.repository,
+        "installation_id": t.installation_id,
+        "workflow_id": t.workflow_id,
+        "input_mapping": t.input_mapping,
+        "status": str(t.status),
+        "fire_count": t.fire_count,
+        "config": t.config,
+        "created_by": t.created_by,
     }
 
 
 @router.patch("/{trigger_id}")
 async def update_trigger(trigger_id: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Update trigger (pause/resume).
-
-    Args:
-        trigger_id: The trigger ID.
-        body: Update payload with "action" field (pause/resume).
-
-    Returns:
-        Updated trigger status.
-    """
-    from aef_adapters.storage.repositories import get_trigger_repository
-
+    """Update trigger (pause/resume)."""
     action = body.get("action", "")
-    store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
 
-    event: object | None
     if action == "pause":
-        event = await handler.pause(
-            PauseTriggerCommand(
-                trigger_id=trigger_id,
-                paused_by=body.get("paused_by", "api"),
-                reason=body.get("reason"),
-            )
+        result = await trig.pause_trigger(
+            trigger_id=trigger_id,
+            reason=body.get("reason"),
+            paused_by=body.get("paused_by", "api"),
         )
     elif action == "resume":
-        event = await handler.resume(
-            ResumeTriggerCommand(
-                trigger_id=trigger_id,
-                resumed_by=body.get("resumed_by", "api"),
-            )
+        result = await trig.resume_trigger(
+            trigger_id=trigger_id,
+            resumed_by=body.get("resumed_by", "api"),
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
 
-    if event is None:
+    if isinstance(result, Err):
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot {action} trigger {trigger_id} (invalid state or not found)",
+            detail=f"Cannot {action} trigger {trigger_id}: {result.message}",
         )
 
-    trigger = await store.get(trigger_id)
-    status = "unknown"
-    if trigger is not None:
-        status = trigger.status.value if hasattr(trigger.status, "value") else str(trigger.status)
-    return {
-        "trigger_id": trigger_id,
-        "status": status,
-        "action": action,
-    }
+    return {"trigger_id": trigger_id, "status": action + "d", "action": action}
 
 
 @router.delete("/{trigger_id}")
 async def delete_trigger(trigger_id: str) -> dict[str, Any]:
-    """Delete a trigger rule.
+    """Delete a trigger rule."""
+    result = await trig.delete_trigger(trigger_id=trigger_id, deleted_by="api")
 
-    Args:
-        trigger_id: The trigger ID.
-
-    Returns:
-        Deletion confirmation.
-    """
-    from aef_adapters.storage.repositories import get_trigger_repository
-
-    store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
-    event = await handler.delete(DeleteTriggerCommand(trigger_id=trigger_id, deleted_by="api"))
-
-    if event is None:
+    if isinstance(result, Err):
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot delete trigger {trigger_id} (not found or already deleted)",
+            detail=f"Cannot delete trigger {trigger_id}: {result.message}",
         )
 
     return {"trigger_id": trigger_id, "status": "deleted"}
@@ -248,41 +136,25 @@ async def delete_trigger(trigger_id: str) -> dict[str, Any]:
 
 @router.post("/presets/{preset_name}")
 async def enable_preset(preset_name: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Enable a preset for a repository.
-
-    Args:
-        preset_name: Name of the preset (self-healing | review-fix).
-        body: Must include "repository".
-
-    Returns:
-        Created trigger details.
-    """
+    """Enable a preset for a repository."""
     repository = body.get("repository", "")
     if not repository:
         raise HTTPException(status_code=400, detail="repository is required")
 
-    try:
-        cmd = create_preset_command(
-            preset_name=preset_name,
-            repository=repository,
-            installation_id=body.get("installation_id", ""),
-            created_by=body.get("created_by", "api"),
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = await trig.enable_preset(
+        preset_name=preset_name,
+        repository=repository,
+        installation_id=body.get("installation_id", ""),
+        created_by=body.get("created_by", "api"),
+    )
 
-    from aef_adapters.storage.repositories import get_trigger_repository
-
-    store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
-    aggregate = await handler.handle(cmd)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
 
     return {
-        "trigger_id": aggregate.trigger_id,
-        "name": aggregate.name,
-        "status": aggregate.status.value
-        if hasattr(aggregate.status, "value")
-        else str(aggregate.status),
+        "trigger_id": result.value,
+        "name": preset_name,
+        "status": "active",
         "preset": preset_name,
     }
 
@@ -292,18 +164,11 @@ async def get_trigger_history(
     trigger_id: str,
     limit: int = 50,
 ) -> dict[str, Any]:
-    """Get execution history for a trigger.
+    """Get execution history for a trigger."""
+    result = trig.get_trigger_history(trigger_id=trigger_id, limit=limit)
 
-    Args:
-        trigger_id: The trigger ID.
-        limit: Max entries to return.
-
-    Returns:
-        Trigger history entries.
-    """
-    query = GetTriggerHistoryQuery(trigger_id=trigger_id, limit=limit)
-    handler = GetTriggerHistoryHandler()
-    entries = handler.handle(query)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=result.message)
 
     return {
         "trigger_id": trigger_id,
@@ -311,13 +176,13 @@ async def get_trigger_history(
             {
                 "fired_at": e.fired_at.isoformat() if e.fired_at else None,
                 "execution_id": e.execution_id,
-                "webhook_delivery_id": e.webhook_delivery_id,
+                "webhook_delivery_id": getattr(e, "webhook_delivery_id", None),
                 "event_type": e.github_event_type,
                 "pr_number": e.pr_number,
                 "status": e.status,
                 "cost_usd": e.cost_usd,
             }
-            for e in entries
+            for e in result.value
         ],
     }
 
@@ -326,30 +191,32 @@ async def get_trigger_history(
 async def get_all_history(limit: int = 50) -> dict[str, Any]:
     """Get all trigger activity (global).
 
-    Args:
-        limit: Max entries to return.
-
-    Returns:
-        All trigger history entries.
+    Note: This falls back to domain-level projection since
+    global history aggregation is not yet in aef_api.
     """
-    from aef_domain.contexts.github.slices.trigger_history.projection import (
-        get_trigger_history_projection,
-    )
+    # Aggregate from individual trigger histories
+    list_result = await trig.list_triggers()
+    if isinstance(list_result, Err):
+        return {"entries": [], "total": 0}
 
-    projection = get_trigger_history_projection()
-    entries = projection.get_all_history(limit=limit)
+    all_entries = []
+    for t in list_result.value:
+        hist = trig.get_trigger_history(trigger_id=t.trigger_id, limit=limit)
+        if not isinstance(hist, Err):
+            for e in hist.value:
+                all_entries.append(
+                    {
+                        "trigger_id": t.trigger_id,
+                        "fired_at": e.fired_at.isoformat() if e.fired_at else None,
+                        "execution_id": e.execution_id,
+                        "event_type": e.github_event_type,
+                        "pr_number": e.pr_number,
+                        "status": e.status,
+                    }
+                )
 
-    return {
-        "entries": [
-            {
-                "trigger_id": e.trigger_id,
-                "fired_at": e.fired_at.isoformat() if e.fired_at else None,
-                "execution_id": e.execution_id,
-                "event_type": e.github_event_type,
-                "pr_number": e.pr_number,
-                "status": e.status,
-            }
-            for e in entries
-        ],
-        "total": len(entries),
-    }
+    # Sort by fired_at desc and limit
+    all_entries.sort(key=lambda x: x.get("fired_at") or "", reverse=True)
+    all_entries = all_entries[:limit]
+
+    return {"entries": all_entries, "total": len(all_entries)}

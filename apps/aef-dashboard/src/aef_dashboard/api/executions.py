@@ -1,7 +1,4 @@
-"""Execution API endpoints.
-
-Provides endpoints for accessing workflow execution (run) details.
-"""
+"""Execution API endpoints — thin wrapper over aef_api."""
 
 from __future__ import annotations
 
@@ -10,7 +7,8 @@ from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from aef_adapters.projections import get_projection_manager
+import aef_api.v1.executions as ex
+from aef_api.types import Err
 
 router = APIRouter(prefix="/executions", tags=["executions"])
 
@@ -53,7 +51,7 @@ class PhaseExecutionInfo(BaseModel):
 class ExecutionDetailResponse(BaseModel):
     """Detailed response for a workflow execution run."""
 
-    workflow_execution_id: str  # ADR-028: OTel correlation naming
+    workflow_execution_id: str
     workflow_id: str
     workflow_name: str
     status: str
@@ -69,15 +67,10 @@ class ExecutionDetailResponse(BaseModel):
     error_message: str | None = None
 
 
-# =============================================================================
-# List Response Models
-# =============================================================================
-
-
 class ExecutionSummaryResponse(BaseModel):
     """Summary of a workflow execution for list views."""
 
-    workflow_execution_id: str  # ADR-028: OTel correlation naming
+    workflow_execution_id: str
     workflow_id: str
     workflow_name: str
     status: str
@@ -110,23 +103,15 @@ async def list_all_executions(
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
 ) -> ExecutionListResponse:
-    """List all workflow executions across all workflows.
-
-    Returns executions sorted by started_at in descending order (most recent first).
-    """
-    manager = get_projection_manager()
+    """List all workflow executions across all workflows."""
     offset = (page - 1) * page_size
+    result = await ex.list_(status=status, limit=page_size, offset=offset)
 
-    executions = await manager.execution_list.get_all(
-        limit=page_size,
-        offset=offset,
-        status_filter=status,
-    )
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=result.message)
 
-    def _to_str(val: str | object | None) -> str | None:
-        if val is None:
-            return None
-        return str(val) if not isinstance(val, str) else val
+    def _to_str(val: object | None) -> str | None:
+        return str(val) if val is not None else None
 
     return ExecutionListResponse(
         executions=[
@@ -141,11 +126,10 @@ async def list_all_executions(
                 total_phases=e.total_phases,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
-                tool_call_count=e.tool_call_count,
             )
-            for e in executions
+            for e in result.value
         ],
-        total=len(executions),  # TODO: Implement proper count
+        total=len(result.value),
         page=page,
         page_size=page_size,
     )
@@ -153,57 +137,46 @@ async def list_all_executions(
 
 @router.get("/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution(execution_id: str) -> ExecutionDetailResponse:
-    """Get detailed information about a workflow execution run.
+    """Get detailed information about a workflow execution run."""
+    result = await ex.get_detail(execution_id)
 
-    Returns phase-level metrics for the execution, including token usage,
-    duration, and cost for each phase.
-    """
-    manager = get_projection_manager()
-    detail = await manager.execution_detail.get_by_id(execution_id)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
 
-    if detail is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Execution {execution_id} not found",
-        )
-
-    # Convert phases with operations from TimescaleDB
+    detail = result.value
     phases = []
-    for p in detail.phases:
-        # Fetch operations for this phase's session
-        operations: list[PhaseOperationInfo] = []
-        if p.session_id:
-            tool_ops = await manager.session_tools.get(p.session_id)
-            operations = [
-                PhaseOperationInfo(
-                    operation_id=op.observation_id,
-                    operation_type=op.operation_type,
-                    timestamp=str(op.timestamp) if op.timestamp else None,
-                    tool_name=op.tool_name,
-                    tool_use_id=op.tool_use_id,
-                    success=op.success if op.success is not None else True,
-                )
-                for op in tool_ops
-            ]
-
+    for p in detail.phases or []:
+        operations = [
+            PhaseOperationInfo(
+                operation_id=op.observation_id,
+                operation_type=op.operation_type,
+                timestamp=str(op.timestamp) if op.timestamp else None,
+                tool_name=op.tool_name,
+                tool_use_id=op.tool_use_id,
+                success=op.success if op.success is not None else True,
+            )
+            for op in (p.operations or [])
+        ]
         phases.append(
             PhaseExecutionInfo(
-                phase_id=p.workflow_phase_id,
+                phase_id=p.phase_id,
                 name=p.name,
                 status=p.status,
                 session_id=p.session_id,
                 artifact_id=p.artifact_id,
                 input_tokens=p.input_tokens,
                 output_tokens=p.output_tokens,
-                total_tokens=p.total_tokens,
-                duration_seconds=p.duration_seconds,
+                total_tokens=p.input_tokens + p.output_tokens,
+                duration_seconds=p.duration_seconds or 0.0,
                 cost_usd=Decimal(str(p.cost_usd)),
                 started_at=str(p.started_at) if p.started_at else None,
                 completed_at=str(p.completed_at) if p.completed_at else None,
-                error_message=p.error_message,
                 operations=operations,
             )
         )
+
+    total_input = sum(p.input_tokens for p in detail.phases or [])
+    total_output = sum(p.output_tokens for p in detail.phases or [])
 
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
@@ -213,11 +186,9 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,
         phases=phases,
-        total_input_tokens=detail.total_input_tokens,
-        total_output_tokens=detail.total_output_tokens,
-        total_tokens=detail.total_input_tokens + detail.total_output_tokens,
+        total_input_tokens=total_input,
+        total_output_tokens=total_output,
+        total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
-        total_duration_seconds=detail.total_duration_seconds,
-        artifact_ids=list(detail.artifact_ids),
         error_message=detail.error_message,
     )
