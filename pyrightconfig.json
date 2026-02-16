@@ -1,0 +1,19 @@
+{
+  "include": [
+    "packages/aef-api/src",
+    "apps/aef-cli/src",
+    "apps/aef-dashboard/src"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "archive",
+    "scripts",
+    "**/tests"
+  ],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "warning",
+  "reportAttributeAccessIssue": "error",
+  "reportCallIssue": "error",
+  "reportArgumentType": "error"
+}

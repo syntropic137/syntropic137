@@ -236,6 +236,7 @@ def run_workflow(
     ] = None,
 ) -> None:
     """Execute a workflow."""
+    import aef_api.v1.executions as ex
     import aef_api.v1.workflows as wf
 
     parsed_inputs = _parse_inputs(inputs)
@@ -289,7 +290,7 @@ def run_workflow(
     # Execute
     with console.status("Executing workflow..."):
         exec_result = run(
-            wf.execute_workflow(
+            ex.execute(
                 workflow_id=full_workflow_id,
                 inputs={k: str(v) for k, v in parsed_inputs.items()},
                 use_container=container,
@@ -332,6 +333,7 @@ def workflow_status(
     ],
 ) -> None:
     """Show execution history for a workflow."""
+    import aef_api.v1.executions as ex
     import aef_api.v1.workflows as wf
 
     # Resolve partial ID and show executions
@@ -356,7 +358,7 @@ def workflow_status(
         )
     )
 
-    exec_result = run(wf.list_executions(workflow_id=full_id))
+    exec_result = run(ex.list_(workflow_id=full_id))
     match exec_result:
         case Ok(executions):
             if not executions:
