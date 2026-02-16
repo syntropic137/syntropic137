@@ -1,38 +1,21 @@
-"""Trigger management commands."""
+"""Trigger management commands — register, enable, list, show, history, pause, resume, delete, disable."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
-from aef_shared.logging import get_logger
-
-logger = get_logger(__name__)
-console = Console()
+from aef_api.types import Err, Ok
+from aef_cli._async import run
+from aef_cli._output import console, status_style
 
 app = typer.Typer(
     name="triggers",
     help="Manage self-healing trigger rules",
     no_args_is_help=True,
 )
-
-
-def _run_async(coro):
-    """Run an async coroutine synchronously."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop and loop.is_running():
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            return pool.submit(asyncio.run, coro).result()
-    return asyncio.run(coro)
 
 
 @app.command("register")
@@ -54,15 +37,7 @@ def register_trigger(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Register a new trigger rule."""
-    from aef_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
-        RegisterTriggerCommand,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-        RegisterTriggerHandler,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
     # Parse conditions
     parsed_conditions = []
@@ -77,36 +52,33 @@ def register_trigger(
             cond["value"] = parts[2]
         parsed_conditions.append(cond)
 
-    cmd = RegisterTriggerCommand(
-        name=name,
-        event=event,
-        conditions=tuple(parsed_conditions),
-        repository=repository,
-        installation_id=installation_id,
-        workflow_id=workflow,
-        config=(
-            ("max_attempts", max_attempts),
-            ("budget_per_trigger_usd", budget),
-            ("daily_limit", daily_limit),
-        ),
-        created_by=created_by,
+    result = run(
+        tr.register_trigger(
+            name=name,
+            event=event,
+            repository=repository,
+            workflow_id=workflow,
+            conditions=parsed_conditions or None,
+            installation_id=installation_id,
+            config={
+                "max_attempts": max_attempts,
+                "budget_per_trigger_usd": budget,
+                "daily_limit": daily_limit,
+            },
+            created_by=created_by,
+        )
     )
 
-    from aef_adapters.storage.repositories import get_trigger_repository
-
-    store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
-    aggregate = _run_async(handler.handle(cmd))
-
-    status_val = (
-        aggregate.status.value if hasattr(aggregate.status, "value") else str(aggregate.status)
-    )
-    console.print(f"[green]Trigger registered:[/green] {aggregate.trigger_id}")
-    console.print(f"  Name: {aggregate.name}")
-    console.print(f"  Event: {aggregate.event}")
-    console.print(f"  Repository: {aggregate.repository}")
-    console.print(f"  Workflow: {aggregate.workflow_id}")
-    console.print(f"  Status: {status_val}")
+    match result:
+        case Ok(trigger_id):
+            console.print(f"[green]Trigger registered:[/green] {trigger_id}")
+            console.print(f"  Name: {name}")
+            console.print(f"  Event: {event}")
+            console.print(f"  Repository: {repository}")
+            console.print(f"  Workflow: {workflow}")
+        case Err(error, message=msg):
+            console.print(f"[red]Failed to register trigger: {msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("enable")
@@ -117,36 +89,24 @@ def enable_preset(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Enable a built-in preset for a repository."""
-    from aef_domain.contexts.github._shared.trigger_presets import (
-        create_preset_command,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-        RegisterTriggerHandler,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    try:
-        cmd = create_preset_command(
+    result = run(
+        tr.enable_preset(
             preset_name=preset,
             repository=repository,
             installation_id=installation_id,
             created_by=created_by,
         )
-    except ValueError as e:
-        console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1) from e
+    )
 
-    from aef_adapters.storage.repositories import get_trigger_repository
-
-    store = get_trigger_store()
-    handler = RegisterTriggerHandler(store=store, repository=get_trigger_repository())
-    aggregate = _run_async(handler.handle(cmd))
-
-    console.print(f"[green]Preset '{preset}' enabled:[/green] {aggregate.trigger_id}")
-    console.print(f"  Repository: {repository}")
-    console.print(f"  Workflow: {aggregate.workflow_id}")
+    match result:
+        case Ok(trigger_id):
+            console.print(f"[green]Preset '{preset}' enabled:[/green] {trigger_id}")
+            console.print(f"  Repository: {repository}")
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("list")
@@ -157,42 +117,38 @@ def list_triggers(
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status")] = None,
 ) -> None:
     """List all registered triggers."""
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    store = get_trigger_store()
-    triggers = _run_async(store.list_all(repository=repository, status=status))
+    result = run(tr.list_triggers(repository=repository, status=status))
 
-    if not triggers:
-        console.print("[dim]No triggers found.[/dim]")
-        return
+    match result:
+        case Ok(triggers):
+            if not triggers:
+                console.print("[dim]No triggers found.[/dim]")
+                return
 
-    table = Table(title="Trigger Rules")
-    table.add_column("ID", style="cyan")
-    table.add_column("Name")
-    table.add_column("Event")
-    table.add_column("Repository")
-    table.add_column("Status")
-    table.add_column("Fires", justify="right")
+            table = Table(title="Trigger Rules")
+            table.add_column("ID", style="cyan")
+            table.add_column("Name")
+            table.add_column("Event")
+            table.add_column("Repository")
+            table.add_column("Status")
+            table.add_column("Fires", justify="right")
 
-    for t in triggers:
-        status_val = t.status.value if hasattr(t.status, "value") else str(t.status)
-        status_style = {
-            "active": "green",
-            "paused": "yellow",
-            "deleted": "red",
-        }.get(status_val, "")
-        table.add_row(
-            t.trigger_id,
-            t.name,
-            t.event,
-            t.repository,
-            f"[{status_style}]{status_val}[/{status_style}]",
-            str(t.fire_count),
-        )
-
-    console.print(table)
+            for t in triggers:
+                style = status_style(t.status)
+                table.add_row(
+                    t.trigger_id,
+                    t.name,
+                    t.event,
+                    t.repository,
+                    f"[{style}]{t.status}[/{style}]",
+                    str(t.fire_count),
+                )
+            console.print(table)
+        case Err(error, message=msg):
+            console.print(f"[red]Failed: {msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("show")
@@ -200,40 +156,32 @@ def show_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Show trigger details."""
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    store = get_trigger_store()
-    trigger = _run_async(store.get(trigger_id))
+    result = run(tr.get_trigger(trigger_id))
 
-    if trigger is None:
-        console.print(f"[red]Trigger not found: {trigger_id}[/red]")
-        raise typer.Exit(1)
-
-    status_val = trigger.status.value if hasattr(trigger.status, "value") else str(trigger.status)
-    console.print(f"[bold]Trigger: {trigger.name}[/bold]")
-    console.print(f"  ID: {trigger.trigger_id}")
-    console.print(f"  Status: {status_val}")
-    console.print(f"  Event: {trigger.event}")
-    console.print(f"  Repository: {trigger.repository}")
-    console.print(f"  Workflow: {trigger.workflow_id}")
-    console.print(f"  Fire Count: {trigger.fire_count}")
-    console.print(f"  Conditions: {len(trigger.conditions)}")
-    for c in trigger.conditions:
-        if isinstance(c, dict):
-            console.print(
-                f"    - {c.get('field', '')} {c.get('operator', '')} {c.get('value', '')}"
-            )
-        else:
-            console.print(f"    - {c.field} {c.operator} {c.value}")
-    config = trigger.config
-    if hasattr(config, "max_attempts"):
-        console.print("  Config:")
-        console.print(f"    Max Attempts: {config.max_attempts}")
-        console.print(f"    Daily Limit: {config.daily_limit}")
-        console.print(f"    Cooldown: {config.cooldown_seconds}s")
-        console.print(f"    Budget: ${config.budget_per_trigger_usd:.2f}")
+    match result:
+        case Ok(detail):
+            console.print(f"[bold]Trigger: {detail.name}[/bold]")
+            console.print(f"  ID: {detail.trigger_id}")
+            console.print(f"  Status: {detail.status}")
+            console.print(f"  Event: {detail.event}")
+            console.print(f"  Repository: {detail.repository}")
+            console.print(f"  Workflow: {detail.workflow_id}")
+            console.print(f"  Fire Count: {detail.fire_count}")
+            if detail.conditions:
+                console.print(f"  Conditions: {len(detail.conditions)}")
+                for c in detail.conditions:
+                    console.print(
+                        f"    - {c.get('field', '')} {c.get('operator', '')} {c.get('value', '')}"
+                    )
+            if detail.config:
+                console.print("  Config:")
+                for k, v in detail.config.items():
+                    console.print(f"    {k}: {v}")
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("history")
@@ -242,39 +190,36 @@ def trigger_history(
     limit: Annotated[int, typer.Option(help="Max entries to show")] = 50,
 ) -> None:
     """Show trigger execution history."""
-    from aef_domain.contexts.github.domain.queries.get_trigger_history import (
-        GetTriggerHistoryQuery,
-    )
-    from aef_domain.contexts.github.slices.trigger_history.handler import (
-        GetTriggerHistoryHandler,
-    )
+    import aef_api.v1.triggers as tr
 
-    query = GetTriggerHistoryQuery(trigger_id=trigger_id, limit=limit)
-    handler = GetTriggerHistoryHandler()
-    entries = handler.handle(query)
+    result = tr.get_trigger_history(trigger_id=trigger_id, limit=limit)
 
-    if not entries:
-        console.print(f"[dim]No history for trigger {trigger_id}.[/dim]")
-        return
+    match result:
+        case Ok(entries):
+            if not entries:
+                console.print(f"[dim]No history for trigger {trigger_id}.[/dim]")
+                return
 
-    table = Table(title=f"History for {trigger_id}")
-    table.add_column("Fired At")
-    table.add_column("Execution ID", style="cyan")
-    table.add_column("Event")
-    table.add_column("PR #", justify="right")
-    table.add_column("Status")
+            table = Table(title=f"History for {trigger_id}")
+            table.add_column("Fired At")
+            table.add_column("Execution ID", style="cyan")
+            table.add_column("Event")
+            table.add_column("PR #", justify="right")
+            table.add_column("Status")
 
-    for entry in entries:
-        fired_at = entry.fired_at.isoformat() if entry.fired_at else "-"
-        table.add_row(
-            fired_at,
-            entry.execution_id,
-            entry.github_event_type,
-            str(entry.pr_number or "-"),
-            entry.status,
-        )
-
-    console.print(table)
+            for entry in entries:
+                fired_at = entry.fired_at.isoformat() if entry.fired_at else "-"
+                table.add_row(
+                    fired_at,
+                    entry.execution_id,
+                    entry.github_event_type,
+                    str(entry.pr_number or "-"),
+                    entry.status,
+                )
+            console.print(table)
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("pause")
@@ -283,27 +228,16 @@ def pause_trigger(
     reason: Annotated[str | None, typer.Option(help="Reason for pausing")] = None,
 ) -> None:
     """Pause a trigger rule."""
-    from aef_adapters.storage.repositories import get_trigger_repository
-    from aef_domain.contexts.github.domain.commands.PauseTriggerCommand import (
-        PauseTriggerCommand,
-    )
-    from aef_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
-    event = _run_async(
-        handler.pause(PauseTriggerCommand(trigger_id=trigger_id, paused_by="cli", reason=reason))
-    )
+    result = run(tr.pause_trigger(trigger_id=trigger_id, reason=reason, paused_by="cli"))
 
-    if event:
-        console.print(f"[yellow]Trigger paused:[/yellow] {trigger_id}")
-    else:
-        console.print(f"[red]Could not pause trigger {trigger_id} (not found or not active)[/red]")
+    match result:
+        case Ok():
+            console.print(f"[yellow]Trigger paused:[/yellow] {trigger_id}")
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("resume")
@@ -311,27 +245,16 @@ def resume_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Resume a paused trigger rule."""
-    from aef_adapters.storage.repositories import get_trigger_repository
-    from aef_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
-        ResumeTriggerCommand,
-    )
-    from aef_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
-    event = _run_async(
-        handler.resume(ResumeTriggerCommand(trigger_id=trigger_id, resumed_by="cli"))
-    )
+    result = run(tr.resume_trigger(trigger_id=trigger_id, resumed_by="cli"))
 
-    if event:
-        console.print(f"[green]Trigger resumed:[/green] {trigger_id}")
-    else:
-        console.print(f"[red]Could not resume trigger {trigger_id} (not found or not paused)[/red]")
+    match result:
+        case Ok():
+            console.print(f"[green]Trigger resumed:[/green] {trigger_id}")
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("delete")
@@ -339,29 +262,16 @@ def delete_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Delete a trigger rule."""
-    from aef_adapters.storage.repositories import get_trigger_repository
-    from aef_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
-        DeleteTriggerCommand,
-    )
-    from aef_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    store = get_trigger_store()
-    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
-    event = _run_async(
-        handler.delete(DeleteTriggerCommand(trigger_id=trigger_id, deleted_by="cli"))
-    )
+    result = run(tr.delete_trigger(trigger_id=trigger_id, deleted_by="cli"))
 
-    if event:
-        console.print(f"[red]Trigger deleted:[/red] {trigger_id}")
-    else:
-        console.print(
-            f"[red]Could not delete trigger {trigger_id} (not found or already deleted)[/red]"
-        )
+    match result:
+        case Ok():
+            console.print(f"[red]Trigger deleted:[/red] {trigger_id}")
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("disable")
@@ -371,38 +281,16 @@ def disable_all(
     ],
 ) -> None:
     """Disable all triggers for a repository."""
-    from aef_domain.contexts.github.domain.commands.PauseTriggerCommand import (
-        PauseTriggerCommand,
-    )
-    from aef_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-        ManageTriggerHandler,
-    )
-    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
-        get_trigger_store,
-    )
+    import aef_api.v1.triggers as tr
 
-    store = get_trigger_store()
-    triggers = _run_async(store.list_all(repository=repository, status="active"))
+    result = run(tr.disable_triggers(repository=repository, paused_by="cli"))
 
-    if not triggers:
-        console.print(f"[dim]No active triggers for {repository}.[/dim]")
-        return
-
-    from aef_adapters.storage.repositories import get_trigger_repository
-
-    handler = ManageTriggerHandler(store=store, repository=get_trigger_repository())
-    paused = 0
-    for t in triggers:
-        event = _run_async(
-            handler.pause(
-                PauseTriggerCommand(
-                    trigger_id=t.trigger_id,
-                    paused_by="cli",
-                    reason=f"Bulk disable for {repository}",
-                )
-            )
-        )
-        if event:
-            paused += 1
-
-    console.print(f"[yellow]Paused {paused} trigger(s) for {repository}[/yellow]")
+    match result:
+        case Ok(count):
+            if count == 0:
+                console.print(f"[dim]No active triggers for {repository}.[/dim]")
+            else:
+                console.print(f"[yellow]Paused {count} trigger(s) for {repository}[/yellow]")
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
