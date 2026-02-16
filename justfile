@@ -43,7 +43,13 @@ dev: _workspace-check
     @echo "3️⃣ Waiting for services to be healthy..."
     @sleep 5
     @echo ""
-    @echo "4️⃣ Starting dashboard frontend..."
+    @echo "4️⃣ Seeding workflows..."
+    @just seed-workflows || echo "   ⚠️ Seed skipped (workflows may already exist)"
+    @echo ""
+    @echo "5️⃣ Seeding triggers..."
+    @just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
+    @echo ""
+    @echo "6️⃣ Starting dashboard frontend..."
     @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 3
@@ -159,7 +165,10 @@ dev-fresh: _workspace-check
     @echo "7️⃣ Seeding workflows..."
     @just seed-workflows
     @echo ""
-    @echo "8️⃣ Starting dashboard frontend..."
+    @echo "8️⃣ Seeding triggers..."
+    @just seed-triggers
+    @echo ""
+    @echo "9️⃣ Starting dashboard frontend..."
     @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 3
@@ -374,7 +383,7 @@ check:
     @uv run ruff format --check .
     @echo ""
     @echo "4️⃣ Type checking..."
-    @uv run pyright || echo "⚠️  Type check failed (non-blocking for now)"
+    @uv run pyright
     @echo ""
     @echo "✅ Static checks passed!"
 
@@ -616,7 +625,14 @@ generate-llms-txt:
 
 # Seed workflows from YAML files
 seed-workflows:
-    uv run --package aef-cli aef workflow seed
+    uv run python scripts/seed_workflows.py
+
+# Seed trigger presets (self-healing, review-fix)
+seed-triggers:
+    uv run python scripts/seed_triggers.py
+
+# Seed all data (workflows + triggers)
+seed-all: seed-workflows seed-triggers
 
 # --- Utility Commands ---
 
