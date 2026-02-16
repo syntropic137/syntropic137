@@ -10,6 +10,7 @@ resolution-markers = [
 [manifest]
 members = [
     "aef-adapters",
+    "aef-api",
     "aef-cli",
     "aef-collector",
     "aef-dashboard",
@@ -87,6 +88,25 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
 ]
 provides-extras = ["postgres", "claude", "openai", "agents", "minio", "all"]
+
+[[package]]
+name = "aef-api"
+version = "0.1.0"
+source = { editable = "packages/aef-api" }
+dependencies = [
+    { name = "aef-adapters" },
+    { name = "aef-domain" },
+    { name = "aef-shared" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aef-adapters", editable = "packages/aef-adapters" },
+    { name = "aef-domain", editable = "packages/aef-domain" },
+    { name = "aef-shared", editable = "packages/aef-shared" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+]
 
 [[package]]
 name = "aef-cli"
@@ -274,10 +294,11 @@ requires-dist = [
 
 [[package]]
 name = "agentic-engineering-framework"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aef-adapters" },
+    { name = "aef-api" },
     { name = "aef-cli" },
     { name = "aef-collector" },
     { name = "aef-dashboard" },
@@ -305,6 +326,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aef-adapters", editable = "packages/aef-adapters" },
+    { name = "aef-api", editable = "packages/aef-api" },
     { name = "aef-cli", editable = "apps/aef-cli" },
     { name = "aef-collector", editable = "packages/aef-collector" },
     { name = "aef-dashboard", editable = "apps/aef-dashboard" },
