@@ -132,7 +132,7 @@ async def test_list_workflows_with_filter():
 
 async def test_list_executions_empty():
     """List executions when none exist."""
-    from aef_api.v1.workflows import list_executions
+    from aef_api.v1.executions import list_ as list_executions
 
     result = await list_executions()
     assert isinstance(result, Ok)

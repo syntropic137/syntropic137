@@ -198,3 +198,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
             self._project_name = event_data.get("project_name")
             self._description = event_data.get("description")
+
+    @event_sourcing_handler("WorkflowCreated")
+    def on_workflow_created_legacy(self, event: WorkflowTemplateCreatedEvent) -> None:
+        """Handle legacy 'WorkflowCreated' events stored before the rename.
+
+        Delegates to the canonical handler so old events rehydrate correctly.
+        """
+        self.on_workflow_created(event)

@@ -1,6 +1,7 @@
-"""Workflow operations — create, list, get, execute, and query executions.
+"""Workflow operations — create, list, get, and validate templates.
 
 Maps to the orchestration context in aef-domain.
+Execution operations have moved to ``aef_api.v1.executions``.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from uuid import uuid4
 
 from aef_api._wiring import (
     ensure_connected,
-    get_execution_engine,
     get_projection_mgr,
     get_publisher,
     get_workflow_repo,
@@ -18,8 +18,6 @@ from aef_api._wiring import (
 )
 from aef_api.types import (
     Err,
-    ExecutionDetail,
-    ExecutionSummary,
     Ok,
     Result,
     WorkflowDetail,
@@ -92,6 +90,38 @@ async def get_workflow(
     detail = await manager.workflow_detail.get_by_id(workflow_id)
     if detail is None:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
+    # Convert domain phase objects to PhaseDefinitionResponse-compatible dicts
+    from aef_api.types import PhaseDefinitionResponse
+
+    phases: list[PhaseDefinitionResponse] = []
+    for p in getattr(detail, "phases", None) or []:
+        if isinstance(p, dict):
+            phases.append(
+                PhaseDefinitionResponse(
+                    phase_id=str(p.get("phase_id") or p.get("id") or ""),
+                    name=str(p.get("name", "")),
+                    order=p.get("order", 0),
+                    description=p.get("description"),
+                    agent_type=p.get("agent_type", ""),
+                    prompt_template=p.get("prompt_template"),
+                    timeout_seconds=p.get("timeout_seconds", 300),
+                    allowed_tools=p.get("allowed_tools", []),
+                )
+            )
+        else:
+            phases.append(
+                PhaseDefinitionResponse(
+                    phase_id=getattr(p, "phase_id", None) or getattr(p, "id", ""),
+                    name=getattr(p, "name", ""),
+                    order=getattr(p, "order", 0),
+                    description=getattr(p, "description", None),
+                    agent_type=getattr(p, "agent_type", ""),
+                    prompt_template=getattr(p, "prompt_template", None),
+                    timeout_seconds=getattr(p, "timeout_seconds", None) or 300,
+                    allowed_tools=list(getattr(p, "allowed_tools", None) or []),
+                )
+            )
+
     return Ok(
         WorkflowDetail(
             id=detail.id,
@@ -99,7 +129,7 @@ async def get_workflow(
             description=detail.description,
             workflow_type=detail.workflow_type,
             classification=detail.classification,
-            phases=[],  # Phase details available via detail.phases
+            phases=phases,
             created_at=detail.created_at,
             runs_count=detail.runs_count,
         )
@@ -208,154 +238,6 @@ async def create_workflow(
         return Ok(workflow_id)
     except Exception as e:
         return Err(WorkflowError.INVALID_INPUT, message=str(e))
-
-
-async def execute_workflow(
-    workflow_id: str,
-    inputs: dict[str, str] | None = None,
-    execution_id: str | None = None,
-    use_container: bool = True,  # noqa: ARG001
-    tenant_id: str | None = None,  # noqa: ARG001
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[ExecutionSummary, WorkflowError]:
-    """Execute a workflow.
-
-    Args:
-        workflow_id: ID of the workflow template to execute.
-        inputs: Input variables for the workflow.
-        execution_id: Optional execution ID (auto-generated if omitted).
-        use_container: Whether to use container isolation (default True).
-        tenant_id: Optional tenant ID for multi-tenant deployments.
-        auth: Optional authentication context.
-
-    Returns:
-        Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
-    """
-    from aef_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
-        WorkflowNotFoundError,
-    )
-
-    await ensure_connected()
-
-    # Look up workflow name for the summary
-    manager = get_projection_mgr()
-    detail = await manager.workflow_detail.get_by_id(workflow_id)
-    workflow_name = detail.name if detail else ""
-
-    engine = await get_execution_engine()
-
-    try:
-        result = await engine.execute(
-            workflow_id=workflow_id,
-            inputs=inputs or {},
-            execution_id=execution_id,
-        )
-    except WorkflowNotFoundError:
-        return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
-    except Exception as e:
-        return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
-
-    return Ok(
-        ExecutionSummary(
-            workflow_execution_id=result.execution_id,
-            workflow_id=workflow_id,
-            workflow_name=workflow_name,
-            status=result.status.value,
-            completed_phases=result.metrics.completed_phases,
-            total_phases=result.metrics.total_phases,
-            total_tokens=result.metrics.total_tokens,
-            total_cost_usd=result.metrics.total_cost_usd,
-            error_message=result.error_message,
-        )
-    )
-
-
-async def get_execution(
-    execution_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[ExecutionDetail, WorkflowError]:
-    """Get detailed information about a workflow execution.
-
-    Args:
-        execution_id: The execution ID.
-        auth: Optional authentication context.
-
-    Returns:
-        Ok(ExecutionDetail) on success, Err(WorkflowError.NOT_FOUND) if missing.
-    """
-    await ensure_connected()
-    manager = get_projection_mgr()
-    detail = await manager.workflow_execution_detail.get_by_id(execution_id)
-    if detail is None:
-        return Err(WorkflowError.NOT_FOUND, message=f"Execution {execution_id} not found")
-    return Ok(
-        ExecutionDetail(
-            workflow_execution_id=detail.workflow_execution_id,
-            workflow_id=detail.workflow_id,
-            workflow_name=detail.workflow_name,
-            status=detail.status,
-            started_at=detail.started_at,
-            completed_at=detail.completed_at,
-            total_input_tokens=detail.total_input_tokens,
-            total_output_tokens=detail.total_output_tokens,
-            total_cost_usd=detail.total_cost_usd,
-            total_duration_seconds=detail.total_duration_seconds,
-            artifact_ids=list(detail.artifact_ids),
-            error_message=detail.error_message,
-        )
-    )
-
-
-async def list_executions(
-    workflow_id: str | None = None,
-    status: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[list[ExecutionSummary], WorkflowError]:
-    """List workflow executions.
-
-    Args:
-        workflow_id: Optional filter by workflow ID.
-        status: Optional filter by execution status.
-        limit: Maximum results to return.
-        offset: Pagination offset.
-        auth: Optional authentication context.
-
-    Returns:
-        Ok(list[ExecutionSummary]) on success, Err(WorkflowError) on failure.
-    """
-    await ensure_connected()
-    manager = get_projection_mgr()
-    projection = manager.workflow_execution_list
-
-    if workflow_id:
-        domain_summaries = await projection.get_by_workflow_id(workflow_id)
-    else:
-        domain_summaries = await projection.get_all(
-            limit=limit,
-            offset=offset,
-            status_filter=status,
-        )
-
-    return Ok(
-        [
-            ExecutionSummary(
-                workflow_execution_id=s.workflow_execution_id,
-                workflow_id=s.workflow_id,
-                workflow_name=s.workflow_name,
-                status=s.status,
-                started_at=s.started_at,
-                completed_at=s.completed_at,
-                completed_phases=s.completed_phases,
-                total_phases=s.total_phases,
-                total_tokens=s.total_tokens,
-                total_cost_usd=s.total_cost_usd,
-                error_message=s.error_message,
-            )
-            for s in domain_summaries
-        ]
-    )
 
 
 async def validate_yaml(
