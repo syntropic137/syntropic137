@@ -150,6 +150,16 @@ async def enable_preset(
             message=f"Preset '{preset_name}' not found",
         )
 
+    # Dedup check: skip if an active/paused trigger with the same name+repo+event exists
+    existing = await list_triggers(repository=repository)
+    if isinstance(existing, Ok):
+        for t in existing.value:
+            if t.name == command.name and t.event == command.event and t.status != "deleted":
+                return Err(
+                    TriggerError.INVALID_INPUT,
+                    message=f"Trigger '{command.name}' already exists for {repository}",
+                )
+
     store = get_trigger_store()
     repo = get_trigger_repo()
     handler = RegisterTriggerHandler(store=store, repository=repo)

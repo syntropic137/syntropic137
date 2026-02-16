@@ -7,6 +7,7 @@ obtain properly-configured domain handlers and projections.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from aef_adapters.agents import AgentProvider, get_agent
@@ -18,6 +19,7 @@ from aef_adapters.storage import (
     disconnect_event_store,
     get_artifact_repository,
     get_event_publisher,
+    get_event_store_client,
     get_session_repository,
     get_workflow_repository,
 )
@@ -178,3 +180,89 @@ async def sync_published_events_to_projections() -> None:
 
     # Clear processed events to avoid re-processing
     publisher._published_events.clear()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 additions — execution control, events, conversations, etc.
+# ---------------------------------------------------------------------------
+
+
+def get_controller() -> Any:
+    """Return a singleton ExecutionController for pause/resume/cancel/inject.
+
+    Wraps: ExecutionController(ProjectionControlStateAdapter, signal_adapter)
+    """
+    from aef_adapters.control import ExecutionController
+    from aef_adapters.control.adapters.projection import ProjectionControlStateAdapter
+    from aef_adapters.projection_stores import get_projection_store
+
+    state_adapter = ProjectionControlStateAdapter(get_projection_store())
+
+    env = os.environ.get("APP_ENVIRONMENT", "")
+    if env == "test":
+        from aef_adapters.control.adapters.memory import InMemorySignalQueueAdapter
+
+        signal_adapter: Any = InMemorySignalQueueAdapter()
+    else:
+        signal_adapter = _NullSignalQueueAdapter()
+
+    return ExecutionController(
+        state_port=state_adapter,
+        signal_port=signal_adapter,
+    )
+
+
+class _NullSignalQueueAdapter:
+    """No-op signal adapter when Redis is not available."""
+
+    async def enqueue(self, _execution_id: str, _signal: object) -> None:
+        pass
+
+    async def dequeue(self, _execution_id: str) -> None:
+        return None
+
+    async def get_signal(self, _execution_id: str) -> None:
+        return None
+
+
+def get_event_store_instance() -> Any:
+    """Return the AgentEventStore for TimescaleDB queries."""
+    return get_event_store()
+
+
+async def get_conversation_store() -> Any:
+    """Return the conversation storage (MinIO-backed)."""
+    return await get_conversation_storage()
+
+
+def get_realtime() -> Any:
+    """Return the RealTimeProjection singleton."""
+    from aef_adapters.projections.realtime import get_realtime_projection
+
+    return get_realtime_projection()
+
+
+def get_subscription_coordinator(
+    realtime_projection: Any = None,
+    execution_service: Any = None,
+) -> Any:
+    """Create the CoordinatorSubscriptionService.
+
+    Wraps: create_coordinator_service(event_store, projection_store, ...)
+    """
+    from aef_adapters.projection_stores import get_projection_store
+    from aef_adapters.subscriptions import create_coordinator_service
+
+    return create_coordinator_service(
+        event_store=get_event_store_client(),
+        projection_store=get_projection_store(),
+        realtime_projection=realtime_projection,
+        execution_service=execution_service,
+    )
+
+
+def get_github_settings() -> Any:
+    """Return the GitHubAppSettings instance."""
+    from aef_shared.settings.github import get_github_settings as _get
+
+    return _get()
