@@ -153,7 +153,9 @@ def build_manifest(
 # Local Callback Server
 # ---------------------------------------------------------------------------
 
-# Shared state between callback handler and the waiting thread.
+# Module-level mutable state shared between the callback handler and the
+# waiting thread.  This module is NOT thread-safe — only one manifest flow
+# should run at a time per process (which is the expected CLI usage).
 _callback_result: dict[str, str | None] = {"code": None, "error": None}
 _callback_event = threading.Event()
 
@@ -161,8 +163,12 @@ _callback_event = threading.Event()
 _installation_result: dict[str, str | None] = {"installation_id": None}
 _installation_event = threading.Event()
 
-# Shared server reference for lifecycle management across callbacks.
+# CSRF state token — set before the browser flow, validated on callback.
+_expected_state: str | None = None
+
+# Shared server references for lifecycle management across callbacks.
 _callback_server: http.server.HTTPServer | None = None
+_form_server: http.server.HTTPServer | None = None
 
 
 class _ManifestCallbackHandler(http.server.BaseHTTPRequestHandler):
@@ -182,6 +188,19 @@ class _ManifestCallbackHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_manifest_callback(self, params: dict[str, list[str]]) -> None:
         """Handle the manifest creation redirect (``/callback?code=...``)."""
+        # Validate CSRF state token
+        state = params.get("state", [None])[0]
+        if _expected_state and state != _expected_state:
+            _callback_result["error"] = "state_mismatch"
+            self.send_response(403)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><h1>Error</h1><p>State mismatch (possible CSRF).</p></body></html>"
+            )
+            _callback_event.set()
+            return
+
         code = params.get("code", [None])[0]
         if code:
             _callback_result["code"] = code
@@ -319,12 +338,14 @@ def wait_for_installation(timeout: int = 180) -> str | None:
 
 
 def shutdown_callback_server() -> None:
-    """Gracefully shut down the shared callback server."""
-    global _callback_server
-    if _callback_server is not None:
-        with suppress(Exception):
-            _callback_server.shutdown()
-        _callback_server = None
+    """Gracefully shut down all local HTTP servers (callback + form)."""
+    global _callback_server, _form_server
+    for ref in (_callback_server, _form_server):
+        if ref is not None:
+            with suppress(Exception):
+                ref.shutdown()
+    _callback_server = None
+    _form_server = None
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +477,9 @@ def run_manifest_flow(
     # We need to POST the manifest to GitHub via a form in the browser.
     # The simplest cross-platform approach is to open a tiny local HTML page
     # that auto-submits the form.
+    global _expected_state
     state = secrets.token_urlsafe(16)
+    _expected_state = state
     form_html = _build_autosubmit_form(create_url, manifest_json, state)
 
     # Serve the auto-submit page, then reuse the same server for callback
@@ -552,15 +575,15 @@ class _FormPageHandler(http.server.BaseHTTPRequestHandler):
 
 def _serve_form_page(port: int, form_html: str) -> None:
     """Start a background server that serves the form HTML on ``/start``."""
+    global _form_server
 
     class Handler(_FormPageHandler):
         _html = form_html
 
     server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    _form_server = server
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    # Server will be garbage-collected when the process exits or the
-    # daemon thread is cleaned up.
 
 
 # ---------------------------------------------------------------------------

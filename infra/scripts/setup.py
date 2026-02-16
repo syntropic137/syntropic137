@@ -28,6 +28,7 @@ import socket
 import stat
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -337,7 +338,7 @@ def _configure_github_app_manifest(ctx: dict) -> bool:
         print("  You can retry this stage with:")
         print("    python infra/scripts/setup.py --stage configure_github_app")
         return False
-    except Exception as exc:
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError, RuntimeError) as exc:
         fail(f"Manifest flow failed: {exc}")
         print()
         if confirm("Fall back to manual configuration?"):
@@ -492,11 +493,22 @@ def _audit_file_security() -> tuple[int, int]:
     # Secrets dir .gitignore
     gitignore = SECRETS_DIR / ".gitignore"
     if SECRETS_DIR.exists():
-        if gitignore.exists() and "*" in gitignore.read_text():
-            ok("Secrets directory has .gitignore with wildcard")
+        if gitignore.exists():
+            gi_text = gitignore.read_text()
+            gi_lines = [ln.strip() for ln in gi_text.splitlines()]
+            # Check that plain-text secrets are ignored (either a bare '*'
+            # wildcard or specific '*.txt' / '*.pem' patterns).
+            has_blanket = "*" in gi_lines
+            has_specific = "*.txt" in gi_lines and "*.pem" in gi_lines
+            if has_blanket or has_specific:
+                ok("Secrets directory has .gitignore blocking plain-text secrets")
+            else:
+                warn("Secrets .gitignore may not block plain-text files")
+                step(f"  Ensure *.txt and *.pem are listed in {gitignore}")
+                warnings += 1
         else:
-            warn("Secrets directory missing .gitignore with '*' pattern")
-            step(f"  Fix: echo '*' > {gitignore}")
+            warn("Secrets directory missing .gitignore")
+            step(f"  Fix: echo '*.txt\\n*.pem' > {gitignore}")
             warnings += 1
 
     # Misplaced PEM files

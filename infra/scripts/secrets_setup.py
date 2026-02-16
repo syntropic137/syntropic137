@@ -227,9 +227,10 @@ def seal_secrets(passphrase: str | None = None) -> bool:
         print("Passphrase cannot be empty.")
         return False
 
-    sealed = 0
+    # Phase 1: Encrypt all files (without deleting originals yet).
+    enc_pairs: list[tuple[Path, Path]] = []
     for path in files:
-        enc_path = path.with_suffix(path.suffix + ".enc")
+        enc_path = path.with_name(path.name + ".enc")
         result = subprocess.run(
             [
                 "openssl",
@@ -244,29 +245,38 @@ def seal_secrets(passphrase: str | None = None) -> bool:
                 "-out",
                 str(enc_path),
                 "-pass",
-                f"pass:{passphrase}",
+                "stdin",
             ],
+            input=passphrase,
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
             print(f"  FAIL {path.name}: {result.stderr.strip()}")
-            # Remove partial .enc file
             enc_path.unlink(missing_ok=True)
+            # Roll back any .enc files created in this run
+            for _, rollback_enc in enc_pairs:
+                rollback_enc.unlink(missing_ok=True)
             return False
 
         set_secure_permissions(enc_path)
-        path.unlink()
-        print(f"  sealed {path.name} -> {enc_path.name}")
-        sealed += 1
+        enc_pairs.append((path, enc_path))
+        print(f"  encrypted {path.name} -> {enc_path.name}")
 
-    print(f"\n{sealed} file(s) sealed. Plain-text originals removed.")
+    # Phase 2: All encryptions succeeded — remove plain-text originals.
+    for plain, _enc in enc_pairs:
+        plain.unlink()
+
+    print(f"\n{len(enc_pairs)} file(s) sealed. Plain-text originals removed.")
     print("The .enc files are safe to commit to version control.")
     return True
 
 
 def unseal_secrets(passphrase: str | None = None) -> bool:
     """Decrypt ``.enc`` files back to plain-text secrets.
+
+    The ``.enc`` files are preserved after decryption so they remain
+    available as encrypted backups (and for version control).
 
     Args:
         passphrase: Decryption passphrase.  Prompted interactively if *None*.
@@ -297,7 +307,9 @@ def unseal_secrets(passphrase: str | None = None) -> bool:
     unsealed = 0
     for enc_path in enc_files:
         # Restore original filename: foo.txt.enc -> foo.txt
-        plain_path = enc_path.with_suffix("")
+        # Use stem of the .enc to strip exactly the .enc suffix.
+        plain_name = enc_path.name.removesuffix(".enc")
+        plain_path = enc_path.with_name(plain_name)
         result = subprocess.run(
             [
                 "openssl",
@@ -313,8 +325,9 @@ def unseal_secrets(passphrase: str | None = None) -> bool:
                 "-out",
                 str(plain_path),
                 "-pass",
-                f"pass:{passphrase}",
+                "stdin",
             ],
+            input=passphrase,
             capture_output=True,
             text=True,
         )
@@ -331,7 +344,7 @@ def unseal_secrets(passphrase: str | None = None) -> bool:
         print(f"  unsealed {enc_path.name} -> {plain_path.name}")
         unsealed += 1
 
-    print(f"\n{unsealed} file(s) unsealed.")
+    print(f"\n{unsealed} file(s) unsealed. (.enc files preserved as backups)")
     return True
 
 
