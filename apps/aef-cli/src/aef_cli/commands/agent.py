@@ -1,219 +1,128 @@
-"""Agent CLI commands.
-
-Commands for interacting with AI agent providers.
-"""
+"""Agent interaction commands — list providers, test, chat."""
 
 from __future__ import annotations
 
-import asyncio
+from typing import Annotated
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
-from aef_adapters.agents import (
-    AgentConfig,
-    AgentError,
-    AgentMessage,
-    AgentProvider,
-    get_agent,
-    get_available_agents,
-)
-from aef_shared.logging import get_logger
-
-logger = get_logger(__name__)
-console = Console()
+from aef_api.types import Err, Ok
+from aef_cli._async import run
+from aef_cli._output import console
 
 app = typer.Typer(
     name="agent",
-    help="AI agent management and interaction",
+    help="AI agent management and testing",
+    no_args_is_help=True,
 )
 
 
 @app.command("list")
-def list_agents() -> None:
+def list_providers() -> None:
     """List available agent providers."""
-    available = get_available_agents()
+    import aef_api.v1.agents as ag
 
-    table = Table(title="Available Agents")
-    table.add_column("Provider", style="cyan")
-    table.add_column("Status", style="green")
-    table.add_column("Default Model")
+    result = run(ag.list_providers())
 
-    # Check each provider
-    for provider in AgentProvider:
-        if provider == AgentProvider.MOCK:
-            continue  # Skip mock in user-facing list
+    match result:
+        case Ok(providers):
+            table = Table(title="Agent Providers")
+            table.add_column("Provider", style="cyan")
+            table.add_column("Display Name")
+            table.add_column("Available")
+            table.add_column("Default Model")
 
-        is_available = provider in available
-        status = "[green]✓ Available[/green]" if is_available else "[red]✗ Not configured[/red]"
-
-        model = ""
-        if provider == AgentProvider.CLAUDE:
-            model = "claude-sonnet-4-20250514"
-        elif provider == AgentProvider.OPENAI:
-            model = "gpt-4o"
-
-        table.add_row(provider.value, status, model)
-
-    console.print(table)
-
-    if not available or (len(available) == 1 and AgentProvider.MOCK in available):
-        console.print()
-        console.print("[yellow]No agents configured![/yellow]")
-        console.print("Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your environment.")
+            for p in providers:
+                available = "[green]Yes[/green]" if p.available else "[red]No[/red]"
+                table.add_row(p.provider, p.display_name, available, p.default_model)
+            console.print(table)
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("test")
 def test_agent(
-    provider: str = typer.Option(
-        None,
-        "--provider",
-        "-p",
-        help="Provider to test (claude, openai). Auto-selects if not specified.",
-    ),
-    prompt: str = typer.Option(
-        "Say 'Hello from AEF!' in exactly 5 words.",
-        "--prompt",
-        help="Test prompt to send",
-    ),
-    model: str = typer.Option(None, "--model", "-m", help="Model to use (optional)"),
+    provider: Annotated[
+        str,
+        typer.Option("--provider", "-p", help="Agent provider (claude, openai, mock)"),
+    ] = "claude",
+    prompt: Annotated[
+        str,
+        typer.Option("--prompt", help="Test prompt"),
+    ] = "Say hello in one sentence.",
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Model override"),
+    ] = None,
 ) -> None:
     """Test an agent provider with a simple prompt."""
-    try:
-        # Get provider enum if specified
-        agent_provider: AgentProvider | None = None
-        if provider:
-            try:
-                agent_provider = AgentProvider(provider.lower())
-            except ValueError:
-                console.print(f"[red]Unknown provider: {provider}[/red]")
-                console.print(
-                    f"Available: {', '.join(p.value for p in AgentProvider if p != AgentProvider.MOCK)}"
-                )
-                raise typer.Exit(1) from None
+    import aef_api.v1.agents as ag
 
-        agent = get_agent(agent_provider)
-        console.print(f"[blue]Testing agent:[/blue] {agent.provider.value}")
+    with console.status(f"Testing {provider}..."):
+        result = run(ag.test_agent(provider=provider, prompt=prompt, model=model))
 
-        config = AgentConfig(
-            model=model
-            or ("claude-sonnet-4-20250514" if agent.provider == AgentProvider.CLAUDE else "gpt-4o"),
-            max_tokens=100,
-            temperature=0.7,
-        )
-
-        console.print(f"[blue]Model:[/blue] {config.model}")
-        console.print(f"[blue]Prompt:[/blue] {prompt}")
-        console.print()
-
-        # Run the test
-        with console.status("Waiting for response..."):
-            response = asyncio.run(
-                agent.complete(
-                    messages=[AgentMessage.user(prompt)],
-                    config=config,
-                )
+    match result:
+        case Ok(test_result):
+            console.print(f"[green]Response from {test_result.provider}:[/green]")
+            console.print(f"  Model: {test_result.model}")
+            console.print(f"  Response: {test_result.response_text}")
+            console.print(
+                f"  Tokens: {test_result.input_tokens} in / {test_result.output_tokens} out"
             )
-
-        console.print("[green]Response:[/green]")
-        console.print(response.content)
-        console.print()
-
-        # Show metrics
-        table = Table(title="Usage Metrics")
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", justify="right")
-
-        table.add_row("Input Tokens", str(response.input_tokens))
-        table.add_row("Output Tokens", str(response.output_tokens))
-        table.add_row("Total Tokens", str(response.total_tokens))
-        table.add_row("Est. Cost", f"${response.cost_estimate:.4f}")
-        table.add_row("Stop Reason", response.stop_reason or "N/A")
-
-        console.print(table)
-
-    except AgentError as e:
-        console.print(f"[red]Agent error:[/red] {e}")
-        logger.error("agent_test_failed", error=str(e), provider=e.provider.value)
-        raise typer.Exit(1) from None
+        case Err(error, message=msg):
+            console.print(f"[red]{msg or error}[/red]")
+            raise typer.Exit(1)
 
 
 @app.command("chat")
-def chat_agent(
-    provider: str = typer.Option(
-        None,
-        "--provider",
-        "-p",
-        help="Provider to use (claude, openai)",
-    ),
-    model: str = typer.Option(None, "--model", "-m", help="Model to use"),
-    system: str = typer.Option(
-        None,
-        "--system",
-        "-s",
-        help="System prompt",
-    ),
+def chat_session(
+    provider: Annotated[
+        str,
+        typer.Option("--provider", "-p", help="Agent provider"),
+    ] = "claude",
+    system: Annotated[
+        str | None,
+        typer.Option("--system", "-s", help="System prompt"),
+    ] = None,
+    model: Annotated[
+        str | None,
+        typer.Option("--model", "-m", help="Model override"),
+    ] = None,
 ) -> None:
-    """Start an interactive chat session with an agent."""
-    try:
-        # Get provider enum if specified
-        agent_provider: AgentProvider | None = None
-        if provider:
-            try:
-                agent_provider = AgentProvider(provider.lower())
-            except ValueError:
-                console.print(f"[red]Unknown provider: {provider}[/red]")
-                raise typer.Exit(1) from None
+    """Start an interactive chat session."""
+    import aef_api.v1.agents as ag
 
-        agent = get_agent(agent_provider)
+    console.print(f"[bold]Chat with {provider}[/bold] (type 'exit' to quit)\n")
 
-        config = AgentConfig(
-            model=model
-            or ("claude-sonnet-4-20250514" if agent.provider == AgentProvider.CLAUDE else "gpt-4o"),
-            max_tokens=4096,
-            temperature=0.7,
-            system_prompt=system,
-        )
+    messages: list[dict[str, str]] = []
+    if system:
+        messages.append({"role": "system", "content": system})
 
-        console.print(f"[bold blue]Chat with {agent.provider.value}[/bold blue]")
-        console.print(f"Model: {config.model}")
-        console.print("Type 'exit' or 'quit' to end the session.")
-        console.print()
+    while True:
+        try:
+            user_input = console.input("[bold blue]You:[/bold blue] ")
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Goodbye![/dim]")
+            break
 
-        messages: list[AgentMessage] = []
+        if user_input.strip().lower() in ("exit", "quit", "q"):
+            console.print("[dim]Goodbye![/dim]")
+            break
 
-        while True:
-            try:
-                user_input = console.input("[bold green]You:[/bold green] ")
-            except (KeyboardInterrupt, EOFError):
-                console.print("\n[yellow]Session ended[/yellow]")
+        if not user_input.strip():
+            continue
+
+        messages.append({"role": "user", "content": user_input})
+
+        with console.status("Thinking..."):
+            result = run(ag.chat(provider=provider, messages=messages, model=model))
+
+        match result:
+            case Ok(chat_result):
+                console.print(f"[bold green]Agent:[/bold green] {chat_result.response_text}\n")
+                messages.append({"role": "assistant", "content": chat_result.response_text})
+            case Err(error, message=msg):
+                console.print(f"[red]{msg or error}[/red]\n")
                 break
-
-            if user_input.lower() in ("exit", "quit", "q"):
-                console.print("[yellow]Session ended[/yellow]")
-                break
-
-            if not user_input.strip():
-                continue
-
-            messages.append(AgentMessage.user(user_input))
-
-            try:
-                with console.status("Thinking..."):
-                    response = asyncio.run(agent.complete(messages=messages, config=config))
-
-                console.print(f"[bold blue]{agent.provider.value}:[/bold blue] {response.content}")
-                console.print(
-                    f"[dim]({response.total_tokens} tokens, ${response.cost_estimate:.4f})[/dim]"
-                )
-                console.print()
-
-                messages.append(AgentMessage.assistant(response.content))
-
-            except AgentError as e:
-                console.print(f"[red]Error:[/red] {e}")
-
-    except AgentError as e:
-        console.print(f"[red]Agent error:[/red] {e}")
-        raise typer.Exit(1) from None

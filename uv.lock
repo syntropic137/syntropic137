@@ -110,21 +110,19 @@ requires-dist = [
 
 [[package]]
 name = "aef-cli"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "apps/aef-cli" }
 dependencies = [
-    { name = "aef-adapters" },
-    { name = "aef-domain" },
-    { name = "aef-shared" },
+    { name = "aef-api" },
+    { name = "httpx" },
     { name = "rich" },
     { name = "typer" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "aef-adapters", editable = "packages/aef-adapters" },
-    { name = "aef-domain", editable = "packages/aef-domain" },
-    { name = "aef-shared", editable = "packages/aef-shared" },
+    { name = "aef-api", editable = "packages/aef-api" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "rich", specifier = ">=13.9.0" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
