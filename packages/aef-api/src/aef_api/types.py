@@ -89,6 +89,31 @@ class ObservabilityError(str, Enum):
     NOT_IMPLEMENTED = "not_implemented"
 
 
+class TriggerError(str, Enum):
+    """Errors returned by trigger operations."""
+
+    NOT_FOUND = "not_found"
+    INVALID_INPUT = "invalid_input"
+    ALREADY_PAUSED = "already_paused"
+    ALREADY_ACTIVE = "already_active"
+    ALREADY_DELETED = "already_deleted"
+    PRESET_NOT_FOUND = "preset_not_found"
+
+
+class AgentError(str, Enum):
+    """Errors returned by agent operations."""
+
+    PROVIDER_NOT_FOUND = "provider_not_found"
+    API_KEY_MISSING = "api_key_missing"
+    COMPLETION_FAILED = "completion_failed"
+
+
+class ConfigError(str, Enum):
+    """Errors returned by config operations."""
+
+    LOAD_FAILED = "load_failed"
+
+
 # ---------------------------------------------------------------------------
 # Response models — Pydantic schemas for API consumers
 # ---------------------------------------------------------------------------
@@ -199,3 +224,116 @@ class ArtifactSummary(BaseModel):
     title: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# Trigger models
+# ---------------------------------------------------------------------------
+
+
+class TriggerSummary(BaseModel):
+    """Summary of a trigger rule for list views."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    trigger_id: str
+    name: str
+    event: str
+    repository: str
+    workflow_id: str
+    status: str
+    fire_count: int = 0
+    created_at: datetime | None = None
+
+
+class TriggerDetail(BaseModel):
+    """Detailed trigger rule response."""
+
+    trigger_id: str
+    name: str
+    event: str
+    repository: str
+    workflow_id: str
+    status: str
+    fire_count: int = 0
+    created_at: datetime | None = None
+    conditions: list[dict] = Field(default_factory=list)
+    input_mapping: dict[str, str] = Field(default_factory=dict)
+    config: dict = Field(default_factory=dict)
+    installation_id: str = ""
+    created_by: str = ""
+    last_fired_at: datetime | None = None
+
+
+class TriggerHistoryEntry(BaseModel):
+    """A single entry in a trigger's execution history."""
+
+    trigger_id: str
+    execution_id: str
+    github_event_type: str = ""
+    repository: str = ""
+    pr_number: int | None = None
+    fired_at: datetime | None = None
+    status: str = "dispatched"
+    cost_usd: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# Agent models
+# ---------------------------------------------------------------------------
+
+
+class AgentProviderInfo(BaseModel):
+    """Information about an available agent provider."""
+
+    provider: str
+    display_name: str
+    available: bool
+    default_model: str
+
+
+class AgentTestResult(BaseModel):
+    """Result of testing an agent provider."""
+
+    provider: str
+    model: str
+    response_text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Config models
+# ---------------------------------------------------------------------------
+
+
+class ConfigSnapshot(BaseModel):
+    """Snapshot of the current application configuration."""
+
+    app: dict = Field(default_factory=dict)
+    database: dict = Field(default_factory=dict)
+    agents: dict = Field(default_factory=dict)
+    storage: dict = Field(default_factory=dict)
+
+
+class ConfigIssue(BaseModel):
+    """A configuration issue found during validation."""
+
+    level: str  # "error" | "warning" | "info"
+    category: str
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Workflow validation model
+# ---------------------------------------------------------------------------
+
+
+class WorkflowValidation(BaseModel):
+    """Result of validating a workflow YAML file."""
+
+    valid: bool
+    name: str | None = None
+    workflow_type: str | None = None
+    phase_count: int = 0
+    errors: list[str] = Field(default_factory=list)

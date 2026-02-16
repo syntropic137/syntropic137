@@ -137,3 +137,52 @@ async def test_list_executions_empty():
     result = await list_executions()
     assert isinstance(result, Ok)
     assert result.value == []
+
+
+async def test_validate_yaml_valid(tmp_path):
+    """Validate a valid workflow YAML file."""
+    from aef_api.v1.workflows import validate_yaml
+
+    yaml_content = """\
+id: test-workflow
+name: Test Workflow
+type: custom
+phases:
+  - id: phase-1
+    name: Research
+    order: 1
+    description: Research phase
+    agent_type: claude
+"""
+    yaml_file = tmp_path / "valid.yaml"
+    yaml_file.write_text(yaml_content)
+
+    result = await validate_yaml(str(yaml_file))
+    assert isinstance(result, Ok)
+    assert result.value.valid is True
+    assert result.value.name == "Test Workflow"
+    assert result.value.phase_count == 1
+
+
+async def test_validate_yaml_invalid(tmp_path):
+    """Validate an invalid workflow YAML file."""
+    from aef_api.v1.workflows import validate_yaml
+
+    yaml_content = """\
+name: Missing Required Fields
+"""
+    yaml_file = tmp_path / "invalid.yaml"
+    yaml_file.write_text(yaml_content)
+
+    result = await validate_yaml(str(yaml_file))
+    assert isinstance(result, Ok)
+    assert result.value.valid is False
+    assert len(result.value.errors) > 0
+
+
+async def test_validate_yaml_file_not_found():
+    """Validate a non-existent YAML file."""
+    from aef_api.v1.workflows import validate_yaml
+
+    result = await validate_yaml("/nonexistent/path/workflow.yaml")
+    assert isinstance(result, Err)
