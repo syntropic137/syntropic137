@@ -1,9 +1,7 @@
-"""GitHub operations — repositories, installations, and triggers.
+"""GitHub operations — repositories and installations.
 
-Maps to the github context in aef-domain.
-
-Stub implementation for Phase 1 — complete signatures and types,
-with TODO markers pointing to domain slices.
+Installation and repository listing stubs. Trigger operations have
+moved to ``aef_api.v1.triggers``.
 """
 
 from __future__ import annotations
@@ -34,10 +32,9 @@ async def list_repos(
         Ok(list[dict]) on success, Err(GitHubError) on failure.
     """
     # TODO(#92): Implement — maps to domain slice github/list_repos
-    # Wire: GitHub App installation token → list repositories
     return Err(
         GitHubError.NOT_IMPLEMENTED,
-        message="list_repos not yet implemented — see #92 Phase 1",
+        message="list_repos not yet implemented",
     )
 
 
@@ -55,37 +52,7 @@ async def get_installation(
         Ok(dict) on success, Err(GitHubError) on failure.
     """
     # TODO(#92): Implement — maps to domain slice github/get_installation
-    # Wire: GitHub App → get installation details
     return Err(
         GitHubError.NOT_IMPLEMENTED,
-        message="get_installation not yet implemented — see #92 Phase 1",
-    )
-
-
-async def register_trigger(
-    repo_owner: str,
-    repo_name: str,
-    event_type: str,
-    workflow_id: str,
-    config: dict[str, Any] | None = None,
-    auth: AuthContext | None = None,
-) -> Result[str, GitHubError]:
-    """Register a GitHub event trigger for a workflow.
-
-    Args:
-        repo_owner: GitHub repository owner.
-        repo_name: GitHub repository name.
-        event_type: GitHub event type (e.g., "push", "pull_request").
-        workflow_id: Workflow to trigger on this event.
-        config: Optional trigger configuration (branch filters, etc.).
-        auth: Optional authentication context.
-
-    Returns:
-        Ok(trigger_id) on success, Err(GitHubError) on failure.
-    """
-    # TODO(#92): Implement — maps to domain slice github/register_trigger
-    # Wire: get_trigger_repository() → TriggerAggregate.register()
-    return Err(
-        GitHubError.NOT_IMPLEMENTED,
-        message="register_trigger not yet implemented — see #92 Phase 1",
+        message="get_installation not yet implemented",
     )

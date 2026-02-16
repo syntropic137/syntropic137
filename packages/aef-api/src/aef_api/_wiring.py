@@ -22,7 +22,10 @@ from aef_adapters.storage import (
     get_workflow_repository,
 )
 from aef_adapters.storage.artifact_storage import get_artifact_storage
-from aef_adapters.storage.repositories import get_workflow_execution_repository
+from aef_adapters.storage.repositories import (
+    get_trigger_repository,
+    get_workflow_execution_repository,
+)
 from aef_adapters.workspace_backends.service import WorkspaceService
 from aef_domain.contexts.artifacts import ArtifactQueryService
 from aef_domain.contexts.orchestration.slices.execute_workflow import (
@@ -100,6 +103,57 @@ def get_artifact_repo():
 def get_publisher():
     """Return the event publisher."""
     return get_event_publisher()
+
+
+class _InMemoryAggregateRepository:
+    """Simple in-memory repository for test mode (trigger aggregates).
+
+    InMemoryTriggerQueryStore from the domain layer lacks the save()/get_by_id()
+    interface required by domain handlers, so we provide a minimal implementation.
+    """
+
+    def __init__(self) -> None:
+        self._aggregates: dict[str, Any] = {}
+
+    async def get_by_id(self, aggregate_id: str) -> Any:
+        return self._aggregates.get(aggregate_id)
+
+    async def save(self, aggregate: Any) -> None:
+        agg_id = str(aggregate.id) if hasattr(aggregate, "id") else str(aggregate.trigger_id)
+        self._aggregates[agg_id] = aggregate
+
+    async def exists(self, aggregate_id: str) -> bool:
+        return aggregate_id in self._aggregates
+
+
+_test_trigger_repo: _InMemoryAggregateRepository | None = None
+
+
+def get_trigger_repo():
+    """Return the trigger rule repository.
+
+    In test mode, returns a NullRepository since InMemoryTriggerQueryStore
+    lacks save()/get_by_id() required by domain handlers.
+    """
+    from aef_shared.settings import get_settings
+
+    settings = get_settings()
+    if settings.is_test:
+        global _test_trigger_repo
+        if _test_trigger_repo is None:
+            _test_trigger_repo = _InMemoryAggregateRepository()
+        return _test_trigger_repo
+
+    return get_trigger_repository()
+
+
+def get_trigger_store():
+    """Return the trigger query store."""
+    from aef_domain.contexts.github.slices.register_trigger.trigger_store import (
+        get_trigger_query_store,
+    )
+
+    return get_trigger_query_store()
 
 
 async def sync_published_events_to_projections() -> None:
