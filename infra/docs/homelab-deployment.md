@@ -248,6 +248,9 @@ just homelab-reset
 - Database password stored as Docker secret (not in environment)
 - GitHub private key stored as file with restricted permissions
 - Rotate secrets periodically: `just secrets-rotate`
+- Encrypt secrets for safe storage or version control: `just secrets-seal`
+- Decrypt before deployment: `just secrets-unseal`
+- Run `just security-audit` to check your overall security posture
 
 ### Updates
 - Keep Docker images updated: `just homelab-upgrade`
@@ -269,8 +272,12 @@ cat backup-20250101.sql | docker exec -i aef-postgres psql -U aef aef
 
 Back up these files:
 - `infra/.env`
-- `infra/docker/secrets/` (encrypted)
+- `infra/docker/secrets/` (encrypted via `just secrets-seal`)
 - Any custom compose overrides
+
+> **Tip**: Run `just secrets-seal` to encrypt secrets into `.enc` files that
+> are safe to commit to version control. Use `just secrets-unseal` to restore
+> plain-text files before starting Docker services.
 
 ## Monitoring
 
