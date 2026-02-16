@@ -7,6 +7,8 @@ Usage:
     python secrets_setup.py generate  # Generate new secrets
     python secrets_setup.py check     # Verify secrets exist
     python secrets_setup.py rotate    # Rotate secrets (regenerate)
+    python secrets_setup.py seal      # Encrypt secrets (safe to commit .enc)
+    python secrets_setup.py unseal    # Decrypt .enc files back to plain text
 
 Examples:
     # First-time setup
@@ -17,12 +19,20 @@ Examples:
 
     # Rotate secrets (use with caution - restarts required)
     python infra/scripts/secrets_setup.py rotate --force
+
+    # Encrypt secrets for safe storage / git commit
+    python infra/scripts/secrets_setup.py seal
+
+    # Decrypt .enc files to restore plain-text secrets
+    python infra/scripts/secrets_setup.py unseal
 """
 
 import argparse
 import contextlib
+import getpass
 import secrets
 import stat
+import subprocess
 import sys
 from pathlib import Path
 
@@ -153,6 +163,178 @@ def check_secrets() -> bool:
     return all_ok
 
 
+# ---------------------------------------------------------------------------
+# Seal / Unseal (openssl AES-256-CBC encryption)
+# ---------------------------------------------------------------------------
+
+ENCRYPTION_CIPHER = "aes-256-cbc"
+PBKDF2_ITERATIONS = 600_000
+_SEALABLE_GLOBS = ("*.txt", "*.pem")
+
+
+def _check_openssl() -> bool:
+    """Verify that openssl is available."""
+    try:
+        subprocess.run(
+            ["openssl", "version"],
+            capture_output=True,
+            check=True,
+        )
+        return True
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+
+
+def seal_secrets(passphrase: str | None = None) -> bool:
+    """Encrypt plain-text secrets to ``.enc`` files using openssl.
+
+    Each ``*.txt`` and ``*.pem`` file in the secrets directory is encrypted
+    with AES-256-CBC (PBKDF2 key derivation).  The original plain-text
+    file is removed after successful encryption.  The ``.enc`` files are
+    safe to commit to version control.
+
+    Args:
+        passphrase: Encryption passphrase.  Prompted interactively if *None*.
+
+    Returns:
+        True if all files were sealed successfully.
+    """
+    if not _check_openssl():
+        print("openssl not found. Install OpenSSL to use seal/unseal.")
+        return False
+
+    if not SECRETS_DIR.exists():
+        print(f"Secrets directory not found: {SECRETS_DIR}")
+        return False
+
+    # Collect files to seal
+    files: list[Path] = []
+    for pattern in _SEALABLE_GLOBS:
+        files.extend(SECRETS_DIR.glob(pattern))
+
+    if not files:
+        print("No plain-text secrets found to seal.")
+        return True
+
+    if passphrase is None:
+        passphrase = getpass.getpass("  Passphrase for sealing secrets: ")
+        confirm = getpass.getpass("  Confirm passphrase: ")
+        if passphrase != confirm:
+            print("Passphrases do not match.")
+            return False
+
+    if not passphrase:
+        print("Passphrase cannot be empty.")
+        return False
+
+    sealed = 0
+    for path in files:
+        enc_path = path.with_suffix(path.suffix + ".enc")
+        result = subprocess.run(
+            [
+                "openssl",
+                "enc",
+                f"-{ENCRYPTION_CIPHER}",
+                "-salt",
+                "-pbkdf2",
+                "-iter",
+                str(PBKDF2_ITERATIONS),
+                "-in",
+                str(path),
+                "-out",
+                str(enc_path),
+                "-pass",
+                f"pass:{passphrase}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(f"  FAIL {path.name}: {result.stderr.strip()}")
+            # Remove partial .enc file
+            enc_path.unlink(missing_ok=True)
+            return False
+
+        set_secure_permissions(enc_path)
+        path.unlink()
+        print(f"  sealed {path.name} -> {enc_path.name}")
+        sealed += 1
+
+    print(f"\n{sealed} file(s) sealed. Plain-text originals removed.")
+    print("The .enc files are safe to commit to version control.")
+    return True
+
+
+def unseal_secrets(passphrase: str | None = None) -> bool:
+    """Decrypt ``.enc`` files back to plain-text secrets.
+
+    Args:
+        passphrase: Decryption passphrase.  Prompted interactively if *None*.
+
+    Returns:
+        True if all files were unsealed successfully.
+    """
+    if not _check_openssl():
+        print("openssl not found. Install OpenSSL to use seal/unseal.")
+        return False
+
+    if not SECRETS_DIR.exists():
+        print(f"Secrets directory not found: {SECRETS_DIR}")
+        return False
+
+    enc_files = list(SECRETS_DIR.glob("*.enc"))
+    if not enc_files:
+        print("No .enc files found to unseal.")
+        return True
+
+    if passphrase is None:
+        passphrase = getpass.getpass("  Passphrase for unsealing secrets: ")
+
+    if not passphrase:
+        print("Passphrase cannot be empty.")
+        return False
+
+    unsealed = 0
+    for enc_path in enc_files:
+        # Restore original filename: foo.txt.enc -> foo.txt
+        plain_path = enc_path.with_suffix("")
+        result = subprocess.run(
+            [
+                "openssl",
+                "enc",
+                f"-{ENCRYPTION_CIPHER}",
+                "-d",
+                "-salt",
+                "-pbkdf2",
+                "-iter",
+                str(PBKDF2_ITERATIONS),
+                "-in",
+                str(enc_path),
+                "-out",
+                str(plain_path),
+                "-pass",
+                f"pass:{passphrase}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            plain_path.unlink(missing_ok=True)
+            if "bad decrypt" in stderr.lower():
+                print("  Wrong passphrase.")
+            else:
+                print(f"  FAIL {enc_path.name}: {stderr}")
+            return False
+
+        set_secure_permissions(plain_path)
+        print(f"  unsealed {enc_path.name} -> {plain_path.name}")
+        unsealed += 1
+
+    print(f"\n{unsealed} file(s) unsealed.")
+    return True
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Manage AEF deployment secrets",
@@ -163,11 +345,13 @@ Examples:
   %(prog)s generate --force  Regenerate all secrets
   %(prog)s check             Verify secrets are configured
   %(prog)s rotate            Alias for generate --force
+  %(prog)s seal              Encrypt secrets (creates .enc files)
+  %(prog)s unseal            Decrypt .enc files back to plain text
         """,
     )
     parser.add_argument(
         "command",
-        choices=["generate", "check", "rotate"],
+        choices=["generate", "check", "rotate", "seal", "unseal"],
         help="Command to run",
     )
     parser.add_argument(
@@ -190,6 +374,10 @@ Examples:
         print("⚠ Rotating secrets requires service restart!")
         print()
         success = generate_secrets(force=True)
+    elif args.command == "seal":
+        success = seal_secrets()
+    elif args.command == "unseal":
+        success = unseal_secrets()
 
     print()
     if success:

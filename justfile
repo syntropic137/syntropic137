@@ -956,6 +956,23 @@ secrets-rotate:
 secrets-check:
     @uv run python infra/scripts/secrets_setup.py check
 
+# Encrypt secrets with passphrase (creates .enc files safe to commit)
+secrets-seal:
+    @uv run python infra/scripts/secrets_setup.py seal
+
+# Decrypt secrets from .enc files (restores plain-text for Docker)
+secrets-unseal:
+    @uv run python infra/scripts/secrets_setup.py unseal
+
+# Reconfigure GitHub App (change repos, permissions, or recreate)
+github-reconfigure:
+    @echo "Reconfiguring GitHub App..."
+    @uv run python infra/scripts/setup.py --stage configure_github_app
+
+# Run security audit to check posture
+security-audit:
+    @uv run python infra/scripts/setup.py --stage security_audit
+
 # --- Health Checks ---
 
 # Run health checks on all services

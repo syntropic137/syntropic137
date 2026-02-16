@@ -16,21 +16,67 @@ GitHub Apps provide:
 - **Organization-level control**: Admins can manage app access centrally
 - **Self-healing capabilities**: Read CI logs, respond to PR reviews, fix issues automatically
 
-## Step 1: Create the GitHub App
+## Quick Start: Manifest Flow (Recommended)
 
-### For Organizations (Recommended)
+The easiest way to create a GitHub App is the **manifest flow** — one click and all
+permissions, events, and credentials are configured automatically.
+
+```bash
+# During full setup (includes GitHub App creation):
+just setup
+
+# Or run only the GitHub App stage:
+python infra/scripts/setup.py --stage configure_github_app
+
+# Or run the manifest flow standalone:
+python infra/scripts/github_manifest.py
+```
+
+When you choose **"new"**, the setup wizard will:
+
+1. Open your browser to GitHub with all permissions pre-filled
+2. You click **"Create GitHub App"** — one click
+3. GitHub redirects back to the setup wizard automatically
+4. The wizard saves the private key, webhook secret, and app credentials
+5. You install the app on your repositories
+6. The Installation ID is **detected automatically** via the setup callback — no copy-paste needed
+
+All permissions, webhook events, and secrets are handled automatically — no
+manual field entry required.
+
+> **Reconfiguring later**: To change repositories, permissions, or recreate the
+> app at any time, run `just github-reconfigure`.
+
+> **Note on the Workflows permission**: The manifest flow does **not** request
+> `workflows: write` by default because it allows modifying GitHub Actions
+> workflow files (`.github/workflows/*.yml`). If your agent needs to create or
+> edit workflow files, add `"workflows": "write"` to the manifest permissions
+> in `infra/scripts/github_manifest.py` and ensure branch protection rules
+> require PR reviews for workflow changes.
+
+---
+
+## Manual Setup
+
+If you prefer to create the GitHub App manually (or need to configure an
+existing app), choose **"existing"** during `just setup` and follow the
+steps below.
+
+### Step 1: Create the GitHub App
+
+#### For Organizations (Recommended)
 
 If you have an organization (e.g., `AgentParadise`), create the app through the org:
 
 1. Go to **https://github.com/organizations/YOUR_ORG/settings/apps**
 2. Click **New GitHub App**
 
-### For Personal Accounts
+#### For Personal Accounts
 
 1. Go to [GitHub Settings > Developer settings > GitHub Apps](https://github.com/settings/apps)
 2. Click **New GitHub App**
 
-### Basic Information
+#### Basic Information
 
 Fill in the app details:
 - **GitHub App name**: `aef-agent` (or your preferred name, e.g., `agentparadise-bot`)
@@ -38,7 +84,7 @@ Fill in the app details:
 - **Webhook URL**: `https://your-domain.com/webhooks/github` (can leave blank for local dev)
 - **Webhook secret**: Generate a strong random secret (e.g., `openssl rand -hex 32`)
 
-### Repository Permissions
+#### Repository Permissions
 
 Set these permissions for full agentic capabilities:
 
@@ -52,7 +98,7 @@ Set these permissions for full agentic capabilities:
 | **Issues** | Read & Write | Create/update issues from agent findings |
 | **Metadata** | Read-only | Required for all GitHub Apps |
 
-### Subscribe to Events
+#### Subscribe to Events
 
 Enable these webhook events for real-time notifications and full auditability.
 
@@ -139,7 +185,7 @@ Automatic (no checkbox, always received):
 
 > **Note:** All webhook events are captured as domain events for auditability, analytics, and debugging. You can query "show me all events for PR #123" or "how many CI failures this week?"
 
-### Installation Scope
+#### Installation Scope
 
 Choose where the app can be installed:
 - **Only on this account**: For your org only
@@ -147,14 +193,14 @@ Choose where the app can be installed:
 
 Click **Create GitHub App**
 
-## Step 2: Generate Private Key
+### Step 2: Generate Private Key
 
 1. After creating the app, scroll down to "Private keys"
 2. Click **Generate a private key**
 3. Save the downloaded `.pem` file securely
 4. **NEVER commit this file to git!**
 
-## Step 3: Install the App
+### Step 3: Install the App
 
 1. Go to your GitHub App's page
 2. Click **Install App** in the left sidebar
@@ -165,7 +211,7 @@ Click **Create GitHub App**
 5. Click **Install**
 6. Note the Installation ID from the URL: `https://github.com/settings/installations/[INSTALLATION_ID]`
 
-## Step 4: Configure Environment Variables
+### Step 4: Configure Environment Variables
 
 Set these environment variables in your deployment:
 
@@ -182,7 +228,7 @@ AEF_GITHUB_INSTALLATION_ID=12345678         # From installation URL
 AEF_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ```
 
-### For Docker/Kubernetes
+#### For Docker/Kubernetes
 
 When using Docker or Kubernetes, you may need to handle the multi-line private key specially:
 
@@ -211,7 +257,7 @@ cat private-key.pem | base64 -w0 > private-key.b64
 AEF_GITHUB_PRIVATE_KEY_B64=$(cat private-key.b64)
 ```
 
-## Step 5: Verify Configuration
+### Step 5: Verify Configuration
 
 Test that everything is configured correctly:
 

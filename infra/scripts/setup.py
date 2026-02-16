@@ -13,9 +13,9 @@ Usage:
 
 Stages:
     check_prerequisites, init_submodules, generate_secrets,
-    configure_github_app, configure_env, configure_cloudflare,
-    configure_smee, build_and_start, wait_for_health,
-    seed_workflows, print_summary
+    configure_github_app, configure_env, security_audit,
+    configure_cloudflare, configure_smee, build_and_start,
+    wait_for_health, seed_workflows, print_summary
 """
 
 from __future__ import annotations
@@ -25,6 +25,7 @@ import os
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -43,13 +44,6 @@ ENV_FILE = INFRA_DIR / ".env"
 
 REQUIRED_PORTS = {
     80: "UI (nginx)",
-    5432: "PostgreSQL",
-    8000: "Dashboard API",
-    8080: "Collector",
-    9000: "MinIO API",
-    9001: "MinIO Console",
-    50051: "Event Store gRPC",
-    6379: "Redis",
 }
 
 STAGES = [
@@ -58,6 +52,7 @@ STAGES = [
     "generate_secrets",
     "configure_github_app",
     "configure_env",
+    "security_audit",
     "configure_cloudflare",
     "configure_smee",
     "build_and_start",
@@ -280,7 +275,7 @@ def generate_secrets(ctx: dict) -> bool:  # noqa: ARG001
 
 
 def configure_github_app(ctx: dict) -> bool:
-    """Walk the user through GitHub App configuration."""
+    """GitHub App configuration — manifest flow (new), manual, or skip."""
     banner("Stage: Configure GitHub App")
 
     if ctx.get("skip_github"):
@@ -298,15 +293,84 @@ def configure_github_app(ctx: dict) -> bool:
         warn("GitHub App env vars not fully set — skipping")
         return True
 
-    print("  To use AEF with GitHub, you need a GitHub App.")
-    print("  If you don't have one yet, create it at:")
-    print("    https://github.com/settings/apps/new")
+    print("  AEF uses a GitHub App for secure agent commits, webhooks,")
+    print("  and self-healing CI integration.")
+    print()
+    print("  Options:")
+    print("    new      — Create a new GitHub App automatically (recommended)")
+    print("    existing — Enter credentials for an app you already created")
+    print("    skip     — Skip GitHub App configuration for now")
     print()
 
-    if not confirm("Configure GitHub App now?"):
+    choice = prompt("Create new app or use existing?", default="new")
+    choice = choice.strip().lower()
+
+    if choice == "new":
+        return _configure_github_app_manifest(ctx)
+    elif choice == "existing":
+        return _configure_github_app_manual(ctx)
+    else:
         step("Skipping GitHub App configuration")
         ctx["skip_github"] = True
         return True
+
+
+def _configure_github_app_manifest(ctx: dict) -> bool:
+    """Create a new GitHub App using the manifest flow."""
+    from github_manifest import run_manifest_flow
+
+    app_name = prompt("App name", default="aef-agent")
+    org = prompt("GitHub org (leave blank for personal)", default="")
+    webhook_url = ctx.get("webhook_url") or None
+
+    print()
+    try:
+        result = run_manifest_flow(
+            app_name=app_name,
+            webhook_url=webhook_url,
+            secrets_dir=SECRETS_DIR,
+            org=org or None,
+        )
+    except TimeoutError as exc:
+        fail(str(exc))
+        print()
+        print("  You can retry this stage with:")
+        print("    python infra/scripts/setup.py --stage configure_github_app")
+        return False
+    except Exception as exc:
+        fail(f"Manifest flow failed: {exc}")
+        print()
+        if confirm("Fall back to manual configuration?"):
+            return _configure_github_app_manual(ctx)
+        return False
+
+    ctx["github_app_id"] = str(result["id"])
+    ctx["github_app_name"] = result.get("slug", app_name)
+
+    # Installation ID — auto-detected from setup_url callback or manual fallback
+    installation_id = result.get("installation_id")
+    if installation_id:
+        ctx["github_installation_id"] = str(installation_id)
+        ok(f"Installation ID auto-detected: {installation_id}")
+    else:
+        print()
+        print("  The installation callback was not received.")
+        print("  Enter the installation ID from the URL after installing.")
+        print(
+            "  (It's the numeric ID in the URL, e.g. https://github.com/settings/installations/12345)"
+        )
+        ctx["github_installation_id"] = prompt("Installation ID")
+
+    ok("GitHub App created and configured via manifest flow")
+    return True
+
+
+def _configure_github_app_manual(ctx: dict) -> bool:
+    """Manual GitHub App configuration (existing app)."""
+    print()
+    print("  Enter your existing GitHub App credentials.")
+    print("  (Find them at https://github.com/settings/apps)")
+    print()
 
     ctx["github_app_id"] = prompt("GitHub App ID (numeric)")
     ctx["github_app_name"] = prompt("GitHub App name (slug)")
@@ -338,7 +402,7 @@ def configure_github_app(ctx: dict) -> bool:
     else:
         warn("Webhook secret not found — run 'just secrets-generate' first")
 
-    ok("GitHub App configured")
+    ok("GitHub App configured (manual)")
     return True
 
 
@@ -385,6 +449,234 @@ def configure_env(ctx: dict) -> bool:
     ENV_FILE.write_text(content)
     ok(f"Environment file written to {ENV_FILE}")
     return True
+
+
+# ---------------------------------------------------------------------------
+# Security Audit Helpers
+# ---------------------------------------------------------------------------
+
+
+def _audit_file_security() -> tuple[int, int]:
+    """Check file permissions and secret hygiene. Returns (warnings, info)."""
+    warnings = 0
+
+    # PEM file permissions
+    pem_path = SECRETS_DIR / "github-private-key.pem"
+    if pem_path.exists():
+        try:
+            mode = pem_path.stat().st_mode
+            if mode & (stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH):
+                warn("Private key has loose permissions — should be 600")
+                step(f"  Fix: chmod 600 {pem_path}")
+                warnings += 1
+            else:
+                ok("Private key permissions are restrictive (600)")
+        except OSError:
+            warn("Could not check private key permissions")
+            warnings += 1
+    else:
+        step("Private key not yet created — skipping permission check")
+
+    # Webhook secret
+    webhook_path = SECRETS_DIR / "github-webhook-secret.txt"
+    if webhook_path.exists():
+        secret = webhook_path.read_text().strip()
+        if len(secret) < 32:
+            warn(f"Webhook secret is short ({len(secret)} chars) — recommend >= 32")
+            warnings += 1
+        else:
+            ok(f"Webhook secret length OK ({len(secret)} chars)")
+    else:
+        step("Webhook secret not yet created — skipping")
+
+    # Secrets dir .gitignore
+    gitignore = SECRETS_DIR / ".gitignore"
+    if SECRETS_DIR.exists():
+        if gitignore.exists() and "*" in gitignore.read_text():
+            ok("Secrets directory has .gitignore with wildcard")
+        else:
+            warn("Secrets directory missing .gitignore with '*' pattern")
+            step(f"  Fix: echo '*' > {gitignore}")
+            warnings += 1
+
+    # Misplaced PEM files
+    for search_dir in [PROJECT_ROOT, INFRA_DIR]:
+        for pem in search_dir.glob("*.pem"):
+            if pem.parent == SECRETS_DIR:
+                continue
+            warn(f"PEM file found outside secrets dir: {pem.relative_to(PROJECT_ROOT)}")
+            step(f"  Move to: {SECRETS_DIR}/")
+            warnings += 1
+
+    return warnings, 0
+
+
+def _audit_network_security() -> tuple[int, int]:
+    """Check Docker Compose for host-published ports. Returns (warnings, info)."""
+    warnings = 0
+    compose_file = COMPOSE_DIR / "docker-compose.yaml"
+    if not compose_file.exists():
+        step("docker-compose.yaml not found — skipping network audit")
+        return 0, 0
+
+    compose_text = compose_file.read_text()
+
+    # Parse service blocks and check for host port mappings.
+    # We look for each internal service and flag if it exposes ports to the host.
+    internal_services = {
+        "postgres": "PostgreSQL",
+        "event-store": "EventStoreDB",
+        "redis": "Redis",
+        "aef-dashboard": "Dashboard API",
+        "minio": "MinIO",
+    }
+
+    for svc_key, label in internal_services.items():
+        # Find the service block: starts at `^  <service>:` and extends
+        # until the next top-level service or section.
+        pattern = rf"(?m)^  {re.escape(svc_key)}:\n((?:(?!^  \w).*\n)*)"
+        match = re.search(pattern, compose_text)
+        if not match:
+            continue
+        block = match.group(1)
+        if re.search(r"^\s+ports:", block, re.MULTILINE):
+            warn(f"{label} ({svc_key}) has host-published ports")
+            warnings += 1
+        else:
+            ok(f"{label} — no host port exposure")
+
+    return warnings, 0
+
+
+def _audit_github_app(ctx: dict) -> tuple[int, int]:  # noqa: ARG001
+    """Check GitHub App configuration. Returns (warnings, info)."""
+    warnings = 0
+    info = 0
+
+    pem_path = SECRETS_DIR / "github-private-key.pem"
+    if pem_path.exists():
+        content = pem_path.read_text()
+        if "BEGIN RSA PRIVATE KEY" in content or "BEGIN PRIVATE KEY" in content:
+            ok("Private key contains valid PEM header")
+        else:
+            warn("Private key missing expected PEM header")
+            warnings += 1
+    else:
+        step("Private key not found — GitHub App not yet configured")
+
+    # Permissions education (informational)
+    try:
+        from github_manifest import DEFAULT_PERMISSIONS
+
+        print()
+        step("GitHub App permissions (from manifest):")
+        for perm, level in DEFAULT_PERMISSIONS.items():
+            print(f"       {perm}: {level}")
+        info += 1
+
+        # Check for dangerous permissions
+        if DEFAULT_PERMISSIONS.get("workflows") == "write":
+            warn("workflows:write is set — this allows modifying GitHub Actions workflows")
+            step("  Consider removing unless AEF needs to create/edit workflow files")
+            warnings += 1
+        else:
+            ok("workflows:write not requested (good)")
+    except ImportError:
+        step("Could not load manifest permissions — skipping review")
+
+    # Webhook secret configured
+    webhook_path = SECRETS_DIR / "github-webhook-secret.txt"
+    if pem_path.exists() and not webhook_path.exists():
+        warn("GitHub App exists but webhook secret is missing")
+        warnings += 1
+
+    return warnings, info
+
+
+def _audit_environment() -> tuple[int, int]:
+    """Check environment configuration. Returns (warnings, info)."""
+    warnings = 0
+
+    # .env not tracked by git
+    if ENV_FILE.exists():
+        try:
+            result = subprocess.run(
+                ["git", "ls-files", "--error-unmatch", str(ENV_FILE)],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=PROJECT_ROOT,
+            )
+            if result.returncode == 0:
+                warn(".env is tracked by git — add to .gitignore")
+                warnings += 1
+            else:
+                ok(".env is not tracked by git")
+        except FileNotFoundError:
+            pass  # git not available
+
+    # Default credential checks
+    if ENV_FILE.exists():
+        env_content = ENV_FILE.read_text()
+        if "POSTGRES_PASSWORD=aef_dev_password" in env_content:
+            warn("POSTGRES_PASSWORD is still the default — change for production")
+            warnings += 1
+        if "MINIO_ROOT_PASSWORD=minioadmin" in env_content:
+            warn("MINIO_ROOT_PASSWORD is still the default — change for production")
+            warnings += 1
+    else:
+        step(".env not created yet — skipping credential check")
+
+    return warnings, 0
+
+
+def security_audit(ctx: dict) -> bool:
+    """Validate security posture — warnings only, never blocks setup."""
+    banner("Stage: Security Audit (Tier 1)")
+
+    print("  Security tier: Tier 1 (single-tenant, localhost trust)")
+    print("  All checks are advisory — nothing will block setup.")
+    print()
+
+    total_warnings = 0
+    total_info = 0
+
+    # File security
+    step("File security...")
+    w, i = _audit_file_security()
+    total_warnings += w
+    total_info += i
+    print()
+
+    # Network security
+    step("Network security...")
+    w, i = _audit_network_security()
+    total_warnings += w
+    total_info += i
+    print()
+
+    # GitHub App
+    step("GitHub App configuration...")
+    w, i = _audit_github_app(ctx)
+    total_warnings += w
+    total_info += i
+    print()
+
+    # Environment
+    step("Environment configuration...")
+    w, i = _audit_environment()
+    total_warnings += w
+    total_info += i
+    print()
+
+    # Summary
+    if total_warnings == 0:
+        ok("Security audit passed — no warnings")
+    else:
+        warn(f"Security audit complete — {total_warnings} warning(s)")
+        step("These are advisory for Tier 1 (localhost). Review before exposing externally.")
+
+    return True  # Never blocks
 
 
 def configure_cloudflare(ctx: dict) -> bool:
@@ -544,10 +836,12 @@ def print_summary(ctx: dict) -> bool:
         print("  Dashboard API: http://localhost:8000")
         print("  API Docs:      http://localhost:8000/docs")
 
-    print("  MinIO Console: http://localhost:9001")
-    print("  PostgreSQL:    localhost:5432")
-    print("  Event Store:   localhost:50051")
-    print("  Redis:         localhost:6379")
+    print()
+    print("  Internal services (Docker network only — not exposed to host):")
+    print("    PostgreSQL, EventStoreDB, Redis, MinIO, Collector")
+    print()
+    print("  Security: Tier 1 (single-tenant) — no API auth, Docker network isolation.")
+    print("  Run 'just setup --stage security_audit' to re-check security posture.")
 
     print()
     print("  Useful commands:")
@@ -574,6 +868,7 @@ STAGE_FUNCS: dict[str, callable] = {
     "generate_secrets": generate_secrets,
     "configure_github_app": configure_github_app,
     "configure_env": configure_env,
+    "security_audit": security_audit,
     "configure_cloudflare": configure_cloudflare,
     "configure_smee": configure_smee,
     "build_and_start": build_and_start,
