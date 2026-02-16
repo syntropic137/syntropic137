@@ -1,4 +1,4 @@
-"""Workflow TEMPLATE API endpoints.
+"""Workflow TEMPLATE API endpoints — thin wrapper over aef_api.
 
 These endpoints manage workflow TEMPLATES (definitions).
 For execution details, see /api/executions.
@@ -6,11 +6,13 @@ For execution details, see /api/executions.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query
 
-from aef_adapters.projections import get_projection_manager
+import aef_api.v1.executions as ex
+import aef_api.v1.workflows as wf
+from aef_api.types import Err
 from aef_dashboard.models.schemas import (
     ExecutionHistoryResponse,
     ExecutionRunListResponse,
@@ -20,71 +22,90 @@ from aef_dashboard.models.schemas import (
     WorkflowResponse,
     WorkflowSummary,
 )
-from aef_domain.contexts.orchestration.domain.queries import (
-    GetWorkflowDetailQuery,
-    ListWorkflowsQuery,
-)
-from aef_domain.contexts.orchestration.slices.get_workflow_detail import (
-    GetWorkflowDetailHandler,
-)
-from aef_domain.contexts.orchestration.slices.list_workflows import ListWorkflowsHandler
-
-if TYPE_CHECKING:
-    from aef_domain.contexts.orchestration.domain.read_models import (
-        WorkflowDetail,
-    )
-    from aef_domain.contexts.orchestration.domain.read_models import (
-        WorkflowSummary as DomainWorkflowSummary,
-    )
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
-def _domain_summary_to_api(summary: DomainWorkflowSummary) -> WorkflowSummary:
-    """Convert domain WorkflowSummary to API WorkflowSummary.
+@router.get("", response_model=WorkflowListResponse)
+async def list_workflows(
+    workflow_type: str | None = Query(None, description="Filter by workflow type"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+) -> WorkflowListResponse:
+    """List all workflow templates."""
+    offset = (page - 1) * page_size
+    result = await wf.list_workflows(
+        workflow_type=workflow_type,
+        limit=page_size,
+        offset=offset,
+    )
 
-    Templates don't have status - only runs_count.
-    """
-    return WorkflowSummary(
-        id=summary.id,
-        name=summary.name,
-        workflow_type=summary.workflow_type,
-        phase_count=summary.phase_count,
-        created_at=summary.created_at,
-        runs_count=summary.runs_count,
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=result.message)
+
+    # Get total count
+    total_result = await wf.list_workflows(
+        workflow_type=workflow_type,
+        limit=10000,
+        offset=0,
+    )
+    total = len(total_result.value) if not isinstance(total_result, Err) else 0
+
+    return WorkflowListResponse(
+        workflows=[
+            WorkflowSummary(
+                id=s.id,
+                name=s.name,
+                workflow_type=s.workflow_type,
+                phase_count=s.phase_count,
+                created_at=s.created_at,
+                runs_count=s.runs_count,
+            )
+            for s in result.value
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
-def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
-    """Convert domain WorkflowDetail to API WorkflowResponse.
+@router.get("/{workflow_id}", response_model=WorkflowResponse)
+async def get_workflow(workflow_id: str) -> WorkflowResponse:
+    """Get workflow details by ID."""
+    result = await wf.get_workflow(workflow_id)
 
-    Templates don't have execution status - only definition info.
-    """
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+
+    detail = result.value
     phases = []
-    for i, p in enumerate(detail.phases, 1):
+    for i, p in enumerate(detail.phases or [], 1):
         if isinstance(p, dict):
-            phase_def = PhaseDefinition(
-                phase_id=str(p.get("id") or p.get("phase_id") or f"phase-{i}"),
-                name=str(p.get("name") or f"Phase {i}"),
-                order=p.get("order", i),
-                description=p.get("description"),
-                agent_type=p.get("agent_type", ""),
-                prompt_template=p.get("prompt_template"),
-                timeout_seconds=p.get("timeout_seconds", 300),
-                allowed_tools=p.get("allowed_tools", []),
+            phases.append(
+                PhaseDefinition(
+                    phase_id=str(p.get("id") or p.get("phase_id") or f"phase-{i}"),
+                    name=str(p.get("name") or f"Phase {i}"),
+                    order=p.get("order", i),
+                    description=p.get("description"),
+                    agent_type=p.get("agent_type", ""),
+                    prompt_template=p.get("prompt_template"),
+                    timeout_seconds=p.get("timeout_seconds", 300),
+                    allowed_tools=p.get("allowed_tools", []),
+                )
             )
         else:
-            phase_def = PhaseDefinition(
-                phase_id=p.id,
-                name=p.name,
-                order=getattr(p, "order", i),
-                description=getattr(p, "description", None),
-                agent_type=getattr(p, "agent_type", ""),
-                prompt_template=getattr(p, "prompt_template", None),
-                timeout_seconds=getattr(p, "timeout_seconds", 300),
-                allowed_tools=list(getattr(p, "allowed_tools", [])),
+            phases.append(
+                PhaseDefinition(
+                    phase_id=getattr(p, "id", f"phase-{i}"),
+                    name=getattr(p, "name", f"Phase {i}"),
+                    order=getattr(p, "order", i),
+                    description=getattr(p, "description", None),
+                    agent_type=getattr(p, "agent_type", ""),
+                    prompt_template=getattr(p, "prompt_template", None),
+                    timeout_seconds=getattr(p, "timeout_seconds", 300),
+                    allowed_tools=list(getattr(p, "allowed_tools", [])),
+                )
             )
-        phases.append(phase_def)
 
     return WorkflowResponse(
         id=detail.id,
@@ -99,85 +120,26 @@ def _domain_detail_to_api(detail: WorkflowDetail) -> WorkflowResponse:
     )
 
 
-@router.get("", response_model=WorkflowListResponse)
-async def list_workflows(
-    workflow_type: str | None = Query(None, description="Filter by workflow type"),
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
-) -> WorkflowListResponse:
-    """List all workflow templates.
-
-    Note: Templates don't have status. Use /api/executions for execution status.
-    """
-    manager = get_projection_manager()
-    handler = ListWorkflowsHandler(manager.workflow_list)
-
-    offset = (page - 1) * page_size
-    query = ListWorkflowsQuery(
-        workflow_type_filter=workflow_type,
-        limit=page_size,
-        offset=offset,
-    )
-    summaries = await handler.handle(query)
-
-    # Get total count
-    total_query = ListWorkflowsQuery(workflow_type_filter=workflow_type, limit=10000, offset=0)
-    all_summaries = await handler.handle(total_query)
-    total = len(all_summaries)
-
-    return WorkflowListResponse(
-        workflows=[_domain_summary_to_api(s) for s in summaries],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/{workflow_id}", response_model=WorkflowResponse)
-async def get_workflow(workflow_id: str) -> WorkflowResponse:
-    """Get workflow details by ID."""
-    # Get projection manager and create handler
-    manager = get_projection_manager()
-    handler = GetWorkflowDetailHandler(manager.workflow_detail)
-
-    # Execute query
-    query = GetWorkflowDetailQuery(workflow_id=workflow_id)
-    detail = await handler.handle(query)
-
-    if detail is None:
-        raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
-
-    return _domain_detail_to_api(detail)
-
-
 @router.get("/{workflow_id}/runs", response_model=ExecutionRunListResponse)
 async def list_workflow_runs(workflow_id: str) -> ExecutionRunListResponse:
-    """List all execution runs for a workflow.
-
-    Returns a list of execution summaries for the specified workflow,
-    sorted by most recent first.
-    """
-    from decimal import Decimal
-
-    manager = get_projection_manager()
-
-    # Get workflow name for response
-    handler = GetWorkflowDetailHandler(manager.workflow_detail)
-    query = GetWorkflowDetailQuery(workflow_id=workflow_id)
-    detail = await handler.handle(query)
-
-    if detail is None:
+    """List all execution runs for a workflow."""
+    # Get workflow name
+    wf_result = await wf.get_workflow(workflow_id)
+    if isinstance(wf_result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    # Get executions from projection
-    executions = await manager.execution_list.get_by_workflow_id(workflow_id)
+    workflow_name = wf_result.value.name
 
-    # Convert to API response
+    # Get executions
+    exec_result = await ex.list_(workflow_id=workflow_id)
+    if isinstance(exec_result, Err):
+        raise HTTPException(status_code=500, detail=exec_result.message)
+
     runs = [
         ExecutionRunSummary(
             workflow_execution_id=e.workflow_execution_id,
             workflow_id=e.workflow_id,
-            workflow_name=e.workflow_name or detail.name,
+            workflow_name=e.workflow_name or workflow_name,
             status=e.status,
             started_at=e.started_at,
             completed_at=e.completed_at,
@@ -187,14 +149,14 @@ async def list_workflow_runs(workflow_id: str) -> ExecutionRunListResponse:
             total_cost_usd=Decimal(str(e.total_cost_usd)),
             error_message=e.error_message,
         )
-        for e in executions
+        for e in exec_result.value
     ]
 
     return ExecutionRunListResponse(
         runs=runs,
         total=len(runs),
         workflow_id=workflow_id,
-        workflow_name=detail.name,
+        workflow_name=workflow_name,
     )
 
 
@@ -204,21 +166,13 @@ async def get_workflow_history(workflow_id: str) -> ExecutionHistoryResponse:
 
     DEPRECATED: Use /workflows/{workflow_id}/runs instead.
     """
-    # Get projection manager and create handler
-    manager = get_projection_manager()
-    handler = GetWorkflowDetailHandler(manager.workflow_detail)
-
-    # Execute query
-    query = GetWorkflowDetailQuery(workflow_id=workflow_id)
-    detail = await handler.handle(query)
-
-    if detail is None:
+    wf_result = await wf.get_workflow(workflow_id)
+    if isinstance(wf_result, Err):
         raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
 
-    # For now, return empty history (sessions/artifacts not yet implemented in history)
     return ExecutionHistoryResponse(
         workflow_id=workflow_id,
-        workflow_name=detail.name,
+        workflow_name=wf_result.value.name,
         executions=[],
         total_executions=0,
     )

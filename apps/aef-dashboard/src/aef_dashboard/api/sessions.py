@@ -1,43 +1,21 @@
-"""Session API endpoints."""
+"""Session API endpoints — thin wrapper over aef_api."""
 
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from aef_adapters.projections import get_projection_manager
+import aef_api.v1.sessions as sess
+from aef_api.types import Err
 from aef_dashboard.models.schemas import (
     OperationInfo,
     SessionResponse,
     SessionSummary,
 )
-from aef_domain.contexts.agent_sessions.domain.queries import ListSessionsQuery
-from aef_domain.contexts.agent_sessions.slices.list_sessions import ListSessionsHandler
-
-if TYPE_CHECKING:
-    from aef_domain.contexts.agent_sessions.domain.read_models import (
-        SessionSummary as DomainSessionSummary,
-    )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
-
-
-def _domain_session_to_api(session: DomainSessionSummary) -> SessionSummary:
-    """Convert domain SessionSummary to API SessionSummary."""
-    return SessionSummary(
-        id=session.id,
-        workflow_id=session.workflow_id,
-        execution_id=session.execution_id,
-        phase_id=session.phase_id,
-        status=session.status,
-        agent_provider=session.agent_type,
-        total_tokens=session.total_tokens,
-        total_cost_usd=session.total_cost_usd,
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-    )
 
 
 @router.get("", response_model=list[SessionSummary])
@@ -47,188 +25,90 @@ async def list_sessions(
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> list[SessionSummary]:
     """List agent sessions with optional filtering."""
-    # Get projection manager and create handler
-    manager = get_projection_manager()
-    handler = ListSessionsHandler(manager.session_list)
-
-    # Build and execute query
-    query = ListSessionsQuery(
+    result = await sess.list_sessions(
         workflow_id=workflow_id,
-        status_filter=status,
+        status=status,
         limit=limit,
     )
-    sessions = await handler.handle(query)
 
-    return [_domain_session_to_api(s) for s in sessions]
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=result.message)
+
+    return [
+        SessionSummary(
+            id=s.id,
+            workflow_id=s.workflow_id,
+            execution_id=s.execution_id,
+            phase_id=s.phase_id,
+            status=s.status,
+            agent_provider=s.agent_type,
+            total_tokens=s.total_tokens,
+            total_cost_usd=Decimal(str(s.total_cost_usd)),
+            started_at=s.started_at,
+            completed_at=s.completed_at,
+        )
+        for s in result.value
+    ]
 
 
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session(session_id: str) -> SessionResponse:
     """Get session details by ID."""
-    # Get projection manager and create handler
-    manager = get_projection_manager()
-    handler = ListSessionsHandler(manager.session_list)
+    result = await sess.get_session(session_id)
 
-    # Query all sessions and find the matching one
-    # TODO: Add a GetSessionDetailQuery for direct lookup
-    query = ListSessionsQuery(limit=10000)
-    sessions = await handler.handle(query)
-    session = next((s for s in sessions if s.id == session_id), None)
-
-    if session is None:
+    if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    # Get cost data from TimescaleDB via SessionCostProjection
-    # Note: Events are stored with session_id (agent session), not execution_id (workflow)
-    session_cost = await manager.session_cost.get_session_cost(session_id)
+    detail = result.value
 
-    # Get workspace_path from execution_started event (ADR-029)
-    workspace_path: str | None = None
-    try:
-        from aef_adapters.events import get_event_store
-
-        store = get_event_store()
-        await store.initialize()
-        if store.pool:
-            async with store.pool.acquire() as conn:
-                result = await conn.fetchval(
-                    """
-                    SELECT data->>'workspace_path'
-                    FROM agent_events
-                    WHERE session_id = $1 AND event_type = 'execution_started'
-                    ORDER BY time DESC
-                    LIMIT 1
-                    """,
-                    session_id,
-                )
-                workspace_path = result
-    except Exception:
-        pass  # Workspace path is optional
-
-    # Get tool operations from TimescaleDB via SessionToolsProjection (ADR-026)
-    # Use the actual session_id (from URL), not execution_id
-    tool_operations = await manager.session_tools.get(session_id)
-
-    # Convert ToolOperation read models to API OperationInfo
+    # Convert tool operations to API format
     operations: list[OperationInfo] = []
-    for tool_op in tool_operations:
-        # Handle input_preview - may be a string that needs parsing
+    for op in detail.operations or []:
+        # Parse tool input if available
         tool_input_dict: dict[str, Any] | None = None
-        if tool_op.input_preview:
-            import json as json_module
+        input_preview = getattr(op, "input_preview", None)
+        if input_preview:
+            import json
 
             try:
-                parsed = json_module.loads(tool_op.input_preview)
-                if isinstance(parsed, dict):
-                    tool_input_dict = parsed
-                else:
-                    tool_input_dict = {"raw": tool_op.input_preview}
-            except (json_module.JSONDecodeError, TypeError):
-                tool_input_dict = {"raw": tool_op.input_preview}
+                parsed = json.loads(input_preview)
+                tool_input_dict = parsed if isinstance(parsed, dict) else {"raw": input_preview}
+            except (json.JSONDecodeError, TypeError):
+                tool_input_dict = {"raw": input_preview}
 
         operations.append(
             OperationInfo(
-                operation_id=tool_op.observation_id,
-                operation_type=tool_op.operation_type,
-                timestamp=tool_op.timestamp,
-                duration_seconds=(tool_op.duration_ms / 1000.0) if tool_op.duration_ms else None,
-                success=tool_op.success if tool_op.success is not None else True,
-                # Token metrics (not available in tool operations)
-                input_tokens=None,
-                output_tokens=None,
-                total_tokens=None,
-                # Tool details
-                tool_name=tool_op.tool_name,
-                tool_use_id=tool_op.tool_use_id,
+                operation_id=op.observation_id,
+                operation_type=op.operation_type,
+                timestamp=op.timestamp,
+                duration_seconds=(op.duration_ms / 1000.0) if op.duration_ms else None,
+                success=op.success if op.success is not None else True,
+                tool_name=op.tool_name,
+                tool_use_id=op.tool_use_id,
                 tool_input=tool_input_dict,
-                tool_output=tool_op.output_preview,
-                # Message details (not applicable for tool ops)
-                message_role=None,
-                message_content=None,
-                # Thinking details (not applicable for tool ops)
-                thinking_content=None,
+                tool_output=getattr(op, "output_preview", None),
             )
         )
 
-    # Fallback to projection if TimescaleDB doesn't have data
-    if not operations:
-        for op in session.operations:
-            # Handle timestamp - can be string or datetime
-            ts = op.timestamp
-            if isinstance(ts, str):
-                from datetime import datetime as dt
-
-                try:
-                    ts = dt.fromisoformat(ts.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    ts = None
-            operations.append(
-                OperationInfo(
-                    operation_id=op.operation_id,
-                    operation_type=op.operation_type,
-                    timestamp=ts,
-                    duration_seconds=op.duration_seconds,
-                    success=op.success,
-                    # Token metrics
-                    input_tokens=op.input_tokens,
-                    output_tokens=op.output_tokens,
-                    total_tokens=op.total_tokens,
-                    # Tool details
-                    tool_name=op.tool_name,
-                    tool_use_id=op.tool_use_id,
-                    tool_input=op.tool_input,
-                    tool_output=op.tool_output,
-                    # Message details
-                    message_role=op.message_role,
-                    message_content=op.message_content,
-                    # Thinking details
-                    thinking_content=op.thinking_content,
-                )
-            )
-
-    # Get workflow name from projection if available
-    workflow_name = None
-    if session.workflow_id:
-        try:
-            # Try to get workflow from the list projection
-            workflows = await manager.workflow_list.get_all()
-            wf = next((w for w in workflows if w.id == session.workflow_id), None)
-            if wf:
-                workflow_name = wf.name
-        except Exception:
-            pass  # workflow lookup is optional
-
-    # Use cost data from TimescaleDB if available, otherwise use session data
-    if session_cost:
-        input_tokens = session_cost.input_tokens
-        output_tokens = session_cost.output_tokens
-        total_tokens = input_tokens + output_tokens
-        total_cost_usd = session_cost.total_cost_usd
-    else:
-        input_tokens = session.input_tokens
-        output_tokens = session.output_tokens
-        total_tokens = session.total_tokens
-        total_cost_usd = Decimal(str(session.total_cost_usd))
-
     return SessionResponse(
-        id=session.id,
-        workflow_id=session.workflow_id,
-        workflow_name=workflow_name,
-        execution_id=getattr(session, "execution_id", None),
-        phase_id=session.phase_id,
+        id=detail.id,
+        workflow_id=detail.workflow_id,
+        workflow_name=getattr(detail, "workflow_name", None),
+        execution_id=detail.execution_id,
+        phase_id=detail.phase_id,
         milestone_id=None,
-        agent_provider=session.agent_type,
+        agent_provider=detail.agent_type,
         agent_model=None,
-        status=session.status,
-        workspace_path=workspace_path,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=total_tokens,
-        total_cost_usd=total_cost_usd,
+        status=detail.status,
+        workspace_path=getattr(detail, "workspace_path", None),
+        input_tokens=detail.input_tokens,
+        output_tokens=detail.output_tokens,
+        total_tokens=detail.total_tokens,
+        total_cost_usd=Decimal(str(detail.total_cost_usd)),
         operations=operations,
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-        duration_seconds=session.duration_seconds,
+        started_at=detail.started_at,
+        completed_at=detail.completed_at,
+        duration_seconds=detail.duration_seconds,
         error_message=None,
         metadata={},
     )

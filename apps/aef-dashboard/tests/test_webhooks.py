@@ -1,44 +1,26 @@
-"""Tests for GitHub webhook endpoints."""
+"""Tests for GitHub webhook endpoints.
+
+These tests mock aef_api.v1.github to validate the dashboard's
+thin-wrapper webhook endpoint.
+"""
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
-from unittest import mock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from aef_dashboard.main import create_app
-from aef_shared.settings.github import reset_github_settings
+from aef_api.types import Err, GitHubError, Ok, WebhookResult
+from aef_dashboard.main import app
+
+API_MODULE = "aef_api.v1.github"
 
 
 @pytest.fixture
 def client() -> TestClient:
     """Create a test client."""
-    app = create_app()
     return TestClient(app)
-
-
-@pytest.fixture(autouse=True)
-def reset_settings() -> None:
-    """Reset settings before each test."""
-    reset_github_settings()
-
-
-@pytest.fixture(autouse=True)
-def development_environment() -> None:
-    """Set development environment for tests without signature."""
-    import os
-
-    original = os.environ.get("AEF_ENVIRONMENT")
-    os.environ["AEF_ENVIRONMENT"] = "development"
-    yield
-    if original is None:
-        os.environ.pop("AEF_ENVIRONMENT", None)
-    else:
-        os.environ["AEF_ENVIRONMENT"] = original
 
 
 @pytest.mark.unit
@@ -46,7 +28,7 @@ class TestGitHubWebhook:
     """Tests for the /webhooks/github endpoint."""
 
     def test_ping_event(self, client: TestClient) -> None:
-        """Test handling ping event from GitHub."""
+        """Test handling ping event from GitHub (handled locally, not via aef_api)."""
         payload = {"zen": "Keep it simple."}
 
         response = client.post(
@@ -65,154 +47,111 @@ class TestGitHubWebhook:
 
     def test_installation_created_event(self, client: TestClient) -> None:
         """Test handling installation created event."""
-        payload = {
-            "action": "created",
-            "installation": {
-                "id": 12345,
-                "account": {
-                    "id": 67890,
-                    "login": "test-org",
-                    "type": "Organization",
+        with patch(f"{API_MODULE}.verify_and_process_webhook", new_callable=AsyncMock) as mock:
+            mock.return_value = Ok(
+                WebhookResult(
+                    status="processed",
+                    event="installation",
+                    triggers_fired=[],
+                    deferred=[],
+                )
+            )
+            response = client.post(
+                "/webhooks/github",
+                json={"action": "created", "installation": {"id": 12345}},
+                headers={
+                    "X-GitHub-Event": "installation",
+                    "X-GitHub-Delivery": "test-delivery-456",
                 },
-                "permissions": {
-                    "contents": "write",
-                    "metadata": "read",
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "processed"
+            assert data["event"] == "installation"
+
+    def test_webhook_with_triggers(self, client: TestClient) -> None:
+        """Test webhook that fires triggers."""
+        with patch(f"{API_MODULE}.verify_and_process_webhook", new_callable=AsyncMock) as mock:
+            mock.return_value = Ok(
+                WebhookResult(
+                    status="processed",
+                    event="push",
+                    triggers_fired=["trigger-1", "trigger-2"],
+                    deferred=["trigger-3"],
+                )
+            )
+            response = client.post(
+                "/webhooks/github",
+                json={"ref": "refs/heads/main"},
+                headers={
+                    "X-GitHub-Event": "push",
+                    "X-GitHub-Delivery": "test-delivery-push",
                 },
-            },
-            "repositories": [
-                {"full_name": "test-org/repo1"},
-                {"full_name": "test-org/repo2"},
-            ],
-        }
+            )
 
-        response = client.post(
-            "/webhooks/github",
-            json=payload,
-            headers={
-                "X-GitHub-Event": "installation",
-                "X-GitHub-Delivery": "test-delivery-456",
-            },
-        )
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "processed"
+            assert len(data["triggers"]) == 2
+            assert len(data["deferred"]) == 1
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "processed"
-        assert data["action"] == "created"
-        assert data["installation_id"] == "12345"
-
-    def test_installation_deleted_event(self, client: TestClient) -> None:
-        """Test handling installation deleted event."""
-        payload = {
-            "action": "deleted",
-            "installation": {
-                "id": 12345,
-                "account": {
-                    "login": "test-org",
+    def test_invalid_signature_rejected(self, client: TestClient) -> None:
+        """Test that invalid signature returns 401."""
+        with patch(f"{API_MODULE}.verify_and_process_webhook", new_callable=AsyncMock) as mock:
+            mock.return_value = Err(
+                GitHubError.INVALID_SIGNATURE,
+                message="Invalid signature",
+            )
+            response = client.post(
+                "/webhooks/github",
+                json={"zen": "Test"},
+                headers={
+                    "X-GitHub-Event": "push",
+                    "X-GitHub-Delivery": "test-delivery",
+                    "X-Hub-Signature-256": "sha256=invalid",
                 },
-            },
-        }
+            )
 
-        response = client.post(
-            "/webhooks/github",
-            json=payload,
-            headers={
-                "X-GitHub-Event": "installation",
-                "X-GitHub-Delivery": "test-delivery-789",
-            },
-        )
+            assert response.status_code == 401
+            assert "Invalid signature" in response.json()["detail"]
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "processed"
-        assert data["action"] == "deleted"
+    def test_invalid_payload_rejected(self, client: TestClient) -> None:
+        """Test that invalid payload returns 400."""
+        with patch(f"{API_MODULE}.verify_and_process_webhook", new_callable=AsyncMock) as mock:
+            mock.return_value = Err(
+                GitHubError.INVALID_PAYLOAD,
+                message="Invalid payload format",
+            )
+            response = client.post(
+                "/webhooks/github",
+                json={"bad": "data"},
+                headers={
+                    "X-GitHub-Event": "push",
+                    "X-GitHub-Delivery": "test-delivery",
+                },
+            )
 
-    def test_installation_suspend_event(self, client: TestClient) -> None:
-        """Test handling installation suspend event."""
-        payload = {
-            "action": "suspend",
-            "installation": {
-                "id": 12345,
-            },
-        }
+            assert response.status_code == 400
+            assert "Invalid payload" in response.json()["detail"]
 
-        response = client.post(
-            "/webhooks/github",
-            json=payload,
-            headers={
-                "X-GitHub-Event": "installation",
-                "X-GitHub-Delivery": "test-delivery-suspend",
-            },
-        )
+    def test_processing_error_returns_500(self, client: TestClient) -> None:
+        """Test that processing failure returns 500."""
+        with patch(f"{API_MODULE}.verify_and_process_webhook", new_callable=AsyncMock) as mock:
+            mock.return_value = Err(
+                GitHubError.PROCESSING_FAILED,
+                message="Internal error processing webhook",
+            )
+            response = client.post(
+                "/webhooks/github",
+                json={"data": "test"},
+                headers={
+                    "X-GitHub-Event": "push",
+                    "X-GitHub-Delivery": "test-delivery",
+                },
+            )
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "processed"
-        assert data["action"] == "suspend"
-        assert data["installation_id"] == "12345"
-
-    def test_installation_repos_event(self, client: TestClient) -> None:
-        """Test handling installation_repositories event."""
-        payload = {
-            "action": "added",
-            "installation": {
-                "id": 12345,
-            },
-            "repositories_added": [
-                {"full_name": "test-org/new-repo"},
-            ],
-            "repositories_removed": [],
-        }
-
-        response = client.post(
-            "/webhooks/github",
-            json=payload,
-            headers={
-                "X-GitHub-Event": "installation_repositories",
-                "X-GitHub-Delivery": "test-delivery-repos",
-            },
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "processed"
-        assert data["repos_added"] == 1
-        assert data["repos_removed"] == 0
-
-    def test_unknown_event_ignored(self, client: TestClient) -> None:
-        """Test that unknown events are ignored."""
-        response = client.post(
-            "/webhooks/github",
-            json={"some": "data"},
-            headers={
-                "X-GitHub-Event": "unknown_event",
-                "X-GitHub-Delivery": "test-delivery-unknown",
-            },
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ignored"
-        assert data["event"] == "unknown_event"
-
-    def test_unknown_installation_action_ignored(self, client: TestClient) -> None:
-        """Test that unknown installation actions are ignored."""
-        payload = {
-            "action": "some_future_action",
-            "installation": {"id": 12345},
-        }
-
-        response = client.post(
-            "/webhooks/github",
-            json=payload,
-            headers={
-                "X-GitHub-Event": "installation",
-                "X-GitHub-Delivery": "test-delivery-action",
-            },
-        )
-
-        assert response.status_code == 200
-        data = response.json()
-        assert data["status"] == "ignored"
+            assert response.status_code == 500
 
     def test_missing_github_event_header(self, client: TestClient) -> None:
         """Test that missing X-GitHub-Event header returns 422."""
@@ -225,120 +164,3 @@ class TestGitHubWebhook:
         )
 
         assert response.status_code == 422
-
-    def test_invalid_json_payload(self, client: TestClient) -> None:
-        """Test that invalid JSON returns 400."""
-        response = client.post(
-            "/webhooks/github",
-            content=b"not valid json",
-            headers={
-                "X-GitHub-Event": "ping",
-                "X-GitHub-Delivery": "test-delivery",
-                "Content-Type": "application/json",
-            },
-        )
-
-        assert response.status_code == 400
-        data = response.json()
-        assert "Invalid JSON" in data["detail"]
-
-
-class TestWebhookSignatureVerification:
-    """Tests for webhook signature verification."""
-
-    def test_valid_signature_accepted(self, client: TestClient) -> None:
-        """Test that valid signature is accepted."""
-        # Configure webhook secret
-        with mock.patch.dict(
-            "os.environ",
-            {"AEF_GITHUB_WEBHOOK_SECRET": "test-secret"},
-        ):
-            reset_github_settings()
-
-            payload = json.dumps({"zen": "Test"}).encode()
-            signature = "sha256=" + hmac.new(b"test-secret", payload, hashlib.sha256).hexdigest()
-
-            response = client.post(
-                "/webhooks/github",
-                content=payload,
-                headers={
-                    "X-GitHub-Event": "ping",
-                    "X-GitHub-Delivery": "test-delivery",
-                    "X-Hub-Signature-256": signature,
-                    "Content-Type": "application/json",
-                },
-            )
-
-            assert response.status_code == 200
-
-    def test_invalid_signature_rejected(self, client: TestClient) -> None:
-        """Test that invalid signature is rejected."""
-        with mock.patch.dict(
-            "os.environ",
-            {"AEF_GITHUB_WEBHOOK_SECRET": "test-secret"},
-        ):
-            reset_github_settings()
-
-            response = client.post(
-                "/webhooks/github",
-                json={"zen": "Test"},
-                headers={
-                    "X-GitHub-Event": "ping",
-                    "X-GitHub-Delivery": "test-delivery",
-                    "X-Hub-Signature-256": "sha256=invalid",
-                },
-            )
-
-            assert response.status_code == 401
-            assert "Invalid signature" in response.json()["detail"]
-
-    def test_missing_signature_when_secret_configured(self, client: TestClient) -> None:
-        """Test that missing signature is rejected when secret is configured."""
-        with mock.patch.dict(
-            "os.environ",
-            {"AEF_GITHUB_WEBHOOK_SECRET": "test-secret"},
-        ):
-            reset_github_settings()
-
-            response = client.post(
-                "/webhooks/github",
-                json={"zen": "Test"},
-                headers={
-                    "X-GitHub-Event": "ping",
-                    "X-GitHub-Delivery": "test-delivery",
-                },
-            )
-
-            assert response.status_code == 401
-            assert "Missing X-Hub-Signature-256" in response.json()["detail"]
-
-    def test_no_secret_in_dev_mode_accepts_without_signature(self, client: TestClient) -> None:
-        """Test that in development mode without secret, requests are accepted."""
-        # AEF_ENVIRONMENT is set to 'development' by fixture
-        response = client.post(
-            "/webhooks/github",
-            json={"zen": "Test"},
-            headers={
-                "X-GitHub-Event": "ping",
-                "X-GitHub-Delivery": "test-delivery",
-            },
-        )
-
-        assert response.status_code == 200
-
-    def test_no_secret_in_production_rejects(self, client: TestClient) -> None:
-        """Test that in production mode without secret, requests are rejected."""
-        with mock.patch.dict("os.environ", {"AEF_ENVIRONMENT": "production"}):
-            reset_github_settings()
-
-            response = client.post(
-                "/webhooks/github",
-                json={"zen": "Test"},
-                headers={
-                    "X-GitHub-Event": "ping",
-                    "X-GitHub-Delivery": "test-delivery",
-                },
-            )
-
-            assert response.status_code == 500
-            assert "not configured" in response.json()["detail"]
