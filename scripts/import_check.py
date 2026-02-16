@@ -56,6 +56,11 @@ def main() -> int:
 
         modules_tested.append(cli_app.info.name or "cli_app")
 
+        # API
+        import aef_api
+
+        modules_tested.append(f"aef_api v{aef_api.__version__}")
+
         # Adapters
         from aef_adapters.storage import (
             ArtifactRepositoryProtocol,

@@ -595,6 +595,10 @@ qa-python: lint format typecheck test test-debt vsa-validate
 
 # --- Workflow Management ---
 
+# Generate llms.txt from API docs
+generate-llms-txt:
+    uv run python scripts/generate_llms_txt.py
+
 # Seed workflows from YAML files
 seed-workflows:
     uv run --package aef-cli aef workflow seed
