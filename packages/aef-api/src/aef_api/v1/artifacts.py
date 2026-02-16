@@ -1,19 +1,32 @@
-"""Artifact operations — list, create, and upload artifacts.
+"""Artifact operations — list, get, create, and upload artifacts.
 
 Maps to the artifacts context in aef-domain.
-
-Stub implementation for Phase 1 — complete signatures and types,
-with TODO markers pointing to domain slices.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
-from aef_api.types import ArtifactError, ArtifactSummary, Err, Result
+from aef_api._wiring import (
+    ensure_connected,
+    get_artifact_repo,
+    get_projection_mgr,
+    sync_published_events_to_projections,
+)
+from aef_api.types import (
+    ArtifactDetail,
+    ArtifactError,
+    ArtifactSummary,
+    Err,
+    Ok,
+    Result,
+)
 
 if TYPE_CHECKING:
     from aef_api.auth import AuthContext
+
+logger = logging.getLogger(__name__)
 
 
 async def list_artifacts(
@@ -35,12 +48,92 @@ async def list_artifacts(
     Returns:
         Ok(list[ArtifactSummary]) on success, Err(ArtifactError) on failure.
     """
-    # TODO(#92): Implement — maps to domain slice artifacts/list_artifacts
-    # Wire: get_projection_manager().artifact_list → ArtifactListProjection
-    return Err(
-        ArtifactError.NOT_IMPLEMENTED,
-        message="list_artifacts not yet implemented — see #92 Phase 1",
-    )
+    await ensure_connected()
+    try:
+        manager = get_projection_mgr()
+        projection = manager.artifact_list
+        domain_artifacts = await projection.query(
+            workflow_id=workflow_id,
+            session_id=session_id,
+            limit=limit,
+            offset=offset,
+        )
+        return Ok(
+            [
+                ArtifactSummary(
+                    id=a.id,
+                    workflow_id=getattr(a, "workflow_id", None),
+                    phase_id=getattr(a, "phase_id", None),
+                    artifact_type=getattr(a, "artifact_type", ""),
+                    title=getattr(a, "title", None),
+                    size_bytes=getattr(a, "size_bytes", 0),
+                    created_at=getattr(a, "created_at", None),
+                )
+                for a in domain_artifacts
+            ]
+        )
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+async def get_artifact(
+    artifact_id: str,
+    include_content: bool = False,
+    auth: AuthContext | None = None,
+) -> Result[ArtifactDetail, ArtifactError]:
+    """Get detailed artifact information, optionally with content.
+
+    Args:
+        artifact_id: The artifact ID.
+        include_content: Whether to include the artifact content.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(ArtifactDetail) on success, Err(ArtifactError) on failure.
+    """
+    await ensure_connected()
+    try:
+        manager = get_projection_mgr()
+        projection = manager.artifact_list
+
+        # Look up from projection
+        all_artifacts = await projection.query(limit=10000)
+        artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+
+        if artifact is None:
+            return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
+
+        content = None
+        content_type = None
+        if include_content:
+            try:
+                from aef_adapters.storage.artifact_storage import get_artifact_storage
+
+                storage = await get_artifact_storage()
+                raw = await storage.download(artifact_id)
+                content = raw.decode("utf-8", errors="replace")
+                content_type = getattr(artifact, "content_type", "text/plain")
+            except Exception:
+                logger.exception("Failed to load artifact content for %s", artifact_id)
+
+        return Ok(
+            ArtifactDetail(
+                id=artifact.id,
+                workflow_id=getattr(artifact, "workflow_id", None),
+                phase_id=getattr(artifact, "phase_id", None),
+                session_id=getattr(artifact, "session_id", None),
+                artifact_type=getattr(artifact, "artifact_type", ""),
+                title=getattr(artifact, "title", None),
+                content=content,
+                content_type=content_type,
+                size_bytes=getattr(artifact, "size_bytes", 0),
+                created_at=getattr(artifact, "created_at", None),
+            )
+        )
+    except Exception as e:
+        if "not found" in str(e).lower():
+            return Err(ArtifactError.NOT_FOUND, message=str(e))
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
 
 
 async def create_artifact(
@@ -68,12 +161,44 @@ async def create_artifact(
     Returns:
         Ok(artifact_id) on success, Err(ArtifactError) on failure.
     """
-    # TODO(#92): Implement — maps to domain slice artifacts/create_artifact
-    # Wire: get_artifact_repository() → ArtifactAggregate.create()
-    return Err(
-        ArtifactError.NOT_IMPLEMENTED,
-        message="create_artifact not yet implemented — see #92 Phase 1",
-    )
+    from uuid import uuid4
+
+    await ensure_connected()
+    try:
+        from aef_domain.contexts.artifacts._shared.value_objects import ArtifactType
+        from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+            ArtifactAggregate,
+        )
+        from aef_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
+            CreateArtifactCommand,
+        )
+
+        type_map = {
+            "research_summary": ArtifactType.RESEARCH_SUMMARY,
+            "code": ArtifactType.CODE,
+            "document": ArtifactType.DOCUMENTATION,
+        }
+        art_type = type_map.get(artifact_type.lower(), ArtifactType.RESEARCH_SUMMARY)
+
+        artifact_id = str(uuid4())
+        command = CreateArtifactCommand(
+            aggregate_id=artifact_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id or "",
+            artifact_type=art_type,
+            content=content,
+            title=title,
+        )
+
+        repo = get_artifact_repo()
+        aggregate = ArtifactAggregate()
+        aggregate._handle_command(command)
+        await repo.save(aggregate)
+        await sync_published_events_to_projections()
+
+        return Ok(artifact_id)
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
 
 
 async def upload_artifact(
@@ -95,9 +220,16 @@ async def upload_artifact(
     Returns:
         Ok(storage_url) on success, Err(ArtifactError) on failure.
     """
-    # TODO(#92): Implement — maps to artifact content storage (MinIO)
-    # Wire: get_artifact_storage() → ArtifactContentStoragePort.upload()
-    return Err(
-        ArtifactError.NOT_IMPLEMENTED,
-        message="upload_artifact not yet implemented — see #92 Phase 1",
-    )
+    await ensure_connected()
+    try:
+        from aef_adapters.storage.artifact_storage import get_artifact_storage
+
+        storage = await get_artifact_storage()
+        result = await storage.upload(
+            artifact_id=artifact_id,
+            content=data,
+            content_type=content_type,
+        )
+        return Ok(result.storage_uri if hasattr(result, "storage_uri") else str(result))
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))

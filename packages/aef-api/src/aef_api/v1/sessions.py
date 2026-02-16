@@ -5,6 +5,7 @@ Maps to the agent_sessions context in aef-domain.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from aef_api._wiring import (
@@ -13,10 +14,20 @@ from aef_api._wiring import (
     get_session_repo,
     sync_published_events_to_projections,
 )
-from aef_api.types import Err, Ok, Result, SessionError, SessionSummary
+from aef_api.types import (
+    Err,
+    Ok,
+    Result,
+    SessionDetail,
+    SessionError,
+    SessionSummary,
+    ToolOperation,
+)
 
 if TYPE_CHECKING:
     from aef_api.auth import AuthContext
+
+logger = logging.getLogger(__name__)
 
 
 async def list_sessions(
@@ -142,3 +153,83 @@ async def complete_session(
         return Ok(None)
     except Exception as e:
         return Err(SessionError.NOT_FOUND, message=str(e))
+
+
+async def get_session(
+    session_id: str,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[SessionDetail, SessionError]:
+    """Get detailed information about a session, including tool operations and costs.
+
+    Args:
+        session_id: The session ID to look up.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(SessionDetail) on success, Err(SessionError.NOT_FOUND) if missing.
+    """
+    await ensure_connected()
+    manager = get_projection_mgr()
+
+    # Look up session in the session_list projection
+    sessions = await manager.session_list.query(limit=10000)
+    session = next((s for s in sessions if s.id == session_id), None)
+
+    if session is None:
+        return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
+
+    # Get tool operations
+    operations: list[ToolOperation] = []
+    try:
+        tool_data = await manager.session_tools.get(session_id)
+        operations = [
+            ToolOperation(
+                observation_id=getattr(op, "observation_id", ""),
+                operation_type=getattr(op, "operation_type", ""),
+                timestamp=getattr(op, "timestamp", None),
+                duration_ms=getattr(op, "duration_ms", None),
+                success=getattr(op, "success", None),
+                tool_name=getattr(op, "tool_name", None),
+                tool_use_id=getattr(op, "tool_use_id", None),
+                input_preview=getattr(op, "input_preview", None),
+                output_preview=getattr(op, "output_preview", None),
+            )
+            for op in (tool_data or [])
+        ]
+    except Exception:
+        logger.exception("Failed to load tool operations for session %s", session_id)
+
+    # Get cost data
+    input_tokens = 0
+    output_tokens = 0
+    total_cost = session.total_cost_usd
+    duration_seconds = None
+    try:
+        cost = await manager.session_cost.get_session_cost(session_id)
+        if cost:
+            input_tokens = getattr(cost, "input_tokens", 0)
+            output_tokens = getattr(cost, "output_tokens", 0)
+            total_cost = getattr(cost, "total_cost_usd", session.total_cost_usd)
+            if getattr(cost, "duration_ms", 0):
+                duration_seconds = getattr(cost, "duration_ms", 0) / 1000.0
+    except Exception:
+        logger.exception("Failed to load cost data for session %s", session_id)
+
+    return Ok(
+        SessionDetail(
+            id=session.id,
+            workflow_id=session.workflow_id,
+            execution_id=session.execution_id,
+            phase_id=session.phase_id,
+            agent_type=session.agent_type,
+            status=session.status,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=session.total_tokens,
+            total_cost_usd=total_cost,
+            operations=operations,
+            started_at=session.started_at,
+            completed_at=session.completed_at,
+            duration_seconds=duration_seconds,
+        )
+    )
