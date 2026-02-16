@@ -15,6 +15,7 @@ COPY packages/aef-shared/ ./packages/aef-shared/
 COPY packages/aef-tokens/ ./packages/aef-tokens/
 COPY packages/aef-domain/ ./packages/aef-domain/
 COPY packages/aef-adapters/ ./packages/aef-adapters/
+COPY packages/aef-api/ ./packages/aef-api/
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
 COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
 COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
@@ -39,6 +40,7 @@ RUN uv pip install ./packages/aef-shared
 RUN uv pip install ./packages/aef-tokens
 RUN uv pip install ./packages/aef-domain
 RUN uv pip install './packages/aef-adapters[all]'
+RUN uv pip install ./packages/aef-api
 RUN uv pip install ./apps/aef-dashboard
 
 # Runtime stage
