@@ -46,7 +46,7 @@ build-backend = "uv_build"
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/aef-dashboard-ui", "apps/aef-docs"]
+exclude = ["apps/aef-dashboard-ui", "apps/aef-docs", "apps/aef-cli-legacy"]
 
 [tool.uv.sources]
 aef-api = { workspace = true }

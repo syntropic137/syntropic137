@@ -1,16 +1,14 @@
 """Main CLI entry point for Agentic Engineering Framework."""
 
-from __future__ import annotations
-
-import logging
-
 import typer
 from rich.console import Console
 
 from aef_cli.commands import agent, config, control, triggers, workflow
+from aef_shared.logging import LogConfig, configure_logging, get_logger
 
-# Basic logging setup (no aef_shared dependency)
-logging.basicConfig(level=logging.WARNING, format="%(message)s")
+# Configure logging
+configure_logging(LogConfig())
+logger = get_logger(__name__)
 
 # Create CLI app
 app = typer.Typer(
@@ -36,6 +34,7 @@ def version() -> None:
     console.print(f"[bold]Agentic Engineering Framework[/bold] v{__version__}")
 
 
+# Convenience alias: `aef run` delegates to `aef workflow run`
 @app.command("run")
 def run_shortcut(
     workflow_id: str = typer.Argument(..., help="Workflow ID to execute"),
@@ -46,6 +45,7 @@ def run_shortcut(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
 ) -> None:
     """Execute a workflow (shortcut for 'aef workflow run')."""
+    # Delegate to workflow run command
     workflow.run_workflow(workflow_id, inputs, dry_run, quiet)
 
 
