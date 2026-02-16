@@ -25,6 +25,7 @@ from aef_api.types import (
     WorkflowDetail,
     WorkflowError,
     WorkflowSummary,
+    WorkflowValidation,
 )
 
 if TYPE_CHECKING:
@@ -213,6 +214,8 @@ async def execute_workflow(
     workflow_id: str,
     inputs: dict[str, str] | None = None,
     execution_id: str | None = None,
+    use_container: bool = True,  # noqa: ARG001
+    tenant_id: str | None = None,  # noqa: ARG001
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionSummary, WorkflowError]:
     """Execute a workflow.
@@ -221,6 +224,8 @@ async def execute_workflow(
         workflow_id: ID of the workflow template to execute.
         inputs: Input variables for the workflow.
         execution_id: Optional execution ID (auto-generated if omitted).
+        use_container: Whether to use container isolation (default True).
+        tenant_id: Optional tenant ID for multi-tenant deployments.
         auth: Optional authentication context.
 
     Returns:
@@ -231,6 +236,12 @@ async def execute_workflow(
     )
 
     await ensure_connected()
+
+    # Look up workflow name for the summary
+    manager = get_projection_mgr()
+    detail = await manager.workflow_detail.get_by_id(workflow_id)
+    workflow_name = detail.name if detail else ""
+
     engine = await get_execution_engine()
 
     try:
@@ -248,7 +259,7 @@ async def execute_workflow(
         ExecutionSummary(
             workflow_execution_id=result.execution_id,
             workflow_id=workflow_id,
-            workflow_name="",
+            workflow_name=workflow_name,
             status=result.status.value,
             completed_phases=result.metrics.completed_phases,
             total_phases=result.metrics.total_phases,
@@ -344,4 +355,59 @@ async def list_executions(
             )
             for s in domain_summaries
         ]
+    )
+
+
+async def validate_yaml(
+    yaml_path: str,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[WorkflowValidation, WorkflowError]:
+    """Validate a workflow YAML file.
+
+    Args:
+        yaml_path: Path to the YAML file to validate.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(WorkflowValidation) on success, Err(WorkflowError) on failure.
+    """
+    from pathlib import Path
+
+    from aef_domain.contexts.orchestration._shared.workflow_definition import (
+        WorkflowDefinition,
+        validate_workflow_yaml,
+    )
+
+    path = Path(yaml_path)
+    if not path.exists():
+        return Err(
+            WorkflowError.NOT_FOUND,
+            message=f"YAML file not found: {yaml_path}",
+        )
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return Err(WorkflowError.INVALID_INPUT, message=f"Failed to read file: {e}")
+
+    is_valid, error_msg = validate_workflow_yaml(content)
+
+    if is_valid:
+        definition = WorkflowDefinition.from_yaml(content)
+        return Ok(
+            WorkflowValidation(
+                valid=True,
+                name=definition.name,
+                workflow_type=definition.type.value
+                if hasattr(definition.type, "value")
+                else str(definition.type),
+                phase_count=len(definition.phases),
+            )
+        )
+
+    return Ok(
+        WorkflowValidation(
+            valid=False,
+            errors=[error_msg] if error_msg else ["Unknown validation error"],
+        )
     )
