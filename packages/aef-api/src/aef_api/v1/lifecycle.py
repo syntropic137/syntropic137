@@ -18,6 +18,7 @@ from aef_api._wiring import (
     get_github_settings,
     get_realtime,
     get_subscription_coordinator,
+    get_workflow_dispatcher,
 )
 from aef_api.types import Err, LifecycleError, Ok, Result
 
@@ -28,8 +29,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Module-level reference to the subscription service
+# Module-level references for lifecycle management
 _subscription_service: Any = None
+_workflow_dispatcher: Any = None
 
 
 async def startup(
@@ -45,7 +47,7 @@ async def startup(
     Returns:
         Ok(None) on success, Err(LifecycleError) on failure.
     """
-    global _subscription_service
+    global _subscription_service, _workflow_dispatcher
 
     try:
         from aef_shared.settings import get_settings
@@ -77,11 +79,13 @@ async def startup(
         # Connect to event store
         await ensure_connected()
 
-        # Start subscription coordinator
+        # Start subscription coordinator with workflow dispatcher
         try:
             realtime = get_realtime()
+            _workflow_dispatcher = await get_workflow_dispatcher()
             _subscription_service = get_subscription_coordinator(
                 realtime_projection=realtime,
+                execution_service=_workflow_dispatcher,
             )
             await _subscription_service.start()
         except Exception:
@@ -103,9 +107,15 @@ async def shutdown(
     Returns:
         Ok(None) on success, Err(LifecycleError) on failure.
     """
-    global _subscription_service
+    global _subscription_service, _workflow_dispatcher
 
     try:
+        # Shut down dispatcher first to prevent new tasks during teardown
+        if _workflow_dispatcher is not None:
+            with contextlib.suppress(Exception):
+                await _workflow_dispatcher.shutdown()
+            _workflow_dispatcher = None
+
         if _subscription_service is not None:
             with contextlib.suppress(Exception):
                 await _subscription_service.stop()
