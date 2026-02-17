@@ -93,9 +93,7 @@ def main() -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(spec, indent=2) + "\n")
 
-    endpoint_count = sum(
-        len(methods) for methods in spec.get("paths", {}).values()
-    )
+    endpoint_count = sum(len(methods) for methods in spec.get("paths", {}).values())
     print(f"Wrote OpenAPI spec to {output_path} ({endpoint_count} endpoints)")
 
 

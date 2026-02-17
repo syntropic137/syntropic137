@@ -64,7 +64,7 @@ function NetworkNodes({ isDark }: { isDark: boolean }) {
   const lineMaterialRef = useRef<THREE.LineBasicMaterial>(null);
   const theme = isDark ? DARK_COLORS : LIGHT_COLORS;
 
-  const [positions, connections] = useMemo(() => {
+  const [[positions, connections]] = useState(() => {
     const nodeCount = 80;
     const pos = new Float32Array(nodeCount * 3);
 
@@ -96,7 +96,7 @@ function NetworkNodes({ isDark }: { isDark: boolean }) {
     }
 
     return [pos, new Float32Array(linePositions)];
-  }, []);
+  });
 
   const colors = useMemo(() => {
     const nodeCount = 80;
@@ -307,6 +307,9 @@ export function HeroScene() {
         camera={{ position: [0, 0, 5.5], fov: 55 }}
         style={{ background: 'transparent' }}
         gl={{ alpha: true, antialias: true }}
+        aria-label="Interactive 3D visualization of the AEF architecture"
+        role="img"
+        tabIndex={-1}
       >
         <Scene isDark={isDark} />
       </Canvas>

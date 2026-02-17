@@ -202,7 +202,7 @@ jobs:
 
       - name: Install ui-feedback-react dependencies
         working-directory: lib/ui-feedback/packages/ui-feedback-react
-        run: pnpm install --ignore-scripts
+        run: pnpm install --ignore-scripts --ignore-workspace
 
       - name: Install dashboard dependencies
         working-directory: apps/aef-dashboard-ui
