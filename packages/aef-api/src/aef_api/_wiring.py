@@ -7,6 +7,8 @@ obtain properly-configured domain handlers and projections.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from typing import Any
 
@@ -210,6 +212,55 @@ def get_controller() -> Any:
         state_port=state_adapter,
         signal_port=signal_adapter,
     )
+
+
+logger = logging.getLogger(__name__)
+
+
+class BackgroundWorkflowDispatcher:
+    """Bridges WorkflowDispatchProjection → WorkflowExecutionEngine.
+
+    - run_workflow() → execute() method name bridge
+    - Fire-and-forget via asyncio.Task (never blocks projection loop)
+    - Tracks tasks for graceful shutdown
+    """
+
+    def __init__(self, engine: WorkflowExecutionEngine) -> None:
+        self._engine = engine
+        self._tasks: set[asyncio.Task] = set()
+
+    async def run_workflow(self, workflow_id: str, inputs: dict, execution_id: str = "") -> None:
+        task = asyncio.create_task(
+            self._run(workflow_id, inputs, execution_id),
+            name=f"workflow-exec-{execution_id or workflow_id}",
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _run(self, workflow_id: str, inputs: dict, execution_id: str) -> None:
+        try:
+            await self._engine.execute(
+                workflow_id=workflow_id,
+                inputs=inputs,
+                execution_id=execution_id or None,
+            )
+        except Exception:
+            logger.exception(
+                "Background workflow failed",
+                extra={"workflow_id": workflow_id, "execution_id": execution_id},
+            )
+
+    async def shutdown(self) -> None:
+        for task in list(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+
+
+async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
+    """Create a BackgroundWorkflowDispatcher backed by the execution engine."""
+    engine = await get_execution_engine()
+    return BackgroundWorkflowDispatcher(engine)
 
 
 class _NullSignalQueueAdapter:

@@ -215,12 +215,22 @@ async def verify_and_process_webhook(
     except Exception:
         logger.exception("Failed to evaluate webhook triggers")
 
-    # Post acknowledgment reaction on comment-triggered events
-    if triggers_fired and event_type == "issue_comment":
-        comment_id = payload.get("comment", {}).get("id")
+    # Post acknowledgment and status comment for triggered events
+    if triggers_fired:
         repo_full_name = payload.get("repository", {}).get("full_name", "")
-        if comment_id and repo_full_name:
-            await _post_comment_reaction(repo_full_name, comment_id, "eyes")
+
+        # React to the comment that triggered the workflow
+        if event_type == "issue_comment":
+            comment_id = payload.get("comment", {}).get("id")
+            if comment_id and repo_full_name:
+                await _post_comment_reaction(repo_full_name, comment_id, "rocket")
+
+        # Post deterministic "starting" comment on the PR
+        pr_number = _extract_pr_number(event_type, payload)
+        if pr_number and repo_full_name:
+            await _post_trigger_started_comment(
+                repo_full_name, pr_number, triggers_fired, compound_event,
+            )
 
     return Ok(
         WebhookResult(
@@ -232,10 +242,64 @@ async def verify_and_process_webhook(
     )
 
 
+def _extract_pr_number(event_type: str, payload: dict) -> int | None:
+    """Extract the PR number from a webhook payload (best-effort)."""
+    if event_type == "issue_comment":
+        # PR comments have issue.pull_request populated
+        if payload.get("issue", {}).get("pull_request"):
+            return payload["issue"].get("number")
+    elif event_type == "check_run":
+        prs = payload.get("check_run", {}).get("pull_requests", [])
+        if prs:
+            return prs[0].get("number")
+    elif event_type in ("pull_request_review", "pull_request"):
+        return payload.get("pull_request", {}).get("number")
+    return None
+
+
+# Trigger name labels for human-readable status comments
+_TRIGGER_LABELS: dict[str, str] = {
+    "check_run.completed": "Self-Heal",
+    "pull_request_review.submitted": "Review Fix",
+    "issue_comment.created": "Command",
+}
+
+
+async def _post_trigger_started_comment(
+    repo_full_name: str,
+    pr_number: int,
+    trigger_ids: list[str],
+    compound_event: str,
+) -> None:
+    """Post a deterministic status comment on the PR when a trigger fires.
+
+    Best-effort — failures are logged but do not block webhook processing.
+    """
+    label = _TRIGGER_LABELS.get(compound_event, "Workflow")
+    trigger_list = ", ".join(f"`{tid}`" for tid in trigger_ids)
+    body = f"⚡ **{label} Starting**\n\nTrigger {trigger_list} fired on `{compound_event}` — dispatching workflow."
+
+    try:
+        from aef_adapters.github.client import get_github_client
+
+        client = get_github_client()
+        await client.api_post(
+            f"/repos/{repo_full_name}/issues/{pr_number}/comments",
+            json={"body": body},
+        )
+        logger.info("Posted trigger-started comment on %s#%s", repo_full_name, pr_number)
+    except Exception:
+        logger.debug(
+            "Could not post trigger-started comment on %s#%s (GitHub App may not be configured)",
+            repo_full_name,
+            pr_number,
+        )
+
+
 async def _post_comment_reaction(
     repo_full_name: str,
     comment_id: int,
-    reaction: str = "eyes",
+    reaction: str = "rocket",
 ) -> None:
     """Post a reaction on a GitHub issue/PR comment (best-effort).
 
