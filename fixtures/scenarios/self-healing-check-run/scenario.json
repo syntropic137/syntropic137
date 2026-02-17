@@ -1,0 +1,12 @@
+{
+  "name": "self-healing-check-run",
+  "description": "Full self-healing scenario: CI check_run failure triggers automatic diagnosis and fix.",
+  "trigger_preset": "self-healing",
+  "repository": "demo/offline-repo",
+  "webhook": "webhook.json",
+  "expected": {
+    "triggers_fired": 1,
+    "compound_event": "check_run.completed",
+    "workflow_name": "self-healing-ci"
+  }
+}
