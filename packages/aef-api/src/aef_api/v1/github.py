@@ -182,13 +182,11 @@ async def verify_and_process_webhook(
     # compose `{event_type}.{action}` to match.
     triggers_fired: list[str] = []
     deferred: list[str] = []
+    action = payload.get("action", "")
+    compound_event = f"{event_type}.{action}" if action else event_type
     try:
         repository = payload.get("repository", {}).get("full_name", "")
         installation_id = str(payload.get("installation", {}).get("id", ""))
-
-        # Compose compound event (e.g. "issue_comment.created")
-        action = payload.get("action", "")
-        compound_event = f"{event_type}.{action}" if action else event_type
 
         from aef_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
             EvaluateWebhookHandler,
@@ -229,7 +227,10 @@ async def verify_and_process_webhook(
         pr_number = _extract_pr_number(event_type, payload)
         if pr_number and repo_full_name:
             await _post_trigger_started_comment(
-                repo_full_name, pr_number, triggers_fired, compound_event,
+                repo_full_name,
+                pr_number,
+                triggers_fired,
+                compound_event,
             )
 
     return Ok(
