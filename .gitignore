@@ -123,6 +123,7 @@ artifacts/
 !packages/aef-adapters/src/aef_adapters/artifacts/
 
 _reference/
+archive/
 
 # Draft project plans (per RIPER-5 guidelines)
 PROJECT-PLAN_*.md
