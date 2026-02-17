@@ -57,7 +57,7 @@ export default function HomePage() {
                 Documentation
               </Link>
               <Link
-                href="/llms.txt"
+                href="/llms"
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-medium border border-zinc-700 hover:border-zinc-500 text-fd-foreground hover:bg-zinc-800/50 transition-all"
               >
                 <Bot className="w-5 h-5" />
@@ -131,7 +131,7 @@ export default function HomePage() {
               description="REST API with 45+ endpoints"
             />
             <QuickLink
-              href="/llms.txt"
+              href="/llms"
               icon={<Bot className="w-6 h-6" />}
               title="LLM Docs"
               description="Machine-readable docs for AI agents"
