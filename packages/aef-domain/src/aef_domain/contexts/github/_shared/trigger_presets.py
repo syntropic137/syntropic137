@@ -67,13 +67,13 @@ REVIEW_FIX_PRESET = {
 
 COMMENT_COMMAND_PRESET = {
     "name": "comment-command",
-    "description": "Dispatch a workflow when @aef is mentioned in a PR comment",
+    "description": "Dispatch a workflow when /aef is used in a PR comment",
     "event": "issue_comment.created",
     "conditions": (
         # Only fire on PR comments (GitHub populates issue.pull_request for PR comments)
         {"field": "issue.pull_request", "operator": "not_empty"},
-        # Comment must mention the bot
-        {"field": "comment.body", "operator": "contains", "value": "@aef"},
+        # Slash command style — no GitHub @mention ping
+        {"field": "comment.body", "operator": "contains", "value": "/aef"},
     ),
     "workflow_id": "self-heal-pr",
     "input_mapping": (
