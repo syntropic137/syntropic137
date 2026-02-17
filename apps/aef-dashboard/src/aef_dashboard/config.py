@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
-
-from aef_shared.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -17,17 +16,19 @@ class DashboardConfig:
     cors_origins: list[str]
 
     @classmethod
-    def from_settings(cls) -> DashboardConfig:
-        """Create config from application settings."""
-        settings = get_settings()
+    def from_env(cls) -> DashboardConfig:
+        """Create config from environment variables."""
         return cls(
-            host=settings.dashboard_host,
-            port=settings.dashboard_port,
-            debug=settings.debug,
-            cors_origins=["http://localhost:5173", "http://localhost:3000"],  # Vite defaults
+            host=os.getenv("AEF_DASHBOARD_HOST", "0.0.0.0"),
+            port=int(os.getenv("AEF_DASHBOARD_PORT", "8000")),
+            debug=os.getenv("AEF_DEBUG", "false").lower() == "true",
+            cors_origins=[
+                "http://localhost:5173",
+                "http://localhost:3000",
+            ],
         )
 
 
 def get_dashboard_config() -> DashboardConfig:
     """Get dashboard configuration."""
-    return DashboardConfig.from_settings()
+    return DashboardConfig.from_env()

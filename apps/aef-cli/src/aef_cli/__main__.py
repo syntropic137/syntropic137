@@ -1,6 +1,5 @@
-"""Entry point for running aef_cli as a module."""
+"""Entry point for ``python -m aef_cli``."""
 
 from aef_cli.main import app
 
-if __name__ == "__main__":
-    app()
+app()

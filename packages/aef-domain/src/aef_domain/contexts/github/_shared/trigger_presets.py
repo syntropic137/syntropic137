@@ -65,9 +65,39 @@ REVIEW_FIX_PRESET = {
     ),
 }
 
+COMMENT_COMMAND_PRESET = {
+    "name": "comment-command",
+    "description": "Dispatch a workflow when /aef is used in a PR comment",
+    "event": "issue_comment.created",
+    "conditions": (
+        # Only fire on PR comments (GitHub populates issue.pull_request for PR comments)
+        {"field": "issue.pull_request", "operator": "not_empty"},
+        # Slash command style — no GitHub @mention ping
+        {"field": "comment.body", "operator": "contains", "value": "/aef"},
+    ),
+    "workflow_id": "self-heal-pr",
+    "input_mapping": (
+        ("repository", "repository.full_name"),
+        ("pr_number", "issue.number"),
+        ("pr_title", "issue.title"),
+        ("comment_body", "comment.body"),
+        ("comment_author", "comment.user.login"),
+        ("comment_id", "comment.id"),
+        ("comment_html_url", "comment.html_url"),
+    ),
+    "config": (
+        ("max_attempts", 5),
+        ("budget_per_trigger_usd", 10.00),
+        ("daily_limit", 30),
+        ("cooldown_seconds", 60),
+        ("skip_if_sender_is_bot", True),
+    ),
+}
+
 PRESETS: dict[str, dict[str, Any]] = {
     "self-healing": SELF_HEALING_PRESET,
     "review-fix": REVIEW_FIX_PRESET,
+    "comment-command": COMMENT_COMMAND_PRESET,
 }
 
 

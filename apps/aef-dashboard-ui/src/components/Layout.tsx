@@ -1,6 +1,7 @@
 import { clsx } from 'clsx'
 import {
   Activity,
+  Bell,
   Box,
   FileText,
   GitBranch,
@@ -16,6 +17,7 @@ const navigation = [
   { name: 'Executions', href: '/executions', icon: Zap },
   { name: 'Sessions', href: '/sessions', icon: Activity },
   { name: 'Artifacts', href: '/artifacts', icon: FileText },
+  { name: 'Triggers', href: '/triggers', icon: Bell },
 ]
 
 export function Layout() {

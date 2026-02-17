@@ -112,7 +112,7 @@ def get_event_publisher() -> InMemoryEventPublisher | NoOpEventPublisher:
     For DEV/PROD: Returns NoOpEventPublisher (SDK handles persistence).
     """
     settings = get_settings()
-    if settings.is_test:
+    if settings.uses_in_memory_stores:
         return get_inmem_event_publisher()
     return NoOpEventPublisher()
 

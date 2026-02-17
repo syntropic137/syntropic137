@@ -1,0 +1,770 @@
+# AEF API Reference
+
+> Programmatic interface to the Agentic Engineering Framework
+> Version: 0.1.0
+
+## Quick Start
+
+```python
+import aef_api
+from aef_api import Ok, Err
+
+# List workflows
+result = await aef_api.v1.workflows.list_workflows()
+match result:
+    case Ok(workflows):
+        for wf in workflows:
+            print(f"{wf.name} ({wf.workflow_type})")
+    case Err(error):
+        print(f"Error: {error}")
+
+# Create a workflow
+result = await aef_api.v1.workflows.create_workflow(
+    name="My Research Workflow",
+    workflow_type="research",
+    description="Automated research pipeline",
+)
+match result:
+    case Ok(workflow_id):
+        print(f"Created: {workflow_id}")
+    case Err(error):
+        print(f"Failed: {error.message}")
+```
+
+## Architecture
+
+```
+aef-api
+├── types.py         # Result[T, E], Ok, Err, Pydantic models, error enums
+├── auth.py          # AuthContext (optional parameter)
+├── _wiring.py       # Internal: adapter composition root
+└── v1/
+    ├── workflows.py     # Workflow template CRUD + execution
+    ├── workspaces.py    # Isolated workspace management
+    ├── sessions.py      # Agent session lifecycle
+    ├── artifacts.py     # Artifact storage (stub)
+    ├── github.py        # GitHub integration (stub)
+    └── observability.py # Metrics and telemetry (stub)
+```
+
+## Result Type
+
+All API functions return `Result[T, E]` — either `Ok(value)` or `Err(error, message)`. Use pattern matching or `isinstance` checks:
+
+```python
+result = await aef_api.v1.workflows.get_workflow("wf-123")
+
+# Pattern matching (recommended)
+match result:
+    case Ok(detail):
+        print(detail.name)
+    case Err(error, message):
+        print(f"{error}: {message}")
+
+# isinstance check
+if isinstance(result, Ok):
+    print(result.value.name)
+```
+
+# types
+
+Result type, error enums, and shared Pydantic models.
+
+## Result Type
+
+All API functions return `Result[T, E]` — a discriminated union of `Ok[T]` and `Err[E]`.
+
+```python
+from aef_api import Ok, Err, Result
+```
+
+### Ok
+
+```python
+@dataclass(frozen=True, slots=True)
+class Ok(Generic[T]):
+    value: T
+```
+
+### Err
+
+```python
+@dataclass(frozen=True, slots=True)
+class Err(Generic[E]):
+    error: E
+    message: str | None = None
+```
+
+### Pattern Matching
+
+```python
+result = await aef_api.v1.workflows.get_workflow("wf-123")
+
+match result:
+    case Ok(detail):
+        print(detail.name)
+    case Err(error, message):
+        print(f"{error}: {message}")
+```
+
+## Error Enums
+
+### WorkflowError
+
+| Value | Description |
+|-------|-------------|
+| `NOT_FOUND` | Workflow or execution not found |
+| `ALREADY_EXISTS` | Workflow with same name exists |
+| `INVALID_INPUT` | Invalid parameters |
+| `EXECUTION_FAILED` | Execution encountered an error |
+| `NOT_IMPLEMENTED` | Operation not yet implemented |
+
+### SessionError
+
+| Value | Description |
+|-------|-------------|
+| `NOT_FOUND` | Session not found |
+| `ALREADY_COMPLETED` | Session already completed |
+| `INVALID_INPUT` | Invalid parameters |
+| `NOT_IMPLEMENTED` | Operation not yet implemented |
+
+### ArtifactError
+
+| Value | Description |
+|-------|-------------|
+| `NOT_FOUND` | Artifact not found |
+| `INVALID_INPUT` | Invalid parameters |
+| `STORAGE_ERROR` | Storage backend error |
+| `NOT_IMPLEMENTED` | Operation not yet implemented |
+
+### GitHubError
+
+| Value | Description |
+|-------|-------------|
+| `NOT_FOUND` | Resource not found |
+| `AUTH_REQUIRED` | Authentication required |
+| `RATE_LIMITED` | GitHub API rate limited |
+| `NOT_IMPLEMENTED` | Operation not yet implemented |
+
+### ObservabilityError
+
+| Value | Description |
+|-------|-------------|
+| `NOT_FOUND` | Resource not found |
+| `QUERY_FAILED` | Query execution failed |
+| `NOT_IMPLEMENTED` | Operation not yet implemented |
+
+## Response Models
+
+### WorkflowSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Workflow template ID |
+| `name` | `str` | Workflow name |
+| `workflow_type` | `str` | Type (research, custom, etc.) |
+| `classification` | `str` | Classification level |
+| `phase_count` | `int` | Number of phases |
+| `description` | `str \| None` | Description |
+| `created_at` | `datetime \| None` | Creation timestamp |
+| `runs_count` | `int` | Number of executions |
+
+### WorkflowDetail
+
+Extends WorkflowSummary with `phases: list[PhaseDefinitionResponse]`.
+
+### ExecutionSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workflow_execution_id` | `str` | Execution ID |
+| `workflow_id` | `str` | Workflow template ID |
+| `workflow_name` | `str` | Workflow name |
+| `status` | `str` | Execution status |
+| `completed_phases` | `int` | Completed phase count |
+| `total_phases` | `int` | Total phase count |
+| `total_tokens` | `int` | Total tokens used |
+| `total_cost_usd` | `Decimal` | Total cost |
+| `error_message` | `str \| None` | Error if failed |
+
+### ExecutionDetail
+
+Extends ExecutionSummary with input/output token breakdowns, duration, and artifact IDs.
+
+### SessionSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Session ID |
+| `workflow_id` | `str \| None` | Associated workflow |
+| `execution_id` | `str \| None` | Associated execution |
+| `status` | `str` | Session status |
+| `agent_type` | `str` | Agent provider |
+| `total_tokens` | `int` | Total tokens |
+| `total_cost_usd` | `Decimal` | Total cost |
+
+### ArtifactSummary
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `str` | Artifact ID |
+| `workflow_id` | `str \| None` | Associated workflow |
+| `artifact_type` | `str` | Artifact type |
+| `title` | `str \| None` | Title |
+| `size_bytes` | `int` | Content size |
+
+---
+
+# auth
+
+Authentication context for API operations.
+
+## AuthContext
+
+All v1 functions accept an optional `AuthContext` parameter. When `None` (the default), operations run without authorization checks.
+
+```python
+from aef_api import AuthContext
+
+@dataclass(frozen=True, slots=True)
+class AuthContext:
+    user_id: str
+    tenant_id: str | None = None
+    roles: frozenset[str] = frozenset()
+```
+
+### Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `user_id` | `str` | required | Authenticated user identifier |
+| `tenant_id` | `str \| None` | `None` | Tenant for multi-tenant isolation |
+| `roles` | `frozenset[str]` | `frozenset()` | Role names for authorization |
+
+### Usage
+
+```python
+from aef_api import AuthContext
+
+# Unauthenticated (default)
+result = await aef_api.v1.workflows.list_workflows()
+
+# Authenticated
+auth = AuthContext(
+    user_id="user-123",
+    tenant_id="tenant-abc",
+    roles=frozenset({"admin", "operator"}),
+)
+result = await aef_api.v1.workflows.list_workflows(auth=auth)
+```
+
+### Future Plans
+
+Phase 2+ will wire AuthContext to real identity providers and implement authorization checks per operation.
+
+---
+
+# workflows
+
+Workflow template management and execution.
+
+## list_workflows()
+
+List all workflow templates.
+
+**Signature:**
+
+```python
+async def list_workflows(
+    workflow_type: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    auth: AuthContext | None = None,
+) -> Result[list[WorkflowSummary], WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `workflow_type` | `str \| None` | `None` | Filter by type (research, planning, implementation, etc.) |
+| `limit` | `int` | `100` | Maximum results |
+| `offset` | `int` | `0` | Pagination offset |
+| `auth` | `AuthContext \| None` | `None` | Optional auth context |
+
+**Returns:** `Ok(list[WorkflowSummary])` on success.
+
+**Errors:** None expected under normal operation.
+
+**Example:**
+
+```python
+result = await aef_api.v1.workflows.list_workflows(workflow_type="research")
+match result:
+    case Ok(workflows):
+        for wf in workflows:
+            print(f"{wf.name} - {wf.phase_count} phases, {wf.runs_count} runs")
+```
+
+---
+
+## get_workflow()
+
+Get detailed information about a workflow template.
+
+**Signature:**
+
+```python
+async def get_workflow(
+    workflow_id: str,
+    auth: AuthContext | None = None,
+) -> Result[WorkflowDetail, WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `workflow_id` | `str` | The workflow template ID |
+| `auth` | `AuthContext \| None` | Optional auth context |
+
+**Returns:** `Ok(WorkflowDetail)` on success.
+
+**Errors:** `WorkflowError.NOT_FOUND` if the workflow doesn't exist.
+
+**Example:**
+
+```python
+result = await aef_api.v1.workflows.get_workflow("wf-abc123")
+match result:
+    case Ok(detail):
+        print(f"{detail.name}: {detail.description}")
+    case Err(error, message):
+        print(f"Not found: {message}")
+```
+
+---
+
+## create_workflow()
+
+Create a new workflow template.
+
+**Signature:**
+
+```python
+async def create_workflow(
+    name: str,
+    workflow_type: str = "custom",
+    classification: str = "standard",
+    repository_url: str = "https://github.com/example/repo",
+    repository_ref: str = "main",
+    description: str | None = None,
+    phases: list[dict[str, Any]] | None = None,
+    auth: AuthContext | None = None,
+) -> Result[str, WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `name` | `str` | required | Workflow name |
+| `workflow_type` | `str` | `"custom"` | Type: research, planning, implementation, review, deployment, custom |
+| `classification` | `str` | `"standard"` | Classification: standard, advanced |
+| `repository_url` | `str` | example URL | Repository URL |
+| `repository_ref` | `str` | `"main"` | Git ref/branch |
+| `description` | `str \| None` | `None` | Human-readable description |
+| `phases` | `list[dict] \| None` | `None` | Phase definitions (auto-creates one if omitted) |
+| `auth` | `AuthContext \| None` | `None` | Optional auth context |
+
+**Returns:** `Ok(workflow_id)` on success.
+
+**Errors:** `WorkflowError.INVALID_INPUT` on validation failure.
+
+**Example:**
+
+```python
+result = await aef_api.v1.workflows.create_workflow(
+    name="Research Pipeline",
+    workflow_type="research",
+    phases=[
+        {"name": "Literature Review", "order": 1},
+        {"name": "Analysis", "order": 2},
+        {"name": "Summary", "order": 3},
+    ],
+)
+```
+
+---
+
+## execute_workflow()
+
+Execute a workflow.
+
+**Signature:**
+
+```python
+async def execute_workflow(
+    workflow_id: str,
+    inputs: dict[str, str] | None = None,
+    execution_id: str | None = None,
+    auth: AuthContext | None = None,
+) -> Result[ExecutionSummary, WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `workflow_id` | `str` | required | Workflow template ID |
+| `inputs` | `dict[str, str] \| None` | `None` | Input variables matching `{{variable}}` placeholders |
+| `execution_id` | `str \| None` | `None` | Custom execution ID (auto-generated if omitted) |
+| `auth` | `AuthContext \| None` | `None` | Optional auth context |
+
+**Returns:** `Ok(ExecutionSummary)` on success.
+
+**Errors:**
+- `WorkflowError.NOT_FOUND` if the workflow doesn't exist
+- `WorkflowError.EXECUTION_FAILED` on execution error
+
+---
+
+## get_execution()
+
+Get detailed information about a workflow execution.
+
+**Signature:**
+
+```python
+async def get_execution(
+    execution_id: str,
+    auth: AuthContext | None = None,
+) -> Result[ExecutionDetail, WorkflowError]
+```
+
+**Returns:** `Ok(ExecutionDetail)` on success, `Err(WorkflowError.NOT_FOUND)` if missing.
+
+---
+
+## list_executions()
+
+List workflow executions.
+
+**Signature:**
+
+```python
+async def list_executions(
+    workflow_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    auth: AuthContext | None = None,
+) -> Result[list[ExecutionSummary], WorkflowError]
+```
+
+**Returns:** `Ok(list[ExecutionSummary])` on success.
+
+---
+
+# workspaces
+
+Isolated workspace management for workflow execution.
+
+## create_workspace()
+
+Create an isolated workspace (Docker container with egress proxy).
+
+**Signature:**
+
+```python
+async def create_workspace(
+    execution_id: str,
+    workflow_id: str | None = None,
+    phase_id: str | None = None,
+    with_sidecar: bool = True,
+    environment: dict[str, str] | None = None,
+    auth: AuthContext | None = None,
+) -> Result[str, WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `execution_id` | `str` | required | Execution ID for this workspace |
+| `workflow_id` | `str \| None` | `None` | Associated workflow |
+| `phase_id` | `str \| None` | `None` | Associated phase |
+| `with_sidecar` | `bool` | `True` | Start egress proxy sidecar |
+| `environment` | `dict[str, str] \| None` | `None` | Extra environment variables |
+| `auth` | `AuthContext \| None` | `None` | Optional auth context |
+
+**Returns:** `Ok(workspace_id)` on success.
+
+**Note:** For production use, prefer using `WorkspaceService.create_workspace()` directly as an async context manager for automatic cleanup.
+
+---
+
+## terminate_workspace()
+
+Terminate an isolated workspace.
+
+**Signature:**
+
+```python
+async def terminate_workspace(
+    workspace_id: str,
+    auth: AuthContext | None = None,
+) -> Result[None, WorkflowError]
+```
+
+**Status:** Stub — workspaces are cleaned up automatically via the context manager pattern.
+
+---
+
+# sessions
+
+Agent session lifecycle management.
+
+## list_sessions()
+
+List agent sessions, optionally filtered.
+
+**Signature:**
+
+```python
+async def list_sessions(
+    workflow_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    auth: AuthContext | None = None,
+) -> Result[list[SessionSummary], SessionError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `workflow_id` | `str \| None` | `None` | Filter by workflow ID |
+| `status` | `str \| None` | `None` | Filter by session status |
+| `limit` | `int` | `100` | Maximum results |
+| `offset` | `int` | `0` | Pagination offset |
+| `auth` | `AuthContext \| None` | `None` | Optional auth context |
+
+**Returns:** `Ok(list[SessionSummary])` on success.
+
+**Example:**
+
+```python
+result = await aef_api.v1.sessions.list_sessions(workflow_id="wf-123")
+match result:
+    case Ok(sessions):
+        for s in sessions:
+            print(f"Session {s.id}: {s.status}, {s.total_tokens} tokens")
+```
+
+---
+
+## start_session()
+
+Start a new agent session.
+
+**Signature:**
+
+```python
+async def start_session(
+    workflow_id: str,
+    phase_id: str | None = None,
+    execution_id: str | None = None,
+    agent_type: str = "claude",
+    auth: AuthContext | None = None,
+) -> Result[str, SessionError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `workflow_id` | `str` | required | Workflow this session belongs to |
+| `phase_id` | `str \| None` | `None` | Phase within the workflow |
+| `execution_id` | `str \| None` | `None` | Execution ID |
+| `agent_type` | `str` | `"claude"` | Agent provider (claude, openai, mock) |
+| `auth` | `AuthContext \| None` | `None` | Optional auth context |
+
+**Returns:** `Ok(session_id)` on success.
+
+---
+
+## complete_session()
+
+Complete an agent session.
+
+**Signature:**
+
+```python
+async def complete_session(
+    session_id: str,
+    auth: AuthContext | None = None,
+) -> Result[None, SessionError]
+```
+
+**Returns:** `Ok(None)` on success, `Err(SessionError.NOT_FOUND)` if session doesn't exist.
+
+---
+
+# artifacts
+
+Artifact storage and retrieval.
+
+**Status:** Stub — all functions return `Err(ArtifactError.NOT_IMPLEMENTED)`.
+
+## list_artifacts()
+
+List artifacts, optionally filtered by workflow or session.
+
+**Signature:**
+
+```python
+async def list_artifacts(
+    workflow_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    auth: AuthContext | None = None,
+) -> Result[list[ArtifactSummary], ArtifactError]
+```
+
+---
+
+## create_artifact()
+
+Create a new artifact.
+
+**Signature:**
+
+```python
+async def create_artifact(
+    workflow_id: str,
+    artifact_type: str,
+    title: str,
+    content: str,
+    phase_id: str | None = None,
+    session_id: str | None = None,
+    content_type: str = "text/markdown",
+    auth: AuthContext | None = None,
+) -> Result[str, ArtifactError]
+```
+
+---
+
+## upload_artifact()
+
+Upload binary content for an existing artifact.
+
+**Signature:**
+
+```python
+async def upload_artifact(
+    artifact_id: str,
+    data: bytes,
+    filename: str,
+    content_type: str = "application/octet-stream",
+    auth: AuthContext | None = None,
+) -> Result[str, ArtifactError]
+```
+
+---
+
+# github
+
+GitHub App integration — repositories, installations, and triggers.
+
+**Status:** Stub — all functions return `Err(GitHubError.NOT_IMPLEMENTED)`.
+
+## list_repos()
+
+List GitHub repositories accessible via the GitHub App.
+
+**Signature:**
+
+```python
+async def list_repos(
+    installation_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    auth: AuthContext | None = None,
+) -> Result[list[dict[str, Any]], GitHubError]
+```
+
+---
+
+## get_installation()
+
+Get details about a GitHub App installation.
+
+**Signature:**
+
+```python
+async def get_installation(
+    installation_id: str,
+    auth: AuthContext | None = None,
+) -> Result[dict[str, Any], GitHubError]
+```
+
+---
+
+## register_trigger()
+
+Register a GitHub event trigger for a workflow.
+
+**Signature:**
+
+```python
+async def register_trigger(
+    repo_owner: str,
+    repo_name: str,
+    event_type: str,
+    workflow_id: str,
+    config: dict[str, Any] | None = None,
+    auth: AuthContext | None = None,
+) -> Result[str, GitHubError]
+```
+
+---
+
+# observability
+
+Metrics and telemetry — token usage and tool timelines.
+
+**Status:** Stub — all functions return `Err(ObservabilityError.NOT_IMPLEMENTED)`.
+
+## get_token_metrics()
+
+Get token usage metrics for an execution or session.
+
+**Signature:**
+
+```python
+async def get_token_metrics(
+    execution_id: str | None = None,
+    session_id: str | None = None,
+    auth: AuthContext | None = None,
+) -> Result[dict[str, Any], ObservabilityError]
+```
+
+---
+
+## get_tool_timeline()
+
+Get the tool call timeline for a session.
+
+**Signature:**
+
+```python
+async def get_tool_timeline(
+    session_id: str,
+    auth: AuthContext | None = None,
+) -> Result[list[dict[str, Any]], ObservabilityError]
+```
+
+---

@@ -1,15 +1,14 @@
 [project]
 name = "aef-cli"
-version = "0.1.0"
-description = "CLI application for Agentic Engineering Framework"
+version = "0.2.0"
+description = "CLI for Agentic Engineering Framework — thin wrapper over aef-api"
 requires-python = ">=3.12"
 
 dependencies = [
+    "aef-api",
     "typer>=0.15.0",
     "rich>=13.9.0",
-    "aef-shared",
-    "aef-domain",
-    "aef-adapters",
+    "httpx>=0.28.0",
 ]
 
 [build-system]
