@@ -238,4 +238,10 @@ def _build_payload_summary(payload: dict[str, Any], event: str) -> dict:
         review = payload.get("review", {})
         summary["review_state"] = review.get("state", "")
         summary["reviewer"] = review.get("user", {}).get("login", "")
+    elif "issue_comment" in event:
+        comment = payload.get("comment", {})
+        summary["comment_id"] = comment.get("id")
+        summary["author"] = comment.get("user", {}).get("login", "")
+        body = comment.get("body", "")
+        summary["body_preview"] = body[:200] if body else ""
     return summary

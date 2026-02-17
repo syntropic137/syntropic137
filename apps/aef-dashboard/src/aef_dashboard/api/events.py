@@ -1,36 +1,32 @@
-"""Event API endpoints for querying agent events.
-
-These endpoints provide access to raw JSONL events from agent executions,
-stored in the agent_events TimescaleDB hypertable (ADR-029).
-"""
+"""Event API endpoints — thin wrapper over aef_api."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    from datetime import datetime
+import aef_api.v1.observability as obs
+from aef_api.types import Err
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 
 # ============================================================================
-# Response Models
+# Response Models (kept for HTTP API contract stability)
 # ============================================================================
 
 
 class EventResponse(BaseModel):
     """Single event response."""
 
-    time: datetime
+    time: Any
     event_type: str
-    session_id: str
+    session_id: str | None = None
     execution_id: str | None = None
     phase_id: str | None = None
-    data: dict[str, Any]
+    data: dict[str, Any] = {}
 
 
 class EventListResponse(BaseModel):
@@ -44,7 +40,7 @@ class EventListResponse(BaseModel):
 class TimelineEntry(BaseModel):
     """Timeline entry for visualization."""
 
-    time: datetime
+    time: Any
     event_type: str
     tool_name: str | None = None
     duration_ms: int | None = None
@@ -60,7 +56,6 @@ class CostSummary(BaseModel):
     total_tokens: int = 0
     cache_creation_tokens: int = 0
     cache_read_tokens: int = 0
-    # Cost calculation would need pricing info
     estimated_cost_usd: float | None = None
 
 
@@ -88,40 +83,36 @@ async def get_session_events(
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ) -> EventListResponse:
     """Get all events for a session."""
-    try:
-        from aef_adapters.events import get_event_store
+    result = await obs.get_session_events(
+        session_id=session_id,
+        event_type=event_type,
+        limit=limit + 1,
+        offset=offset,
+    )
 
-        store = get_event_store()
-        await store.initialize()
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=f"Failed to query events: {result.message}")
 
-        events = await store.query(
-            session_id=session_id,
-            event_type=event_type,
-            limit=limit + 1,  # Fetch one extra to check has_more
-            offset=offset,
-        )
+    events = result.value
+    has_more = len(events) > limit
+    if has_more:
+        events = events[:limit]
 
-        has_more = len(events) > limit
-        if has_more:
-            events = events[:limit]
-
-        return EventListResponse(
-            events=[
-                EventResponse(
-                    time=e["time"],
-                    event_type=e["event_type"],
-                    session_id=e["session_id"],
-                    execution_id=e.get("execution_id"),
-                    phase_id=e.get("phase_id"),
-                    data=e.get("data", {}),
-                )
-                for e in events
-            ],
-            count=len(events),
-            has_more=has_more,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query events: {e}") from e
+    return EventListResponse(
+        events=[
+            EventResponse(
+                time=e.time,
+                event_type=e.event_type,
+                session_id=e.session_id,
+                execution_id=e.execution_id,
+                phase_id=e.phase_id,
+                data=e.data,
+            )
+            for e in events
+        ],
+        count=len(events),
+        has_more=has_more,
+    )
 
 
 @router.get("/sessions/{session_id}/timeline", response_model=list[TimelineEntry])
@@ -129,157 +120,60 @@ async def get_session_timeline(
     session_id: str,
     limit: int = Query(100, ge=1, le=500, description="Max entries"),
 ) -> list[TimelineEntry]:
-    """Get a timeline view of session events.
+    """Get a timeline view of session events."""
+    result = await obs.get_session_timeline(session_id=session_id, limit=limit)
 
-    Returns tool executions and key events in chronological order.
-    """
-    try:
-        from aef_adapters.events import get_event_store
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=f"Failed to get timeline: {result.message}")
 
-        store = get_event_store()
-        await store.initialize()
-
-        # Get tool events for timeline
-        events = await store.query(
-            session_id=session_id,
-            limit=limit * 2,  # Get more to filter
+    return [
+        TimelineEntry(
+            time=e.time,
+            event_type=e.event_type,
+            tool_name=e.tool_name,
+            duration_ms=int(e.duration_ms) if e.duration_ms else None,
+            success=e.success,
         )
-
-        timeline: list[TimelineEntry] = []
-        for e in events:
-            event_type = e["event_type"]
-            data = e.get("data", {})
-
-            # Include key event types in timeline
-            if event_type in (
-                "tool_execution_started",
-                "tool_execution_completed",
-                "session_started",
-                "session_completed",
-                "security_decision",
-            ):
-                timeline.append(
-                    TimelineEntry(
-                        time=e["time"],
-                        event_type=event_type,
-                        tool_name=data.get("tool_name"),
-                        duration_ms=data.get("duration_ms"),
-                        success=data.get("success"),
-                    )
-                )
-
-        return timeline[:limit]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get timeline: {e}") from e
+        for e in result.value
+    ]
 
 
 @router.get("/sessions/{session_id}/costs", response_model=CostSummary)
 async def get_session_costs(session_id: str) -> CostSummary:
-    """Get cost summary for a session.
+    """Get cost summary for a session."""
+    result = await obs.get_token_metrics(session_id=session_id)
 
-    Aggregates token usage from all events in the session.
-    """
-    try:
-        from aef_adapters.events import get_event_store
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=f"Failed to get costs: {result.message}")
 
-        store = get_event_store()
-        await store.initialize()
-
-        # Query for token usage events
-        events = await store.query(
-            session_id=session_id,
-            event_type="token_usage",
-            limit=10000,  # Get all token events
-        )
-
-        # Aggregate token counts
-        input_tokens = 0
-        output_tokens = 0
-        cache_creation = 0
-        cache_read = 0
-
-        for e in events:
-            data = e.get("data", {})
-            input_tokens += data.get("input_tokens", 0)
-            output_tokens += data.get("output_tokens", 0)
-            cache_creation += data.get("cache_creation_tokens", 0)
-            cache_read += data.get("cache_read_tokens", 0)
-
-        return CostSummary(
-            session_id=session_id,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
-            cache_creation_tokens=cache_creation,
-            cache_read_tokens=cache_read,
-            # TODO: Calculate cost based on model pricing
-            estimated_cost_usd=None,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get costs: {e}") from e
+    data = result.value
+    return CostSummary(
+        session_id=session_id,
+        input_tokens=data.get("input_tokens", 0),
+        output_tokens=data.get("output_tokens", 0),
+        total_tokens=data.get("total_tokens", 0),
+        cache_creation_tokens=data.get("cache_creation_tokens", 0),
+        cache_read_tokens=data.get("cache_read_tokens", 0),
+        estimated_cost_usd=float(data["total_cost_usd"]) if "total_cost_usd" in data else None,
+    )
 
 
 @router.get("/sessions/{session_id}/tools", response_model=list[ToolSummary])
 async def get_session_tools(session_id: str) -> list[ToolSummary]:
-    """Get tool usage summary for a session.
+    """Get tool usage summary for a session."""
+    result = await obs.get_session_tool_summary(session_id=session_id)
 
-    Returns aggregated stats for each tool used in the session.
-    """
-    try:
-        from aef_adapters.events import get_event_store
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=f"Failed to get tools: {result.message}")
 
-        store = get_event_store()
-        await store.initialize()
-
-        # Query for tool completion events
-        events = await store.query(
-            session_id=session_id,
-            event_type="tool_execution_completed",
-            limit=10000,
+    return [
+        ToolSummary(
+            tool_name=t.tool_name,
+            call_count=t.call_count,
+            success_count=t.success_count,
+            error_count=t.error_count,
+            total_duration_ms=int(t.total_duration_ms),
+            avg_duration_ms=(t.total_duration_ms / t.call_count if t.call_count > 0 else 0.0),
         )
-
-        # Aggregate by tool name
-        tool_stats: dict[str, dict[str, Any]] = {}
-
-        for e in events:
-            data = e.get("data", {})
-            tool_name = data.get("tool_name", "unknown")
-
-            if tool_name not in tool_stats:
-                tool_stats[tool_name] = {
-                    "call_count": 0,
-                    "success_count": 0,
-                    "error_count": 0,
-                    "total_duration_ms": 0,
-                }
-
-            stats = tool_stats[tool_name]
-            stats["call_count"] += 1
-
-            if data.get("success", True):
-                stats["success_count"] += 1
-            else:
-                stats["error_count"] += 1
-
-            duration = data.get("duration_ms", 0)
-            if isinstance(duration, int | float):
-                stats["total_duration_ms"] += int(duration)
-
-        # Build response
-        return [
-            ToolSummary(
-                tool_name=name,
-                call_count=stats["call_count"],
-                success_count=stats["success_count"],
-                error_count=stats["error_count"],
-                total_duration_ms=stats["total_duration_ms"],
-                avg_duration_ms=(
-                    stats["total_duration_ms"] / stats["call_count"]
-                    if stats["call_count"] > 0
-                    else 0.0
-                ),
-            )
-            for name, stats in sorted(tool_stats.items())
-        ]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get tools: {e}") from e
+        for t in result.value
+    ]

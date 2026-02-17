@@ -47,7 +47,7 @@ def _assert_test_environment() -> None:
 
     # Check for APP_ENVIRONMENT
     app_env = os.environ.get("APP_ENVIRONMENT", "").lower()
-    if app_env in ("test", "testing"):
+    if app_env in ("test", "testing", "offline"):
         return
 
     raise RecordingAdapterTestOnlyError(

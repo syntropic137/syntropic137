@@ -51,7 +51,7 @@ def get_event_store_client() -> EventStoreClient:
 
     settings = get_settings()
 
-    _client = _create_memory_client() if settings.is_test else _create_grpc_client()
+    _client = _create_memory_client() if settings.uses_in_memory_stores else _create_grpc_client()
 
     return _client
 

@@ -10,6 +10,7 @@ resolution-markers = [
 [manifest]
 members = [
     "aef-adapters",
+    "aef-api",
     "aef-cli",
     "aef-collector",
     "aef-dashboard",
@@ -89,15 +90,14 @@ requires-dist = [
 provides-extras = ["postgres", "claude", "openai", "agents", "minio", "all"]
 
 [[package]]
-name = "aef-cli"
+name = "aef-api"
 version = "0.1.0"
-source = { editable = "apps/aef-cli" }
+source = { editable = "packages/aef-api" }
 dependencies = [
     { name = "aef-adapters" },
     { name = "aef-domain" },
     { name = "aef-shared" },
-    { name = "rich" },
-    { name = "typer" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
@@ -105,6 +105,24 @@ requires-dist = [
     { name = "aef-adapters", editable = "packages/aef-adapters" },
     { name = "aef-domain", editable = "packages/aef-domain" },
     { name = "aef-shared", editable = "packages/aef-shared" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+]
+
+[[package]]
+name = "aef-cli"
+version = "0.2.0"
+source = { editable = "apps/aef-cli" }
+dependencies = [
+    { name = "aef-api" },
+    { name = "httpx" },
+    { name = "rich" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aef-api", editable = "packages/aef-api" },
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "rich", specifier = ">=13.9.0" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
@@ -155,6 +173,7 @@ version = "0.1.0"
 source = { editable = "apps/aef-dashboard" }
 dependencies = [
     { name = "aef-adapters" },
+    { name = "aef-api" },
     { name = "aef-domain" },
     { name = "aef-shared" },
     { name = "agentic-logging" },
@@ -174,6 +193,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aef-adapters", editable = "packages/aef-adapters" },
+    { name = "aef-api", editable = "packages/aef-api" },
     { name = "aef-domain", editable = "packages/aef-domain" },
     { name = "aef-shared", editable = "packages/aef-shared" },
     { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
@@ -278,6 +298,7 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "aef-adapters" },
+    { name = "aef-api" },
     { name = "aef-cli" },
     { name = "aef-collector" },
     { name = "aef-dashboard" },
@@ -294,6 +315,7 @@ dev = [
     { name = "asyncpg" },
     { name = "mypy" },
     { name = "psycopg", extra = ["binary"] },
+    { name = "pyright" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -305,6 +327,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aef-adapters", editable = "packages/aef-adapters" },
+    { name = "aef-api", editable = "packages/aef-api" },
     { name = "aef-cli", editable = "apps/aef-cli" },
     { name = "aef-collector", editable = "packages/aef-collector" },
     { name = "aef-dashboard", editable = "apps/aef-dashboard" },
@@ -322,6 +345,7 @@ dev = [
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "mypy", specifier = ">=1.19.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.0" },
+    { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=9.0.1" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
@@ -1231,6 +1255,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nodeenv"
+version = "1.10.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/24/bf/d1bda4f6168e0b2e9e5958945e01910052158313224ada5ce1fb2e1113b8/nodeenv-1.10.0.tar.gz", hash = "sha256:996c191ad80897d076bdfba80a41994c2b47c68e224c542b48feba42ba00f8bb", size = 55611, upload-time = "2025-12-20T14:08:54.006Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/b2/d0896bdcdc8d28a7fc5717c305f1a861c26e18c05047949fb371034d98bd/nodeenv-1.10.0-py2.py3-none-any.whl", hash = "sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827", size = 23438, upload-time = "2025-12-20T14:08:52.782Z" },
+]
+
+[[package]]
 name = "openai"
 version = "2.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1504,6 +1537,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e7/46/bd74733ff231675599650d3e47f361794b22ef3e3770998dda30d3b63726/pyjwt-2.10.1.tar.gz", hash = "sha256:3cc5772eb20009233caf06e9d8a0577824723b44e6648ee0a2aedb6cf9381953", size = 87785, upload-time = "2024-11-28T03:43:29.933Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl", hash = "sha256:dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb", size = 22997, upload-time = "2024-11-28T03:43:27.893Z" },
+]
+
+[[package]]
+name = "pyright"
+version = "1.1.408"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "nodeenv" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/74/b2/5db700e52554b8f025faa9c3c624c59f1f6c8841ba81ab97641b54322f16/pyright-1.1.408.tar.gz", hash = "sha256:f28f2321f96852fa50b5829ea492f6adb0e6954568d1caa3f3af3a5f555eb684", size = 4400578, upload-time = "2026-01-08T08:07:38.795Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/82/a2c93e32800940d9573fb28c346772a14778b84ba7524e691b324620ab89/pyright-1.1.408-py3-none-any.whl", hash = "sha256:090b32865f4fdb1e0e6cd82bf5618480d48eecd2eb2e70f960982a3d9a4c17c1", size = 6399144, upload-time = "2026-01-08T08:07:37.082Z" },
 ]
 
 [[package]]

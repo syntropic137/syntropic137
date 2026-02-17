@@ -97,6 +97,7 @@ jobs:
           uv run pytest -m unit \
             --cov=apps/aef-cli/src \
             --cov=apps/aef-dashboard/src \
+            --cov=packages/aef-api/src \
             --cov=packages/aef-domain/src \
             --cov=packages/aef-adapters/src \
             --cov=packages/aef-shared/src \

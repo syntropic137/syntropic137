@@ -10,6 +10,7 @@ dependencies = [
     "sse-starlette>=2.2.0",
     "asyncpg>=0.30.0",
     "agentic-logging",  # Structured logging from agentic-primitives
+    "aef-api",          # Programmatic API layer (wraps domain/adapters/shared)
     "aef-shared",
     "aef-domain",
     "aef-adapters",

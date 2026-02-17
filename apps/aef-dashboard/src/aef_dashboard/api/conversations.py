@@ -1,17 +1,15 @@
-"""Conversation log API endpoints.
-
-Provides access to full conversation logs stored in MinIO/S3.
-See ADR-035: Agent Output Data Model and Storage.
-"""
+"""Conversation log API endpoints — thin wrapper over aef_api."""
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+import aef_api.v1.conversations as conv
+from aef_api.types import Err
 
 logger = logging.getLogger(__name__)
 
@@ -56,164 +54,70 @@ class ConversationMetadata(BaseModel):
     size_bytes: int | None = None
 
 
-def _parse_conversation_line(line: str, line_number: int) -> ConversationLine:
-    """Parse a JSONL line and extract summary info."""
-    parsed: dict[str, Any] | None = None
-    event_type: str | None = None
-    tool_name: str | None = None
-    content_preview: str | None = None
-
-    try:
-        parsed = json.loads(line)
-        event_type = parsed.get("type")
-
-        # Extract tool name from tool_use events
-        if event_type == "assistant":
-            message = parsed.get("message", {})
-            content = message.get("content", [])
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "tool_use":
-                        tool_name = item.get("name")
-                        break
-                    if item.get("type") == "text":
-                        text = item.get("text", "")
-                        content_preview = text[:200] if len(text) > 200 else text
-                        break
-
-        # Extract content preview from system messages
-        if event_type == "system":
-            subtype = parsed.get("subtype")
-            if subtype:
-                content_preview = f"[{subtype}]"
-
-        # Extract result info
-        if event_type == "result":
-            is_error = parsed.get("is_error", False)
-            content_preview = "Error" if is_error else "Success"
-
-    except json.JSONDecodeError:
-        pass
-
-    return ConversationLine(
-        line_number=line_number,
-        raw=line,
-        parsed=parsed,
-        event_type=event_type,
-        tool_name=tool_name,
-        content_preview=content_preview,
-    )
-
-
-async def _get_conversation_storage():
-    """Get or create conversation storage instance."""
-    from aef_adapters.conversations import MinioConversationStorage
-    from aef_shared.settings.config import get_settings
-
-    settings = get_settings()
-    storage_settings = settings.storage
-
-    storage = MinioConversationStorage(
-        endpoint=storage_settings.minio_endpoint,
-        access_key=storage_settings.minio_access_key,
-        secret_key=storage_settings.minio_secret_key.get_secret_value(),
-        db_url=str(settings.aef_observability_db_url),
-    )
-    await storage.initialize()
-    return storage
-
-
 @router.get("/{session_id}", response_model=ConversationLogResponse)
 async def get_conversation_log(
     session_id: str,
     offset: int = 0,
     limit: int = 100,
 ) -> ConversationLogResponse:
-    """Get conversation log for a session.
-
-    Args:
-        session_id: The session ID
-        offset: Starting line number (0-indexed)
-        limit: Max lines to return (default 100, max 500)
-
-    Returns:
-        Parsed conversation log with line-by-line content
-    """
+    """Get conversation log for a session."""
     if limit > 500:
         limit = 500
 
-    try:
-        storage = await _get_conversation_storage()
+    result = await conv.get_conversation_log(
+        session_id=session_id,
+        offset=offset,
+        limit=limit,
+    )
 
-        # Get the raw lines
-        lines = await storage.retrieve_session(session_id)
-        if lines is None:
+    if isinstance(result, Err):
+        if "not found" in (result.message or "").lower():
             raise HTTPException(
                 status_code=404,
                 detail=f"Conversation log not found for session: {session_id}",
             )
-
-        # Get metadata
-        metadata = await storage.get_session_metadata(session_id)
-
-        # Apply pagination
-        total_lines = len(lines)
-        paginated_lines = lines[offset : offset + limit]
-
-        # Parse each line
-        parsed_lines = [
-            _parse_conversation_line(line, offset + i) for i, line in enumerate(paginated_lines)
-        ]
-
-        await storage.close()
-
-        return ConversationLogResponse(
-            session_id=session_id,
-            lines=parsed_lines,
-            total_lines=total_lines,
-            metadata=metadata,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Error retrieving conversation log: %s", e)
         raise HTTPException(
             status_code=500,
-            detail=f"Error retrieving conversation log: {e}",
-        ) from e
+            detail=f"Error retrieving conversation log: {result.message}",
+        )
+
+    log = result.value
+    return ConversationLogResponse(
+        session_id=log.session_id,
+        lines=[
+            ConversationLine(
+                line_number=line.line_number,
+                raw=line.raw,
+                event_type=line.event_type,
+                tool_name=line.tool_name,
+                content_preview=line.content_preview,
+            )
+            for line in log.lines
+        ],
+        total_lines=log.total_lines,
+        metadata=log.metadata,
+    )
 
 
 @router.get("/{session_id}/metadata", response_model=ConversationMetadata | None)
 async def get_conversation_metadata(session_id: str) -> ConversationMetadata | None:
-    """Get conversation metadata for a session.
+    """Get conversation metadata for a session."""
+    result = await conv.get_conversation_metadata(session_id)
 
-    This returns the indexed metadata without fetching the full log.
-    """
-    try:
-        storage = await _get_conversation_storage()
-        metadata = await storage.get_session_metadata(session_id)
-        await storage.close()
-
-        if metadata is None:
-            return None
-
-        return ConversationMetadata(
-            session_id=metadata.get("session_id", session_id),
-            execution_id=metadata.get("execution_id"),
-            workflow_id=metadata.get("workflow_id"),
-            phase_id=metadata.get("phase_id"),
-            event_count=metadata.get("event_count"),
-            total_input_tokens=metadata.get("total_input_tokens"),
-            total_output_tokens=metadata.get("total_output_tokens"),
-            tool_counts=metadata.get("tool_counts"),
-            started_at=str(metadata["started_at"]) if metadata.get("started_at") else None,
-            completed_at=str(metadata["completed_at"]) if metadata.get("completed_at") else None,
-            model=metadata.get("model"),
-            success=metadata.get("success"),
-            size_bytes=metadata.get("size_bytes"),
-        )
-
-    except Exception as e:
-        logger.exception("Error retrieving conversation metadata: %s", e)
+    if isinstance(result, Err):
         return None
+
+    meta = result.value
+    if meta is None:
+        return None
+
+    return ConversationMetadata(
+        session_id=session_id,
+        event_count=meta.event_count,
+        total_input_tokens=meta.total_input_tokens,
+        total_output_tokens=meta.total_output_tokens,
+        tool_counts=meta.tool_counts,
+        started_at=str(meta.started_at) if meta.started_at else None,
+        completed_at=str(meta.completed_at) if meta.completed_at else None,
+        model=meta.model,
+    )

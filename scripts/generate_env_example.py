@@ -29,6 +29,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "packages" / "aef-shared" / "src"))
 
 from aef_shared.settings.config import Settings  # noqa: E402
+from aef_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from aef_shared.settings.github import GitHubAppSettings  # noqa: E402
 from aef_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
@@ -265,6 +266,16 @@ def generate_env_example() -> str:
             "GITHUB APP (Secure Authentication)",
             prefix="AEF_GITHUB_",
             description="GitHub App for secure API access. See docs/deployment/github-app-setup.md",
+        )
+    )
+
+    # Add Development Tooling Settings (DEV__* prefix)
+    lines.extend(
+        generate_settings_section(
+            DevToolingSettings,
+            "DEVELOPMENT TOOLING",
+            prefix="DEV__",
+            description="Dev-only tools (webhook proxies, debug servers). Not needed in production.",
         )
     )
 

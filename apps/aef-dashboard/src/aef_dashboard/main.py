@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
@@ -11,6 +10,7 @@ from agentic_logging import get_logger, setup_logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from aef_api.types import Ok
 from aef_dashboard.api import (
     artifacts_router,
     control_router,
@@ -28,7 +28,6 @@ from aef_dashboard.api import (
     workflows_router,
 )
 from aef_dashboard.config import get_dashboard_config
-from aef_shared.settings import get_settings
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -38,196 +37,13 @@ if TYPE_CHECKING:
 setup_logging()
 logger = get_logger(__name__)
 
-# Global reference to subscription service for health checks
-_subscription_service = None
-
-
-def _validate_api_keys() -> None:
-    """Validate required API keys are available at startup.
-
-    Fail-fast behavior:
-    - TEST: No API key required (mocks are used)
-    - DEVELOPMENT: Warning only (allows read-only dashboard usage)
-    - PRODUCTION/STAGING: Fail hard - workflow execution requires API key
-
-    Also exports the API key to os.environ so that agent adapters
-    (which read from os.environ) can access it.
-    """
-    settings = get_settings()
-    api_key = settings.anthropic_api_key
-
-    if not api_key:
-        if settings.is_test:
-            logger.info("No ANTHROPIC_API_KEY set (test mode - using mocks)")
-        elif settings.app_environment == "development":
-            logger.warning(
-                "⚠️  ANTHROPIC_API_KEY not set - workflow execution will fail. "
-                "Set it in .env to enable real agent execution."
-            )
-        else:
-            # Production/Staging - fail hard
-            raise RuntimeError(
-                f"ANTHROPIC_API_KEY is required in {settings.app_environment} mode. "
-                "Workflow execution cannot proceed without it. "
-                "Set the environment variable and restart."
-            )
-    else:
-        # Export to os.environ so agent adapters can find it
-        # (ClaudeAgenticAgent reads from os.environ.get("ANTHROPIC_API_KEY"))
-        key_value = api_key.get_secret_value()
-        os.environ["ANTHROPIC_API_KEY"] = key_value
-
-        # Mask key for logging (show first 8 chars)
-        masked = key_value[:8] + "..." if len(key_value) > 8 else "***"
-        logger.info("✓ ANTHROPIC_API_KEY configured and exported (%s)", masked)
-
-
-def _validate_github_app() -> None:
-    """Validate GitHub App is configured at startup.
-
-    Poka-Yoke: Fail fast if GitHub App credentials are missing.
-    GitHub App is REQUIRED for:
-    - Creating PRs from agent workflows
-    - Git authentication in isolated containers
-    - Secure, auditable GitHub operations
-
-    This prevents silent failures when running workflows that need GitHub.
-    """
-    from aef_shared.settings.github import GitHubAppSettings
-
-    settings = get_settings()
-    github = GitHubAppSettings()
-
-    if not github.is_configured:
-        missing = []
-        if not github.app_id:
-            missing.append("AEF_GITHUB_APP_ID")
-        if not github.private_key.get_secret_value():
-            missing.append("AEF_GITHUB_PRIVATE_KEY")
-        if not github.installation_id:
-            missing.append("AEF_GITHUB_INSTALLATION_ID")
-
-        missing_str = ", ".join(missing)
-
-        if settings.is_test:
-            logger.info("GitHub App not configured (test mode - mocks will be used)")
-        elif settings.app_environment == "development":
-            # In development, fail hard - we need GitHub for PR workflows
-            raise RuntimeError(
-                f"GitHub App is REQUIRED but not configured. "
-                f"Missing: {missing_str}. "
-                f"Ensure .env is loaded with GitHub App credentials. "
-                f"See docs/deployment/github-app-setup.md for setup instructions."
-            )
-        else:
-            # Production/Staging - definitely fail
-            raise RuntimeError(
-                f"GitHub App is REQUIRED in {settings.app_environment} mode. "
-                f"Missing: {missing_str}. "
-                f"Set these environment variables and restart."
-            )
-    else:
-        logger.info(
-            "✓ GitHub App configured (app_id=%s, bot=%s)",
-            github.app_id,
-            github.bot_name,
-        )
-
-
-async def _start_subscription_service() -> None:
-    """Start the coordinator subscription service for projection updates.
-
-    This connects to the event store and subscribes to events,
-    dispatching them to projections in real-time using the new
-    SubscriptionCoordinator architecture (ADR-014).
-    """
-    global _subscription_service
-
-    try:
-        from aef_adapters.projection_stores import get_projection_store
-        from aef_adapters.projections.realtime import get_realtime_projection
-        from aef_adapters.storage import (
-            connect_event_store,
-            get_event_store_client,
-        )
-        from aef_adapters.subscriptions import create_coordinator_service
-        from aef_shared.settings import get_settings
-
-        settings = get_settings()
-
-        # Skip subscription in test environment
-        if settings.is_test:
-            logger.info("Skipping subscription service in test environment")
-            return
-
-        # Initialize AgentEventStore for TimescaleDB queries (ADR-029)
-        try:
-            from aef_adapters.events import get_event_store
-
-            event_store = get_event_store()
-            await event_store.initialize()
-            logger.info("AgentEventStore initialized for event queries")
-        except Exception as e:
-            logger.warning(
-                "Could not initialize AgentEventStore, event data may be unavailable: %s", e
-            )
-
-        # Connect to event store
-        await connect_event_store()
-        logger.info("Connected to event store")
-
-        # Create and start coordinator subscription service (ADR-014)
-        from aef_dashboard.services.execution import ExecutionService
-
-        _subscription_service = create_coordinator_service(
-            event_store=get_event_store_client(),
-            projection_store=get_projection_store(),
-            realtime_projection=get_realtime_projection(),
-            execution_service=ExecutionService(),
-        )
-        await _subscription_service.start()
-        logger.info("Coordinator subscription service started (ADR-014)")
-
-    except ImportError as e:
-        logger.warning(
-            "Could not start subscription service - missing dependencies: %s",
-            e,
-        )
-    except Exception as e:
-        logger.error(
-            "Failed to start subscription service: %s",
-            e,
-            exc_info=True,
-        )
-
-
-async def _stop_subscription_service() -> None:
-    """Stop the event subscription service gracefully."""
-    global _subscription_service
-
-    if _subscription_service is not None:
-        try:
-            await _subscription_service.stop()
-            logger.info("Event subscription service stopped")
-        except Exception as e:
-            logger.error("Error stopping subscription service: %s", e)
-
-    try:
-        from aef_adapters.storage import disconnect_event_store
-
-        await disconnect_event_store()
-        logger.info("Disconnected from event store")
-    except Exception as e:
-        logger.warning("Error disconnecting from event store: %s", e)
-
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager.
 
     On startup:
-        - Validate API keys (fail-fast)
-        - Validate GitHub App (fail-fast)
+        - Validate credentials (fail-fast)
         - Connect to event store
         - Start subscription service for projection updates
 
@@ -235,21 +51,21 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         - Stop subscription service
         - Disconnect from event store
     """
+    import aef_api.v1.lifecycle as lifecycle
+
     logger.info("Starting AEF Dashboard...")
 
-    # Fail-fast: validate required credentials (Poka-Yoke)
-    _validate_api_keys()
-    _validate_github_app()
-
-    # Start subscription service
-    await _start_subscription_service()
+    result = await lifecycle.startup()
+    if hasattr(result, "value"):
+        logger.info("Startup complete")
+    else:
+        msg = getattr(result, "message", "unknown error")
+        logger.error("Startup failed: %s", msg)
 
     yield
 
     logger.info("Shutting down AEF Dashboard...")
-
-    # Stop subscription service
-    await _stop_subscription_service()
+    await lifecycle.shutdown()
 
 
 def create_app() -> FastAPI:
@@ -279,6 +95,15 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Webhook recording middleware (opt-in via AEF_RECORD_WEBHOOKS=true)
+    import os
+
+    if os.environ.get("AEF_RECORD_WEBHOOKS", "").lower() == "true":
+        from aef_dashboard.middleware.webhook_recorder import WebhookRecorderMiddleware
+
+        app.add_middleware(WebhookRecorderMiddleware)
+        logger.info("Webhook recording enabled — saving to fixtures/webhooks/")
 
     # Register API routers
     app.include_router(workflows_router, prefix="/api")
@@ -313,13 +138,12 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict:
         """Health check endpoint with detailed subscription status."""
-        response: dict = {"status": "healthy"}
+        import aef_api.v1.lifecycle as lifecycle
 
-        if _subscription_service is not None:
-            # Use the new detailed status method
-            response["subscription"] = _subscription_service.get_status()
-
-        return response
+        result = await lifecycle.health_check()
+        if isinstance(result, Ok):
+            return result.value
+        return {"status": "unhealthy"}
 
     return app
 

@@ -44,18 +44,18 @@ class InMemoryStorageError(Exception):
 
 
 def _assert_test_environment() -> None:
-    """Assert that we're in a test environment.
+    """Assert that we're in a test or offline environment.
 
     Raises:
-        InMemoryStorageError: If not in test environment (APP_ENVIRONMENT != 'test').
+        InMemoryStorageError: If not in test/offline environment.
     """
     settings = get_settings()
-    if not settings.is_test:
+    if not settings.uses_in_memory_stores:
         raise InMemoryStorageError(
-            "In-memory storage can ONLY be used in test environments. "
+            "In-memory storage can ONLY be used in test or offline environments. "
             f"Current environment: {settings.app_environment}. "
             "For local development, use PostgreSQL via 'just dev'. "
-            "Set APP_ENVIRONMENT=test to use in-memory storage for unit tests."
+            "Set APP_ENVIRONMENT=test or APP_ENVIRONMENT=offline to use in-memory storage."
         )
 
 

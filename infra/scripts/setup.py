@@ -720,11 +720,11 @@ def configure_smee(ctx: dict) -> bool:
     banner("Stage: Configure Webhook Proxy (Optional)")
 
     if ctx.get("non_interactive"):
-        smee_url = os.environ.get("SMEE_URL", "")
+        smee_url = os.environ.get("DEV__SMEE_URL", "")
         if smee_url:
-            ok(f"SMEE_URL read from environment: {smee_url}")
+            ok(f"DEV__SMEE_URL read from environment: {smee_url}")
         else:
-            step("No SMEE_URL in environment — skipping")
+            step("No DEV__SMEE_URL in environment — skipping")
         return True
 
     if ctx.get("skip_github"):
@@ -739,25 +739,25 @@ def configure_smee(ctx: dict) -> bool:
         step("Skipping smee configuration")
         return True
 
-    smee_url = prompt("SMEE_URL")
+    smee_url = prompt("DEV__SMEE_URL")
     if smee_url:
         # Write to root .env for `just dev` integration
         root_env = PROJECT_ROOT / ".env"
         if root_env.exists():
             content = root_env.read_text()
-            if "SMEE_URL=" in content:
+            if "DEV__SMEE_URL=" in content:
                 content = re.sub(
-                    r"^SMEE_URL=.*$",
-                    f"SMEE_URL={smee_url}",
+                    r"^DEV__SMEE_URL=.*$",
+                    f"DEV__SMEE_URL={smee_url}",
                     content,
                     flags=re.MULTILINE,
                 )
             else:
-                content += f"\nSMEE_URL={smee_url}\n"
+                content += f"\nDEV__SMEE_URL={smee_url}\n"
             root_env.write_text(content)
         else:
-            root_env.write_text(f"SMEE_URL={smee_url}\n")
-        ok(f"SMEE_URL written to {root_env}")
+            root_env.write_text(f"DEV__SMEE_URL={smee_url}\n")
+        ok(f"DEV__SMEE_URL written to {root_env}")
 
     return True
 

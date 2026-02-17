@@ -1,0 +1,31 @@
+{
+  "action": "completed",
+  "check_run": {
+    "id": 12345678,
+    "name": "CI / Build and Test",
+    "head_sha": "abc123def456",
+    "status": "completed",
+    "conclusion": "failure",
+    "started_at": "2026-02-16T00:00:00Z",
+    "completed_at": "2026-02-16T00:05:30Z",
+    "output": {
+      "title": "Build Failed",
+      "summary": "2 tests failed",
+      "text": "FAILED tests/test_api.py::test_create_workflow - AssertionError\nFAILED tests/test_api.py::test_list_workflows - KeyError: 'name'",
+      "annotations_count": 2
+    },
+    "html_url": "https://github.com/demo/offline-repo/runs/12345678",
+    "app": {
+      "slug": "github-actions"
+    }
+  },
+  "repository": {
+    "id": 999,
+    "full_name": "demo/offline-repo",
+    "private": false,
+    "html_url": "https://github.com/demo/offline-repo"
+  },
+  "installation": {
+    "id": 1001
+  }
+}

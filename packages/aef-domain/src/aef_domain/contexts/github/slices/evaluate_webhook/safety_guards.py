@@ -27,7 +27,10 @@ RETRY_BUFFER_SECONDS: float = 5
 
 # Window (seconds) during which a fire from *any* trigger on the same PR
 # blocks other triggers from firing (prevents concurrent workflows).
-CROSS_TRIGGER_COOLDOWN_SECONDS: float = 120
+# NOTE: Disabled — cooldown is now per-trigger via guard #3 (repo+PR+trigger_id).
+# Different trigger types (self-heal vs review-fix) should not block each other.
+# See: https://github.com/AgentParadise/agentic-engineering-framework/issues/101
+CROSS_TRIGGER_COOLDOWN_SECONDS: float = 0
 
 
 @dataclass
