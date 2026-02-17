@@ -101,8 +101,8 @@ async def get_token_metrics(
             )
 
         if execution_id:
-            cost = await manager.execution_cost.get_execution_cost(execution_id)
-            if cost is None:
+            exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+            if exec_cost is None:
                 return Err(
                     ObservabilityError.NOT_FOUND,
                     message=f"Execution {execution_id} not found",
@@ -110,10 +110,10 @@ async def get_token_metrics(
             return Ok(
                 {
                     "execution_id": execution_id,
-                    "input_tokens": getattr(cost, "input_tokens", 0),
-                    "output_tokens": getattr(cost, "output_tokens", 0),
-                    "total_tokens": getattr(cost, "total_tokens", 0),
-                    "total_cost_usd": str(getattr(cost, "total_cost_usd", 0)),
+                    "input_tokens": getattr(exec_cost, "input_tokens", 0),
+                    "output_tokens": getattr(exec_cost, "output_tokens", 0),
+                    "total_tokens": getattr(exec_cost, "total_tokens", 0),
+                    "total_cost_usd": str(getattr(exec_cost, "total_cost_usd", 0)),
                 }
             )
 

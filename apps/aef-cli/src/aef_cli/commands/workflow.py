@@ -373,13 +373,13 @@ def workflow_status(
             table.add_column("Tokens", justify="right")
             table.add_column("Cost", justify="right")
 
-            for ex in executions:
+            for execution in executions:
                 table.add_row(
-                    ex.workflow_execution_id[:12] + "...",
-                    ex.status,
-                    f"{ex.completed_phases}/{ex.total_phases}",
-                    format_tokens(ex.total_tokens),
-                    format_cost(ex.total_cost_usd),
+                    execution.workflow_execution_id[:12] + "...",
+                    execution.status,
+                    f"{execution.completed_phases}/{execution.total_phases}",
+                    format_tokens(execution.total_tokens),
+                    format_cost(execution.total_cost_usd),
                 )
             console.print(table)
         case Err(error, message=msg):

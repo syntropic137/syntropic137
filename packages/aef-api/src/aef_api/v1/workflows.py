@@ -111,7 +111,7 @@ async def get_workflow(
         else:
             phases.append(
                 PhaseDefinitionResponse(
-                    phase_id=getattr(p, "phase_id", None) or getattr(p, "id", ""),
+                    phase_id=str(getattr(p, "phase_id", None) or getattr(p, "id", "")),
                     name=getattr(p, "name", ""),
                     order=getattr(p, "order", 0),
                     description=getattr(p, "description", None),
