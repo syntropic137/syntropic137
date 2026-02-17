@@ -124,6 +124,7 @@ class TriggerError(str, Enum):
     ALREADY_ACTIVE = "already_active"
     ALREADY_DELETED = "already_deleted"
     PRESET_NOT_FOUND = "preset_not_found"
+    WORKFLOW_NOT_FOUND = "workflow_not_found"
 
 
 class AgentError(str, Enum):
