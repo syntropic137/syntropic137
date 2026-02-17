@@ -221,6 +221,36 @@ jobs:
         run: npm run build
 
   #############################################################################
+  # DOCS SITE - Fumadocs build check
+  #############################################################################
+
+  docs-site:
+    name: Docs Site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        working-directory: apps/aef-docs
+        run: pnpm install
+
+      - name: Build
+        working-directory: apps/aef-docs
+        run: pnpm run build
+
+  #############################################################################
   # SUBMODULE VALIDATION - Ensure submodules are properly referenced
   #############################################################################
 
@@ -262,6 +292,7 @@ jobs:
       - python-unit-tests
       - python-integration-tests
       - dashboard-ui
+      - docs-site
       - submodule-check
     runs-on: ubuntu-latest
     steps:
@@ -271,6 +302,7 @@ jobs:
           if [[ "${{ needs.python-qa.result }}" == "failure" ]] || \
              [[ "${{ needs.python-unit-tests.result }}" == "failure" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "failure" ]] || \
+             [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
              [[ "${{ needs.submodule-check.result }}" == "failure" ]]; then
             echo "❌ CI checks failed"
             exit 1
@@ -287,6 +319,7 @@ jobs:
           if [[ "${{ needs.python-qa.result }}" == "cancelled" ]] || \
              [[ "${{ needs.python-unit-tests.result }}" == "cancelled" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.docs-site.result }}" == "cancelled" ]] || \
              [[ "${{ needs.submodule-check.result }}" == "cancelled" ]]; then
             echo "⚠️ CI checks were cancelled"
             exit 1

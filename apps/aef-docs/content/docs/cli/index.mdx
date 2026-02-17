@@ -1,0 +1,66 @@
+---
+title: CLI Reference
+description: Command-line interface for the Agentic Engineering Framework.
+---
+
+The `aef` CLI provides commands for managing workflows, agents, and the AEF
+platform from your terminal.
+
+## Installation
+
+The CLI is included when you install AEF:
+
+```bash
+uv sync
+aef --help
+```
+
+## Commands
+
+### `aef workflow`
+
+Manage and trigger workflows.
+
+```bash
+# List workflows
+aef workflow list
+
+# Run a workflow
+aef workflow run --name <workflow-name>
+
+# Get workflow status
+aef workflow status <execution-id>
+```
+
+### `aef agent`
+
+Manage agent sessions.
+
+```bash
+# List active sessions
+aef agent list
+
+# View session details
+aef agent show <session-id>
+```
+
+### `aef config`
+
+Manage configuration.
+
+```bash
+# Show current config
+aef config show
+
+# Validate configuration
+aef config validate
+```
+
+## Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--help` | Show help message |
+| `--version` | Show version |
+| `--api-url` | Override API server URL |
+| `--format` | Output format (`json`, `table`) |

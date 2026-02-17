@@ -1,0 +1,74 @@
+---
+title: Architecture
+description: Event sourcing, CQRS, workspace isolation, and the internals of AEF
+---
+
+## Event Sourcing
+
+AEF uses **event sourcing** as its core persistence pattern. Instead of storing current state, every state change is recorded as an immutable event. The current state is derived by replaying events.
+
+<EventSourcingFlowDiagram />
+
+### Two Event Types
+
+AEF distinguishes between two kinds of events, each optimized for its use case:
+
+| | Domain Events | Observability Events |
+|---|---|---|
+| **Purpose** | Business logic, state transitions | Telemetry, metrics, audit logs |
+| **Storage** | Event Store (gRPC) | TimescaleDB (hypertable) |
+| **Validation** | Aggregate invariants, can be rejected | Schema validation only, append-only |
+| **Throughput** | ~1K/sec | ~10K/sec |
+| **Examples** | `WorkflowCreated`, `ExecutionStarted` | `ToolExecuted`, `TokensUsed` |
+
+<TwoEventTypesDiagram />
+
+## CQRS
+
+Commands and queries are strictly separated. Commands modify state through aggregates; queries read from pre-built projections cached in Redis.
+
+**Commands (12):** `CreateWorkflow`, `StartExecution`, `PauseExecution`, `ResumeExecution`, `CancelExecution`, `RegisterTrigger`, `UpdateTrigger`, `DeleteTrigger`, and more.
+
+**Events (31):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionPaused`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
+
+**Projections (13):** Pre-computed read models updated by event processors, cached in Redis for sub-millisecond query response times.
+
+<CQRSDiagram />
+
+## Domain Model
+
+AEF is organized into four bounded contexts with six aggregates:
+
+<DomainModelDiagram />
+
+## Real-Time Communication
+
+AEF provides two real-time channels for monitoring execution:
+
+**WebSocket** — Bidirectional control plane for pause/resume/cancel commands and state updates:
+
+```
+wss://host/ws/control/{execution_id}
+```
+
+**Server-Sent Events** — Unidirectional stream for execution progress, tool events, and token updates:
+
+```
+GET /api/executions/{execution_id}/stream
+```
+
+### Execution State Machine
+
+<StateMachineDiagram />
+
+**Yield Points** — The agent can only be paused at safe points: before each workflow phase, after each tool execution, and after each LLM call.
+
+## Performance
+
+| Operation | Latency | Throughput |
+|-----------|---------|------------|
+| Domain event append | ~10ms | 1K/sec |
+| Observability event insert | ~5ms | 10K/sec |
+| Read model query (cached) | sub-ms | 100K/sec |
+| Read model query (miss) | ~20ms | 5K/sec |
+| Artifact upload | ~100ms | 100/sec |

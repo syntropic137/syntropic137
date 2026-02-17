@@ -571,6 +571,21 @@ docs-sync:
         exit 1; \
     fi
 
+# Regenerate docs site content (OpenAPI spec + API reference MDX)
+docs-site-gen:
+    @echo "📄 Extracting OpenAPI spec from FastAPI..."
+    uv run python scripts/extract_openapi.py
+    @echo "📄 Generating API reference docs..."
+    cd apps/aef-docs && pnpm run generate:openapi
+
+# Build docs site (runs generation + next build)
+docs-site-build: docs-site-gen
+    cd apps/aef-docs && pnpm run build
+
+# Start docs site dev server
+docs-site-dev:
+    cd apps/aef-docs && pnpm run dev
+
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
     @echo "🔍 Checking for test debt..."

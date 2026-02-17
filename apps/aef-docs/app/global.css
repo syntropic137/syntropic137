@@ -1,0 +1,97 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* AEF Brand Colors — Indigo/Purple gradient theme */
+:root {
+  --fd-primary: 99 102 241;
+  /* #6366F1 - Indigo */
+  --fd-primary-foreground: 255 255 255;
+  --fd-background: 255 255 255;
+  --fd-foreground: 15 23 42;
+  --fd-muted: 241 245 249;
+  --fd-muted-foreground: 100 116 139;
+  --fd-accent: 139 92 246;
+  /* #8B5CF6 - Purple */
+  --fd-accent-foreground: 255 255 255;
+}
+
+.dark {
+  --fd-primary: 129 140 248;
+  /* #818CF8 - Light Indigo */
+  --fd-primary-foreground: 0 0 0;
+  --fd-background: 15 23 42;
+  --fd-foreground: 248 250 252;
+  --fd-muted: 30 41 59;
+  --fd-muted-foreground: 148 163 184;
+  --fd-accent: 167 139 250;
+  /* #A78BFA - Light Purple */
+  --fd-accent-foreground: 0 0 0;
+}
+
+/* Enhanced card hover effects */
+.fd-card {
+  transition: all 0.2s ease;
+}
+
+.fd-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
+}
+
+.dark .fd-card:hover {
+  box-shadow: 0 8px 30px rgba(129, 140, 248, 0.2);
+}
+
+/* Accordion styling */
+.dark [data-state="open"]>button {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+}
+
+/* Code block enhancements */
+pre {
+  border: 1px solid rgba(99, 102, 241, 0.2) !important;
+}
+
+.dark pre {
+  border: 1px solid rgba(129, 140, 248, 0.2) !important;
+}
+
+/* Scrollbar styling for dark mode */
+.dark ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: rgb(30, 41, 59);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgb(71, 85, 105);
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgb(100, 116, 139);
+}
+
+/* Table styling */
+table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dark th {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+/* Link hover effects */
+article a:not([class]) {
+  text-decoration-color: rgba(99, 102, 241, 0.4);
+  transition: text-decoration-color 0.2s ease;
+}
+
+article a:not([class]):hover {
+  text-decoration-color: rgba(99, 102, 241, 1);
+}
