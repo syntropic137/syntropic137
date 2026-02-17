@@ -52,14 +52,19 @@ async def startup(
 
         settings = get_settings()
 
-        # Validate credentials (unless skipped or in test mode)
-        if not skip_validation and not settings.is_test:
+        # Validate credentials (unless skipped or in test/offline mode)
+        if not skip_validation and not settings.uses_in_memory_stores:
             result = validate_credentials()
             if isinstance(result, Err):
                 return result
 
         # Skip subscription service in test environment
         if settings.is_test:
+            return Ok(None)
+
+        # Offline mode: seed demo data and return (no Docker/external services)
+        if settings.is_offline:
+            await _seed_offline_data()
             return Ok(None)
 
         # Initialize AgentEventStore
@@ -177,3 +182,116 @@ def validate_credentials(
         logger.exception("Failed to validate GitHub App configuration")
 
     return Ok(None)
+
+
+async def _seed_offline_data() -> None:
+    """Seed demo data for offline development mode.
+
+    Creates workflow templates and trigger presets so the dashboard
+    renders meaningful content without any external services.
+    """
+    from aef_api._wiring import ensure_connected, sync_published_events_to_projections
+
+    await ensure_connected()
+
+    # Seed workflow templates
+    from aef_adapters.storage import get_event_publisher, get_workflow_repository
+    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        CreateWorkflowTemplateHandler,
+    )
+
+    handler = CreateWorkflowTemplateHandler(
+        repository=get_workflow_repository(),
+        event_publisher=get_event_publisher(),
+    )
+
+    workflows_seeded = 0
+    for wf_def in _OFFLINE_WORKFLOW_DEFS:
+        try:
+            from aef_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+                CreateWorkflowTemplateCommand,
+            )
+
+            command = CreateWorkflowTemplateCommand(**wf_def)
+            await handler.handle(command)
+            workflows_seeded += 1
+        except Exception:
+            logger.debug("Skipped seeding workflow '%s' (may already exist)", wf_def["name"])
+
+    # Seed trigger presets
+    import aef_api.v1.triggers as triggers_api
+
+    triggers_seeded = 0
+    for preset_name in ("self-healing", "review-fix"):
+        try:
+            result = await triggers_api.enable_preset(
+                preset_name=preset_name,
+                repository="demo/offline-repo",
+                installation_id="",
+                created_by="offline-seed",
+            )
+            if isinstance(result, Ok):
+                triggers_seeded += 1
+        except Exception:
+            logger.debug("Skipped seeding trigger preset '%s'", preset_name)
+
+    # Sync events to projections so read models are populated
+    await sync_published_events_to_projections()
+
+    logger.info(
+        "Offline mode: seeded %d workflows, %d triggers",
+        workflows_seeded,
+        triggers_seeded,
+    )
+
+
+_OFFLINE_WORKFLOW_DEFS: list[dict] = [
+    {
+        "name": "self-healing-ci",
+        "description": "Automatically fix failing CI checks by analyzing logs and applying patches.",
+        "phases": [
+            {
+                "name": "diagnose",
+                "description": "Analyze CI failure logs and identify root cause",
+                "agent_provider": "claude",
+                "prompt_template": "Analyze the following CI failure and identify the root cause:\n{ci_logs}",
+            },
+            {
+                "name": "fix",
+                "description": "Apply automated fix based on diagnosis",
+                "agent_provider": "claude",
+                "prompt_template": "Apply a fix for the diagnosed issue:\n{diagnosis}",
+            },
+        ],
+    },
+    {
+        "name": "code-review-fix",
+        "description": "Address code review feedback by analyzing comments and applying changes.",
+        "phases": [
+            {
+                "name": "analyze",
+                "description": "Parse review comments and plan changes",
+                "agent_provider": "claude",
+                "prompt_template": "Analyze the following code review comments and plan fixes:\n{review_comments}",
+            },
+            {
+                "name": "apply",
+                "description": "Apply the planned changes",
+                "agent_provider": "claude",
+                "prompt_template": "Apply the following planned changes:\n{plan}",
+            },
+        ],
+    },
+    {
+        "name": "documentation-sync",
+        "description": "Keep documentation in sync with code changes.",
+        "phases": [
+            {
+                "name": "detect",
+                "description": "Detect documentation that needs updating",
+                "agent_provider": "claude",
+                "prompt_template": "Identify documentation that needs updating based on:\n{changes}",
+            },
+        ],
+    },
+]
