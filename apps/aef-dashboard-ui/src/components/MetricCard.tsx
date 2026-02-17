@@ -59,7 +59,7 @@ export function MetricCard({
           <p className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
             {title}
           </p>
-          <p className="mt-2 text-2xl font-bold text-[var(--color-text-primary)]">
+          <p className="mt-2 text-2xl font-bold text-[var(--color-text-primary)] truncate" title={String(value)}>
             {typeof value === 'number' ? value.toLocaleString() : value}
           </p>
           {subtitle && (
