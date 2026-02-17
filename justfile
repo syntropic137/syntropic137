@@ -34,6 +34,8 @@ setup-stage stage:
 dev: _workspace-check
     @echo "🚀 Starting full dev stack..."
     @echo ""
+    @just _env-check
+    @echo ""
     @echo "1️⃣ Syncing Python dependencies..."
     @uv sync
     @echo ""
@@ -50,6 +52,7 @@ dev: _workspace-check
     @just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
     @echo ""
     @echo "6️⃣ Starting dashboard frontend..."
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 3
@@ -111,6 +114,8 @@ dev-reset:
 # Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
 # Builds workspace image if missing
 dev-force: _workspace-check
+    @just _env-check
+    @echo ""
     @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
     -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
@@ -144,6 +149,8 @@ dev-force: _workspace-check
 dev-fresh: _workspace-check
     @echo "🧹 Fresh start: wiping databases and restarting full stack..."
     @echo ""
+    @just _env-check
+    @echo ""
     @echo "1️⃣ Stopping any existing processes..."
     @-lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     @echo ""
@@ -169,6 +176,7 @@ dev-fresh: _workspace-check
     @just seed-triggers
     @echo ""
     @echo "9️⃣ Starting dashboard frontend..."
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
     @cd apps/aef-dashboard-ui && pnpm run dev &
     @sleep 3
@@ -186,50 +194,136 @@ dev-fresh: _workspace-check
     @echo ""
     @echo "💡 All data has been wiped. Workflows have been re-seeded."
 
+# --- Environment Validation ---
+
+# Check .env configuration and warn about missing/broken settings
+dev-doctor: _env-check
+    @echo ""
+    @echo "💡 Run 'just dev' to start the development stack."
+
+# Check .env for common misconfigurations and warn loudly
+_env-check:
+    #!/usr/bin/env bash
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+    WARNINGS=0
+    ERRORS=0
+
+    echo "🔍 Checking environment configuration..."
+    echo ""
+
+    # --- Critical: .env file exists ---
+    if [ ! -f .env ]; then
+        echo "   ❌ ERROR: .env file not found!"
+        echo "            Run: cp .env.example .env"
+        echo ""
+        ERRORS=$((ERRORS + 1))
+    fi
+
+    # --- GitHub App ---
+    if [ -n "${AEF_GITHUB_APP_ID:-}" ] && [ -n "${AEF_GITHUB_PRIVATE_KEY:-}" ] && [ -n "${AEF_GITHUB_INSTALLATION_ID:-}" ]; then
+        echo "   ✅ GitHub App configured (${AEF_GITHUB_APP_NAME:-aef-app})"
+    elif [ -n "${AEF_GITHUB_APP_ID:-}" ] || [ -n "${AEF_GITHUB_PRIVATE_KEY:-}" ] || [ -n "${AEF_GITHUB_INSTALLATION_ID:-}" ]; then
+        echo "   ❌ ERROR: GitHub App partially configured!"
+        echo "            All three required: AEF_GITHUB_APP_ID, AEF_GITHUB_PRIVATE_KEY, AEF_GITHUB_INSTALLATION_ID"
+        echo ""
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "   ⚠️  WARNING: GitHub App not configured — agent workflows cannot push code"
+        echo "               See: docs/deployment/github-app-setup.md"
+        echo ""
+        WARNINGS=$((WARNINGS + 1))
+    fi
+
+    # --- Webhook forwarding ---
+    if [ -n "${DEV__SMEE_URL:-}" ]; then
+        echo "   ✅ Webhook proxy configured (smee.io)"
+    else
+        echo "   ⚠️  WARNING: DEV__SMEE_URL not set — GitHub webhooks will NOT reach your local dashboard!"
+        echo "               Triggers (self-healing, review-fix) will not fire."
+        echo "               Fix: 1) Visit https://smee.io/new"
+        echo "                    2) Add DEV__SMEE_URL=<your-url> to .env"
+        echo "               (Webhook URL is auto-managed by just dev/dev-stop)"
+        echo ""
+        WARNINGS=$((WARNINGS + 1))
+    fi
+
+    # --- Webhook secret ---
+    if [ -n "${AEF_GITHUB_WEBHOOK_SECRET:-}" ]; then
+        echo "   ✅ Webhook secret configured"
+    elif [ -n "${AEF_GITHUB_APP_ID:-}" ]; then
+        echo "   ⚠️  WARNING: AEF_GITHUB_WEBHOOK_SECRET not set — webhook signature verification disabled"
+        echo "               Anyone can send fake webhooks to your endpoint"
+        echo ""
+        WARNINGS=$((WARNINGS + 1))
+    fi
+
+    # --- Anthropic API key ---
+    if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+        echo "   ✅ Agent credentials configured"
+    else
+        echo "   ⚠️  WARNING: No agent credentials (ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)"
+        echo "               Agent workflows will fail when trying to call Claude"
+        echo ""
+        WARNINGS=$((WARNINGS + 1))
+    fi
+
+    # --- Summary ---
+    echo ""
+    if [ $ERRORS -gt 0 ]; then
+        echo "   ❌ ${ERRORS} error(s), ${WARNINGS} warning(s) — fix errors before continuing"
+        exit 1
+    elif [ $WARNINGS -gt 0 ]; then
+        echo "   ⚠️  ${WARNINGS} warning(s) — some features may not work (see above)"
+    else
+        echo "   ✅ Environment looks good!"
+    fi
+
 # --- Webhook Forwarding (smee.io) ---
 
-# Start smee webhook proxy (reads SMEE_URL from .env, no-op if unset)
+# Start smee webhook proxy (reads DEV__SMEE_URL from .env, no-op if unset)
 _smee-start:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
-    if [ -z "${SMEE_URL:-}" ]; then
-        echo "   ℹ️  Webhook proxy skipped (SMEE_URL not set in .env)"
+    if [ -z "${DEV__SMEE_URL:-}" ]; then
+        echo "   ℹ️  Webhook proxy skipped (DEV__SMEE_URL not set in .env)"
         echo "   💡 To receive GitHub webhooks locally:"
         echo "      1. Visit https://smee.io/new"
-        echo "      2. Add SMEE_URL=<your-url> to .env"
-        echo "      3. Set the same URL as your GitHub App webhook URL"
+        echo "      2. Add DEV__SMEE_URL=<your-url> to .env"
         exit 0
     fi
+    # Switch GitHub App webhook URL to Smee for local dev
+    uv run python scripts/manage_webhook_url.py --mode dev || true
     # Kill any existing smee process
-    pkill -f "smee-client.*${SMEE_URL}" 2>/dev/null || true
+    pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
     echo "5️⃣  Starting webhook proxy (smee.io → localhost:8000)..."
-    npx -y smee-client --url "$SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
-    echo "   🔗 Webhook proxy: $SMEE_URL → http://localhost:8000/webhooks/github"
+    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+    echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8000/webhooks/github"
 
-# Stop smee webhook proxy
+# Stop smee webhook proxy and restore production webhook URL
 _smee-stop:
+    @-uv run python scripts/manage_webhook_url.py --mode prod 2>/dev/null || true
     @-pkill -f "smee-client" 2>/dev/null || true
 
 # Start smee webhook proxy standalone (for use without full dev stack)
 dev-webhooks:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
-    if [ -z "${SMEE_URL:-}" ]; then
-        echo "❌ SMEE_URL not set in .env"
+    if [ -z "${DEV__SMEE_URL:-}" ]; then
+        echo "❌ DEV__SMEE_URL not set in .env"
         echo ""
         echo "To set up local webhook forwarding:"
         echo "  1. Visit https://smee.io/new to create a channel"
-        echo "  2. Add SMEE_URL=<your-url> to .env"
-        echo "  3. Set the same URL as your GitHub App webhook URL"
+        echo "  2. Add DEV__SMEE_URL=<your-url> to .env"
+        echo "  (Webhook URL is auto-managed by just dev/dev-stop)"
         exit 1
     fi
     echo "🔗 Starting webhook proxy..."
-    echo "   Source: $SMEE_URL"
+    echo "   Source: $DEV__SMEE_URL"
     echo "   Target: http://localhost:8000/webhooks/github"
     echo ""
     echo "   Press Ctrl+C to stop"
     echo ""
-    npx -y smee-client --url "$SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github
+    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github
 
 # View smee proxy logs
 dev-webhooks-logs:
@@ -287,6 +381,40 @@ _workspace-check:
         echo "   Rebuilding to include latest agentic-primitives changes..."
         just workspace-build
     fi
+
+# Start dashboard in offline mode (no Docker, no external services)
+# Seeds demo data automatically — just open http://localhost:5173
+dev-offline:
+    @echo "Starting AEF in offline mode (no Docker, no external services)..."
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
+    @-lsof -ti:8000 | xargs kill 2>/dev/null || true
+    @APP_ENVIRONMENT=offline uv run uvicorn aef_dashboard.main:app \
+        --host 0.0.0.0 --port 8000 --reload &
+    @sleep 3
+    @cd apps/aef-dashboard-ui && pnpm run dev &
+    @sleep 2
+    @echo ""
+    @echo "Offline dev mode ready!"
+    @echo "   Frontend:  http://localhost:5173"
+    @echo "   Backend:   http://localhost:8000"
+    @echo "   API Docs:  http://localhost:8000/docs"
+    @echo ""
+    @echo "No Docker, no API keys, no smee — just code."
+    @echo "Stop with: just dev-offline-stop"
+
+# Stop offline dev mode
+dev-offline-stop:
+    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
+    @-lsof -ti:8000 | xargs kill 2>/dev/null || true
+    @echo "Offline dev mode stopped."
+
+# Start dashboard backend with webhook recording enabled
+dev-record-webhooks:
+    AEF_RECORD_WEBHOOKS=true just dashboard-backend
+
+# Replay recorded webhooks against a running dashboard
+replay-webhooks *args:
+    uv run python scripts/replay_webhooks.py {{args}}
 
 # Run the CLI application
 cli *args:
