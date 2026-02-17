@@ -5,34 +5,35 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import { Points, PointMaterial } from '@react-three/drei';
 import * as THREE from 'three';
 
+// SR-71 palette: cold instrument blues, titanium grays
 const DARK_COLORS = {
-  agent: '#A5B4FC',
-  command: '#C4B5FD',
-  skill: '#818CF8',
-  tool: '#DDD6FE',
-  hook: '#E0E7FF',
-  line: '#A5B4FC',
-  particle: '#C4B5FD',
-  coreOuter: '#A5B4FC',
-  coreMiddle: '#C4B5FD',
-  coreInner: '#DDD6FE',
-  ring1: '#A5B4FC',
-  ring2: '#C4B5FD',
+  agent: '#38BDF8',    // sky-400
+  command: '#7DD3FC',  // sky-300
+  skill: '#0EA5E9',   // sky-500
+  tool: '#BAE6FD',    // sky-200
+  hook: '#A1A1AA',    // zinc-400
+  line: '#38BDF8',
+  particle: '#7DD3FC',
+  coreOuter: '#38BDF8',
+  coreMiddle: '#0EA5E9',
+  coreInner: '#7DD3FC',
+  ring1: '#38BDF8',
+  ring2: '#0EA5E9',
 };
 
 const LIGHT_COLORS = {
-  agent: '#4F46E5',
-  command: '#7C3AED',
-  skill: '#6366F1',
-  tool: '#8B5CF6',
-  hook: '#A78BFA',
-  line: '#6366F1',
-  particle: '#8B5CF6',
-  coreOuter: '#6366F1',
-  coreMiddle: '#7C3AED',
-  coreInner: '#4F46E5',
-  ring1: '#6366F1',
-  ring2: '#8B5CF6',
+  agent: '#0284C7',    // sky-600
+  command: '#0369A1',  // sky-700
+  skill: '#0EA5E9',    // sky-500
+  tool: '#38BDF8',     // sky-400
+  hook: '#71717A',     // zinc-500
+  line: '#0EA5E9',
+  particle: '#0284C7',
+  coreOuter: '#0EA5E9',
+  coreMiddle: '#0284C7',
+  coreInner: '#0369A1',
+  ring1: '#0EA5E9',
+  ring2: '#0284C7',
 };
 
 function useTheme() {
@@ -120,12 +121,12 @@ function NetworkNodes({ isDark }: { isDark: boolean }) {
   useFrame((state) => {
     const t = state.clock.elapsedTime;
     if (ref.current) {
-      ref.current.rotation.y = t * 0.08;
-      ref.current.rotation.x = Math.sin(t * 0.05) * 0.15;
+      ref.current.rotation.y = t * 0.06;
+      ref.current.rotation.x = Math.sin(t * 0.04) * 0.1;
     }
     if (linesRef.current) {
-      linesRef.current.rotation.y = t * 0.08;
-      linesRef.current.rotation.x = Math.sin(t * 0.05) * 0.15;
+      linesRef.current.rotation.y = t * 0.06;
+      linesRef.current.rotation.x = Math.sin(t * 0.04) * 0.1;
     }
   });
 
@@ -138,14 +139,14 @@ function NetworkNodes({ isDark }: { isDark: boolean }) {
             args={[connections, 3]}
           />
         </bufferGeometry>
-        <lineBasicMaterial ref={lineMaterialRef} color={theme.line} transparent opacity={isDark ? 0.35 : 0.5} />
+        <lineBasicMaterial ref={lineMaterialRef} color={theme.line} transparent opacity={isDark ? 0.25 : 0.4} />
       </lineSegments>
 
       <Points ref={ref} positions={positions} stride={3}>
         <PointMaterial
           transparent
           vertexColors
-          size={0.15}
+          size={0.12}
           sizeAttenuation={true}
           depthWrite={false}
           blending={isDark ? THREE.AdditiveBlending : THREE.NormalBlending}
@@ -184,8 +185,8 @@ function FloatingParticles({ isDark }: { isDark: boolean }) {
 
   useFrame((state) => {
     if (ref.current) {
-      ref.current.rotation.y = state.clock.elapsedTime * 0.015;
-      ref.current.rotation.x = state.clock.elapsedTime * 0.01;
+      ref.current.rotation.y = state.clock.elapsedTime * 0.012;
+      ref.current.rotation.x = state.clock.elapsedTime * 0.008;
     }
   });
 
@@ -194,10 +195,10 @@ function FloatingParticles({ isDark }: { isDark: boolean }) {
       <PointMaterial
         transparent
         color={theme.particle}
-        size={0.025}
+        size={0.02}
         sizeAttenuation={true}
         depthWrite={false}
-        opacity={isDark ? 0.7 : 0.5}
+        opacity={isDark ? 0.5 : 0.4}
         blending={isDark ? THREE.AdditiveBlending : THREE.NormalBlending}
       />
     </Points>
@@ -212,15 +213,15 @@ function CentralCore({ isDark }: { isDark: boolean }) {
   useFrame((state) => {
     const t = state.clock.elapsedTime;
     if (meshRef.current) {
-      meshRef.current.rotation.y = t * 0.5;
-      meshRef.current.rotation.z = t * 0.3;
-      const scale = 1 + Math.sin(t * 2) * 0.08;
+      meshRef.current.rotation.y = t * 0.4;
+      meshRef.current.rotation.z = t * 0.25;
+      const scale = 1 + Math.sin(t * 2) * 0.05;
       meshRef.current.scale.set(scale, scale, scale);
     }
     if (glowRef.current) {
-      glowRef.current.rotation.y = -t * 0.3;
-      glowRef.current.rotation.x = t * 0.2;
-      const glowScale = 1.3 + Math.sin(t * 1.5) * 0.1;
+      glowRef.current.rotation.y = -t * 0.25;
+      glowRef.current.rotation.x = t * 0.15;
+      const glowScale = 1.3 + Math.sin(t * 1.5) * 0.06;
       glowRef.current.scale.set(glowScale, glowScale, glowScale);
     }
   });
@@ -233,7 +234,7 @@ function CentralCore({ isDark }: { isDark: boolean }) {
           color={theme.coreOuter}
           wireframe
           transparent
-          opacity={isDark ? 0.25 : 0.4}
+          opacity={isDark ? 0.2 : 0.35}
         />
       </mesh>
 
@@ -243,13 +244,13 @@ function CentralCore({ isDark }: { isDark: boolean }) {
           color={theme.coreMiddle}
           wireframe
           transparent
-          opacity={0.9}
+          opacity={0.8}
         />
       </mesh>
 
       <mesh>
         <sphereGeometry args={[0.18, 16, 16]} />
-        <meshBasicMaterial color={theme.coreInner} transparent opacity={1} />
+        <meshBasicMaterial color={theme.coreInner} transparent opacity={0.9} />
       </mesh>
     </group>
   );
@@ -264,23 +265,23 @@ function OrbitalRings({ isDark }: { isDark: boolean }) {
     const t = state.clock.elapsedTime;
     if (ring1Ref.current) {
       ring1Ref.current.rotation.x = Math.PI / 2;
-      ring1Ref.current.rotation.z = t * 0.4;
+      ring1Ref.current.rotation.z = t * 0.35;
     }
     if (ring2Ref.current) {
       ring2Ref.current.rotation.y = Math.PI / 3;
-      ring2Ref.current.rotation.z = -t * 0.3;
+      ring2Ref.current.rotation.z = -t * 0.25;
     }
   });
 
   return (
     <group>
       <mesh ref={ring1Ref}>
-        <torusGeometry args={[0.85, 0.012, 16, 100]} />
-        <meshBasicMaterial color={theme.ring1} transparent opacity={isDark ? 0.7 : 0.8} />
+        <torusGeometry args={[0.85, 0.01, 16, 100]} />
+        <meshBasicMaterial color={theme.ring1} transparent opacity={isDark ? 0.6 : 0.7} />
       </mesh>
       <mesh ref={ring2Ref}>
-        <torusGeometry args={[1.05, 0.01, 16, 100]} />
-        <meshBasicMaterial color={theme.ring2} transparent opacity={isDark ? 0.6 : 0.7} />
+        <torusGeometry args={[1.05, 0.008, 16, 100]} />
+        <meshBasicMaterial color={theme.ring2} transparent opacity={isDark ? 0.4 : 0.5} />
       </mesh>
     </group>
   );

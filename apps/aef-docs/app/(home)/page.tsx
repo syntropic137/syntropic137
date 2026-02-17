@@ -13,34 +13,37 @@ export default function HomePage() {
           <div className="flex flex-col items-center text-center">
             {/* Badges */}
             <div className="flex flex-wrap justify-center gap-2 mb-6">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
                 <Zap className="w-3.5 h-3.5" />
                 Event-Sourced
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-zinc-500/10 text-zinc-400 border border-zinc-500/20">
                 <Workflow className="w-3.5 h-3.5" />
                 Workflow Engine
               </span>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-pink-500/20 text-pink-400 border border-pink-500/30">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium bg-sky-500/10 text-sky-300 border border-sky-500/20">
                 <Eye className="w-3.5 h-3.5" />
                 Full Observability
               </span>
             </div>
 
             {/* Main Title */}
-            <h1 className="text-4xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 bg-clip-text text-transparent pb-1">
-              Agentic Engineering Framework
+            <h1 className="text-4xl md:text-6xl font-bold mb-2 text-fd-foreground tracking-tight pb-1">
+              Syntropic<span className="text-sky-400">137</span>
             </h1>
-            <p className="text-lg md:text-xl text-fd-muted-foreground max-w-2xl mb-8">
+            <p className="text-lg md:text-xl text-fd-muted-foreground mb-1">
+              Agentic Engineering Framework
+            </p>
+            <p className="text-base text-fd-muted-foreground/70 max-w-2xl mb-8">
               Orchestrate AI agents with event-sourced workflows. Build, observe,
-              and scale agentic systems with confidence.
+              and scale agentic systems with precision.
             </p>
 
             {/* CTA Buttons */}
             <div className="flex flex-wrap justify-center gap-4 mb-12">
               <Link
                 href="/docs/guide/getting-started"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-full font-semibold text-white bg-gradient-to-r from-violet-500 to-purple-500 hover:from-violet-600 hover:to-purple-600 shadow-lg shadow-purple-500/30 hover:shadow-purple-500/50 transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-semibold text-zinc-950 bg-sky-400 hover:bg-sky-300 shadow-lg shadow-sky-500/20 hover:shadow-sky-500/30 transition-all"
               >
                 <Rocket className="w-5 h-5" />
                 Get Started
@@ -48,7 +51,7 @@ export default function HomePage() {
               </Link>
               <Link
                 href="/docs"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-full font-medium border-2 border-fd-foreground/20 hover:border-fd-foreground/40 text-fd-foreground hover:bg-fd-foreground/5 transition-all"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-medium border border-zinc-700 hover:border-zinc-500 text-fd-foreground hover:bg-zinc-800/50 transition-all"
               >
                 <BookOpen className="w-5 h-5" />
                 Documentation
@@ -67,32 +70,32 @@ export default function HomePage() {
       <section className="py-16 border-t border-fd-border">
         <div className="container mx-auto px-6">
           <h2 className="text-2xl md:text-3xl font-bold text-center mb-12">
-            Why AEF?
+            Why Syntropic137?
           </h2>
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             <FeatureCard
               icon={<Workflow className="w-6 h-6" />}
               title="Workflow Engine"
               description="YAML-driven workflows with GitHub-triggered execution and human-in-the-loop controls"
-              gradient="indigo"
+              variant="primary"
             />
             <FeatureCard
               icon={<Activity className="w-6 h-6" />}
               title="Event Sourcing"
               description="Complete audit trail with immutable event log, replay, and temporal queries"
-              gradient="purple"
+              variant="secondary"
             />
             <FeatureCard
               icon={<Eye className="w-6 h-6" />}
               title="Full Observability"
               description="Real-time WebSocket dashboard with token metrics, cost tracking, and tool timelines"
-              gradient="pink"
+              variant="primary"
             />
             <FeatureCard
               icon={<Shield className="w-6 h-6" />}
               title="Workspace Isolation"
               description="Each agent session runs in an isolated workspace with resource limits and guardrails"
-              gradient="cyan"
+              variant="secondary"
             />
           </div>
         </div>
@@ -106,7 +109,7 @@ export default function HomePage() {
               href="/docs/guide/getting-started"
               icon={<Rocket className="w-6 h-6" />}
               title="Quick Start"
-              description="Set up AEF and run your first workflow"
+              description="Set up and run your first workflow"
             />
             <QuickLink
               href="/docs/cli"
@@ -137,32 +140,27 @@ function FeatureCard({
   icon,
   title,
   description,
-  gradient,
+  variant,
 }: {
   icon: React.ReactNode;
   title: string;
   description: string;
-  gradient: 'indigo' | 'purple' | 'pink' | 'cyan';
+  variant: 'primary' | 'secondary';
 }) {
-  const gradients = {
-    indigo: 'from-indigo-500/10 to-indigo-500/5 border-indigo-500/20 hover:border-indigo-500/40',
-    purple: 'from-purple-500/10 to-purple-500/5 border-purple-500/20 hover:border-purple-500/40',
-    pink: 'from-pink-500/10 to-pink-500/5 border-pink-500/20 hover:border-pink-500/40',
-    cyan: 'from-cyan-500/10 to-cyan-500/5 border-cyan-500/20 hover:border-cyan-500/40',
+  const styles = {
+    primary: 'from-sky-500/8 to-sky-500/3 border-sky-500/15 hover:border-sky-500/30',
+    secondary: 'from-zinc-500/8 to-zinc-500/3 border-zinc-500/15 hover:border-zinc-500/30',
   };
-
-  const iconBg = {
-    indigo: 'bg-indigo-500/20 text-indigo-400',
-    purple: 'bg-purple-500/20 text-purple-400',
-    pink: 'bg-pink-500/20 text-pink-400',
-    cyan: 'bg-cyan-500/20 text-cyan-400',
+  const iconStyles = {
+    primary: 'bg-sky-500/15 text-sky-400',
+    secondary: 'bg-zinc-500/15 text-zinc-400',
   };
 
   return (
     <div
-      className={`group rounded-xl border bg-gradient-to-br p-6 transition-all hover:scale-[1.02] ${gradients[gradient]}`}
+      className={`group rounded-lg border bg-gradient-to-br p-6 transition-all ${styles[variant]}`}
     >
-      <div className={`inline-flex p-3 rounded-lg mb-4 ${iconBg[gradient]}`}>
+      <div className={`inline-flex p-3 rounded-lg mb-4 ${iconStyles[variant]}`}>
         {icon}
       </div>
       <h3 className="font-semibold text-fd-foreground mb-2">{title}</h3>
@@ -185,10 +183,10 @@ function QuickLink({
   return (
     <Link
       href={href}
-      className="group flex flex-col p-6 rounded-xl border border-fd-border hover:border-purple-500/40 bg-fd-card hover:bg-gradient-to-br hover:from-purple-500/5 hover:to-transparent transition-all"
+      className="group flex flex-col p-6 rounded-lg border border-fd-border hover:border-sky-500/30 bg-fd-card transition-all"
     >
-      <div className="text-purple-400 mb-3">{icon}</div>
-      <h3 className="font-semibold text-fd-foreground mb-1 group-hover:text-purple-400 transition-colors">
+      <div className="text-sky-400 mb-3">{icon}</div>
+      <h3 className="font-semibold text-fd-foreground mb-1 group-hover:text-sky-400 transition-colors">
         {title}
       </h3>
       <p className="text-sm text-fd-muted-foreground">{description}</p>

@@ -24,6 +24,7 @@ const iconMap: Record<string, LucideIcon> = {
 
 type ColorVariant = 'indigo' | 'purple' | 'pink' | 'cyan' | 'slate' | 'emerald' | 'amber';
 
+// SR-71 palette: cold instrument blues, titanium grays, precision feel
 const colorStyles: Record<ColorVariant, {
   bg: string;
   border: string;
@@ -32,53 +33,53 @@ const colorStyles: Record<ColorVariant, {
   glow: string;
 }> = {
   indigo: {
-    bg: 'bg-indigo-500/10 dark:bg-indigo-500/15',
-    border: 'border-indigo-500/30 dark:border-indigo-400/30',
-    icon: 'text-indigo-500 dark:text-indigo-400',
-    text: 'text-indigo-700 dark:text-indigo-300',
-    glow: 'shadow-indigo-500/20',
+    bg: 'bg-sky-500/8 dark:bg-sky-500/12',
+    border: 'border-sky-500/25 dark:border-sky-400/25',
+    icon: 'text-sky-500 dark:text-sky-400',
+    text: 'text-sky-700 dark:text-sky-300',
+    glow: 'shadow-sky-500/15',
   },
   purple: {
-    bg: 'bg-purple-500/10 dark:bg-purple-500/15',
-    border: 'border-purple-500/30 dark:border-purple-400/30',
-    icon: 'text-purple-500 dark:text-purple-400',
-    text: 'text-purple-700 dark:text-purple-300',
-    glow: 'shadow-purple-500/20',
+    bg: 'bg-blue-500/8 dark:bg-blue-500/12',
+    border: 'border-blue-500/25 dark:border-blue-400/25',
+    icon: 'text-blue-500 dark:text-blue-400',
+    text: 'text-blue-700 dark:text-blue-300',
+    glow: 'shadow-blue-500/15',
   },
   pink: {
-    bg: 'bg-pink-500/10 dark:bg-pink-500/15',
-    border: 'border-pink-500/30 dark:border-pink-400/30',
-    icon: 'text-pink-500 dark:text-pink-400',
-    text: 'text-pink-700 dark:text-pink-300',
-    glow: 'shadow-pink-500/20',
+    bg: 'bg-rose-500/8 dark:bg-rose-500/10',
+    border: 'border-rose-500/20 dark:border-rose-400/20',
+    icon: 'text-rose-500 dark:text-rose-400',
+    text: 'text-rose-700 dark:text-rose-300',
+    glow: 'shadow-rose-500/15',
   },
   cyan: {
-    bg: 'bg-cyan-500/10 dark:bg-cyan-500/15',
-    border: 'border-cyan-500/30 dark:border-cyan-400/30',
+    bg: 'bg-cyan-500/8 dark:bg-cyan-500/12',
+    border: 'border-cyan-500/25 dark:border-cyan-400/25',
     icon: 'text-cyan-500 dark:text-cyan-400',
     text: 'text-cyan-700 dark:text-cyan-300',
-    glow: 'shadow-cyan-500/20',
+    glow: 'shadow-cyan-500/15',
   },
   slate: {
-    bg: 'bg-slate-500/10 dark:bg-slate-500/15',
-    border: 'border-slate-500/30 dark:border-slate-400/30',
-    icon: 'text-slate-500 dark:text-slate-400',
-    text: 'text-slate-700 dark:text-slate-300',
-    glow: 'shadow-slate-500/20',
+    bg: 'bg-zinc-500/8 dark:bg-zinc-500/12',
+    border: 'border-zinc-500/25 dark:border-zinc-400/25',
+    icon: 'text-zinc-500 dark:text-zinc-400',
+    text: 'text-zinc-600 dark:text-zinc-300',
+    glow: 'shadow-zinc-500/15',
   },
   emerald: {
-    bg: 'bg-emerald-500/10 dark:bg-emerald-500/15',
-    border: 'border-emerald-500/30 dark:border-emerald-400/30',
-    icon: 'text-emerald-500 dark:text-emerald-400',
-    text: 'text-emerald-700 dark:text-emerald-300',
-    glow: 'shadow-emerald-500/20',
+    bg: 'bg-teal-500/8 dark:bg-teal-500/12',
+    border: 'border-teal-500/25 dark:border-teal-400/25',
+    icon: 'text-teal-500 dark:text-teal-400',
+    text: 'text-teal-700 dark:text-teal-300',
+    glow: 'shadow-teal-500/15',
   },
   amber: {
-    bg: 'bg-amber-500/10 dark:bg-amber-500/15',
-    border: 'border-amber-500/30 dark:border-amber-400/30',
+    bg: 'bg-amber-500/8 dark:bg-amber-500/10',
+    border: 'border-amber-500/20 dark:border-amber-400/20',
     icon: 'text-amber-500 dark:text-amber-400',
     text: 'text-amber-700 dark:text-amber-300',
-    glow: 'shadow-amber-500/20',
+    glow: 'shadow-amber-500/15',
   },
 };
 

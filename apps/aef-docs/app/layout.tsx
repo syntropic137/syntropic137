@@ -10,11 +10,11 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    template: '%s | AEF',
-    default: 'AEF — Agentic Engineering Framework',
+    template: '%s | Syntropic137',
+    default: 'Syntropic137 — Agentic Engineering Framework',
   },
   description:
-    'Orchestrate AI agents with event-sourced workflows. Build, observe, and scale agentic systems with confidence.',
+    'Orchestrate AI agents with event-sourced workflows. Build, observe, and scale agentic systems with precision.',
   icons: {
     icon: '/favicon.svg',
     apple: '/favicon.svg',
