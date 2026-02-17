@@ -32,7 +32,7 @@ export default function HomePage() {
               Syntropic<span className="text-sky-400">137</span>
             </h1>
             <p className="text-lg md:text-xl text-fd-muted-foreground mb-1">
-              Agentic Engineering Framework
+              Agentic Engineering
             </p>
             <p className="text-base text-fd-muted-foreground/70 max-w-2xl mb-8">
               Orchestrate AI agents with event-sourced workflows. Build, observe,
@@ -55,6 +55,13 @@ export default function HomePage() {
               >
                 <BookOpen className="w-5 h-5" />
                 Documentation
+              </Link>
+              <Link
+                href="/llms.txt"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-medium border border-zinc-700 hover:border-zinc-500 text-fd-foreground hover:bg-zinc-800/50 transition-all"
+              >
+                <Bot className="w-5 h-5" />
+                LLM Docs
               </Link>
             </div>
 
