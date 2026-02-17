@@ -1,7 +1,10 @@
 """Seed trigger presets into the event store.
 
-Standalone dev script — registers built-in trigger presets (self-healing,
-review-fix) for target repositories via aef_api. Called by `just seed-triggers`.
+Standalone dev script — first seeds trigger-associated workflows from
+workflows/triggers/, then registers built-in trigger presets (self-healing,
+review-fix, comment-command) for target repositories via aef_api.
+
+Called by `just seed-triggers`.
 
 Usage:
     uv run python scripts/seed_triggers.py [--repository OWNER/REPO ...] [--dry-run]
@@ -12,6 +15,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TRIGGER_WORKFLOWS_DIR = REPO_ROOT / "workflows" / "triggers"
 
 DEFAULT_REPOSITORIES = [
     "AgentParadise/agentic-engineering-framework",
@@ -19,11 +26,51 @@ DEFAULT_REPOSITORIES = [
 ]
 
 
+async def _seed_trigger_workflows(dry_run: bool) -> bool:
+    """Seed workflow templates that triggers depend on.
+
+    Returns True if all workflows seeded successfully (or already exist).
+    """
+    from aef_adapters.storage import (
+        get_event_publisher,
+        get_workflow_repository,
+    )
+    from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        CreateWorkflowTemplateHandler,
+    )
+
+    if not TRIGGER_WORKFLOWS_DIR.exists():
+        print(f"  ⚠ Trigger workflows directory not found: {TRIGGER_WORKFLOWS_DIR}")
+        return False
+
+    handler = CreateWorkflowTemplateHandler(
+        repository=get_workflow_repository(),
+        event_publisher=get_event_publisher(),
+    )
+    seeder = WorkflowSeeder(handler)
+
+    report = await seeder.seed_from_directory(TRIGGER_WORKFLOWS_DIR, dry_run=dry_run)
+
+    for r in report.results:
+        if r.success:
+            print(f"    ✓ {r.name} ({r.workflow_id[:12]}...)")
+        elif r.error and "already exists" in r.error:
+            print(f"    ○ {r.name} (skipped — already exists)")
+        else:
+            print(f"    ✗ {r.name}: {r.error}")
+
+    return report.failed == 0
+
+
 async def _seed(repositories: list[str], dry_run: bool) -> int:
     from aef_domain.contexts.github._shared.trigger_presets import PRESETS
 
     if dry_run:
         print("DRY RUN — no triggers will be created\n")
+        print("  Trigger workflows:")
+        await _seed_trigger_workflows(dry_run=True)
+        print()
         for repo in repositories:
             for name in PRESETS:
                 print(f"  ○ {name} → {repo}")
@@ -36,6 +83,15 @@ async def _seed(repositories: list[str], dry_run: bool) -> int:
 
     await ensure_connected()
 
+    # Step 1: Seed the workflows that triggers reference
+    print("  Seeding trigger workflows...")
+    workflows_ok = await _seed_trigger_workflows(dry_run=False)
+    if not workflows_ok:
+        print("\n  ✗ Failed to seed trigger workflows — aborting trigger creation")
+        return 1
+    print()
+
+    # Step 2: Seed the trigger presets
     succeeded = 0
     skipped = 0
     failed = 0
