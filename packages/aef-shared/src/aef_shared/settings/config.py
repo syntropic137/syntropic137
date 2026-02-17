@@ -15,6 +15,7 @@ from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from aef_shared.settings.dev_tooling import DevToolingSettings
     from aef_shared.settings.github import GitHubAppSettings
     from aef_shared.settings.storage import StorageSettings
     from aef_shared.settings.workspace import (
@@ -32,6 +33,7 @@ class AppEnvironment(str, Enum):
     STAGING = "staging"
     PRODUCTION = "production"
     TEST = "test"
+    OFFLINE = "offline"
 
 
 class Settings(BaseSettings):
@@ -63,8 +65,9 @@ class Settings(BaseSettings):
     app_environment: AppEnvironment = Field(
         default=AppEnvironment.DEVELOPMENT,
         description=(
-            "Current environment: development, staging, production, test. "
-            "Affects logging verbosity, error handling, and feature flags."
+            "Current environment: development, staging, production, test, offline. "
+            "Affects logging verbosity, error handling, and feature flags. "
+            "Use 'offline' for local dev without Docker or external services."
         ),
     )
 
@@ -388,13 +391,23 @@ class Settings(BaseSettings):
         return self.app_environment == AppEnvironment.TEST
 
     @property
+    def is_offline(self) -> bool:
+        """Check if running in offline development mode (no Docker, no external services)."""
+        return self.app_environment == AppEnvironment.OFFLINE
+
+    @property
+    def uses_in_memory_stores(self) -> bool:
+        """True when using in-memory stores (test or offline mode)."""
+        return self.is_test or self.is_offline
+
+    @property
     def use_in_memory_storage(self) -> bool:
         """Check if in-memory storage would be used (no database configured).
 
-        WARNING: In-memory storage is for TESTING ONLY.
+        In-memory storage is used for test and offline environments.
         For local development, configure AEF_OBSERVABILITY_DB_URL to use Docker PostgreSQL.
         """
-        return self.aef_observability_db_url is None and self.is_test
+        return self.aef_observability_db_url is None and self.uses_in_memory_stores
 
     # =========================================================================
     # WORKSPACE ISOLATION - See ADR-021
@@ -468,6 +481,21 @@ class Settings(BaseSettings):
         from aef_shared.settings.storage import StorageSettings
 
         return StorageSettings()
+
+    # =========================================================================
+    # DEVELOPMENT TOOLING
+    # =========================================================================
+
+    @property
+    def dev_tooling(self) -> DevToolingSettings:
+        """Get development tooling settings.
+
+        Returns a DevToolingSettings instance configured from DEV__* env vars.
+        Controls local dev tools like webhook proxies, debug servers, etc.
+        """
+        from aef_shared.settings.dev_tooling import DevToolingSettings
+
+        return DevToolingSettings()
 
     # =========================================================================
     # GITHUB APP - See HANDOFF-GITHUB-APP.md
