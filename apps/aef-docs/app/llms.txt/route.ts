@@ -1,24 +1,28 @@
 import { source } from '@/lib/source';
+import { type NextRequest } from 'next/server';
 
-export const revalidate = false;
+export const dynamic = 'force-dynamic';
 
-export function GET() {
+export function GET(request: NextRequest) {
+  const origin = request.nextUrl.origin;
   const lines: string[] = [];
+
   lines.push('# Syntropic137 Documentation');
   lines.push('');
   lines.push('> Syntropic137 — Agentic Engineering. Orchestrate AI agents with event-sourced workflows.');
   lines.push('');
-  lines.push('## Endpoints');
+  lines.push('## LLM Endpoints');
   lines.push('');
-  lines.push('- /llms.txt — This file. Structured index of all documentation pages.');
-  lines.push('- /llms-full.txt — Complete documentation content in a single file.');
+  lines.push(`- ${origin}/llms.txt — This file. Structured index of all documentation pages.`);
+  lines.push(`- ${origin}/llms-full.txt — Complete documentation content in a single file.`);
+  lines.push(`- ${origin}/llms — Human-readable LLM docs page with system prompt and usage guide.`);
   lines.push('');
   lines.push('## Pages');
   lines.push('');
 
   for (const page of source.getPages()) {
     lines.push(
-      `- [${page.data.title}](${page.url})${page.data.description ? `: ${page.data.description}` : ''}`,
+      `- [${page.data.title}](${origin}${page.url})${page.data.description ? `: ${page.data.description}` : ''}`,
     );
   }
 
