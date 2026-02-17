@@ -175,7 +175,7 @@ export function TriggerList() {
         <EmptyState
           title="No triggers found"
           description="Create a trigger to automatically start workflows on GitHub events"
-          icon={<Zap className="h-12 w-12 text-[var(--color-text-muted)]" />}
+          icon={Zap}
         />
       ) : (
         <div className="space-y-2">
