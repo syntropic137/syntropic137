@@ -6,11 +6,11 @@
   "packageManager": "pnpm@9.15.0",
   "main": "./src/index.ts",
   "module": "./src/index.ts",
-  "types": "./src/index.ts",
+  "types": "./index.d.ts",
   "exports": {
     ".": {
       "import": "./src/index.ts",
-      "types": "./src/index.ts"
+      "types": "./index.d.ts"
     }
   },
   "scripts": {
