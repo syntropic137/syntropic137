@@ -96,6 +96,15 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Webhook recording middleware (opt-in via AEF_RECORD_WEBHOOKS=true)
+    import os
+
+    if os.environ.get("AEF_RECORD_WEBHOOKS", "").lower() == "true":
+        from aef_dashboard.middleware.webhook_recorder import WebhookRecorderMiddleware
+
+        app.add_middleware(WebhookRecorderMiddleware)
+        logger.info("Webhook recording enabled — saving to fixtures/webhooks/")
+
     # Register API routers
     app.include_router(workflows_router, prefix="/api")
     app.include_router(execution_router, prefix="/api")  # Workflow execution

@@ -10,6 +10,7 @@ import {
   ExecutionList,
   SessionDetail,
   SessionList,
+  TriggerDetail,
   TriggerList,
   WorkflowDetail,
   WorkflowList,
@@ -46,6 +47,7 @@ export function App() {
             <Route path="artifacts" element={<ArtifactList />} />
             <Route path="artifacts/:artifactId" element={<ArtifactDetail />} />
             <Route path="triggers" element={<TriggerList />} />
+            <Route path="triggers/:triggerId" element={<TriggerDetail />} />
           </Route>
         </Routes>
       </BrowserRouter>
