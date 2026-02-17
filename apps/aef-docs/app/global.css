@@ -2,96 +2,98 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
-/* AEF Brand Colors — Indigo/Purple gradient theme */
+/* Syntropic137 — SR-71 Precision Theme */
 :root {
-  --fd-primary: 99 102 241;
-  /* #6366F1 - Indigo */
-  --fd-primary-foreground: 255 255 255;
-  --fd-background: 255 255 255;
-  --fd-foreground: 15 23 42;
-  --fd-muted: 241 245 249;
-  --fd-muted-foreground: 100 116 139;
-  --fd-accent: 139 92 246;
-  /* #8B5CF6 - Purple */
+  --fd-primary: 56 189 248;
+  /* #38BDF8 - Sky/instrument blue */
+  --fd-primary-foreground: 2 6 23;
+  --fd-background: 250 250 250;
+  --fd-foreground: 9 9 11;
+  --fd-muted: 244 244 245;
+  --fd-muted-foreground: 113 113 122;
+  --fd-accent: 14 165 233;
+  /* #0EA5E9 - Sky-500 */
   --fd-accent-foreground: 255 255 255;
 }
 
 .dark {
-  --fd-primary: 129 140 248;
-  /* #818CF8 - Light Indigo */
-  --fd-primary-foreground: 0 0 0;
-  --fd-background: 15 23 42;
-  --fd-foreground: 248 250 252;
-  --fd-muted: 30 41 59;
-  --fd-muted-foreground: 148 163 184;
-  --fd-accent: 167 139 250;
-  /* #A78BFA - Light Purple */
-  --fd-accent-foreground: 0 0 0;
+  --fd-primary: 56 189 248;
+  /* #38BDF8 - Sky-400 */
+  --fd-primary-foreground: 2 6 23;
+  --fd-background: 9 9 11;
+  /* #09090B - Zinc-950 */
+  --fd-foreground: 244 244 245;
+  --fd-muted: 24 24 27;
+  /* #18181B - Zinc-900 */
+  --fd-muted-foreground: 161 161 170;
+  /* #A1A1AA - Zinc-400 */
+  --fd-accent: 14 165 233;
+  /* #0EA5E9 - Sky-500 */
+  --fd-accent-foreground: 2 6 23;
 }
 
-/* Enhanced card hover effects */
+/* Subtle card hover — no bouncy transforms */
 .fd-card {
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .fd-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.15);
+  box-shadow: 0 4px 20px rgba(56, 189, 248, 0.08);
 }
 
 .dark .fd-card:hover {
-  box-shadow: 0 8px 30px rgba(129, 140, 248, 0.2);
+  box-shadow: 0 4px 20px rgba(56, 189, 248, 0.1);
 }
 
 /* Accordion styling */
 .dark [data-state="open"]>button {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(139, 92, 246, 0.1));
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.08), rgba(14, 165, 233, 0.05));
 }
 
-/* Code block enhancements */
+/* Code block — sharp border */
 pre {
-  border: 1px solid rgba(99, 102, 241, 0.2) !important;
+  border: 1px solid rgba(56, 189, 248, 0.15) !important;
 }
 
 .dark pre {
-  border: 1px solid rgba(129, 140, 248, 0.2) !important;
+  border: 1px solid rgba(56, 189, 248, 0.12) !important;
 }
 
-/* Scrollbar styling for dark mode */
+/* Scrollbar — stealth */
 .dark ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: rgb(30, 41, 59);
+  background: rgb(24, 24, 27);
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgb(71, 85, 105);
-  border-radius: 4px;
+  background: rgb(63, 63, 70);
+  border-radius: 3px;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgb(100, 116, 139);
+  background: rgb(82, 82, 91);
 }
 
 /* Table styling */
 table {
-  border-radius: 8px;
+  border-radius: 6px;
   overflow: hidden;
 }
 
 .dark th {
-  background: rgba(99, 102, 241, 0.1);
+  background: rgba(56, 189, 248, 0.06);
 }
 
-/* Link hover effects */
+/* Link hover — cold blue */
 article a:not([class]) {
-  text-decoration-color: rgba(99, 102, 241, 0.4);
+  text-decoration-color: rgba(56, 189, 248, 0.3);
   transition: text-decoration-color 0.2s ease;
 }
 
 article a:not([class]):hover {
-  text-decoration-color: rgba(99, 102, 241, 1);
+  text-decoration-color: rgba(56, 189, 248, 0.8);
 }

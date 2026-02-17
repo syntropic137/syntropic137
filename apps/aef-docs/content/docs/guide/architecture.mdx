@@ -1,17 +1,17 @@
 ---
 title: Architecture
-description: Event sourcing, CQRS, workspace isolation, and the internals of AEF
+description: Event sourcing, CQRS, workspace isolation, and the internals of Syntropic137
 ---
 
 ## Event Sourcing
 
-AEF uses **event sourcing** as its core persistence pattern. Instead of storing current state, every state change is recorded as an immutable event. The current state is derived by replaying events.
+Syntropic137 uses **event sourcing** as its core persistence pattern. Instead of storing current state, every state change is recorded as an immutable event. The current state is derived by replaying events.
 
 <EventSourcingFlowDiagram />
 
 ### Two Event Types
 
-AEF distinguishes between two kinds of events, each optimized for its use case:
+Syntropic137 distinguishes between two kinds of events, each optimized for its use case:
 
 | | Domain Events | Observability Events |
 |---|---|---|
@@ -37,13 +37,13 @@ Commands and queries are strictly separated. Commands modify state through aggre
 
 ## Domain Model
 
-AEF is organized into four bounded contexts with six aggregates:
+Syntropic137 is organized into four bounded contexts with six aggregates:
 
 <DomainModelDiagram />
 
 ## Real-Time Communication
 
-AEF provides two real-time channels for monitoring execution:
+Syntropic137 provides two real-time channels for monitoring execution:
 
 **WebSocket** — Bidirectional control plane for pause/resume/cancel commands and state updates:
 

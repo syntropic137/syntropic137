@@ -4,9 +4,9 @@ export const revalidate = false;
 
 export function GET() {
   const lines: string[] = [];
-  lines.push('# AEF Documentation');
+  lines.push('# Syntropic137 Documentation');
   lines.push('');
-  lines.push('> Agentic Engineering Framework — orchestrate AI agents with event-sourced workflows.');
+  lines.push('> Syntropic137 — Agentic Engineering Framework. Orchestrate AI agents with event-sourced workflows.');
   lines.push('');
 
   for (const page of source.getPages()) {
