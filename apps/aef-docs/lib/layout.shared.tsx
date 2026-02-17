@@ -25,7 +25,7 @@ export function baseOptions(): BaseLayoutProps {
               Syntropic<span className="text-sky-400">137</span>
             </span>
             <span className="text-[10px] text-fd-muted-foreground tracking-wide uppercase">
-              Engineering
+              Agentic Engineering
             </span>
           </div>
         </div>
