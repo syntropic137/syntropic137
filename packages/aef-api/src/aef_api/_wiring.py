@@ -140,7 +140,7 @@ def get_trigger_repo():
     from aef_shared.settings import get_settings
 
     settings = get_settings()
-    if settings.is_test:
+    if settings.uses_in_memory_stores:
         global _test_trigger_repo
         if _test_trigger_repo is None:
             _test_trigger_repo = _InMemoryAggregateRepository()
@@ -199,7 +199,7 @@ def get_controller() -> Any:
     state_adapter = ProjectionControlStateAdapter(get_projection_store())
 
     env = os.environ.get("APP_ENVIRONMENT", "")
-    if env == "test":
+    if env in ("test", "offline"):
         from aef_adapters.control.adapters.memory import InMemorySignalQueueAdapter
 
         signal_adapter: Any = InMemorySignalQueueAdapter()

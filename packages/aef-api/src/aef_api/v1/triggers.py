@@ -11,6 +11,7 @@ from aef_api._wiring import (
     ensure_connected,
     get_trigger_repo,
     get_trigger_store,
+    get_workflow_repo,
     sync_published_events_to_projections,
 )
 from aef_api.types import (
@@ -64,6 +65,14 @@ async def register_trigger(
     )
 
     await ensure_connected()
+
+    # Validate that the referenced workflow exists
+    workflow_repo = get_workflow_repo()
+    if not await workflow_repo.exists(workflow_id):
+        return Err(
+            TriggerError.WORKFLOW_NOT_FOUND,
+            message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
+        )
 
     try:
         command = RegisterTriggerCommand(
@@ -148,6 +157,14 @@ async def enable_preset(
         return Err(
             TriggerError.PRESET_NOT_FOUND,
             message=f"Preset '{preset_name}' not found",
+        )
+
+    # Validate that the referenced workflow exists
+    workflow_repo = get_workflow_repo()
+    if not await workflow_repo.exists(command.workflow_id):
+        return Err(
+            TriggerError.WORKFLOW_NOT_FOUND,
+            message=f"Workflow '{command.workflow_id}' does not exist. Seed workflows before creating triggers.",
         )
 
     # Dedup check: skip if an active/paused trigger with the same name+repo+event exists

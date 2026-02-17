@@ -409,6 +409,63 @@ class GitHubAppClient:
         self._check_response(response)
         return response.json()
 
+    async def get_webhook_config(self) -> dict:
+        """Get the GitHub App's webhook configuration.
+
+        Uses App-level JWT auth (not installation tokens).
+
+        Returns:
+            Webhook config including url, content_type, insecure_ssl, secret.
+        """
+        jwt_token = self._generate_jwt()
+
+        response = await self._http.get(
+            "/app/hook/config",
+            headers={"Authorization": f"Bearer {jwt_token}"},
+        )
+
+        self._check_response(response)
+        return response.json()
+
+    async def update_webhook_config(
+        self,
+        url: str,
+        content_type: str = "json",
+        insecure_ssl: str = "0",
+        secret: str | None = None,
+    ) -> dict:
+        """Update the GitHub App's webhook configuration.
+
+        Uses App-level JWT auth (not installation tokens).
+
+        Args:
+            url: The webhook URL to receive events.
+            content_type: Payload content type ('json' or 'form').
+            insecure_ssl: '0' to verify SSL, '1' to skip verification.
+            secret: Webhook secret for payload signing. If None, keeps existing.
+
+        Returns:
+            Updated webhook config.
+        """
+        jwt_token = self._generate_jwt()
+
+        payload: dict[str, str] = {
+            "url": url,
+            "content_type": content_type,
+            "insecure_ssl": insecure_ssl,
+        }
+        if secret is not None:
+            payload["secret"] = secret
+
+        response = await self._http.patch(
+            "/app/hook/config",
+            headers={"Authorization": f"Bearer {jwt_token}"},
+            json=payload,
+        )
+
+        self._check_response(response)
+        return response.json()
+
     async def list_installations(self) -> list[dict]:
         """List all installations of this GitHub App.
 
