@@ -8,6 +8,13 @@ export function GET() {
   lines.push('');
   lines.push('> Syntropic137 — Agentic Engineering. Orchestrate AI agents with event-sourced workflows.');
   lines.push('');
+  lines.push('## Endpoints');
+  lines.push('');
+  lines.push('- /llms.txt — This file. Structured index of all documentation pages.');
+  lines.push('- /llms-full.txt — Complete documentation content in a single file.');
+  lines.push('');
+  lines.push('## Pages');
+  lines.push('');
 
   for (const page of source.getPages()) {
     lines.push(
@@ -15,5 +22,7 @@ export function GET() {
     );
   }
 
-  return new Response(lines.join('\n'));
+  return new Response(lines.join('\n'), {
+    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+  });
 }
