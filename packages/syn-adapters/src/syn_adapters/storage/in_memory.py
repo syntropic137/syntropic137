@@ -155,10 +155,16 @@ class InMemoryWorkflowRepository:
             self._event_store.append(
                 aggregate_id=str(aggregate.id) if aggregate.id else "",
                 aggregate_type=aggregate.get_aggregate_type(),
-                event_type=getattr(event, "event_type", type(event).__name__),
+                event_type=event.event_type if hasattr(event, "event_type") else type(event).__name__,
                 event_data=event_data,
                 version=aggregate.version + i + 1,
             )
+
+    async def exists(self, workflow_id: str | UUID) -> bool:
+        """Check if a workflow exists by ID."""
+        str_id = str(workflow_id)
+        stored_events = self._event_store.get_events(str_id)
+        return len(stored_events) > 0
 
     async def get_by_id(self, workflow_id: str | UUID) -> WorkflowTemplateAggregate | None:
         """Retrieve a workflow by ID, replaying events."""

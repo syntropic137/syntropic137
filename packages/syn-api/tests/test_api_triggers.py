@@ -27,6 +27,37 @@ def _reset_storage():
     syn_api._wiring._test_trigger_repo = None
 
 
+@pytest.fixture(autouse=True)
+async def _seed_workflows():
+    """Seed the in-memory workflow store with workflow IDs used by trigger tests.
+
+    Trigger registration validates that the referenced workflow exists (via
+    InMemoryWorkflowRepository.exists), so we must create them first.
+    """
+    from syn_api._wiring import ensure_connected
+
+    await ensure_connected()
+
+    from syn_adapters.storage.in_memory import get_event_store
+
+    store = get_event_store()
+    # Seed workflow IDs referenced in tests below
+    for wf_id in ("ci-fix-workflow", "wf-1", "wf-2", "wf-3"):
+        store.append(
+            aggregate_id=wf_id,
+            aggregate_type="WorkflowTemplate",
+            event_type="WorkflowTemplateCreated",
+            event_data={
+                "workflow_id": wf_id,
+                "name": f"Test Workflow {wf_id}",
+                "workflow_type": "sequential",
+                "classification": "test",
+                "phases": [],
+            },
+            version=1,
+        )
+
+
 async def test_register_trigger():
     """Register a trigger and get back an ID."""
     from syn_api.v1.triggers import register_trigger

@@ -413,6 +413,19 @@ class SessionCostProjection:
             session_cost.phase_id = token_result.get("phase_id")
             session_cost.workspace_id = token_result.get("workspace_id")
 
+            # Compute duration and completed_at from timestamps
+            completed_at = (
+                exec_result["completed_at"]
+                if exec_result
+                else token_result.get("last_observation")
+            )
+            if completed_at:
+                session_cost.completed_at = completed_at
+            if started_at and completed_at:
+                session_cost.duration_ms = (
+                    (completed_at - started_at).total_seconds() * 1000
+                )
+
             return session_cost
 
     async def get_sessions_for_execution(self, execution_id: str) -> list[SessionCost]:
