@@ -22,55 +22,11 @@ _openapi:
       - content: List Active Executions
         id: list-active-executions
     contents:
-      - content: >-
-          Start workflow execution.
-
-
-          This endpoint triggers asynchronous workflow execution using the
-
-          WorkflowExecutionEngine. Events flow through the event store and
-
-          update the WorkflowExecutionDetailProjection in real-time.
-
-
-          Query status via GET
-          /workflows/{workflow_id}/executions/{execution_id}
-
-
-          Args:
-              workflow_id: The ID of the workflow to execute.
-              request: Execution configuration (inputs, provider, budget).
-              background_tasks: FastAPI background tasks handler.
-
-          Returns:
-              ExecuteWorkflowResponse with execution_id and status.
-
-          Raises:
-              HTTPException: If workflow not found or execution fails to start.
+      - content: Start workflow execution in background.
         heading: execute-workflow
-      - content: |-
-          Get the status of a workflow execution.
-
-          Queries the WorkflowExecutionDetailProjection which is updated
-          in real-time as events flow through the event store.
-
-          Args:
-              workflow_id: The workflow ID.
-              execution_id: The execution ID returned from execute.
-
-          Returns:
-              ExecutionStatusResponse with current status.
-
-          Raises:
-              HTTPException: If execution not found.
+      - content: Get the status of a workflow execution.
         heading: get-execution-status
-      - content: |-
-          List all active (non-completed) executions.
-
-          Queries the WorkflowExecutionListProjection for running executions.
-
-          Returns:
-              List of active execution statuses.
+      - content: List all active (non-completed) executions.
         heading: list-active-executions
 ---
 

@@ -12,7 +12,7 @@
           "workflows"
         ],
         "summary": "List Workflows",
-        "description": "List all workflow templates.\n\nNote: Templates don't have status. Use /api/executions for execution status.",
+        "description": "List all workflow templates.",
         "operationId": "list_workflows_api_workflows_get",
         "parameters": [
           {
@@ -134,7 +134,7 @@
           "workflows"
         ],
         "summary": "List Workflow Runs",
-        "description": "List all execution runs for a workflow.\n\nReturns a list of execution summaries for the specified workflow,\nsorted by most recent first.",
+        "description": "List all execution runs for a workflow.",
         "operationId": "list_workflow_runs_api_workflows__workflow_id__runs_get",
         "parameters": [
           {
@@ -220,7 +220,7 @@
           "execution"
         ],
         "summary": "Execute Workflow",
-        "description": "Start workflow execution.\n\nThis endpoint triggers asynchronous workflow execution using the\nWorkflowExecutionEngine. Events flow through the event store and\nupdate the WorkflowExecutionDetailProjection in real-time.\n\nQuery status via GET /workflows/{workflow_id}/executions/{execution_id}\n\nArgs:\n    workflow_id: The ID of the workflow to execute.\n    request: Execution configuration (inputs, provider, budget).\n    background_tasks: FastAPI background tasks handler.\n\nReturns:\n    ExecuteWorkflowResponse with execution_id and status.\n\nRaises:\n    HTTPException: If workflow not found or execution fails to start.",
+        "description": "Start workflow execution in background.",
         "operationId": "execute_workflow_api_workflows__workflow_id__execute_post",
         "parameters": [
           {
@@ -273,7 +273,7 @@
           "execution"
         ],
         "summary": "Get Execution Status",
-        "description": "Get the status of a workflow execution.\n\nQueries the WorkflowExecutionDetailProjection which is updated\nin real-time as events flow through the event store.\n\nArgs:\n    workflow_id: The workflow ID.\n    execution_id: The execution ID returned from execute.\n\nReturns:\n    ExecutionStatusResponse with current status.\n\nRaises:\n    HTTPException: If execution not found.",
+        "description": "Get the status of a workflow execution.",
         "operationId": "get_execution_status_api_workflows__workflow_id__executions__execution_id__get",
         "parameters": [
           {
@@ -325,7 +325,7 @@
           "execution"
         ],
         "summary": "List Active Executions",
-        "description": "List all active (non-completed) executions.\n\nQueries the WorkflowExecutionListProjection for running executions.\n\nReturns:\n    List of active execution statuses.",
+        "description": "List all active (non-completed) executions.",
         "operationId": "list_active_executions_api_workflows_executions_active_get",
         "parameters": [
           {
@@ -375,7 +375,7 @@
           "executions"
         ],
         "summary": "List All Executions",
-        "description": "List all workflow executions across all workflows.\n\nReturns executions sorted by started_at in descending order (most recent first).",
+        "description": "List all workflow executions across all workflows.",
         "operationId": "list_all_executions_api_executions_get",
         "parameters": [
           {
@@ -454,7 +454,7 @@
           "executions"
         ],
         "summary": "Get Execution",
-        "description": "Get detailed information about a workflow execution run.\n\nReturns phase-level metrics for the execution, including token usage,\nduration, and cost for each phase.",
+        "description": "Get detailed information about a workflow execution run.",
         "operationId": "get_execution_api_executions__execution_id__get",
         "parameters": [
           {
@@ -846,7 +846,7 @@
           "metrics"
         ],
         "summary": "Get Metrics",
-        "description": "Get aggregated metrics across all workflows or for a specific workflow.\n\nWhen workflow_id is provided, metrics are computed from sessions belonging\nto that workflow. When omitted, returns global metrics from all workflows.",
+        "description": "Get aggregated metrics across all workflows or for a specific workflow.",
         "operationId": "get_metrics_api_metrics_get",
         "parameters": [
           {
@@ -898,7 +898,7 @@
           "observability"
         ],
         "summary": "Get Tool Timeline",
-        "description": "Get tool execution timeline for a session.\n\nArgs:\n    session_id: The session to get tool timeline for.\n    limit: Maximum number of executions to return.\n    include_blocked: Whether to include blocked tool executions.\n\nReturns:\n    Tool timeline with execution details.",
+        "description": "Get tool execution timeline for a session.",
         "operationId": "get_tool_timeline_api_observability_sessions__session_id__tools_get",
         "parameters": [
           {
@@ -963,7 +963,7 @@
           "observability"
         ],
         "summary": "Get Token Metrics",
-        "description": "Get token usage metrics for a session.\n\nArgs:\n    session_id: The session to get token metrics for.\n    include_records: Whether to include individual token records (deprecated).\n\nReturns:\n    Token metrics with aggregated data from session_cost projection.",
+        "description": "Get token usage metrics for a session.",
         "operationId": "get_token_metrics_api_observability_sessions__session_id__tokens_get",
         "parameters": [
           {
@@ -1017,8 +1017,8 @@
         "tags": [
           "control"
         ],
-        "summary": "Pause execution",
-        "description": "Send a pause signal to a running execution. The execution will pause at the next yield point.",
+        "summary": "Pause Execution",
+        "description": "Pause a running execution.",
         "operationId": "pause_execution_api_executions__execution_id__pause_post",
         "parameters": [
           {
@@ -1077,8 +1077,8 @@
         "tags": [
           "control"
         ],
-        "summary": "Resume execution",
-        "description": "Send a resume signal to a paused execution.",
+        "summary": "Resume Execution",
+        "description": "Resume a paused execution.",
         "operationId": "resume_execution_api_executions__execution_id__resume_post",
         "parameters": [
           {
@@ -1120,8 +1120,8 @@
         "tags": [
           "control"
         ],
-        "summary": "Cancel execution",
-        "description": "Send a cancel signal to a running or paused execution. The execution will terminate with cleanup.",
+        "summary": "Cancel Execution",
+        "description": "Cancel a running or paused execution.",
         "operationId": "cancel_execution_api_executions__execution_id__cancel_post",
         "parameters": [
           {
@@ -1180,8 +1180,8 @@
         "tags": [
           "control"
         ],
-        "summary": "Inject context",
-        "description": "Inject a message into the agent's context. Useful for providing additional guidance during execution.",
+        "summary": "Inject Context",
+        "description": "Inject a message into the execution context.",
         "operationId": "inject_context_api_executions__execution_id__inject_post",
         "parameters": [
           {
@@ -1233,8 +1233,8 @@
         "tags": [
           "control"
         ],
-        "summary": "Get execution state",
-        "description": "Get the current control state of an execution.",
+        "summary": "Get Execution State",
+        "description": "Get current execution state.",
         "operationId": "get_execution_state_api_executions__execution_id__state_get",
         "parameters": [
           {
@@ -1631,7 +1631,7 @@
           "events"
         ],
         "summary": "Get Session Timeline",
-        "description": "Get a timeline view of session events.\n\nReturns tool executions and key events in chronological order.",
+        "description": "Get a timeline view of session events.",
         "operationId": "get_session_timeline_api_events_sessions__session_id__timeline_get",
         "parameters": [
           {
@@ -1692,7 +1692,7 @@
           "events"
         ],
         "summary": "Get Session Costs",
-        "description": "Get cost summary for a session.\n\nAggregates token usage from all events in the session.",
+        "description": "Get cost summary for a session.",
         "operationId": "get_session_costs_api_events_sessions__session_id__costs_get",
         "parameters": [
           {
@@ -1735,7 +1735,7 @@
           "events"
         ],
         "summary": "Get Session Tools",
-        "description": "Get tool usage summary for a session.\n\nReturns aggregated stats for each tool used in the session.",
+        "description": "Get tool usage summary for a session.",
         "operationId": "get_session_tools_api_events_sessions__session_id__tools_get",
         "parameters": [
           {
@@ -1782,7 +1782,7 @@
           "conversations"
         ],
         "summary": "Get Conversation Log",
-        "description": "Get conversation log for a session.\n\nArgs:\n    session_id: The session ID\n    offset: Starting line number (0-indexed)\n    limit: Max lines to return (default 100, max 500)\n\nReturns:\n    Parsed conversation log with line-by-line content",
+        "description": "Get conversation log for a session.",
         "operationId": "get_conversation_log_api_conversations__session_id__get",
         "parameters": [
           {
@@ -1845,7 +1845,7 @@
           "conversations"
         ],
         "summary": "Get Conversation Metadata",
-        "description": "Get conversation metadata for a session.\n\nThis returns the indexed metadata without fetching the full log.",
+        "description": "Get conversation metadata for a session.",
         "operationId": "get_conversation_metadata_api_conversations__session_id__metadata_get",
         "parameters": [
           {
@@ -1896,7 +1896,7 @@
           "triggers"
         ],
         "summary": "Register Trigger",
-        "description": "Register a new trigger rule.\n\nArgs:\n    body: Trigger configuration including name, event, conditions, etc.\n\nReturns:\n    Created trigger details.",
+        "description": "Register a new trigger rule.",
         "operationId": "register_trigger_api_triggers_post",
         "requestBody": {
           "required": true,
@@ -1940,7 +1940,7 @@
           "triggers"
         ],
         "summary": "List Triggers",
-        "description": "List all trigger rules.\n\nArgs:\n    repository: Filter by repository.\n    status: Filter by status.\n\nReturns:\n    List of trigger summaries.",
+        "description": "List all trigger rules.",
         "operationId": "list_triggers_api_triggers_get",
         "parameters": [
           {
@@ -2008,7 +2008,7 @@
           "triggers"
         ],
         "summary": "Get Trigger",
-        "description": "Get trigger details.\n\nArgs:\n    trigger_id: The trigger ID.\n\nReturns:\n    Full trigger details.",
+        "description": "Get trigger details.",
         "operationId": "get_trigger_api_triggers__trigger_id__get",
         "parameters": [
           {
@@ -2051,7 +2051,7 @@
           "triggers"
         ],
         "summary": "Update Trigger",
-        "description": "Update trigger (pause/resume).\n\nArgs:\n    trigger_id: The trigger ID.\n    body: Update payload with \"action\" field (pause/resume).\n\nReturns:\n    Updated trigger status.",
+        "description": "Update trigger (pause/resume).",
         "operationId": "update_trigger_api_triggers__trigger_id__patch",
         "parameters": [
           {
@@ -2106,7 +2106,7 @@
           "triggers"
         ],
         "summary": "Delete Trigger",
-        "description": "Delete a trigger rule.\n\nArgs:\n    trigger_id: The trigger ID.\n\nReturns:\n    Deletion confirmation.",
+        "description": "Delete a trigger rule.",
         "operationId": "delete_trigger_api_triggers__trigger_id__delete",
         "parameters": [
           {
@@ -2151,7 +2151,7 @@
           "triggers"
         ],
         "summary": "Enable Preset",
-        "description": "Enable a preset for a repository.\n\nArgs:\n    preset_name: Name of the preset (self-healing | review-fix).\n    body: Must include \"repository\".\n\nReturns:\n    Created trigger details.",
+        "description": "Enable a preset for a repository.",
         "operationId": "enable_preset_api_triggers_presets__preset_name__post",
         "parameters": [
           {
@@ -2208,7 +2208,7 @@
           "triggers"
         ],
         "summary": "Get Trigger History",
-        "description": "Get execution history for a trigger.\n\nArgs:\n    trigger_id: The trigger ID.\n    limit: Max entries to return.\n\nReturns:\n    Trigger history entries.",
+        "description": "Get execution history for a trigger.",
         "operationId": "get_trigger_history_api_triggers__trigger_id__history_get",
         "parameters": [
           {
@@ -2263,7 +2263,7 @@
           "triggers"
         ],
         "summary": "Get All History",
-        "description": "Get all trigger activity (global).\n\nArgs:\n    limit: Max entries to return.\n\nReturns:\n    All trigger history entries.",
+        "description": "Get all trigger activity (global).\n\nNote: This falls back to domain-level projection since\nglobal history aggregation is not yet in aef_api.",
         "operationId": "get_all_history_api_triggers_history_get",
         "parameters": [
           {
@@ -2309,7 +2309,7 @@
           "webhooks"
         ],
         "summary": "Github Webhook",
-        "description": "Handle GitHub webhooks.\n\nProcesses installation and installation_repositories events\nto keep the installation projection up to date.\n\nArgs:\n    request: The incoming request.\n    x_github_event: The type of event (e.g., 'installation').\n    x_github_delivery: Unique delivery ID for this webhook.\n    x_hub_signature_256: HMAC signature for verification.\n\nReturns:\n    Status response.",
+        "description": "Handle GitHub webhooks.\n\nProcesses installation and other events via aef_api.v1.github.",
         "operationId": "github_webhook_webhooks_github_post",
         "parameters": [
           {
@@ -2379,7 +2379,7 @@
           "websocket"
         ],
         "summary": "Websocket Health",
-        "description": "Health check for WebSocket subsystem.\n\nReturns connection statistics from RealTimeProjection.",
+        "description": "Health check for WebSocket subsystem.",
         "operationId": "websocket_health_ws_health_get",
         "responses": {
           "200": {
@@ -3098,8 +3098,6 @@
       "EventResponse": {
         "properties": {
           "time": {
-            "type": "string",
-            "format": "date-time",
             "title": "Time"
           },
           "event_type": {
@@ -3107,7 +3105,14 @@
             "title": "Event Type"
           },
           "session_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Session Id"
           },
           "execution_id": {
@@ -3135,15 +3140,14 @@
           "data": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Data"
+            "title": "Data",
+            "default": {}
           }
         },
         "type": "object",
         "required": [
           "time",
-          "event_type",
-          "session_id",
-          "data"
+          "event_type"
         ],
         "title": "EventResponse",
         "description": "Single event response."
@@ -3894,6 +3898,10 @@
           },
           "role": {
             "type": "string",
+            "enum": [
+              "user",
+              "system"
+            ],
             "title": "Role",
             "default": "user"
           }
@@ -4921,8 +4929,6 @@
       "TimelineEntry": {
         "properties": {
           "time": {
-            "type": "string",
-            "format": "date-time",
             "title": "Time"
           },
           "event_type": {
@@ -5200,8 +5206,24 @@
   },
   "tags": [
     {
-      "name": "workflows",
-      "description": "Manage workflow definitions and view run history"
+      "name": "artifacts",
+      "description": "Access artifacts produced by agent sessions"
+    },
+    {
+      "name": "control",
+      "description": "Pause, resume, cancel, and inject context into running executions"
+    },
+    {
+      "name": "conversations",
+      "description": "Retrieve conversation logs and metadata"
+    },
+    {
+      "name": "costs",
+      "description": "Track token costs per session and execution"
+    },
+    {
+      "name": "events",
+      "description": "Query session events, timelines, and tool usage"
     },
     {
       "name": "execution",
@@ -5212,36 +5234,16 @@
       "description": "Query execution records and details"
     },
     {
-      "name": "control",
-      "description": "Pause, resume, cancel, and inject context into running executions"
-    },
-    {
-      "name": "sessions",
-      "description": "List and inspect agent sessions"
-    },
-    {
-      "name": "conversations",
-      "description": "Retrieve conversation logs and metadata"
-    },
-    {
-      "name": "artifacts",
-      "description": "Access artifacts produced by agent sessions"
-    },
-    {
-      "name": "costs",
-      "description": "Track token costs per session and execution"
-    },
-    {
       "name": "metrics",
       "description": "System-wide metrics and health data"
     },
     {
-      "name": "events",
-      "description": "Query session events, timelines, and tool usage"
-    },
-    {
       "name": "observability",
       "description": "Token metrics and tool timelines for sessions"
+    },
+    {
+      "name": "sessions",
+      "description": "List and inspect agent sessions"
     },
     {
       "name": "triggers",
@@ -5254,6 +5256,10 @@
     {
       "name": "websocket",
       "description": "WebSocket health and real-time communication"
+    },
+    {
+      "name": "workflows",
+      "description": "Manage workflow definitions and view run history"
     }
   ]
 }

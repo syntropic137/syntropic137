@@ -30,7 +30,8 @@ function getRawContent(slug?: string[]): string {
 }
 
 function getEditUrl(slug?: string[]): string {
-  const base = 'https://github.com/AgentParadise/agentic-engineering-framework/edit/main/apps/aef-docs/content/docs';
+  const branch = process.env.NEXT_PUBLIC_EDIT_BRANCH || 'main';
+  const base = `https://github.com/AgentParadise/agentic-engineering-framework/edit/${branch}/apps/aef-docs/content/docs`;
   if (!slug || slug.length === 0) return `${base}/index.mdx`;
 
   const slugPath = slug.join('/');
@@ -58,12 +59,13 @@ export default async function Page(props: {
   const MDXContent = page.data.body;
   const rawContent = getRawContent(params.slug);
   const editUrl = getEditUrl(params.slug);
+  const txtUrl = params.slug ? `/docs/${params.slug.join('/')}.txt` : '/docs.txt';
 
   return (
     <DocsPage toc={page.data.toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
-      <LLMCopyButton content={rawContent} title={page.data.title} editUrl={editUrl} />
+      <LLMCopyButton content={rawContent} title={page.data.title} editUrl={editUrl} txtUrl={txtUrl} />
       <DocsBody>
         <MDXContent
           components={getMDXComponents({})}

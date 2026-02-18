@@ -5,48 +5,42 @@ full: true
 _openapi:
   toc:
     - depth: 2
-      title: Pause execution
+      title: Pause Execution
       url: '#pause-execution'
     - depth: 2
-      title: Resume execution
+      title: Resume Execution
       url: '#resume-execution'
     - depth: 2
-      title: Cancel execution
+      title: Cancel Execution
       url: '#cancel-execution'
     - depth: 2
-      title: Inject context
+      title: Inject Context
       url: '#inject-context'
     - depth: 2
-      title: Get execution state
+      title: Get Execution State
       url: '#get-execution-state'
   structuredData:
     headings:
-      - content: Pause execution
+      - content: Pause Execution
         id: pause-execution
-      - content: Resume execution
+      - content: Resume Execution
         id: resume-execution
-      - content: Cancel execution
+      - content: Cancel Execution
         id: cancel-execution
-      - content: Inject context
+      - content: Inject Context
         id: inject-context
-      - content: Get execution state
+      - content: Get Execution State
         id: get-execution-state
     contents:
-      - content: >-
-          Send a pause signal to a running execution. The execution will pause
-          at the next yield point.
+      - content: Pause a running execution.
         heading: pause-execution
-      - content: Send a resume signal to a paused execution.
+      - content: Resume a paused execution.
         heading: resume-execution
-      - content: >-
-          Send a cancel signal to a running or paused execution. The execution
-          will terminate with cleanup.
+      - content: Cancel a running or paused execution.
         heading: cancel-execution
-      - content: >-
-          Inject a message into the agent's context. Useful for providing
-          additional guidance during execution.
+      - content: Inject a message into the execution context.
         heading: inject-context
-      - content: Get the current control state of an execution.
+      - content: Get current execution state.
         heading: get-execution-state
 ---
 

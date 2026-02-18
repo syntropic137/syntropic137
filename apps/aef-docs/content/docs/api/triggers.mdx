@@ -47,81 +47,25 @@ _openapi:
       - content: Get All History
         id: get-all-history
     contents:
-      - content: |-
-          List all trigger rules.
-
-          Args:
-              repository: Filter by repository.
-              status: Filter by status.
-
-          Returns:
-              List of trigger summaries.
+      - content: List all trigger rules.
         heading: list-triggers
-      - content: |-
-          Register a new trigger rule.
-
-          Args:
-              body: Trigger configuration including name, event, conditions, etc.
-
-          Returns:
-              Created trigger details.
+      - content: Register a new trigger rule.
         heading: register-trigger
-      - content: |-
-          Get trigger details.
-
-          Args:
-              trigger_id: The trigger ID.
-
-          Returns:
-              Full trigger details.
+      - content: Get trigger details.
         heading: get-trigger
-      - content: |-
-          Update trigger (pause/resume).
-
-          Args:
-              trigger_id: The trigger ID.
-              body: Update payload with "action" field (pause/resume).
-
-          Returns:
-              Updated trigger status.
+      - content: Update trigger (pause/resume).
         heading: update-trigger
-      - content: |-
-          Delete a trigger rule.
-
-          Args:
-              trigger_id: The trigger ID.
-
-          Returns:
-              Deletion confirmation.
+      - content: Delete a trigger rule.
         heading: delete-trigger
-      - content: |-
-          Enable a preset for a repository.
-
-          Args:
-              preset_name: Name of the preset (self-healing | review-fix).
-              body: Must include "repository".
-
-          Returns:
-              Created trigger details.
+      - content: Enable a preset for a repository.
         heading: enable-preset
-      - content: |-
-          Get execution history for a trigger.
-
-          Args:
-              trigger_id: The trigger ID.
-              limit: Max entries to return.
-
-          Returns:
-              Trigger history entries.
+      - content: Get execution history for a trigger.
         heading: get-trigger-history
       - content: |-
           Get all trigger activity (global).
 
-          Args:
-              limit: Max entries to return.
-
-          Returns:
-              All trigger history entries.
+          Note: This falls back to domain-level projection since
+          global history aggregation is not yet in aef_api.
         heading: get-all-history
 ---
 

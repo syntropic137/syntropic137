@@ -90,7 +90,7 @@ aef workflow status <execution-id>
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| aef-dashboard | 8000 | FastAPI REST API + WebSocket + SSE |
+| aef-api | 8000 | FastAPI REST API + WebSocket + SSE |
 | event-store | 50051 | gRPC event sourcing server |
 | event-collector | 8080 | High-throughput event ingestion |
 | TimescaleDB | 5432 | Events and metrics storage |
@@ -209,7 +209,7 @@ export default function LLMDocsPage() {
                 <h3 className="text-sm font-medium text-fd-foreground mb-2">Claude Code / CLAUDE.md</h3>
                 <pre className="text-sm bg-zinc-950 rounded-lg p-4 overflow-x-auto border border-zinc-800">
                   <code className="text-zinc-300">{`# In your CLAUDE.md or system prompt:
-Fetch https://your-domain.com/llms-full.txt for complete Syntropic137 docs.`}</code>
+Fetch https://docs.syntropic137.com/llms-full.txt for complete Syntropic137 docs.`}</code>
                 </pre>
               </div>
 
@@ -217,13 +217,13 @@ Fetch https://your-domain.com/llms-full.txt for complete Syntropic137 docs.`}</c
                 <h3 className="text-sm font-medium text-fd-foreground mb-2">curl / CLI</h3>
                 <pre className="text-sm bg-zinc-950 rounded-lg p-4 overflow-x-auto border border-zinc-800">
                   <code className="text-zinc-300">{`# Index only
-curl -s https://your-domain.com/llms.txt
+curl -s https://docs.syntropic137.com/llms.txt
 
 # Full documentation
-curl -s https://your-domain.com/llms-full.txt
+curl -s https://docs.syntropic137.com/llms-full.txt
 
 # Pipe directly to clipboard
-curl -s https://your-domain.com/llms-full.txt | pbcopy`}</code>
+curl -s https://docs.syntropic137.com/llms-full.txt | pbcopy`}</code>
                 </pre>
               </div>
 
@@ -231,7 +231,7 @@ curl -s https://your-domain.com/llms-full.txt | pbcopy`}</code>
                 <h3 className="text-sm font-medium text-fd-foreground mb-2">MCP / Tool Use</h3>
                 <pre className="text-sm bg-zinc-950 rounded-lg p-4 overflow-x-auto border border-zinc-800">
                   <code className="text-zinc-300">{`// Use WebFetch to give an agent full context
-const docs = await fetch("https://your-domain.com/llms-full.txt");
+const docs = await fetch("https://docs.syntropic137.com/llms-full.txt");
 const text = await docs.text();
 // Include in system prompt or tool response`}</code>
                 </pre>

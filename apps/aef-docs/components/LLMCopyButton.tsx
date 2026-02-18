@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Bot, Copy, Check, Pencil } from 'lucide-react';
+import { FileText, Copy, Check, Pencil } from 'lucide-react';
 
-export function LLMCopyButton({ content, title, editUrl }: { content: string; title: string; editUrl?: string }) {
+export function LLMCopyButton({ content, title, editUrl, txtUrl }: { content: string; title: string; editUrl?: string; txtUrl: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -28,11 +28,12 @@ export function LLMCopyButton({ content, title, editUrl }: { content: string; ti
         {copied ? 'Copied for LLM' : 'Copy for LLM'}
       </button>
       <Link
-        href="/llms"
+        href={txtUrl}
+        target="_blank"
         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-fd-muted-foreground hover:text-sky-400 transition-colors"
       >
-        <Bot className="w-3.5 h-3.5" />
-        LLM Docs
+        <FileText className="w-3.5 h-3.5" />
+        View as TXT
       </Link>
       {editUrl && (
         <Link

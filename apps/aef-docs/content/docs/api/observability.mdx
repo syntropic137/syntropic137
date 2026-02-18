@@ -17,26 +17,9 @@ _openapi:
       - content: Get Token Metrics
         id: get-token-metrics
     contents:
-      - content: |-
-          Get tool execution timeline for a session.
-
-          Args:
-              session_id: The session to get tool timeline for.
-              limit: Maximum number of executions to return.
-              include_blocked: Whether to include blocked tool executions.
-
-          Returns:
-              Tool timeline with execution details.
+      - content: Get tool execution timeline for a session.
         heading: get-tool-timeline
-      - content: |-
-          Get token usage metrics for a session.
-
-          Args:
-              session_id: The session to get token metrics for.
-              include_records: Whether to include individual token records (deprecated).
-
-          Returns:
-              Token metrics with aggregated data from session_cost projection.
+      - content: Get token usage metrics for a session.
         heading: get-token-metrics
 ---
 

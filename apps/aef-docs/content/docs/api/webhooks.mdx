@@ -16,17 +16,7 @@ _openapi:
       - content: |-
           Handle GitHub webhooks.
 
-          Processes installation and installation_repositories events
-          to keep the installation projection up to date.
-
-          Args:
-              request: The incoming request.
-              x_github_event: The type of event (e.g., 'installation').
-              x_github_delivery: Unique delivery ID for this webhook.
-              x_hub_signature_256: HMAC signature for verification.
-
-          Returns:
-              Status response.
+          Processes installation and other events via aef_api.v1.github.
         heading: github-webhook
 ---
 

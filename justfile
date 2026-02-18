@@ -720,7 +720,7 @@ docs-site-build: docs-site-gen
     cd apps/aef-docs && pnpm run build
 
 # Start docs site dev server
-docs-site-dev:
+docs:
     cd apps/aef-docs && pnpm run dev
 
 # Check for test debt (xfail, skip, TODO in tests)
