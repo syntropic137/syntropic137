@@ -1,5 +1,5 @@
 {
-  "name": "@aef/ui-feedback-react",
+  "name": "@syn137/ui-feedback-react",
   "version": "0.1.0",
   "description": "React feedback widget for capturing contextual UI feedback",
   "type": "module",
@@ -48,7 +48,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AgentParadise/agentic-engineering-framework.git",
+    "url": "https://github.com/syntropic137/syntropic137.git",
     "directory": "lib/ui-feedback/packages/ui-feedback-react"
   }
 }

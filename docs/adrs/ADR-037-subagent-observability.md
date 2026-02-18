@@ -23,9 +23,9 @@ The `agentic-primitives` library (v0.3.0) added subagent detection in `EventPars
 
 Integrate subagent observability into AEF's event pipeline:
 
-### 1. Event Types (aef-shared)
+### 1. Event Types (syn-shared)
 
-Add two new event types to `aef_shared.events`:
+Add two new event types to `syn_shared.events`:
 
 ```python
 SUBAGENT_STARTED = "subagent_started"
@@ -134,25 +134,25 @@ class ContainerSubagentStopped:
 
 ### Files Changed
 
-**aef-shared**:
-- `packages/aef-shared/src/aef_shared/events/__init__.py` - Event types
+**syn-shared**:
+- `packages/syn-shared/src/syn_shared/events/__init__.py` - Event types
 
-**aef-adapters**:
-- `packages/aef-adapters/src/aef_adapters/events/models.py` - Event mapping
-- `packages/aef-adapters/src/aef_adapters/projections/manager.py` - Event routing
-- `packages/aef-adapters/src/aef_adapters/projections/realtime.py` - WebSocket push
+**syn-adapters**:
+- `packages/syn-adapters/src/syn_adapters/events/models.py` - Event mapping
+- `packages/syn-adapters/src/syn_adapters/projections/manager.py` - Event routing
+- `packages/syn-adapters/src/syn_adapters/projections/realtime.py` - WebSocket push
 
-**aef-domain**:
-- `packages/aef-domain/.../WorkflowExecutionEngine.py` - Subagent event detection and recording
+**syn-domain**:
+- `packages/syn-domain/.../WorkflowExecutionEngine.py` - Subagent event detection and recording
 
-**aef-domain**:
-- `packages/aef-domain/.../session_summary.py` - SubagentRecord dataclass
-- `packages/aef-domain/.../projection.py` - Subagent event handlers
+**syn-domain**:
+- `packages/syn-domain/.../session_summary.py` - SubagentRecord dataclass
+- `packages/syn-domain/.../projection.py` - Subagent event handlers
 
 **Dashboard**:
-- `apps/aef-dashboard-ui/src/types/index.ts` - TypeScript types
-- `apps/aef-dashboard-ui/src/components/SubagentCard.tsx` - New component
-- `apps/aef-dashboard-ui/src/pages/SessionDetail.tsx` - Subagent section
+- `apps/syn-dashboard-ui/src/types/index.ts` - TypeScript types
+- `apps/syn-dashboard-ui/src/components/SubagentCard.tsx` - New component
+- `apps/syn-dashboard-ui/src/pages/SessionDetail.tsx` - Subagent section
 
 ### Testing
 

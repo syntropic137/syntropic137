@@ -24,14 +24,14 @@ async def _seed(
     file: Path | None,
     dry_run: bool,
 ) -> int:
-    from aef_adapters.storage import (
+    from syn_adapters.storage import (
         connect_event_store,
         disconnect_event_store,
         get_event_publisher,
         get_workflow_repository,
     )
-    from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
-    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    from syn_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
 

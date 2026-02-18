@@ -214,20 +214,20 @@ Features without test files in slice directory.
 **Issue**: `WorkflowExecutionEngine.py` imports directly from 8 other slices
 **Current Pattern**:
 ```python
-from aef_domain.contexts.workflows.slices.execute_workflow import ExecuteWorkflowCommand
-from aef_domain.contexts.sessions.slices.start_session import StartSessionCommand
-from aef_domain.contexts.sessions.slices.complete_session import CompleteSessionCommand
+from syn_domain.contexts.workflows.slices.execute_workflow import ExecuteWorkflowCommand
+from syn_domain.contexts.sessions.slices.start_session import StartSessionCommand
+from syn_domain.contexts.sessions.slices.complete_session import CompleteSessionCommand
 ```
 
 **ADR-019 Pattern**:
 ```python
 # Via domain commands (centralized)
-from aef_domain.contexts.workflows.domain.commands import ExecuteWorkflowCommand
-from aef_domain.contexts.sessions.domain.commands import StartSessionCommand
+from syn_domain.contexts.workflows.domain.commands import ExecuteWorkflowCommand
+from syn_domain.contexts.sessions.domain.commands import StartSessionCommand
 
 # Via events (pub/sub)
-from aef_domain.contexts.sessions.events import SessionStartedEvent
-from aef_domain.contexts.sessions.events import SessionCompletedEvent
+from syn_domain.contexts.sessions.events import SessionStartedEvent
+from syn_domain.contexts.sessions.events import SessionCompletedEvent
 ```
 
 **Resolution**: Refactor saga to use domain commands + event subscriptions instead of direct slice imports.
@@ -472,8 +472,8 @@ from aef_domain.contexts.sessions.events import SessionCompletedEvent
 
 ### Finding 1: VSA015 Config Issue - RESOLVED ✅
 **Was**: Slices reported "not in slices/" despite being correctly located
-**Root Cause**: Config `root` pointed to wrong level (`src/aef_domain` instead of `src/aef_domain/contexts`)
-**Fix**: Updated `vsa.yaml` root to `src/aef_domain/contexts` for proper context auto-discovery
+**Root Cause**: Config `root` pointed to wrong level (`src/syn_domain` instead of `src/syn_domain/contexts`)
+**Fix**: Updated `vsa.yaml` root to `src/syn_domain/contexts` for proper context auto-discovery
 **Result**: Zero VSA015 violations - all slices correctly detected
 
 ### Finding 2: Colocated Pattern is Consistent
@@ -541,10 +541,10 @@ After completing all 9 context refactorings (Milestones 7-15), we expect:
 ## Appendix
 
 ### VSA Configuration
-See `packages/aef-domain/vsa.yaml` for validated configuration.
+See `packages/syn-domain/vsa.yaml` for validated configuration.
 
 **Key Settings**:
-- Root: `src/aef_domain/contexts` (auto-discovers 9 contexts)
+- Root: `src/syn_domain/contexts` (auto-discovers 9 contexts)
 - Language: python
 - Architecture: hexagonal-event-sourced-vsa
 
@@ -553,7 +553,7 @@ See `VSA-VALIDATION-BASELINE-CORRECTED.txt` for complete output with line number
 
 ### Validation Command
 ```bash
-cd packages/aef-domain
+cd packages/syn-domain
 ../../lib/event-sourcing-platform/vsa/target/release/vsa validate
 ```
 

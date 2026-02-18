@@ -172,8 +172,8 @@ Write("/path/to/new_file.py", content="..1000 chars..")
 
 ### Implementation
 
-- **ToolTokenEstimator**: `packages/aef-domain/.../costs/services/tool_token_estimator.py`
-- **ToolTokens Value Object**: `packages/aef-domain/.../costs/_shared/tool_tokens.py`
+- **ToolTokenEstimator**: `packages/syn-domain/.../costs/services/tool_token_estimator.py`
+- **ToolTokens Value Object**: `packages/syn-domain/.../costs/_shared/tool_tokens.py`
 - **CostRecordedEvent**: Extended with `tool_token_breakdown` field
 - **SessionCostProjection**: Aggregates tool tokens across events
 

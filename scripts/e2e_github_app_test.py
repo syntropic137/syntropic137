@@ -13,8 +13,8 @@ Run with:
     uv run python scripts/e2e_github_app_test.py
 
 Requires:
-    - GitHub App configured in .env (AEF_GITHUB_* variables)
-    - Access to sandbox repo (AgentParadise/sandbox_aef-engineer-beta)
+    - GitHub App configured in .env (SYN_GITHUB_* variables)
+    - Access to sandbox repo (syntropic137/sandbox_syn-engineer-beta)
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 # Add packages to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-adapters" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-tokens" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-shared" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-adapters" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-tokens" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-shared" / "src"))
 
 
 async def main() -> int:
@@ -40,13 +40,13 @@ async def main() -> int:
     print("\n📦 Step 1: Initializing services...")
 
     try:
-        from aef_adapters.github import GitHubAppError, get_github_client
-        from aef_tokens import SpendTracker, TokenType, TokenVendingService, WorkflowType
-        from aef_tokens.spend import InMemoryBudgetStore
-        from aef_tokens.vending import InMemoryTokenStore
+        from syn_adapters.github import GitHubAppError, get_github_client
+        from syn_tokens import SpendTracker, TokenType, TokenVendingService, WorkflowType
+        from syn_tokens.spend import InMemoryBudgetStore
+        from syn_tokens.vending import InMemoryTokenStore
     except ImportError as e:
         print(f"❌ Import error: {e}")
-        print("   Make sure packages are installed: uv pip install -e packages/aef-*")
+        print("   Make sure packages are installed: uv pip install -e packages/syn-*")
         return 1
 
     # Create token vending service
@@ -66,7 +66,7 @@ async def main() -> int:
         github_client = get_github_client()
     except ValueError as e:
         print(f"❌ GitHub App not configured: {e}")
-        print("   Set AEF_GITHUB_* variables in .env")
+        print("   Set SYN_GITHUB_* variables in .env")
         return 1
 
     try:
@@ -117,7 +117,7 @@ async def main() -> int:
     # Step 6: Create/update a file in sandbox repo
     print("\n📝 Step 6: Creating test file in sandbox repo...")
 
-    sandbox_repo = "AgentParadise/sandbox_aef-engineer-beta"
+    sandbox_repo = "syntropic137/sandbox_syn-engineer-beta"
     test_file_path = f"e2e-tests/{execution_id}.md"
     test_content = f"""# E2E Test: {execution_id}
 

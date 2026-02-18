@@ -4,15 +4,15 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/aef-adapters/src/aef_adapters/workspaces/**"
-      - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
+      - "packages/syn-adapters/src/syn_adapters/workspaces/**"
+      - "packages/syn-domain/src/syn_domain/contexts/workflows/**"
       - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
       - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"
   pull_request:
     paths:
-      - "packages/aef-adapters/src/aef_adapters/workspaces/**"
-      - "packages/aef-domain/src/aef_domain/contexts/workflows/**"
+      - "packages/syn-adapters/src/syn_adapters/workspaces/**"
+      - "packages/syn-domain/src/syn_domain/contexts/workflows/**"
       - "lib/agentic-primitives/providers/workspaces/**" # ADR-029: workspace images
       - "lib/agentic-primitives/primitives/**" # ADR-029: hooks
       - ".github/workflows/e2e-container.yml"

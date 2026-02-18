@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS public.session_conversations (
     session_id TEXT PRIMARY KEY,
 
     -- Storage reference (MinIO/S3)
-    bucket TEXT NOT NULL DEFAULT 'aef-conversations',
+    bucket TEXT NOT NULL DEFAULT 'syn-conversations',
     object_key TEXT NOT NULL,
     size_bytes BIGINT,
 

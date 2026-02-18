@@ -43,7 +43,7 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
 
 1. **Verify Clean State**
    ```bash
-   cd /Users/neural/Code/AgentParadise/agentic-engineering-framework
+   cd /Users/neural/Code/syntropic137/agentic-engineering-framework
 
    # Check for uncommitted changes
    if [ -n "$(git status --porcelain)" ]; then
@@ -263,8 +263,8 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
    done
 
    # Update package.json (dashboard)
-   if [ -f "apps/aef-dashboard-ui/package.json" ]; then
-     cd apps/aef-dashboard-ui
+   if [ -f "apps/syn-dashboard-ui/package.json" ]; then
+     cd apps/syn-dashboard-ui
      npm version "${MAJOR}.${MINOR}.${PATCH}" --no-git-tag-version
      echo "✓ Updated: package.json"
      cd ../..

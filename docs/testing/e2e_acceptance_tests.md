@@ -9,7 +9,7 @@
 
 ## Overview
 
-This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+This document defines acceptance tests for validating the Syntropic137 (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
 
 **Version 6.3** adds:
 - **WorkspaceService Architecture (F18)** - Full E2E validation of new event-sourced workspace domain
@@ -20,7 +20,7 @@ This document defines acceptance tests for validating the Agentic Engineering Fr
 
 **Version 6.2** adds:
 - **Container Execution Robustness (F17)** - Phase counting, artifact collection, session persistence
-- **Type-Safe Workspace Paths** - Shared constants module in `aef_shared.workspace_paths`
+- **Type-Safe Workspace Paths** - Shared constants module in `syn_shared.workspace_paths`
 - **Git Attribution Control** - Disable Claude Co-Authored-By trailer via settings
 - **Analytics Streaming** - Real-time hook events via sidecar
 - **Stale Execution Cleanup** - Background job for stuck executions
@@ -130,7 +130,7 @@ LIMIT 10;
 
 **Agentic SDK (F8-F12):**
 - `ANTHROPIC_API_KEY` environment variable set (for live agent tests)
-- `uv pip install aef-adapters[claude-agentic]` for claude-agent-sdk
+- `uv pip install syn-adapters[claude-agentic]` for claude-agent-sdk
 - `agentic-primitives` submodule initialized
 
 **Quick Setup:**
@@ -204,7 +204,7 @@ See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configur
 |---|---------------------|--------|
 | 1.1.1 | PostgreSQL container starts and becomes healthy | ⬜ |
 | 1.1.2 | Event Store Server container starts and becomes healthy | ⬜ |
-| 1.1.3 | Containers are on the `aef-network` | ⬜ |
+| 1.1.3 | Containers are on the `syn-network` | ⬜ |
 | 1.1.4 | PostgreSQL is accessible on localhost:5432 | ⬜ |
 | 1.1.5 | Event Store Server is accessible on localhost:50051 | ⬜ |
 
@@ -212,7 +212,7 @@ See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configur
 ```bash
 just dev
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-docker network inspect aef-network
+docker network inspect syn-network
 ```
 
 ### F1.2 Database Initialization
@@ -998,7 +998,7 @@ curl -s http://localhost:8000/api/workflows/implementation-workflow-v1 | jq '{ru
 
 ## Feature 8: Agentic Workflow Execution ⭐ NEW
 
-> **Requires:** `aef-adapters[claude-agentic]` installed
+> **Requires:** `syn-adapters[claude-agentic]` installed
 
 ### F8.1 AgenticWorkflowExecutor Initialization
 
@@ -1015,7 +1015,7 @@ curl -s http://localhost:8000/api/workflows/implementation-workflow-v1 | jq '{ru
 
 **Validation (Python):**
 ```python
-from aef_adapters.orchestration import AgenticWorkflowExecutor, get_agentic_agent
+from syn_adapters.orchestration import AgenticWorkflowExecutor, get_agentic_agent
 
 # Verify executor creation
 executor = AgenticWorkflowExecutor(
@@ -1030,7 +1030,7 @@ assert executor is not None
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_executor"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_executor"
 ```
 
 ### F8.2 Single-Phase Workflow Execution
@@ -1050,7 +1050,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_executor"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_simple"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_execute_simple"
 ```
 
 ### F8.3 Multi-Phase Workflow Execution
@@ -1069,7 +1069,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_sim
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_multi"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_execute_multi"
 ```
 
 ### F8.4 Execution Failure Handling
@@ -1088,7 +1088,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_mul
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_phase_failure"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_phase_failure"
 ```
 
 ### F8.5 Live Agent Execution (Requires ANTHROPIC_API_KEY)
@@ -1107,8 +1107,8 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_phase_failu
 **Validation (Manual - requires API key):**
 ```python
 import asyncio
-from aef_adapters.agents import ClaudeAgenticAgent
-from aef_adapters.agents.agentic_types import AgentExecutionConfig, Workspace
+from syn_adapters.agents import ClaudeAgenticAgent
+from syn_adapters.agents.agentic_types import AgentExecutionConfig, Workspace
 
 agent = ClaudeAgenticAgent()
 assert agent.is_available, "Set ANTHROPIC_API_KEY"
@@ -1145,7 +1145,7 @@ asyncio.run(test())
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_local_workspace"
+pytest packages/syn-adapters/tests/test_workspaces.py -v -k "test_local_workspace"
 ```
 
 ### F9.2 Hook Settings Generation
@@ -1163,7 +1163,7 @@ pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_local_workspac
 
 **Validation (Manual):**
 ```python
-from aef_adapters.workspaces import LocalWorkspace, WorkspaceConfig
+from syn_adapters.workspaces import LocalWorkspace, WorkspaceConfig
 from pathlib import Path
 
 config = WorkspaceConfig(
@@ -1212,7 +1212,7 @@ cat /tmp/test-workspace/analytics.jsonl | jq -s '.'
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_inject"
+pytest packages/syn-adapters/tests/test_workspaces.py -v -k "test_inject"
 ```
 
 ---
@@ -1235,7 +1235,7 @@ pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_inject"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_artifact_bundle"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_artifact_bundle"
 ```
 
 ### F10.2 Directory Collection
@@ -1254,7 +1254,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_artifact_bundle
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_from_directory"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_from_directory"
 ```
 
 ### F10.3 Serialization / Deserialization
@@ -1271,7 +1271,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_from_directory"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_serialization"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_serialization"
 ```
 
 ### F10.4 PhaseContext Creation
@@ -1289,7 +1289,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_serialization"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_phase_context"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_phase_context"
 ```
 
 ---
@@ -1313,7 +1313,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_phase_context"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_events.py -v -k "test_watcher"
+pytest packages/syn-adapters/tests/test_events.py -v -k "test_watcher"
 ```
 
 ### F11.2 HookToDomainTranslator
@@ -1334,7 +1334,7 @@ pytest packages/aef-adapters/tests/test_events.py -v -k "test_watcher"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_events.py -v -k "test_translator"
+pytest packages/syn-adapters/tests/test_events.py -v -k "test_translator"
 ```
 
 ### F11.3 EventBridge Integration
@@ -1353,7 +1353,7 @@ pytest packages/aef-adapters/tests/test_events.py -v -k "test_translator"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_events.py -v -k "test_bridge"
+pytest packages/syn-adapters/tests/test_events.py -v -k "test_bridge"
 ```
 
 ---
@@ -1374,7 +1374,7 @@ pytest packages/aef-adapters/tests/test_events.py -v -k "test_bridge"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_agent_factory"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_agent_factory"
 ```
 
 ### F12.2 Agent Availability
@@ -1391,7 +1391,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_agent_facto
 
 **Validation (Python):**
 ```python
-from aef_adapters.agents import ClaudeAgenticAgent
+from syn_adapters.agents import ClaudeAgenticAgent
 import os
 
 # Without API key
@@ -1420,7 +1420,7 @@ assert agent.is_available == True  # (assuming SDK installed)
 **Validation (Python):**
 ```python
 import os
-from aef_adapters.agents import MockAgent
+from syn_adapters.agents import MockAgent
 
 # This should raise RuntimeError
 os.environ["APP_ENVIRONMENT"] = "development"
@@ -1536,7 +1536,7 @@ ws.onopen = () => {
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_executor_control.py -v
+pytest packages/syn-adapters/tests/test_executor_control.py -v
 ```
 
 ### F13.4 Frontend Control UI
@@ -1583,7 +1583,7 @@ pytest packages/aef-adapters/tests/test_executor_control.py -v
 | 13.5.6 | `aef control status <id>` shows current state | ⬜ |
 | 13.5.7 | Status shows colored output (green/yellow/red) | ⬜ |
 | 13.5.8 | Error messages shown when API unavailable | ⬜ |
-| 13.5.9 | `AEF_DASHBOARD_URL` environment variable supported | ⬜ |
+| 13.5.9 | `SYN_DASHBOARD_URL` environment variable supported | ⬜ |
 | 13.5.10 | `--url` flag overrides default dashboard URL | ⬜ |
 
 **Validation Commands:**
@@ -1601,7 +1601,7 @@ aef control cancel exec-123 --force --reason "Timeout"
 aef control status exec-123
 
 # Use custom dashboard URL
-AEF_DASHBOARD_URL=http://prod:8000 aef control status exec-123
+SYN_DASHBOARD_URL=http://prod:8000 aef control status exec-123
 ```
 
 ### F13.6 End-to-End Control Flow ⭐ CRITICAL
@@ -1694,21 +1694,21 @@ All agent workspaces run in isolated containers/VMs. This feature tests:
 **Validation Commands:**
 ```bash
 # Check available backends
-uv run python -m aef_perf check
+uv run python -m syn_perf check
 
 # Run workspace router tests
-uv run pytest packages/aef-adapters/tests/test_workspace_router.py -v
+uv run pytest packages/syn-adapters/tests/test_workspace_router.py -v
 ```
 
 ### F14.2 Git Identity Injection
 
-**Given** AEF_GIT_* environment variables are set
+**Given** SYN_GIT_* environment variables are set
 **When** a workspace is created
 **Then** git identity is configured inside the container
 
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
-| 14.2.1 | GitIdentitySettings reads from AEF_GIT_* env vars | ⬜ |
+| 14.2.1 | GitIdentitySettings reads from SYN_GIT_* env vars | ⬜ |
 | 14.2.2 | GitIdentityResolver follows precedence: workflow > env > local | ⬜ |
 | 14.2.3 | git config user.name set in container | ⬜ |
 | 14.2.4 | git config user.email set in container | ⬜ |
@@ -1722,7 +1722,7 @@ uv run pytest packages/aef-adapters/tests/test_workspace_router.py -v
 just poc-git-identity
 
 # Expected output:
-# Author: aef-bot[bot] <bot@aef.dev>
+# Author: syn-bot[bot] <bot@aef.dev>
 # ✓ Git identity injection successful!
 ```
 
@@ -1826,7 +1826,7 @@ just poc-allowlist
 **Validation Commands:**
 ```bash
 # Run orchestration factory tests
-uv run pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
+uv run pytest packages/syn-adapters/tests/test_orchestration_factory.py -v
 ```
 
 ### F14.7 Dashboard Workspace Display
@@ -1878,9 +1878,9 @@ just poc-logging
 just poc-allowlist
 
 # Run full test suite
-uv run pytest packages/aef-adapters/tests/workspaces/ \
-  packages/aef-adapters/tests/test_orchestration_factory.py \
-  packages/aef-shared/tests/test_workspace_settings.py -v
+uv run pytest packages/syn-adapters/tests/workspaces/ \
+  packages/syn-adapters/tests/test_orchestration_factory.py \
+  packages/syn-shared/tests/test_workspace_settings.py -v
 
 # Expected: 95+ tests pass
 ```
@@ -1931,10 +1931,10 @@ Secure token management for agentic operations at scale:
 
 ```bash
 # GitHub App environment variables
-export AEF_GITHUB_APP_ID=2461312
-export AEF_GITHUB_INSTALLATION_ID=99311335
-export AEF_GITHUB_APP_NAME=aef-engineer-beta
-export AEF_GITHUB_PRIVATE_KEY=$(cat path/to/private-key.pem | base64)
+export SYN_GITHUB_APP_ID=2461312
+export SYN_GITHUB_INSTALLATION_ID=99311335
+export SYN_GITHUB_APP_NAME=aef-engineer-beta
+export SYN_GITHUB_PRIVATE_KEY=$(cat path/to/private-key.pem | base64)
 
 # Verify configuration
 just cli config show | grep GITHUB
@@ -1948,7 +1948,7 @@ just cli config show | grep GITHUB
 
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
-| 15.1.1 | GitHubAppSettings reads from AEF_GITHUB_* env vars | ⬜ |
+| 15.1.1 | GitHubAppSettings reads from SYN_GITHUB_* env vars | ⬜ |
 | 15.1.2 | Private key is base64 decoded correctly | ⬜ |
 | 15.1.3 | JWT generated with correct claims (iss, iat, exp) | ⬜ |
 | 15.1.4 | JWT expires in 10 minutes | ⬜ |
@@ -1960,7 +1960,7 @@ just cli config show | grep GITHUB
 **Validation Commands:**
 ```bash
 # Run GitHub App client tests
-uv run pytest packages/aef-adapters/tests/github/test_client.py -v
+uv run pytest packages/syn-adapters/tests/github/test_client.py -v
 
 # Manual verification
 uv run python scripts/e2e_github_app_test.py
@@ -1988,7 +1988,7 @@ uv run python scripts/e2e_github_app_test.py
 **Validation Commands:**
 ```bash
 # Run token vending tests
-uv run pytest packages/aef-tokens/tests/test_vending.py -v
+uv run pytest packages/syn-tokens/tests/test_vending.py -v
 ```
 
 ### F15.3 Spend Tracker
@@ -2017,7 +2017,7 @@ uv run pytest packages/aef-tokens/tests/test_vending.py -v
 **Validation Commands:**
 ```bash
 # Run spend tracker tests
-uv run pytest packages/aef-tokens/tests/test_spend.py -v
+uv run pytest packages/syn-tokens/tests/test_spend.py -v
 ```
 
 ### F15.4 Git Credential Injection via GitHub App
@@ -2039,7 +2039,7 @@ uv run pytest packages/aef-tokens/tests/test_spend.py -v
 **Validation Commands:**
 ```bash
 # Run git injection tests
-uv run pytest packages/aef-adapters/tests/workspaces/test_git.py -v
+uv run pytest packages/syn-adapters/tests/workspaces/test_git.py -v
 ```
 
 ### F15.5 Sidecar Proxy Configuration
@@ -2080,7 +2080,7 @@ docker compose -f docker/docker-compose.dev.yaml --profile sidecar up -d
 | 15.6.1 | Start Docker stack with `just dev` | ⬜ |
 | 15.6.2 | Event Store healthy on localhost:50051 | ⬜ |
 | 15.6.3 | Dashboard API healthy on localhost:8000 | ⬜ |
-| 15.6.4 | GitHub App configured (AEF_GITHUB_* vars) | ⬜ |
+| 15.6.4 | GitHub App configured (SYN_GITHUB_* vars) | ⬜ |
 | 15.6.5 | Execute workflow via CLI or API | ⬜ |
 | 15.6.6 | WorkflowExecutionStarted event in Event Store | ⬜ |
 | 15.6.7 | Spend budget allocated for execution | ⬜ |
@@ -2149,10 +2149,10 @@ Enforces that all agent execution flows through isolated workspaces:
 **Validation Commands:**
 ```bash
 # Should PASS (test environment)
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "local"
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/workspaces/test_environment_enforcement.py -v -k "local"
 
 # Should FAIL if you manually test in dev
-APP_ENVIRONMENT=development python -c "from aef_adapters.workspaces import LocalWorkspace"
+APP_ENVIRONMENT=development python -c "from syn_adapters.workspaces import LocalWorkspace"
 ```
 
 ### F16.2 InMemoryWorkspace Test-Only Enforcement
@@ -2171,7 +2171,7 @@ APP_ENVIRONMENT=development python -c "from aef_adapters.workspaces import Local
 
 **Validation Commands:**
 ```bash
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "inmemory"
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/workspaces/test_environment_enforcement.py -v -k "inmemory"
 ```
 
 ### F16.3 WorkspaceService Enforcement
@@ -2192,7 +2192,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_e
 
 **Validation Commands:**
 ```bash
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v -k "router"
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/workspaces/test_environment_enforcement.py -v -k "router"
 ```
 
 ### F16.4 WorkflowExecutionEngine Required Dependencies
@@ -2212,7 +2212,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_e
 
 **Validation Commands:**
 ```bash
-APP_ENVIRONMENT=test uv run pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/ -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-domain/tests/contexts/workflows/execute_workflow/ -v
 ```
 
 ### F16.5 AgentExecutor Protocol
@@ -2236,7 +2236,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-domain/tests/contexts/workflows/
 
 **Validation Commands:**
 ```bash
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/agents/test_executor.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/agents/test_executor.py -v
 ```
 
 ### F16.6 Full Enforcement Test Suite
@@ -2254,22 +2254,22 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/agents/test_execu
 | 16.6.5 | AgentExecutor tests pass (15 tests) | ⬜ |
 | 16.6.6 | WorkflowExecutionEngine DI tests pass (3 tests) | ⬜ |
 | 16.6.7 | WorkflowExecutionEngine execution tests pass (17 tests) | ⬜ |
-| 16.6.8 | All aef-domain tests pass (183+ tests) | ⬜ |
+| 16.6.8 | All syn-domain tests pass (183+ tests) | ⬜ |
 | 16.6.9 | All workspace tests pass (95+ tests) | ⬜ |
 
 **Validation Commands:**
 ```bash
 # Run all enforcement tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/workspaces/test_environment_enforcement.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/workspaces/test_environment_enforcement.py -v
 
 # Run all executor tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/tests/agents/test_executor.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/tests/agents/test_executor.py -v
 
 # Run all workflow engine tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/ -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-domain/tests/contexts/workflows/execute_workflow/ -v
 
 # Full domain test suite
-APP_ENVIRONMENT=test uv run pytest packages/aef-domain/ -v --tb=short
+APP_ENVIRONMENT=test uv run pytest packages/syn-domain/ -v --tb=short
 ```
 
 ---
@@ -2338,7 +2338,7 @@ docker exec aef-postgres psql -U aef -d aef -c \
 curl -s http://localhost:8000/api/executions/<exec_id>/artifacts | jq
 
 # Verify path constants
-python -c "from aef_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WORKSPACE_OUTPUT_DIR)"
+python -c "from syn_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WORKSPACE_OUTPUT_DIR)"
 ```
 
 ### F17.3 Session Persistence ⭐ P1
@@ -2451,7 +2451,7 @@ docker exec aef-postgres psql -U aef -d aef -c \
 
 ### F17.7 Type-Safe Workspace Paths ⭐ P0
 
-**Given** workspace paths are defined in aef_shared
+**Given** workspace paths are defined in syn_shared
 **When** agent-runner and adapters import them
 **Then** paths are consistent and type-safe
 
@@ -2464,14 +2464,14 @@ docker exec aef-postgres psql -U aef -d aef -c \
 | 17.7.5 | `WORKSPACE_ANALYTICS_DIR = /workspace/.agentic/analytics` | ⬜ |
 | 17.7.6 | All paths are `PurePosixPath` type | ⬜ |
 | 17.7.7 | agentic_events available in container (ADR-029) | ⬜ |
-| 17.7.8 | aef-adapters imports from aef_shared | ⬜ |
+| 17.7.8 | syn-adapters imports from syn_shared | ⬜ |
 | 17.7.9 | Type checking passes (mypy/pyright) | ⬜ |
 
 **Validation Commands:**
 ```bash
 # Verify constants
 python -c "
-from aef_shared.workspace_paths import *
+from syn_shared.workspace_paths import *
 print(f'ROOT: {WORKSPACE_ROOT}')
 print(f'OUTPUT: {WORKSPACE_OUTPUT_DIR}')
 print(f'CONTEXT: {WORKSPACE_CONTEXT_DIR}')
@@ -2479,8 +2479,8 @@ print(f'TASK: {WORKSPACE_TASK_FILE}')
 "
 
 # Type check
-cd packages/aef-shared && uv run mypy src/
-cd packages/aef-domain && uv run mypy src/
+cd packages/syn-shared && uv run mypy src/
+cd packages/syn-domain && uv run mypy src/
 ```
 
 ### F17.8 End-to-End Container Execution ⭐ CRITICAL
@@ -2579,7 +2579,7 @@ WorkspaceService.create_workspace()
 **Validation Commands:**
 ```bash
 # Run factory tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/service/test_workspace_service.py -v -k "factory"
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/workspace_backends/service/test_workspace_service.py -v -k "factory"
 ```
 
 ### F18.2 WorkspaceAggregate Event Sourcing
@@ -2602,7 +2602,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 **Validation Commands:**
 ```bash
 # Run aggregate tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-domain/src/aef_domain/contexts/workspaces/test_workspace_integration.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-domain/src/syn_domain/contexts/workspaces/test_workspace_integration.py -v
 ```
 
 ### F18.3 ManagedWorkspace Lifecycle
@@ -2626,7 +2626,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-domain/src/aef_domain/contexts/w
 **Validation Commands:**
 ```bash
 # Run lifecycle tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/service/test_workspace_service.py -v -k "lifecycle"
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/workspace_backends/service/test_workspace_service.py -v -k "lifecycle"
 ```
 
 ### F18.4 Docker Isolation Adapter
@@ -2638,7 +2638,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
 | 18.4.1 | `create()` starts Docker container | ⬜ |
-| 18.4.2 | Container uses configured image (aef-workspace-claude) | ⬜ |
+| 18.4.2 | Container uses configured image (syn-workspace-claude) | ⬜ |
 | 18.4.3 | gVisor runtime used when `use_gvisor=True` | ⬜ |
 | 18.4.4 | Network configured per security policy | ⬜ |
 | 18.4.5 | Memory limits applied | ⬜ |
@@ -2651,7 +2651,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 **Validation Commands:**
 ```bash
 # Run Docker adapter tests (mocked)
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/docker/test_docker_adapters.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/workspace_backends/docker/test_docker_adapters.py -v
 ```
 
 ### F18.5 Token Injection Flow
@@ -2673,7 +2673,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 **Validation Commands:**
 ```bash
 # Run token adapter tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/tokens/test_token_adapters.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/workspace_backends/tokens/test_token_adapters.py -v
 ```
 
 ### F18.6 Event Stream Adapter
@@ -2692,7 +2692,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 **Validation Commands:**
 ```bash
 # Run event stream tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/docker/test_docker_adapters.py -v -k "stream"
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/workspace_backends/docker/test_docker_adapters.py -v -k "stream"
 ```
 
 ### F18.7 Memory Adapter (Test Environment)
@@ -2713,7 +2713,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 **Validation Commands:**
 ```bash
 # Run memory adapter tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/workspace_backends/memory/test_memory_adapter.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-adapters/src/syn_adapters/workspace_backends/memory/test_memory_adapter.py -v
 ```
 
 ### F18.8 WorkflowExecutionEngine Integration
@@ -2735,7 +2735,7 @@ APP_ENVIRONMENT=test uv run pytest packages/aef-adapters/src/aef_adapters/worksp
 **Validation Commands:**
 ```bash
 # Run engine integration tests
-APP_ENVIRONMENT=test uv run pytest packages/aef-domain/src/aef_domain/contexts/workflows/execute_workflow/test_execute_workflow.py -v
+APP_ENVIRONMENT=test uv run pytest packages/syn-domain/src/syn_domain/contexts/workflows/execute_workflow/test_execute_workflow.py -v
 ```
 
 ### F18.9 Full Stack E2E Validation ⭐ CRITICAL
@@ -2854,25 +2854,25 @@ open http://localhost:5173/executions
 
 ```bash
 # ⭐ CRITICAL: Run event store regression tests FIRST
-APP_ENVIRONMENT=test pytest packages/aef-domain/tests/integration/test_event_projection_consistency.py -v
+APP_ENVIRONMENT=test pytest packages/syn-domain/tests/integration/test_event_projection_consistency.py -v
 
 # Run all domain tests
-APP_ENVIRONMENT=test pytest packages/aef-domain/ -v
+APP_ENVIRONMENT=test pytest packages/syn-domain/ -v
 
 # Run all agentic tests (F8-F12)
-pytest packages/aef-adapters/tests/test_*.py -v
+pytest packages/syn-adapters/tests/test_*.py -v
 
 # Run specific feature tests
-pytest packages/aef-adapters/tests/test_orchestration.py -v      # F8
-pytest packages/aef-adapters/tests/test_workspaces.py -v         # F9
-pytest packages/aef-adapters/tests/test_artifacts.py -v          # F10
-pytest packages/aef-adapters/tests/test_events.py -v             # F11
-pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
+pytest packages/syn-adapters/tests/test_orchestration.py -v      # F8
+pytest packages/syn-adapters/tests/test_workspaces.py -v         # F9
+pytest packages/syn-adapters/tests/test_artifacts.py -v          # F10
+pytest packages/syn-adapters/tests/test_events.py -v             # F11
+pytest packages/syn-adapters/tests/test_claude_agentic.py -v     # F12
 
 # Run isolated workspace tests (F14)
-pytest packages/aef-adapters/tests/workspaces/ -v
-pytest packages/aef-adapters/tests/test_orchestration_factory.py -v
-pytest packages/aef-shared/tests/test_workspace_settings.py -v
+pytest packages/syn-adapters/tests/workspaces/ -v
+pytest packages/syn-adapters/tests/test_orchestration_factory.py -v
+pytest packages/syn-shared/tests/test_workspace_settings.py -v
 
 # F14 POC validation (manual)
 just poc-git-identity   # Git identity injection
@@ -2881,14 +2881,14 @@ just poc-logging        # Container logging
 just poc-allowlist      # Network allowlist
 
 # Run Container Execution Robustness tests (F17)
-APP_ENVIRONMENT=test pytest packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py -v
-APP_ENVIRONMENT=test pytest packages/aef-shared/tests/test_workspace_paths.py -v
-APP_ENVIRONMENT=test pytest packages/aef-adapters/tests/workspaces/test_artifact_collection.py -v
-APP_ENVIRONMENT=test pytest packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py -v
+APP_ENVIRONMENT=test pytest packages/syn-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py -v
+APP_ENVIRONMENT=test pytest packages/syn-shared/tests/test_workspace_paths.py -v
+APP_ENVIRONMENT=test pytest packages/syn-adapters/tests/workspaces/test_artifact_collection.py -v
+APP_ENVIRONMENT=test pytest packages/syn-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py -v
 
 # Run GitHub App & Secure Token tests (F15)
-pytest packages/aef-tokens/tests/ -v
-pytest packages/aef-adapters/tests/github/ -v
+pytest packages/syn-tokens/tests/ -v
+pytest packages/syn-adapters/tests/github/ -v
 uv run python scripts/e2e_github_app_test.py
 # Full QA check (lint + type + test)
 poetry run poe check-fix
@@ -2945,7 +2945,7 @@ _Add any observations, recommendations, or follow-up items here._
 ### Migration Notes (v6.2 → v6.3)
 
 - **WorkspaceService Architecture:** New F18 tests for event-sourced workspace domain
-- **Deprecated WorkspaceRouter Removed:** Old `aef-adapters/workspaces/` module deleted (12,500+ lines)
+- **Deprecated WorkspaceRouter Removed:** Old `syn-adapters/workspaces/` module deleted (12,500+ lines)
 - **WorkspaceService Facade:** Unified lifecycle management via `WorkspaceService.create_docker()` / `.create_memory()`
 - **WorkspaceAggregate:** Event-sourced aggregate with commands: Create, Execute, InjectTokens, Terminate
 - **Port Interfaces:** `IsolationBackendPort`, `SidecarPort`, `TokenInjectionPort`, `EventStreamPort`
@@ -2955,17 +2955,17 @@ _Add any observations, recommendations, or follow-up items here._
 - **WorkflowExecutionEngine:** Now requires `workspace_service` instead of `workspace_router`
 - **Test Count:** Increased from 484 to 560 criteria
 - **New Files:**
-  - `packages/aef-domain/src/aef_domain/contexts/workspaces/_shared/` (Aggregate, Ports, Value Objects)
-  - `packages/aef-domain/src/aef_domain/contexts/workspaces/*/` (Command slices)
-  - `packages/aef-adapters/src/aef_adapters/workspace_backends/docker/` (Docker implementations)
-  - `packages/aef-adapters/src/aef_adapters/workspace_backends/memory/` (Test implementations)
-  - `packages/aef-adapters/src/aef_adapters/workspace_backends/tokens/` (Token adapters)
-  - `packages/aef-adapters/src/aef_adapters/workspace_backends/service/workspace_service.py` (Facade)
+  - `packages/syn-domain/src/syn_domain/contexts/workspaces/_shared/` (Aggregate, Ports, Value Objects)
+  - `packages/syn-domain/src/syn_domain/contexts/workspaces/*/` (Command slices)
+  - `packages/syn-adapters/src/syn_adapters/workspace_backends/docker/` (Docker implementations)
+  - `packages/syn-adapters/src/syn_adapters/workspace_backends/memory/` (Test implementations)
+  - `packages/syn-adapters/src/syn_adapters/workspace_backends/tokens/` (Token adapters)
+  - `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py` (Facade)
 
 ### Migration Notes (v6.1 → v6.2)
 
 - **Container Execution Robustness:** New F17 tests for agent-in-container reliability
-- **Type-Safe Workspace Paths:** New module `aef_shared.workspace_paths` for consistent path constants
+- **Type-Safe Workspace Paths:** New module `syn_shared.workspace_paths` for consistent path constants
 - **Phase Counting Fix:** Removed duplicate `ctx.phase_results.append()` call
 - **Artifact Collection Fix:** Unified output directory across agent-runner and adapters
 - **Session Persistence:** AgentSessionAggregate now created/completed in container mode
@@ -2974,11 +2974,11 @@ _Add any observations, recommendations, or follow-up items here._
 - **Stale Cleanup:** Background job to mark stuck executions as failed (P2)
 - **Test Count:** Increased from 424 to 484 criteria
 - **New Files:**
-  - `packages/aef-shared/src/aef_shared/workspace_paths.py`
-  - `packages/aef-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py`
-  - `packages/aef-shared/tests/test_workspace_paths.py`
-  - `packages/aef-adapters/tests/workspaces/test_artifact_collection.py`
-  - `packages/aef-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py`
+  - `packages/syn-shared/src/syn_shared/workspace_paths.py`
+  - `packages/syn-domain/tests/contexts/workflows/execute_workflow/test_container_execution.py`
+  - `packages/syn-shared/tests/test_workspace_paths.py`
+  - `packages/syn-adapters/tests/workspaces/test_artifact_collection.py`
+  - `packages/syn-domain/tests/contexts/workflows/cleanup/test_stale_cleaner.py`
 
 ### Migration Notes (v6.0 → v6.1)
 
@@ -2992,9 +2992,9 @@ _Add any observations, recommendations, or follow-up items here._
 - **ClaudeAgentExecutor:** Implementation that wraps ClaudeAgenticAgent
 - **Test Count:** Increased from 373 to 424 criteria
 - **New Files:**
-  - `packages/aef-adapters/src/aef_adapters/agents/executor.py`
-  - `packages/aef-adapters/src/aef_adapters/agents/claude_executor.py`
-  - `packages/aef-adapters/src/aef_adapters/workspaces/memory.py`
+  - `packages/syn-adapters/src/syn_adapters/agents/executor.py`
+  - `packages/syn-adapters/src/syn_adapters/agents/claude_executor.py`
+  - `packages/syn-adapters/src/syn_adapters/workspaces/memory.py`
   - `docs/PLAN-FULL-WORKSPACE-ISOLATION.md`
 
 ### Migration Notes (v5.0 → v6.0)
@@ -3004,7 +3004,7 @@ _Add any observations, recommendations, or follow-up items here._
 - **Token Vending:** Short-lived, scoped tokens (5-min TTL)
 - **Spend Tracking:** Budget allocation per workflow type
 - **Sidecar Proxy:** Envoy config for token injection
-- **GitHub App Env Vars:** `AEF_GITHUB_APP_ID`, `AEF_GITHUB_PRIVATE_KEY`, etc.
+- **GitHub App Env Vars:** `SYN_GITHUB_APP_ID`, `SYN_GITHUB_PRIVATE_KEY`, etc.
 - **Test Count:** Increased from 323 to 373 criteria
 - **New E2E Script:** `scripts/e2e_github_app_test.py`
 
@@ -3013,7 +3013,7 @@ _Add any observations, recommendations, or follow-up items here._
 - **Isolated Workspace Architecture:** New F14 tests for workspace isolation
 - **ADR-021:** Isolated Workspace Architecture design decisions
 - **WorkspaceRouter:** Automatic backend selection (Firecracker > gVisor > Docker)
-- **Git Identity:** `AEF_GIT_USER_NAME`, `AEF_GIT_USER_EMAIL`, `AEF_GIT_TOKEN` env vars
+- **Git Identity:** `SYN_GIT_USER_NAME`, `SYN_GIT_USER_EMAIL`, `SYN_GIT_TOKEN` env vars
 - **API Keys:** Automatic injection of `ANTHROPIC_API_KEY` into containers
 - **Container Logging:** JSON logs at `/workspace/.logs/agent.jsonl`
 - **Egress Proxy:** mitmproxy at `docker/egress-proxy/`
@@ -3043,7 +3043,7 @@ _Add any observations, recommendations, or follow-up items here._
 ### Migration Notes (v1.0 → v2.0)
 
 - **New Prerequisites:** ANTHROPIC_API_KEY required for live agent tests (F8.5)
-- **New Dependencies:** `aef-adapters[claude-agentic]` adds claude-agent-sdk
+- **New Dependencies:** `syn-adapters[claude-agentic]` adds claude-agent-sdk
 - **Test Count:** Increased from 79 to 142 criteria
 - **Automation:** F8-F12 tests are fully automatable via pytest
 

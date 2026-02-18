@@ -134,7 +134,7 @@ class PreMergeValidator:
         logger.info("📦 Checking dependencies...")
 
         success, output, duration = await self.run_command(
-            ["uv", "run", "python", "-c", "import aef_domain; print('OK')"],
+            ["uv", "run", "python", "-c", "import syn_domain; print('OK')"],
             "Dependency check",
             timeout=60,
         )
@@ -244,7 +244,7 @@ class PreMergeValidator:
         logger.info("🐳 Checking Docker workspace image...")
 
         success, output, duration = await self.run_command(
-            ["docker", "build", "-t", "aef-workspace:pre-merge-test", "docker/workspace/"],
+            ["docker", "build", "-t", "syn-workspace:pre-merge-test", "docker/workspace/"],
             "Docker build",
             timeout=600,
         )

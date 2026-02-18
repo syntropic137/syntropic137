@@ -13,7 +13,7 @@ author: AI Agent (Claude)
 
 ## Context
 
-The Agentic Engineering Framework needs consistent, structured logging across all
+The Syntropic137 needs consistent, structured logging across all
 components for:
 
 1. **AI Agent Debugging** - Structured JSON logs are parseable by AI agents
@@ -66,8 +66,8 @@ LOG_LEVEL=DEBUG
 LOG_FORMAT=json
 
 # Per-component log levels (override global)
-LOG_LEVEL_AEF_DASHBOARD=DEBUG
-LOG_LEVEL_AEF_ADAPTERS=INFO
+LOG_LEVEL_SYN_DASHBOARD=DEBUG
+LOG_LEVEL_SYN_ADAPTERS=INFO
 LOG_LEVEL_EVENT_SUBSCRIPTION=DEBUG
 
 # Session correlation (automatically set by agentic-primitives hooks)
@@ -86,12 +86,12 @@ AGENTIC_SESSION_ID=session-abc123
 
 **Human Format** (development):
 ```
-2025-12-03 10:30:45 | INFO | aef_dashboard.main | Workflow started | workflow_id=wf-123
+2025-12-03 10:30:45 | INFO | syn_dashboard.main | Workflow started | workflow_id=wf-123
 ```
 
 **JSON Format** (production):
 ```json
-{"timestamp": "2025-12-03T10:30:45Z", "level": "INFO", "logger": "aef_dashboard.main", "message": "Workflow started", "workflow_id": "wf-123"}
+{"timestamp": "2025-12-03T10:30:45Z", "level": "INFO", "logger": "syn_dashboard.main", "message": "Workflow started", "workflow_id": "wf-123"}
 ```
 
 ## Alternatives Considered
@@ -137,9 +137,9 @@ Use a third-party logging library.
 
 Components that have been updated to use `agentic_logging`:
 
-- [x] `aef-dashboard/main.py` - Dashboard startup and lifespan
-- [x] `aef-dashboard/services/execution.py` - Workflow execution service
-- [x] `aef-adapters/subscriptions/service.py` - Event subscription service
+- [x] `syn-dashboard/main.py` - Dashboard startup and lifespan
+- [x] `syn-dashboard/services/execution.py` - Workflow execution service
+- [x] `syn-adapters/subscriptions/service.py` - Event subscription service
 - [ ] Other components (as needed)
 
 ## References

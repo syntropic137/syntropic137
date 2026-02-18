@@ -158,10 +158,10 @@ Adapters using raw SQL that need schema validation:
 
 | Adapter | Location | Status | Priority |
 |---------|----------|--------|----------|
-| `AgentEventStore` | `aef-adapters/events/store.py` | ✅ Done | - |
-| `PostgresProjectionStore` | `aef-adapters/projection_stores/postgres_store.py` | ❌ TODO | High |
-| `SessionToolsProjection` | `aef-adapters/projections/session_tools.py` | ❌ TODO | Medium |
-| `SessionCostProjection` | `aef-domain/contexts/costs/.../projection.py` | ❌ TODO | Medium |
+| `AgentEventStore` | `syn-adapters/events/store.py` | ✅ Done | - |
+| `PostgresProjectionStore` | `syn-adapters/projection_stores/postgres_store.py` | ❌ TODO | High |
+| `SessionToolsProjection` | `syn-adapters/projections/session_tools.py` | ❌ TODO | Medium |
+| `SessionCostProjection` | `syn-domain/contexts/costs/.../projection.py` | ❌ TODO | Medium |
 
 **Note:** Domain events use `EventStoreClient` (gRPC), which provides type safety via Protocol Buffers.
 The old `PostgresEventStore` was dead code and has been deleted.
@@ -180,6 +180,6 @@ For each adapter using raw SQL:
 
 ## References
 
-- `packages/aef-adapters/src/aef_adapters/events/models.py` - Example Pydantic model
-- `packages/aef-adapters/src/aef_adapters/events/store.py` - Example validation implementation
-- `packages/aef-adapters/tests/events/test_schema_validation.py` - Example tests
+- `packages/syn-adapters/src/syn_adapters/events/models.py` - Example Pydantic model
+- `packages/syn-adapters/src/syn_adapters/events/store.py` - Example validation implementation
+- `packages/syn-adapters/tests/events/test_schema_validation.py` - Example tests

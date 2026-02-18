@@ -10,7 +10,7 @@ Accepted
 
 ## Context
 
-The Agentic Engineering Framework executes long-running workflows that can take minutes to hours to complete. During execution, users need the ability to:
+The Syntropic137 executes long-running workflows that can take minutes to hours to complete. During execution, users need the ability to:
 
 1. **Pause** execution at a safe point (between tool calls)
 2. **Resume** paused executions
@@ -35,7 +35,7 @@ We implement a **hexagonal (ports & adapters) architecture** for the control pla
 ### 1. Domain Core (Pure Logic)
 
 ```
-packages/aef-adapters/src/aef_adapters/control/
+packages/syn-adapters/src/syn_adapters/control/
 ├── commands.py      # Command types (PauseExecution, ResumeExecution, etc.)
 ├── state_machine.py # ExecutionStateMachine with valid transitions
 ├── controller.py    # ExecutionController business logic
@@ -178,7 +178,7 @@ aef control status <execution_id>
 Files created/modified:
 
 ```
-packages/aef-adapters/src/aef_adapters/control/
+packages/syn-adapters/src/syn_adapters/control/
 ├── __init__.py
 ├── commands.py
 ├── state_machine.py
@@ -188,15 +188,15 @@ packages/aef-adapters/src/aef_adapters/control/
     ├── __init__.py
     └── memory.py
 
-packages/aef-adapters/src/aef_adapters/orchestration/executor.py  # Modified
+packages/syn-adapters/src/syn_adapters/orchestration/executor.py  # Modified
 
-apps/aef-dashboard/src/aef_dashboard/api/control.py
-apps/aef-dashboard/src/aef_dashboard/services/control.py
+apps/syn-dashboard/src/syn_dashboard/api/control.py
+apps/syn-dashboard/src/syn_dashboard/services/control.py
 
-apps/aef-dashboard-ui/src/hooks/useExecutionControl.ts
-apps/aef-dashboard-ui/src/components/ExecutionControl.tsx
+apps/syn-dashboard-ui/src/hooks/useExecutionControl.ts
+apps/syn-dashboard-ui/src/components/ExecutionControl.tsx
 
-apps/aef-cli/src/aef_cli/commands/control.py
+apps/syn-cli/src/syn_cli/commands/control.py
 ```
 
 ## References

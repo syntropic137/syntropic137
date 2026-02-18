@@ -7,7 +7,7 @@
 
 ## Context
 
-The Agentic Engineering Framework uses event-driven architecture with Event Sourcing (ES) and CQRS. During implementation of the scalable observability system (ADR-017), we identified a fundamental architectural distinction that was not previously documented:
+The Syntropic137 uses event-driven architecture with Event Sourcing (ES) and CQRS. During implementation of the scalable observability system (ADR-017), we identified a fundamental architectural distinction that was not previously documented:
 
 **Not all events are created equal.**
 

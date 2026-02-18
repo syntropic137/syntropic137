@@ -95,12 +95,12 @@ jobs:
           COLUMNS: "200"
         run: |
           uv run pytest -m unit \
-            --cov=apps/aef-cli/src \
-            --cov=apps/aef-dashboard/src \
-            --cov=packages/aef-api/src \
-            --cov=packages/aef-domain/src \
-            --cov=packages/aef-adapters/src \
-            --cov=packages/aef-shared/src \
+            --cov=apps/syn-cli/src \
+            --cov=apps/syn-dashboard/src \
+            --cov=packages/syn-api/src \
+            --cov=packages/syn-domain/src \
+            --cov=packages/syn-adapters/src \
+            --cov=packages/syn-shared/src \
             --cov-report=term-missing \
             -x -q
 
@@ -124,9 +124,9 @@ jobs:
       timescaledb:
         image: timescale/timescaledb:latest-pg16
         env:
-          POSTGRES_USER: aef
-          POSTGRES_PASSWORD: aef_dev_password
-          POSTGRES_DB: aef
+          POSTGRES_USER: syn
+          POSTGRES_PASSWORD: syn_dev_password
+          POSTGRES_DB: syn
         ports:
           - 15432:5432
         options: >-
@@ -137,7 +137,7 @@ jobs:
 
       # TODO(#62): Enable EventStore service when container is published
       # eventstore:
-      #   image: ghcr.io/agentparadise/event-store:latest
+      #   image: ghcr.io/syntropic137/event-store:latest
       #   ports:
       #     - 55051:50051
       #   options: >-
@@ -193,7 +193,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: apps/aef-dashboard-ui/package-lock.json
+          cache-dependency-path: apps/syn-dashboard-ui/package-lock.json
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -205,19 +205,19 @@ jobs:
         run: pnpm install --ignore-scripts
 
       - name: Install dashboard dependencies
-        working-directory: apps/aef-dashboard-ui
+        working-directory: apps/syn-dashboard-ui
         run: npm ci
 
       - name: Link ui-feedback-react
-        working-directory: apps/aef-dashboard-ui
+        working-directory: apps/syn-dashboard-ui
         run: npm link ../../lib/ui-feedback/packages/ui-feedback-react
 
       - name: Lint
-        working-directory: apps/aef-dashboard-ui
+        working-directory: apps/syn-dashboard-ui
         run: npm run lint
 
       - name: Build
-        working-directory: apps/aef-dashboard-ui
+        working-directory: apps/syn-dashboard-ui
         run: npm run build
 
   #############################################################################
@@ -243,11 +243,11 @@ jobs:
           version: 10
 
       - name: Install dependencies
-        working-directory: apps/aef-docs
+        working-directory: apps/syn-docs
         run: pnpm install
 
       - name: Build
-        working-directory: apps/aef-docs
+        working-directory: apps/syn-docs
         run: pnpm run build
 
   #############################################################################

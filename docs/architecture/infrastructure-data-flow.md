@@ -228,7 +228,7 @@ session:{session_id}:metadata
 
 **Bucket Structure:**
 ```
-aef-artifacts/
+syn-artifacts/
 ├── execution-{id}/
 │   ├── output.zip
 │   ├── logs.txt

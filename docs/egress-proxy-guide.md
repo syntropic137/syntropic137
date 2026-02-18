@@ -23,7 +23,7 @@
 │  │  • Can reach ANY host         │  │
 │  └────────────────────────────────┘  │
 │                                      │
-│  Network: aef-workspace-net (bridge) │
+│  Network: syn-workspace-net (bridge) │
 └──────────────────────────────────────┘
 ```
 
@@ -138,7 +138,7 @@ def request(flow: http.HTTPFlow) -> None:
 services:
   egress-proxy:
     build: ../egress-proxy
-    container_name: aef-egress-proxy
+    container_name: syn-egress-proxy
     networks:
       - proxy-net
       - internet
@@ -184,7 +184,7 @@ claude --print "Hello"
 #### Step 4: Integration with WorkspaceService (2-3 hours)
 
 ```python
-# packages/aef-adapters/src/aef_adapters/workspace_backends/docker/docker_isolation_adapter.py
+# packages/syn-adapters/src/syn_adapters/workspace_backends/docker/docker_isolation_adapter.py
 
 async def _start_egress_proxy(
     self,
@@ -195,13 +195,13 @@ async def _start_egress_proxy(
     Returns:
         Container ID of proxy
     """
-    proxy_name = f"aef-proxy-{execution_id[:8]}"
-    
+    proxy_name = f"syn-proxy-{execution_id[:8]}"
+
     cmd = [
         "docker", "run", "-d",
         f"--name={proxy_name}",
-        "--network=aef-proxy-net",
-        "aef-egress-proxy:latest",
+        "--network=syn-proxy-net",
+        "syn-egress-proxy:latest",
     ]
     
     proc = await asyncio.create_subprocess_exec(*cmd, ...)
@@ -223,7 +223,7 @@ async def create(
     docker_cmd = self._build_docker_command(
         container_name=container_name,
         workspace_dir=workspace_path,
-        network_name="aef-proxy-net",  # Same network as proxy
+        network_name="syn-proxy-net",  # Same network as proxy
         config=config,
     )
     
@@ -325,14 +325,14 @@ async def test_disallowed_hosts():
 ```bash
 # 1. Build proxy
 cd lib/agentic-primitives/providers/workspaces/egress-proxy
-docker build -t aef-egress-proxy .
+docker build -t syn-egress-proxy .
 
 # 2. Start proxy
-docker run -d --name proxy --network aef-net aef-egress-proxy
+docker run -d --name proxy --network syn-net syn-egress-proxy
 
 # 3. Start agent with proxy
 docker run \
-  --network aef-net \
+  --network syn-net \
   -e HTTP_PROXY=http://proxy:8080 \
   agentic-workspace-claude-cli
 ```

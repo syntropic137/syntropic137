@@ -73,7 +73,7 @@ Store actual file content in S3-compatible storage:
 
 ### Storage URI Format
 ```
-s3://aef-artifacts/{tenant_id}/{workflow_id}/{phase_id}/{artifact_id}/{filename}
+s3://syn-artifacts/{tenant_id}/{workflow_id}/{phase_id}/{artifact_id}/{filename}
 ```
 
 ### Access Pattern
@@ -82,7 +82,7 @@ s3://aef-artifacts/{tenant_id}/{workflow_id}/{phase_id}/{artifact_id}/{filename}
 async def store_artifact(artifact_id: str, content: bytes, metadata: dict) -> str:
     # 1. Upload to S3
     storage_uri = await s3_client.put_object(
-        bucket="aef-artifacts",
+        bucket="syn-artifacts",
         key=f"{workflow_id}/{phase_id}/{artifact_id}/output.md",
         body=content,
         content_type="text/markdown",
@@ -157,18 +157,18 @@ async def get_artifact_content(artifact_id: str) -> bytes:
 
 **Safety Guard (Critical):**
 ```python
-# InMemoryArtifactStorage throws if AEF_ENVIRONMENT != 'test'
+# InMemoryArtifactStorage throws if SYN_ENVIRONMENT != 'test'
 # Prevents false positives in production!
 class InMemoryArtifactStorage:
     def __init__(self):
-        if os.environ.get("AEF_ENVIRONMENT") != "test":
+        if os.environ.get("SYN_ENVIRONMENT") != "test":
             raise TestOnlyAdapterError(...)
 ```
 
 **Files:**
-- `packages/aef-domain/.../ports/artifact_storage.py` - Port definition
-- `packages/aef-adapters/.../artifact_storage/minio.py` - MinIO adapter
-- `packages/aef-adapters/.../artifact_storage/memory.py` - Test adapter
+- `packages/syn-domain/.../ports/artifact_storage.py` - Port definition
+- `packages/syn-adapters/.../artifact_storage/minio.py` - MinIO adapter
+- `packages/syn-adapters/.../artifact_storage/memory.py` - Test adapter
 
 ### Phase 2: Production S3 (Future)
 1. Add AWS SDK dependencies

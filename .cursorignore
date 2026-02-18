@@ -9,4 +9,4 @@
 !worktrees/
 
 # AEF Execution Workspaces (runtime artifacts - large files, pollute context)
-.aef-workspaces/
+.syn-workspaces/

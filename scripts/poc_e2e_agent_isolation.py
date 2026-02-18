@@ -46,8 +46,8 @@ from rich.table import Table
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "packages"))
 
-from aef_adapters.agents.agentic_types import WorkspaceConfig
-from aef_adapters.workspaces import (
+from syn_adapters.agents.agentic_types import WorkspaceConfig
+from syn_adapters.workspaces import (
     InMemoryCollectorEmitter,
     IsolatedWorkspaceConfig,
     WorkspaceRouter,
@@ -96,7 +96,7 @@ class POCRunner:
         findings = []
 
         # Create workspace with network disabled
-        os.environ["AEF_SECURITY_ALLOW_NETWORK"] = "false"
+        os.environ["SYN_SECURITY_ALLOW_NETWORK"] = "false"
 
         base_config = WorkspaceConfig(session_id="poc-network-test-none")
         config = IsolatedWorkspaceConfig(base_config=base_config)
@@ -166,8 +166,8 @@ class POCRunner:
         findings = []
 
         # Enable network with allowlist
-        os.environ["AEF_SECURITY_ALLOW_NETWORK"] = "true"
-        os.environ["AEF_SECURITY_ALLOWED_HOSTS"] = "api.anthropic.com,api.github.com,github.com"
+        os.environ["SYN_SECURITY_ALLOW_NETWORK"] = "true"
+        os.environ["SYN_SECURITY_ALLOWED_HOSTS"] = "api.anthropic.com,api.github.com,github.com"
 
         base_config = WorkspaceConfig(session_id="poc-network-test-allowlist")
         config = IsolatedWorkspaceConfig(base_config=base_config)
@@ -257,8 +257,8 @@ class POCRunner:
         start = time.perf_counter()
         findings = []
 
-        os.environ["AEF_SECURITY_ALLOW_NETWORK"] = "true"
-        os.environ["AEF_SECURITY_ALLOWED_HOSTS"] = "github.com"
+        os.environ["SYN_SECURITY_ALLOW_NETWORK"] = "true"
+        os.environ["SYN_SECURITY_ALLOWED_HOSTS"] = "github.com"
 
         base_config = WorkspaceConfig(session_id="poc-github-clone")
         config = IsolatedWorkspaceConfig(base_config=base_config)
@@ -354,8 +354,8 @@ class POCRunner:
         start = time.perf_counter()
         findings = []
 
-        os.environ["AEF_SECURITY_ALLOW_NETWORK"] = "true"
-        os.environ["AEF_SECURITY_ALLOWED_HOSTS"] = (
+        os.environ["SYN_SECURITY_ALLOW_NETWORK"] = "true"
+        os.environ["SYN_SECURITY_ALLOWED_HOSTS"] = (
             "api.anthropic.com,pypi.org,files.pythonhosted.org"
         )
 

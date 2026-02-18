@@ -4,9 +4,9 @@
 # For Docker deployment, use CLOUDFLARE_TUNNEL_TOKEN environment variable instead.
 #
 # Setup:
-#   1. Create tunnel: cloudflared tunnel create aef-homelab
+#   1. Create tunnel: cloudflared tunnel create syn-homelab
 #   2. Copy credentials: cp ~/.cloudflared/<tunnel-id>.json ./credentials.json
-#   3. Configure DNS: cloudflared tunnel route dns aef-homelab aef.yourdomain.com
+#   3. Configure DNS: cloudflared tunnel route dns syn-homelab syn.yourdomain.com
 #   4. Copy this file: cp tunnel-config.yaml.example tunnel-config.yaml
 #   5. Edit with your tunnel ID and domain
 #   6. Run: cloudflared tunnel --config tunnel-config.yaml run
@@ -20,7 +20,7 @@ credentials-file: /etc/cloudflared/credentials.json
 # Ingress rules define how traffic is routed
 ingress:
   # AEF Dashboard UI (main entry point)
-  - hostname: aef.yourdomain.com
+  - hostname: syn.yourdomain.com
     service: http://localhost:80
     originRequest:
       # Skip TLS verification for local services
@@ -31,13 +31,13 @@ ingress:
       tcpKeepAlive: 30s
 
   # AEF API (for direct API access)
-  - hostname: api.aef.yourdomain.com
+  - hostname: api.syn.yourdomain.com
     service: http://localhost:8000
     originRequest:
       noTLSVerify: true
       connectTimeout: 30s
       # Longer timeout for API requests
-      httpHostHeader: api.aef.yourdomain.com
+      httpHostHeader: api.syn.yourdomain.com
 
   # Catch-all rule (required - must be last)
   - service: http_status:404

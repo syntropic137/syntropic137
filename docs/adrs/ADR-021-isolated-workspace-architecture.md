@@ -16,7 +16,7 @@
 
 ## Context
 
-The Agentic Engineering Framework (AEF) executes coding agents that can:
+The Syntropic137 (AEF) executes coding agents that can:
 1. Read and write files
 2. Execute shell commands
 3. Install packages
@@ -179,21 +179,21 @@ class WorkspaceRouter:
 
 ```bash
 # Backend selection
-AEF_WORKSPACE_ISOLATION_BACKEND=firecracker
+SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
 
 # Capacity limits
-AEF_WORKSPACE_POOL_SIZE=100
-AEF_WORKSPACE_MAX_CONCURRENT=1000
+SYN_WORKSPACE_POOL_SIZE=100
+SYN_WORKSPACE_MAX_CONCURRENT=1000
 
 # Cloud overflow
-AEF_WORKSPACE_ENABLE_CLOUD_OVERFLOW=true
-AEF_WORKSPACE_CLOUD_PROVIDER=e2b
-AEF_WORKSPACE_CLOUD_API_KEY=sk-...
+SYN_WORKSPACE_ENABLE_CLOUD_OVERFLOW=true
+SYN_WORKSPACE_CLOUD_PROVIDER=e2b
+SYN_WORKSPACE_CLOUD_API_KEY=sk-...
 
 # Security policies
-AEF_SECURITY_ALLOW_NETWORK=false
-AEF_SECURITY_MAX_MEMORY=512Mi
-AEF_SECURITY_MAX_CPU=0.5
+SYN_SECURITY_ALLOW_NETWORK=false
+SYN_SECURITY_MAX_MEMORY=512Mi
+SYN_SECURITY_MAX_CPU=0.5
 ```
 
 ## Alternatives Considered
@@ -290,7 +290,7 @@ See: `PROJECT-PLAN_20251211_ISOLATED-WORKSPACE-ARCHITECTURE.md`
 
 ### Milestone Summary
 
-1. **Settings & Configuration**: Add workspace settings to aef-shared
+1. **Settings & Configuration**: Add workspace settings to syn-shared
 2. **Protocol Extension**: Extend WorkspaceProtocol for isolation
 3. **gVisor Backend**: Docker + gVisor for macOS/Linux
 4. **Hardened Docker**: Fallback when gVisor unavailable
@@ -479,19 +479,19 @@ await router.execute_command(
 | Environment | Identity | Committer |
 |-------------|----------|-----------|
 | **Local Development** | User's `.gitconfig` | `NeuralEmpowerment <neuralempowerment@gmail.com>` |
-| **CI/CD** | Bot account | `aef-bot[bot] <bot@aef.dev>` |
-| **Production** | GitHub App | `aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>` |
+| **CI/CD** | Bot account | `syn-bot[bot] <bot@aef.dev>` |
+| **Production** | GitHub App | `syn-app[bot] <123456+syn-app[bot]@users.noreply.github.com>` |
 
 **Configuration:**
 
 ```bash
 # User identity (local)
-export AEF_GIT_USER_NAME="NeuralEmpowerment"
-export AEF_GIT_USER_EMAIL="neuralempowerment@gmail.com"
+export SYN_GIT_USER_NAME="NeuralEmpowerment"
+export SYN_GIT_USER_EMAIL="neuralempowerment@gmail.com"
 
 # Bot identity (production)
-export AEF_GIT_USER_NAME="aef-bot[bot]"
-export AEF_GIT_USER_EMAIL="bot@aef.dev"
+export SYN_GIT_USER_NAME="syn-bot[bot]"
+export SYN_GIT_USER_EMAIL="bot@aef.dev"
 ```
 
 #### 2. Git Credentials Injection
@@ -517,7 +517,7 @@ await router.execute_command(
 
 ```python
 # Inject SSH key
-ssh_key = os.environ["AEF_GIT_SSH_KEY"]  # Base64 encoded
+ssh_key = os.environ["SYN_GIT_SSH_KEY"]  # Base64 encoded
 await router.execute_command(
     workspace,
     ["sh", "-c", f"mkdir -p ~/.ssh && echo '{ssh_key}' | base64 -d > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519"]
@@ -551,7 +551,7 @@ class GitHubAppConfig:
 
 ```
 commit abc123
-Author: aef-app[bot] <123456+aef-app[bot]@users.noreply.github.com>
+Author: syn-app[bot] <123456+syn-app[bot]@users.noreply.github.com>
 Date:   Wed Dec 11 19:30:00 2025
 
     feat: implement code review suggestions
@@ -581,7 +581,7 @@ This provides:
 - ✅ Full audit trail
 - ✅ Links back to workflow execution
 - ✅ Credit to human who initiated the workflow
-- ✅ Easy to filter agent commits (`git log --author="aef-app[bot]"`)
+- ✅ Easy to filter agent commits (`git log --author="syn-app[bot]"`)
 
 ### Security Considerations
 
@@ -619,11 +619,11 @@ This provides:
 
 ### Container Image
 
-The `aef-workspace-claude` image is the reference implementation for Claude agents:
+The `syn-workspace-claude` image is the reference implementation for Claude agents:
 
 - **Location**: `docker/workspace/Dockerfile`
 - **Build**: `just workspace-build`
-- **Default**: Configured in `aef_shared.settings.workspace.docker_image`
+- **Default**: Configured in `syn_shared.settings.workspace.docker_image`
 
 Includes:
 - `aef_agent_runner` package (runs inside container)
@@ -636,7 +636,7 @@ Includes:
 
 `AgentContainerContract` validates container requirements before execution:
 
-- **Location**: `packages/aef-adapters/src/aef_adapters/workspaces/contract.py`
+- **Location**: `packages/syn-adapters/src/syn_adapters/workspaces/contract.py`
 - **Validates**: Required commands (`python`, `git`, `gh`) and modules (`aef_agent_runner`, `anthropic`, `claude_agent_sdk`)
 - **Integration**: Called by `WorkspaceRouter.create()` after workspace setup
 - **Fail-fast**: Raises `RuntimeError` with actionable fix instructions
@@ -645,7 +645,7 @@ Includes:
 
 ADR compliance is verified by integration tests:
 
-- **Location**: `packages/aef-adapters/tests/integration/test_adr_compliance.py`
+- **Location**: `packages/syn-adapters/tests/integration/test_adr_compliance.py`
 - **Run**: `pytest tests/integration/test_adr_compliance.py -v`
 - **Marker**: `@pytest.mark.integration`
 

@@ -26,12 +26,12 @@ if TYPE_CHECKING:
 
 # Add packages to path for import
 PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT / "packages" / "aef-shared" / "src"))
+sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 
-from aef_shared.settings.config import Settings  # noqa: E402
-from aef_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
-from aef_shared.settings.github import GitHubAppSettings  # noqa: E402
-from aef_shared.settings.workspace import (  # noqa: E402
+from syn_shared.settings.config import Settings  # noqa: E402
+from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
+from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
+from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
     WorkspaceSecuritySettings,
@@ -186,7 +186,7 @@ def generate_env_example() -> str:
     lines.extend(
         [
             "# " + "=" * 76,
-            "# AGENTIC ENGINEERING FRAMEWORK - ENVIRONMENT CONFIGURATION",
+            "# SYNTROPIC137 - ENVIRONMENT CONFIGURATION",
             "# " + "=" * 76,
             "#",
             "# This file is AUTO-GENERATED from the Settings classes.",
@@ -259,12 +259,12 @@ def generate_env_example() -> str:
 
             lines.append("")
 
-    # Add GitHub App Settings (AEF_GITHUB_* prefix)
+    # Add GitHub App Settings (SYN_GITHUB_* prefix)
     lines.extend(
         generate_settings_section(
             GitHubAppSettings,
             "GITHUB APP (Secure Authentication)",
-            prefix="AEF_GITHUB_",
+            prefix="SYN_GITHUB_",
             description="GitHub App for secure API access. See docs/deployment/github-app-setup.md",
         )
     )
@@ -279,42 +279,42 @@ def generate_env_example() -> str:
         )
     )
 
-    # Add Workspace Settings (AEF_WORKSPACE_* prefix)
+    # Add Workspace Settings (SYN_WORKSPACE_* prefix)
     lines.extend(
         generate_settings_section(
             WorkspaceSettings,
             "WORKSPACE ISOLATION (ADR-021)",
-            prefix="AEF_WORKSPACE_",
+            prefix="SYN_WORKSPACE_",
             description="All workspaces are isolated by default. These settings control HOW.",
         )
     )
 
-    # Add Workspace Security Settings (AEF_SECURITY_* prefix)
+    # Add Workspace Security Settings (SYN_SECURITY_* prefix)
     lines.extend(
         generate_settings_section(
             WorkspaceSecuritySettings,
             "WORKSPACE SECURITY POLICIES",
-            prefix="AEF_SECURITY_",
+            prefix="SYN_SECURITY_",
             description="Defaults are maximally restrictive for compromised agent protection.",
         )
     )
 
-    # Add Git Identity Settings (AEF_GIT_* prefix)
+    # Add Git Identity Settings (SYN_GIT_* prefix)
     lines.extend(
         generate_settings_section(
             GitIdentitySettings,
             "GIT IDENTITY FOR WORKSPACE COMMITS",
-            prefix="AEF_GIT_",
+            prefix="SYN_GIT_",
             description="Git identity for agent commits. Prefer GitHub App for authentication.",
         )
     )
 
-    # Add Container Logging Settings (AEF_LOGGING_* prefix)
+    # Add Container Logging Settings (SYN_LOGGING_* prefix)
     lines.extend(
         generate_settings_section(
             ContainerLoggingSettings,
             "CONTAINER LOGGING (ADR-021)",
-            prefix="AEF_LOGGING_",
+            prefix="SYN_LOGGING_",
             description="Controls logging inside isolated containers for observability.",
         )
     )

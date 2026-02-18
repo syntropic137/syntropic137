@@ -17,7 +17,7 @@ NOTE: This script uses the simplified event system (ADR-029).
 Prerequisites:
 - Docker installed and running
 - AEF workspace image built: just workspace-build
-- Sidecar image built: docker build -t aef-sidecar:latest docker/sidecar-proxy/
+- Sidecar image built: docker build -t syn-sidecar:latest docker/sidecar-proxy/
 
 Usage:
     python scripts/e2e_agent_in_container_test.py [--build] [--no-cleanup]
@@ -67,7 +67,7 @@ async def build_images() -> bool:
         "docker",
         "build",
         "-t",
-        "aef-sidecar:latest",
+        "syn-sidecar:latest",
         "docker/sidecar-proxy/",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -84,7 +84,7 @@ async def build_images() -> bool:
 
 async def check_images_exist() -> tuple[bool, str]:
     """Check if required Docker images exist."""
-    for image in ["aef-workspace:latest", "aef-sidecar:latest"]:
+    for image in ["syn-workspace:latest", "syn-sidecar:latest"]:
         proc = await asyncio.create_subprocess_exec(
             "docker",
             "image",
@@ -136,7 +136,7 @@ async def start_sidecar(
     Returns:
         Tuple of (container_id, container_name)
     """
-    container_name = f"aef-sidecar-test-{execution_id[:8]}"
+    container_name = f"syn-sidecar-test-{execution_id[:8]}"
 
     proc = await asyncio.create_subprocess_exec(
         "docker",
@@ -146,10 +146,10 @@ async def start_sidecar(
         f"--name={container_name}",
         f"--network={network_name}",
         "-e",
-        f"AEF_EXECUTION_ID={execution_id}",
+        f"SYN_EXECUTION_ID={execution_id}",
         "-e",
-        "AEF_TOKEN_SERVICE_URL=http://mock-token-service:8080",
-        "aef-sidecar:latest",
+        "SYN_TOKEN_SERVICE_URL=http://mock-token-service:8080",
+        "syn-sidecar:latest",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -184,7 +184,7 @@ async def start_workspace(
     Returns:
         Tuple of (container_id, container_name)
     """
-    container_name = f"aef-workspace-test-{execution_id[:8]}"
+    container_name = f"syn-workspace-test-{execution_id[:8]}"
     proxy_url = f"http://{sidecar_name}:8081"
 
     proc = await asyncio.create_subprocess_exec(
@@ -199,11 +199,11 @@ async def start_workspace(
         "-e",
         f"HTTPS_PROXY={proxy_url}",
         "-e",
-        f"AEF_EXECUTION_ID={execution_id}",
+        f"SYN_EXECUTION_ID={execution_id}",
         # Override entrypoint to keep container running
         "--entrypoint",
         "sleep",
-        "aef-workspace:latest",
+        "syn-workspace:latest",
         "infinity",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -445,7 +445,7 @@ def verify_analytics_events(events: list[dict]) -> bool:
 async def run_e2e_test(cleanup: bool = True) -> bool:
     """Run the full E2E test."""
     execution_id = str(uuid.uuid4())
-    network_name = f"aef-e2e-test-{execution_id[:8]}"
+    network_name = f"syn-e2e-test-{execution_id[:8]}"
     sidecar_container = None
     workspace_container = None
 
@@ -632,7 +632,7 @@ async def main() -> int:
             logger.error(error)
             logger.info("Run with --build to build images, or build manually:")
             logger.info("  ./docker/workspace/build.sh")
-            logger.info("  docker build -t aef-sidecar:latest docker/sidecar-proxy/")
+            logger.info("  docker build -t syn-sidecar:latest docker/sidecar-proxy/")
             return 1
 
     # Run E2E test

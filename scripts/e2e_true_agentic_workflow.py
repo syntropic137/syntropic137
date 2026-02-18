@@ -19,7 +19,7 @@ Usage:
 
 Requirements:
     - Docker Compose stack running (postgres, dashboard)
-    - GitHub App configured (AEF_GITHUB_* env vars)
+    - GitHub App configured (SYN_GITHUB_* env vars)
     - ANTHROPIC_API_KEY set for Claude agent
 """
 
@@ -37,18 +37,18 @@ from typing import Any
 import httpx
 
 # Configuration
-DASHBOARD_URL = os.getenv("AEF_DASHBOARD_URL", "http://localhost:8000")
-SANDBOX_REPO = "AgentParadise/sandbox_aef-engineer-beta"
+DASHBOARD_URL = os.getenv("SYN_DASHBOARD_URL", "http://localhost:8000")
+SANDBOX_REPO = "syntropic137/sandbox_syn-engineer-beta"
 # Use research workflow which is already registered
 # github-pr-workflow requires event-based registration (future)
-WORKFLOW_ID = os.getenv("AEF_E2E_WORKFLOW_ID", "research-workflow-v2")
+WORKFLOW_ID = os.getenv("SYN_E2E_WORKFLOW_ID", "research-workflow-v2")
 POLL_INTERVAL_SECONDS = 5
 MAX_WAIT_SECONDS = 600  # 10 minutes max
 
 # PostgreSQL connection (via docker exec)
-POSTGRES_CONTAINER = os.getenv("AEF_POSTGRES_CONTAINER", "aef-db")
-POSTGRES_USER = "aef"
-POSTGRES_DB = "aef"
+POSTGRES_CONTAINER = os.getenv("SYN_POSTGRES_CONTAINER", "syn-db")
+POSTGRES_USER = "syn"
+POSTGRES_DB = "syn"
 
 
 def run_psql(query: str) -> tuple[bool, str]:
@@ -140,9 +140,9 @@ async def check_prerequisites() -> bool:
     if is_github_workflow:
         required_vars.extend(
             [
-                ("AEF_GITHUB_APP_ID", "GitHub App ID", True),
-                ("AEF_GITHUB_INSTALLATION_ID", "GitHub Installation ID", True),
-                ("AEF_GITHUB_PRIVATE_KEY", "GitHub Private Key", True),
+                ("SYN_GITHUB_APP_ID", "GitHub App ID", True),
+                ("SYN_GITHUB_INSTALLATION_ID", "GitHub Installation ID", True),
+                ("SYN_GITHUB_PRIVATE_KEY", "GitHub Private Key", True),
             ]
         )
 

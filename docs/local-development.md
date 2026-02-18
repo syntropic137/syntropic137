@@ -1,6 +1,6 @@
 # Local Development Guide
 
-This guide explains how to set up and run the Agentic Engineering Framework locally.
+This guide explains how to set up and run the Syntropic137 locally.
 
 > **📦 For Production/Homelab**: If you're deploying to a homelab or production environment, see:
 > - [Homelab Deployment Guide](infra/docs/homelab-deployment.md) - Docker Compose + Cloudflare Tunnel
@@ -10,7 +10,7 @@ This guide explains how to set up and run the Agentic Engineering Framework loca
 
 ```bash
 # 1. Clone the repository
-git clone --recursive https://github.com/AgentParadise/agentic-engineering-framework.git
+git clone --recursive https://github.com/syntropic137/agentic-engineering-framework.git
 cd agentic-engineering-framework
 
 # 2. Install dependencies
@@ -130,11 +130,11 @@ uv run pytest -m integration
 ```
 agentic-engineering-framework/
 ├── apps/
-│   └── aef-cli/              # CLI application
+│   └── syn-cli/              # CLI application
 ├── packages/
-│   ├── aef-domain/           # Domain model (aggregates, events)
-│   ├── aef-adapters/         # External integrations
-│   └── aef-shared/           # Shared utilities (logging, settings)
+│   ├── syn-domain/           # Domain model (aggregates, events)
+│   ├── syn-adapters/         # External integrations
+│   └── syn-shared/           # Shared utilities (logging, settings)
 ├── lib/
 │   ├── event-sourcing-platform/  # Event sourcing SDK (submodule)
 │   └── agentic-primitives/       # Primitives library (submodule)

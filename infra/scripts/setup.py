@@ -285,9 +285,9 @@ def configure_github_app(ctx: dict) -> bool:
 
     if ctx.get("non_interactive"):
         step("Non-interactive mode — reading from environment")
-        ctx["github_app_id"] = os.environ.get("AEF_GITHUB_APP_ID", "")
-        ctx["github_app_name"] = os.environ.get("AEF_GITHUB_APP_NAME", "")
-        ctx["github_installation_id"] = os.environ.get("AEF_GITHUB_INSTALLATION_ID", "")
+        ctx["github_app_id"] = os.environ.get("SYN_GITHUB_APP_ID", "")
+        ctx["github_app_name"] = os.environ.get("SYN_GITHUB_APP_NAME", "")
+        ctx["github_installation_id"] = os.environ.get("SYN_GITHUB_INSTALLATION_ID", "")
         if all([ctx["github_app_id"], ctx["github_app_name"], ctx["github_installation_id"]]):
             ok("GitHub App config read from environment")
             return True
@@ -320,7 +320,7 @@ def _configure_github_app_manifest(ctx: dict) -> bool:
     """Create a new GitHub App using the manifest flow."""
     from github_manifest import run_manifest_flow
 
-    app_name = prompt("App name", default="aef-agent")
+    app_name = prompt("App name", default="syntropic137")
     org = prompt("GitHub org (leave blank for personal)", default="")
     webhook_url = ctx.get("webhook_url") or None
 
@@ -428,15 +428,15 @@ def configure_env(ctx: dict) -> bool:
     # Substitute collected values
     substitutions = {}
     if ctx.get("github_app_id"):
-        substitutions["AEF_GITHUB_APP_ID"] = ctx["github_app_id"]
+        substitutions["SYN_GITHUB_APP_ID"] = ctx["github_app_id"]
     if ctx.get("github_app_name"):
-        substitutions["AEF_GITHUB_APP_NAME"] = ctx["github_app_name"]
+        substitutions["SYN_GITHUB_APP_NAME"] = ctx["github_app_name"]
     if ctx.get("github_installation_id"):
-        substitutions["AEF_GITHUB_INSTALLATION_ID"] = ctx["github_installation_id"]
+        substitutions["SYN_GITHUB_INSTALLATION_ID"] = ctx["github_installation_id"]
     if ctx.get("cloudflare_tunnel_token"):
         substitutions["CLOUDFLARE_TUNNEL_TOKEN"] = ctx["cloudflare_tunnel_token"]
-    if ctx.get("aef_domain"):
-        substitutions["AEF_DOMAIN"] = ctx["aef_domain"]
+    if ctx.get("syn_domain"):
+        substitutions["SYN_DOMAIN"] = ctx["syn_domain"]
 
     for key, value in substitutions.items():
         # Replace KEY= or KEY=default with KEY=value
@@ -539,7 +539,7 @@ def _audit_network_security() -> tuple[int, int]:
         "postgres": "PostgreSQL",
         "event-store": "EventStoreDB",
         "redis": "Redis",
-        "aef-dashboard": "Dashboard API",
+        "syn-dashboard": "Dashboard API",
         "minio": "MinIO",
     }
 
@@ -630,7 +630,7 @@ def _audit_environment() -> tuple[int, int]:
     # Default credential checks
     if ENV_FILE.exists():
         env_content = ENV_FILE.read_text()
-        if "POSTGRES_PASSWORD=aef_dev_password" in env_content:
+        if "POSTGRES_PASSWORD=syn_dev_password" in env_content:
             warn("POSTGRES_PASSWORD is still the default — change for production")
             warnings += 1
         if "MINIO_ROOT_PASSWORD=minioadmin" in env_content:
@@ -697,7 +697,7 @@ def configure_cloudflare(ctx: dict) -> bool:
 
     if ctx.get("non_interactive"):
         ctx["cloudflare_tunnel_token"] = os.environ.get("CLOUDFLARE_TUNNEL_TOKEN", "")
-        ctx["aef_domain"] = os.environ.get("AEF_DOMAIN", "")
+        ctx["syn_domain"] = os.environ.get("SYN_DOMAIN", "")
         if ctx["cloudflare_tunnel_token"]:
             ok("Cloudflare config read from environment")
         else:
@@ -709,7 +709,7 @@ def configure_cloudflare(ctx: dict) -> bool:
         return True
 
     ctx["cloudflare_tunnel_token"] = prompt("Cloudflare Tunnel token")
-    ctx["aef_domain"] = prompt("Domain (e.g., aef.yourdomain.com)")
+    ctx["syn_domain"] = prompt("Domain (e.g., syn.yourdomain.com)")
 
     ok("Cloudflare Tunnel configured")
     return True
@@ -824,7 +824,7 @@ def seed_workflows(ctx: dict) -> bool:  # noqa: ARG001
         return True
 
     result = run(
-        ["uv", "run", "--package", "aef-cli", "aef", "workflow", "seed"],
+        ["uv", "run", "--package", "syn-cli", "syn", "workflow", "seed"],
         check=False,
     )
     if result.returncode == 0:
@@ -838,7 +838,7 @@ def print_summary(ctx: dict) -> bool:
     """Print access URLs and next steps."""
     banner("Setup Complete!")
 
-    domain = ctx.get("aef_domain")
+    domain = ctx.get("syn_domain")
     if domain:
         print(f"  UI:            https://{domain}")
         print(f"  API:           https://api.{domain}")
@@ -930,7 +930,7 @@ def main() -> None:
     print(" \\__,_|___|_|   |___/\\___|\\__|\\__,_| .__/")
     print("                                   |_|")
     print()
-    print("  Agentic Engineering Framework — Interactive Setup")
+    print("  Syntropic137 — Interactive Setup")
     print()
 
     if args.stage:

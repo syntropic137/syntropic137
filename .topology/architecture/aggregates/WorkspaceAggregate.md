@@ -1,6 +1,6 @@
 # WorkspaceAggregate
 
-> **File**: `./packages/aef-domain/src/aef_domain/contexts/workspaces/domain/WorkspaceAggregate.py`  
+> **File**: `./packages/syn-domain/src/syn_domain/contexts/workspaces/domain/WorkspaceAggregate.py`  
 > **Lines**: 572  
 > **Commands**: 0  
 > **Events**: 0

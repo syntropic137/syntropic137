@@ -182,12 +182,12 @@ Existing endpoints updated:
   implements this model with required workspace isolation and event persistence
 
 ## Files Changed
-- `packages/aef-domain/.../read_models/workflow_execution_summary.py` - New
-- `packages/aef-domain/.../read_models/workflow_execution_detail.py` - New
-- `packages/aef-domain/.../list_executions/projection.py` - New
-- `packages/aef-domain/.../get_execution_detail/projection.py` - New
-- `packages/aef-adapters/.../manager.py` - Updated event handlers
-- `apps/aef-dashboard/.../api/executions.py` - New endpoint
-- `apps/aef-dashboard/.../api/workflows.py` - Updated with runs_link
-- `packages/aef-domain/.../SessionStartedEvent.py` - Added execution_id
-- `packages/aef-domain/.../SessionSummary.py` - Added execution_id
+- `packages/syn-domain/.../read_models/workflow_execution_summary.py` - New
+- `packages/syn-domain/.../read_models/workflow_execution_detail.py` - New
+- `packages/syn-domain/.../list_executions/projection.py` - New
+- `packages/syn-domain/.../get_execution_detail/projection.py` - New
+- `packages/syn-adapters/.../manager.py` - Updated event handlers
+- `apps/syn-dashboard/.../api/executions.py` - New endpoint
+- `apps/syn-dashboard/.../api/workflows.py` - Updated with runs_link
+- `packages/syn-domain/.../SessionStartedEvent.py` - Added execution_id
+- `packages/syn-domain/.../SessionSummary.py` - Added execution_id

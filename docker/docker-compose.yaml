@@ -6,7 +6,7 @@
 #
 # See: ADR-034 - Test Infrastructure Architecture
 
-name: ${COMPOSE_PROJECT_NAME:-aef}
+name: ${COMPOSE_PROJECT_NAME:-syntropic137}
 
 services:
   # =============================================================================
@@ -22,11 +22,11 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
     environment:
-      POSTGRES_DB: aef
-      POSTGRES_USER: aef
-      POSTGRES_PASSWORD: aef_dev_password
+      POSTGRES_DB: syn
+      POSTGRES_USER: syn
+      POSTGRES_PASSWORD: syn_dev_password
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aef -d aef"]
+      test: ["CMD-SHELL", "pg_isready -U syn -d syn"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -40,7 +40,7 @@ services:
       dockerfile: event-store/Dockerfile
     environment:
       BACKEND: postgres
-      DATABASE_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      DATABASE_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
       BIND_ADDR: 0.0.0.0:50051
       RUST_LOG: info
     depends_on:
@@ -59,7 +59,7 @@ services:
   collector:
     build:
       context: ..
-      dockerfile: packages/aef-collector/Dockerfile
+      dockerfile: packages/syn-collector/Dockerfile
     environment:
       EVENT_COLLECTOR_PORT: "8080"
       EVENT_STORE_HOST: event-store
@@ -86,12 +86,12 @@ services:
   dashboard:
     build:
       context: ..
-      dockerfile: apps/aef-dashboard/Dockerfile
+      dockerfile: apps/syn-dashboard/Dockerfile
     environment:
       DASHBOARD_PORT: "8000"
       DASHBOARD_HOST: "0.0.0.0"
       # ADR-030: Use explicit database URLs
-      AEF_OBSERVABILITY_DB_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      SYN_OBSERVABILITY_DB_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       # Note: ANTHROPIC_API_KEY should be set via .env or host environment
@@ -137,8 +137,8 @@ services:
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/aef-artifacts &&
-      echo 'Bucket aef-artifacts ready!'
+      mc mb --ignore-existing local/syn-artifacts &&
+      echo 'Bucket syn-artifacts ready!'
       "
     restart: "no"
 
@@ -164,6 +164,6 @@ services:
       context: ./sidecar-proxy
       dockerfile: Dockerfile
     environment:
-      AEF_EXECUTION_ID: "dev-local"
+      SYN_EXECUTION_ID: "dev-local"
     profiles:
       - sidecar # Only start with: docker compose --profile sidecar up

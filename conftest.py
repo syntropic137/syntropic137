@@ -18,11 +18,11 @@ os.environ["APP_ENVIRONMENT"] = "test"
 
 import pytest
 
-from aef_adapters.storage import reset_storage
+from syn_adapters.storage import reset_storage
 
 # Register test infrastructure fixtures (ADR-034)
 pytest_plugins = [
-    "aef_tests.fixtures.infrastructure",
+    "syn_tests.fixtures.infrastructure",
 ]
 
 

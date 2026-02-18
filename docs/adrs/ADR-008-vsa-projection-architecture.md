@@ -33,13 +33,13 @@ contexts/{context}/slices/{slice_name}/
 
 ### 2. Separation of Concerns
 
-**Domain Layer** (`aef-domain`):
+**Domain Layer** (`syn-domain`):
 - Query DTOs in `domain/queries/` - define query parameters
 - Read Model DTOs in `domain/read_models/` - define response shapes
 - Projections in `slices/` - handle events, build read models
 - Handlers in `slices/` - execute queries
 
-**Adapter Layer** (`aef-adapters`):
+**Adapter Layer** (`syn-adapters`):
 - `ProjectionStoreProtocol` - abstract storage interface
 - `PostgresProjectionStore` - production implementation
 - `InMemoryProjectionStore` - test implementation

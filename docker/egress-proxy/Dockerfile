@@ -7,12 +7,12 @@
 # See ADR-021: Isolated Workspace Architecture - Network Allowlist
 #
 # Build:
-#   docker build -t aef-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
+#   docker build -t syn-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
 #
 # Run:
 #   docker run -d --name egress-proxy -p 8080:8080 \
 #     -e ALLOWED_HOSTS="api.anthropic.com,github.com,pypi.org" \
-#     aef-egress-proxy:latest
+#     syn-egress-proxy:latest
 
 FROM mitmproxy/mitmproxy:10.1.1
 

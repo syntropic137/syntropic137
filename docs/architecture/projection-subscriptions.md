@@ -2,7 +2,7 @@
 
 🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
 
-**Data Source:** `.topology/aef-manifest.json`
+**Data Source:** `.topology/syn-manifest.json`
 
 ---
 
@@ -114,6 +114,6 @@ just docs-gen
 Or regenerate the manifest first:
 
 ```bash
-vsa manifest --config vsa.yaml --output .topology/aef-manifest.json --include-domain
+vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain
 just docs-gen
 ```

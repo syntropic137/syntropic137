@@ -1,10 +1,10 @@
 # AEF API
 
-Programmatic interface to the Agentic Engineering Framework.
+Programmatic interface to the Syntropic137.
 
 ## Overview
 
-`aef-api` is the single entry point for interacting with AEF programmatically. Everything — CLI commands, dashboard operations, third-party integrations, and LLM tool-use — goes through this API.
+`syn-api` is the single entry point for interacting with Syntropic137 programmatically. Everything — CLI commands, dashboard operations, third-party integrations, and LLM tool-use — goes through this API.
 
 ## Installation
 
@@ -14,18 +14,18 @@ uv sync
 ```
 
 ```python
-import aef_api
-print(aef_api.__version__)  # "0.1.0"
+import syn_api
+print(syn_api.__version__)  # "0.1.0"
 ```
 
 ## Quick Start
 
 ```python
-import aef_api
-from aef_api import Ok, Err
+import syn_api
+from syn_api import Ok, Err
 
 # List workflows
-result = await aef_api.v1.workflows.list_workflows()
+result = await syn_api.v1.workflows.list_workflows()
 match result:
     case Ok(workflows):
         for wf in workflows:
@@ -34,7 +34,7 @@ match result:
         print(f"Error: {error}")
 
 # Create a workflow
-result = await aef_api.v1.workflows.create_workflow(
+result = await syn_api.v1.workflows.create_workflow(
     name="My Research Workflow",
     workflow_type="research",
     description="Automated research pipeline",
@@ -49,7 +49,7 @@ match result:
 ## Architecture
 
 ```
-aef-api
+syn-api
 ├── types.py         # Result[T, E], Ok, Err, Pydantic models, error enums
 ├── auth.py          # AuthContext (optional parameter)
 ├── _wiring.py       # Internal: adapter composition root
@@ -67,7 +67,7 @@ aef-api
 All API functions return `Result[T, E]` — either `Ok(value)` or `Err(error, message)`. Use pattern matching or `isinstance` checks:
 
 ```python
-result = await aef_api.v1.workflows.get_workflow("wf-123")
+result = await syn_api.v1.workflows.get_workflow("wf-123")
 
 # Pattern matching (recommended)
 match result:
@@ -97,10 +97,10 @@ if isinstance(result, Ok):
 All functions accept an optional `AuthContext` parameter. When `None` (the default), operations run without authorization checks.
 
 ```python
-from aef_api import AuthContext
+from syn_api import AuthContext
 
 auth = AuthContext(user_id="user-123", tenant_id="tenant-abc")
-result = await aef_api.v1.workflows.list_workflows(auth=auth)
+result = await syn_api.v1.workflows.list_workflows(auth=auth)
 ```
 
 See [auth.md](v1/auth.md) for details.

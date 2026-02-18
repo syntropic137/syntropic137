@@ -111,13 +111,13 @@ For home lab deployments, consider these optimizations:
 
 ```bash
 # In .env file:
-AEF_WORKSPACE_ISOLATION_BACKEND=firecracker
-AEF_WORKSPACE_POOL_SIZE=10           # Pre-warm 10 VMs
-AEF_WORKSPACE_MAX_CONCURRENT=50      # Max 50 concurrent agents
+SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
+SYN_WORKSPACE_POOL_SIZE=10           # Pre-warm 10 VMs
+SYN_WORKSPACE_MAX_CONCURRENT=50      # Max 50 concurrent agents
 
 # Per-workspace limits
-AEF_SECURITY_MAX_MEMORY=1Gi          # 1GB per workspace
-AEF_SECURITY_MAX_CPU=1.0             # 1 vCPU per workspace
+SYN_SECURITY_MAX_MEMORY=1Gi          # 1GB per workspace
+SYN_SECURITY_MAX_CPU=1.0             # 1 vCPU per workspace
 ```
 
 ### KVM Permissions
@@ -146,7 +146,7 @@ sudo ip link set br0 up
 echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
 
 # In .env:
-AEF_SECURITY_ALLOW_NETWORK=true
+SYN_SECURITY_ALLOW_NETWORK=true
 ```
 
 ## Comparison: Home Lab vs Cloud
@@ -220,7 +220,7 @@ Firecracker provides strong isolation but follow these practices:
 
 1. **Never run Firecracker as root in production** - Use jailer
 2. **Limit KVM access** - Only authorized users should access /dev/kvm
-3. **Network isolation** - Keep `AEF_SECURITY_ALLOW_NETWORK=false` unless required
+3. **Network isolation** - Keep `SYN_SECURITY_ALLOW_NETWORK=false` unless required
 4. **Resource limits** - Always set memory and CPU limits
 5. **Jailer** - Use Firecracker's jailer for additional isolation
 
@@ -233,4 +233,4 @@ jailer --id my-vm --exec-file /usr/local/bin/firecracker --uid 1000 --gid 1000
 
 - [Firecracker Documentation](https://github.com/firecracker-microvm/firecracker/tree/main/docs)
 - [ADR-021: Isolated Workspace Architecture](../../docs/adrs/ADR-021-isolated-workspace-architecture.md)
-- [Workspace README](../../packages/aef-adapters/src/aef_adapters/workspaces/README.md)
+- [Workspace README](../../packages/syn-adapters/src/syn_adapters/workspaces/README.md)

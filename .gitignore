@@ -118,9 +118,9 @@ workflows/custom/*.yml
 # Artifacts directory (if storing locally)
 artifacts/
 # But not the domain artifacts bounded context
-!packages/aef-domain/src/aef_domain/contexts/artifacts/
+!packages/syn-domain/src/syn_domain/contexts/artifacts/
 # And not the adapters artifacts module
-!packages/aef-adapters/src/aef_adapters/artifacts/
+!packages/syn-adapters/src/syn_adapters/artifacts/
 
 _reference/
 archive/
@@ -162,7 +162,7 @@ logs/
 # =============================================================================
 # AEF Execution Workspaces (generated at runtime)
 # =============================================================================
-.aef-workspaces/
+.syn-workspaces/
 
 # Generated workflow artifacts
 RESEARCH-PHASE_*.md
@@ -170,7 +170,7 @@ RESEARCH-PHASE_*.md
 DEEP-DIVE_*.md
 
 # Browser testing screenshots
-assets/
+/assets/
 build/
 HANDOFF-*.md
 /workspaces/

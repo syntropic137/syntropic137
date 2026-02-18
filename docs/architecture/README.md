@@ -44,7 +44,7 @@ just diagram  # Updates docs/architecture/vsa-overview.svg
 
 ```bash
 # 1. Update manifest
-vsa manifest --config vsa.yaml --output .topology/aef-manifest.json --include-domain
+vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain
 
 # 2. Regenerate diagrams
 claude generate-architecture-docs
@@ -113,7 +113,7 @@ AEF follows these architectural patterns:
 
 ### Auto-Generated Content (Single Source of Truth)
 
-**Source:** VSA manifest (`.topology/aef-manifest.json`)
+**Source:** VSA manifest (`.topology/syn-manifest.json`)
 
 **Contains:**
 - Commands, Events, Projections (names, counts)

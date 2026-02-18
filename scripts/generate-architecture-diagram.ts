@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import { ArchitectureSvgGenerator } from '../lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/architecture-svg-generator';
 import { parseManifest } from '../lib/event-sourcing-platform/vsa/vsa-visualizer/src/manifest/parser';
 
-const MANIFEST_PATH = '.topology/aef-manifest.json';
+const MANIFEST_PATH = '.topology/syn-manifest.json';
 const OUTPUT_PATH = 'docs/architecture/vsa-overview.svg';
 
 async function main() {
@@ -31,7 +31,7 @@ async function main() {
       { name: 'Redis', description: 'Cache' },
       { name: 'MinIO', description: 'Artifacts' }
     ],
-    packages: ['aef-domain', 'aef-adapters', 'aef-collector', 'aef-shared'],
+    packages: ['syn-domain', 'syn-adapters', 'syn-collector', 'syn-shared'],
     libraries: [
       { 
         name: 'agentic-primitives',

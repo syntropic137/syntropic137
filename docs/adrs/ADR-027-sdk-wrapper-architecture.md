@@ -101,7 +101,7 @@ class AEFAgent(InstrumentedAgent):
 ### 3. Create TimescaleDB Backend for agentic_hooks
 
 ```python
-# packages/aef-adapters/src/aef_adapters/observability/timescale_backend.py
+# packages/syn-adapters/src/syn_adapters/observability/timescale_backend.py
 from agentic_hooks.backends import Backend
 from agentic_hooks.events import HookEvent
 
@@ -162,7 +162,7 @@ dependencies = [
 ```
 
 ### Phase 2: Create TimescaleDB Backend (30 min)
-- Implement `TimescaleDBBackend` in `aef-adapters`
+- Implement `TimescaleDBBackend` in `syn-adapters`
 - Tests with mock writer
 
 ### Phase 3: Refactor AgentRunner to Use Primitives (1h)

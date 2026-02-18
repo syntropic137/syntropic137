@@ -9,28 +9,28 @@
 #   2. Run: just secrets-generate
 #   3. Copy GitHub App private key to ../secrets/github-private-key.pem
 
-name: ${COMPOSE_PROJECT_NAME:-aef}
+name: ${COMPOSE_PROJECT_NAME:-syntropic137}
 
 services:
   # ==========================================================================
   # CORE APPLICATION SERVICES
   # ==========================================================================
 
-  aef-dashboard:
+  syn-dashboard:
     build:
       context: ../../..
-      dockerfile: infra/docker/images/aef-dashboard/Dockerfile
-    image: ${CONTAINER_REGISTRY:-}aef-dashboard:${IMAGE_TAG:-latest}
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-dashboard
+      dockerfile: infra/docker/images/syn-dashboard/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}syn-dashboard:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard
     environment:
       # Database connection
       # Note: POSTGRES_PASSWORD here must match the value in secrets/db-password.txt
       # For production, ensure both are set to the same secure value
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-aef}:${POSTGRES_PASSWORD:-aef_dev_password}@postgres:5432/${POSTGRES_DB:-aef}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@postgres:5432/${POSTGRES_DB:-syn}
       # Event Store
       - EVENT_STORE_HOST=event-store
       - EVENT_STORE_PORT=50051
-      - EVENT_STORE_TENANT_ID=${COMPOSE_PROJECT_NAME:-aef}
+      - EVENT_STORE_TENANT_ID=${COMPOSE_PROJECT_NAME:-syntropic137}
       # Collector
       - COLLECTOR_URL=http://collector:8080
       # MinIO (Object Storage)
@@ -43,9 +43,9 @@ services:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       # GitHub App
-      - AEF_GITHUB_APP_ID=${AEF_GITHUB_APP_ID}
-      - AEF_GITHUB_APP_NAME=${AEF_GITHUB_APP_NAME}
-      - AEF_GITHUB_INSTALLATION_ID=${AEF_GITHUB_INSTALLATION_ID}
+      - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID}
+      - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME}
+      - SYN_GITHUB_INSTALLATION_ID=${SYN_GITHUB_INSTALLATION_ID}
     secrets:
       - github_private_key
       - github_webhook_secret
@@ -78,14 +78,14 @@ services:
           memory: ${DASHBOARD_MEMORY_LIMIT:-512m}
           cpus: "${DASHBOARD_CPU_LIMIT:-0.5}"
     networks:
-      - aef-internal
+      - syn-internal
 
-  aef-ui:
+  syn-ui:
     build:
       context: ../../..
-      dockerfile: infra/docker/images/aef-ui/Dockerfile
-    image: ${CONTAINER_REGISTRY:-}aef-ui:${IMAGE_TAG:-latest}
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-ui
+      dockerfile: infra/docker/images/syn-ui/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}syn-ui:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-ui
     ports:
       - "80:80"
     healthcheck:
@@ -94,7 +94,7 @@ services:
       timeout: 5s
       retries: 3
     depends_on:
-      aef-dashboard:
+      syn-dashboard:
         condition: service_healthy
     deploy:
       resources:
@@ -102,7 +102,7 @@ services:
           memory: ${UI_MEMORY_LIMIT:-256m}
           cpus: "${UI_CPU_LIMIT:-0.25}"
     networks:
-      - aef-internal
+      - syn-internal
 
   # ==========================================================================
   # DATA SERVICES
@@ -110,11 +110,11 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-postgres
     environment:
-      - POSTGRES_USER=${POSTGRES_USER:-aef}
+      - POSTGRES_USER=${POSTGRES_USER:-syn}
       - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
-      - POSTGRES_DB=${POSTGRES_DB:-aef}
+      - POSTGRES_DB=${POSTGRES_DB:-syn}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../../../docker/init-db:/docker-entrypoint-initdb.d:ro
@@ -124,7 +124,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-aef} -d ${POSTGRES_DB:-aef}",
+          "pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn}",
         ]
       interval: 5s
       timeout: 5s
@@ -134,17 +134,17 @@ services:
         limits:
           memory: ${POSTGRES_MEMORY_LIMIT:-1g}
     networks:
-      - aef-internal
+      - syn-internal
 
   event-store:
     build:
       context: ../../../lib/event-sourcing-platform
       dockerfile: event-store/Dockerfile
-    image: ${CONTAINER_REGISTRY:-}aef-event-store:${IMAGE_TAG:-latest}
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-event-store
+    image: ${CONTAINER_REGISTRY:-}syn-event-store:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-event-store
     environment:
       - BACKEND=postgres
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-aef}:${POSTGRES_PASSWORD:-aef_dev_password}@postgres:5432/${POSTGRES_DB:-aef}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@postgres:5432/${POSTGRES_DB:-syn}
       - BIND_ADDR=0.0.0.0:50051
       - RUST_LOG=${LOG_LEVEL:-info}
     healthcheck:
@@ -161,14 +161,14 @@ services:
         limits:
           memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
     networks:
-      - aef-internal
+      - syn-internal
 
   collector:
     build:
       context: ../../..
-      dockerfile: packages/aef-collector/Dockerfile
-    image: ${CONTAINER_REGISTRY:-}aef-collector:${IMAGE_TAG:-latest}
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-collector
+      dockerfile: packages/syn-collector/Dockerfile
+    image: ${CONTAINER_REGISTRY:-}syn-collector:${IMAGE_TAG:-latest}
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-collector
     environment:
       - EVENT_COLLECTOR_PORT=8080
       - EVENTSTORE_HOST=event-store
@@ -196,11 +196,11 @@ services:
           memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
           cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
     networks:
-      - aef-internal
+      - syn-internal
 
   minio:
     image: minio/minio:latest
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-minio
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-minio
     command: server /data --console-address ":9001"
     environment:
       - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
@@ -218,16 +218,16 @@ services:
         limits:
           memory: ${MINIO_MEMORY_LIMIT:-256m}
     networks:
-      - aef-internal
+      - syn-internal
 
   minio-init:
     image: minio/mc:latest
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-minio-init
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-minio-init
     entrypoint: >
       /bin/sh -c "
       mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
-      mc mb --ignore-existing local/aef-artifacts;
-      mc mb --ignore-existing local/aef-conversations;
+      mc mb --ignore-existing local/syn-artifacts;
+      mc mb --ignore-existing local/syn-conversations;
       echo 'Buckets created successfully';
       "
     environment:
@@ -237,11 +237,11 @@ services:
       minio:
         condition: service_healthy
     networks:
-      - aef-internal
+      - syn-internal
 
   redis:
     image: redis:7-alpine
-    container_name: ${COMPOSE_PROJECT_NAME:-aef}-redis
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -255,7 +255,7 @@ services:
         limits:
           memory: ${REDIS_MEMORY_LIMIT:-256m}
     networks:
-      - aef-internal
+      - syn-internal
 
 # ==========================================================================
 # SECRETS (file-based)
@@ -277,19 +277,19 @@ secrets:
 
 volumes:
   postgres_data:
-    name: ${COMPOSE_PROJECT_NAME:-aef}_postgres_data
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_postgres_data
   dashboard_logs:
-    name: ${COMPOSE_PROJECT_NAME:-aef}_dashboard_logs
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_dashboard_logs
   minio_data:
-    name: ${COMPOSE_PROJECT_NAME:-aef}_minio_data
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_minio_data
   redis_data:
-    name: ${COMPOSE_PROJECT_NAME:-aef}_redis_data
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_redis_data
 
 # ==========================================================================
 # NETWORKS
 # ==========================================================================
 
 networks:
-  aef-internal:
-    name: ${COMPOSE_PROJECT_NAME:-aef}_internal
+  syn-internal:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_internal
     driver: bridge

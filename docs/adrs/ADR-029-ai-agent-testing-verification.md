@@ -206,7 +206,7 @@ In tests, we need to:
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
 │  Level 3: Integration Tests (on-demand)                     │
-│  - Real sandbox repo (AgentParadise/sandbox_*)              │
+│  - Real sandbox repo (syntropic137/sandbox_*)              │
 │  - Automatic PR cleanup after test                          │
 │  - Run weekly or before release                             │
 └─────────────────────────────────────────────────────────────┘
@@ -312,7 +312,7 @@ async def record_cli_invocation(tool: str, args: list[str], response: MockRespon
 Central registry of verifiers for each claim type:
 
 ```python
-# packages/aef-shared/src/aef_shared/verification/registry.py
+# packages/syn-shared/src/syn_shared/verification/registry.py
 VERIFIERS: dict[str, Verifier] = {
     "file_created": FileExistsVerifier(),
     "pr_opened": GitHubPRVerifier(),
@@ -389,7 +389,7 @@ event = {
 }
 
 # ✅ GOOD: Factory - mypy catches errors immediately
-from aef_shared.events.factories import tool_started
+from syn_shared.events.factories import tool_started
 
 event = tool_started(
     session_id=session_id,  # Required, type-checked
@@ -398,7 +398,7 @@ event = tool_started(
 )
 ```
 
-Available factories in `aef_shared.events.factories`:
+Available factories in `syn_shared.events.factories`:
 - `tool_started()`, `tool_completed()`
 - `session_started()`, `session_completed()`
 - `token_usage()`

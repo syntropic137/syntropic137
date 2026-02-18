@@ -17,52 +17,52 @@ def main() -> int:
 
     try:
         # Domain aggregates
-        from aef_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
+        from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
             WorkspaceAggregate,
         )
 
         modules_tested.append(WorkspaceAggregate.__name__)
 
-        from aef_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
             WorkflowTemplateAggregate,
         )
 
         modules_tested.append(WorkflowTemplateAggregate.__name__)
 
-        from aef_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
+        from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
             AgentSessionAggregate,
         )
 
         modules_tested.append(AgentSessionAggregate.__name__)
 
-        from aef_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
             ArtifactAggregate,
         )
 
         modules_tested.append(ArtifactAggregate.__name__)
 
-        from aef_domain.contexts.github.domain.aggregate_installation.InstallationAggregate import (
+        from syn_domain.contexts.github.domain.aggregate_installation.InstallationAggregate import (
             InstallationAggregate,
         )
 
         modules_tested.append(InstallationAggregate.__name__)
 
         # Apps
-        from aef_dashboard.main import app as dashboard_app
+        from syn_dashboard.main import app as dashboard_app
 
         modules_tested.append(dashboard_app.title)
 
-        from aef_cli.main import app as cli_app
+        from syn_cli.main import app as cli_app
 
         modules_tested.append(cli_app.info.name or "cli_app")
 
         # API
-        import aef_api
+        import syn_api
 
-        modules_tested.append(f"aef_api v{aef_api.__version__}")
+        modules_tested.append(f"syn_api v{syn_api.__version__}")
 
         # Adapters
-        from aef_adapters.storage import (
+        from syn_adapters.storage import (
             ArtifactRepositoryProtocol,
             SessionRepositoryProtocol,
         )

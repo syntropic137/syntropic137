@@ -41,7 +41,7 @@ isolation similar to Firecracker, but with full OCI compatibility for Kubernetes
 
 ### Phase 1: KataWorkspace Class
 
-Create `packages/aef-adapters/src/aef_adapters/workspaces/kata.py`:
+Create `packages/syn-adapters/src/syn_adapters/workspaces/kata.py`:
 
 ```python
 """Kata Containers workspace for Kubernetes environments.
@@ -62,13 +62,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
-from aef_shared.settings import IsolationBackend
+from syn_shared.settings import IsolationBackend
 
-from aef_adapters.workspaces.base import BaseIsolatedWorkspace
+from syn_adapters.workspaces.base import BaseIsolatedWorkspace
 
 if TYPE_CHECKING:
-    from aef_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceConfig
-    from aef_shared.settings import WorkspaceSecuritySettings
+    from syn_adapters.workspaces.types import IsolatedWorkspace, IsolatedWorkspaceConfig
+    from syn_shared.settings import WorkspaceSecuritySettings
 
 
 class KataWorkspace(BaseIsolatedWorkspace):
@@ -165,7 +165,7 @@ def build_kata_pod_spec(
         "kind": "Pod",
         "metadata": {
             "name": name,
-            "namespace": "aef-workspaces",
+            "namespace": "syn-workspaces",
             "labels": {
                 "aef.dev/component": "workspace",
                 "aef.dev/session-id": config.session_id,
@@ -182,7 +182,7 @@ def build_kata_pod_spec(
             },
             "containers": [{
                 "name": "workspace",
-                "image": "aef-workspace:latest",
+                "image": "syn-workspace:latest",
                 "command": ["sleep", "infinity"],
                 "securityContext": {
                     "allowPrivilegeEscalation": False,
@@ -270,7 +270,7 @@ scheduling:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: aef-workspaces
+  name: syn-workspaces
   labels:
     pod-security.kubernetes.io/enforce: restricted
 ---
@@ -278,7 +278,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: workspace-quota
-  namespace: aef-workspaces
+  namespace: syn-workspaces
 spec:
   hard:
     pods: "100"
