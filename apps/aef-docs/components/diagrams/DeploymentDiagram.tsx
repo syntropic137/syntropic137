@@ -23,7 +23,7 @@ export function DeploymentArchitectureDiagram() {
         </DiagramGroup>
 
         <DiagramGroup title="Backend" color="cyan" columns={1} className="h-full">
-          <DiagramNode icon="server" label="aef-dashboard" sublabel="FastAPI :8000" color="cyan" />
+          <DiagramNode icon="server" label="aef-api" sublabel="FastAPI :8000" color="cyan" />
           <DiagramNode icon="radio" label="event-collector" sublabel=":8080" color="cyan" />
           <DiagramNode icon="activity" label="event-store" sublabel="gRPC :50051" color="cyan" />
         </DiagramGroup>
