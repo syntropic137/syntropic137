@@ -81,7 +81,7 @@ select = [
     "W",      # pycodestyle warnings
     "F",      # Pyflakes
     "I",      # isort
-    "B",      # flake8-bugbear
+    "B",      # flake8-bugbear (includes B009: ban getattr with constant attr — see #116)
     "C4",     # flake8-comprehensions
     "UP",     # pyupgrade
     "ARG",    # flake8-unused-arguments
@@ -93,6 +93,10 @@ select = [
 ignore = [
     "E501",   # line too long (handled by formatter)
     "B008",   # do not perform function calls in argument defaults
+    # NOTE: Do NOT add B009 here. B009 catches 2-arg getattr(obj, "literal").
+    # For 3-arg getattr(obj, "literal", default) — which is the real bug pattern —
+    # see test_no_getattr_in_api_layer in packages/syn-api/tests/test_lint_rules.py.
+    # Both checks together enforce: use direct attribute access, not getattr. (#116)
 ]
 
 [tool.ruff.lint.per-file-ignores]

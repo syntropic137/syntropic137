@@ -184,15 +184,15 @@ async def get_session(
         tool_data = await manager.session_tools.get(session_id)
         operations = [
             ToolOperation(
-                observation_id=getattr(op, "observation_id", ""),
-                operation_type=getattr(op, "operation_type", ""),
-                timestamp=getattr(op, "timestamp", None),
-                duration_ms=getattr(op, "duration_ms", None),
-                success=getattr(op, "success", None),
-                tool_name=getattr(op, "tool_name", None),
-                tool_use_id=getattr(op, "tool_use_id", None),
-                input_preview=getattr(op, "input_preview", None),
-                output_preview=getattr(op, "output_preview", None),
+                observation_id=op.observation_id,
+                operation_type=op.operation_type,
+                timestamp=op.timestamp,
+                duration_ms=op.duration_ms,
+                success=op.success,
+                tool_name=op.tool_name,
+                tool_use_id=op.tool_use_id,
+                input_preview=op.input_preview,
+                output_preview=op.output_preview,
             )
             for op in (tool_data or [])
         ]
@@ -207,11 +207,11 @@ async def get_session(
     try:
         cost = await manager.session_cost.get_session_cost(session_id)
         if cost:
-            input_tokens = getattr(cost, "input_tokens", 0)
-            output_tokens = getattr(cost, "output_tokens", 0)
-            total_cost = getattr(cost, "total_cost_usd", session.total_cost_usd)
-            if getattr(cost, "duration_ms", 0):
-                duration_seconds = getattr(cost, "duration_ms", 0) / 1000.0
+            input_tokens = cost.input_tokens
+            output_tokens = cost.output_tokens
+            total_cost = cost.total_cost_usd
+            if cost.duration_ms:
+                duration_seconds = cost.duration_ms / 1000.0
     except Exception:
         logger.exception("Failed to load cost data for session %s", session_id)
 

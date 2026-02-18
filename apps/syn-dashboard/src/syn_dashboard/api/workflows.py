@@ -96,14 +96,14 @@ async def get_workflow(workflow_id: str) -> WorkflowResponse:
         else:
             phases.append(
                 PhaseDefinition(
-                    phase_id=getattr(p, "id", f"phase-{i}"),
-                    name=getattr(p, "name", f"Phase {i}"),
-                    order=getattr(p, "order", i),
-                    description=getattr(p, "description", None),
-                    agent_type=getattr(p, "agent_type", ""),
-                    prompt_template=getattr(p, "prompt_template", None),
-                    timeout_seconds=getattr(p, "timeout_seconds", 300),
-                    allowed_tools=list(getattr(p, "allowed_tools", [])),
+                    phase_id=p.id if hasattr(p, "id") else f"phase-{i}",
+                    name=p.name if hasattr(p, "name") else f"Phase {i}",
+                    order=p.order if hasattr(p, "order") else i,
+                    description=p.description if hasattr(p, "description") else None,
+                    agent_type=p.agent_type if hasattr(p, "agent_type") else "",
+                    prompt_template=p.prompt_template if hasattr(p, "prompt_template") else None,
+                    timeout_seconds=p.timeout_seconds if hasattr(p, "timeout_seconds") else 300,
+                    allowed_tools=list(p.allowed_tools) if hasattr(p, "allowed_tools") else [],
                 )
             )
 

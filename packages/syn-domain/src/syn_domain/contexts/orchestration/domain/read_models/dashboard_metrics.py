@@ -32,6 +32,9 @@ class DashboardMetrics:
     total_artifacts: int = 0
     """Total number of artifacts."""
 
+    total_artifact_bytes: int = 0
+    """Total artifact size in bytes."""
+
     total_tokens: int = 0
     """Total tokens used across all sessions."""
 
@@ -54,6 +57,7 @@ class DashboardMetrics:
             failed_workflows=data.get("failed_workflows", 0),
             total_sessions=data.get("total_sessions", 0),
             total_artifacts=data.get("total_artifacts", 0),
+            total_artifact_bytes=data.get("total_artifact_bytes", 0),
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
@@ -69,6 +73,7 @@ class DashboardMetrics:
             "failed_workflows": self.failed_workflows,
             "total_sessions": self.total_sessions,
             "total_artifacts": self.total_artifacts,
+            "total_artifact_bytes": self.total_artifact_bytes,
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,

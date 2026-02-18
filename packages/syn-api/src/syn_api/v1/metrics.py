@@ -45,16 +45,16 @@ async def get_dashboard_metrics(
 
         return Ok(
             DashboardMetrics(
-                total_workflows=getattr(data, "total_workflows", 0),
-                completed_workflows=getattr(data, "completed_workflows", 0),
-                failed_workflows=getattr(data, "failed_workflows", 0),
-                total_sessions=getattr(data, "total_sessions", 0),
-                total_input_tokens=getattr(data, "total_input_tokens", 0),
-                total_output_tokens=getattr(data, "total_output_tokens", 0),
-                total_tokens=getattr(data, "total_tokens", 0),
-                total_cost_usd=Decimal(str(getattr(data, "total_cost_usd", 0))),
-                total_artifacts=getattr(data, "total_artifacts", 0),
-                total_artifact_bytes=getattr(data, "total_artifact_bytes", 0),
+                total_workflows=data.total_workflows,
+                completed_workflows=data.completed_workflows,
+                failed_workflows=data.failed_workflows,
+                total_sessions=data.total_sessions,
+                total_input_tokens=data.total_input_tokens,
+                total_output_tokens=data.total_output_tokens,
+                total_tokens=data.total_tokens,
+                total_cost_usd=Decimal(str(data.total_cost_usd)),
+                total_artifacts=data.total_artifacts,
+                total_artifact_bytes=data.total_artifact_bytes,
             )
         )
     except Exception as e:
@@ -86,25 +86,25 @@ async def list_session_costs(
         return Ok(
             [
                 SessionCostData(
-                    session_id=getattr(c, "session_id", ""),
-                    execution_id=getattr(c, "execution_id", None),
-                    workflow_id=getattr(c, "workflow_id", None),
-                    phase_id=getattr(c, "phase_id", None),
-                    total_cost_usd=Decimal(str(getattr(c, "total_cost_usd", 0))),
-                    token_cost_usd=Decimal(str(getattr(c, "token_cost_usd", 0))),
-                    input_tokens=getattr(c, "input_tokens", 0),
-                    output_tokens=getattr(c, "output_tokens", 0),
-                    total_tokens=getattr(c, "total_tokens", 0),
-                    cache_creation_tokens=getattr(c, "cache_creation_tokens", 0),
-                    cache_read_tokens=getattr(c, "cache_read_tokens", 0),
-                    tool_calls=getattr(c, "tool_calls", 0),
-                    turns=getattr(c, "turns", 0),
-                    duration_ms=getattr(c, "duration_ms", 0),
-                    cost_by_model=getattr(c, "cost_by_model", {}),
-                    cost_by_tool=getattr(c, "cost_by_tool", {}),
-                    is_finalized=getattr(c, "is_finalized", False),
-                    started_at=getattr(c, "started_at", None),
-                    completed_at=getattr(c, "completed_at", None),
+                    session_id=c.session_id,
+                    execution_id=c.execution_id,
+                    workflow_id=c.workflow_id,
+                    phase_id=c.phase_id,
+                    total_cost_usd=Decimal(str(c.total_cost_usd)),
+                    token_cost_usd=Decimal(str(c.token_cost_usd)),
+                    input_tokens=c.input_tokens,
+                    output_tokens=c.output_tokens,
+                    total_tokens=c.total_tokens,
+                    cache_creation_tokens=c.cache_creation_tokens,
+                    cache_read_tokens=c.cache_read_tokens,
+                    tool_calls=c.tool_calls,
+                    turns=c.turns,
+                    duration_ms=c.duration_ms,
+                    cost_by_model=c.cost_by_model,
+                    cost_by_tool=c.cost_by_tool,
+                    is_finalized=c.is_finalized,
+                    started_at=c.started_at,
+                    completed_at=c.completed_at,
                 )
                 for c in (costs or [])
             ]
@@ -136,25 +136,25 @@ async def get_session_cost(
 
         return Ok(
             SessionCostData(
-                session_id=getattr(c, "session_id", session_id),
-                execution_id=getattr(c, "execution_id", None),
-                workflow_id=getattr(c, "workflow_id", None),
-                phase_id=getattr(c, "phase_id", None),
-                total_cost_usd=Decimal(str(getattr(c, "total_cost_usd", 0))),
-                token_cost_usd=Decimal(str(getattr(c, "token_cost_usd", 0))),
-                input_tokens=getattr(c, "input_tokens", 0),
-                output_tokens=getattr(c, "output_tokens", 0),
-                total_tokens=getattr(c, "total_tokens", 0),
-                cache_creation_tokens=getattr(c, "cache_creation_tokens", 0),
-                cache_read_tokens=getattr(c, "cache_read_tokens", 0),
-                tool_calls=getattr(c, "tool_calls", 0),
-                turns=getattr(c, "turns", 0),
-                duration_ms=getattr(c, "duration_ms", 0),
-                cost_by_model=getattr(c, "cost_by_model", {}),
-                cost_by_tool=getattr(c, "cost_by_tool", {}),
-                is_finalized=getattr(c, "is_finalized", False),
-                started_at=getattr(c, "started_at", None),
-                completed_at=getattr(c, "completed_at", None),
+                session_id=c.session_id,
+                execution_id=c.execution_id,
+                workflow_id=c.workflow_id,
+                phase_id=c.phase_id,
+                total_cost_usd=Decimal(str(c.total_cost_usd)),
+                token_cost_usd=Decimal(str(c.token_cost_usd)),
+                input_tokens=c.input_tokens,
+                output_tokens=c.output_tokens,
+                total_tokens=c.total_tokens,
+                cache_creation_tokens=c.cache_creation_tokens,
+                cache_read_tokens=c.cache_read_tokens,
+                tool_calls=c.tool_calls,
+                turns=c.turns,
+                duration_ms=c.duration_ms,
+                cost_by_model=c.cost_by_model,
+                cost_by_tool=c.cost_by_tool,
+                is_finalized=c.is_finalized,
+                started_at=c.started_at,
+                completed_at=c.completed_at,
             )
         )
     except Exception as e:
@@ -180,20 +180,20 @@ async def list_execution_costs(
         return Ok(
             [
                 ExecutionCostData(
-                    execution_id=getattr(c, "execution_id", ""),
-                    workflow_id=getattr(c, "workflow_id", None),
-                    session_count=getattr(c, "session_count", 0),
-                    session_ids=getattr(c, "session_ids", []),
-                    total_cost_usd=Decimal(str(getattr(c, "total_cost_usd", 0))),
-                    input_tokens=getattr(c, "input_tokens", 0),
-                    output_tokens=getattr(c, "output_tokens", 0),
-                    total_tokens=getattr(c, "total_tokens", 0),
-                    cost_by_phase=getattr(c, "cost_by_phase", {}),
-                    cost_by_model=getattr(c, "cost_by_model", {}),
-                    cost_by_tool=getattr(c, "cost_by_tool", {}),
-                    is_complete=getattr(c, "is_complete", False),
-                    started_at=getattr(c, "started_at", None),
-                    completed_at=getattr(c, "completed_at", None),
+                    execution_id=c.execution_id,
+                    workflow_id=c.workflow_id,
+                    session_count=c.session_count,
+                    session_ids=c.session_ids,
+                    total_cost_usd=Decimal(str(c.total_cost_usd)),
+                    input_tokens=c.input_tokens,
+                    output_tokens=c.output_tokens,
+                    total_tokens=c.total_tokens,
+                    cost_by_phase=c.cost_by_phase,
+                    cost_by_model=c.cost_by_model,
+                    cost_by_tool=c.cost_by_tool,
+                    is_complete=c.is_complete,
+                    started_at=c.started_at,
+                    completed_at=c.completed_at,
                 )
                 for c in (costs or [])
             ]
@@ -225,20 +225,20 @@ async def get_execution_cost(
 
         return Ok(
             ExecutionCostData(
-                execution_id=getattr(c, "execution_id", execution_id),
-                workflow_id=getattr(c, "workflow_id", None),
-                session_count=getattr(c, "session_count", 0),
-                session_ids=getattr(c, "session_ids", []),
-                total_cost_usd=Decimal(str(getattr(c, "total_cost_usd", 0))),
-                input_tokens=getattr(c, "input_tokens", 0),
-                output_tokens=getattr(c, "output_tokens", 0),
-                total_tokens=getattr(c, "total_tokens", 0),
-                cost_by_phase=getattr(c, "cost_by_phase", {}),
-                cost_by_model=getattr(c, "cost_by_model", {}),
-                cost_by_tool=getattr(c, "cost_by_tool", {}),
-                is_complete=getattr(c, "is_complete", False),
-                started_at=getattr(c, "started_at", None),
-                completed_at=getattr(c, "completed_at", None),
+                execution_id=c.execution_id,
+                workflow_id=c.workflow_id,
+                session_count=c.session_count,
+                session_ids=c.session_ids,
+                total_cost_usd=Decimal(str(c.total_cost_usd)),
+                input_tokens=c.input_tokens,
+                output_tokens=c.output_tokens,
+                total_tokens=c.total_tokens,
+                cost_by_phase=c.cost_by_phase,
+                cost_by_model=c.cost_by_model,
+                cost_by_tool=c.cost_by_tool,
+                is_complete=c.is_complete,
+                started_at=c.started_at,
+                completed_at=c.completed_at,
             )
         )
     except Exception as e:
@@ -261,9 +261,9 @@ async def get_cost_summary(
         exec_projection = manager.execution_cost
         all_costs = await exec_projection.get_all()
 
-        total_cost = Decimal(str(sum(getattr(c, "total_cost_usd", 0) for c in (all_costs or []))))
-        total_tokens = sum(getattr(c, "total_tokens", 0) for c in (all_costs or []))
-        total_sessions = sum(getattr(c, "session_count", 0) for c in (all_costs or []))
+        total_cost = Decimal(str(sum(c.total_cost_usd for c in (all_costs or []))))
+        total_tokens = sum(c.total_tokens for c in (all_costs or []))
+        total_sessions = sum(c.session_count for c in (all_costs or []))
 
         return Ok(
             CostSummary(
