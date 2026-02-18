@@ -481,6 +481,7 @@ class ArtifactDetail(BaseModel):
     title: str | None = None
     content: str | None = None
     content_type: str | None = None
+    content_hash: str | None = None
     size_bytes: int = 0
     created_at: datetime | None = None
 
