@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/banner.png" alt="Syntropic137 Banner" width="100%" />
+  <img src="./docs/banner-syntropic137.png" alt="Syntropic137 Banner" width="100%" />
 </p>
 
 # Syntropic137
