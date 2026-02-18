@@ -247,3 +247,32 @@ async def get_session_tool_summary(
         )
     except Exception as e:
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
+
+
+async def get_recent_activity_events(
+    limit: int = 50,
+    auth: AuthContext | None = None,
+) -> Result[list[dict[str, Any]], ObservabilityError]:
+    """Get recent git/activity events for the global dashboard feed.
+
+    Returns the most recent git_commit, git_push, git_branch_changed, and
+    git_operation events across all sessions, ordered newest-first.
+
+    Args:
+        limit: Maximum events to return.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(list[dict]) on success.
+    """
+    await ensure_connected()
+    try:
+        store = get_event_store_instance()
+        await store.initialize()
+        events = await store.query_recent_by_types(
+            event_types=["git_commit", "git_push", "git_branch_changed", "git_operation"],
+            limit=limit,
+        )
+        return Ok(events)
+    except Exception as e:
+        return Err(ObservabilityError.QUERY_FAILED, message=str(e))

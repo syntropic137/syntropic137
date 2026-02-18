@@ -75,6 +75,36 @@ class ToolSummary(BaseModel):
 # ============================================================================
 
 
+@router.get("/recent", response_model=EventListResponse)
+async def get_recent_activity(
+    limit: int = Query(50, ge=1, le=200, description="Max events to return"),
+) -> EventListResponse:
+    """Get recent git activity events for the global dashboard feed.
+
+    Returns git_commit, git_push, git_branch_changed, and git_operation events
+    across all sessions, ordered newest-first. Used by the EventFeed component.
+    """
+    result = await obs.get_recent_activity_events(limit=limit)
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=f"Failed to query activity: {result.message}")
+
+    events = result.value
+    return EventListResponse(
+        events=[
+            EventResponse(
+                time=e["time"],
+                event_type=e["event_type"],
+                session_id=e.get("session_id"),
+                execution_id=e.get("execution_id"),
+                data=e.get("data", {}),
+            )
+            for e in events
+        ],
+        count=len(events),
+    )
+
+
 @router.get("/sessions/{session_id}", response_model=EventListResponse)
 async def get_session_events(
     session_id: str,

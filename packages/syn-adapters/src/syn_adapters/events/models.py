@@ -22,12 +22,19 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 from syn_shared.events import (
+    GIT_BRANCH_CHANGED,
+    GIT_COMMIT,
+    GIT_OPERATION,
+    GIT_PUSH,
     SESSION_COMPLETED,
     SESSION_STARTED,
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
+    TASK_COMPLETED,
+    TEAMMATE_IDLE,
     TOKEN_USAGE,
     TOOL_COMPLETED,
+    TOOL_FAILED,
     TOOL_STARTED,
     EventType,
 )
@@ -157,6 +164,15 @@ class AgentEvent(BaseModel):
             # Subagent lifecycle events (from EventParser, pass through as-is)
             SUBAGENT_STARTED: SUBAGENT_STARTED,
             SUBAGENT_STOPPED: SUBAGENT_STOPPED,
+            # Git observability events (from agentic-primitives observability plugin)
+            GIT_COMMIT: GIT_COMMIT,
+            GIT_PUSH: GIT_PUSH,
+            GIT_BRANCH_CHANGED: GIT_BRANCH_CHANGED,
+            GIT_OPERATION: GIT_OPERATION,
+            # Claude Code hook events (observability plugin)
+            TOOL_FAILED: TOOL_FAILED,
+            TEAMMATE_IDLE: TEAMMATE_IDLE,
+            TASK_COMPLETED: TASK_COMPLETED,
         }
 
         # Use inner_type if it's a tool event, otherwise use raw_type
