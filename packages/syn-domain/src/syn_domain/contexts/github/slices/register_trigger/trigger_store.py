@@ -139,6 +139,8 @@ class _IndexedTrigger:
         self.created_by = created_by
         self.status = status
         self.fire_count = 0
+        self.created_at: datetime | None = None
+        self.last_fired_at: datetime | None = None
 
 
 class InMemoryTriggerQueryStore(TriggerQueryStore):

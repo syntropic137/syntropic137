@@ -216,19 +216,19 @@ async def get_detail(
     if hasattr(detail, "phases") and detail.phases:
         for p in detail.phases:
             ops: list[ToolOperation] = []
-            session_id = getattr(p, "session_id", None)
+            session_id = p.session_id if hasattr(p, "session_id") else None
             if session_id:
                 try:
                     tool_data = await manager.session_tools.get(session_id)
                     ops = [
                         ToolOperation(
-                            observation_id=getattr(op, "observation_id", ""),
-                            operation_type=getattr(op, "operation_type", ""),
-                            timestamp=getattr(op, "timestamp", None),
-                            duration_ms=getattr(op, "duration_ms", None),
-                            success=getattr(op, "success", None),
-                            tool_name=getattr(op, "tool_name", None),
-                            tool_use_id=getattr(op, "tool_use_id", None),
+                            observation_id=op.observation_id,
+                            operation_type=op.operation_type,
+                            timestamp=op.timestamp,
+                            duration_ms=op.duration_ms,
+                            success=op.success,
+                            tool_name=op.tool_name,
+                            tool_use_id=op.tool_use_id,
                         )
                         for op in (tool_data or [])
                     ]
@@ -237,17 +237,17 @@ async def get_detail(
 
             phases.append(
                 PhaseExecution(
-                    phase_id=getattr(p, "phase_id", ""),
-                    name=getattr(p, "name", ""),
-                    status=getattr(p, "status", ""),
+                    phase_id=p.phase_id,
+                    name=p.name,
+                    status=p.status,
                     session_id=session_id,
-                    artifact_id=getattr(p, "artifact_id", None),
-                    input_tokens=getattr(p, "input_tokens", 0),
-                    output_tokens=getattr(p, "output_tokens", 0),
-                    cost_usd=Decimal(str(getattr(p, "cost_usd", 0))),
-                    duration_seconds=getattr(p, "duration_seconds", None),
-                    started_at=getattr(p, "started_at", None),
-                    completed_at=getattr(p, "completed_at", None),
+                    artifact_id=p.artifact_id if hasattr(p, "artifact_id") else None,
+                    input_tokens=p.input_tokens,
+                    output_tokens=p.output_tokens,
+                    cost_usd=Decimal(str(p.cost_usd)),
+                    duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
+                    started_at=p.started_at if hasattr(p, "started_at") else None,
+                    completed_at=p.completed_at if hasattr(p, "completed_at") else None,
                     operations=ops,
                 )
             )
@@ -259,8 +259,7 @@ async def get_detail(
             workflow_name=detail.workflow_name,
             status=detail.status,
             phases=phases,
-            total_tokens=getattr(detail, "total_input_tokens", 0)
-            + getattr(detail, "total_output_tokens", 0),
+            total_tokens=detail.total_input_tokens + detail.total_output_tokens,
             total_cost_usd=detail.total_cost_usd,
             started_at=detail.started_at,
             completed_at=detail.completed_at,
