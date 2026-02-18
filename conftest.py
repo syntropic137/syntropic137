@@ -1,11 +1,10 @@
-"""Pytest configuration for all tests in the AEF project.
+"""Pytest configuration for all tests in the Syntropic137 project.
 
 Sets APP_ENVIRONMENT=test to ensure in-memory storage is used during testing.
 
 Test Infrastructure (ADR-034):
     - test_infrastructure: Auto-detects test-stack or uses testcontainers
     - db_pool: Database connection pool
-    - db_connection: Single database connection
 """
 
 from __future__ import annotations

@@ -311,3 +311,46 @@ class TestToolNameExtraction:
         event = AgentEvent.from_dict(raw_event)
 
         assert event.data.get("success") is False
+
+
+# ---------------------------------------------------------------------------
+# Subagent event mapping — moved from syn_tests/integration/test_subagent_observability.py (#115)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestEventModelMapping:
+    """Test event type mapping includes subagent events."""
+
+    def test_subagent_events_in_mapping(self) -> None:
+        """AgentEvent.from_dict correctly maps subagent event types."""
+        # Test subagent_started event
+        started_event = AgentEvent.from_dict(
+            {
+                "type": "subagent_started",
+                "session_id": "session-123",
+                "agent_name": "test-subagent",
+                "subagent_tool_use_id": "toolu_abc",
+                "timestamp": "2025-01-08T10:00:00Z",
+            }
+        )
+
+        assert started_event.event_type == "subagent_started"
+        assert started_event.data.get("agent_name") == "test-subagent"
+
+        # Test subagent_stopped event
+        stopped_event = AgentEvent.from_dict(
+            {
+                "type": "subagent_stopped",
+                "session_id": "session-123",
+                "agent_name": "test-subagent",
+                "subagent_tool_use_id": "toolu_abc",
+                "duration_ms": 5000,
+                "tools_used": {"Read": 2},
+                "timestamp": "2025-01-08T10:00:05Z",
+            }
+        )
+
+        assert stopped_event.event_type == "subagent_stopped"
+        assert stopped_event.data.get("duration_ms") == 5000
+        assert stopped_event.data.get("tools_used") == {"Read": 2}
