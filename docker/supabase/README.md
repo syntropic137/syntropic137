@@ -26,10 +26,10 @@ Add these to your `.env` file:
 
 ```bash
 # Object Storage Configuration
-AEF_STORAGE_PROVIDER=supabase
-AEF_STORAGE_SUPABASE_URL=http://localhost:54321
-AEF_STORAGE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
-AEF_STORAGE_BUCKET_NAME=aef-artifacts
+SYN_STORAGE_PROVIDER=supabase
+SYN_STORAGE_SUPABASE_URL=http://localhost:54321
+SYN_STORAGE_SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU
+SYN_STORAGE_BUCKET_NAME=syn-artifacts
 ```
 
 ## Default Credentials
@@ -53,9 +53,9 @@ workflows/{workflow_id}/bundles/{bundle_id}/manifest.json
 ## Usage in Code
 
 ```python
-from aef_adapters.object_storage import get_storage
+from syn_adapters.object_storage import get_storage
 
-# Get storage (auto-selects based on AEF_STORAGE_PROVIDER)
+# Get storage (auto-selects based on SYN_STORAGE_PROVIDER)
 storage = await get_storage()
 
 # Upload artifact
@@ -82,7 +82,7 @@ docker logs aef-supabase-kong
 
 ### Bucket not found
 
-The `aef-artifacts` bucket is created automatically by the init script.
+The `syn-artifacts` bucket is created automatically by the init script.
 If missing, create it in Studio at http://localhost:54323.
 
 ### Authentication errors

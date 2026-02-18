@@ -78,7 +78,7 @@ Before Phase 2 can work, Phase 1 must be complete:
 # aef-webhook/src/aef_webhook/handler.py
 
 from fastapi import FastAPI, Request, HTTPException
-from aef_domain.contexts.workflows import WorkflowExecutionEngine
+from syn_domain.contexts.workflows import WorkflowExecutionEngine
 
 app = FastAPI()
 
@@ -205,7 +205,7 @@ class WebhookAggregate:
 
 ```bash
 # Environment variable
-AEF_GITHUB_WEBHOOK_SECRET=<random-256-bit-secret>
+SYN_GITHUB_WEBHOOK_SECRET=<random-256-bit-secret>
 ```
 
 Every incoming webhook MUST be validated against this secret.
@@ -325,10 +325,10 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - AEF_GITHUB_WEBHOOK_SECRET=${AEF_GITHUB_WEBHOOK_SECRET}
-      - AEF_EVENT_STORE_URL=http://aef-event-store:50051
+      - SYN_GITHUB_WEBHOOK_SECRET=${SYN_GITHUB_WEBHOOK_SECRET}
+      - SYN_EVENT_STORE_URL=http://syn-event-store:50051
     depends_on:
-      - aef-event-store
+      - syn-event-store
       - aef-postgres
 ```
 
@@ -336,7 +336,7 @@ services:
 
 In GitHub App settings:
 - Webhook URL: `https://webhooks.aef.dev/webhooks/github`
-- Webhook Secret: (generate and store in AEF_GITHUB_WEBHOOK_SECRET)
+- Webhook Secret: (generate and store in SYN_GITHUB_WEBHOOK_SECRET)
 - Events: issues, issue_comment, pull_request, pull_request_review, push
 
 ---

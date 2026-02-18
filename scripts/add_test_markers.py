@@ -14,7 +14,7 @@ Usage:
     uv run python scripts/add_test_markers.py
 
     # Apply to specific directory
-    uv run python scripts/add_test_markers.py packages/aef-domain/tests
+    uv run python scripts/add_test_markers.py packages/syn-domain/tests
 """
 
 from __future__ import annotations

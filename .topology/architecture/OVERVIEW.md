@@ -62,7 +62,7 @@ Detailed breakdown of each bounded context and its features/slices.
 
 ### metrics
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/metrics`
+Path: `./packages/syn-domain/src/syn_domain/contexts/metrics`
 
 **Features/Slices:**
 
@@ -72,7 +72,7 @@ Path: `./packages/aef-domain/src/aef_domain/contexts/metrics`
 
 ### artifacts
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/artifacts`
+Path: `./packages/syn-domain/src/syn_domain/contexts/artifacts`
 
 **Features/Slices:**
 
@@ -86,7 +86,7 @@ Path: `./packages/aef-domain/src/aef_domain/contexts/artifacts`
 
 ### costs
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/costs`
+Path: `./packages/syn-domain/src/syn_domain/contexts/costs`
 
 **Infrastructure:**
 
@@ -102,7 +102,7 @@ Path: `./packages/aef-domain/src/aef_domain/contexts/costs`
 
 ### workflows
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/workflows`
+Path: `./packages/syn-domain/src/syn_domain/contexts/workflows`
 
 **Features/Slices:**
 
@@ -121,11 +121,11 @@ _... and 1 more features_
 
 ### agents
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/agents`
+Path: `./packages/syn-domain/src/syn_domain/contexts/agents`
 
 ### observability
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/observability`
+Path: `./packages/syn-domain/src/syn_domain/contexts/observability`
 
 **Features/Slices:**
 
@@ -136,7 +136,7 @@ Path: `./packages/aef-domain/src/aef_domain/contexts/observability`
 
 ### workspaces
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/workspaces`
+Path: `./packages/syn-domain/src/syn_domain/contexts/workspaces`
 
 **Features/Slices:**
 
@@ -152,7 +152,7 @@ Path: `./packages/aef-domain/src/aef_domain/contexts/workspaces`
 
 ### sessions
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/sessions`
+Path: `./packages/syn-domain/src/syn_domain/contexts/sessions`
 
 **Features/Slices:**
 
@@ -166,7 +166,7 @@ Path: `./packages/aef-domain/src/aef_domain/contexts/sessions`
 
 ### github
 
-Path: `./packages/aef-domain/src/aef_domain/contexts/github`
+Path: `./packages/syn-domain/src/syn_domain/contexts/github`
 
 **Features/Slices:**
 

@@ -29,7 +29,7 @@ def _patch_deferred_annotations() -> None:
 
     from pydantic import BaseModel
 
-    from aef_dashboard.api import events
+    from syn_dashboard.api import events
 
     ns = {"datetime": datetime}
 
@@ -45,7 +45,7 @@ def _patch_deferred_annotations() -> None:
 
 
 def main() -> None:
-    from aef_dashboard.main import create_app
+    from syn_dashboard.main import create_app
 
     _patch_deferred_annotations()
 
@@ -89,7 +89,7 @@ def main() -> None:
         for tag in sorted(used_tags - {"unknown"})
     ]
 
-    output_path = Path("apps/aef-docs/openapi.json")
+    output_path = Path("apps/syn-docs/openapi.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(spec, indent=2) + "\n")
 

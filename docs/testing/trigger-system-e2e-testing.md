@@ -22,8 +22,8 @@ curl http://localhost:8000/
 If you want to test via the REST API at `/api/triggers`:
 
 ```python
-# In apps/aef-dashboard/src/aef_dashboard/main.py, add:
-from aef_dashboard.api import triggers_router
+# In apps/syn-dashboard/src/syn_dashboard/main.py, add:
+from syn_dashboard.api import triggers_router
 # ...
 app.include_router(triggers_router, prefix="/api")
 ```
@@ -37,7 +37,7 @@ app.include_router(triggers_router, prefix="/api")
 just cli triggers register \
   --name "ci-self-heal" \
   --event "check_run.completed" \
-  --repository "AgentParadise/my-project" \
+  --repository "syntropic137/my-project" \
   --workflow "ci-fix-workflow" \
   --condition "check_run.conclusion eq failure"
 
@@ -45,7 +45,7 @@ just cli triggers register \
 # Trigger registered: tr-XXXXXXXX
 #   Name: ci-self-heal
 #   Event: check_run.completed
-#   Repository: AgentParadise/my-project
+#   Repository: syntropic137/my-project
 #   Workflow: ci-fix-workflow
 #   Status: active
 ```
@@ -58,7 +58,7 @@ Save the trigger ID for later steps.
 
 ```bash
 just cli triggers enable self-healing \
-  --repository "AgentParadise/my-project"
+  --repository "syntropic137/my-project"
 
 # Expected: preset trigger created with auto-configured conditions
 ```
@@ -79,7 +79,7 @@ just cli triggers show <trigger-id>
 
 ## Test 4: Fire a webhook (simulated CI failure)
 
-Set `AEF_ENVIRONMENT=development` in your `.env` to bypass signature verification, then:
+Set `SYN_ENVIRONMENT=development` in your `.env` to bypass signature verification, then:
 
 ```bash
 curl -s -X POST http://localhost:8000/webhooks/github \
@@ -89,13 +89,13 @@ curl -s -X POST http://localhost:8000/webhooks/github \
   -d '{
     "action": "completed",
     "sender": {"login": "human-dev"},
-    "repository": {"full_name": "AgentParadise/my-project"},
+    "repository": {"full_name": "syntropic137/my-project"},
     "installation": {"id": 12345},
     "check_run": {
       "name": "lint",
       "conclusion": "failure",
       "output": {"title": "Lint failed", "summary": "2 errors"},
-      "html_url": "https://github.com/AgentParadise/my-project/runs/1",
+      "html_url": "https://github.com/syntropic137/my-project/runs/1",
       "pull_requests": [
         {"number": 42, "head": {"ref": "feat/test"}}
       ]
@@ -133,7 +133,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
   -d '{
     "action": "completed",
     "sender": {"login": "aef-engineer[bot]"},
-    "repository": {"full_name": "AgentParadise/my-project"},
+    "repository": {"full_name": "syntropic137/my-project"},
     "installation": {"id": 12345},
     "check_run": {
       "conclusion": "failure",
@@ -158,7 +158,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
   -d '{
     "action": "completed",
     "sender": {"login": "human-dev"},
-    "repository": {"full_name": "AgentParadise/my-project"},
+    "repository": {"full_name": "syntropic137/my-project"},
     "installation": {"id": 12345},
     "check_run": {
       "conclusion": "failure",
@@ -185,7 +185,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
   -d '{
     "action": "completed",
     "sender": {"login": "human-dev"},
-    "repository": {"full_name": "AgentParadise/my-project"},
+    "repository": {"full_name": "syntropic137/my-project"},
     "installation": {"id": 12345},
     "check_run": {
       "conclusion": "failure",
@@ -206,7 +206,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
   -d '{
     "action": "completed",
     "sender": {"login": "human-dev"},
-    "repository": {"full_name": "AgentParadise/my-project"},
+    "repository": {"full_name": "syntropic137/my-project"},
     "installation": {"id": 12345},
     "check_run": {
       "conclusion": "failure",
@@ -229,7 +229,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
   -d '{
     "action": "completed",
     "sender": {"login": "human-dev"},
-    "repository": {"full_name": "AgentParadise/my-project"},
+    "repository": {"full_name": "syntropic137/my-project"},
     "installation": {"id": 12345},
     "check_run": {
       "conclusion": "success",

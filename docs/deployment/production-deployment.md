@@ -54,7 +54,7 @@ sudo reboot
 
 ```bash
 # Clone repository
-git clone https://github.com/AgentParadise/agentic-engineering-framework.git
+git clone https://github.com/syntropic137/agentic-engineering-framework.git
 cd agentic-engineering-framework
 
 # Install with uv
@@ -79,43 +79,43 @@ Create `.env` file:
 
 # ---- Isolation Backend ----
 # Options: firecracker (Linux+KVM), gvisor (Docker+runsc), docker_hardened, cloud
-AEF_WORKSPACE_ISOLATION_BACKEND=firecracker
+SYN_WORKSPACE_ISOLATION_BACKEND=firecracker
 
 # ---- Capacity ----
-AEF_WORKSPACE_POOL_SIZE=10              # Pre-warmed workspaces
-AEF_WORKSPACE_MAX_CONCURRENT=50         # Maximum concurrent agents
+SYN_WORKSPACE_POOL_SIZE=10              # Pre-warmed workspaces
+SYN_WORKSPACE_MAX_CONCURRENT=50         # Maximum concurrent agents
 
 # ---- Cloud Overflow (backup when local capacity exhausted) ----
-AEF_WORKSPACE_ENABLE_CLOUD_OVERFLOW=true
-AEF_WORKSPACE_CLOUD_PROVIDER=e2b
-AEF_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
+SYN_WORKSPACE_ENABLE_CLOUD_OVERFLOW=true
+SYN_WORKSPACE_CLOUD_PROVIDER=e2b
+SYN_WORKSPACE_CLOUD_API_KEY=your-e2b-api-key
 
 # ---- Security Settings ----
-AEF_SECURITY_ALLOW_NETWORK=false        # No network by default
-AEF_SECURITY_READ_ONLY_ROOT=true        # Read-only root filesystem
-AEF_SECURITY_MAX_MEMORY=1Gi             # 1GB per workspace
-AEF_SECURITY_MAX_CPU=1.0                # 1 CPU per workspace
-AEF_SECURITY_MAX_PIDS=100               # Process limit
-AEF_SECURITY_MAX_EXECUTION_TIME=3600    # 1 hour timeout
+SYN_SECURITY_ALLOW_NETWORK=false        # No network by default
+SYN_SECURITY_READ_ONLY_ROOT=true        # Read-only root filesystem
+SYN_SECURITY_MAX_MEMORY=1Gi             # 1GB per workspace
+SYN_SECURITY_MAX_CPU=1.0                # 1 CPU per workspace
+SYN_SECURITY_MAX_PIDS=100               # Process limit
+SYN_SECURITY_MAX_EXECUTION_TIME=3600    # 1 hour timeout
 
 # ---- Docker Settings ----
-AEF_WORKSPACE_DOCKER_IMAGE=aef-workspace:latest
-AEF_WORKSPACE_DOCKER_RUNTIME=runsc      # gVisor runtime
-AEF_WORKSPACE_DOCKER_NETWORK=none       # No network
+SYN_WORKSPACE_DOCKER_IMAGE=syn-workspace:latest
+SYN_WORKSPACE_DOCKER_RUNTIME=runsc      # gVisor runtime
+SYN_WORKSPACE_DOCKER_NETWORK=none       # No network
 
 # ---- Firecracker Settings (if using Firecracker) ----
-AEF_FIRECRACKER_KERNEL_PATH=/var/lib/aef/firecracker/vmlinux
-AEF_FIRECRACKER_ROOTFS_PATH=/var/lib/aef/firecracker/rootfs.ext4
+SYN_FIRECRACKER_KERNEL_PATH=/var/lib/syn/firecracker/vmlinux
+SYN_FIRECRACKER_ROOTFS_PATH=/var/lib/syn/firecracker/rootfs.ext4
 
 # ---- Database ----
-AEF_DATABASE_URL=postgresql://aef:password@localhost:5432/aef
+SYN_DATABASE_URL=postgresql://syn:password@localhost:5432/syn
 
 # ---- Redis (for coordination) ----
-AEF_REDIS_URL=redis://localhost:6379
+SYN_REDIS_URL=redis://localhost:6379
 
 # ---- Observability ----
-AEF_LOG_LEVEL=INFO
-AEF_OTEL_ENDPOINT=http://localhost:4317
+SYN_LOG_LEVEL=INFO
+SYN_OTEL_ENDPOINT=http://localhost:4317
 ```
 
 #### 4. Start Services
@@ -125,20 +125,20 @@ AEF_OTEL_ENDPOINT=http://localhost:4317
 docker compose -f docker/docker-compose.dev.yaml up -d
 
 # Start AEF
-uv run python -m aef_cli start
+uv run python -m syn_cli start
 ```
 
 #### 5. Verify Installation
 
 ```bash
 # Check status
-uv run python -m aef_cli status
+uv run python -m syn_cli status
 
 # Run test workflow
-uv run python -m aef_cli workflow run examples/hello-world.yaml
+uv run python -m syn_cli workflow run examples/hello-world.yaml
 
 # Check workspace isolation
-uv run pytest packages/aef-adapters/tests/test_workspace_integration.py -v
+uv run pytest packages/syn-adapters/tests/test_workspace_integration.py -v
 ```
 
 ---
@@ -179,13 +179,13 @@ All servers must share:
 
 ```bash
 # Same database
-AEF_DATABASE_URL=postgresql://aef:password@db.internal:5432/aef
+SYN_DATABASE_URL=postgresql://aef:password@db.internal:5432/aef
 
 # Same Redis for coordination
-AEF_REDIS_URL=redis://redis.internal:6379
+SYN_REDIS_URL=redis://redis.internal:6379
 
 # Same artifact storage
-AEF_ARTIFACT_STORAGE_URL=s3://aef-artifacts
+SYN_ARTIFACT_STORAGE_URL=s3://syn-artifacts
 ```
 
 ### Load Balancing
@@ -341,7 +341,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: deny-workspace-network
-  namespace: aef-workspaces
+  namespace: syn-workspaces
 spec:
   podSelector:
     matchLabels:
@@ -358,7 +358,7 @@ spec:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: aef-workspaces
+  name: syn-workspaces
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
@@ -426,12 +426,12 @@ Import Grafana dashboards:
 ```bash
 # Download AEF dashboards
 curl -L https://grafana.com/api/dashboards/xxxxx/revisions/1/download \
-    -o aef-workspaces.json
+    -o syn-workspaces.json
 
 # Import to Grafana
 curl -X POST http://grafana.internal/api/dashboards/db \
     -H "Content-Type: application/json" \
-    -d @aef-workspaces.json
+    -d @syn-workspaces.json
 ```
 
 ---
@@ -477,7 +477,7 @@ spec:
 
 ```bash
 # Check backend availability
-uv run python -c "from aef_adapters.workspaces import WorkspaceRouter; print(WorkspaceRouter().get_available_backends())"
+uv run python -c "from syn_adapters.workspaces import WorkspaceRouter; print(WorkspaceRouter().get_available_backends())"
 
 # Check Docker
 docker info
@@ -492,10 +492,10 @@ firecracker --version
 
 ```bash
 # Check pool warmup
-uv run python -c "from aef_adapters.workspaces import get_workspace_router; print(get_workspace_router().stats)"
+uv run python -c "from syn_adapters.workspaces import get_workspace_router; print(get_workspace_router().stats)"
 
 # Increase pool size
-export AEF_WORKSPACE_POOL_SIZE=50
+export SYN_WORKSPACE_POOL_SIZE=50
 ```
 
 #### Memory Issues
@@ -505,7 +505,7 @@ export AEF_WORKSPACE_POOL_SIZE=50
 docker stats
 
 # Reduce per-workspace memory
-export AEF_SECURITY_MAX_MEMORY=256Mi
+export SYN_SECURITY_MAX_MEMORY=256Mi
 ```
 
 ---
@@ -536,7 +536,7 @@ kubectl autoscale deployment/aef --min=3 --max=20 --cpu-percent=70 -n aef
 
 ## Related Documentation
 
-- [Workspace Architecture README](../../packages/aef-adapters/src/aef_adapters/workspaces/README.md)
+- [Workspace Architecture README](../../packages/syn-adapters/src/syn_adapters/workspaces/README.md)
 - [ADR-021: Isolated Workspace Architecture](../adrs/ADR-021-isolated-workspace-architecture.md)
 - [Firecracker Setup](../../docker/firecracker/README.md)
 - [Environment Configuration](../env-configuration.md)

@@ -1,5 +1,5 @@
 -- Supabase Storage Initialization
--- Creates the aef-artifacts bucket for artifact storage
+-- Creates the syn-artifacts bucket for artifact storage
 --
 -- NOTE: This is for LOCAL DEVELOPMENT only. The RLS policies here are
 -- permissive for ease of development. In production, implement proper
@@ -8,8 +8,8 @@
 -- Insert default bucket for AEF artifacts
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
-    'aef-artifacts',
-    'aef-artifacts',
+    'syn-artifacts',
+    'syn-artifacts',
     false,  -- Private bucket, requires auth
     52428800,  -- 50MB max file size
     ARRAY[
@@ -41,8 +41,8 @@ BEGIN
         ON storage.objects
         FOR ALL
         TO service_role
-        USING (bucket_id = 'aef-artifacts')
-        WITH CHECK (bucket_id = 'aef-artifacts');
+        USING (bucket_id = 'syn-artifacts')
+        WITH CHECK (bucket_id = 'syn-artifacts');
     END IF;
 END $$;
 
@@ -61,7 +61,7 @@ BEGIN
         FOR SELECT
         TO authenticated
         USING (
-            bucket_id = 'aef-artifacts'
+            bucket_id = 'syn-artifacts'
             AND (storage.foldername(name))[1] = 'workflows'
         );
     END IF;

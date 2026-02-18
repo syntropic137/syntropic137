@@ -181,7 +181,7 @@ AEF has **two event systems** with different type safety strategies:
 | Event System | Purpose | Type Safety Approach |
 |--------------|---------|---------------------|
 | **Domain Events** | Business state changes | Pydantic `DomainEvent` base class |
-| **Observability Events** | Agent telemetry | Typed factories (`aef_shared.events.factories`) |
+| **Observability Events** | Agent telemetry | Typed factories (`syn_shared.events.factories`) |
 
 ### Domain Events (This ADR)
 
@@ -197,7 +197,7 @@ class WorkflowCreatedEvent(DomainEvent):
 
 ```python
 # Factory-based, typed arguments, no magic strings
-from aef_shared.events.factories import tool_started
+from syn_shared.events.factories import tool_started
 
 event = tool_started(
     session_id=sid,
@@ -216,7 +216,7 @@ Both catch schema drift at mypy time, not runtime.
 ## References
 
 - `lib/event-sourcing-platform/event-sourcing/python/src/event_sourcing/core/event.py` - DomainEvent base class
-- `packages/aef-domain/src/aef_domain/contexts/workflows/create_workflow/WorkflowCreatedEvent.py` - Example event
-- `packages/aef-shared/src/aef_shared/events/factories.py` - Observability event factories
+- `packages/syn-domain/src/syn_domain/contexts/workflows/create_workflow/WorkflowCreatedEvent.py` - Example event
+- `packages/syn-shared/src/syn_shared/events/factories.py` - Observability event factories
 - `docs/adrs/ADR-038-test-organization-standard.md` - Test organization with typed factories
 - `.github/workflows/ci.yml` - CI configuration with mypy

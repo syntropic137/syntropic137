@@ -60,10 +60,10 @@ uv run python -c "from event_sourcing.client.grpc_client import GrpcEventStoreCl
 
 ```bash
 # Verify event store is healthy
-docker ps | grep aef-event-store
+docker ps | grep syn-event-store
 
 # Check event store logs
-docker logs aef-event-store --tail=20
+docker logs syn-event-store --tail=20
 ```
 
 ## Why This Is Needed
@@ -92,7 +92,7 @@ Docker uses layer caching aggressively. Even with `--build`, if the Cargo.lock/C
 - `lib/event-sourcing-platform/event-store/eventstore-backend-postgres/` - Rust Postgres backend
 - `lib/event-sourcing-platform/event-store/eventstore-proto/` - Proto definitions
 - `docker/docker-compose.dev.yaml` - Docker compose configuration
-- `packages/aef-adapters/src/aef_adapters/subscriptions/service.py` - Uses the SDK
+- `packages/syn-adapters/src/syn_adapters/subscriptions/service.py` - Uses the SDK
 
 ## Common Errors Without Sync
 

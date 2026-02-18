@@ -13,7 +13,7 @@ Usage (standalone):
 
 Usage (from setup.py):
     from github_manifest import run_manifest_flow
-    result = run_manifest_flow(app_name="aef-agent", ...)
+    result = run_manifest_flow(app_name="syntropic137", ...)
 """
 
 from __future__ import annotations
@@ -125,7 +125,7 @@ def build_manifest(
     """Build the GitHub App manifest JSON with AEF's required permissions.
 
     Args:
-        app_name: Name for the GitHub App (e.g. "aef-agent").
+        app_name: Name for the GitHub App (e.g. "syntropic137").
         redirect_url: Local callback URL for the OAuth redirect.
         webhook_url: Optional webhook delivery URL.  When *None* the
             webhook is created in an inactive state.
@@ -135,7 +135,7 @@ def build_manifest(
     """
     manifest: dict[str, Any] = {
         "name": app_name,
-        "url": "https://github.com/AgentParadise/agentic-engineering-framework",
+        "url": "https://github.com/syntropic137/agentic-engineering-framework",
         "hook_attributes": {
             "url": webhook_url or "",
             "active": bool(webhook_url),
@@ -599,7 +599,7 @@ def main() -> None:
     print("=" * 55)
     print()
 
-    app_name = input("  App name [aef-agent]: ").strip() or "aef-agent"
+    app_name = input("  App name [syntropic137]: ").strip() or "syntropic137"
     org = input("  GitHub org (blank for personal): ").strip() or None
     webhook_url = input("  Webhook URL (blank to skip): ").strip() or None
 
@@ -630,12 +630,12 @@ def main() -> None:
     install_id = result.get("installation_id")
     if install_id:
         print(f"  Installation ID: {install_id}")
-        print("  Add this to your .env as AEF_GITHUB_INSTALLATION_ID")
+        print("  Add this to your .env as SYN_GITHUB_INSTALLATION_ID")
     else:
         install_id = input("  Installation ID (from URL after installing): ").strip()
         if install_id:
             print(f"\n  Installation ID: {install_id}")
-            print("  Add this to your .env as AEF_GITHUB_INSTALLATION_ID")
+            print("  Add this to your .env as SYN_GITHUB_INSTALLATION_ID")
 
     print()
     print("  Done! Run 'python infra/scripts/secrets_setup.py check' to verify.")

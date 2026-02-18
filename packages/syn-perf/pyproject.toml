@@ -1,0 +1,32 @@
+[project]
+name = "syn-perf"
+version = "0.1.0"
+description = "Performance benchmarking suite for AEF isolated workspaces"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "AEF Team" }]
+
+dependencies = [
+    "syn-adapters",
+    "syn-shared",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+syn-perf = "syn_perf.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

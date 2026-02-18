@@ -1,0 +1,52 @@
+# VSA Configuration for AEF Domain
+# Baseline validation - expect violations against ADR-019
+
+version: 2
+architecture: hexagonal-event-sourced-vsa
+language: python
+root: src/syn_domain/contexts
+
+# Note: Scanner auto-discovers bounded contexts at depth 1 from root
+# With root=src/syn_domain/contexts, it will find:
+#
+# VALID BOUNDED CONTEXTS (have aggregates per ADR-020):
+#   - orchestration/ (merged from workflows + workspaces, has 3 aggregates)
+#   - sessions/ (has AgentSessionAggregate)
+#   - artifacts/ (has ArtifactAggregate)
+#   - github/ (has InstallationAggregate)
+#
+# DEPRECATED (will be removed - no aggregates):
+#   - agents/ (empty)
+#   - costs/ (projections moved to orchestration/sessions)
+#   - metrics/ (projections moved to orchestration)
+#   - observability/ (projections moved to sessions)
+#   - workflows/ (merged into orchestration)
+#   - workspaces/ (merged into orchestration)
+
+# Validation settings
+validation:
+  enabled: true
+  fail_on_warning: false
+
+# Domain structure (expected by ADR-019)
+domain:
+  aggregates_path: "domain"
+  commands_path: "domain/commands"
+  events_path: "domain/events"
+  queries_path: "domain/queries"
+  value_objects_pattern: "*ValueObjects.*"
+
+# Slice structure
+slices:
+  path: "slices"
+
+# Infrastructure
+infrastructure:
+  path: "infrastructure"
+  buses_path: "infrastructure/buses"
+
+# Framework base types
+framework:
+  name: "syn"
+  commands_base: "syn_domain._shared.commands.BaseCommand"
+  events_base: "syn_domain._shared.events.BaseEvent"

@@ -143,7 +143,7 @@ This approach:
 ### 1. Extend OperationType Enum
 
 ```python
-# packages/aef-domain/.../value_objects.py
+# packages/syn-domain/.../value_objects.py
 class OperationType(str, Enum):
     # Messages (LLM API calls)
     MESSAGE_REQUEST = "message_request"
@@ -169,7 +169,7 @@ class OperationType(str, Enum):
 ### 2. Enhance Event Fields
 
 ```python
-# packages/aef-domain/.../OperationRecordedEvent.py
+# packages/syn-domain/.../OperationRecordedEvent.py
 @event("OperationRecorded", "v2")
 class OperationRecordedEvent(DomainEvent):
     session_id: str

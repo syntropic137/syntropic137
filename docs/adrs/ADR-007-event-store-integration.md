@@ -13,7 +13,7 @@ informed: All Stakeholders
 
 ## Context
 
-The Agentic Engineering Framework (AEF) uses event sourcing for domain aggregates (Workflows, Sessions, Artifacts). We need to decide how to persist events and integrate with the `event-sourcing-platform` library.
+The Syntropic137 (AEF) uses event sourcing for domain aggregates (Workflows, Sessions, Artifacts). We need to decide how to persist events and integrate with the `event-sourcing-platform` library.
 
 ### Options Considered
 
@@ -42,7 +42,7 @@ We will use the **Event Store Server via gRPC** for all non-test environments.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        AEF Application                               │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Domain Layer (aef-domain)                                          │
+│  Domain Layer (syn-domain)                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐     │
 │  │ WorkflowAggregate│  │ SessionAggregate │  │ ArtifactAggregate│     │
 │  │ @aggregate       │  │ @aggregate       │  │ @aggregate       │     │
@@ -51,7 +51,7 @@ We will use the **Event Store Server via gRPC** for all non-test environments.
 │           └────────────────────┼────────────────────┘               │
 │                                │                                     │
 ├────────────────────────────────┼─────────────────────────────────────┤
-│  Adapter Layer (aef-adapters)  │                                     │
+│  Adapter Layer (syn-adapters)  │                                     │
 │  ┌─────────────────────────────┴─────────────────────────────┐      │
 │  │              EventStoreRepository (SDK)                    │      │
 │  │  - Uses event_sourcing.core.repository                    │      │
@@ -183,7 +183,7 @@ The `MemoryEventStoreClient` from the SDK provides the same interface, ensuring 
 ### Storage Module Structure
 
 ```
-packages/aef-adapters/src/aef_adapters/storage/
+packages/syn-adapters/src/syn_adapters/storage/
 ├── __init__.py           # Factory functions with environment detection
 ├── in_memory.py          # In-memory implementations (TEST ONLY)
 ├── event_store_client.py # Event Store client factory

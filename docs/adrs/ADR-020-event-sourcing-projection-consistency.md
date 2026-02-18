@@ -119,6 +119,6 @@ To maintain compliance:
 - ADR-014: Workflow Execution Model
 
 ## Files Changed
-- `packages/aef-domain/tests/integration/test_event_projection_consistency.py` - Regression tests
-- `apps/aef-dashboard/src/aef_dashboard/services/execution.py` - Added `_complete_phase()`
-- `packages/aef-domain/.../WorkflowExecutionAggregate.py` - Added `CompletePhaseCommand`
+- `packages/syn-domain/tests/integration/test_event_projection_consistency.py` - Regression tests
+- `apps/syn-dashboard/src/syn_dashboard/services/execution.py` - Added `_complete_phase()`
+- `packages/syn-domain/.../WorkflowExecutionAggregate.py` - Added `CompletePhaseCommand`

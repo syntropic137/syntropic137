@@ -1,6 +1,6 @@
 # WorkflowExecutionAggregate
 
-> **File**: `./packages/aef-domain/src/aef_domain/contexts/workflows/domain/WorkflowExecutionAggregate.py`  
+> **File**: `./packages/syn-domain/src/syn_domain/contexts/workflows/domain/WorkflowExecutionAggregate.py`  
 > **Lines**: 540  
 > **Commands**: 0  
 > **Events**: 0

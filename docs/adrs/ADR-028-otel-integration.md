@@ -24,7 +24,7 @@ author: Neural
 > 3. OTel remains available for external monitoring if needed, but is not
 >    required for AEF's core observability pipeline.
 >
-> The `aef-adapters/observability/otel_config.py` and `conventions.py` files
+> The `syn-adapters/observability/otel_config.py` and `conventions.py` files
 > referenced here have been deleted.
 > See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
@@ -81,7 +81,7 @@ class AEFSemanticConventions:
 
 ### 2. OTel Config Factory
 
-Create `create_phase_otel_config()` factory in `aef-adapters`:
+Create `create_phase_otel_config()` factory in `syn-adapters`:
 
 ```python
 def create_phase_otel_config(
@@ -183,7 +183,7 @@ Add `agent_session_id` to `PhaseExecutionDetail` for UI display and OTel correla
 ### Files Created
 
 ```
-packages/aef-adapters/src/aef_adapters/observability/
+packages/syn-adapters/src/syn_adapters/observability/
 ├── __init__.py
 ├── conventions.py      # AEFSemanticConventions
 └── otel_config.py      # create_phase_otel_config, get_collector_endpoint
@@ -196,20 +196,20 @@ docker/
 ### Files Modified
 
 ```
-packages/aef-adapters/src/aef_adapters/orchestration/workflow_executor.py
+packages/syn-adapters/src/syn_adapters/orchestration/workflow_executor.py
   - Added _create_otel_environment() method
   - Inject OTel env vars into workspace creation
 
-packages/aef-adapters/src/aef_adapters/workspace_backends/service/workspace_service.py
+packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py
   - Added extra_environment parameter to create_workspace()
 
-packages/aef-domain/src/aef_domain/.../workflow_execution_detail.py
+packages/syn-domain/src/syn_domain/.../workflow_execution_detail.py
   - Added agent_session_id field
 
-apps/aef-dashboard-ui/src/types/index.ts
+apps/syn-dashboard-ui/src/types/index.ts
   - Added agent_session_id to PhaseExecutionDetail
 
-apps/aef-dashboard-ui/src/pages/ExecutionDetail.tsx
+apps/syn-dashboard-ui/src/pages/ExecutionDetail.tsx
   - Display agent_session_id for OTel correlation
 ```
 
@@ -217,7 +217,7 @@ apps/aef-dashboard-ui/src/pages/ExecutionDetail.tsx
 
 `get_collector_endpoint()` resolves in order:
 1. `OTEL_EXPORTER_OTLP_ENDPOINT` (explicit override)
-2. `AEF_OTEL_COLLECTOR_HOST` + `AEF_OTEL_COLLECTOR_PORT` (Docker network)
+2. `SYN_OTEL_COLLECTOR_HOST` + `SYN_OTEL_COLLECTOR_PORT` (Docker network)
 3. Default: `http://localhost:4317`
 
 ### OTel Collector Configuration

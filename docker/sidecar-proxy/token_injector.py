@@ -12,9 +12,9 @@ Usage:
     python token_injector.py
 
 Environment:
-    AEF_TOKEN_SERVICE_URL: URL of token vending service
-    AEF_SPEND_SERVICE_URL: URL of spend tracker service
-    AEF_EXECUTION_ID: Current execution ID
+    SYN_TOKEN_SERVICE_URL: URL of token vending service
+    SYN_SPEND_SERVICE_URL: URL of spend tracker service
+    SYN_EXECUTION_ID: Current execution ID
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Environment configuration
-TOKEN_SERVICE_URL = os.getenv("AEF_TOKEN_SERVICE_URL", "http://localhost:8080")
-EXECUTION_ID = os.getenv("AEF_EXECUTION_ID", "")
+TOKEN_SERVICE_URL = os.getenv("SYN_TOKEN_SERVICE_URL", "http://localhost:8080")
+EXECUTION_ID = os.getenv("SYN_EXECUTION_ID", "")
 
 # Host to token type mapping
 HOST_TOKEN_MAP = {
@@ -63,7 +63,7 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
             self.tokens["anthropic_auth_mode"] = "api_key"
             logger.info("Loaded Anthropic API key from environment")
 
-        if github_token := os.getenv("AEF_GITHUB_PRIVATE_KEY"):
+        if github_token := os.getenv("SYN_GITHUB_PRIVATE_KEY"):
             # Would generate installation token here
             self.tokens["github"] = github_token
             logger.info("Loaded GitHub credentials from environment")

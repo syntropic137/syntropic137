@@ -41,12 +41,12 @@ alwaysApply: true
 
 ```
 packages/
-├── aef-adapters/      ← Orchestration: WorkspaceService, DockerIsolationAdapter
+├── syn-adapters/      ← Orchestration: WorkspaceService, DockerIsolationAdapter
 │                        Observability: EventStore, Projections, Subscriptions
 │                        Token Management: SetupPhaseSecrets, GitHub App integration
-├── aef-domain/        ← Domain events, aggregates, ports
-├── aef-collector/     ← Event ingestion API (receives agent events)
-└── aef-shared/        ← Shared settings, configuration
+├── syn-domain/        ← Domain events, aggregates, ports
+├── syn-collector/     ← Event ingestion API (receives agent events)
+└── syn-shared/        ← Shared settings, configuration
 
 lib/agentic-primitives/  ← Shared library (git submodule)
 └── lib/python/
@@ -256,7 +256,7 @@ for event in player:
 
 ### Test Observability Pipeline with Recordings
 ```python
-from aef_adapters.workspace_backends.recording import RecordingEventStreamAdapter
+from syn_adapters.workspace_backends.recording import RecordingEventStreamAdapter
 
 # Replay recording through full AEF pipeline (no API calls)
 adapter = RecordingEventStreamAdapter("simple-bash")
@@ -317,7 +317,7 @@ AEF supports three testing modes that can run simultaneously:
 │   └── Redis: 6379                   └── Redis: 16379                     │
 │                                                                           │
 │   Volumes: PERSISTENT               Volumes: NONE (ephemeral)            │
-│   Network: aef-network              Network: aef-test-network            │
+│   Network: syn-network              Network: syn-test-network            │
 │                                                                           │
 └───────────────────────────────────────────────────────────────────────────┘
 ```

@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-INSTALL_DIR="${AEF_FIRECRACKER_DIR:-/var/lib/aef/firecracker}"
+INSTALL_DIR="${SYN_FIRECRACKER_DIR:-/var/lib/syn/firecracker}"
 SOCKET_PATH="/tmp/firecracker-test-$$.socket"
 KERNEL_PATH="${INSTALL_DIR}/vmlinux"
 ROOTFS_PATH="${INSTALL_DIR}/rootfs.ext4"
@@ -122,7 +122,7 @@ echo ""
 echo "Firecracker is ready for use with AEF."
 echo ""
 echo "To enable in AEF:"
-echo "  export AEF_WORKSPACE_ISOLATION_BACKEND=firecracker"
+echo "  export SYN_WORKSPACE_ISOLATION_BACKEND=firecracker"
 echo ""
 echo "Note: This test configured but did NOT boot a VM."
 echo "      Full boot testing requires more time (~125ms per VM)."

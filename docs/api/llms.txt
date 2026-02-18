@@ -1,16 +1,16 @@
 # AEF API Reference
 
-> Programmatic interface to the Agentic Engineering Framework
+> Programmatic interface to the Syntropic137
 > Version: 0.1.0
 
 ## Quick Start
 
 ```python
-import aef_api
-from aef_api import Ok, Err
+import syn_api
+from syn_api import Ok, Err
 
 # List workflows
-result = await aef_api.v1.workflows.list_workflows()
+result = await syn_api.v1.workflows.list_workflows()
 match result:
     case Ok(workflows):
         for wf in workflows:
@@ -19,7 +19,7 @@ match result:
         print(f"Error: {error}")
 
 # Create a workflow
-result = await aef_api.v1.workflows.create_workflow(
+result = await syn_api.v1.workflows.create_workflow(
     name="My Research Workflow",
     workflow_type="research",
     description="Automated research pipeline",
@@ -34,7 +34,7 @@ match result:
 ## Architecture
 
 ```
-aef-api
+syn-api
 ├── types.py         # Result[T, E], Ok, Err, Pydantic models, error enums
 ├── auth.py          # AuthContext (optional parameter)
 ├── _wiring.py       # Internal: adapter composition root
@@ -52,7 +52,7 @@ aef-api
 All API functions return `Result[T, E]` — either `Ok(value)` or `Err(error, message)`. Use pattern matching or `isinstance` checks:
 
 ```python
-result = await aef_api.v1.workflows.get_workflow("wf-123")
+result = await syn_api.v1.workflows.get_workflow("wf-123")
 
 # Pattern matching (recommended)
 match result:
@@ -75,7 +75,7 @@ Result type, error enums, and shared Pydantic models.
 All API functions return `Result[T, E]` — a discriminated union of `Ok[T]` and `Err[E]`.
 
 ```python
-from aef_api import Ok, Err, Result
+from syn_api import Ok, Err, Result
 ```
 
 ### Ok
@@ -98,7 +98,7 @@ class Err(Generic[E]):
 ### Pattern Matching
 
 ```python
-result = await aef_api.v1.workflows.get_workflow("wf-123")
+result = await syn_api.v1.workflows.get_workflow("wf-123")
 
 match result:
     case Ok(detail):
@@ -224,7 +224,7 @@ Authentication context for API operations.
 All v1 functions accept an optional `AuthContext` parameter. When `None` (the default), operations run without authorization checks.
 
 ```python
-from aef_api import AuthContext
+from syn_api import AuthContext
 
 @dataclass(frozen=True, slots=True)
 class AuthContext:
@@ -244,10 +244,10 @@ class AuthContext:
 ### Usage
 
 ```python
-from aef_api import AuthContext
+from syn_api import AuthContext
 
 # Unauthenticated (default)
-result = await aef_api.v1.workflows.list_workflows()
+result = await syn_api.v1.workflows.list_workflows()
 
 # Authenticated
 auth = AuthContext(
@@ -255,7 +255,7 @@ auth = AuthContext(
     tenant_id="tenant-abc",
     roles=frozenset({"admin", "operator"}),
 )
-result = await aef_api.v1.workflows.list_workflows(auth=auth)
+result = await syn_api.v1.workflows.list_workflows(auth=auth)
 ```
 
 ### Future Plans
@@ -299,7 +299,7 @@ async def list_workflows(
 **Example:**
 
 ```python
-result = await aef_api.v1.workflows.list_workflows(workflow_type="research")
+result = await syn_api.v1.workflows.list_workflows(workflow_type="research")
 match result:
     case Ok(workflows):
         for wf in workflows:
@@ -335,7 +335,7 @@ async def get_workflow(
 **Example:**
 
 ```python
-result = await aef_api.v1.workflows.get_workflow("wf-abc123")
+result = await syn_api.v1.workflows.get_workflow("wf-abc123")
 match result:
     case Ok(detail):
         print(f"{detail.name}: {detail.description}")
@@ -384,7 +384,7 @@ async def create_workflow(
 **Example:**
 
 ```python
-result = await aef_api.v1.workflows.create_workflow(
+result = await syn_api.v1.workflows.create_workflow(
     name="Research Pipeline",
     workflow_type="research",
     phases=[
@@ -556,7 +556,7 @@ async def list_sessions(
 **Example:**
 
 ```python
-result = await aef_api.v1.sessions.list_sessions(workflow_id="wf-123")
+result = await syn_api.v1.sessions.list_sessions(workflow_id="wf-123")
 match result:
     case Ok(sessions):
         for s in sessions:

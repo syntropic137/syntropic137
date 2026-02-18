@@ -1,8 +1,8 @@
 {
   "include": [
-    "packages/aef-api/src",
-    "apps/aef-cli/src",
-    "apps/aef-dashboard/src"
+    "packages/syn-api/src",
+    "apps/syn-cli/src",
+    "apps/syn-dashboard/src"
   ],
   "exclude": [
     "**/__pycache__",

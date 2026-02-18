@@ -7,7 +7,7 @@
 
 ## Context
 
-The Agentic Engineering Framework (AEF) has developed multiple architectural components that were designed independently and never fully integrated:
+The Syntropic137 (AEF) has developed multiple architectural components that were designed independently and never fully integrated:
 
 1. **ADR-009**: Agentic Execution Architecture - Defined `AgenticProtocol` and workspace concept
 2. **ADR-014**: Workflow Execution Model - Separated templates from executions
@@ -239,7 +239,7 @@ Keep workspace optional, add warnings when not used.
 
 ### Alternative 2: Feature Flag for Isolation
 
-Use `AEF_ENABLE_ISOLATION=true` to enable workspace requirement.
+Use `SYN_ENABLE_ISOLATION=true` to enable workspace requirement.
 
 **Why Rejected:**
 - Creates two code paths to maintain
@@ -313,8 +313,8 @@ See: `PROJECT-PLAN_20251213_WORKSPACE-FIRST-EXECUTION.md`
 ### Default Configuration
 
 ```python
-# packages/aef-shared/src/aef_shared/settings/workspace.py
-docker_image = "aef-workspace-claude:latest"
+# packages/syn-shared/src/syn_shared/settings/workspace.py
+docker_image = "syn-workspace-claude:latest"
 ```
 
 ### Automated Build
@@ -341,7 +341,7 @@ if not result.passed:
 
 ADR compliance is verified by integration tests:
 
-- **Location**: `packages/aef-adapters/tests/integration/test_adr_compliance.py`
+- **Location**: `packages/syn-adapters/tests/integration/test_adr_compliance.py`
 - **Run**: `pytest tests/integration/test_adr_compliance.py -v`
 
 ### Key Files
@@ -349,9 +349,9 @@ ADR compliance is verified by integration tests:
 | Component | Location |
 |-----------|----------|
 | Workspace Image | `docker/workspace/Dockerfile` |
-| Contract Validation | `aef_adapters.workspaces.contract` |
-| Workspace Router | `aef_adapters.workspaces.router` |
-| Settings | `aef_shared.settings.workspace` |
+| Contract Validation | `syn_adapters.workspaces.contract` |
+| Workspace Router | `syn_adapters.workspaces.router` |
+| Settings | `syn_shared.settings.workspace` |
 | Compliance Tests | `tests/integration/test_adr_compliance.py` |
 
 ## References

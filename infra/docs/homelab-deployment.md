@@ -1,6 +1,6 @@
 # 🏠 AEF Homelab Deployment Guide
 
-Complete guide for deploying the Agentic Engineering Framework on a homelab server (Mac Mini, Linux box, etc.) with secure external access via Cloudflare Tunnel.
+Complete guide for deploying the Syntropic137 on a homelab server (Mac Mini, Linux box, etc.) with secure external access via Cloudflare Tunnel.
 
 ## Overview
 
@@ -33,7 +33,7 @@ This deployment provides:
 
 ```bash
 # Clone the repository
-git clone https://github.com/AgentParadise/agentic-engineering-framework.git
+git clone https://github.com/syntropic137/agentic-engineering-framework.git
 cd agentic-engineering-framework
 
 # Initialize submodules
@@ -70,15 +70,15 @@ just secrets-check
 
 1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
 2. Navigate to **Networks** → **Tunnels** → **Create a tunnel**
-3. Name it: `aef-homelab`
+3. Name it: `syn-homelab`
 4. Copy the tunnel token
 
 Add these routes in the tunnel configuration:
 
 | Subdomain | Domain | Service |
 |-----------|--------|---------|
-| `aef` | yourdomain.com | `http://aef-ui:80` |
-| `api.aef` | yourdomain.com | `http://aef-dashboard:8000` |
+| `aef` | yourdomain.com | `http://syn-ui:80` |
+| `api.aef` | yourdomain.com | `http://syn-dashboard:8000` |
 
 #### Option B: Via CLI
 
@@ -89,12 +89,12 @@ brew install cloudflared  # macOS
 
 # Login and create tunnel
 cloudflared tunnel login
-cloudflared tunnel create aef-homelab
-cloudflared tunnel route dns aef-homelab aef.yourdomain.com
-cloudflared tunnel route dns aef-homelab api.aef.yourdomain.com
+cloudflared tunnel create syn-homelab
+cloudflared tunnel route dns syn-homelab aef.yourdomain.com
+cloudflared tunnel route dns syn-homelab api.aef.yourdomain.com
 
 # Get token
-cloudflared tunnel token aef-homelab
+cloudflared tunnel token syn-homelab
 ```
 
 ### Step 5: Configure Environment
@@ -112,12 +112,12 @@ Required settings:
 ```bash
 # Cloudflare Tunnel
 CLOUDFLARE_TUNNEL_TOKEN=eyJ...your-token-here
-AEF_DOMAIN=aef.yourdomain.com
+SYN_DOMAIN=aef.yourdomain.com
 
 # GitHub App
-AEF_GITHUB_APP_ID=123456
-AEF_GITHUB_APP_NAME=your-app-name
-AEF_GITHUB_INSTALLATION_ID=12345678
+SYN_GITHUB_APP_ID=123456
+SYN_GITHUB_APP_NAME=your-app-name
+SYN_GITHUB_INSTALLATION_ID=12345678
 ```
 
 ### Step 6: Deploy
@@ -156,14 +156,14 @@ curl https://api.aef.yourdomain.com/health
 just homelab-logs
 
 # View specific service logs
-just homelab-logs aef-dashboard
+just homelab-logs syn-dashboard
 just homelab-logs cloudflared
 
 # Check health
 just health-check
 
 # Restart a service
-just homelab-restart aef-dashboard
+just homelab-restart syn-dashboard
 ```
 
 ### Updates
@@ -183,10 +183,10 @@ just homelab-upgrade
 docker ps -a
 
 # View container logs
-docker logs aef-dashboard
+docker logs syn-dashboard
 
 # Enter container for debugging
-docker exec -it aef-dashboard /bin/bash
+docker exec -it syn-dashboard /bin/bash
 
 # Full reset (WARNING: deletes data)
 just homelab-reset
@@ -213,7 +213,7 @@ just homelab-reset
 │                      Your Homelab                               │
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  cloudflared │───▶│    aef-ui    │───▶│ aef-dashboard│      │
+│  │  cloudflared │───▶│    syn-ui    │───▶│ syn-dashboard│      │
 │  │              │    │   (nginx)    │    │  (FastAPI)   │      │
 │  └──────────────┘    └──────────────┘    └──────────────┘      │
 │                                                 │                │
@@ -338,7 +338,7 @@ echo $CLOUDFLARE_TUNNEL_TOKEN | head -c 20
 docker exec aef-postgres pg_isready -U aef
 
 # Check connection from dashboard
-docker exec aef-dashboard python -c "import asyncpg; print('OK')"
+docker exec syn-dashboard python -c "import asyncpg; print('OK')"
 ```
 
 ## Next Steps

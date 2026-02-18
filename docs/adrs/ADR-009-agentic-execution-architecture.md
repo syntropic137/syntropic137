@@ -16,7 +16,7 @@
 
 ## Context
 
-The Agentic Engineering Framework (AEF) was initially implemented with a **chat completion model** where agents are thin wrappers around LLM APIs (Anthropic Messages API, OpenAI Chat API). This model is fundamentally misaligned with the framework's purpose.
+The Syntropic137 (AEF) was initially implemented with a **chat completion model** where agents are thin wrappers around LLM APIs (Anthropic Messages API, OpenAI Chat API). This model is fundamentally misaligned with the framework's purpose.
 
 ### Current (Incorrect) Architecture
 
@@ -38,7 +38,7 @@ class ClaudeAgent:
 2. **No Tool Support**: Agents can't Read, Write, Bash, Edit files
 3. **Manual Hook Integration**: Hooks added via wrapper, not native
 4. **Application Controls Flow**: Orchestrator decides when agent is "done"
-5. **Name Mismatch**: "Agentic Engineering Framework" uses non-agentic patterns
+5. **Name Mismatch**: "Syntropic137" uses non-agentic patterns
 
 ### Desired Architecture
 
@@ -271,7 +271,7 @@ AEF Event Store (domain events)
 
 ✅ **True Agentic Behavior**: Multi-turn, tool use, autonomous completion
 
-✅ **Framework Name Match**: "Agentic Engineering Framework" actually uses agents
+✅ **Framework Name Match**: "Syntropic137" actually uses agents
 
 ✅ **Built-in Hooks**: Security and analytics via agentic-primitives
 

@@ -1,6 +1,6 @@
 # InstallationAggregate
 
-> **File**: `./packages/aef-domain/src/aef_domain/contexts/github/domain/InstallationAggregate.py`  
+> **File**: `./packages/syn-domain/src/syn_domain/contexts/github/domain/InstallationAggregate.py`  
 > **Lines**: 175  
 > **Commands**: 0  
 > **Events**: 0

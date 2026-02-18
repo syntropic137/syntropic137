@@ -33,7 +33,7 @@ async def list_sessions(
 **Example:**
 
 ```python
-result = await aef_api.v1.sessions.list_sessions(workflow_id="wf-123")
+result = await syn_api.v1.sessions.list_sessions(workflow_id="wf-123")
 match result:
     case Ok(sessions):
         for s in sessions:

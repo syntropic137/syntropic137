@@ -51,16 +51,16 @@ import pytest
 @pytest.fixture
 def event_store_client():
     """Get event store client - memory only in tests."""
-    env = os.getenv("AEF_ENVIRONMENT", "development")
+    env = os.getenv("SYN_ENVIRONMENT", "development")
 
     if env == "test":
         # Memory client is ONLY acceptable in tests
-        from aef_adapters.storage.memory import MemoryEventStoreClient
+        from syn_adapters.storage.memory import MemoryEventStoreClient
         return MemoryEventStoreClient()
     else:
         # NEVER use memory client in dev/prod - will give false positives!
         raise RuntimeError(
-            f"Tests must run with AEF_ENVIRONMENT=test, got {env}. "
+            f"Tests must run with SYN_ENVIRONMENT=test, got {env}. "
             "Memory implementations must not leak into dev/prod."
         )
 ```
@@ -76,7 +76,7 @@ def event_store_client():
 # In production code - defensive check
 class MemoryEventStoreClient:
     def __init__(self):
-        env = os.getenv("AEF_ENVIRONMENT", "development")
+        env = os.getenv("SYN_ENVIRONMENT", "development")
         if env not in ("test", "testing"):
             raise RuntimeError(
                 "MemoryEventStoreClient can only be used in test environment. "
@@ -160,22 +160,22 @@ For local development:
 # Pre-running infrastructure (~50ms startup)
 export TEST_DATABASE_URL=postgresql://localhost:15648/test
 export TEST_EVENTSTORE_URL=localhost:50051
-export AEF_ENVIRONMENT=test  # Required for memory implementations!
+export SYN_ENVIRONMENT=test  # Required for memory implementations!
 ```
 
 For CI:
 ```bash
 # Testcontainers fallback (isolated but slower)
 export FORCE_TESTCONTAINERS=1
-export AEF_ENVIRONMENT=test
+export SYN_ENVIRONMENT=test
 ```
 
 ## Implementation Plan
 
-### Phase 1: Add testcontainers to aef-adapters
+### Phase 1: Add testcontainers to syn-adapters
 
 ```toml
-# packages/aef-adapters/pyproject.toml
+# packages/syn-adapters/pyproject.toml
 [project.optional-dependencies]
 test = [
     "pytest-testcontainers>=0.0.4",
@@ -186,7 +186,7 @@ test = [
 ### Phase 2: Create integration test fixtures
 
 ```python
-# packages/aef-adapters/tests/conftest.py
+# packages/syn-adapters/tests/conftest.py
 import pytest
 from testcontainers.postgres import PostgresContainer
 
@@ -206,7 +206,7 @@ def event_store_container():
 ### Phase 3: Add integration tests for projections
 
 ```python
-# packages/aef-adapters/tests/integration/test_projection_serialization.py
+# packages/syn-adapters/tests/integration/test_projection_serialization.py
 @pytest.mark.integration
 async def test_session_projection_round_trip(event_store_container):
     """Test that projections handle event store serialization correctly."""
@@ -267,7 +267,7 @@ jobs:
 - **Memory implementations MUST NOT leak to dev/prod**
 - **Mocks give false positives** if used outside test environment
 - **Defensive checks required** in memory implementations
-- **CI must set `AEF_ENVIRONMENT=test`** explicitly
+- **CI must set `SYN_ENVIRONMENT=test`** explicitly
 
 ### Neutral
 - **Existing tests unchanged** - unit tests continue working as-is
@@ -313,5 +313,5 @@ Key insight: The platform uses **persistent dev containers** for fast iteration,
 
 ### Implementation Examples
 - `packages/aef-agent-runner/tests/test_runner.py` - Fast unit tests for SDK message parsing
-- `packages/aef-adapters/tests/conftest.py` - Test fixture patterns
+- `packages/syn-adapters/tests/conftest.py` - Test fixture patterns
 - `docker/test-observability/` - Isolated integration test environment

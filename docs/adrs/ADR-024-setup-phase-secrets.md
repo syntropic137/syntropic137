@@ -10,7 +10,7 @@ Accepted (with limitations - see 2026-01-29 update below)
 
 ## Context
 
-The Agentic Engineering Framework (AEF) executes agent code in isolated containers that need access to:
+The Syntropic137 (AEF) executes agent code in isolated containers that need access to:
 
 - **Claude API** - For LLM inference
 - **GitHub API** - For repository operations (clone, commit, push, PR)

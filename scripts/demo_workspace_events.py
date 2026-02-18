@@ -16,8 +16,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from aef_adapters.agents.agentic_types import WorkspaceConfig
-from aef_adapters.workspaces import (
+from syn_adapters.agents.agentic_types import WorkspaceConfig
+from syn_adapters.workspaces import (
     InMemoryCollectorEmitter,
     IsolatedWorkspaceConfig,
     WorkspaceRouter,

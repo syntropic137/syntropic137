@@ -27,7 +27,7 @@
 | **Duration** | ✅ | ✅ | ✅ | Per session and workflow |
 | **Tool Calls** | ✅ | ✅ | ✅ | Count and timeline |
 | **Tool Success Rate** | ✅ | ❌ | ❌ | Data exists, need aggregation |
-| **Per-Tool Tokens** | ❌ | ❌ | ❌ | 📋 [Issue #30](https://github.com/AgentParadise/agentic-engineering-framework/issues/30) |
+| **Per-Tool Tokens** | ❌ | ❌ | ❌ | 📋 [Issue #30](https://github.com/syntropic137/agentic-engineering-framework/issues/30) |
 | **Cognitive Efficiency** | 🔧 | ❌ | ❌ | Need commit tracking |
 | **Semantic Durability** | ❌ | ❌ | ❌ | Need rework detection |
 | **Rework Token Ratio** | ❌ | ❌ | ❌ | Need rework events |

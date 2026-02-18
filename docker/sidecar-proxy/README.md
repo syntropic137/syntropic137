@@ -40,9 +40,9 @@ The sidecar proxy intercepts outbound requests from agent containers and:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AEF_TOKEN_SERVICE_URL` | URL of token vending service | `http://localhost:8080` |
-| `AEF_EXECUTION_ID` | Current execution ID | Required |
-| `AEF_ALLOWED_HOSTS` | Comma-separated allowed hosts | See config |
+| `SYN_TOKEN_SERVICE_URL` | URL of token vending service | `http://localhost:8080` |
+| `SYN_EXECUTION_ID` | Current execution ID | Required |
+| `SYN_ALLOWED_HOSTS` | Comma-separated allowed hosts | See config |
 
 ## Allowed Hosts
 
@@ -64,7 +64,7 @@ metadata:
 spec:
   containers:
   - name: agent
-    image: aef-workspace:latest
+    image: syn-workspace:latest
     env:
     - name: http_proxy
       value: "http://localhost:8081"
@@ -73,7 +73,7 @@ spec:
   - name: sidecar
     image: aef-sidecar:latest
     env:
-    - name: AEF_EXECUTION_ID
+    - name: SYN_EXECUTION_ID
       valueFrom:
         fieldRef:
           fieldPath: metadata.labels['execution-id']
@@ -84,7 +84,7 @@ spec:
 ```yaml
 services:
   agent:
-    image: aef-workspace:latest
+    image: syn-workspace:latest
     environment:
       - http_proxy=http://sidecar:8081
       - https_proxy=http://sidecar:8081
@@ -94,8 +94,8 @@ services:
   sidecar:
     image: aef-sidecar:latest
     environment:
-      - AEF_EXECUTION_ID=${EXECUTION_ID}
-      - AEF_TOKEN_SERVICE_URL=http://token-service:8080
+      - SYN_EXECUTION_ID=${EXECUTION_ID}
+      - SYN_TOKEN_SERVICE_URL=http://token-service:8080
 ```
 
 ## Token Injection Flow
@@ -119,4 +119,4 @@ Before forwarding requests to Claude API:
 
 - `docs/adrs/ADR-022-secure-token-architecture.md`
 - `docs/deployment/claude-api-security.md`
-- `packages/aef-tokens/` - Token Vending Service
+- `packages/syn-tokens/` - Token Vending Service

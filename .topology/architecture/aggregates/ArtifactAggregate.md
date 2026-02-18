@@ -1,6 +1,6 @@
 # ArtifactAggregate
 
-> **File**: `./packages/aef-domain/src/aef_domain/contexts/artifacts/domain/ArtifactAggregate.py`  
+> **File**: `./packages/syn-domain/src/syn_domain/contexts/artifacts/domain/ArtifactAggregate.py`  
 > **Lines**: 205  
 > **Commands**: 0  
 > **Events**: 0

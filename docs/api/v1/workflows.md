@@ -33,7 +33,7 @@ async def list_workflows(
 **Example:**
 
 ```python
-result = await aef_api.v1.workflows.list_workflows(workflow_type="research")
+result = await syn_api.v1.workflows.list_workflows(workflow_type="research")
 match result:
     case Ok(workflows):
         for wf in workflows:
@@ -69,7 +69,7 @@ async def get_workflow(
 **Example:**
 
 ```python
-result = await aef_api.v1.workflows.get_workflow("wf-abc123")
+result = await syn_api.v1.workflows.get_workflow("wf-abc123")
 match result:
     case Ok(detail):
         print(f"{detail.name}: {detail.description}")
@@ -118,7 +118,7 @@ async def create_workflow(
 **Example:**
 
 ```python
-result = await aef_api.v1.workflows.create_workflow(
+result = await syn_api.v1.workflows.create_workflow(
     name="Research Pipeline",
     workflow_type="research",
     phases=[

@@ -1,22 +1,22 @@
 [project]
-name = "agentic-engineering-framework"
+name = "syntropic137"
 version = "0.3.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "AgentParadise" }]
+authors = [{ name = "syntropic137" }]
 keywords = ["ai", "agents", "event-sourcing", "workflows", "metrics"]
 
 # Workspace member dependencies
 dependencies = [
-    "aef-api",
-    "aef-cli",
-    "aef-collector",
-    "aef-dashboard",
-    "aef-domain",
-    "aef-adapters",
-    "aef-shared",
+    "syn-api",
+    "syn-cli",
+    "syn-collector",
+    "syn-dashboard",
+    "syn-domain",
+    "syn-adapters",
+    "syn-shared",
     "event-sourcing-python",
     "grpcio>=1.60", # Required by event-sourcing SDK
     "minio>=7.2.20",
@@ -47,18 +47,18 @@ build-backend = "uv_build"
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/aef-dashboard-ui", "apps/aef-docs"]
+exclude = ["apps/syn-dashboard-ui", "apps/syn-docs"]
 
 [tool.uv.sources]
-aef-api = { workspace = true }
-aef-cli = { workspace = true }
-aef-collector = { workspace = true }
-aef-dashboard = { workspace = true }
-aef-domain = { workspace = true }
-aef-adapters = { workspace = true }
-aef-shared = { workspace = true }
-aef-perf = { workspace = true }
-aef-tokens = { workspace = true }
+syn-api = { workspace = true }
+syn-cli = { workspace = true }
+syn-collector = { workspace = true }
+syn-dashboard = { workspace = true }
+syn-domain = { workspace = true }
+syn-adapters = { workspace = true }
+syn-shared = { workspace = true }
+syn-perf = { workspace = true }
+syn-tokens = { workspace = true }
 # Submodule dependencies
 event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
 agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging" }
@@ -102,14 +102,14 @@ ignore = [
 # Scripts may have planned-but-not-implemented params
 "scripts/*.py" = ["ARG001"]
 # API stub functions have complete signatures but no implementation
-"**/aef_api/v1/artifacts.py" = ["ARG001"]
-"**/aef_api/v1/github.py" = ["ARG001"]
-"**/aef_api/v1/observability.py" = ["ARG001"]
+"**/syn_api/v1/artifacts.py" = ["ARG001"]
+"**/syn_api/v1/github.py" = ["ARG001"]
+"**/syn_api/v1/observability.py" = ["ARG001"]
 # gRPC handlers require context param even if unused
 "**/token_injector.py" = ["ARG002"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["aef_api", "aef_cli", "aef_collector", "aef_dashboard", "aef_domain", "aef_adapters", "aef_shared", "aef_perf"]
+known-first-party = ["syn_api", "syn_cli", "syn_collector", "syn_dashboard", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -148,11 +148,11 @@ module = [
     "redis.*",
     "aiohttp.*",
     "fakeredis.*",
-    "aef_api.*",
-    "aef_adapters.*",  # Internal module cross-references
-    "aef_tokens.*",
-    "aef_shared.*",
-    "aef_domain.*",
+    "syn_api.*",
+    "syn_adapters.*",  # Internal module cross-references
+    "syn_tokens.*",
+    "syn_shared.*",
+    "syn_domain.*",
 ]
 ignore_missing_imports = true
 
@@ -186,23 +186,23 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = [
-    "apps/aef-cli/tests",
-    "apps/aef-dashboard/tests",
-    "packages/aef-api/tests",
-    "packages/aef-collector/tests",
-    "packages/aef-domain/tests",
-    "packages/aef-domain/src",  # VSA co-located tests
-    "packages/aef-adapters/tests",
-    "packages/aef-shared/tests",
+    "apps/syn-cli/tests",
+    "apps/syn-dashboard/tests",
+    "packages/syn-api/tests",
+    "packages/syn-collector/tests",
+    "packages/syn-domain/tests",
+    "packages/syn-domain/src",  # VSA co-located tests
+    "packages/syn-adapters/tests",
+    "packages/syn-shared/tests",
 ]
 pythonpath = [
-    "apps/aef-cli/src",
-    "apps/aef-dashboard/src",
-    "packages/aef-api/src",
-    "packages/aef-collector/src",
-    "packages/aef-domain/src",
-    "packages/aef-adapters/src",
-    "packages/aef-shared/src",
+    "apps/syn-cli/src",
+    "apps/syn-dashboard/src",
+    "packages/syn-api/src",
+    "packages/syn-collector/src",
+    "packages/syn-domain/src",
+    "packages/syn-adapters/src",
+    "packages/syn-shared/src",
 ]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]

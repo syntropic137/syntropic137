@@ -64,7 +64,7 @@ VSA validates:
 ## Configuration
 
 VSA is configured in `vsa.yaml`:
-- **Root:** `./packages/aef-domain/src/aef_domain/contexts`
+- **Root:** `./packages/syn-domain/src/syn_domain/contexts`
 - **Language:** Python
 - **Contexts:** artifacts, workflows, workspaces, sessions, github, costs
 
@@ -82,7 +82,7 @@ VSA validation is integrated into:
 Create a handler file following the naming convention:
 
 ```python
-# File: packages/aef-domain/src/aef_domain/contexts/<context>/<feature>/<Feature>Handler.py
+# File: packages/syn-domain/src/syn_domain/contexts/<context>/<feature>/<Feature>Handler.py
 
 from .<Feature>Command import <Feature>Command
 
@@ -100,7 +100,7 @@ class <Feature>Handler:
 Create a test file following the naming convention:
 
 ```python
-# File: packages/aef-domain/src/aef_domain/contexts/<context>/<feature>/test_<feature>.py
+# File: packages/syn-domain/src/syn_domain/contexts/<context>/<feature>/test_<feature>.py
 
 import pytest
 from .<Feature>Handler import <Feature>Handler
@@ -115,7 +115,7 @@ def test_handler_exists():
 
 - **VSA Documentation:** `lib/event-sourcing-platform/vsa/README.md`
 - **Configuration:** `vsa.yaml`
-- **Bounded Contexts:** `packages/aef-domain/src/aef_domain/contexts/`
+- **Bounded Contexts:** `packages/syn-domain/src/syn_domain/contexts/`
 
 ## When to Run
 

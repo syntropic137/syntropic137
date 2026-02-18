@@ -14,9 +14,9 @@ Use your existing GitHub identity:
 
 ```bash
 # Set environment variables (add to .env)
-export AEF_GIT_USER_NAME="$(git config user.name)"
-export AEF_GIT_USER_EMAIL="$(git config user.email)"
-export AEF_GIT_TOKEN="$(gh auth token)"  # Requires GitHub CLI
+export SYN_GIT_USER_NAME="$(git config user.name)"
+export SYN_GIT_USER_EMAIL="$(git config user.email)"
+export SYN_GIT_TOKEN="$(gh auth token)"  # Requires GitHub CLI
 ```
 
 ### 2. CI/CD / Production
@@ -25,9 +25,9 @@ Create a bot account:
 
 ```bash
 # Bot identity
-export AEF_GIT_USER_NAME="aef-bot[bot]"
-export AEF_GIT_USER_EMAIL="bot@aef.dev"
-export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
+export SYN_GIT_USER_NAME="syn-bot[bot]"
+export SYN_GIT_USER_EMAIL="bot@aef.dev"
+export SYN_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 ```
 
 ---
@@ -37,8 +37,8 @@ export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 | Environment | Identity | Committer | Credentials |
 |-------------|----------|-----------|-------------|
 | **Local** | User's `.gitconfig` | Your name/email | `gh auth token` |
-| **CI/CD** | Bot account | `aef-bot[bot]` | GitHub token |
-| **Production** | GitHub App | `aef-app[bot]` | App installation token |
+| **CI/CD** | Bot account | `syn-bot[bot]` | GitHub token |
+| **Production** | GitHub App | `syn-app[bot]` | App installation token |
 
 ---
 
@@ -54,7 +54,7 @@ export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 # - repo (full control)
 # - workflow (if modifying GitHub Actions)
 
-export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
+export SYN_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 ```
 
 **Pros:**
@@ -76,9 +76,9 @@ export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 # - Metadata: Read-only
 # - Pull requests: Read & Write (if needed)
 
-export AEF_GITHUB_APP_ID="123456"
-export AEF_GITHUB_INSTALLATION_ID="987654"
-export AEF_GITHUB_PRIVATE_KEY="$(cat app-private-key.pem)"
+export SYN_GITHUB_APP_ID="123456"
+export SYN_GITHUB_INSTALLATION_ID="987654"
+export SYN_GITHUB_PRIVATE_KEY="$(cat app-private-key.pem)"
 ```
 
 **Pros:**
@@ -93,11 +93,11 @@ export AEF_GITHUB_PRIVATE_KEY="$(cat app-private-key.pem)"
 
 ```bash
 # Generate SSH key (if you don't have one)
-ssh-keygen -t ed25519 -C "aef-bot@yourdomain.com" -f ~/.ssh/aef_bot_key
+ssh-keygen -t ed25519 -C "syn-bot@yourdomain.com" -f ~/.ssh/aef_bot_key
 
 # Add to GitHub: https://github.com/settings/keys
 
-export AEF_GIT_SSH_KEY="$(cat ~/.ssh/aef_bot_key | base64)"
+export SYN_GIT_SSH_KEY="$(cat ~/.ssh/aef_bot_key | base64)"
 ```
 
 **Pros:**
@@ -116,7 +116,7 @@ All agent commits include metadata for traceability:
 
 ```
 commit abc123def456
-Author: aef-bot[bot] <bot@aef.dev>
+Author: syn-bot[bot] <bot@aef.dev>
 Date:   Wed Dec 11 19:30:00 2025
 
     feat: implement code review suggestions
@@ -136,7 +136,7 @@ Date:   Wed Dec 11 19:30:00 2025
 - ✅ Full audit trail
 - ✅ Links to workflow execution
 - ✅ Credit to human who initiated
-- ✅ Easy filtering: `git log --author="aef-bot[bot]"`
+- ✅ Easy filtering: `git log --author="syn-bot[bot]"`
 
 ---
 
@@ -175,9 +175,9 @@ Date:   Wed Dec 11 19:30:00 2025
 # For local testing, use .env file (NEVER commit this):
 
 cat > .env.github-app <<EOF
-AEF_GITHUB_APP_ID="123456"
-AEF_GITHUB_INSTALLATION_ID="987654"
-AEF_GITHUB_PRIVATE_KEY="$(cat aef-app.private-key.pem)"
+SYN_GITHUB_APP_ID="123456"
+SYN_GITHUB_INSTALLATION_ID="987654"
+SYN_GITHUB_PRIVATE_KEY="$(cat syn-app.private-key.pem)"
 EOF
 
 chmod 600 .env.github-app
@@ -217,9 +217,9 @@ just poc-isolation-quick
 
 # Check if agent can commit
 docker run --rm \
-  -e AEF_GIT_USER_NAME="Test Bot" \
-  -e AEF_GIT_USER_EMAIL="bot@test.dev" \
-  aef-workspace:latest \
+  -e SYN_GIT_USER_NAME="Test Bot" \
+  -e SYN_GIT_USER_EMAIL="bot@test.dev" \
+  syn-workspace:latest \
   git config --global --list
 ```
 
@@ -246,8 +246,8 @@ docker run --rm \
 **Fix**:
 ```bash
 # Check if environment variables are set
-echo $AEF_GIT_USER_NAME
-echo $AEF_GIT_USER_EMAIL
+echo $SYN_GIT_USER_NAME
+echo $SYN_GIT_USER_EMAIL
 
 # Verify injection in container
 docker exec <container_id> git config --global --list
@@ -260,10 +260,10 @@ docker exec <container_id> git config --global --list
 **Fix**:
 ```bash
 # For HTTPS:
-export AEF_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
+export SYN_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 
 # For SSH:
-export AEF_GIT_SSH_KEY="$(cat ~/.ssh/id_ed25519 | base64)"
+export SYN_GIT_SSH_KEY="$(cat ~/.ssh/id_ed25519 | base64)"
 ```
 
 ### Commits show wrong author

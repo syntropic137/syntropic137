@@ -20,7 +20,7 @@ classification: standard
 
 # Default repository context (should be overridden at runtime)
 repository:
-  url: https://github.com/AgentParadise/sandbox_aef-engineer-beta
+  url: https://github.com/syntropic137/sandbox_syn-engineer-beta
   ref: main
 
 # Project association (optional)
@@ -100,7 +100,7 @@ phases:
          [Describe the changes you made]
 
          ---
-         *Automated PR by aef-engineer-beta[bot]*"
+         *Automated PR by syn-engineer-beta[bot]*"
          ```
 
       6. **Write summary to artifacts (REQUIRED):**

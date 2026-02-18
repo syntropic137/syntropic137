@@ -9,8 +9,8 @@
 
 We discovered that the AEF platform had **two separate executor implementations** with inconsistent observability wiring:
 
-1. **WorkflowExecutionEngine** (aef-domain) - Used by CLI, has event sourcing and `observability_writer`
-2. **AgenticWorkflowExecutor** (aef-adapters) - Used by Dashboard, has `collector_url` (but wasn't being passed)
+1. **WorkflowExecutionEngine** (syn-domain) - Used by CLI, has event sourcing and `observability_writer`
+2. **AgenticWorkflowExecutor** (syn-adapters) - Used by Dashboard, has `collector_url` (but wasn't being passed)
 
 This caused a critical bug: **Dashboard runs had no observability data in TimescaleDB** while CLI runs worked correctly. The root cause was that `ExecutionService` was creating `AgenticWorkflowExecutor` without the `collector_url` parameter.
 
@@ -52,13 +52,13 @@ We implemented the **Poka-Yoke pattern** (mistake-proofing) by:
                               │ implements
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       aef-adapters                               │
+│                       syn-adapters                               │
 ├─────────────────────────────────────────────────────────────────┤
-│  aef_adapters.observability                                      │
+│  syn_adapters.observability                                      │
 │   ├── TimescaleObservability (wraps ObservabilityWriter)        │
 │   └── get_observability() → ObservabilityPort                   │
 │                                                                  │
-│  aef_adapters.orchestration                                      │
+│  syn_adapters.orchestration                                      │
 │   ├── WorkflowExecutor(__init__(observability: ObservabilityPort))
 │   └── create_workflow_executor() → WorkflowExecutor             │
 └─────────────────────────────────────────────────────────────────┘
@@ -67,7 +67,7 @@ We implemented the **Poka-Yoke pattern** (mistake-proofing) by:
 ## Poka-Yoke Guarantees
 
 1. **Constructor requires ObservabilityPort** - `WorkflowExecutor(observability=None)` raises `TypeError`
-2. **NullObservability throws outside tests** - `NullObservability()` raises `TestOnlyAdapterError` if `AEF_ENVIRONMENT != 'test'`
+2. **NullObservability throws outside tests** - `NullObservability()` raises `TestOnlyAdapterError` if `SYN_ENVIRONMENT != 'test'`
 3. **Factory is the recommended entry point** - `create_workflow_executor()` handles DI wiring automatically
 4. **Single code path** - Both CLI and Dashboard now use the same executor (or will after migration)
 
@@ -105,12 +105,12 @@ lib/agentic-primitives/lib/python/agentic_observability/
 ├── pyproject.toml
 └── README.md
 
-packages/aef-adapters/src/aef_adapters/observability/
+packages/syn-adapters/src/syn_adapters/observability/
 ├── __init__.py
 ├── timescale.py             # TimescaleObservability
 └── factory.py               # get_observability()
 
-packages/aef-adapters/src/aef_adapters/orchestration/
+packages/syn-adapters/src/syn_adapters/orchestration/
 ├── workflow_executor.py     # WorkflowExecutor (unified)
 └── factory.py               # create_workflow_executor() [updated]
 ```
@@ -119,7 +119,7 @@ packages/aef-adapters/src/aef_adapters/orchestration/
 
 ```python
 # Production (Dashboard/CLI)
-from aef_adapters.orchestration import create_workflow_executor
+from syn_adapters.orchestration import create_workflow_executor
 
 executor = create_workflow_executor(
     workspace_service=WorkspaceService.create_docker(),
@@ -130,7 +130,7 @@ async for event in executor.execute(workflow, inputs):
 
 # Tests
 import os
-os.environ["AEF_ENVIRONMENT"] = "test"
+os.environ["SYN_ENVIRONMENT"] = "test"
 
 from agentic_observability import NullObservability
 

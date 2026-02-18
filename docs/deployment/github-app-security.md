@@ -68,7 +68,7 @@ This document describes how AEF securely integrates with GitHub using GitHub App
 ```bash
 # Generate new private key (done in GitHub App settings)
 # Download .pem file, base64 encode for storage
-cat aef-app.pem | base64 | tr -d '\n'
+cat syn-app.pem | base64 | tr -d '\n'
 ```
 
 ### 2. JWT Token (Ephemeral)
@@ -132,8 +132,8 @@ Installation tokens are automatically scoped to:
         "issues": "read"
     },
     "repositories": [
-        "AgentParadise/sandbox_aef-engineer-beta",
-        "AgentParadise/agentic-engineering-framework"
+        "syntropic137/sandbox_aef-engineer-beta",
+        "syntropic137/agentic-engineering-framework"
     ]
 }
 ```
@@ -169,7 +169,7 @@ All GitHub operations are auditable:
   "action": "git.push",
   "actor": "aef-engineer-beta[bot]",
   "actor_id": 12345678,
-  "repository": "AgentParadise/sandbox_aef-engineer-beta",
+  "repository": "syntropic137/sandbox_aef-engineer-beta",
   "ref": "refs/heads/feature/agent-changes",
   "commit_sha": "abc1234"
 }
@@ -182,7 +182,7 @@ All GitHub operations are auditable:
   "execution_id": "exec-abc123",
   "workflow_id": "code-review-v1",
   "operation": "git.push",
-  "repository": "AgentParadise/sandbox_aef-engineer-beta",
+  "repository": "syntropic137/sandbox_aef-engineer-beta",
   "commit_sha": "abc1234",
   "agent_session": "session-xyz"
 }
@@ -232,19 +232,19 @@ See GitHub Issue #24 for multi-tenancy implementation details.
 
 ```bash
 # Required
-AEF_GITHUB_APP_ID=2461312
-AEF_GITHUB_APP_NAME=aef-engineer-beta
-AEF_GITHUB_INSTALLATION_ID=99311335
-AEF_GITHUB_PRIVATE_KEY=<base64-encoded-pem>
+SYN_GITHUB_APP_ID=2461312
+SYN_GITHUB_APP_NAME=aef-engineer-beta
+SYN_GITHUB_INSTALLATION_ID=99311335
+SYN_GITHUB_PRIVATE_KEY=<base64-encoded-pem>
 
 # Optional
-AEF_GITHUB_WEBHOOK_SECRET=<hmac-secret>
+SYN_GITHUB_WEBHOOK_SECRET=<hmac-secret>
 ```
 
 ### Pydantic Settings
 
 ```python
-from aef_shared.settings import get_settings
+from syn_shared.settings import get_settings
 
 settings = get_settings()
 github = settings.github

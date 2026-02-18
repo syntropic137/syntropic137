@@ -9,7 +9,7 @@
 
 ## Overview
 
-This document defines acceptance tests for validating the Agentic Engineering Framework (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+This document defines acceptance tests for validating the Syntropic137 (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
 
 **Version 4.0** adds:
 - **WebSocket Control Plane** - Real-time execution control (pause/resume/cancel)
@@ -93,7 +93,7 @@ LIMIT 10;
 
 **Agentic SDK (F8-F12):**
 - `ANTHROPIC_API_KEY` environment variable set (for live agent tests)
-- `uv pip install aef-adapters[claude-agentic]` for claude-agent-sdk
+- `uv pip install syn-adapters[claude-agentic]` for claude-agent-sdk
 - `agentic-primitives` submodule initialized
 
 **Quick Setup:**
@@ -167,7 +167,7 @@ See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configur
 |---|---------------------|--------|
 | 1.1.1 | PostgreSQL container starts and becomes healthy | ⬜ |
 | 1.1.2 | Event Store Server container starts and becomes healthy | ⬜ |
-| 1.1.3 | Containers are on the `aef-network` | ⬜ |
+| 1.1.3 | Containers are on the `syn-network` | ⬜ |
 | 1.1.4 | PostgreSQL is accessible on localhost:5432 | ⬜ |
 | 1.1.5 | Event Store Server is accessible on localhost:50051 | ⬜ |
 
@@ -175,7 +175,7 @@ See [ADR-004: Environment Configuration](/docs/adrs/ADR-004-environment-configur
 ```bash
 just dev
 docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-docker network inspect aef-network
+docker network inspect syn-network
 ```
 
 ### F1.2 Database Initialization
@@ -944,7 +944,7 @@ curl -s http://localhost:8000/api/workflows/implementation-workflow-v1 | jq '{ru
 
 ## Feature 8: Agentic Workflow Execution ⭐ NEW
 
-> **Requires:** `aef-adapters[claude-agentic]` installed
+> **Requires:** `syn-adapters[claude-agentic]` installed
 
 ### F8.1 AgenticWorkflowExecutor Initialization
 
@@ -961,7 +961,7 @@ curl -s http://localhost:8000/api/workflows/implementation-workflow-v1 | jq '{ru
 
 **Validation (Python):**
 ```python
-from aef_adapters.orchestration import AgenticWorkflowExecutor, get_agentic_agent
+from syn_adapters.orchestration import AgenticWorkflowExecutor, get_agentic_agent
 
 # Verify executor creation
 executor = AgenticWorkflowExecutor(
@@ -976,7 +976,7 @@ assert executor is not None
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_executor"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_executor"
 ```
 
 ### F8.2 Single-Phase Workflow Execution
@@ -996,7 +996,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_executor"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_simple"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_execute_simple"
 ```
 
 ### F8.3 Multi-Phase Workflow Execution
@@ -1015,7 +1015,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_sim
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_multi"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_execute_multi"
 ```
 
 ### F8.4 Execution Failure Handling
@@ -1034,7 +1034,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_execute_mul
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_phase_failure"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_phase_failure"
 ```
 
 ### F8.5 Live Agent Execution (Requires ANTHROPIC_API_KEY)
@@ -1053,8 +1053,8 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_phase_failu
 **Validation (Manual - requires API key):**
 ```python
 import asyncio
-from aef_adapters.agents import ClaudeAgenticAgent
-from aef_adapters.agents.agentic_types import AgentExecutionConfig, Workspace
+from syn_adapters.agents import ClaudeAgenticAgent
+from syn_adapters.agents.agentic_types import AgentExecutionConfig, Workspace
 
 agent = ClaudeAgenticAgent()
 assert agent.is_available, "Set ANTHROPIC_API_KEY"
@@ -1091,7 +1091,7 @@ asyncio.run(test())
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_local_workspace"
+pytest packages/syn-adapters/tests/test_workspaces.py -v -k "test_local_workspace"
 ```
 
 ### F9.2 Hook Settings Generation
@@ -1109,7 +1109,7 @@ pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_local_workspac
 
 **Validation (Manual):**
 ```python
-from aef_adapters.workspaces import LocalWorkspace, WorkspaceConfig
+from syn_adapters.workspaces import LocalWorkspace, WorkspaceConfig
 from pathlib import Path
 
 config = WorkspaceConfig(
@@ -1158,7 +1158,7 @@ cat /tmp/test-workspace/analytics.jsonl | jq -s '.'
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_inject"
+pytest packages/syn-adapters/tests/test_workspaces.py -v -k "test_inject"
 ```
 
 ---
@@ -1181,7 +1181,7 @@ pytest packages/aef-adapters/tests/test_workspaces.py -v -k "test_inject"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_artifact_bundle"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_artifact_bundle"
 ```
 
 ### F10.2 Directory Collection
@@ -1200,7 +1200,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_artifact_bundle
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_from_directory"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_from_directory"
 ```
 
 ### F10.3 Serialization / Deserialization
@@ -1217,7 +1217,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_from_directory"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_serialization"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_serialization"
 ```
 
 ### F10.4 PhaseContext Creation
@@ -1235,7 +1235,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_serialization"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_phase_context"
+pytest packages/syn-adapters/tests/test_artifacts.py -v -k "test_phase_context"
 ```
 
 ---
@@ -1259,7 +1259,7 @@ pytest packages/aef-adapters/tests/test_artifacts.py -v -k "test_phase_context"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_events.py -v -k "test_watcher"
+pytest packages/syn-adapters/tests/test_events.py -v -k "test_watcher"
 ```
 
 ### F11.2 HookToDomainTranslator
@@ -1280,7 +1280,7 @@ pytest packages/aef-adapters/tests/test_events.py -v -k "test_watcher"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_events.py -v -k "test_translator"
+pytest packages/syn-adapters/tests/test_events.py -v -k "test_translator"
 ```
 
 ### F11.3 EventBridge Integration
@@ -1299,7 +1299,7 @@ pytest packages/aef-adapters/tests/test_events.py -v -k "test_translator"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_events.py -v -k "test_bridge"
+pytest packages/syn-adapters/tests/test_events.py -v -k "test_bridge"
 ```
 
 ---
@@ -1320,7 +1320,7 @@ pytest packages/aef-adapters/tests/test_events.py -v -k "test_bridge"
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_agent_factory"
+pytest packages/syn-adapters/tests/test_orchestration.py -v -k "test_agent_factory"
 ```
 
 ### F12.2 Agent Availability
@@ -1337,7 +1337,7 @@ pytest packages/aef-adapters/tests/test_orchestration.py -v -k "test_agent_facto
 
 **Validation (Python):**
 ```python
-from aef_adapters.agents import ClaudeAgenticAgent
+from syn_adapters.agents import ClaudeAgenticAgent
 import os
 
 # Without API key
@@ -1366,7 +1366,7 @@ assert agent.is_available == True  # (assuming SDK installed)
 **Validation (Python):**
 ```python
 import os
-from aef_adapters.agents import MockAgent
+from syn_adapters.agents import MockAgent
 
 # This should raise RuntimeError
 os.environ["APP_ENVIRONMENT"] = "development"
@@ -1481,7 +1481,7 @@ ws.onopen = () => {
 
 **Validation (pytest):**
 ```bash
-pytest packages/aef-adapters/tests/test_executor_control.py -v
+pytest packages/syn-adapters/tests/test_executor_control.py -v
 ```
 
 ### F13.4 Frontend Control UI
@@ -1528,7 +1528,7 @@ pytest packages/aef-adapters/tests/test_executor_control.py -v
 | 13.5.6 | `aef control status <id>` shows current state | ⬜ |
 | 13.5.7 | Status shows colored output (green/yellow/red) | ⬜ |
 | 13.5.8 | Error messages shown when API unavailable | ⬜ |
-| 13.5.9 | `AEF_DASHBOARD_URL` environment variable supported | ⬜ |
+| 13.5.9 | `SYN_DASHBOARD_URL` environment variable supported | ⬜ |
 | 13.5.10 | `--url` flag overrides default dashboard URL | ⬜ |
 
 **Validation Commands:**
@@ -1546,7 +1546,7 @@ aef control cancel exec-123 --force --reason "Timeout"
 aef control status exec-123
 
 # Use custom dashboard URL
-AEF_DASHBOARD_URL=http://prod:8000 aef control status exec-123
+SYN_DASHBOARD_URL=http://prod:8000 aef control status exec-123
 ```
 
 ### F13.6 End-to-End Control Flow ⭐ CRITICAL
@@ -1643,20 +1643,20 @@ test('execution control flow', async ({ page }) => {
 
 ```bash
 # ⭐ CRITICAL: Run event store regression tests FIRST
-APP_ENVIRONMENT=test pytest packages/aef-domain/tests/integration/test_event_projection_consistency.py -v
+APP_ENVIRONMENT=test pytest packages/syn-domain/tests/integration/test_event_projection_consistency.py -v
 
 # Run all domain tests
-APP_ENVIRONMENT=test pytest packages/aef-domain/ -v
+APP_ENVIRONMENT=test pytest packages/syn-domain/ -v
 
 # Run all agentic tests (F8-F12)
-pytest packages/aef-adapters/tests/test_*.py -v
+pytest packages/syn-adapters/tests/test_*.py -v
 
 # Run specific feature tests
-pytest packages/aef-adapters/tests/test_orchestration.py -v      # F8
-pytest packages/aef-adapters/tests/test_workspaces.py -v         # F9
-pytest packages/aef-adapters/tests/test_artifacts.py -v          # F10
-pytest packages/aef-adapters/tests/test_events.py -v             # F11
-pytest packages/aef-adapters/tests/test_claude_agentic.py -v     # F12
+pytest packages/syn-adapters/tests/test_orchestration.py -v      # F8
+pytest packages/syn-adapters/tests/test_workspaces.py -v         # F9
+pytest packages/syn-adapters/tests/test_artifacts.py -v          # F10
+pytest packages/syn-adapters/tests/test_events.py -v             # F11
+pytest packages/syn-adapters/tests/test_claude_agentic.py -v     # F12
 
 # Full QA check (lint + type + test)
 poetry run poe check-fix
@@ -1728,7 +1728,7 @@ _Add any observations, recommendations, or follow-up items here._
 ### Migration Notes (v1.0 → v2.0)
 
 - **New Prerequisites:** ANTHROPIC_API_KEY required for live agent tests (F8.5)
-- **New Dependencies:** `aef-adapters[claude-agentic]` adds claude-agent-sdk
+- **New Dependencies:** `syn-adapters[claude-agentic]` adds claude-agent-sdk
 - **Test Count:** Increased from 79 to 142 criteria
 - **Automation:** F8-F12 tests are fully automatable via pytest
 

@@ -28,19 +28,19 @@ just proxy-test
 ### Build
 
 ```bash
-docker build -t aef-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
+docker build -t syn-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
 ```
 
 ### Run
 
 ```bash
 # With default allowlist
-docker run -d --name aef-egress-proxy -p 8080:8080 aef-egress-proxy:latest
+docker run -d --name syn-egress-proxy -p 8080:8080 syn-egress-proxy:latest
 
 # With custom allowlist
-docker run -d --name aef-egress-proxy -p 8080:8080 \
+docker run -d --name syn-egress-proxy -p 8080:8080 \
   -e ALLOWED_HOSTS="api.anthropic.com,github.com,pypi.org" \
-  aef-egress-proxy:latest
+  syn-egress-proxy:latest
 ```
 
 ### Configure Containers to Use Proxy
@@ -137,7 +137,7 @@ curl -x http://localhost:8080 https://evil.com
 lsof -i :8080
 
 # Check Docker logs
-docker logs aef-egress-proxy
+docker logs syn-egress-proxy
 ```
 
 ### Container can't reach proxy

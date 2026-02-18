@@ -12,7 +12,7 @@
 
 ## Context
 
-The Agentic Engineering Framework (AEF) executes untrusted code in agent containers. These agents require access to external APIs:
+The Syntropic137 (AEF) executes untrusted code in agent containers. These agents require access to external APIs:
 
 - **Claude API** (Anthropic) - For LLM inference ($15-75 per 1M tokens)
 - **GitHub API** - For repository operations (clone, commit, push, PR)

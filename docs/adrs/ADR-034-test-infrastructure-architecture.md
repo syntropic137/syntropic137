@@ -74,8 +74,8 @@ This allows both stacks to run simultaneously without conflicts.
 
 ### 3. Container Naming Convention
 
-- Dev: `aef-{service}` (e.g., `aef-db`, `aef-collector`)
-- Test: `aef-test-{service}` (e.g., `aef-test-db`, `aef-test-collector`)
+- Dev: `syn-{service}` (e.g., `syn-db`, `syn-collector`)
+- Test: `syn-test-{service}` (e.g., `syn-test-db`, `syn-test-collector`)
 
 ### 4. Volume Strategy
 
@@ -91,7 +91,7 @@ Following the es-p pattern, test fixtures:
 3. Fall back to testcontainers for CI
 
 ```python
-from aef_shared.testing import (
+from syn_shared.testing import (
     ENV_TEST_DATABASE_URL,
     ENV_TEST_TIMESCALEDB_HOST,
     TEST_STACK_PORTS,
@@ -110,7 +110,7 @@ async def get_test_infrastructure():
     return await _get_testcontainer_infrastructure()
 ```
 
-**Important:** Always use constants from `aef_shared.testing` - never hardcode port numbers or environment variable names. See ADR-038 for full DRY patterns.
+**Important:** Always use constants from `syn_shared.testing` - never hardcode port numbers or environment variable names. See ADR-038 for full DRY patterns.
 
 ### 6. Justfile Commands
 
@@ -143,7 +143,7 @@ just test-integration # Run integration tests
 │   │ Redis: 6379             │     │ Redis: 16379            │              │
 │   ├─────────────────────────┤     ├─────────────────────────┤              │
 │   │ Volumes: PERSISTENT     │     │ Volumes: NONE           │              │
-│   │ Network: aef-network    │     │ Network: aef-test-network│             │
+│   │ Network: syn-network    │     │ Network: syn-test-network│             │
 │   └─────────────────────────┘     └─────────────────────────┘              │
 │             │                               │                               │
 │             ▼                               ▼                               │

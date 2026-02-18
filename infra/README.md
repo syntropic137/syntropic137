@@ -1,6 +1,6 @@
 # AEF Infrastructure
 
-The Agentic Engineering Framework (AEF) infrastructure runs as a set of Docker services. This guide gets you from `git clone` to a fully running stack in one command.
+The Syntropic137 (AEF) infrastructure runs as a set of Docker services. This guide gets you from `git clone` to a fully running stack in one command.
 
 ## Quickstart
 

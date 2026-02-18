@@ -1,7 +1,7 @@
 # OpenCode Plugin-Based Observability
 
 > **Status:** Architecture Complete - Ready for Implementation
-> **Related Issue:** [#51 - OpenCode Integration](https://github.com/AgentParadise/agentic-engineering-framework/issues/51)
+> **Related Issue:** [#51 - OpenCode Integration](https://github.com/syntropic137/agentic-engineering-framework/issues/51)
 > **Related ADRs:** ADR-038 (planned)
 
 ## Overview
@@ -211,9 +211,9 @@ export const AEFObservabilityPlugin: Plugin = async ({
   directory
 }) => {
   const config: AEFPluginConfig = {
-    collectorUrl: process.env.AEF_COLLECTOR_URL || "http://aef-collector:8080",
-    sessionId: process.env.AEF_SESSION_ID || crypto.randomUUID(),
-    apiKey: process.env.AEF_API_KEY,
+    collectorUrl: process.env.SYN_COLLECTOR_URL || "http://syn-collector:8080",
+    sessionId: process.env.SYN_SESSION_ID || crypto.randomUUID(),
+    apiKey: process.env.SYN_API_KEY,
     retryAttempts: 3,
     batchSize: 10,
   }
@@ -389,7 +389,7 @@ export const AEFPlugin: Plugin = async (ctx) => {
           tags: tool.schema.record(tool.schema.string()),
         },
         async execute(args, ctx) {
-          await fetch('http://aef-collector:8080/metrics', {
+          await fetch('http://syn-collector:8080/metrics', {
             method: 'POST',
             body: JSON.stringify(args),
           })
@@ -405,7 +405,7 @@ export const AEFPlugin: Plugin = async (ctx) => {
         },
         async execute(args, ctx) {
           const response = await fetch(
-            `http://aef-dashboard:8000/api/sessions/${args.session_id}/metrics`
+            `http://syn-dashboard:8000/api/sessions/${args.session_id}/metrics`
           )
           return await response.json()
         },
@@ -523,17 +523,17 @@ CMD ["opencode"]
 
 **Environment Variables:**
 ```bash
-AEF_COLLECTOR_URL=http://aef-collector:8080
-AEF_SESSION_ID=<generated-by-workspace-service>
-AEF_API_KEY=<optional-auth>
+SYN_COLLECTOR_URL=http://syn-collector:8080
+SYN_SESSION_ID=<generated-by-workspace-service>
+SYN_API_KEY=<optional-auth>
 AI_API_BASE_URL=http://aef-gateway:8081  # Route through gateway
 ```
 
 ### WorkspaceService Integration
 
 ```python
-# packages/aef-adapters/src/aef_adapters/workspace_backends/opencode.py
-from aef_domain.workspace import WorkspaceBackend
+# packages/syn-adapters/src/syn_adapters/workspace_backends/opencode.py
+from syn_domain.workspace import WorkspaceBackend
 
 class OpenCodeWorkspaceBackend(WorkspaceBackend):
     def __init__(self, collector_url: str, gateway_url: str):
@@ -547,8 +547,8 @@ class OpenCodeWorkspaceBackend(WorkspaceBackend):
         container = await self.docker.containers.run(
             "aef/opencode:latest",
             environment={
-                "AEF_COLLECTOR_URL": self.collector_url,
-                "AEF_SESSION_ID": session_id,
+                "SYN_COLLECTOR_URL": self.collector_url,
+                "SYN_SESSION_ID": session_id,
                 "AI_API_BASE_URL": self.gateway_url,
             },
             volumes={
@@ -600,7 +600,7 @@ describe("AEFObservabilityPlugin", () => {
 ```python
 # aef_tests/integration/test_opencode_observability.py
 import pytest
-from aef_adapters.workspace_backends.opencode import OpenCodeWorkspaceBackend
+from syn_adapters.workspace_backends.opencode import OpenCodeWorkspaceBackend
 
 @pytest.mark.integration
 async def test_opencode_events_captured(test_infrastructure, db_pool):
@@ -684,5 +684,5 @@ for (let attempt = 0; attempt < config.retryAttempts; attempt++) {
 - [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
 - [OpenCode GitHub Repository](https://github.com/stackblitz/opencode)
 - [Bun Shell API](https://bun.sh/docs/runtime/shell)
-- [AEF Issue #51 - OpenCode Integration](https://github.com/AgentParadise/agentic-engineering-framework/issues/51)
+- [AEF Issue #51 - OpenCode Integration](https://github.com/syntropic137/agentic-engineering-framework/issues/51)
 
