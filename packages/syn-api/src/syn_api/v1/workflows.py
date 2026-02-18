@@ -94,7 +94,7 @@ async def get_workflow(
     from syn_api.types import PhaseDefinitionResponse
 
     phases: list[PhaseDefinitionResponse] = []
-    for p in getattr(detail, "phases", None) or []:
+    for p in detail.phases or []:
         if isinstance(p, dict):
             phases.append(
                 PhaseDefinitionResponse(
@@ -111,14 +111,14 @@ async def get_workflow(
         else:
             phases.append(
                 PhaseDefinitionResponse(
-                    phase_id=str(getattr(p, "phase_id", None) or getattr(p, "id", "")),
-                    name=getattr(p, "name", ""),
-                    order=getattr(p, "order", 0),
-                    description=getattr(p, "description", None),
-                    agent_type=getattr(p, "agent_type", ""),
-                    prompt_template=getattr(p, "prompt_template", None),
-                    timeout_seconds=getattr(p, "timeout_seconds", None) or 300,
-                    allowed_tools=list(getattr(p, "allowed_tools", None) or []),
+                    phase_id=str(p.phase_id if hasattr(p, "phase_id") else p.id),
+                    name=p.name,
+                    order=p.order,
+                    description=p.description,
+                    agent_type=p.agent_type,
+                    prompt_template=p.prompt_template,
+                    timeout_seconds=p.timeout_seconds or 300,
+                    allowed_tools=list(p.allowed_tools or []),
                 )
             )
 
