@@ -1,0 +1,25 @@
+{
+  "title": "API Reference",
+  "root": true,
+  "pages": [
+    "index",
+    "---Core---",
+    "workflows",
+    "execution",
+    "executions",
+    "control",
+    "---Data---",
+    "sessions",
+    "conversations",
+    "artifacts",
+    "---Observability---",
+    "events",
+    "observability",
+    "metrics",
+    "costs",
+    "---Automation---",
+    "triggers",
+    "webhooks",
+    "websocket"
+  ]
+}

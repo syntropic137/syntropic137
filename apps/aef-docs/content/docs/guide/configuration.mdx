@@ -1,0 +1,47 @@
+---
+title: Configuration
+description: Environment variables, settings, and GitHub App setup for Syntropic137.
+---
+
+Syntropic137 uses environment variables for configuration. Copy `.env.example` to `.env`
+and customize as needed.
+
+## Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_ENVIRONMENT` | `development` | Runtime environment (`development`, `staging`, `production`) |
+| `DATABASE_URL` | — | PostgreSQL connection string |
+| `REDIS_URL` | — | Redis connection string |
+| `API_HOST` | `0.0.0.0` | API server bind address |
+| `API_PORT` | `8000` | API server port |
+
+## GitHub App
+
+Syntropic137 integrates with GitHub through a GitHub App for receiving webhook events
+and managing repositories.
+
+### Setup
+
+1. Run `just github-app-setup` to create the GitHub App
+2. Install the app on your target repositories
+3. The setup wizard handles credential encryption automatically
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `GITHUB_APP_ID` | GitHub App ID |
+| `GITHUB_APP_PRIVATE_KEY` | PEM-encoded private key |
+| `GITHUB_WEBHOOK_SECRET` | Webhook verification secret |
+
+## Agent Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_WORKSPACE_DIR` | `/tmp/aef-workspaces` | Base directory for agent workspaces |
+| `AGENT_TIMEOUT` | `3600` | Maximum agent execution time (seconds) |
+| `AGENT_MAX_CONCURRENT` | `4` | Maximum concurrent agent sessions |
+
+See `.env.example` in the repository for the complete list of configuration
+options.
