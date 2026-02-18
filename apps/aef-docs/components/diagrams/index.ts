@@ -25,3 +25,16 @@ export {
   WorkspaceIsolationDiagram,
   ScalingDiagram,
 } from './DeploymentDiagram';
+
+// Interactive React Flow diagrams (lazy-loaded)
+export {
+  SystemArchitectureFlow,
+  EventSourcingFlow,
+  TwoEventTypesFlow,
+  CQRSFlow,
+  DomainModelFlow,
+  StateMachineFlow,
+  DeploymentArchitectureFlow,
+  WorkspaceIsolationFlow,
+  ScalingFlow,
+} from './interactive/diagrams';

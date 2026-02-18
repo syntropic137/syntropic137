@@ -7,7 +7,7 @@ description: Deploy Syntropic137 on your own infrastructure — from homelab to 
 
 Syntropic137 runs as a set of Docker services connected through a shared network:
 
-<DeploymentArchitectureDiagram />
+<DeploymentArchitectureFlow />
 
 ## Quick Start with Docker Compose
 
@@ -29,7 +29,7 @@ The dashboard will be available at `http://localhost:8000`.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| `aef-dashboard` | 8000 | FastAPI backend — REST API, WebSocket, SSE |
+| `aef-api` | 8000 | FastAPI backend — REST API, WebSocket, SSE |
 | `aef-ui` | 80 | React dashboard frontend |
 | `event-store` | 50051 | gRPC event sourcing server |
 | `event-collector` | 8080 | High-throughput event ingestion |
@@ -41,7 +41,7 @@ The dashboard will be available at `http://localhost:8000`.
 
 Each agent execution runs in an isolated Docker workspace with a two-phase security model:
 
-<WorkspaceIsolationDiagram />
+<WorkspaceIsolationFlow />
 
 **Setup Phase** — Secrets are available briefly to configure credential helpers. Raw tokens are cleared before the agent starts.
 
@@ -75,7 +75,7 @@ Recommended for **10–100 concurrent agents**:
 
 For **100–1,000 concurrent agents**, run multiple Syntropic137 instances behind a load balancer:
 
-<ScalingDiagram />
+<ScalingFlow />
 
 ### Kubernetes
 

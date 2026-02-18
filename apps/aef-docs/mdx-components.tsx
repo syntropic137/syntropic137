@@ -11,6 +11,10 @@ import {
   EventSourcingFlowDiagram, TwoEventTypesDiagram, CQRSDiagram,
   DomainModelDiagram, StateMachineDiagram,
   DeploymentArchitectureDiagram, WorkspaceIsolationDiagram, ScalingDiagram,
+  // Interactive React Flow diagrams
+  SystemArchitectureFlow, EventSourcingFlow, TwoEventTypesFlow,
+  CQRSFlow, DomainModelFlow, StateMachineFlow,
+  DeploymentArchitectureFlow, WorkspaceIsolationFlow, ScalingFlow,
 } from '@/components/diagrams';
 
 export function getMDXComponents(components: MDXComponents): MDXComponents {
@@ -42,6 +46,16 @@ export function getMDXComponents(components: MDXComponents): MDXComponents {
     DeploymentArchitectureDiagram,
     WorkspaceIsolationDiagram,
     ScalingDiagram,
+    // Interactive React Flow diagrams
+    SystemArchitectureFlow,
+    EventSourcingFlow,
+    TwoEventTypesFlow,
+    CQRSFlow,
+    DomainModelFlow,
+    StateMachineFlow,
+    DeploymentArchitectureFlow,
+    WorkspaceIsolationFlow,
+    ScalingFlow,
     ...components,
   };
 }

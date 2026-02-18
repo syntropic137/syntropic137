@@ -7,7 +7,7 @@ description: Event sourcing, CQRS, workspace isolation, and the internals of Syn
 
 Syntropic137 uses **event sourcing** as its core persistence pattern. Instead of storing current state, every state change is recorded as an immutable event. The current state is derived by replaying events.
 
-<EventSourcingFlowDiagram />
+<EventSourcingFlow />
 
 ### Two Event Types
 
@@ -21,7 +21,7 @@ Syntropic137 distinguishes between two kinds of events, each optimized for its u
 | **Throughput** | ~1K/sec | ~10K/sec |
 | **Examples** | `WorkflowCreated`, `ExecutionStarted` | `ToolExecuted`, `TokensUsed` |
 
-<TwoEventTypesDiagram />
+<TwoEventTypesFlow />
 
 ## CQRS
 
@@ -33,13 +33,13 @@ Commands and queries are strictly separated. Commands modify state through aggre
 
 **Projections (13):** Pre-computed read models updated by event processors, cached in Redis for sub-millisecond query response times.
 
-<CQRSDiagram />
+<CQRSFlow />
 
 ## Domain Model
 
 Syntropic137 is organized into four bounded contexts with six aggregates:
 
-<DomainModelDiagram />
+<DomainModelFlow />
 
 ## Real-Time Communication
 
@@ -59,7 +59,7 @@ GET /api/executions/{execution_id}/stream
 
 ### Execution State Machine
 
-<StateMachineDiagram />
+<StateMachineFlow />
 
 **Yield Points** — The agent can only be paused at safe points: before each workflow phase, after each tool execution, and after each LLM call.
 
