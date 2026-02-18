@@ -195,12 +195,12 @@ async def _start_egress_proxy(
     Returns:
         Container ID of proxy
     """
-    proxy_name = f"aef-proxy-{execution_id[:8]}"
-    
+    proxy_name = f"syn-proxy-{execution_id[:8]}"
+
     cmd = [
         "docker", "run", "-d",
         f"--name={proxy_name}",
-        "--network=aef-proxy-net",
+        "--network=syn-proxy-net",
         "syn-egress-proxy:latest",
     ]
     
@@ -223,7 +223,7 @@ async def create(
     docker_cmd = self._build_docker_command(
         container_name=container_name,
         workspace_dir=workspace_path,
-        network_name="aef-proxy-net",  # Same network as proxy
+        network_name="syn-proxy-net",  # Same network as proxy
         config=config,
     )
     
@@ -328,11 +328,11 @@ cd lib/agentic-primitives/providers/workspaces/egress-proxy
 docker build -t syn-egress-proxy .
 
 # 2. Start proxy
-docker run -d --name proxy --network aef-net syn-egress-proxy
+docker run -d --name proxy --network syn-net syn-egress-proxy
 
 # 3. Start agent with proxy
 docker run \
-  --network aef-net \
+  --network syn-net \
   -e HTTP_PROXY=http://proxy:8080 \
   agentic-workspace-claude-cli
 ```

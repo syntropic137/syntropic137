@@ -74,7 +74,7 @@ This allows both stacks to run simultaneously without conflicts.
 
 ### 3. Container Naming Convention
 
-- Dev: `aef-{service}` (e.g., `syn-db`, `syn-collector`)
+- Dev: `syn-{service}` (e.g., `syn-db`, `syn-collector`)
 - Test: `syn-test-{service}` (e.g., `syn-test-db`, `syn-test-collector`)
 
 ### 4. Volume Strategy

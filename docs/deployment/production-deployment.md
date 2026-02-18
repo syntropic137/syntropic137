@@ -104,11 +104,11 @@ SYN_WORKSPACE_DOCKER_RUNTIME=runsc      # gVisor runtime
 SYN_WORKSPACE_DOCKER_NETWORK=none       # No network
 
 # ---- Firecracker Settings (if using Firecracker) ----
-SYN_FIRECRACKER_KERNEL_PATH=/var/lib/aef/firecracker/vmlinux
-SYN_FIRECRACKER_ROOTFS_PATH=/var/lib/aef/firecracker/rootfs.ext4
+SYN_FIRECRACKER_KERNEL_PATH=/var/lib/syn/firecracker/vmlinux
+SYN_FIRECRACKER_ROOTFS_PATH=/var/lib/syn/firecracker/rootfs.ext4
 
 # ---- Database ----
-SYN_DATABASE_URL=postgresql://aef:password@localhost:5432/aef
+SYN_DATABASE_URL=postgresql://syn:password@localhost:5432/syn
 
 # ---- Redis (for coordination) ----
 SYN_REDIS_URL=redis://localhost:6379

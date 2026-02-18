@@ -1,4 +1,4 @@
-"""AEF Dashboard - FastAPI application."""
+"""Syntropic137 Dashboard - FastAPI application."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """
     import syn_api.v1.lifecycle as lifecycle
 
-    logger.info("Starting AEF Dashboard...")
+    logger.info("Starting Syntropic137 Dashboard...")
 
     result = await lifecycle.startup()
     if hasattr(result, "value"):
@@ -64,7 +64,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    logger.info("Shutting down AEF Dashboard...")
+    logger.info("Shutting down Syntropic137 Dashboard...")
     await lifecycle.shutdown()
 
 
@@ -73,7 +73,7 @@ def create_app() -> FastAPI:
     config = get_dashboard_config()
 
     app = FastAPI(
-        title="AEF Dashboard API",
+        title="Syntropic137 Dashboard API",
         description=(
             "Dashboard API for Syntropic137. "
             "Provides real-time observability for workflow execution, "
@@ -129,7 +129,7 @@ def create_app() -> FastAPI:
     async def root() -> dict[str, str]:
         """Root endpoint with API info."""
         return {
-            "name": "AEF Dashboard API",
+            "name": "Syntropic137 Dashboard API",
             "version": "0.1.0",
             "docs": "/docs",
             "health": "/health",
@@ -155,7 +155,7 @@ app = create_app()
 def run() -> None:
     """Run the dashboard server."""
     config = get_dashboard_config()
-    logger.info("Starting AEF Dashboard on %s:%d", config.host, config.port)
+    logger.info("Starting Syntropic137 Dashboard on %s:%d", config.host, config.port)
     uvicorn.run(
         "syn_dashboard.main:app",
         host=config.host,

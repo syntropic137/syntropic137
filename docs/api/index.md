@@ -4,7 +4,7 @@ Programmatic interface to the Syntropic137.
 
 ## Overview
 
-`syn-api` is the single entry point for interacting with AEF programmatically. Everything — CLI commands, dashboard operations, third-party integrations, and LLM tool-use — goes through this API.
+`syn-api` is the single entry point for interacting with Syntropic137 programmatically. Everything — CLI commands, dashboard operations, third-party integrations, and LLM tool-use — goes through this API.
 
 ## Installation
 
