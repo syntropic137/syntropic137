@@ -12,26 +12,26 @@
 # Storage API: http://localhost:54321/storage/v1
 #
 # Environment variables for your .env:
-#   AEF_STORAGE_PROVIDER=supabase
-#   AEF_STORAGE_SUPABASE_URL=http://localhost:54321
-#   AEF_STORAGE_SUPABASE_KEY=<service-role-key-from-console>
-#   AEF_STORAGE_BUCKET_NAME=aef-artifacts
+#   SYN_STORAGE_PROVIDER=supabase
+#   SYN_STORAGE_SUPABASE_URL=http://localhost:54321
+#   SYN_STORAGE_SUPABASE_KEY=<service-role-key-from-console>
+#   SYN_STORAGE_BUCKET_NAME=syn-artifacts
 
-name: aef-supabase
+name: syn-supabase
 
 services:
   # Supabase Studio - Admin UI
   studio:
     image: supabase/studio:20240326-5e5586d
-    container_name: aef-supabase-studio
+    container_name: syn-supabase-studio
     restart: unless-stopped
     ports:
       - "54323:3000"
     environment:
       STUDIO_PG_META_URL: http://meta:8080
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aef_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-syn_dev_password}
       DEFAULT_ORGANIZATION_NAME: AEF Development
-      DEFAULT_PROJECT_NAME: aef-local
+      DEFAULT_PROJECT_NAME: syn-local
       SUPABASE_URL: http://kong:8000
       SUPABASE_PUBLIC_URL: http://localhost:54321
       # ============================================================================
@@ -44,7 +44,7 @@ services:
   # Kong - API Gateway
   kong:
     image: kong:2.8.1
-    container_name: aef-supabase-kong
+    container_name: syn-supabase-kong
     restart: unless-stopped
     ports:
       - "54321:8000" # Supabase API
@@ -66,14 +66,14 @@ services:
   # Auth - GoTrue authentication
   auth:
     image: supabase/gotrue:v2.143.0
-    container_name: aef-supabase-auth
+    container_name: syn-supabase-auth
     restart: unless-stopped
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
       API_EXTERNAL_URL: http://localhost:54321
       GOTRUE_DB_DRIVER: postgres
-      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-aef_dev_password}@supabase-db:5432/postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD:-syn_dev_password}@supabase-db:5432/postgres
       GOTRUE_SITE_URL: http://localhost:3000
       GOTRUE_URI_ALLOW_LIST: "*"
       GOTRUE_DISABLE_SIGNUP: "false"
@@ -91,10 +91,10 @@ services:
   # REST - PostgREST API
   rest:
     image: postgrest/postgrest:v12.0.1
-    container_name: aef-supabase-rest
+    container_name: syn-supabase-rest
     restart: unless-stopped
     environment:
-      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-aef_dev_password}@supabase-db:5432/postgres
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD:-syn_dev_password}@supabase-db:5432/postgres
       PGRST_DB_SCHEMAS: public,storage,graphql_public
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
@@ -108,14 +108,14 @@ services:
   # Storage - S3-compatible storage service
   storage:
     image: supabase/storage-api:v0.46.4
-    container_name: aef-supabase-storage
+    container_name: syn-supabase-storage
     restart: unless-stopped
     environment:
       ANON_KEY: ${ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
       SERVICE_KEY: ${SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
       POSTGREST_URL: http://rest:3000
       PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
-      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD:-aef_dev_password}@supabase-db:5432/postgres
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD:-syn_dev_password}@supabase-db:5432/postgres
       FILE_SIZE_LIMIT: 52428800 # 50MB
       STORAGE_BACKEND: file
       FILE_STORAGE_BACKEND_PATH: /var/lib/storage
@@ -135,7 +135,7 @@ services:
   # Image proxy for resizing
   imgproxy:
     image: darthsim/imgproxy:v3.8.0
-    container_name: aef-supabase-imgproxy
+    container_name: syn-supabase-imgproxy
     restart: unless-stopped
     environment:
       IMGPROXY_BIND: ":8080"
@@ -145,7 +145,7 @@ services:
   # Postgres metadata service
   meta:
     image: supabase/postgres-meta:v0.77.2
-    container_name: aef-supabase-meta
+    container_name: syn-supabase-meta
     restart: unless-stopped
     environment:
       PG_META_PORT: 8080
@@ -153,7 +153,7 @@ services:
       PG_META_DB_PORT: 5432
       PG_META_DB_NAME: postgres
       PG_META_DB_USER: supabase_admin
-      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-aef_dev_password}
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-syn_dev_password}
     depends_on:
       supabase-db:
         condition: service_healthy
@@ -161,7 +161,7 @@ services:
   # Supabase Postgres (separate from main AEF postgres)
   supabase-db:
     image: supabase/postgres:15.1.0.147
-    container_name: aef-supabase-db
+    container_name: syn-supabase-db
     restart: unless-stopped
     ports:
       - "54329:5432"
@@ -169,8 +169,8 @@ services:
       POSTGRES_HOST: /var/run/postgresql
       PGPORT: 5432
       POSTGRES_PORT: 5432
-      PGPASSWORD: ${POSTGRES_PASSWORD:-aef_dev_password}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aef_dev_password}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-syn_dev_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-syn_dev_password}
       PGDATABASE: postgres
       POSTGRES_DB: postgres
       JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
@@ -200,5 +200,5 @@ volumes:
 
 networks:
   default:
-    name: aef-network
+    name: syn-network
     external: true

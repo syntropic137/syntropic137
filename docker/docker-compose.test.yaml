@@ -9,7 +9,7 @@
 
 services:
   timescaledb:
-    container_name: aef-test-db
+    container_name: syn-test-db
     ports:
       - "15432:5432"
     volumes:
@@ -17,31 +17,31 @@ services:
     # No persistent volume - ephemeral
 
   event-store:
-    container_name: aef-test-event-store
+    container_name: syn-test-event-store
     ports:
       - "55051:50051"
 
   collector:
-    container_name: aef-test-collector
+    container_name: syn-test-collector
     ports:
       - "18080:8080"
 
   minio:
-    container_name: aef-test-minio
+    container_name: syn-test-minio
     ports:
       - "19000:9000" # S3 API
       - "19001:9001" # Web Console
     # No persistent volume - ephemeral
 
   minio-init:
-    container_name: aef-test-minio-init
+    container_name: syn-test-minio-init
 
   redis:
-    container_name: aef-test-redis
+    container_name: syn-test-redis
     ports:
       - "16379:6379"
     # No persistent volume - ephemeral
 
 networks:
   default:
-    name: aef-test-network
+    name: syn-test-network

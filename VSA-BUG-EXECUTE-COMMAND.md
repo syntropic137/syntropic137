@@ -19,13 +19,13 @@ VSA validation fails to detect `ExecuteCommandHandler.py` in the `execute_comman
   - `inject_tokens/InjectTokensHandler.py` ✅
 - The file exists and is readable:
   ```bash
-  $ ls -la packages/aef-domain/src/aef_domain/contexts/workspaces/execute_command/
+  $ ls -la packages/syn-domain/src/syn_domain/contexts/workspaces/execute_command/
   -rw-r--r--@ 1 neural  staff   960 Jan 17 16:35 ExecuteCommandHandler.py
   ```
 - Python can import it successfully
 - The handler is correctly exported in `__init__.py`:
   ```python
-  from aef_domain.contexts.workspaces.execute_command.ExecuteCommandHandler import (
+  from syn_domain.contexts.workspaces.execute_command.ExecuteCommandHandler import (
       ExecuteCommandHandler,
   )
   __all__ = ["...", "ExecuteCommandHandler"]
@@ -36,7 +36,7 @@ VSA validation fails to detect `ExecuteCommandHandler.py` in the `execute_comman
 VSA validation consistently reports:
 ```
 ! Feature 'execute_command' in context 'workspaces' has a command but no handler
-  at: ./packages/aef-domain/src/aef_domain/contexts/workspaces/execute_command
+  at: ./packages/syn-domain/src/syn_domain/contexts/workspaces/execute_command
 ```
 
 ### 🧪 Tests Performed
@@ -105,7 +105,7 @@ The bug appears to be **specific to the `execute_command` directory**. Possible 
 cd /path/to/agentic-engineering-framework
 
 # Verify file exists
-ls -la packages/aef-domain/src/aef_domain/contexts/workspaces/execute_command/ExecuteCommandHandler.py
+ls -la packages/syn-domain/src/syn_domain/contexts/workspaces/execute_command/ExecuteCommandHandler.py
 
 # Run VSA validation
 vsa validate
@@ -148,6 +148,6 @@ vsa validate
 
 ---
 
-**Reported By:** Cursor AI Agent (Agentic Engineering Framework Team)
+**Reported By:** Cursor AI Agent (Syntropic137 Team)
 **Date:** 2026-01-18
 **Environment:** macOS 25.1.0, VSA from event-sourcing-platform submodule

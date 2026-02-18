@@ -16,7 +16,7 @@ running, a smee.io tunnel, a real GitHub repo with failing CI, and real API call
 This is slow, expensive, and fragile.
 
 The codebase already has **agent session recording/replay** (SessionRecorder /
-SessionPlayer in agentic-primitives, RecordingEventStreamAdapter in aef-adapters;
+SessionPlayer in agentic-primitives, RecordingEventStreamAdapter in syn-adapters;
 see ADR-033). What's missing is **webhook recording** and an **offline dev mode**
 that lets the full stack run without Docker or external services.
 
@@ -48,7 +48,7 @@ A new `uses_in_memory_stores` property on `Settings` returns `True` for both
 ### 2. Webhook Recording / Replay
 
 An ASGI middleware (`WebhookRecorderMiddleware`) captures incoming GitHub webhooks
-to JSONL files when `AEF_RECORD_WEBHOOKS=true`. Each file follows the same JSONL
+to JSONL files when `SYN_RECORD_WEBHOOKS=true`. Each file follows the same JSONL
 convention as SessionRecorder from agentic-primitives:
 
 - **Metadata header** on line 1 (timestamp, event type, source).
@@ -64,8 +64,8 @@ running dashboard with speed control and signature stripping.
 Pytest tests that run fully offline — no Docker, no network:
 
 - Set `APP_ENVIRONMENT=test` (already uses in-memory stores).
-- Seed triggers via `aef_api.v1.triggers.enable_preset()`.
-- Inject webhook payloads directly via `aef_api.v1.github.verify_and_process_webhook()`.
+- Seed triggers via `syn_api.v1.triggers.enable_preset()`.
+- Inject webhook payloads directly via `syn_api.v1.github.verify_and_process_webhook()`.
 - Assert triggers fired, correct workflow inputs extracted.
 - Replay agent sessions via existing `RecordingEventStreamAdapter`.
 - Assert projections populated (session list, costs, tool timeline).

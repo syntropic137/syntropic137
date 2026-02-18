@@ -1,5 +1,5 @@
 ---
-description: Prime context for AEF (Agentic Engineering Framework)
+description: Prime context for AEF (Syntropic137)
 argument-hint: [optional: focus area like "adapters", "dashboard", "cli", "events"]
 model: sonnet
 allowed-tools: Read, Glob, Grep
@@ -11,7 +11,7 @@ Quickly understand the AEF codebase structure, patterns, and architecture.
 
 ## Purpose
 
-Build working context for the Agentic Engineering Framework by reading key files and understanding the dual-purpose architecture: **Orchestration** (running agents in Docker) and **Observability** (capturing and analyzing agent events).
+Build working context for the Syntropic137 by reading key files and understanding the dual-purpose architecture: **Orchestration** (running agents in Docker) and **Observability** (capturing and analyzing agent events).
 
 ## Variables
 
@@ -22,25 +22,25 @@ FOCUS_AREA: $ARGUMENTS
 ```
 agentic-engineering-framework/
 ├── apps/                           # Applications
-│   ├── aef-cli/                    # CLI tool (`aef` command)
-│   ├── aef-dashboard/              # FastAPI backend (port 8000)
-│   └── aef-dashboard-ui/           # React frontend (port 5173)
+│   ├── syn-cli/                    # CLI tool (`aef` command)
+│   ├── syn-dashboard/              # FastAPI backend (port 8000)
+│   └── syn-dashboard-ui/           # React frontend (port 5173)
 │
 ├── packages/                       # Core packages
-│   ├── aef-adapters/               # External integrations (Docker, EventStore, MinIO)
+│   ├── syn-adapters/               # External integrations (Docker, EventStore, MinIO)
 │   │   ├── events/                 # Event storage (TimescaleDB)
 │   │   ├── workspace_backends/     # Docker workspace management
 │   │   ├── projections/            # Event aggregations
 │   │   └── subscriptions/          # Real-time event streaming
-│   ├── aef-domain/                 # Domain models & VSA contexts
+│   ├── syn-domain/                 # Domain models & VSA contexts
 │   │   ├── agents/                 # Agent sessions, token tracking
 │   │   ├── workflows/              # Workflow definitions, phases
 │   │   ├── artifacts/              # Artifact storage, metadata
 │   │   ├── workspaces/             # Isolated workspace lifecycle
 │   │   └── costs/                  # Cost tracking & aggregation
-│   ├── aef-collector/              # Event ingestion API (port 8080)
-│   ├── aef-shared/                 # Logging, settings, utilities
-│   └── aef-tokens/                 # Secure token vending
+│   ├── syn-collector/              # Event ingestion API (port 8080)
+│   ├── syn-shared/                 # Logging, settings, utilities
+│   └── syn-tokens/                 # Secure token vending
 │
 ├── lib/                            # Git submodules
 │   ├── agentic-primitives/         # Composable agent blocks
@@ -69,11 +69,11 @@ agentic-engineering-framework/
 | `justfile` | **Primary entry point** - all dev commands (`just --list`) | 1 (critical) |
 | `AGENTS.md` | Agent instructions, RIPER-5 protocol, testing philosophy | 1 (critical) |
 | `pyproject.toml` | Dependencies, workspace config, tool settings | 1 (critical) |
-| `packages/aef-adapters/src/aef_adapters/workspace_backends/service/workspace_service.py` | Core orchestration - runs Claude in Docker | 2 (high) |
-| `packages/aef-adapters/src/aef_adapters/events/store.py` | Event storage (TimescaleDB) | 2 (high) |
-| `apps/aef-dashboard/src/aef_dashboard/main.py` | Dashboard API entry point | 2 (high) |
-| `apps/aef-cli/src/aef_cli/main.py` | CLI entry point | 2 (high) |
-| `packages/aef-domain/src/aef_domain/` | Domain models per bounded context | 3 (medium) |
+| `packages/syn-adapters/src/syn_adapters/workspace_backends/service/workspace_service.py` | Core orchestration - runs Claude in Docker | 2 (high) |
+| `packages/syn-adapters/src/syn_adapters/events/store.py` | Event storage (TimescaleDB) | 2 (high) |
+| `apps/syn-dashboard/src/syn_dashboard/main.py` | Dashboard API entry point | 2 (high) |
+| `apps/syn-cli/src/syn_cli/main.py` | CLI entry point | 2 (high) |
+| `packages/syn-domain/src/syn_domain/` | Domain models per bounded context | 3 (medium) |
 | `docker/docker-compose.yaml` | Infrastructure services | 3 (medium) |
 | `docs/adrs/` | Architecture decisions (35+ ADRs) | 3 (medium) |
 
@@ -121,21 +121,21 @@ Test Stack: ports +10000 (15432, 55051, etc.) (ephemeral)
 
 2. **Understand Architecture**
    - Review relevant ADRs in `docs/adrs/`
-   - Check bounded contexts in `packages/aef-domain/src/aef_domain/`
+   - Check bounded contexts in `packages/syn-domain/src/syn_domain/`
 
 3. **If FOCUS_AREA provided**
    Focus areas and their key files:
 
    | Area | Key Files |
    |------|-----------|
-   | `adapters` | `packages/aef-adapters/src/aef_adapters/` |
-   | `dashboard` | `apps/aef-dashboard/src/aef_dashboard/` |
-   | `cli` | `apps/aef-cli/src/aef_cli/` |
-   | `events` | `packages/aef-adapters/src/aef_adapters/events/` |
-   | `workspaces` | `packages/aef-adapters/src/aef_adapters/workspace_backends/` |
-   | `domain` | `packages/aef-domain/src/aef_domain/` |
-   | `collector` | `packages/aef-collector/src/aef_collector/` |
-   | `frontend` | `apps/aef-dashboard-ui/src/` |
+   | `adapters` | `packages/syn-adapters/src/syn_adapters/` |
+   | `dashboard` | `apps/syn-dashboard/src/syn_dashboard/` |
+   | `cli` | `apps/syn-cli/src/syn_cli/` |
+   | `events` | `packages/syn-adapters/src/syn_adapters/events/` |
+   | `workspaces` | `packages/syn-adapters/src/syn_adapters/workspace_backends/` |
+   | `domain` | `packages/syn-domain/src/syn_domain/` |
+   | `collector` | `packages/syn-collector/src/syn_collector/` |
+   | `frontend` | `apps/syn-dashboard-ui/src/` |
 
 ## Common Commands
 

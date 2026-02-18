@@ -62,7 +62,7 @@ export EXEC_ID="<execution_id_from_output>"
 
 ```bash
 # Get container name
-docker ps --filter "name=aef-workspace" --format "{{.Names}}"
+docker ps --filter "name=syn-workspace" --format "{{.Names}}"
 
 # View container logs
 docker logs <container_name> 2>&1 | less

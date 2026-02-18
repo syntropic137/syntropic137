@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The Agentic Engineering Framework needs a robust configuration system that:
+The Syntropic137 needs a robust configuration system that:
 
 1. **Validates on startup** - Fails immediately with clear errors if required values are missing
 2. **Documents itself** - Each setting has a description explaining purpose and where to get it
@@ -28,10 +28,10 @@ Use **Pydantic Settings** (`pydantic-settings`) for all environment configuratio
 
 #### 1. Centralized Settings Class
 
-All configuration lives in a single `Settings` class in `aef_shared.settings`:
+All configuration lives in a single `Settings` class in `syn_shared.settings`:
 
 ```python
-from aef_shared import get_settings
+from syn_shared import get_settings
 
 settings = get_settings()
 ```
@@ -138,7 +138,7 @@ See `docs/testing/E2E-ACCEPTANCE-TESTS.md` for the full mocking policy.
 ### File Structure
 
 ```
-packages/aef-shared/src/aef_shared/
+packages/syn-shared/src/syn_shared/
 ├── settings/
 │   ├── __init__.py      # Public exports
 │   └── config.py        # Settings class and get_settings()

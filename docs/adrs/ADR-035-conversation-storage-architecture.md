@@ -27,7 +27,7 @@ When an AI agent executes inside a container, it produces **three distinct types
 │     ├── Full tool inputs/outputs                                    │
 │     └── Message history                                             │
 │     Purpose: ML training, debugging, vectorization, learning        │
-│     Storage: MinIO/S3 (aef-conversations bucket)                    │
+│     Storage: MinIO/S3 (syn-conversations bucket)                    │
 │     Access: Download, crawl, batch processing                       │
 │                                                                      │
 │  3. EXECUTION LOGS (future)                                         │
@@ -131,7 +131,7 @@ async def execute_phase(self, phase: WorkflowPhase) -> PhaseResult:
 **Session is the atomic unit.** Projections aggregate upward.
 
 ```
-MinIO: aef-conversations/
+MinIO: syn-conversations/
 └── sessions/
     └── {session_id}/
         └── conversation.jsonl      # Complete JSONL

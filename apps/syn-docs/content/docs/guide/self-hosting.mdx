@@ -1,0 +1,105 @@
+---
+title: Self-Hosting
+description: Deploy Syntropic137 on your own infrastructure — from homelab to Kubernetes
+---
+
+## Deployment Architecture
+
+Syntropic137 runs as a set of Docker services connected through a shared network:
+
+<DeploymentArchitectureFlow />
+
+## Quick Start with Docker Compose
+
+```bash
+# Clone the repository
+git clone https://github.com/syntropic137/agentic-engineering-framework.git
+cd agentic-engineering-framework
+
+# Run the homelab setup wizard
+just homelab-setup
+
+# Start all services
+docker compose up -d
+```
+
+The dashboard will be available at `http://localhost:8000`.
+
+## Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `syn-api` | 8000 | FastAPI backend — REST API, WebSocket, SSE |
+| `syn-ui` | 80 | React dashboard frontend |
+| `event-store` | 50051 | gRPC event sourcing server |
+| `event-collector` | 8080 | High-throughput event ingestion |
+| `timescaledb` | 5432 | PostgreSQL + TimescaleDB for events and metrics |
+| `redis` | 6379 | Caching, pub/sub, projection store |
+| `minio` | 9000 | S3-compatible artifact storage |
+
+## Workspace Isolation
+
+Each agent execution runs in an isolated Docker workspace with a two-phase security model:
+
+<WorkspaceIsolationFlow />
+
+**Setup Phase** — Secrets are available briefly to configure credential helpers. Raw tokens are cleared before the agent starts.
+
+**Agent Phase** — The agent runs with only `ANTHROPIC_API_KEY` in its environment. Git operations use cached credentials from the setup phase.
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_ENVIRONMENT` | `development` | Environment mode (`development`, `production`) |
+| `TIMESCALEDB_HOST` | `localhost` | TimescaleDB hostname |
+| `TIMESCALEDB_PORT` | `5432` | TimescaleDB port |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
+| `MINIO_ENDPOINT` | `localhost:9000` | MinIO S3 endpoint |
+| `MINIO_ACCESS_KEY` | — | MinIO access key |
+| `MINIO_SECRET_KEY` | — | MinIO secret key |
+| `GITHUB_APP_ID` | — | GitHub App ID for webhook triggers |
+| `GITHUB_APP_PRIVATE_KEY` | — | GitHub App private key (PEM) |
+| `ANTHROPIC_API_KEY` | — | API key for Claude agent execution |
+
+## Scaling Options
+
+### Single Server (Homelab)
+
+Recommended for **10–100 concurrent agents**:
+- 4+ CPU cores, 8GB+ RAM (16GB recommended)
+- 500GB NVMe storage
+- Docker with workspace pooling (10–50 containers)
+
+### Multi-Server
+
+For **100–1,000 concurrent agents**, run multiple Syntropic137 instances behind a load balancer:
+
+<ScalingFlow />
+
+### Kubernetes
+
+For **1,000+ concurrent agents** with auto-scaling:
+- Use Kata Containers runtime for workspace isolation
+- HPA with 70% CPU target, 3–20 replicas
+- PersistentVolume for artifact storage
+
+## Cloudflare Tunnel (Optional)
+
+For secure external access without port forwarding:
+
+```bash
+# Install cloudflared
+brew install cloudflare/cloudflare/cloudflared
+
+# Authenticate
+cloudflared tunnel login
+
+# Create tunnel
+cloudflared tunnel create aef
+
+# Route traffic
+cloudflared tunnel route dns aef aef.yourdomain.com
+```
+
+Add `cloudflared` to your Docker Compose to run it as a service.

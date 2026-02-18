@@ -7,7 +7,7 @@ Result type, error enums, and shared Pydantic models.
 All API functions return `Result[T, E]` — a discriminated union of `Ok[T]` and `Err[E]`.
 
 ```python
-from aef_api import Ok, Err, Result
+from syn_api import Ok, Err, Result
 ```
 
 ### Ok
@@ -30,7 +30,7 @@ class Err(Generic[E]):
 ### Pattern Matching
 
 ```python
-result = await aef_api.v1.workflows.get_workflow("wf-123")
+result = await syn_api.v1.workflows.get_workflow("wf-123")
 
 match result:
     case Ok(detail):

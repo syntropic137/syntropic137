@@ -8,7 +8,7 @@
 
 ## Context
 
-The Agentic Engineering Framework uses event sourcing with CQRS (Command Query Responsibility Segregation). This means:
+The Syntropic137 uses event sourcing with CQRS (Command Query Responsibility Segregation). This means:
 - **Write side:** Commands create events that are persisted to the Event Store
 - **Read side:** Projections build optimized read models from events
 

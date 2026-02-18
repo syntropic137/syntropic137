@@ -1,6 +1,6 @@
 # Git submodules directory
 # Submodules:
-# - agentic-primitives (https://github.com/AgentParadise/agentic-primitives)
+# - agentic-primitives (https://github.com/syntropic137/agentic-primitives)
 # - event-sourcing-platform (https://github.com/NeuralEmpowerment/event-sourcing-platform)
 #
 # Initialize with: just submodules

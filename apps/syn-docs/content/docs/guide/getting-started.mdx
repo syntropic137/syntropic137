@@ -1,0 +1,44 @@
+---
+title: Getting Started
+description: Install Syntropic137 and run your first AI agent workflow in minutes.
+---
+
+## Prerequisites
+
+- Python 3.11+
+- [uv](https://docs.astral.sh/uv/) package manager
+- Docker (for workspace isolation)
+- A GitHub account (for GitHub App integration)
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/syntropic137/agentic-engineering-framework.git
+cd agentic-engineering-framework
+
+# Install dependencies
+uv sync
+
+# Copy environment configuration
+cp .env.example .env
+```
+
+## First Workflow
+
+```bash
+# Start the API server
+just api-dev
+
+# In another terminal, trigger a workflow via CLI
+aef workflow run --name hello-world
+```
+
+Visit the [Dashboard API](/docs/api) to observe your workflow execution in
+real-time.
+
+## Next Steps
+
+- [Self-Hosting Guide](/docs/guide/self-hosting) — deploy to production
+- [Configuration](/docs/guide/configuration) — customize settings
+- [CLI Reference](/docs/cli) — explore all commands

@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-We need a clean, scalable Python monorepo structure for the Agentic Engineering Framework. After researching uv's workspace capabilities, we've identified the canonical patterns for Python monorepos.
+We need a clean, scalable Python monorepo structure for the Syntropic137. After researching uv's workspace capabilities, we've identified the canonical patterns for Python monorepos.
 
 ### Key Constraints
 1. Python's import system requires directory names to match import names
@@ -38,10 +38,10 @@ build-backend = "uv_build"
 
 | Thing | Convention | Example |
 |-------|------------|---------|
-| Project name (pyproject.toml) | **hyphens** | `aef-domain` |
-| Import namespace (src/ folder) | **snake_case** | `aef_domain` |
-| Installation | same as project | `uv add aef-domain` |
-| Import in code | same as namespace | `import aef_domain` |
+| Project name (pyproject.toml) | **hyphens** | `syn-domain` |
+| Import namespace (src/ folder) | **snake_case** | `syn_domain` |
+| Installation | same as project | `uv add syn-domain` |
+| Import in code | same as namespace | `import syn_domain` |
 
 This mapping is canonical and avoids "hyphen in import path" errors.
 
@@ -58,32 +58,32 @@ agentic-engineering-framework/
 │   └── event-sourcing-platform/
 │
 ├── apps/                       # Deployable applications
-│   └── aef-cli/
+│   └── syn-cli/
 │       ├── pyproject.toml
 │       └── src/
-│           └── aef_cli/
+│           └── syn_cli/
 │               ├── __init__.py
 │               ├── main.py
 │               └── commands/
 │
 ├── packages/                   # Reusable libraries
-│   ├── aef-domain/
+│   ├── syn-domain/
 │   │   ├── pyproject.toml
 │   │   └── src/
-│   │       └── aef_domain/
+│   │       └── syn_domain/
 │   │           ├── __init__.py
 │   │           └── contexts/
 │   │
-│   ├── aef-adapters/
+│   ├── syn-adapters/
 │   │   ├── pyproject.toml
 │   │   └── src/
-│   │       └── aef_adapters/
+│   │       └── syn_adapters/
 │   │           └── __init__.py
 │   │
-│   └── aef-shared/
+│   └── syn-shared/
 │       ├── pyproject.toml
 │       └── src/
-│           └── aef_shared/
+│           └── syn_shared/
 │               ├── __init__.py
 │               └── logging/
 │
@@ -100,20 +100,20 @@ name = "agentic-engineering-framework"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "aef-cli",
-    "aef-domain",
-    "aef-adapters",
-    "aef-shared",
+    "syn-cli",
+    "syn-domain",
+    "syn-adapters",
+    "syn-shared",
 ]
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
 
 [tool.uv.sources]
-aef-cli = { workspace = true }
-aef-domain = { workspace = true }
-aef-adapters = { workspace = true }
-aef-shared = { workspace = true }
+syn-cli = { workspace = true }
+syn-domain = { workspace = true }
+syn-adapters = { workspace = true }
+syn-shared = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.6.0"]
@@ -123,19 +123,19 @@ build-backend = "uv_build"
 ### 5. Member Package Pattern
 
 ```toml
-# packages/aef-domain/pyproject.toml
+# packages/syn-domain/pyproject.toml
 [project]
-name = "aef-domain"
+name = "syn-domain"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["aef-shared", "pydantic>=2.10.0"]
+dependencies = ["syn-shared", "pydantic>=2.10.0"]
 
 [build-system]
 requires = ["uv_build>=0.6.0"]
 build-backend = "uv_build"
 ```
 
-The source code lives at: `packages/aef-domain/src/aef_domain/`
+The source code lives at: `packages/syn-domain/src/syn_domain/`
 
 ### 6. Core Commands
 
@@ -147,10 +147,10 @@ uv lock
 uv sync
 
 # Run specific package
-uv run --package aef-cli python -m aef_cli
+uv run --package syn-cli python -m syn_cli
 
 # Add dependency to specific package
-uv add --package aef-domain sqlalchemy
+uv add --package syn-domain sqlalchemy
 ```
 
 ## Consequences

@@ -1,7 +1,7 @@
 /// <reference types="react" />
 
 /**
- * Type declarations for @aef/ui-feedback-react
+ * Type declarations for @syn137/ui-feedback-react
  *
  * Standalone declaration file. The `/// <reference types="react" />` directive
  * is resolved by TypeScript from the consumer's node_modules, avoiding the need

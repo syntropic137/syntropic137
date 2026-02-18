@@ -1,18 +1,18 @@
 # Skill: Fumadocs Site — Syntropic137 Documentation
 
-Build, extend, and maintain the Fumadocs documentation site at `apps/aef-docs/`.
+Build, extend, and maintain the Fumadocs documentation site at `apps/syn-docs/`.
 
 ## Quick Start
 
 ```bash
 # Dev server (port 3001)
-cd apps/aef-docs && pnpm run dev
+cd apps/syn-docs && pnpm run dev
 
 # Build
-cd apps/aef-docs && pnpm run build
+cd apps/syn-docs && pnpm run build
 
 # Regenerate API docs from OpenAPI spec
-cd apps/aef-docs && pnpm run generate:openapi
+cd apps/syn-docs && pnpm run generate:openapi
 ```
 
 ## Stack
@@ -30,7 +30,7 @@ cd apps/aef-docs && pnpm run generate:openapi
 ## Project Structure
 
 ```
-apps/aef-docs/
+apps/syn-docs/
 ├── app/
 │   ├── (home)/page.tsx              # Landing page with hero + features
 │   ├── docs/
@@ -134,7 +134,7 @@ All registered in `mdx-components.tsx`. Use directly in MDX without imports:
 
 ## Architecture Diagram System
 
-Location: `apps/aef-docs/components/diagrams/`
+Location: `apps/syn-docs/components/diagrams/`
 
 This is a composable, MDX-native diagram system built with React + Tailwind. No external diagram tools needed.
 
@@ -294,7 +294,7 @@ Every docs page renders `<LLMCopyButton>` with three actions:
 
 1. **Copy for LLM** — copies page content (frontmatter/JSX stripped) to clipboard with title prepended
 2. **View as TXT** — opens `/docs/<slug>.txt` in new tab (plain text version)
-3. **Edit on GitHub** — links to `github.com/.../edit/<branch>/apps/aef-docs/content/docs/<file>.mdx`
+3. **Edit on GitHub** — links to `github.com/.../edit/<branch>/apps/syn-docs/content/docs/<file>.mdx`
 
 The raw content is read server-side in `app/docs/[[...slug]]/page.tsx` using `fs.readFileSync` and passed to the client component.
 
@@ -369,7 +369,7 @@ title: { template: '%s | Syntropic137', default: 'Syntropic137 — Agentic Engin
 
 ```bash
 # 1. Create the MDX file
-cat > apps/aef-docs/content/docs/guide/my-page.mdx << 'EOF'
+cat > apps/syn-docs/content/docs/guide/my-page.mdx << 'EOF'
 ---
 title: My New Page
 description: What this page covers
@@ -379,21 +379,21 @@ Content here. Use any registered MDX components.
 EOF
 
 # 2. Add to meta.json
-# Edit apps/aef-docs/content/docs/guide/meta.json
+# Edit apps/syn-docs/content/docs/guide/meta.json
 # Add "my-page" to the "pages" array
 ```
 
 ### Add a new diagram
 
-1. Create `apps/aef-docs/components/diagrams/NewDiagram.tsx`
-2. Add export to `apps/aef-docs/components/diagrams/index.ts`
-3. Add import + registration in `apps/aef-docs/mdx-components.tsx`
+1. Create `apps/syn-docs/components/diagrams/NewDiagram.tsx`
+2. Add export to `apps/syn-docs/components/diagrams/index.ts`
+3. Add import + registration in `apps/syn-docs/mdx-components.tsx`
 4. Use `<NewDiagram />` in any MDX file
 
 ### Add a new MDX component
 
-1. Create component in `apps/aef-docs/components/`
-2. Register in `apps/aef-docs/mdx-components.tsx` inside `getMDXComponents()`
+1. Create component in `apps/syn-docs/components/`
+2. Register in `apps/syn-docs/mdx-components.tsx` inside `getMDXComponents()`
 3. Use in MDX without import
 
 ### Refresh API docs
@@ -404,7 +404,7 @@ just docs-site-gen
 
 # Or manually:
 uv run python scripts/extract_openapi.py
-cd apps/aef-docs && pnpm run generate:openapi
+cd apps/syn-docs && pnpm run generate:openapi
 ```
 
 ### Edit on GitHub branch

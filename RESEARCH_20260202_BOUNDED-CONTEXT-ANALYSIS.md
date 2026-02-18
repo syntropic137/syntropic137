@@ -548,21 +548,21 @@ contexts/
 - Aggregate Scanner: `lib/event-sourcing-platform/vsa/vsa-core/src/scanners/aggregate_scanner.rs`
 
 ### AEF Domain
-- Contexts Root: `packages/aef-domain/src/aef_domain/contexts/`
+- Contexts Root: `packages/syn-domain/src/syn_domain/contexts/`
 - VSA Config (Root): `vsa.yaml`
-- VSA Config (Domain): `packages/aef-domain/vsa.yaml`
-- Generated Manifest: `.topology/aef-manifest.json`
+- VSA Config (Domain): `packages/syn-domain/vsa.yaml`
+- Generated Manifest: `.topology/syn-manifest.json`
 
 ### AEF Aggregates
-- WorkspaceAggregate: `packages/aef-domain/src/aef_domain/contexts/workspaces/domain/WorkspaceAggregate.py`
-- WorkflowAggregate: `packages/aef-domain/src/aef_domain/contexts/workflows/domain/WorkflowAggregate.py`
-- WorkflowExecutionAggregate: `packages/aef-domain/src/aef_domain/contexts/workflows/domain/WorkflowExecutionAggregate.py`
-- AgentSessionAggregate: `packages/aef-domain/src/aef_domain/contexts/sessions/domain/AgentSessionAggregate.py`
-- ArtifactAggregate: `packages/aef-domain/src/aef_domain/contexts/artifacts/domain/ArtifactAggregate.py`
-- InstallationAggregate: `packages/aef-domain/src/aef_domain/contexts/github/domain/InstallationAggregate.py`
+- WorkspaceAggregate: `packages/syn-domain/src/syn_domain/contexts/workspaces/domain/WorkspaceAggregate.py`
+- WorkflowAggregate: `packages/syn-domain/src/syn_domain/contexts/workflows/domain/WorkflowAggregate.py`
+- WorkflowExecutionAggregate: `packages/syn-domain/src/syn_domain/contexts/workflows/domain/WorkflowExecutionAggregate.py`
+- AgentSessionAggregate: `packages/syn-domain/src/syn_domain/contexts/sessions/domain/AgentSessionAggregate.py`
+- ArtifactAggregate: `packages/syn-domain/src/syn_domain/contexts/artifacts/domain/ArtifactAggregate.py`
+- InstallationAggregate: `packages/syn-domain/src/syn_domain/contexts/github/domain/InstallationAggregate.py`
 
 ### Current Aggregate Tests
-- WorkspaceAggregate: `packages/aef-domain/src/aef_domain/contexts/workspaces/_shared/test_workspace_aggregate.py`
+- WorkspaceAggregate: `packages/syn-domain/src/syn_domain/contexts/workspaces/_shared/test_workspace_aggregate.py`
 
 ---
 

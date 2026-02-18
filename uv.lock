@@ -9,349 +9,16 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "aef-adapters",
-    "aef-api",
-    "aef-cli",
-    "aef-collector",
-    "aef-dashboard",
-    "aef-domain",
-    "aef-perf",
-    "aef-shared",
-    "aef-tokens",
-    "agentic-engineering-framework",
-]
-
-[[package]]
-name = "aef-adapters"
-version = "0.1.0"
-source = { editable = "packages/aef-adapters" }
-dependencies = [
-    { name = "aef-domain" },
-    { name = "aef-shared" },
-    { name = "aef-tokens" },
-    { name = "agentic-events" },
-    { name = "agentic-isolation" },
-    { name = "agentic-logging" },
-    { name = "anthropic" },
-    { name = "cryptography" },
-    { name = "event-sourcing-python", extra = ["grpc"] },
-    { name = "pyjwt" },
-    { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-agents = [
-    { name = "anthropic" },
-    { name = "openai" },
-]
-all = [
-    { name = "anthropic" },
-    { name = "asyncpg" },
-    { name = "minio" },
-    { name = "openai" },
-]
-claude = [
-    { name = "anthropic" },
-]
-minio = [
-    { name = "minio" },
-]
-openai = [
-    { name = "openai" },
-]
-postgres = [
-    { name = "asyncpg" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-domain", editable = "packages/aef-domain" },
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "aef-tokens", editable = "packages/aef-tokens" },
-    { name = "agentic-events", directory = "lib/agentic-primitives/lib/python/agentic_events" },
-    { name = "agentic-isolation", directory = "lib/agentic-primitives/lib/python/agentic_isolation" },
-    { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
-    { name = "anthropic", specifier = ">=0.75.0" },
-    { name = "anthropic", marker = "extra == 'agents'", specifier = ">=0.42.0" },
-    { name = "anthropic", marker = "extra == 'all'", specifier = ">=0.42.0" },
-    { name = "anthropic", marker = "extra == 'claude'", specifier = ">=0.42.0" },
-    { name = "asyncpg", marker = "extra == 'all'", specifier = ">=0.30.0" },
-    { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0" },
-    { name = "cryptography", specifier = ">=46.0.3" },
-    { name = "event-sourcing-python", extras = ["grpc"], directory = "lib/event-sourcing-platform/event-sourcing/python" },
-    { name = "minio", marker = "extra == 'all'", specifier = ">=7.2.0" },
-    { name = "minio", marker = "extra == 'minio'", specifier = ">=7.2.0" },
-    { name = "openai", marker = "extra == 'agents'", specifier = ">=1.59.0" },
-    { name = "openai", marker = "extra == 'all'", specifier = ">=1.59.0" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.59.0" },
-    { name = "pyjwt", specifier = ">=2.10.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-]
-provides-extras = ["postgres", "claude", "openai", "agents", "minio", "all"]
-
-[[package]]
-name = "aef-api"
-version = "0.1.0"
-source = { editable = "packages/aef-api" }
-dependencies = [
-    { name = "aef-adapters" },
-    { name = "aef-domain" },
-    { name = "aef-shared" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-adapters", editable = "packages/aef-adapters" },
-    { name = "aef-domain", editable = "packages/aef-domain" },
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-]
-
-[[package]]
-name = "aef-cli"
-version = "0.2.0"
-source = { editable = "apps/aef-cli" }
-dependencies = [
-    { name = "aef-api" },
-    { name = "httpx" },
-    { name = "rich" },
-    { name = "typer" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-api", editable = "packages/aef-api" },
-    { name = "httpx", specifier = ">=0.28.0" },
-    { name = "rich", specifier = ">=13.9.0" },
-    { name = "typer", specifier = ">=0.15.0" },
-]
-
-[[package]]
-name = "aef-collector"
-version = "0.1.0"
-source = { editable = "packages/aef-collector" }
-dependencies = [
-    { name = "aef-shared" },
-    { name = "click" },
-    { name = "event-sourcing-python" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "uvicorn" },
-    { name = "watchfiles" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "click", specifier = ">=8.0" },
-    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pydantic-settings", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "pytest-cov", marker = "extra == 'dev'" },
-    { name = "uvicorn", specifier = ">=0.32" },
-    { name = "watchfiles", specifier = ">=0.24" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "aef-dashboard"
-version = "0.1.0"
-source = { editable = "apps/aef-dashboard" }
-dependencies = [
-    { name = "aef-adapters" },
-    { name = "aef-api" },
-    { name = "aef-domain" },
-    { name = "aef-shared" },
-    { name = "agentic-logging" },
-    { name = "asyncpg" },
-    { name = "fastapi" },
-    { name = "sse-starlette" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-adapters", editable = "packages/aef-adapters" },
-    { name = "aef-api", editable = "packages/aef-api" },
-    { name = "aef-domain", editable = "packages/aef-domain" },
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
-    { name = "asyncpg", specifier = ">=0.30.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "sse-starlette", specifier = ">=2.2.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "aef-domain"
-version = "0.1.0"
-source = { editable = "packages/aef-domain" }
-dependencies = [
-    { name = "aef-shared" },
-    { name = "agentic-events" },
-    { name = "event-sourcing-python" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "agentic-events", directory = "lib/agentic-primitives/lib/python/agentic_events" },
-    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pyyaml", specifier = ">=6.0.2" },
-]
-
-[[package]]
-name = "aef-perf"
-version = "0.1.0"
-source = { editable = "packages/aef-perf" }
-dependencies = [
-    { name = "aef-adapters" },
-    { name = "aef-shared" },
-    { name = "rich" },
-    { name = "typer" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-adapters", editable = "packages/aef-adapters" },
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
-    { name = "rich", specifier = ">=13.0.0" },
-    { name = "typer", specifier = ">=0.9.0" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "aef-shared"
-version = "0.1.0"
-source = { editable = "packages/aef-shared" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "structlog" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-settings", specifier = ">=2.7.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "structlog", specifier = ">=25.4.0" },
-]
-
-[[package]]
-name = "aef-tokens"
-version = "0.1.0"
-source = { editable = "packages/aef-tokens" }
-dependencies = [
-    { name = "aef-shared" },
-    { name = "pydantic" },
-    { name = "redis" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "redis", specifier = ">=5.0.0" },
-]
-
-[[package]]
-name = "agentic-engineering-framework"
-version = "0.3.0"
-source = { editable = "." }
-dependencies = [
-    { name = "aef-adapters" },
-    { name = "aef-api" },
-    { name = "aef-cli" },
-    { name = "aef-collector" },
-    { name = "aef-dashboard" },
-    { name = "aef-domain" },
-    { name = "aef-shared" },
-    { name = "event-sourcing-python" },
-    { name = "grpcio" },
-    { name = "minio" },
-    { name = "sqlmodel" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "asyncpg" },
-    { name = "mypy" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "testcontainers" },
-    { name = "types-pyyaml" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aef-adapters", editable = "packages/aef-adapters" },
-    { name = "aef-api", editable = "packages/aef-api" },
-    { name = "aef-cli", editable = "apps/aef-cli" },
-    { name = "aef-collector", editable = "packages/aef-collector" },
-    { name = "aef-dashboard", editable = "apps/aef-dashboard" },
-    { name = "aef-domain", editable = "packages/aef-domain" },
-    { name = "aef-shared", editable = "packages/aef-shared" },
-    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
-    { name = "grpcio", specifier = ">=1.60" },
-    { name = "minio", specifier = ">=7.2.20" },
-    { name = "sqlmodel", specifier = ">=0.0.27" },
-]
-provides-extras = ["all"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "asyncpg", specifier = ">=0.31.0" },
-    { name = "mypy", specifier = ">=1.19.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.0" },
-    { name = "pyright", specifier = ">=1.1.408" },
-    { name = "pytest", specifier = ">=9.0.1" },
-    { name = "pytest-asyncio", specifier = ">=1.3.0" },
-    { name = "pytest-cov", specifier = ">=7.0.0" },
-    { name = "ruff", specifier = ">=0.14.7" },
-    { name = "testcontainers", specifier = ">=4.13.3" },
-    { name = "types-pyyaml", specifier = ">=6.0.12" },
+    "syn-adapters",
+    "syn-api",
+    "syn-cli",
+    "syn-collector",
+    "syn-dashboard",
+    "syn-domain",
+    "syn-perf",
+    "syn-shared",
+    "syn-tokens",
+    "syntropic137",
 ]
 
 [[package]]
@@ -1836,6 +1503,339 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ef/52/9ba0f43b686e7f3ddfeaa78ac3af750292662284b3661e91ad5494f21dbc/structlog-25.5.0.tar.gz", hash = "sha256:098522a3bebed9153d4570c6d0288abf80a031dfdb2048d59a49e9dc2190fc98", size = 1460830, upload-time = "2025-10-27T08:28:23.028Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/45/a132b9074aa18e799b891b91ad72133c98d8042c70f6240e4c5f9dabee2f/structlog-25.5.0-py3-none-any.whl", hash = "sha256:a8453e9b9e636ec59bd9e79bbd4a72f025981b3ba0f5837aebf48f02f37a7f9f", size = 72510, upload-time = "2025-10-27T08:28:21.535Z" },
+]
+
+[[package]]
+name = "syn-adapters"
+version = "0.1.0"
+source = { editable = "packages/syn-adapters" }
+dependencies = [
+    { name = "agentic-events" },
+    { name = "agentic-isolation" },
+    { name = "agentic-logging" },
+    { name = "anthropic" },
+    { name = "cryptography" },
+    { name = "event-sourcing-python", extra = ["grpc"] },
+    { name = "pyjwt" },
+    { name = "pyyaml" },
+    { name = "syn-domain" },
+    { name = "syn-shared" },
+    { name = "syn-tokens" },
+]
+
+[package.optional-dependencies]
+agents = [
+    { name = "anthropic" },
+    { name = "openai" },
+]
+all = [
+    { name = "anthropic" },
+    { name = "asyncpg" },
+    { name = "minio" },
+    { name = "openai" },
+]
+claude = [
+    { name = "anthropic" },
+]
+minio = [
+    { name = "minio" },
+]
+openai = [
+    { name = "openai" },
+]
+postgres = [
+    { name = "asyncpg" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentic-events", directory = "lib/agentic-primitives/lib/python/agentic_events" },
+    { name = "agentic-isolation", directory = "lib/agentic-primitives/lib/python/agentic_isolation" },
+    { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
+    { name = "anthropic", specifier = ">=0.75.0" },
+    { name = "anthropic", marker = "extra == 'agents'", specifier = ">=0.42.0" },
+    { name = "anthropic", marker = "extra == 'all'", specifier = ">=0.42.0" },
+    { name = "anthropic", marker = "extra == 'claude'", specifier = ">=0.42.0" },
+    { name = "asyncpg", marker = "extra == 'all'", specifier = ">=0.30.0" },
+    { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.30.0" },
+    { name = "cryptography", specifier = ">=46.0.3" },
+    { name = "event-sourcing-python", extras = ["grpc"], directory = "lib/event-sourcing-platform/event-sourcing/python" },
+    { name = "minio", marker = "extra == 'all'", specifier = ">=7.2.0" },
+    { name = "minio", marker = "extra == 'minio'", specifier = ">=7.2.0" },
+    { name = "openai", marker = "extra == 'agents'", specifier = ">=1.59.0" },
+    { name = "openai", marker = "extra == 'all'", specifier = ">=1.59.0" },
+    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.59.0" },
+    { name = "pyjwt", specifier = ">=2.10.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "syn-domain", editable = "packages/syn-domain" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+    { name = "syn-tokens", editable = "packages/syn-tokens" },
+]
+provides-extras = ["postgres", "claude", "openai", "agents", "minio", "all"]
+
+[[package]]
+name = "syn-api"
+version = "0.1.0"
+source = { editable = "packages/syn-api" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "syn-adapters" },
+    { name = "syn-domain" },
+    { name = "syn-shared" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "syn-adapters", editable = "packages/syn-adapters" },
+    { name = "syn-domain", editable = "packages/syn-domain" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+]
+
+[[package]]
+name = "syn-cli"
+version = "0.2.0"
+source = { editable = "apps/syn-cli" }
+dependencies = [
+    { name = "httpx" },
+    { name = "rich" },
+    { name = "syn-api" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "rich", specifier = ">=13.9.0" },
+    { name = "syn-api", editable = "packages/syn-api" },
+    { name = "typer", specifier = ">=0.15.0" },
+]
+
+[[package]]
+name = "syn-collector"
+version = "0.1.0"
+source = { editable = "packages/syn-collector" }
+dependencies = [
+    { name = "click" },
+    { name = "event-sourcing-python" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "syn-shared" },
+    { name = "uvicorn" },
+    { name = "watchfiles" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.0" },
+    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+    { name = "uvicorn", specifier = ">=0.32" },
+    { name = "watchfiles", specifier = ">=0.24" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "syn-dashboard"
+version = "0.1.0"
+source = { editable = "apps/syn-dashboard" }
+dependencies = [
+    { name = "agentic-logging" },
+    { name = "asyncpg" },
+    { name = "fastapi" },
+    { name = "sse-starlette" },
+    { name = "syn-adapters" },
+    { name = "syn-api" },
+    { name = "syn-domain" },
+    { name = "syn-shared" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
+    { name = "asyncpg", specifier = ">=0.30.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "sse-starlette", specifier = ">=2.2.0" },
+    { name = "syn-adapters", editable = "packages/syn-adapters" },
+    { name = "syn-api", editable = "packages/syn-api" },
+    { name = "syn-domain", editable = "packages/syn-domain" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "syn-domain"
+version = "0.1.0"
+source = { editable = "packages/syn-domain" }
+dependencies = [
+    { name = "agentic-events" },
+    { name = "event-sourcing-python" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "syn-shared" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "agentic-events", directory = "lib/agentic-primitives/lib/python/agentic_events" },
+    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+]
+
+[[package]]
+name = "syn-perf"
+version = "0.1.0"
+source = { editable = "packages/syn-perf" }
+dependencies = [
+    { name = "rich" },
+    { name = "syn-adapters" },
+    { name = "syn-shared" },
+    { name = "typer" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "syn-adapters", editable = "packages/syn-adapters" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+    { name = "typer", specifier = ">=0.9.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "syn-shared"
+version = "0.1.0"
+source = { editable = "packages/syn-shared" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "python-dotenv" },
+    { name = "structlog" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "pydantic-settings", specifier = ">=2.7.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "structlog", specifier = ">=25.4.0" },
+]
+
+[[package]]
+name = "syn-tokens"
+version = "0.1.0"
+source = { editable = "packages/syn-tokens" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "redis" },
+    { name = "syn-shared" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "redis", specifier = ">=5.0.0" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+]
+
+[[package]]
+name = "syntropic137"
+version = "0.3.0"
+source = { editable = "." }
+dependencies = [
+    { name = "event-sourcing-python" },
+    { name = "grpcio" },
+    { name = "minio" },
+    { name = "sqlmodel" },
+    { name = "syn-adapters" },
+    { name = "syn-api" },
+    { name = "syn-cli" },
+    { name = "syn-collector" },
+    { name = "syn-dashboard" },
+    { name = "syn-domain" },
+    { name = "syn-shared" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "asyncpg" },
+    { name = "mypy" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "testcontainers" },
+    { name = "types-pyyaml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
+    { name = "grpcio", specifier = ">=1.60" },
+    { name = "minio", specifier = ">=7.2.20" },
+    { name = "sqlmodel", specifier = ">=0.0.27" },
+    { name = "syn-adapters", editable = "packages/syn-adapters" },
+    { name = "syn-api", editable = "packages/syn-api" },
+    { name = "syn-cli", editable = "apps/syn-cli" },
+    { name = "syn-collector", editable = "packages/syn-collector" },
+    { name = "syn-dashboard", editable = "apps/syn-dashboard" },
+    { name = "syn-domain", editable = "packages/syn-domain" },
+    { name = "syn-shared", editable = "packages/syn-shared" },
+]
+provides-extras = ["all"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "asyncpg", specifier = ">=0.31.0" },
+    { name = "mypy", specifier = ">=1.19.0" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.0" },
+    { name = "pyright", specifier = ">=1.1.408" },
+    { name = "pytest", specifier = ">=9.0.1" },
+    { name = "pytest-asyncio", specifier = ">=1.3.0" },
+    { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "ruff", specifier = ">=0.14.7" },
+    { name = "testcontainers", specifier = ">=4.13.3" },
+    { name = "types-pyyaml", specifier = ">=6.0.12" },
 ]
 
 [[package]]

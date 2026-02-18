@@ -147,7 +147,7 @@ echo ""
 # 5. Docker
 echo "🐳 Step 5: Docker Image"
 echo "──────────────────────"
-if docker image inspect aef-workspace:latest >/dev/null 2>&1; then
+if docker image inspect syn-workspace:latest >/dev/null 2>&1; then
     check_pass "Workspace image exists locally"
 else
     check_warn "Workspace image not found (will build on first E2E test)"
@@ -173,9 +173,9 @@ echo ""
 echo "📁 Step 7: Key Files"
 echo "───────────────────"
 FILES=(
-    "packages/aef-agent-runner/src/aef_agent_runner/__init__.py"
-    "packages/aef-domain/src/aef_domain/contexts/workspaces/workspace_aggregate.py"
-    "packages/aef-adapters/src/aef_adapters/storage/artifact_storage/minIO_storage.py"
+    "packages/syn-agent-runner/src/syn_agent_runner/__init__.py"
+    "packages/syn-domain/src/syn_domain/contexts/workspaces/workspace_aggregate.py"
+    "packages/syn-adapters/src/syn_adapters/storage/artifact_storage/minIO_storage.py"
     "scripts/e2e_agent_in_container_test.py"
     "scripts/pre_merge_validation.py"
     "docker/workspace/Dockerfile"

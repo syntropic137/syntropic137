@@ -23,7 +23,7 @@ Run with:
 
 Requirements:
     - Docker stack running: just dev
-    - GitHub App configured: AEF_GITHUB_* env vars
+    - GitHub App configured: SYN_GITHUB_* env vars
     - Claude API key (for --live): ANTHROPIC_API_KEY
 """
 
@@ -37,12 +37,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 # Add packages to path
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-adapters" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-tokens" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-shared" / "src"))
-sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "aef-domain" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-adapters" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-tokens" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-shared" / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "packages" / "syn-domain" / "src"))
 
-SANDBOX_REPO = "AgentParadise/sandbox_aef-engineer-beta"
+SANDBOX_REPO = "syntropic137/sandbox_syn-engineer-beta"
 
 
 def print_header(title: str) -> None:
@@ -75,7 +75,7 @@ async def check_prerequisites() -> bool:
     )
     containers = result.stdout.strip().split("\n") if result.stdout else []
 
-    required = ["aef-db", "aef-event-store", "aef-collector"]
+    required = ["syn-db", "syn-event-store", "syn-collector"]
     for container in required:
         if container in containers:
             print(f"   ✅ {container} running")
@@ -90,14 +90,14 @@ async def check_prerequisites() -> bool:
     # Check GitHub App
     print("\n2. GitHub App configuration...")
     try:
-        from aef_adapters.github import get_github_client
+        from syn_adapters.github import get_github_client
 
         client = get_github_client()
         print(f"   ✅ GitHub App: {client._settings.app_name}")
         print(f"   ✅ Bot: {client.bot_username}")
     except ValueError as e:
         print(f"   ❌ GitHub App not configured: {e}")
-        print("   💡 Set AEF_GITHUB_* environment variables")
+        print("   💡 Set SYN_GITHUB_* environment variables")
         return False
 
     # Check Claude API (optional)
@@ -137,10 +137,10 @@ async def run_phase1_workflow(_live: bool = False) -> dict:
     """
     print_header("🚀 Phase 1: Programmatic Workflow Execution")
 
-    from aef_adapters.github import get_github_client
-    from aef_tokens import SpendTracker, TokenType, TokenVendingService, WorkflowType
-    from aef_tokens.spend import InMemoryBudgetStore
-    from aef_tokens.vending import InMemoryTokenStore
+    from syn_adapters.github import get_github_client
+    from syn_tokens import SpendTracker, TokenType, TokenVendingService, WorkflowType
+    from syn_tokens.spend import InMemoryBudgetStore
+    from syn_tokens.vending import InMemoryTokenStore
 
     # Initialize services
     print_step(1, "Initialize Services")
@@ -159,7 +159,7 @@ async def run_phase1_workflow(_live: bool = False) -> dict:
 
     # Generate execution ID
     execution_id = f"e2e-workflow-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}"
-    branch_name = f"aef/test-{uuid.uuid4().hex[:8]}"
+    branch_name = f"syn/test-{uuid.uuid4().hex[:8]}"
 
     print(f"   📌 Execution ID: {execution_id}")
     print(f"   🌿 Branch: {branch_name}")
@@ -372,16 +372,16 @@ async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str)
 
     try:
         # Reset cached settings and repositories
-        from aef_shared.settings import reset_settings
+        from syn_shared.settings import reset_settings
 
         reset_settings()
 
-        from aef_adapters.storage.event_store_client import (
+        from syn_adapters.storage.event_store_client import (
             connect_event_store,
             disconnect_event_store,
             reset_event_store_client,
         )
-        from aef_adapters.storage.repositories import (
+        from syn_adapters.storage.repositories import (
             get_workflow_execution_repository,
             reset_repositories,
         )
@@ -395,7 +395,7 @@ async def emit_workflow_events(execution_id: str, workflow_id: str, branch: str)
 
         from decimal import Decimal
 
-        from aef_domain.contexts.orchestration._shared.WorkflowExecutionAggregate import (
+        from syn_domain.contexts.orchestration._shared.WorkflowExecutionAggregate import (
             CompleteExecutionCommand,
             StartExecutionCommand,
             WorkflowExecutionAggregate,
@@ -466,12 +466,12 @@ async def verify_event_store(execution_id: str) -> bool:
         [
             "docker",
             "exec",
-            "aef-db",
+            "syn-db",
             "psql",
             "-U",
-            "aef",
+            "syn",
             "-d",
-            "aef",
+            "syn",
             "-t",
             "-c",
             f"SELECT event_type, aggregate_type FROM events WHERE aggregate_id = '{execution_id}' ORDER BY global_nonce;",

@@ -1,7 +1,7 @@
 # E2E Acceptance Test Log
 
 **Date:** 2025-12-03
-**Tester:** Agentic Engineering Framework Team
+**Tester:** Syntropic137 Team
 **Version:** v2.0 (Agentic SDK Integration)
 **Environment:** macOS darwin 25.1.0
 
@@ -70,7 +70,7 @@ aef-postgres   Up 25 hours (healthy)    0.0.0.0:5432->5432/tcp
 - **Result:** ✅ PASS
 - **Evidence:**
 ```
-aef-event-store   Up 6 hours (unhealthy)   0.0.0.0:50051->50051/tcp
+syn-event-store   Up 6 hours (unhealthy)   0.0.0.0:50051->50051/tcp
 ```
 - **Note:** Docker reports "unhealthy" but logs show server is processing events correctly.
 
@@ -341,7 +341,7 @@ Console Errors:
 
 #### Test Command:
 ```bash
-cd .workspaces/agentic-sdk && uv run pytest packages/aef-adapters/tests/ -v
+cd .workspaces/agentic-sdk && uv run pytest packages/syn-adapters/tests/ -v
 ```
 
 #### Results:
@@ -404,12 +404,12 @@ cd .workspaces/agentic-sdk && uv run pytest -v
 - **Description:** Vite dev server not proxying `/api/*` to backend
 - **Impact:** Frontend shows no data despite backend having data
 - **Root Cause:** Vite config had `port: 3000` but server was running on 5173
-- **Fix Applied:** Updated `apps/aef-dashboard-ui/vite.config.ts` to use port 5173
+- **Fix Applied:** Updated `apps/syn-dashboard-ui/vite.config.ts` to use port 5173
 - **Status:** ✅ Fixed - requires frontend server restart
 - **Restart Command:**
 ```bash
 # Kill existing Vite server and restart
-cd apps/aef-dashboard-ui && npm run dev
+cd apps/syn-dashboard-ui && npm run dev
 ```
 
 ### Issue #2: Seed Command Idempotency (MEDIUM) ✅ FIXED
@@ -461,7 +461,7 @@ Screenshots captured during testing:
 
 **Overall Status:** ✅ 100% PASS (713/721 tests passing, 8 expected skips)
 
-The Agentic Engineering Framework is functioning correctly at all layers:
+The Syntropic137 is functioning correctly at all layers:
 - ✅ Docker Infrastructure (PostgreSQL, Event Store)
 - ✅ CLI (workflow management, seed idempotency)
 - ✅ Backend API (all endpoints working)
@@ -485,4 +485,4 @@ The Agentic Engineering Framework is functioning correctly at all layers:
 
 ---
 
-*Log generated during E2E acceptance testing of Agentic Engineering Framework v2.0*
+*Log generated during E2E acceptance testing of Syntropic137 v2.0*

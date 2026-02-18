@@ -125,7 +125,7 @@ def test_f8_agentic_execution(verbose: bool = False, live: bool = False) -> Feat
     # F8.1 - Executor Initialization
     print("\n  F8.1 AgenticWorkflowExecutor Initialization")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_orchestration.py",
+        "packages/syn-adapters/tests/test_orchestration.py",
         "test_executor",
         verbose,
     )
@@ -142,7 +142,7 @@ def test_f8_agentic_execution(verbose: bool = False, live: bool = False) -> Feat
     # F8.2 - Single-Phase Execution
     print("\n  F8.2 Single-Phase Workflow Execution")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_orchestration.py",
+        "packages/syn-adapters/tests/test_orchestration.py",
         "test_execute_simple",
         verbose,
     )
@@ -159,7 +159,7 @@ def test_f8_agentic_execution(verbose: bool = False, live: bool = False) -> Feat
     # F8.3 - Multi-Phase Execution
     print("\n  F8.3 Multi-Phase Workflow Execution")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_orchestration.py",
+        "packages/syn-adapters/tests/test_orchestration.py",
         "test_execute_multi",
         verbose,
     )
@@ -176,7 +176,7 @@ def test_f8_agentic_execution(verbose: bool = False, live: bool = False) -> Feat
     # F8.4 - Failure Handling
     print("\n  F8.4 Execution Failure Handling")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_orchestration.py",
+        "packages/syn-adapters/tests/test_orchestration.py",
         "test_phase_failure",
         verbose,
     )
@@ -213,7 +213,7 @@ def test_f8_agentic_execution(verbose: bool = False, live: bool = False) -> Feat
     else:
         # Run live test
         success, output = run_pytest(
-            "packages/aef-adapters/tests/test_claude_agentic.py",
+            "packages/syn-adapters/tests/test_claude_agentic.py",
             "test_live",
             verbose,
         )
@@ -247,7 +247,7 @@ def test_f9_workspace_hooks(verbose: bool = False) -> FeatureResult:
     # F9.1 - LocalWorkspace Creation
     print("\n  F9.1 LocalWorkspace Creation")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_workspaces.py",
+        "packages/syn-adapters/tests/test_workspaces.py",
         "test_local_workspace",
         verbose,
     )
@@ -264,7 +264,7 @@ def test_f9_workspace_hooks(verbose: bool = False) -> FeatureResult:
     # F9.2 - Hook Settings
     print("\n  F9.2 Hook Settings Generation")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_workspaces.py",
+        "packages/syn-adapters/tests/test_workspaces.py",
         "test_hook_settings",
         verbose,
     )
@@ -281,7 +281,7 @@ def test_f9_workspace_hooks(verbose: bool = False) -> FeatureResult:
     # F9.3 - Analytics File
     print("\n  F9.3 Analytics JSONL File")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_workspaces.py",
+        "packages/syn-adapters/tests/test_workspaces.py",
         "test_analytics",
         verbose,
     )
@@ -298,7 +298,7 @@ def test_f9_workspace_hooks(verbose: bool = False) -> FeatureResult:
     # F9.4 - Context Injection
     print("\n  F9.4 Context Injection")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_workspaces.py",
+        "packages/syn-adapters/tests/test_workspaces.py",
         "test_inject",
         verbose,
     )
@@ -332,7 +332,7 @@ def test_f10_artifacts(verbose: bool = False) -> FeatureResult:
     # F10.1 - ArtifactBundle Creation
     print("\n  F10.1 ArtifactBundle Creation")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_artifacts.py",
+        "packages/syn-adapters/tests/test_artifacts.py",
         "test_artifact_bundle or test_artifact_file",
         verbose,
     )
@@ -349,7 +349,7 @@ def test_f10_artifacts(verbose: bool = False) -> FeatureResult:
     # F10.2 - Directory Collection
     print("\n  F10.2 Directory Collection")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_artifacts.py",
+        "packages/syn-adapters/tests/test_artifacts.py",
         "test_from_directory",
         verbose,
     )
@@ -366,7 +366,7 @@ def test_f10_artifacts(verbose: bool = False) -> FeatureResult:
     # F10.3 - Serialization
     print("\n  F10.3 Serialization / Deserialization")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_artifacts.py",
+        "packages/syn-adapters/tests/test_artifacts.py",
         "test_serialization",
         verbose,
     )
@@ -383,7 +383,7 @@ def test_f10_artifacts(verbose: bool = False) -> FeatureResult:
     # F10.4 - PhaseContext
     print("\n  F10.4 PhaseContext Creation")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_artifacts.py",
+        "packages/syn-adapters/tests/test_artifacts.py",
         "test_phase_context",
         verbose,
     )
@@ -417,7 +417,7 @@ def test_f11_event_bridge(verbose: bool = False) -> FeatureResult:
     # F11.1 - JSONLWatcher
     print("\n  F11.1 JSONLWatcher")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_events.py",
+        "packages/syn-adapters/tests/test_events.py",
         "TestJSONLWatcher",
         verbose,
     )
@@ -434,7 +434,7 @@ def test_f11_event_bridge(verbose: bool = False) -> FeatureResult:
     # F11.2 - Translator
     print("\n  F11.2 HookToDomainTranslator")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_events.py",
+        "packages/syn-adapters/tests/test_events.py",
         "TestHookToDomainTranslator",
         verbose,
     )
@@ -451,7 +451,7 @@ def test_f11_event_bridge(verbose: bool = False) -> FeatureResult:
     # F11.3 - Bridge Integration
     print("\n  F11.3 EventBridge Integration")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_events.py",
+        "packages/syn-adapters/tests/test_events.py",
         "TestEventBridge",
         verbose,
     )
@@ -485,7 +485,7 @@ def test_f12_providers(verbose: bool = False) -> FeatureResult:
     # F12.1 - Agent Factory
     print("\n  F12.1 Agent Factory")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_orchestration.py",
+        "packages/syn-adapters/tests/test_orchestration.py",
         "test_agent_factory",
         verbose,
     )
@@ -502,7 +502,7 @@ def test_f12_providers(verbose: bool = False) -> FeatureResult:
     # F12.2 - Agent Availability
     print("\n  F12.2 Agent Availability")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_claude_agentic.py",
+        "packages/syn-adapters/tests/test_claude_agentic.py",
         "test_availability",
         verbose,
     )
@@ -519,7 +519,7 @@ def test_f12_providers(verbose: bool = False) -> FeatureResult:
     # F12.3 - MockAgent Safety
     print("\n  F12.3 MockAgent Safety")
     success, output = run_pytest(
-        "packages/aef-adapters/tests/test_mock.py",
+        "packages/syn-adapters/tests/test_mock.py",
         "test_mock_agent_environment",
         verbose,
     )

@@ -53,8 +53,8 @@ dev: _workspace-check
     @echo ""
     @echo "6️⃣ Starting dashboard frontend..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
-    @cd apps/aef-dashboard-ui && pnpm run dev &
+    @cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
+    @cd apps/syn-dashboard-ui && pnpm run dev &
     @sleep 3
     @echo ""
     @just _smee-start
@@ -125,7 +125,7 @@ dev-force: _workspace-check
     @sleep 2
     @echo "Starting dashboard backend on :8000..."
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
+    uv run uvicorn syn_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
     @sleep 2
     @echo "Starting feedback API on :8001..."
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
@@ -134,7 +134,7 @@ dev-force: _workspace-check
     uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
     @sleep 2
     @echo "Starting dashboard frontend on :5173..."
-    @cd apps/aef-dashboard-ui && pnpm run dev &
+    @cd apps/syn-dashboard-ui && pnpm run dev &
     @sleep 2
     @just _smee-start
     @echo ""
@@ -177,8 +177,8 @@ dev-fresh: _workspace-check
     @echo ""
     @echo "9️⃣ Starting dashboard frontend..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @cd apps/aef-dashboard-ui && pnpm install --silent 2>/dev/null || true
-    @cd apps/aef-dashboard-ui && pnpm run dev &
+    @cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
+    @cd apps/syn-dashboard-ui && pnpm run dev &
     @sleep 3
     @echo ""
     @just _smee-start
@@ -220,11 +220,11 @@ _env-check:
     fi
 
     # --- GitHub App ---
-    if [ -n "${AEF_GITHUB_APP_ID:-}" ] && [ -n "${AEF_GITHUB_PRIVATE_KEY:-}" ] && [ -n "${AEF_GITHUB_INSTALLATION_ID:-}" ]; then
-        echo "   ✅ GitHub App configured (${AEF_GITHUB_APP_NAME:-aef-app})"
-    elif [ -n "${AEF_GITHUB_APP_ID:-}" ] || [ -n "${AEF_GITHUB_PRIVATE_KEY:-}" ] || [ -n "${AEF_GITHUB_INSTALLATION_ID:-}" ]; then
+    if [ -n "${SYN_GITHUB_APP_ID:-}" ] && [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ] && [ -n "${SYN_GITHUB_INSTALLATION_ID:-}" ]; then
+        echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app})"
+    elif [ -n "${SYN_GITHUB_APP_ID:-}" ] || [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ] || [ -n "${SYN_GITHUB_INSTALLATION_ID:-}" ]; then
         echo "   ❌ ERROR: GitHub App partially configured!"
-        echo "            All three required: AEF_GITHUB_APP_ID, AEF_GITHUB_PRIVATE_KEY, AEF_GITHUB_INSTALLATION_ID"
+        echo "            All three required: SYN_GITHUB_APP_ID, SYN_GITHUB_PRIVATE_KEY, SYN_GITHUB_INSTALLATION_ID"
         echo ""
         ERRORS=$((ERRORS + 1))
     else
@@ -248,10 +248,10 @@ _env-check:
     fi
 
     # --- Webhook secret ---
-    if [ -n "${AEF_GITHUB_WEBHOOK_SECRET:-}" ]; then
+    if [ -n "${SYN_GITHUB_WEBHOOK_SECRET:-}" ]; then
         echo "   ✅ Webhook secret configured"
-    elif [ -n "${AEF_GITHUB_APP_ID:-}" ]; then
-        echo "   ⚠️  WARNING: AEF_GITHUB_WEBHOOK_SECRET not set — webhook signature verification disabled"
+    elif [ -n "${SYN_GITHUB_APP_ID:-}" ]; then
+        echo "   ⚠️  WARNING: SYN_GITHUB_WEBHOOK_SECRET not set — webhook signature verification disabled"
         echo "               Anyone can send fake webhooks to your endpoint"
         echo ""
         WARNINGS=$((WARNINGS + 1))
@@ -388,10 +388,10 @@ dev-offline:
     @echo "Starting AEF in offline mode (no Docker, no external services)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @-lsof -ti:8000 | xargs kill 2>/dev/null || true
-    @APP_ENVIRONMENT=offline uv run uvicorn aef_dashboard.main:app \
+    @APP_ENVIRONMENT=offline uv run uvicorn syn_dashboard.main:app \
         --host 0.0.0.0 --port 8000 --reload &
     @sleep 3
-    @cd apps/aef-dashboard-ui && pnpm run dev &
+    @cd apps/syn-dashboard-ui && pnpm run dev &
     @sleep 2
     @echo ""
     @echo "Offline dev mode ready!"
@@ -410,7 +410,7 @@ dev-offline-stop:
 
 # Start dashboard backend with webhook recording enabled
 dev-record-webhooks:
-    AEF_RECORD_WEBHOOKS=true just dashboard-backend
+    SYN_RECORD_WEBHOOKS=true just dashboard-backend
 
 # Replay recorded webhooks against a running dashboard
 replay-webhooks *args:
@@ -418,30 +418,30 @@ replay-webhooks *args:
 
 # Run the CLI application
 cli *args:
-    uv run --package aef-cli aef {{args}}
+    uv run --package syn-cli syn {{args}}
 
 # Start the dashboard backend (API server)
 # Loads .env for database connection and API keys
 dashboard-backend:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn aef_dashboard.main:app --host 0.0.0.0 --port 8000 --reload
+    uv run uvicorn syn_dashboard.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Start the dashboard frontend (Vite dev server)
 dashboard-frontend:
-    cd apps/aef-dashboard-ui && pnpm run dev
+    cd apps/syn-dashboard-ui && pnpm run dev
 
 # Install dashboard frontend dependencies
 dashboard-install:
     cd lib/ui-feedback/packages/ui-feedback-react && pnpm install
-    cd apps/aef-dashboard-ui && pnpm install
+    cd apps/syn-dashboard-ui && pnpm install
 
 # Build dashboard frontend for production
 dashboard-build:
-    cd apps/aef-dashboard-ui && pnpm run build
+    cd apps/syn-dashboard-ui && pnpm run build
 
 # Lint dashboard frontend
 dashboard-lint:
-    cd apps/aef-dashboard-ui && pnpm run lint
+    cd apps/syn-dashboard-ui && pnpm run lint
 
 # --- UI Feedback Commands ---
 
@@ -571,7 +571,7 @@ ci-fast:
 
 # Run tests with coverage report
 test-cov:
-    uv run pytest --cov=apps/aef-cli/src --cov=packages/aef-domain/src --cov=packages/aef-adapters/src --cov=packages/aef-shared/src --cov-report=term-missing --cov-fail-under=80
+    uv run pytest --cov=apps/syn-cli/src --cov=packages/syn-domain/src --cov=packages/syn-adapters/src --cov=packages/syn-shared/src --cov-report=term-missing --cov-fail-under=80
 
 # Test TimescaleDB observability stack in isolation
 test-timescale-isolated:
@@ -672,7 +672,7 @@ vsa-validate:
 diagram:
     @echo "🏗️  Generating architecture diagrams..."
     @cd lib/event-sourcing-platform/vsa/vsa-visualizer && npm run build > /dev/null 2>&1
-    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/aef-manifest.json --format svg --type architecture --output docs/architecture
+    @node lib/event-sourcing-platform/vsa/vsa-visualizer/dist/index.js .topology/syn-manifest.json --format svg --type architecture --output docs/architecture
 
 # Generate auto-generated architecture documentation
 docs-gen:
@@ -713,15 +713,15 @@ docs-site-gen:
     @echo "📄 Extracting OpenAPI spec from FastAPI..."
     uv run python scripts/extract_openapi.py
     @echo "📄 Generating API reference docs..."
-    cd apps/aef-docs && pnpm run generate:openapi
+    cd apps/syn-docs && pnpm run generate:openapi
 
 # Build docs site (runs generation + next build)
 docs-site-build: docs-site-gen
-    cd apps/aef-docs && pnpm run build
+    cd apps/syn-docs && pnpm run build
 
 # Start docs site dev server
 docs:
-    cd apps/aef-docs && pnpm run dev
+    cd apps/syn-docs && pnpm run dev
 
 # Check for test debt (xfail, skip, TODO in tests)
 test-debt:
@@ -817,43 +817,43 @@ submodules-update:
 
 # Check available isolation backends
 perf-check:
-    uv run python -m aef_perf check
+    uv run python -m syn_perf check
 
 # Run single workspace benchmark (5 iterations)
 perf-single iterations="5":
-    uv run python -m aef_perf single --iterations {{iterations}}
+    uv run python -m syn_perf single --iterations {{iterations}}
 
 # Run parallel scaling benchmark
 perf-parallel count="10":
-    uv run python -m aef_perf parallel --count {{count}}
+    uv run python -m syn_perf parallel --count {{count}}
 
 # Run throughput benchmark
 perf-throughput duration="30":
-    uv run python -m aef_perf throughput --duration {{duration}}
+    uv run python -m syn_perf throughput --duration {{duration}}
 
 # Compare all available backends
 perf-compare:
-    uv run python -m aef_perf compare --iterations 3
+    uv run python -m syn_perf compare --iterations 3
 
 # Run all benchmarks
 perf-all:
     @echo "=== Backend Availability ==="
-    uv run python -m aef_perf check
+    uv run python -m syn_perf check
     @echo ""
     @echo "=== Single Workspace Benchmark ==="
-    uv run python -m aef_perf single --iterations 5
+    uv run python -m syn_perf single --iterations 5
     @echo ""
     @echo "=== Parallel Scaling (10 concurrent) ==="
-    uv run python -m aef_perf parallel --count 10
+    uv run python -m syn_perf parallel --count 10
     @echo ""
     @echo "=== Throughput Test (30s) ==="
-    uv run python -m aef_perf throughput --duration 30
+    uv run python -m syn_perf throughput --duration 30
 
 # Run benchmark and save JSON report
 perf-report:
     @mkdir -p reports
-    uv run python -m aef_perf single --iterations 10 --output reports/perf-single.json
-    uv run python -m aef_perf parallel --count 10 --output reports/perf-parallel.json
+    uv run python -m syn_perf single --iterations 10 --output reports/perf-single.json
+    uv run python -m syn_perf parallel --count 10 --output reports/perf-parallel.json
     @echo "Reports saved to reports/"
 
 # Demo workspace events E2E
@@ -879,37 +879,37 @@ poc-isolation-quick:
 
 # Build the egress proxy image
 proxy-build:
-    docker build -t aef-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
+    docker build -t syn-egress-proxy:latest -f docker/egress-proxy/Dockerfile docker/egress-proxy/
 
 # Egress proxy port (use unique port to avoid conflicts)
-PROXY_PORT := env_var_or_default("AEF_PROXY_PORT", "18080")
+PROXY_PORT := env_var_or_default("SYN_PROXY_PORT", "18080")
 
 # Start the egress proxy
 proxy-start:
-    @docker rm -f aef-egress-proxy 2>/dev/null || true
-    docker run -d --name aef-egress-proxy -p {{PROXY_PORT}}:8080 \
+    @docker rm -f syn-egress-proxy 2>/dev/null || true
+    docker run -d --name syn-egress-proxy -p {{PROXY_PORT}}:8080 \
         -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
-        aef-egress-proxy:latest
+        syn-egress-proxy:latest
     @echo "✓ Egress proxy started on port {{PROXY_PORT}}"
 
 # Stop the egress proxy
 proxy-stop:
-    docker rm -f aef-egress-proxy
+    docker rm -f syn-egress-proxy
     @echo "✓ Egress proxy stopped"
 
 # View proxy logs
 proxy-logs:
-    docker logs -f aef-egress-proxy
+    docker logs -f syn-egress-proxy
 
 # Test network allowlist enforcement
 poc-allowlist:
     @echo "=== Network Allowlist Test ==="
     @echo "1. Starting egress proxy on port {{PROXY_PORT}}..."
     @just proxy-build >/dev/null 2>&1 || true
-    @docker rm -f aef-egress-proxy 2>/dev/null || true
-    @docker run -d --name aef-egress-proxy -p {{PROXY_PORT}}:8080 \
+    @docker rm -f syn-egress-proxy 2>/dev/null || true
+    @docker run -d --name syn-egress-proxy -p {{PROXY_PORT}}:8080 \
         -e ALLOWED_HOSTS="api.anthropic.com,github.com" \
-        aef-egress-proxy:latest >/dev/null
+        syn-egress-proxy:latest >/dev/null
     @sleep 2
     @echo ""
     @echo "2. Testing ALLOWED host (github.com)..."
@@ -926,7 +926,7 @@ poc-allowlist:
         curlimages/curl -s -o /dev/null -w "%{http_code}" --insecure https://evil.com || echo "403"
     @echo " <- Expected: 403"
     @echo ""
-    @docker rm -f aef-egress-proxy >/dev/null
+    @docker rm -f syn-egress-proxy >/dev/null
     @echo "✓ Network allowlist test complete!"
 
 # Test container logging setup
@@ -965,8 +965,8 @@ poc-git-identity:
     @echo ""
     docker run --rm --network=bridge python:3.12-slim sh -c '\
         apt-get update -qq 2>/dev/null && apt-get install -y -qq git 2>/dev/null && \
-        git config --global user.name "aef-bot[bot]" && \
-        git config --global user.email "bot@aef.dev" && \
+        git config --global user.name "syn-bot[bot]" && \
+        git config --global user.email "bot@syntropic137.com" && \
         git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && \
         cd /tmp/repo && \
         echo "# AEF Test" >> README && \
@@ -1022,20 +1022,20 @@ homelab-status:
     @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml ps
     @echo ""
     @echo "🔗 Access Points:"
-    @if [ -n "${AEF_DOMAIN:-}" ]; then \
-        echo "   UI:  https://${AEF_DOMAIN}"; \
-        echo "   API: https://api.${AEF_DOMAIN}"; \
+    @if [ -n "${SYN_DOMAIN:-}" ]; then \
+        echo "   UI:  https://${SYN_DOMAIN}"; \
+        echo "   API: https://api.${SYN_DOMAIN}"; \
     else \
         echo "   UI:  http://localhost:80"; \
         echo "   API: http://localhost:8000"; \
-        echo "   (Set AEF_DOMAIN in .env for external access)"; \
+        echo "   (Set SYN_DOMAIN in .env for external access)"; \
     fi
 
 # Check Cloudflare tunnel status
 homelab-tunnel-status:
     @echo "🚇 Cloudflare Tunnel Status"
     @echo "==========================="
-    @docker logs aef-cloudflared 2>&1 | tail -20
+    @docker logs syn-cloudflared 2>&1 | tail -20
 
 # Restart specific homelab service
 homelab-restart service:
@@ -1113,7 +1113,7 @@ secrets-rotate:
     @uv run python infra/scripts/secrets_setup.py rotate
     @echo ""
     @echo "⚠️  Restart services to apply new secrets:"
-    @echo "   just homelab-restart aef-dashboard"
+    @echo "   just homelab-restart syn-dashboard"
 
 # Verify secrets are configured
 secrets-check:

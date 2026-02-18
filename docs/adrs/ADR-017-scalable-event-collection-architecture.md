@@ -6,7 +6,7 @@
 
 ## Context
 
-The Agentic Engineering Framework (AEF) needs comprehensive observability for agent execution across multiple deployment environments. We require:
+The Syntropic137 (AEF) needs comprehensive observability for agent execution across multiple deployment environments. We require:
 
 1. **Tool-level observability** - Track every tool call (started, completed, blocked) with metadata
 2. **Token usage tracking** - Per-turn and cumulative token metrics from Claude transcripts
@@ -219,7 +219,7 @@ See [ADR-018](./ADR-018-commands-vs-observations-event-architecture.md) for the 
 
 | Environment | Event Sidecar | Collector URL | Notes |
 |-------------|--------------|---------------|-------|
-| **Local Filesystem** | Background daemon | `http://localhost:8080` | Run via `uv run aef-collector daemon` |
+| **Local Filesystem** | Background daemon | `http://localhost:8080` | Run via `uv run syn-collector daemon` |
 | **Local Docker** | Same container or sidecar container | `http://collector:8080` | Docker network |
 | **Cloud Sandbox (E2B)** | Baked into agent image | `https://collector.aef.example.com` | HTTPS + API key auth |
 
@@ -397,7 +397,7 @@ Response:
 
 ### Mitigations
 
-1. **Sidecar complexity** - Provide `aef-collector` CLI with `daemon`, `watch`, `serve` commands
+1. **Sidecar complexity** - Provide `syn-collector` CLI with `daemon`, `watch`, `serve` commands
 2. **Latency** - Configurable batch interval (100ms for real-time needs)
 3. **File formats** - Unified watcher library handles both JSONL formats
 
@@ -406,10 +406,10 @@ Response:
 ### Package Structure
 
 ```
-packages/aef-collector/
+packages/syn-collector/
 ├── pyproject.toml
 ├── src/
-│   └── aef_collector/
+│   └── syn_collector/
 │       ├── __init__.py
 │       ├── cli.py              # Click CLI (daemon, watch, serve)
 │       ├── watcher/
@@ -435,19 +435,19 @@ packages/aef-collector/
 
 ```bash
 # Start collector service (receives events, writes to event store)
-uv run aef-collector serve --port 8080 --eventstore-host localhost
+uv run syn-collector serve --port 8080 --eventstore-host localhost
 
 # Start file watcher daemon (watches files, posts to collector)
-uv run aef-collector watch \
+uv run syn-collector watch \
   --hooks-file .agentic/analytics/events.jsonl \
   --transcript-dir ~/.claude/projects/ \
   --collector-url http://localhost:8080
 
 # Start as background daemon
-uv run aef-collector daemon start
+uv run syn-collector daemon start
 
 # For Docker: combined mode
-uv run aef-collector sidecar \
+uv run syn-collector sidecar \
   --hooks-file /app/.agentic/analytics/events.jsonl \
   --transcript-dir /root/.claude/projects/ \
   --collector-url http://collector:8080
@@ -475,7 +475,7 @@ EVENT_BATCH_INTERVAL_MS=1000
 
 ## Migration Path
 
-1. **Phase 1**: Build `aef-collector` package with CLI
+1. **Phase 1**: Build `syn-collector` package with CLI
 2. **Phase 2**: Deploy collector service alongside existing dashboard
 3. **Phase 3**: Add sidecar to Docker agent images
 4. **Phase 4**: Configure cloud sandbox images with sidecar + API key
@@ -500,7 +500,7 @@ This architecture provides a foundation for:
 
 - Claude Code Hooks Documentation: https://code.claude.com/docs/en/hooks
 - Claude Code Transcript Format: `~/.claude/projects/.../*.jsonl`
-- Existing EventBridge: `packages/aef-adapters/src/aef_adapters/events/bridge.py`
+- Existing EventBridge: `packages/syn-adapters/src/syn_adapters/events/bridge.py`
 
 ---
 
@@ -519,7 +519,7 @@ This architecture provides a foundation for:
 
 | Existing Code | Purpose |
 |--------------|---------|
-| `packages/aef-adapters/src/aef_adapters/events/watcher.py` | File watching pattern to extend |
-| `packages/aef-adapters/src/aef_adapters/events/bridge.py` | Event bridging pattern |
-| `packages/aef-adapters/src/aef_adapters/hooks/client.py` | HTTP client pattern |
+| `packages/syn-adapters/src/syn_adapters/events/watcher.py` | File watching pattern to extend |
+| `packages/syn-adapters/src/syn_adapters/events/bridge.py` | Event bridging pattern |
+| `packages/syn-adapters/src/syn_adapters/hooks/client.py` | HTTP client pattern |
 | `lib/agentic-primitives/primitives/v1/hooks/handlers/` | Existing hook implementations |

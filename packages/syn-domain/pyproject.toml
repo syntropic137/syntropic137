@@ -1,0 +1,17 @@
+[project]
+name = "syn-domain"
+version = "0.1.0"
+description = "Core domain model for Syntropic137"
+requires-python = ">=3.12"
+
+dependencies = [
+    "syn-shared",
+    "pydantic>=2.12.5",
+    "event-sourcing-python",
+    "pyyaml>=6.0.2",
+    "agentic-events",  # ADR-029: JSONL parsing utilities
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13"]
+build-backend = "uv_build"

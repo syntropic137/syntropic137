@@ -44,7 +44,7 @@ def _get_smee_url() -> str | None:
 
 
 def _get_prod_url() -> str | None:
-    domain = os.environ.get("AEF_DOMAIN")
+    domain = os.environ.get("SYN_DOMAIN")
     if domain:
         return f"https://api.{domain}/webhooks/github"
     return None
@@ -52,8 +52,8 @@ def _get_prod_url() -> str | None:
 
 async def _check() -> int:
     """Print current webhook config."""
-    from aef_adapters.github.client import GitHubAppClient
-    from aef_shared.settings.github import GitHubAppSettings
+    from syn_adapters.github.client import GitHubAppClient
+    from syn_shared.settings.github import GitHubAppSettings
 
     settings = GitHubAppSettings()
     if not settings.is_configured:
@@ -72,8 +72,8 @@ async def _check() -> int:
 
 async def _switch(mode: str, dry_run: bool) -> int:
     """Switch webhook URL to dev (Smee) or prod (Cloudflare)."""
-    from aef_adapters.github.client import GitHubAppClient
-    from aef_shared.settings.github import GitHubAppSettings
+    from syn_adapters.github.client import GitHubAppClient
+    from syn_shared.settings.github import GitHubAppSettings
 
     settings = GitHubAppSettings()
     if not settings.is_configured:
@@ -89,7 +89,7 @@ async def _switch(mode: str, dry_run: bool) -> int:
     else:
         target_url = _get_prod_url()
         if not target_url:
-            print("AEF_DOMAIN not set — skipping webhook restore")
+            print("SYN_DOMAIN not set — skipping webhook restore")
             return 0
         label = "prod (Cloudflare)"
 

@@ -66,7 +66,7 @@ steps below.
 
 #### For Organizations (Recommended)
 
-If you have an organization (e.g., `AgentParadise`), create the app through the org:
+If you have an organization (e.g., `syntropic137`), create the app through the org:
 
 1. Go to **https://github.com/organizations/YOUR_ORG/settings/apps**
 2. Click **New GitHub App**
@@ -80,7 +80,7 @@ If you have an organization (e.g., `AgentParadise`), create the app through the 
 
 Fill in the app details:
 - **GitHub App name**: `aef-agent` (or your preferred name, e.g., `agentparadise-bot`)
-- **Homepage URL**: Your organization's URL (e.g., `https://github.com/AgentParadise`)
+- **Homepage URL**: Your organization's URL (e.g., `https://github.com/syntropic137`)
 - **Webhook URL**: `https://your-domain.com/webhooks/github` (can leave blank for local dev)
 - **Webhook secret**: Generate a strong random secret (e.g., `openssl rand -hex 32`)
 
@@ -217,15 +217,15 @@ Set these environment variables in your deployment:
 
 ```bash
 # Required: GitHub App credentials
-AEF_GITHUB_APP_ID=123456                    # From app settings page
-AEF_GITHUB_APP_NAME=aef-app                  # Your app's slug
-AEF_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
+SYN_GITHUB_APP_ID=123456                    # From app settings page
+SYN_GITHUB_APP_NAME=syn-app                  # Your app's slug
+SYN_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 ...your private key content...
 -----END RSA PRIVATE KEY-----"
-AEF_GITHUB_INSTALLATION_ID=12345678         # From installation URL
+SYN_GITHUB_INSTALLATION_ID=12345678         # From installation URL
 
 # Optional: Webhook security
-AEF_GITHUB_WEBHOOK_SECRET=your-webhook-secret
+SYN_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ```
 
 #### For Docker/Kubernetes
@@ -235,10 +235,10 @@ When using Docker or Kubernetes, you may need to handle the multi-line private k
 ```yaml
 # docker-compose.yaml
 services:
-  aef-dashboard:
+  syn-dashboard:
     environment:
-      - AEF_GITHUB_APP_ID=123456
-      - AEF_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github_private_key
+      - SYN_GITHUB_APP_ID=123456
+      - SYN_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github_private_key
     secrets:
       - github_private_key
 
@@ -254,7 +254,7 @@ Or base64 encode the key:
 cat private-key.pem | base64 -w0 > private-key.b64
 
 # In environment
-AEF_GITHUB_PRIVATE_KEY_B64=$(cat private-key.b64)
+SYN_GITHUB_PRIVATE_KEY_B64=$(cat private-key.b64)
 ```
 
 ### Step 5: Verify Configuration
@@ -263,8 +263,8 @@ Test that everything is configured correctly:
 
 ```bash
 # Start the dashboard
-cd apps/aef-dashboard
-uv run python -m aef_dashboard
+cd apps/syn-dashboard
+uv run python -m syn_dashboard
 
 # Check health endpoint
 curl http://localhost:8000/health
@@ -405,7 +405,7 @@ Ensure the key is correctly formatted with newlines preserved:
 ```python
 # Check key format in Python
 import os
-key = os.environ.get("AEF_GITHUB_PRIVATE_KEY", "")
+key = os.environ.get("SYN_GITHUB_PRIVATE_KEY", "")
 print(f"Key starts with: {key[:50]}")
 print(f"Key length: {len(key)}")
 ```

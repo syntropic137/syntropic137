@@ -2,7 +2,7 @@
 # Envoy-based proxy for secure token injection and observability
 #
 # Build: docker build -t aef-sidecar:latest .
-# Run: docker run -e AEF_EXECUTION_ID=exec-123 -p 8081:8081 aef-sidecar:latest
+# Run: docker run -e SYN_EXECUTION_ID=exec-123 -p 8081:8081 aef-sidecar:latest
 
 FROM envoyproxy/envoy:v1.31-latest
 

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-The Agentic Engineering Framework requires different storage and infrastructure configurations depending on the context:
+The Syntropic137 requires different storage and infrastructure configurations depending on the context:
 
 1. **Unit Tests** - Need to run fast, be isolated, and have no external dependencies
 2. **Local Development** - Need to mirror production as closely as possible for realistic testing
@@ -44,14 +44,14 @@ A common anti-pattern is using in-memory or SQLite for "development" which leads
 **Usage:**
 ```python
 # In tests
-from aef_adapters.storage import reset_storage
+from syn_adapters.storage import reset_storage
 
 @pytest.fixture(autouse=True)
 def clean_storage():
     reset_storage()  # Fresh state each test
 ```
 
-**Code Location:** `packages/aef-adapters/src/aef_adapters/storage/in_memory.py`
+**Code Location:** `packages/syn-adapters/src/syn_adapters/storage/in_memory.py`
 
 ### 2. Development Environment (Docker)
 
@@ -212,8 +212,8 @@ agentic-engineering-framework/
 │   ├── docker-compose.ci.yaml     # CI/CD stack (if needed)
 │   └── init/
 │       └── 01-init.sql            # Database initialization
-├── packages/aef-adapters/
-│   └── src/aef_adapters/storage/
+├── packages/syn-adapters/
+│   └── src/syn_adapters/storage/
 │       ├── in_memory.py           # Test-only storage
 │       └── postgres.py            # PostgreSQL storage (future)
 └── .env.example                   # Template for developers

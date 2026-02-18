@@ -43,7 +43,7 @@ allowed_hosts: str = Field(
 ### Implementation
 
 **DockerIsolationAdapter:**
-- Uses `default_network` parameter (defaults to `"aef-network"`)
+- Uses `default_network` parameter (defaults to `"syn-network"`)
 - Creates Docker network if it doesn't exist
 - Containers connect to this network with `--network={network_name}`
 
@@ -65,7 +65,7 @@ f"--network={network_name}",
 | Layer | Network Setting | Notes |
 |-------|----------------|-------|
 | **Settings (workspace.py)** | `docker_network = "none"` | Default: full isolation |
-| **DockerIsolationAdapter** | `default_network = DEFAULT_NETWORK` | Likely: "aef-network" |
+| **DockerIsolationAdapter** | `default_network = DEFAULT_NETWORK` | Likely: "syn-network" |
 | **Security Policy** | `allow_network = False` | Network disabled |
 
 **Issue:** The settings say `"none"` by default, but the DockerIsolationAdapter uses a named network (`DEFAULT_NETWORK`).
@@ -74,7 +74,7 @@ f"--network={network_name}",
 
 1. **What is `DEFAULT_NETWORK`?**
    - Need to find the constant definition
-   - Is it "aef-network" or "none"?
+   - Is it "syn-network" or "none"?
 
 2. **Which setting takes precedence?**
    - Does `docker_network` from settings override `default_network` in adapter?

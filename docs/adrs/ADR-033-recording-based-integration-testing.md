@@ -53,13 +53,13 @@ Use recorded agent sessions from `agentic-primitives` with a new `RecordingEvent
 
 1. **SessionRecorder** (agentic-primitives): Captures agent events with timing to JSONL
 2. **SessionPlayer** (agentic-primitives): Replays recordings at configurable speed
-3. **RecordingEventStreamAdapter** (aef-adapters): Bridges recordings to AEF's event pipeline
+3. **RecordingEventStreamAdapter** (syn-adapters): Bridges recordings to AEF's event pipeline
 
 ### Usage
 
 ```python
-from aef_adapters.workspace_backends.recording import RecordingEventStreamAdapter
-from aef_adapters.workspace_backends.service import WorkspaceService
+from syn_adapters.workspace_backends.recording import RecordingEventStreamAdapter
+from syn_adapters.workspace_backends.service import WorkspaceService
 
 # Load recording by task name
 adapter = RecordingEventStreamAdapter("simple-bash")
@@ -110,11 +110,11 @@ In pytest, this is configured automatically in `conftest.py`.
 ### Files Created
 
 ```
-packages/aef-adapters/src/aef_adapters/workspace_backends/recording/
+packages/syn-adapters/src/syn_adapters/workspace_backends/recording/
 ├── __init__.py
 └── adapter.py                    # RecordingEventStreamAdapter
 
-packages/aef-adapters/tests/workspace_backends/recording/
+packages/syn-adapters/tests/workspace_backends/recording/
 ├── __init__.py
 ├── test_adapter.py               # Unit tests
 └── test_integration.py           # Integration tests with real recordings

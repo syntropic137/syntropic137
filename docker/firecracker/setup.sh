@@ -15,7 +15,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-v1.7.0}"
-INSTALL_DIR="${AEF_FIRECRACKER_DIR:-/var/lib/aef/firecracker}"
+INSTALL_DIR="${SYN_FIRECRACKER_DIR:-/var/lib/syn/firecracker}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -197,7 +197,7 @@ build_rootfs() {
     info "Building rootfs from workspace Dockerfile..."
 
     local rootfs_path="${INSTALL_DIR}/rootfs.ext4"
-    local rootfs_size="${AEF_ROOTFS_SIZE:-2G}"
+    local rootfs_size="${SYN_ROOTFS_SIZE:-2G}"
 
     if [[ -f "$rootfs_path" ]]; then
         info "Rootfs already exists at ${rootfs_path}"
@@ -210,12 +210,12 @@ build_rootfs() {
 
     # Build workspace Docker image
     info "Building workspace Docker image..."
-    docker build -t aef-workspace:latest -f "${SCRIPT_DIR}/../workspace/Dockerfile" "${SCRIPT_DIR}/../.."
+    docker build -t syn-workspace:latest -f "${SCRIPT_DIR}/../workspace/Dockerfile" "${SCRIPT_DIR}/../.."
 
     # Create container and export filesystem
     info "Exporting filesystem..."
     local container_id
-    container_id=$(docker create aef-workspace:latest)
+    container_id=$(docker create syn-workspace:latest)
 
     # Create empty ext4 image
     dd if=/dev/zero of="$rootfs_path" bs=1 count=0 seek="$rootfs_size" 2>/dev/null
@@ -290,7 +290,7 @@ main() {
     echo "  ./docker/firecracker/test.sh"
     echo ""
     echo "To configure AEF to use Firecracker:"
-    echo "  export AEF_WORKSPACE_ISOLATION_BACKEND=firecracker"
+    echo "  export SYN_WORKSPACE_ISOLATION_BACKEND=firecracker"
     echo ""
 }
 

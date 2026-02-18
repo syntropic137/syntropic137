@@ -8,7 +8,7 @@ Accepted (Revised)
 
 ## Context
 
-The Agentic Engineering Framework needs a scalable architecture that:
+The Syntropic137 needs a scalable architecture that:
 1. Integrates two external dependencies as git submodules (`agentic-primitives`, `event-sourcing-platform`)
 2. Supports composable workflow phases with clear boundaries
 3. Enables parallel agent development for new features
@@ -203,6 +203,6 @@ Initial implementation stores artifacts inline in PostgreSQL:
 
 ## References
 - [Event Sourcing Platform](https://github.com/NeuralEmpowerment/event-sourcing-platform)
-- [Agentic Primitives](https://github.com/AgentParadise/agentic-primitives)
+- [Agentic Primitives](https://github.com/syntropic137/agentic-primitives)
 - [uv Workspaces](https://docs.astral.sh/uv/concepts/workspaces/)
 - [Understanding Event Sourcing](https://leanpub.com/understanding-eventsourcing) - Processor/Todo pattern

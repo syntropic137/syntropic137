@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document defines the standard QA workflow for the Agentic Engineering Framework. It ensures code quality while optimizing for developer velocity.
+This document defines the standard QA workflow for the Syntropic137. It ensures code quality while optimizing for developer velocity.
 
 ## Command Hierarchy
 

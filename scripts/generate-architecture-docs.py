@@ -23,11 +23,11 @@ from typing import Any
 
 def load_manifest() -> dict[str, Any]:
     """Load the VSA manifest."""
-    manifest_path = Path(".topology/aef-manifest.json")
+    manifest_path = Path(".topology/syn-manifest.json")
     if not manifest_path.exists():
         print(f"❌ Error: Manifest not found at {manifest_path}")
         print(
-            "   Run: vsa manifest --config vsa.yaml --output .topology/aef-manifest.json --include-domain"
+            "   Run: vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain"
         )
         sys.exit(1)
 
@@ -84,7 +84,7 @@ def generate_projection_subscriptions(manifest: dict[str, Any]) -> str:
 
 🤖 **Auto-generated from VSA manifest** - Run `just docs-gen` to update
 
-**Data Source:** `.topology/aef-manifest.json`
+**Data Source:** `.topology/syn-manifest.json`
 
 ---
 
@@ -141,7 +141,7 @@ just docs-gen
 Or regenerate the manifest first:
 
 ```bash
-vsa manifest --config vsa.yaml --output .topology/aef-manifest.json --include-domain
+vsa manifest --config vsa.yaml --output .topology/syn-manifest.json --include-domain
 just docs-gen
 ```
 """

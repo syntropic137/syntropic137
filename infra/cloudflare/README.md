@@ -24,7 +24,7 @@ This guide helps you set up secure external access to your homelab AEF deploymen
 1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
 2. Navigate to: **Networks** → **Tunnels** → **Create a tunnel**
 3. Select **Cloudflared** connector type
-4. Name your tunnel: `aef-homelab`
+4. Name your tunnel: `syn-homelab`
 5. Click **Save tunnel**
 6. **Copy the tunnel token** (long base64 string starting with `eyJ...`)
 
@@ -34,8 +34,8 @@ In the tunnel configuration, add these public hostnames:
 
 | Subdomain | Domain | Type | URL |
 |-----------|--------|------|-----|
-| `aef` | yourdomain.com | HTTP | `http://aef-ui:80` |
-| `api.aef` | yourdomain.com | HTTP | `http://aef-dashboard:8000` |
+| `aef` | yourdomain.com | HTTP | `http://syn-ui:80` |
+| `api.aef` | yourdomain.com | HTTP | `http://syn-dashboard:8000` |
 
 **Important:** The service URLs use Docker container names, not `localhost`.
 
@@ -50,7 +50,7 @@ cp .env.example .env
 
 # Edit .env and add your tunnel token
 # CLOUDFLARE_TUNNEL_TOKEN=eyJ...your-token...
-# AEF_DOMAIN=aef.yourdomain.com
+# SYN_DOMAIN=aef.yourdomain.com
 ```
 
 ### Step 4: Generate Secrets
@@ -109,14 +109,14 @@ scoop install cloudflared
 cloudflared tunnel login
 
 # Create tunnel
-cloudflared tunnel create aef-homelab
+cloudflared tunnel create syn-homelab
 
 # Configure DNS routes
-cloudflared tunnel route dns aef-homelab aef.yourdomain.com
-cloudflared tunnel route dns aef-homelab api.aef.yourdomain.com
+cloudflared tunnel route dns syn-homelab aef.yourdomain.com
+cloudflared tunnel route dns syn-homelab api.aef.yourdomain.com
 
 # Get tunnel token
-cloudflared tunnel token aef-homelab
+cloudflared tunnel token syn-homelab
 ```
 
 Then add the token to your `.env` file as shown above.
@@ -169,7 +169,7 @@ just homelab-logs cloudflared
 just homelab-status
 
 # Check if services can reach each other
-docker exec aef-ui wget -qO- http://aef-dashboard:8000/health
+docker exec syn-ui wget -qO- http://syn-dashboard:8000/health
 ```
 
 ### DNS Not Resolving

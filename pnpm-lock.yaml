@@ -6,7 +6,7 @@ settings:
 
 importers:
 
-  apps/aef-docs:
+  apps/syn-docs:
     dependencies:
       '@react-three/drei':
         specifier: ^10.7.7

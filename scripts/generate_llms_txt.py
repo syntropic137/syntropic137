@@ -24,7 +24,7 @@ def generate_llms_txt() -> str:
     # Header
     lines.append("# AEF API Reference")
     lines.append("")
-    lines.append("> Programmatic interface to the Agentic Engineering Framework")
+    lines.append("> Programmatic interface to the Syntropic137")
     lines.append("> Version: 0.1.0")
     lines.append("")
 

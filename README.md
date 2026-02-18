@@ -1,10 +1,10 @@
-# Agentic Engineering Framework
+# Syntropic137
 
 Event-sourced system for tracking AI agent work across workflows, capturing metrics for observability and optimization.
 
 ## Overview
 
-The Agentic Engineering Framework provides:
+The Syntropic137 provides:
 
 - **Composable Workflows**: Define reusable workflow phases with inputs and output artifacts
 - **Event Sourcing**: All state changes captured as immutable events
@@ -34,10 +34,10 @@ The system is organized into 4 bounded contexts following Vertical Slice Archite
 - MinIO (artifacts)
 
 **Packages:**
-- `aef-domain` - Core domain logic
-- `aef-adapters` - External integrations
-- `aef-collector` - Event collection
-- `aef-shared` - Shared utilities
+- `syn-domain` - Core domain logic
+- `syn-adapters` - External integrations
+- `syn-collector` - Event collection
+- `syn-shared` - Shared utilities
 
 **Libraries:**
 - `agentic-primitives` - Composable agent building blocks
@@ -63,7 +63,7 @@ just diagram  # Generates docs/architecture/vsa-overview.svg
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/AgentParadise/agentic-engineering-framework.git
+git clone --recursive https://github.com/syntropic137/agentic-engineering-framework.git
 cd agentic-engineering-framework
 
 # Install dependencies

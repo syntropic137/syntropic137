@@ -1,8 +1,8 @@
-# VSA Configuration for Agentic Engineering Framework
+# VSA Configuration for Syntropic137
 # See: https://github.com/neuralempowerment/event-sourcing-platform/vsa for documentation
 
 version: 1
-root: ./packages/aef-domain/src/aef_domain/contexts
+root: ./packages/syn-domain/src/syn_domain/contexts
 language: python
 
 # Event sourcing framework integration

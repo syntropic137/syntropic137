@@ -363,13 +363,13 @@ Every API call is logged:
 ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
 
 # Spend limits (optional overrides)
-AEF_CLAUDE_MAX_COST_PER_EXECUTION=50.00
-AEF_CLAUDE_MAX_COST_PER_HOUR=500.00
-AEF_CLAUDE_MAX_TOKENS_PER_REQUEST=100000
+SYN_CLAUDE_MAX_COST_PER_EXECUTION=50.00
+SYN_CLAUDE_MAX_COST_PER_HOUR=500.00
+SYN_CLAUDE_MAX_TOKENS_PER_REQUEST=100000
 
 # Alerting
-AEF_SPEND_ALERT_WEBHOOK=https://hooks.slack.com/services/xxx
-AEF_SPEND_ALERT_EMAIL=ops@example.com
+SYN_SPEND_ALERT_WEBHOOK=https://hooks.slack.com/services/xxx
+SYN_SPEND_ALERT_EMAIL=ops@example.com
 ```
 
 ### Budget Configuration per Workflow

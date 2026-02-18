@@ -46,7 +46,7 @@ class ValidationResult:
 class IsolationValidator:
     """Validates Docker container isolation."""
 
-    CONTAINER_NAME: ClassVar[str] = "aef-isolation-test"
+    CONTAINER_NAME: ClassVar[str] = "syn-isolation-test"
     IMAGE: ClassVar[str] = "python:3.12-slim"
 
     def __init__(self, backend: str = "docker_hardened", verbose: bool = False) -> None:

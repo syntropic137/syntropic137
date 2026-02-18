@@ -9,7 +9,7 @@ Usage:
     just validate-events  # If added to justfile
 
 Environment variables:
-    DATABASE_URL: PostgreSQL connection string (default: postgres://localhost:5432/aef_dev)
+    DATABASE_URL: PostgreSQL connection string (default: postgres://localhost:5432/syn_dev)
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ def validate_event_store() -> int:
     # Get database connection string
     database_url = os.environ.get(
         "DATABASE_URL",
-        "postgresql://aef:aef_dev_password@localhost:5432/aef",
+        "postgresql://syn:syn_dev_password@localhost:5432/syn",
     )
 
     print_header("Event Store Validation")

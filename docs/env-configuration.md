@@ -1,6 +1,6 @@
 # Environment Configuration
 
-This document describes all environment variables used by the Agentic Engineering Framework.
+This document describes all environment variables used by the Syntropic137.
 
 ## Quick Start
 
@@ -18,7 +18,7 @@ just gen-env
 ```
 
 This ensures the example file always matches the actual settings defined in code.
-Never edit `.env.example` manually - update `packages/aef-shared/src/aef_shared/settings/config.py` instead.
+Never edit `.env.example` manually - update `packages/syn-shared/src/syn_shared/settings/config.py` instead.
 
 ## Environment Variables
 
@@ -76,13 +76,13 @@ For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup 
 
 | Variable | Required | Default | Description | Where to Get |
 |----------|----------|---------|-------------|--------------|
-| `AEF_GITHUB_APP_ID` | For GitHub App | None | GitHub App ID | [github.com/settings/apps](https://github.com/settings/apps) |
-| `AEF_GITHUB_APP_NAME` | No | `aef-app` | App name for commit attribution (shows as `<name>[bot]`) | Your app's slug |
-| `AEF_GITHUB_PRIVATE_KEY` | For GitHub App | None | PEM-format private key | Generate from app settings |
-| `AEF_GITHUB_INSTALLATION_ID` | For GitHub App | None | Installation ID | From installation URL |
-| `AEF_GITHUB_WEBHOOK_SECRET` | For webhooks | None | Webhook signature secret | Set during app creation |
+| `SYN_GITHUB_APP_ID` | For GitHub App | None | GitHub App ID | [github.com/settings/apps](https://github.com/settings/apps) |
+| `SYN_GITHUB_APP_NAME` | No | `syn-app` | App name for commit attribution (shows as `<name>[bot]`) | Your app's slug |
+| `SYN_GITHUB_PRIVATE_KEY` | For GitHub App | None | PEM-format private key | Generate from app settings |
+| `SYN_GITHUB_INSTALLATION_ID` | For GitHub App | None | Installation ID | From installation URL |
+| `SYN_GITHUB_WEBHOOK_SECRET` | For webhooks | None | Webhook signature secret | Set during app creation |
 
-> **Note:** If any of `AEF_GITHUB_APP_ID`, `AEF_GITHUB_PRIVATE_KEY`, or `AEF_GITHUB_INSTALLATION_ID` is set, all three are required.
+> **Note:** If any of `SYN_GITHUB_APP_ID`, `SYN_GITHUB_PRIVATE_KEY`, or `SYN_GITHUB_INSTALLATION_ID` is set, all three are required.
 
 ## Example .env File
 
@@ -109,17 +109,17 @@ OPENAI_API_KEY=
 ARTIFACT_STORAGE_TYPE=database
 
 # GitHub App (optional - for secure agent commits)
-# AEF_GITHUB_APP_ID=123456
-# AEF_GITHUB_APP_NAME=aef-app
-# AEF_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."
-# AEF_GITHUB_INSTALLATION_ID=12345678
-# AEF_GITHUB_WEBHOOK_SECRET=your-webhook-secret
+# SYN_GITHUB_APP_ID=123456
+# SYN_GITHUB_APP_NAME=syn-app
+# SYN_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----..."
+# SYN_GITHUB_INSTALLATION_ID=12345678
+# SYN_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ```
 
 ## Usage in Code
 
 ```python
-from aef_shared import get_settings
+from syn_shared import get_settings
 
 # Settings are validated on first access
 settings = get_settings()

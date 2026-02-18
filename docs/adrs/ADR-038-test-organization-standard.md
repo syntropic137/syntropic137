@@ -15,11 +15,11 @@ AEF uses Vertical Slice Architecture (VSA) where each feature is a self-containe
 |---------|----------|---------|
 | Co-located | `src/.../slices/start_session/test_start_session.py` | Good for slices |
 | Separate | `tests/events/test_integration.py` | Good for integration |
-| Mixed | `src/aef_adapters/.../test_memory_adapter.py` | Tests shipped in package |
+| Mixed | `src/syn_adapters/.../test_memory_adapter.py` | Tests shipped in package |
 
 ### Issues
 
-1. **Inconsistent** - aef-domain uses co-located, aef-adapters uses separate
+1. **Inconsistent** - syn-domain uses co-located, syn-adapters uses separate
 2. **Tests in src/** - Some tests live in `src/` and get shipped with the package
 3. **No standard** - New contributors don't know where to put tests
 4. **Type safety** - Tests used raw dicts that could drift from schemas
@@ -39,8 +39,8 @@ AEF uses Vertical Slice Architecture (VSA) where each feature is a self-containe
 **Rule: Co-located for slices, separate for integration**
 
 ```
-packages/aef-domain/
-├── src/aef_domain/
+packages/syn-domain/
+├── src/syn_domain/
 │   └── contexts/
 │       └── sessions/
 │           └── slices/
@@ -52,8 +52,8 @@ packages/aef-domain/
     └── integration/
         └── test_session_roundtrip.py          ← SEPARATE (integration)
 
-packages/aef-adapters/
-├── src/aef_adapters/
+packages/syn-adapters/
+├── src/syn_adapters/
 │   └── events/
 │       └── store.py                           ← NO tests in src/
 └── tests/
@@ -78,7 +78,7 @@ Is it testing a VSA slice (command/handler)?
 
 ### 3. Type-Safe Event Factories
 
-All test event creation MUST use typed factories from `aef_shared.events.factories`:
+All test event creation MUST use typed factories from `syn_shared.events.factories`:
 
 ```python
 # ❌ BAD: Raw dicts (no type checking, can drift from schema)
@@ -89,7 +89,7 @@ event = {
 }
 
 # ✅ GOOD: Type-safe factory (IDE autocomplete, type errors on drift)
-from aef_shared.events.factories import tool_started
+from syn_shared.events.factories import tool_started
 
 event = tool_started(
     session_id=session_id,
@@ -119,8 +119,8 @@ All test configuration MUST use centralized constants:
 15432
 
 # ✅ GOOD: Centralized constants
-from aef_shared.events import TOOL_STARTED
-from aef_shared.testing import ENV_TEST_TIMESCALEDB_HOST, TEST_STACK_PORTS
+from syn_shared.events import TOOL_STARTED
+from syn_shared.testing import ENV_TEST_TIMESCALEDB_HOST, TEST_STACK_PORTS
 
 TOOL_STARTED  # "tool_execution_started"
 ENV_TEST_TIMESCALEDB_HOST  # "TEST_TIMESCALEDB_HOST"
@@ -175,20 +175,20 @@ NOT on feature branch PRs (unit tests sufficient for fast iteration).
 The following tests currently violate the standard:
 
 ```
-❌ packages/aef-adapters/src/aef_adapters/workspace_backends/memory/test_memory_adapter.py
-   → Move to: packages/aef-adapters/tests/workspace_backends/test_memory_adapter.py
+❌ packages/syn-adapters/src/syn_adapters/workspace_backends/memory/test_memory_adapter.py
+   → Move to: packages/syn-adapters/tests/workspace_backends/test_memory_adapter.py
 
-❌ packages/aef-adapters/src/aef_adapters/workspace_backends/service/test_workspace_service.py
-   → Move to: packages/aef-adapters/tests/workspace_backends/test_workspace_service.py
+❌ packages/syn-adapters/src/syn_adapters/workspace_backends/service/test_workspace_service.py
+   → Move to: packages/syn-adapters/tests/workspace_backends/test_workspace_service.py
 
-❌ packages/aef-adapters/src/aef_adapters/workspace_backends/tokens/test_token_adapters.py
-   → Move to: packages/aef-adapters/tests/workspace_backends/test_token_adapters.py
+❌ packages/syn-adapters/src/syn_adapters/workspace_backends/tokens/test_token_adapters.py
+   → Move to: packages/syn-adapters/tests/workspace_backends/test_token_adapters.py
 ```
 
 ## Implementation Checklist
 
-- [x] Create `aef_shared.events.factories` module
-- [x] Create `aef_shared.testing` module with constants
+- [x] Create `syn_shared.events.factories` module
+- [x] Create `syn_shared.testing` module with constants
 - [x] Update test files to use factories
 - [x] Update test files to use constants
 - [x] Enable weekly CI integration tests
@@ -199,5 +199,5 @@ The following tests currently violate the standard:
 
 - [ADR-034: Test Infrastructure Architecture](./ADR-034-test-infrastructure-architecture.md)
 - [ADR-008: VSA Projection Architecture](./ADR-008-vsa-projection-architecture.md)
-- [aef_shared.events.factories](/packages/aef-shared/src/aef_shared/events/factories.py)
-- [aef_shared.testing](/packages/aef-shared/src/aef_shared/testing/__init__.py)
+- [syn_shared.events.factories](/packages/syn-shared/src/syn_shared/events/factories.py)
+- [syn_shared.testing](/packages/syn-shared/src/syn_shared/testing/__init__.py)

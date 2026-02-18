@@ -47,7 +47,7 @@ async def test_workspace_service() -> bool:
     print_step("Testing WorkspaceService Docker integration...")
 
     try:
-        from aef_adapters.workspace_backends.service import WorkspaceService
+        from syn_adapters.workspace_backends.service import WorkspaceService
 
         service = WorkspaceService.create()
 
@@ -83,7 +83,7 @@ async def test_observability_port() -> bool:
     try:
         from agentic_observability import ObservationContext, ObservationType
 
-        from aef_adapters.observability import get_observability
+        from syn_adapters.observability import get_observability
 
         obs = get_observability()
 
@@ -105,12 +105,12 @@ async def test_observability_port() -> bool:
             [
                 "docker",
                 "exec",
-                "aef-timescaledb",
+                "syn-timescaledb",
                 "psql",
                 "-U",
-                "aef",
+                "syn",
                 "-d",
-                "aef_observability",
+                "syn_observability",
                 "-c",
                 f"SELECT COUNT(*) FROM agent_events WHERE session_id = '{test_session_id}';",
             ],
@@ -138,8 +138,8 @@ async def test_workflow_executor_integration() -> bool:
     print_step("Testing WorkflowExecutor → WorkspaceService integration...")
 
     try:
-        from aef_adapters.orchestration import create_workflow_executor
-        from aef_adapters.workspace_backends.service import WorkspaceService
+        from syn_adapters.orchestration import create_workflow_executor
+        from syn_adapters.workspace_backends.service import WorkspaceService
 
         # Create executor with all dependencies
         workspace_service = WorkspaceService.create()
@@ -174,7 +174,7 @@ async def test_github_credentials() -> bool:
             print_step("GitHub App not configured (skipping)", "⚠️")
             return True  # Skip but don't fail
 
-        from aef_adapters.workspace_backends.service import SetupPhaseSecrets
+        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
         secrets = await SetupPhaseSecrets.create(require_github=True)
 
@@ -200,8 +200,8 @@ async def test_full_workflow_execution() -> bool:
     try:
         from dataclasses import dataclass
 
-        from aef_adapters.orchestration import create_workflow_executor
-        from aef_adapters.workspace_backends.service import WorkspaceService
+        from syn_adapters.orchestration import create_workflow_executor
+        from syn_adapters.workspace_backends.service import WorkspaceService
 
         # Create a minimal workflow definition
         @dataclass

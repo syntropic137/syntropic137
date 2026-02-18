@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate that all domain events inherit from DomainEvent with strict settings.
 
-This script scans the aef-domain package for event classes and validates:
+This script scans the syn-domain package for event classes and validates:
 1. All events inherit from DomainEvent
 2. Events use the @event decorator
 3. Events don't override model_config with permissive settings
@@ -153,7 +153,7 @@ def main() -> int:
     """Main entry point."""
     # Find the domain package
     repo_root = Path(__file__).parent.parent
-    domain_src = repo_root / "packages" / "aef-domain" / "src"
+    domain_src = repo_root / "packages" / "syn-domain" / "src"
 
     if not domain_src.exists():
         print(f"{RED}Error: Domain source not found at {domain_src}{RESET}")

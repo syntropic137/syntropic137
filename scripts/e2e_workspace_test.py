@@ -46,7 +46,7 @@ class E2EWorkspaceTest:
         self.allow_network = allow_network
         self.verbose = verbose
         self.container_id: str | None = None
-        self.container_name = "aef-e2e-test"
+        self.container_name = "syn-e2e-test"
 
     def log(self, msg: str) -> None:
         """Print message."""

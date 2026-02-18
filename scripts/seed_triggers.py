@@ -2,7 +2,7 @@
 
 Standalone dev script — first seeds trigger-associated workflows from
 workflows/triggers/, then registers built-in trigger presets (self-healing,
-review-fix, comment-command) for target repositories via aef_api.
+review-fix, comment-command) for target repositories via syn_api.
 
 Called by `just seed-triggers`.
 
@@ -21,8 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIGGER_WORKFLOWS_DIR = REPO_ROOT / "workflows" / "triggers"
 
 DEFAULT_REPOSITORIES = [
-    "AgentParadise/agentic-engineering-framework",
-    "AgentParadise/sandbox_aef-engineer-beta",
+    "syntropic137/agentic-engineering-framework",
+    "syntropic137/sandbox_syn-engineer-beta",
 ]
 
 
@@ -31,12 +31,12 @@ async def _seed_trigger_workflows(dry_run: bool) -> bool:
 
     Returns True if all workflows seeded successfully (or already exist).
     """
-    from aef_adapters.storage import (
+    from syn_adapters.storage import (
         get_event_publisher,
         get_workflow_repository,
     )
-    from aef_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
-    from aef_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+    from syn_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
         CreateWorkflowTemplateHandler,
     )
 
@@ -64,7 +64,7 @@ async def _seed_trigger_workflows(dry_run: bool) -> bool:
 
 
 async def _seed(repositories: list[str], dry_run: bool) -> int:
-    from aef_domain.contexts.github._shared.trigger_presets import PRESETS
+    from syn_domain.contexts.github._shared.trigger_presets import PRESETS
 
     if dry_run:
         print("DRY RUN — no triggers will be created\n")
@@ -77,9 +77,9 @@ async def _seed(repositories: list[str], dry_run: bool) -> int:
         print(f"\nTotal: {len(PRESETS) * len(repositories)}  (dry run)")
         return 0
 
-    import aef_api.v1.triggers as tr
-    from aef_api._wiring import ensure_connected
-    from aef_api.types import Err, Ok
+    import syn_api.v1.triggers as tr
+    from syn_api._wiring import ensure_connected
+    from syn_api.types import Err, Ok
 
     await ensure_connected()
 

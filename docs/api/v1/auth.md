@@ -7,7 +7,7 @@ Authentication context for API operations.
 All v1 functions accept an optional `AuthContext` parameter. When `None` (the default), operations run without authorization checks.
 
 ```python
-from aef_api import AuthContext
+from syn_api import AuthContext
 
 @dataclass(frozen=True, slots=True)
 class AuthContext:
@@ -27,10 +27,10 @@ class AuthContext:
 ### Usage
 
 ```python
-from aef_api import AuthContext
+from syn_api import AuthContext
 
 # Unauthenticated (default)
-result = await aef_api.v1.workflows.list_workflows()
+result = await syn_api.v1.workflows.list_workflows()
 
 # Authenticated
 auth = AuthContext(
@@ -38,7 +38,7 @@ auth = AuthContext(
     tenant_id="tenant-abc",
     roles=frozenset({"admin", "operator"}),
 )
-result = await aef_api.v1.workflows.list_workflows(auth=auth)
+result = await syn_api.v1.workflows.list_workflows(auth=auth)
 ```
 
 ### Future Plans

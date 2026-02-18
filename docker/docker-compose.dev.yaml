@@ -7,7 +7,7 @@
 
 services:
   timescaledb:
-    container_name: aef-db
+    container_name: syn-db
     ports:
       - "5432:5432"
     volumes:
@@ -16,19 +16,19 @@ services:
     restart: unless-stopped
 
   event-store:
-    container_name: aef-event-store
+    container_name: syn-event-store
     ports:
       - "50051:50051"
     restart: unless-stopped
 
   collector:
-    container_name: aef-collector
+    container_name: syn-collector
     ports:
       - "8080:8080"
     restart: unless-stopped
 
   dashboard:
-    container_name: aef-dashboard
+    container_name: syn-dashboard
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -36,17 +36,17 @@ services:
       - ../.env # Load environment variables from root .env file
     environment:
       # Override .env localhost values with Docker service names (ADR-030)
-      AEF_OBSERVABILITY_DB_URL: postgres://aef:aef_dev_password@timescaledb:5432/aef
+      SYN_OBSERVABILITY_DB_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       # Override MinIO endpoint for Docker network
-      AEF_STORAGE_MINIO_ENDPOINT: minio:9000
+      SYN_STORAGE_MINIO_ENDPOINT: minio:9000
       # Workspace directory configuration for Docker-in-Docker
       # Container path where workspaces are accessible
-      AEF_WORKSPACE_CONTAINER_DIR: /workspaces
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
       # Host path that Docker daemon can mount (must match volume mount below)
       # This should be absolute path on the host machine
-      AEF_WORKSPACE_HOST_DIR: ${PWD}/workspaces
+      SYN_WORKSPACE_HOST_DIR: ${PWD}/workspaces
     volumes:
       # Mount Docker socket to create workspace containers
       - /var/run/docker.sock:/var/run/docker.sock
@@ -55,7 +55,7 @@ services:
       - ../workspaces:/workspaces
 
   minio:
-    container_name: aef-minio
+    container_name: syn-minio
     ports:
       - "9000:9000" # S3 API
       - "9001:9001" # Web Console
@@ -64,10 +64,10 @@ services:
     restart: unless-stopped
 
   minio-init:
-    container_name: aef-minio-init
+    container_name: syn-minio-init
 
   redis:
-    container_name: aef-redis
+    container_name: syn-redis
     ports:
       - "6379:6379"
     volumes:
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
 
   sidecar-proxy:
-    container_name: aef-sidecar-example
+    container_name: syn-sidecar-example
     ports:
       - "8081:8081"
       - "9901:9901" # Envoy admin
@@ -88,4 +88,4 @@ volumes:
 
 networks:
   default:
-    name: aef-network
+    name: syn-network

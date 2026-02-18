@@ -18,7 +18,7 @@ For Claude CLI to work, agents need:
 
 ### Phase 1: Current (Working) ✅
 
-**Configuration:** Named Docker network (`aef-workspace-net`)
+**Configuration:** Named Docker network (`syn-workspace-net`)
 
 **Pros:**
 - ✅ Works immediately - no config needed
@@ -33,7 +33,7 @@ For Claude CLI to work, agents need:
 
 **Code:**
 ```python
-DEFAULT_NETWORK = "aef-workspace-net"  # Acts like bridge mode
+DEFAULT_NETWORK = "syn-workspace-net"  # Acts like bridge mode
 # Container can reach ANY external host
 ```
 
@@ -48,7 +48,7 @@ DEFAULT_NETWORK = "aef-workspace-net"  # Acts like bridge mode
 **Implementation:**
 ```python
 # Settings
-docker_network = "bridge"  # or "aef-workspace-net"
+docker_network = "bridge"  # or "syn-workspace-net"
 allowed_hosts = "api.anthropic.com,github.com,api.github.com,pypi.org"
 
 # Document clearly that enforcement is NOT yet active
@@ -211,12 +211,12 @@ static_resources:
 
 1. **Align settings with implementation:**
    ```python
-   # packages/aef-shared/src/aef_shared/settings/workspace.py
+   # packages/syn-shared/src/syn_shared/settings/workspace.py
    docker_network: str = Field(
-       default="aef-workspace-net",  # Change from "none"
+       default="syn-workspace-net",  # Change from "none"
        description=(
            "Docker network for containers. "
-           "Default: aef-workspace-net (bridge-like, allows all outbound). "
+           "Default: syn-workspace-net (bridge-like, allows all outbound). "
            "For production: implement egress proxy (Phase 3) for allowlist enforcement."
        ),
    )
@@ -238,7 +238,7 @@ static_resources:
    ```markdown
    ### Network Configuration
    
-   **Current:** Bridge mode (`aef-workspace-net`)
+   **Current:** Bridge mode (`syn-workspace-net`)
    - Agents can reach all external hosts
    - Required: api.anthropic.com, github.com, api.github.com
    - Allowlist documented but not enforced
@@ -271,7 +271,7 @@ static_resources:
 
 **Best approach for GitHub + Anthropic access:**
 
-1. **Now:** Use bridge mode (`aef-workspace-net`) - it works!
+1. **Now:** Use bridge mode (`syn-workspace-net`) - it works!
 2. **Document:** List required hosts in settings
 3. **Note:** Allowlist enforcement is future enhancement
 4. **Plan:** Egress proxy when you need enforcement (multi-tenant)
