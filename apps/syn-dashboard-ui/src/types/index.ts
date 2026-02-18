@@ -318,6 +318,12 @@ export const SSE_EVENTS = {
   WORKSPACE_DESTROYING: 'workspace_destroying',
   WORKSPACE_DESTROYED: 'workspace_destroyed',
   WORKSPACE_ERROR: 'workspace_error',
+
+  // Git observability events (agentic-primitives observability plugin)
+  GIT_COMMIT: 'git_commit',
+  GIT_PUSH: 'git_push',
+  GIT_BRANCH_CHANGED: 'git_branch_changed',
+  GIT_OPERATION: 'git_operation',
 } as const
 
 export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]

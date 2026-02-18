@@ -222,6 +222,24 @@ class RealTimeProjection:
         if execution_id:
             await self.broadcast(execution_id, "SubagentStopped", event)
 
+    # ==========================================================================
+    # Global Activity Channel
+    # ==========================================================================
+
+    _ACTIVITY_KEY = "_activity_"
+
+    async def broadcast_global(self, event_type: str, data: dict[str, Any]) -> None:
+        """Broadcast a repo-level event to all global activity feed subscribers.
+
+        Used for git commit/push events and other non-execution-scoped events
+        that should appear in the dashboard's global live feed.
+
+        Args:
+            event_type: The event type string (e.g. "git_commit").
+            data: The event payload.
+        """
+        await self.broadcast(self._ACTIVITY_KEY, event_type, data)
+
 
 # Singleton instance - registered with ProjectionManager at startup
 _realtime_projection: RealTimeProjection | None = None

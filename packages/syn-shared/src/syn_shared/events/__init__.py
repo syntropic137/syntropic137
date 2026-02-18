@@ -39,11 +39,25 @@ PHASE_COMPLETED = "phase_completed"
 # Error events
 ERROR = "error"
 
+# Git observability events (from agentic-primitives observability plugin)
+# Emitted by post-commit, pre-push, post-merge, post-rewrite hooks and
+# PreToolUse/PostToolUse git command detection (agentic-primitives PR #82)
+GIT_COMMIT = "git_commit"
+GIT_PUSH = "git_push"
+GIT_BRANCH_CHANGED = "git_branch_changed"
+GIT_OPERATION = "git_operation"
+
+# Claude Code hook events (from observability plugin, all 14 lifecycle hooks)
+TOOL_FAILED = "tool_execution_failed"
+TEAMMATE_IDLE = "teammate_idle"
+TASK_COMPLETED = "task_completed"
+
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
 EventType = Literal[
     "tool_execution_started",
     "tool_execution_completed",
+    "tool_execution_failed",
     "tool_blocked",
     "session_started",
     "session_completed",
@@ -56,6 +70,12 @@ EventType = Literal[
     "phase_started",
     "phase_completed",
     "error",
+    "git_commit",
+    "git_push",
+    "git_branch_changed",
+    "git_operation",
+    "teammate_idle",
+    "task_completed",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -70,6 +90,10 @@ def is_valid_event_type(event_type: str) -> bool:
 __all__ = [
     "COST_RECORDED",
     "ERROR",
+    "GIT_BRANCH_CHANGED",
+    "GIT_COMMIT",
+    "GIT_OPERATION",
+    "GIT_PUSH",
     "PHASE_COMPLETED",
     "PHASE_STARTED",
     "SESSION_COMPLETED",
@@ -78,9 +102,12 @@ __all__ = [
     "SESSION_SUMMARY",
     "SUBAGENT_STARTED",
     "SUBAGENT_STOPPED",
+    "TASK_COMPLETED",
+    "TEAMMATE_IDLE",
     "TOKEN_USAGE",
     "TOOL_BLOCKED",
     "TOOL_COMPLETED",
+    "TOOL_FAILED",
     "TOOL_STARTED",
     "VALID_EVENT_TYPES",
     "EventType",

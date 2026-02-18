@@ -475,6 +475,52 @@ class AgentEventStore:
             for row in rows
         ]
 
+    async def query_recent_by_types(
+        self,
+        event_types: list[str],
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Query most recent events of given types across all sessions.
+
+        Used for the global activity feed (git commits, pushes, etc.).
+
+        Args:
+            event_types: Event type strings to include.
+            limit: Maximum events to return.
+
+        Returns:
+            List of event dicts ordered by time DESC.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is None:
+            raise RuntimeError("AgentEventStore pool is not initialized")
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT time, event_type, session_id, execution_id, phase_id, data
+                FROM agent_events
+                WHERE event_type = ANY($1)
+                ORDER BY time DESC
+                LIMIT $2
+                """,
+                event_types,
+                limit,
+            )
+
+        return [
+            {
+                "time": row["time"].isoformat(),
+                "event_type": row["event_type"],
+                "session_id": row["session_id"],
+                "execution_id": row["execution_id"],
+                "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
+            }
+            for row in rows
+        ]
+
     async def record_observation(
         self,
         session_id: str,
