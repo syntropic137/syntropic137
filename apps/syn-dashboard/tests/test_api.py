@@ -257,7 +257,7 @@ class TestRootEndpoints:
         response = await client.get("/")
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "AEF Dashboard API"
+        assert data["name"] == "Syntropic137 Dashboard API"
         assert data["docs"] == "/docs"
 
     @pytest.mark.asyncio
