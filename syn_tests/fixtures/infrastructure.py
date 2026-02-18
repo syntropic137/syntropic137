@@ -239,20 +239,3 @@ async def db_pool(
         raise RuntimeError(msg)
     yield pool
     await pool.close()
-
-
-@pytest.fixture
-async def db_connection(
-    test_infrastructure: TestInfrastructure,
-) -> AsyncGenerator[asyncpg.Connection, None]:
-    """Get single database connection (simpler than pool for basic tests).
-
-    Usage:
-        async def test_query(db_connection):
-            result = await db_connection.fetch("SELECT 1")
-    """
-    import asyncpg
-
-    conn = await asyncpg.connect(test_infrastructure.timescaledb_url)
-    yield conn
-    await conn.close()
