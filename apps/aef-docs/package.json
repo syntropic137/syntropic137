@@ -13,6 +13,7 @@
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
     "@theguild/remark-mermaid": "^0.3.0",
+    "@xyflow/react": "^12.10.0",
     "clsx": "^2.1.1",
     "fumadocs-core": "^16.6.2",
     "fumadocs-mdx": "^14.2.7",
