@@ -29,11 +29,11 @@ def record_tool_started(
         tool_input: Input parameters passed to the tool.
 
     Returns:
-        RecordOperationCommand configured for TOOL_STARTED.
+        RecordOperationCommand configured for TOOL_EXECUTION_STARTED.
     """
     return RecordOperationCommand(
         aggregate_id=session_id,
-        operation_type=OperationType.TOOL_STARTED,
+        operation_type=OperationType.TOOL_EXECUTION_STARTED,
         tool_name=tool_name,
         tool_use_id=tool_use_id,
         tool_input=tool_input,
@@ -59,11 +59,11 @@ def record_tool_completed(
         success: Whether the tool completed successfully.
 
     Returns:
-        RecordOperationCommand configured for TOOL_COMPLETED.
+        RecordOperationCommand configured for TOOL_EXECUTION_COMPLETED.
     """
     return RecordOperationCommand(
         aggregate_id=session_id,
-        operation_type=OperationType.TOOL_COMPLETED,
+        operation_type=OperationType.TOOL_EXECUTION_COMPLETED,
         tool_name=tool_name,
         tool_use_id=tool_use_id,
         tool_output=tool_output,

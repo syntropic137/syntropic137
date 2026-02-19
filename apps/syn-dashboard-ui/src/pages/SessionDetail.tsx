@@ -10,6 +10,9 @@ import {
   Copy,
   Cpu,
   FileText,
+  GitBranch,
+  GitCommit,
+  GitMerge,
   MessageSquare,
   Play,
   Terminal,
@@ -38,6 +41,11 @@ const operationIcons: Record<string, typeof Activity> = {
   // Subagent lifecycle events (agentic_isolation v0.3.0)
   subagent_started: Users,
   subagent_stopped: Users,
+  // Git observability events
+  git_commit: GitCommit,
+  git_push: GitBranch,
+  git_branch_changed: GitBranch,
+  git_operation: GitMerge,
   // New v2 types
   message_request: MessageSquare,
   message_response: MessageSquare,
@@ -69,6 +77,11 @@ const operationColors: Record<string, string> = {
   // Subagent lifecycle events (agentic_isolation v0.3.0)
   subagent_started: 'text-violet-400 bg-violet-500/10',
   subagent_stopped: 'text-violet-400 bg-violet-500/10',
+  // Git observability events
+  git_commit: 'text-orange-400 bg-orange-500/10',
+  git_push: 'text-orange-400 bg-orange-500/10',
+  git_branch_changed: 'text-orange-400 bg-orange-500/10',
+  git_operation: 'text-orange-400 bg-orange-500/10',
   // New v2 types
   message_request: 'text-blue-400 bg-blue-500/10',
   message_response: 'text-indigo-400 bg-indigo-500/10',
@@ -637,6 +650,23 @@ export function SessionDetail() {
                             <span className="flex items-center gap-1">
                               <Wrench className="h-3 w-3" />
                               {op.tool_name}
+                            </span>
+                          )}
+                          {op.git_message && (
+                            <span className="flex items-center gap-1 max-w-sm truncate">
+                              <GitCommit className="h-3 w-3 shrink-0" />
+                              {op.git_message}
+                            </span>
+                          )}
+                          {op.git_sha && (
+                            <span className="font-mono text-[var(--color-text-muted)]">
+                              {op.git_sha.slice(0, 7)}
+                            </span>
+                          )}
+                          {op.git_branch && (
+                            <span className="flex items-center gap-1">
+                              <GitBranch className="h-3 w-3" />
+                              {op.git_branch}
                             </span>
                           )}
                           {op.message_role && (

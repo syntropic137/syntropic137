@@ -16,12 +16,16 @@ from uuid import uuid4
 
 from syn_shared.events import (
     COST_RECORDED,
+    GIT_BRANCH_CHANGED,
+    GIT_COMMIT,
+    GIT_OPERATION,
+    GIT_PUSH,
     SESSION_SUMMARY,
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
     TOKEN_USAGE,
-    TOOL_COMPLETED,
-    TOOL_STARTED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
 )
 
 if TYPE_CHECKING:
@@ -37,34 +41,40 @@ logger = logging.getLogger(__name__)
 _TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
+_GIT_EVENT_TYPES = (GIT_COMMIT, GIT_PUSH, GIT_BRANCH_CHANGED, GIT_OPERATION)
 
 
 @dataclass
 class ToolOperation:
-    """Read model for a tool operation from TimescaleDB.
+    """Read model for a session timeline event from TimescaleDB.
 
-    Represents either a tool_started or tool_completed event.
+    Covers tool executions, git operations, subagent lifecycle, and other
+    observability events recorded during a session.
     """
 
     observation_id: str
     tool_name: str
     tool_use_id: str | None
-    operation_type: str  # "tool_started" or "tool_completed"
+    operation_type: str  # e.g. "tool_started", "git_commit", "subagent_started"
     timestamp: datetime
     success: bool | None  # Only for tool_execution_completed
     input_preview: str | None  # Truncated input for display
     output_preview: str | None  # Truncated output for display
     duration_ms: int | None  # Only for tool_execution_completed
+    # Git-specific fields (populated for git_* event types)
+    git_sha: str | None = None
+    git_message: str | None = None
+    git_branch: str | None = None
 
     @property
     def is_started(self) -> bool:
         """Check if this is a tool_started event."""
-        return self.operation_type == TOOL_STARTED
+        return self.operation_type == TOOL_EXECUTION_STARTED
 
     @property
     def is_completed(self) -> bool:
         """Check if this is a tool_completed event."""
-        return self.operation_type == TOOL_COMPLETED
+        return self.operation_type == TOOL_EXECUTION_COMPLETED
 
 
 class SessionToolsProjection:
@@ -160,8 +170,8 @@ class SessionToolsProjection:
                     ORDER BY e.time ASC
                     """,
                     session_id,
-                    TOOL_STARTED,
-                    TOOL_COMPLETED,
+                    TOOL_EXECUTION_STARTED,
+                    TOOL_EXECUTION_COMPLETED,
                     list(_TIMELINE_EXCLUDE),
                 )
 
@@ -250,7 +260,7 @@ class SessionToolsProjection:
             data = json.loads(data)
 
         event_type = row["event_type"]
-        is_completed = event_type == TOOL_COMPLETED
+        is_completed = event_type == TOOL_EXECUTION_COMPLETED
         is_subagent = event_type in _SUBAGENT_EVENT_TYPES
 
         if is_subagent:
@@ -267,6 +277,27 @@ class SessionToolsProjection:
                 input_preview=None,
                 output_preview=None,
                 duration_ms=data.get("duration_ms") if event_type == SUBAGENT_STOPPED else None,
+            )
+
+        is_git = event_type in _GIT_EVENT_TYPES
+        if is_git:
+            obs_id = f"git-{event_type}-{row['time'].isoformat()}"
+            return ToolOperation(
+                observation_id=obs_id,
+                tool_name="",
+                tool_use_id=None,
+                operation_type=event_type,
+                timestamp=row["time"],
+                success=True,
+                input_preview=None,
+                output_preview=None,
+                duration_ms=None,
+                git_sha=data.get("sha") or data.get("commit_hash") or None,
+                git_message=data.get("message")
+                or data.get("message_preview")
+                or data.get("commit_message")
+                or None,
+                git_branch=data.get("branch") or data.get("to_branch") or None,
             )
 
         # Generate a unique ID from the row data
