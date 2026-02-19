@@ -540,9 +540,7 @@ def get_github_client() -> GitHubAppClient:
     settings = get_settings()
 
     if not settings.github.is_configured:
-        msg = (
-            "GitHub App not configured. Set SYN_GITHUB_APP_ID and SYN_GITHUB_PRIVATE_KEY."
-        )
+        msg = "GitHub App not configured. Set SYN_GITHUB_APP_ID and SYN_GITHUB_PRIVATE_KEY."
         raise ValueError(msg)
 
     _github_client = GitHubAppClient(settings.github)
