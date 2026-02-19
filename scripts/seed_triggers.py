@@ -50,6 +50,13 @@ async def _seed_trigger_workflows(dry_run: bool) -> bool:
     )
     seeder = WorkflowSeeder(handler)
 
+    # Pre-load existing IDs so the seeder skips them without hitting the event store.
+    # This prevents noisy gRPC ABORTED errors from optimistic concurrency checks.
+    from syn_adapters.projection_stores import get_projection_store
+    store = get_projection_store()
+    existing = await store.get_all("workflow_summaries")
+    seeder.register_existing({w["id"] for w in existing if "id" in w})
+
     report = await seeder.seed_from_directory(TRIGGER_WORKFLOWS_DIR, dry_run=dry_run)
 
     for r in report.results:
