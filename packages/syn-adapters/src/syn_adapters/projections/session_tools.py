@@ -194,9 +194,9 @@ class SessionToolsProjection:
         if pool is None:
             return []
 
-        # Build dynamic query with type-safe event types
-        conditions = [f"event_type = ANY(${1})"]
-        params: list[Any] = [list(_TOOL_EVENT_TYPES)]
+        # Exclude high-volume, non-activity events (same logic as get())
+        conditions = [f"event_type != ALL(${1})"]
+        params: list[Any] = [list(_TIMELINE_EXCLUDE)]
         param_idx = 2
 
         if execution_id:
