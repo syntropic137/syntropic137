@@ -390,6 +390,27 @@ class AgenticEventStreamAdapter:
 
         Yields:
             Individual stdout lines as they are produced
+
+        ARCHITECTURE NOTE — stderr=STDOUT is intentional (ADR-043):
+        -----------------------------------------------------------------
+        stderr=STDOUT merges any direct stderr from the claude CLI process into the
+        stdout pipe so nothing is silently discarded (edge cases, internal errors).
+
+        HOW GIT HOOK EVENTS ACTUALLY FLOW (important — not the obvious path):
+        When Claude runs `git commit` via the Bash tool, the post-commit hook fires
+        and emits JSONL to stderr. Claude Code captures Bash tool stderr as part of
+        the tool output, then packages it inside a stream-json "user/tool_result"
+        event. The JSONL arrives EMBEDDED inside tool_result content — NOT as a
+        standalone raw line. WorkflowExecutionEngine scans each tool_result's full
+        content string for embedded JSONL (see the tool_result branch in the loop).
+
+        stderr=PIPE would silently discard any stderr escaping Claude Code's own
+        packaging. Do not revert to PIPE or DEVNULL.
+
+        IMPORTANT — TWO DOCKER EXEC PATHS EXIST. This file is the production path
+        (used by the workspace service). agentic_isolation/providers/docker.py has
+        the same fix but is only used in agentic_isolation contexts. Both must stay
+        in sync — changing docker.py alone has no effect on the dashboard.
         """
         # Store timeout for use in the streaming loop
         stream_timeout = float(timeout_seconds) if timeout_seconds else None
@@ -429,10 +450,13 @@ class AgenticEventStreamAdapter:
 
         start_time = time.monotonic()
 
+        # stderr=STDOUT: merge stderr into stdout so git hook JSONL events
+        # (emitted to stderr by post-commit/pre-push hooks) are read by the engine.
+        # See docstring above for full architectural rationale.
         proc = await asyncio.create_subprocess_exec(
             *exec_cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
         )
 
         try:
