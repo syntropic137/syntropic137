@@ -127,7 +127,7 @@ class GitHubAppClient:
 
         self._settings = settings
         self._private_key: str | None = None
-        self._cached_token: InstallationToken | None = None
+        self._cached_tokens: dict[str, InstallationToken] = {}
         self._http = httpx.AsyncClient(
             base_url=GITHUB_API_URL,
             headers={
@@ -152,12 +152,6 @@ class GitHubAppClient:
         """Get the GitHub App ID."""
         assert self._settings.app_id is not None
         return self._settings.app_id
-
-    @property
-    def installation_id(self) -> str:
-        """Get the installation ID."""
-        assert self._settings.installation_id is not None
-        return self._settings.installation_id
 
     @property
     def bot_username(self) -> str:
@@ -223,40 +217,49 @@ class GitHubAppClient:
             msg = f"Failed to generate JWT: {e}"
             raise GitHubAuthError(msg) from e
 
-    async def get_installation_token(self, force_refresh: bool = False) -> str:
+    async def get_installation_token(
+        self, installation_id: str | None = None, force_refresh: bool = False
+    ) -> str:
         """Get a valid installation access token.
 
-        Returns a cached token if still valid, or fetches a new one.
-        Tokens are valid for 1 hour.
+        Tokens are cached per installation_id and reused until expired.
 
         Args:
+            installation_id: The installation to get a token for. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided. Raises if neither is set.
             force_refresh: If True, always fetch a new token.
 
         Returns:
             Installation access token string.
 
         Raises:
-            GitHubAuthError: If token generation fails.
+            GitHubAuthError: If token generation fails or no installation_id available.
             GitHubRateLimitError: If rate limited.
         """
-        # Return cached token if valid
-        if not force_refresh and self._cached_token and not self._cached_token.is_expired:
-            logger.debug(
-                "Using cached installation token (expires_in=%ss)",
-                f"{self._cached_token.seconds_until_expiry:.0f}",
+        iid = installation_id or self._settings.installation_id
+        if not iid:
+            msg = (
+                "No installation_id provided. Pass it explicitly or set SYN_GITHUB_INSTALLATION_ID."
             )
-            return self._cached_token.token
+            raise GitHubAuthError(msg)
 
-        # Generate new token
-        logger.info(
-            "Generating new installation token for installation_id=%s", self.installation_id
-        )
+        # Return cached token if valid
+        cached = self._cached_tokens.get(iid)
+        if not force_refresh and cached and not cached.is_expired:
+            logger.debug(
+                "Using cached installation token (installation_id=%s, expires_in=%ss)",
+                iid,
+                f"{cached.seconds_until_expiry:.0f}",
+            )
+            return cached.token
+
+        logger.info("Generating new installation token for installation_id=%s", iid)
 
         jwt_token = self._generate_jwt()
 
         try:
             response = await self._http.post(
-                f"/app/installations/{self.installation_id}/access_tokens",
+                f"/app/installations/{iid}/access_tokens",
                 headers={"Authorization": f"Bearer {jwt_token}"},
             )
 
@@ -265,7 +268,6 @@ class GitHubAppClient:
                 raise GitHubAuthError(msg)
 
             if response.status_code == 403:
-                # Check for rate limiting
                 if "rate limit" in response.text.lower():
                     reset_header = response.headers.get("X-RateLimit-Reset")
                     reset_at = None
@@ -276,40 +278,42 @@ class GitHubAppClient:
                 raise GitHubAuthError(msg)
 
             if response.status_code == 404:
-                msg = f"Installation {self.installation_id} not found"
+                msg = f"Installation {iid} not found"
                 raise GitHubAuthError(msg)
 
             response.raise_for_status()
 
             data = response.json()
-
-            # Parse expiration time
             expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
 
-            self._cached_token = InstallationToken(
+            token = InstallationToken(
                 token=data["token"],
                 expires_at=expires_at,
                 permissions=data.get("permissions", {}),
                 repository_selection=data.get("repository_selection", "all"),
             )
+            self._cached_tokens[iid] = token
 
             logger.info(
-                "Installation token generated (expires_at=%s, permissions=%s)",
+                "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
+                iid,
                 expires_at.isoformat(),
-                list(self._cached_token.permissions.keys()),
+                list(token.permissions.keys()),
             )
 
-            return self._cached_token.token
+            return token.token
 
         except httpx.HTTPError as e:
             msg = f"HTTP error generating token: {e}"
             raise GitHubAuthError(msg) from e
 
-    async def api_get(self, path: str) -> dict:
+    async def api_get(self, path: str, installation_id: str | None = None) -> dict:
         """Make an authenticated GET request to the GitHub API.
 
         Args:
             path: API path (e.g., "/repos/owner/repo").
+            installation_id: Installation to authenticate as. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided.
 
         Returns:
             Response JSON as dictionary.
@@ -317,7 +321,7 @@ class GitHubAppClient:
         Raises:
             GitHubAppError: On API errors.
         """
-        token = await self.get_installation_token()
+        token = await self.get_installation_token(installation_id)
 
         response = await self._http.get(
             path,
@@ -327,12 +331,16 @@ class GitHubAppClient:
         self._check_response(response)
         return response.json()
 
-    async def api_post(self, path: str, json: dict | None = None) -> dict:
+    async def api_post(
+        self, path: str, json: dict | None = None, installation_id: str | None = None
+    ) -> dict:
         """Make an authenticated POST request to the GitHub API.
 
         Args:
             path: API path.
             json: Request body.
+            installation_id: Installation to authenticate as. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided.
 
         Returns:
             Response JSON as dictionary.
@@ -340,7 +348,7 @@ class GitHubAppClient:
         Raises:
             GitHubAppError: On API errors.
         """
-        token = await self.get_installation_token()
+        token = await self.get_installation_token(installation_id)
 
         response = await self._http.post(
             path,
@@ -351,12 +359,16 @@ class GitHubAppClient:
         self._check_response(response)
         return response.json()
 
-    async def api_put(self, path: str, json: dict | None = None) -> dict:
+    async def api_put(
+        self, path: str, json: dict | None = None, installation_id: str | None = None
+    ) -> dict:
         """Make an authenticated PUT request to the GitHub API.
 
         Args:
             path: API path.
             json: Request body.
+            installation_id: Installation to authenticate as. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided.
 
         Returns:
             Response JSON as dictionary.
@@ -364,7 +376,7 @@ class GitHubAppClient:
         Raises:
             GitHubAppError: On API errors.
         """
-        token = await self.get_installation_token()
+        token = await self.get_installation_token(installation_id)
 
         response = await self._http.put(
             path,
@@ -482,13 +494,17 @@ class GitHubAppClient:
         self._check_response(response)
         return response.json()
 
-    async def list_accessible_repos(self) -> list[dict]:
-        """List repositories accessible to this installation.
+    async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]:
+        """List repositories accessible to an installation.
+
+        Args:
+            installation_id: The installation to list repos for. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided.
 
         Returns:
             List of repository metadata.
         """
-        token = await self.get_installation_token()
+        token = await self.get_installation_token(installation_id)
 
         response = await self._http.get(
             "/installation/repositories",
@@ -525,16 +541,14 @@ def get_github_client() -> GitHubAppClient:
 
     if not settings.github.is_configured:
         msg = (
-            "GitHub App not configured. Set SYN_GITHUB_APP_ID, "
-            "SYN_GITHUB_INSTALLATION_ID, and SYN_GITHUB_PRIVATE_KEY."
+            "GitHub App not configured. Set SYN_GITHUB_APP_ID and SYN_GITHUB_PRIVATE_KEY."
         )
         raise ValueError(msg)
 
     _github_client = GitHubAppClient(settings.github)
     logger.info(
-        "GitHub App client initialized (app_id=%s, installation_id=%s)",
+        "GitHub App client initialized (app_id=%s)",
         settings.github.app_id,
-        settings.github.installation_id,
     )
 
     return _github_client

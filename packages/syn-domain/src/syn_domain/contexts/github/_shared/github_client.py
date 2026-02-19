@@ -88,12 +88,11 @@ class GitHubAppClient:
         """
         if not settings.is_configured:
             raise ValueError(
-                "GitHub App not configured. Set SYN_GITHUB_APP_ID, "
-                "SYN_GITHUB_PRIVATE_KEY, and SYN_GITHUB_INSTALLATION_ID."
+                "GitHub App not configured. Set SYN_GITHUB_APP_ID and SYN_GITHUB_PRIVATE_KEY."
             )
 
         self._settings = settings
-        self._cached_token: TokenResponse | None = None
+        self._cached_tokens: dict[str, TokenResponse] = {}
 
     def generate_jwt(self) -> str:
         """Generate a JWT for GitHub App authentication.
@@ -135,30 +134,40 @@ class GitHubAppClient:
         except Exception as e:
             raise JWTGenerationError(f"Failed to generate JWT: {e}") from e
 
-    async def get_installation_token(self, force_refresh: bool = False) -> TokenResponse:
+    async def get_installation_token(
+        self, installation_id: str | None = None, force_refresh: bool = False
+    ) -> TokenResponse:
         """Get an installation access token.
 
-        Tokens are cached and reused until they expire or are about to expire
-        (within 5 minutes).
+        Tokens are cached per installation_id and reused until they expire or
+        are about to expire (within 5 minutes).
 
         Args:
+            installation_id: The installation to get a token for. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided. Raises if neither is set.
             force_refresh: Force a new token even if cached token is valid.
 
         Returns:
             TokenResponse with the access token and metadata.
 
         Raises:
-            TokenFetchError: If token fetch fails.
+            TokenFetchError: If token fetch fails or no installation_id available.
         """
-        # Check cache
-        if not force_refresh and self._cached_token:
-            # Check if token is still valid (with 5 minute buffer)
-            from datetime import timedelta
+        iid = installation_id or self._settings.installation_id
+        if not iid:
+            raise TokenFetchError(
+                "No installation_id provided. Pass it explicitly or set SYN_GITHUB_INSTALLATION_ID."
+            )
 
+        # Check cache
+        from datetime import timedelta
+
+        cached = self._cached_tokens.get(iid)
+        if not force_refresh and cached:
             buffer = timedelta(minutes=5)
-            if datetime.now(UTC) + buffer < self._cached_token.expires_at:
-                logger.debug("Using cached installation token")
-                return self._cached_token
+            if datetime.now(UTC) + buffer < cached.expires_at:
+                logger.debug("Using cached installation token for %s", iid)
+                return cached
 
         # Fetch new token
         try:
@@ -170,9 +179,7 @@ class GitHubAppClient:
             ) from e
 
         jwt_token = self.generate_jwt()
-        installation_id = self._settings.installation_id
-
-        url = f"{GITHUB_API_URL}/app/installations/{installation_id}/access_tokens"
+        url = f"{GITHUB_API_URL}/app/installations/{iid}/access_tokens"
         headers = {
             "Accept": "application/vnd.github+json",
             "Authorization": f"Bearer {jwt_token}",
@@ -200,14 +207,18 @@ class GitHubAppClient:
             repository_selection=data.get("repository_selection", "all"),
         )
 
-        # Cache the token
-        self._cached_token = token_response
-        logger.info(f"Fetched new installation token (expires: {expires_at.isoformat()})")
+        # Cache the token per installation
+        self._cached_tokens[iid] = token_response
+        logger.info(f"Fetched new installation token for {iid} (expires: {expires_at.isoformat()})")
 
         return token_response
 
-    async def get_accessible_repositories(self) -> list[dict]:
-        """List repositories accessible to this installation.
+    async def get_accessible_repositories(self, installation_id: str | None = None) -> list[dict]:
+        """List repositories accessible to an installation.
+
+        Args:
+            installation_id: The installation to list repos for. Falls back to
+                SYN_GITHUB_INSTALLATION_ID if not provided.
 
         Returns:
             List of repository dictionaries with 'id', 'name', 'full_name', etc.
@@ -220,7 +231,7 @@ class GitHubAppClient:
         except ImportError as e:
             raise TokenFetchError("httpx package required") from e
 
-        token = await self.get_installation_token()
+        token = await self.get_installation_token(installation_id)
 
         url = f"{GITHUB_API_URL}/installation/repositories"
         headers = {
