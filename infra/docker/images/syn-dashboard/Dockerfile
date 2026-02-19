@@ -41,7 +41,10 @@ COPY packages/syn-tokens/ ./packages/syn-tokens/
 # 6. Adapters layer (depends on domain, shared, agentic packages, tokens)
 COPY packages/syn-adapters/ ./packages/syn-adapters/
 
-# 6. Dashboard application
+# 7. API layer (depends on adapters, domain, shared)
+COPY packages/syn-api/ ./packages/syn-api/
+
+# 8. Dashboard application
 COPY apps/syn-dashboard/ ./apps/syn-dashboard/
 
 # -----------------------------------------------------------------------------
@@ -59,6 +62,7 @@ RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-domain
 RUN uv pip install ./packages/syn-tokens
 RUN uv pip install "./packages/syn-adapters[minio]"
+RUN uv pip install ./packages/syn-api
 RUN uv pip install ./apps/syn-dashboard
 
 # =============================================================================
