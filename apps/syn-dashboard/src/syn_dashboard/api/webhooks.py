@@ -71,6 +71,8 @@ async def github_webhook(
     # For push events, write commit observability events to the pipeline
     if x_github_event == "push":
         try:
+            import json
+
             payload = json.loads(body)
             await _record_push_commits(payload, delivery_id=x_github_delivery)
         except Exception:

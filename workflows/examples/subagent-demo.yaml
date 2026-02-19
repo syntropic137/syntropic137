@@ -46,14 +46,14 @@ phases:
          - The task description should be: "Research best Hello World implementations in 3 languages"
 
       2. **Spawn a Code Writing Subagent**: Use the `Task` tool to create a subagent that:
-         - Writes a simple hello.py file
-         - Uses `Write` tool to create the file
-         - The task description should be: "Write a hello.py file that prints Hello World"
+         - Writes a simple hello.py file to `/workspace/artifacts/output/hello.py`
+         - Uses `Write` tool to create the file at that exact path
+         - The task description should be: "Write a hello.py file that prints Hello World to /workspace/artifacts/output/hello.py"
 
       3. **Spawn a Verification Subagent**: Use the `Task` tool to create a subagent that:
-         - Reads the created file
+         - Reads the file at `/workspace/artifacts/output/hello.py`
          - Verifies its contents
-         - The task description should be: "Verify the hello.py file was created correctly"
+         - The task description should be: "Verify the hello.py file was created correctly at /workspace/artifacts/output/hello.py"
 
       ## Important
       - You MUST use the `Task` tool to delegate to subagents
@@ -91,7 +91,7 @@ phases:
       Please:
       1. Confirm that 3 subagents were spawned
       2. List what each subagent accomplished
-      3. Check if hello.py was created
+      3. Check if hello.py was created at `/workspace/artifacts/output/hello.py` (use Read tool)
       4. Note any issues or successes
 
       Output a brief verification report.

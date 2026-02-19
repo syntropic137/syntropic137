@@ -184,9 +184,9 @@ async def verify_and_process_webhook(
     deferred: list[str] = []
     action = payload.get("action", "")
     compound_event = f"{event_type}.{action}" if action else event_type
+    installation_id = str(payload.get("installation", {}).get("id", ""))
     try:
         repository = payload.get("repository", {}).get("full_name", "")
-        installation_id = str(payload.get("installation", {}).get("id", ""))
 
         from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
             EvaluateWebhookHandler,

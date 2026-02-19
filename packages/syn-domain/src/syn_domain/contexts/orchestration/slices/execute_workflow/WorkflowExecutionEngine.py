@@ -1527,6 +1527,7 @@ class WorkflowExecutionEngine:
                                         and self._observability_writer is not None
                                     ):
                                         import re as _re
+
                                         bash_cmd = tool_input.get("command", "") or ""
                                         if "git commit" in bash_cmd:
                                             _commit_msg = ""
@@ -1536,9 +1537,15 @@ class WorkflowExecutionEngine:
                                                 if _after.startswith('"') or _after.startswith("'"):
                                                     _q = _after[0]
                                                     _end = _after.find(_q, 1)
-                                                    _commit_msg = _after[1:_end] if _end > 0 else _after[1:101]
+                                                    _commit_msg = (
+                                                        _after[1:_end]
+                                                        if _end > 0
+                                                        else _after[1:101]
+                                                    )
                                                 else:
-                                                    _commit_msg = _after.split()[0] if _after.split() else ""
+                                                    _commit_msg = (
+                                                        _after.split()[0] if _after.split() else ""
+                                                    )
                                             await self._record_observation(
                                                 observation_type="git_commit",
                                                 session_id=session_id,

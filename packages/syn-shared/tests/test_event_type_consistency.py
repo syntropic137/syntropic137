@@ -81,11 +81,9 @@ class TestEventTypeConsistency:
             GIT_COMMIT,
             GIT_OPERATION,
             GIT_PUSH,
-            SYSTEM_NOTIFICATION,
             PERMISSION_REQUESTED,
             PHASE_COMPLETED,
             PHASE_STARTED,
-            USER_PROMPT_SUBMITTED,
             SECURITY_DECISION,
             SESSION_COMPLETED,
             SESSION_ERROR,
@@ -93,6 +91,7 @@ class TestEventTypeConsistency:
             SESSION_SUMMARY,
             SUBAGENT_STARTED,
             SUBAGENT_STOPPED,
+            SYSTEM_NOTIFICATION,
             TASK_COMPLETED,
             TEAMMATE_IDLE,
             TOKEN_USAGE,
@@ -100,6 +99,7 @@ class TestEventTypeConsistency:
             TOOL_EXECUTION_COMPLETED,
             TOOL_EXECUTION_FAILED,
             TOOL_EXECUTION_STARTED,
+            USER_PROMPT_SUBMITTED,
             VALID_EVENT_TYPES,
         )
 
