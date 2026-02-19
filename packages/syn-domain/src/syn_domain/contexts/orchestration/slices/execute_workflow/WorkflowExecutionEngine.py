@@ -1172,6 +1172,10 @@ class WorkflowExecutionEngine:
                 # (conversation_lines initialized before try block for failure handling)
                 conversation_lines.clear()
 
+                # Structured task result parsed from final `result` event text.
+                # Agents emit: TASK_RESULT: {"success": bool, "comments": "..."}
+                agent_task_result: dict | None = None
+
                 line_count = 0
                 async for line in workspace.stream(
                     claude_cmd,
@@ -1295,8 +1299,29 @@ class WorkflowExecutionEngine:
                         cli_type = cli_event.get("type", "")
                         logger.debug("CLI event type: %s", cli_type)
 
-                        # Handle token usage from result messages (session completion)
-                        if cli_type == "result" and "usage" in cli_event:
+                        # Handle result event (session completion)
+                        if cli_type == "result":
+                            # Parse structured task result from agent's final text
+                            result_text = cli_event.get("result", "")
+                            if result_text and "TASK_RESULT:" in result_text:
+                                try:
+                                    marker = "TASK_RESULT:"
+                                    idx = result_text.rfind(marker)
+                                    raw = result_text[idx + len(marker):].strip()
+                                    # Extract just the JSON object (stop at first newline after })
+                                    brace_end = raw.find("}")
+                                    if brace_end >= 0:
+                                        raw = raw[: brace_end + 1]
+                                    agent_task_result = json.loads(raw)
+                                    logger.info(
+                                        "Agent task result: success=%s comments=%s",
+                                        agent_task_result.get("success"),
+                                        agent_task_result.get("comments", "")[:100],
+                                    )
+                                except (json.JSONDecodeError, ValueError):
+                                    logger.debug("Could not parse TASK_RESULT block")
+
+                            # Extract token usage
                             usage = cli_event.get("usage", {})
                             input_tokens = usage.get("input_tokens", 0)
                             output_tokens = usage.get("output_tokens", 0)
@@ -1533,6 +1558,15 @@ class WorkflowExecutionEngine:
                             f"Agent process exited with code {exit_code}. "
                             "Check agent logs for details."
                         ),
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                    )
+
+                # Check structured task result — agent explicitly reported failure
+                if agent_task_result is not None and not agent_task_result.get("success", True):
+                    comments = agent_task_result.get("comments", "Agent reported task failure")
+                    raise WorkflowExecutionError(
+                        message=comments,
                         workflow_id=ctx.workflow_id,
                         phase_id=phase.phase_id,
                     )
