@@ -21,7 +21,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { getConversationLog, getSession } from '../api/client'
@@ -390,6 +390,24 @@ export function SessionDetail() {
   const [now, setNow] = useState(() => Date.now())
   const [showConversationLog, setShowConversationLog] = useState(false)
 
+  // Scroll anchoring: when new ops prepend at the top, keep the user's place
+  // unless they're already near the top (watching live updates).
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const capturedScrollHeightRef = useRef(0)
+  // Capture the current scrollHeight during render (before the DOM is mutated).
+  // timelineRef.current still reflects the previous commit at this point.
+  if (timelineRef.current) {
+    capturedScrollHeightRef.current = timelineRef.current.scrollHeight
+  }
+  useLayoutEffect(() => {
+    const el = timelineRef.current
+    if (!el) return
+    const heightDiff = el.scrollHeight - capturedScrollHeightRef.current
+    if (heightDiff > 0 && window.scrollY > 50) {
+      window.scrollBy({ top: heightDiff, behavior: 'instant' })
+    }
+  }, [session?.operations?.length])
+
   useEffect(() => {
     if (!sessionId) return
 
@@ -606,7 +624,7 @@ export function SessionDetail() {
               </p>
             </div>
           ) : (
-            <div className="relative">
+            <div ref={timelineRef} className="relative">
               {/* Timeline line */}
               <div className="absolute left-8 top-0 bottom-0 w-px bg-[var(--color-border)]" />
 

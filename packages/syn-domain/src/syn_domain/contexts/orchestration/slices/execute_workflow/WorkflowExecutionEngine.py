@@ -1217,13 +1217,25 @@ class WorkflowExecutionEngine:
                     if line.strip():
                         conversation_lines.append(line)
 
-                    # ADR-029: Try hook event first (from agentic_events)
-                    # Hook events come in two forms:
-                    # 1. Standalone JSONL line with "event_type" (legacy / direct stderr path)
-                    # 2. Embedded in Claude's hook_response stream-json output:
-                    #    {"type":"system","subtype":"hook_response","output":"...JSONL...",
-                    #     "stderr":"...JSONL..."}
-                    # We collect all hook events from either source and process them uniformly.
+                    # ADR-029 / ADR-043: Parse hook events from the stream.
+                    #
+                    # Two sources of hook JSONL exist:
+                    #
+                    # SOURCE A — Claude Code hooks (observe.py via PreToolUse/PostToolUse):
+                    #   These appear as stream-json {"type":"system","subtype":"hook_response"}
+                    #   lines, with JSONL embedded in the "output"/"stderr" fields.
+                    #   Handled below in the hook_response branch.
+                    #
+                    # SOURCE B — Git hooks (post-commit, pre-push, etc.):
+                    #   These emit JSONL to their own stderr. The Bash tool inside Claude
+                    #   Code captures that stderr along with stdout, then packages the whole
+                    #   combined output as the tool_result content in a stream-json "user"
+                    #   message. The JSONL is therefore EMBEDDED INSIDE a tool_result, NOT
+                    #   a standalone raw line. Handled below in the tool_result branch.
+                    #
+                    # parse_jsonl_line() on raw stream lines catches SOURCE A's standalone
+                    # output and any direct stderr from the claude process (via stderr=STDOUT).
+                    # SOURCE B is handled separately in the tool_result scan below.
                     _hook_events: list[dict] = []
                     _standalone = parse_jsonl_line(line)
                     if _standalone:
@@ -1577,6 +1589,54 @@ class WorkflowExecutionEngine:
                                     )
                                     # Look up tool_name from cache
                                     tool_name = tool_names_cache.get(tool_use_id, "unknown")
+
+                                    # ADR-043: Scan tool output for embedded git hook JSONL.
+                                    #
+                                    # Git hooks (post-commit, pre-push, etc.) emit JSONL to
+                                    # stderr. Because the Bash tool runs inside Claude Code,
+                                    # Claude Code captures the subprocess's stderr along with
+                                    # stdout and packages everything as the tool result content.
+                                    # The JSONL does NOT arrive as a standalone stream line;
+                                    # it's embedded in the tool_result here.
+                                    #
+                                    # We scan every line of tool output for parse_jsonl_line()
+                                    # hits and process them identically to standalone hook events.
+                                    if tool_content and self._observability_writer is not None:
+                                        for _tl in str(tool_content).splitlines():
+                                            _tl = _tl.strip()
+                                            if not _tl:
+                                                continue
+                                            _embedded = parse_jsonl_line(_tl)
+                                            if not _embedded:
+                                                continue
+                                            _et = _embedded.get("event_type")
+                                            if _et not in VALID_EVENT_TYPES:
+                                                logger.debug(
+                                                    "Unknown event_type in tool output: %s", _et
+                                                )
+                                                continue
+                                            _enriched = enrich_event(
+                                                _embedded,
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                            )
+                                            _hd = {
+                                                **(_enriched.get("context") or {}),
+                                                **(_enriched.get("metadata") or {}),
+                                            }
+                                            await self._record_observation(
+                                                observation_type=_et,
+                                                session_id=session_id,
+                                                data=_hd,
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                                workspace_id=workspace_id,
+                                            )
+                                            logger.info(
+                                                "Git hook event from tool output: %s (tool=%s)",
+                                                _et,
+                                                tool_name,
+                                            )
 
                                     if self._observability_writer is not None:
                                         await self._record_observation(
