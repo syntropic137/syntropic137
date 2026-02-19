@@ -22,10 +22,16 @@ from uuid import UUID
 from pydantic import BaseModel, Field, field_validator
 
 from syn_shared.events import (
+    AGENT_STOPPED,
+    CONTEXT_COMPACTED,
     GIT_BRANCH_CHANGED,
     GIT_COMMIT,
     GIT_OPERATION,
     GIT_PUSH,
+    SYSTEM_NOTIFICATION,
+    PERMISSION_REQUESTED,
+    USER_PROMPT_SUBMITTED,
+    SECURITY_DECISION,
     SESSION_COMPLETED,
     SESSION_STARTED,
     SUBAGENT_STARTED,
@@ -33,9 +39,9 @@ from syn_shared.events import (
     TASK_COMPLETED,
     TEAMMATE_IDLE,
     TOKEN_USAGE,
-    TOOL_COMPLETED,
-    TOOL_FAILED,
-    TOOL_STARTED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_FAILED,
+    TOOL_EXECUTION_STARTED,
     EventType,
 )
 
@@ -149,11 +155,11 @@ class AgentEvent(BaseModel):
         # Output values use constants from syn_shared.events for type safety
         event_type_mapping = {
             # Tool events (inner content type takes precedence)
-            "tool_started": TOOL_STARTED,
-            "tool_use": TOOL_STARTED,
+            "tool_started": TOOL_EXECUTION_STARTED,
+            "tool_use": TOOL_EXECUTION_STARTED,
             # Tool results
-            "tool_result": TOOL_COMPLETED,
-            "tool_completed": TOOL_COMPLETED,
+            "tool_result": TOOL_EXECUTION_COMPLETED,
+            "tool_completed": TOOL_EXECUTION_COMPLETED,
             # Session lifecycle
             "system.init": SESSION_STARTED,
             "system": SESSION_STARTED,
@@ -170,9 +176,20 @@ class AgentEvent(BaseModel):
             GIT_BRANCH_CHANGED: GIT_BRANCH_CHANGED,
             GIT_OPERATION: GIT_OPERATION,
             # Claude Code hook events (observability plugin)
-            TOOL_FAILED: TOOL_FAILED,
+            TOOL_EXECUTION_FAILED: TOOL_EXECUTION_FAILED,
             TEAMMATE_IDLE: TEAMMATE_IDLE,
             TASK_COMPLETED: TASK_COMPLETED,
+            # Security / permission events (from agentic_events.EventType)
+            SECURITY_DECISION: SECURITY_DECISION,
+            PERMISSION_REQUESTED: PERMISSION_REQUESTED,
+            # Agent control events (from agentic_events.EventType)
+            AGENT_STOPPED: AGENT_STOPPED,
+            # Context management events (from agentic_events.EventType)
+            CONTEXT_COMPACTED: CONTEXT_COMPACTED,
+            # System / notification events (from agentic_events.EventType)
+            SYSTEM_NOTIFICATION: SYSTEM_NOTIFICATION,
+            # User interaction events (from agentic_events.EventType)
+            USER_PROMPT_SUBMITTED: USER_PROMPT_SUBMITTED,
         }
 
         # Use inner_type if it's a tool event, otherwise use raw_type

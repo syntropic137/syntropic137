@@ -51,7 +51,7 @@ class SessionCostProjection:
 
         Processes unified telemetry:
         - TOKEN_USAGE: Calculate cost from tokens, update counts
-        - TOOL_COMPLETED: Increment tool_calls count
+        - TOOL_EXECUTION_COMPLETED: Increment tool_calls count
         """
         session_id = event_data.get("session_id")
         if not session_id:
@@ -126,8 +126,8 @@ class SessionCostProjection:
             # Increment turns (each token_usage = one turn)
             session_cost.turns += 1
 
-        # Handle TOOL_COMPLETED observations
-        elif event_type == ObservationType.TOOL_COMPLETED.value:
+        # Handle TOOL_EXECUTION_COMPLETED observations
+        elif event_type == ObservationType.TOOL_EXECUTION_COMPLETED.value:
             session_cost.tool_calls += 1
 
             # Track duration if available

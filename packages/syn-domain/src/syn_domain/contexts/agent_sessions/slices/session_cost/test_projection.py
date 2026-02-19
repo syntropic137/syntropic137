@@ -161,12 +161,12 @@ class TestAgentObservationHandling:
     async def test_tool_completed_observation_increments_count(
         self, projection: SessionCostProjection
     ) -> None:
-        """Test that TOOL_COMPLETED observation increments tool_calls."""
+        """Test that TOOL_EXECUTION_COMPLETED observation increments tool_calls."""
         # First tool
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "event_type": ObservationType.TOOL_COMPLETED.value,
+                "event_type": ObservationType.TOOL_EXECUTION_COMPLETED.value,
                 "data": {
                     "tool_name": "Read",
                     "tool_use_id": "tool-1",
@@ -180,7 +180,7 @@ class TestAgentObservationHandling:
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
-                "event_type": ObservationType.TOOL_COMPLETED.value,
+                "event_type": ObservationType.TOOL_EXECUTION_COMPLETED.value,
                 "data": {
                     "tool_name": "Write",
                     "tool_use_id": "tool-2",
@@ -197,7 +197,7 @@ class TestAgentObservationHandling:
 
     @pytest.mark.asyncio
     async def test_mixed_observations(self, projection: SessionCostProjection) -> None:
-        """Test handling both TOKEN_USAGE and TOOL_COMPLETED observations."""
+        """Test handling both TOKEN_USAGE and TOOL_EXECUTION_COMPLETED observations."""
         # Token usage
         await projection.on_agent_observation(
             {
@@ -219,7 +219,7 @@ class TestAgentObservationHandling:
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "event_type": ObservationType.TOOL_COMPLETED.value,
+                "event_type": ObservationType.TOOL_EXECUTION_COMPLETED.value,
                 "data": {
                     "tool_name": "Bash",
                     "tool_use_id": "tool-1",

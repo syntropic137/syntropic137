@@ -83,8 +83,8 @@ Extend `OperationType` enum and add typed optional fields to existing event:
 class OperationType(str, Enum):
     MESSAGE_REQUEST = "message_request"
     MESSAGE_RESPONSE = "message_response"
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
+    TOOL_EXECUTION_STARTED = "tool_started"
+    TOOL_EXECUTION_COMPLETED = "tool_completed"
     TOOL_BLOCKED = "tool_blocked"
     THINKING = "thinking"
     ERROR = "error"
@@ -150,8 +150,8 @@ class OperationType(str, Enum):
     MESSAGE_RESPONSE = "message_response"
 
     # Tool lifecycle
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
+    TOOL_EXECUTION_STARTED = "tool_started"
+    TOOL_EXECUTION_COMPLETED = "tool_completed"
     TOOL_BLOCKED = "tool_blocked"
 
     # Extended thinking

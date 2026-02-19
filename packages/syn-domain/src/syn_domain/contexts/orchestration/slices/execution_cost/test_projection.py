@@ -129,12 +129,12 @@ class TestAgentObservationHandling:
     async def test_tool_completed_increments_count(
         self, projection: ExecutionCostProjection
     ) -> None:
-        """Test that TOOL_COMPLETED observation increments tool calls."""
+        """Test that TOOL_EXECUTION_COMPLETED observation increments tool calls."""
         await projection.on_agent_observation(
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "observation_type": ObservationType.TOOL_EXECUTION_COMPLETED.value,
                 "data": {
                     "tool_name": "Read",
                     "tool_use_id": "tool-1",
@@ -148,7 +148,7 @@ class TestAgentObservationHandling:
             {
                 "session_id": "session-1",
                 "execution_id": "exec-1",
-                "observation_type": ObservationType.TOOL_COMPLETED.value,
+                "observation_type": ObservationType.TOOL_EXECUTION_COMPLETED.value,
                 "data": {
                     "tool_name": "Write",
                     "tool_use_id": "tool-2",
