@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -1518,85 +1517,6 @@ class WorkflowExecutionEngine:
                                             workspace_id=workspace_id,
                                         )
                                         logger.debug("Tool started: %s", tool_name)
-
-                                    # Detect git operations from Bash tool_use commands.
-                                    # Claude CLI does NOT emit PreToolUse hook_response events
-                                    # in stream-json, so we detect git operations here instead.
-                                    if (
-                                        tool_name == "Bash"
-                                        and self._observability_writer is not None
-                                    ):
-                                        bash_cmd = tool_input.get("command", "") or ""
-                                        if "git commit" in bash_cmd:
-                                            # Extract commit message heuristically
-                                            _commit_msg = ""
-                                            _m_idx = bash_cmd.find("-m ")
-                                            if _m_idx >= 0:
-                                                _after = bash_cmd[_m_idx + 3 :].strip()
-                                                if _after.startswith('"') or _after.startswith("'"):
-                                                    _q = _after[0]
-                                                    _end = _after.find(_q, 1)
-                                                    _commit_msg = (
-                                                        _after[1:_end]
-                                                        if _end > 0
-                                                        else _after[1:101]
-                                                    )
-                                                else:
-                                                    _commit_msg = (
-                                                        _after.split()[0] if _after.split() else ""
-                                                    )
-                                            await self._record_observation(
-                                                observation_type="git_commit",
-                                                session_id=session_id,
-                                                data={
-                                                    "command": bash_cmd[:500],
-                                                    "commit_message": _commit_msg[:200],
-                                                    "tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                            logger.info(
-                                                "Git commit detected in Bash command: %r",
-                                                _commit_msg[:100],
-                                            )
-                                        elif "git push" in bash_cmd:
-                                            await self._record_observation(
-                                                observation_type="git_push",
-                                                session_id=session_id,
-                                                data={
-                                                    "command": bash_cmd[:500],
-                                                    "tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                            logger.info("Git push detected in Bash command")
-                                        elif re.search(r"\bgit\s+\w", bash_cmd):
-                                            # Catch-all for other git operations
-                                            # (clone, pull, fetch, checkout, branch, merge, etc.)
-                                            _git_match = re.search(r"\bgit\s+(\w+)", bash_cmd)
-                                            _git_subcmd = (
-                                                _git_match.group(1) if _git_match else "unknown"
-                                            )
-                                            await self._record_observation(
-                                                observation_type="git_operation",
-                                                session_id=session_id,
-                                                data={
-                                                    "operation": _git_subcmd,
-                                                    "command": bash_cmd[:500],
-                                                    "tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                            logger.info(
-                                                "Git operation detected in Bash command: %s",
-                                                _git_subcmd,
-                                            )
 
                                     # ADR-037: Detect Task tool as subagent start (raw CLI format)
                                     if tool_name == "Task" and tool_use_id:
