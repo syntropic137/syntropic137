@@ -39,7 +39,7 @@ export function Dashboard() {
   useEffect(() => {
     Promise.all([
       getMetrics(),
-      listWorkflows({ page_size: 5 }),
+      listWorkflows({ page_size: 5, order_by: '-runs_count' }),
     ])
       .then(([metricsData, workflowsData]) => {
         setMetrics(metricsData)
@@ -107,7 +107,7 @@ export function Dashboard() {
           subtitle={`${metrics?.completed_workflows ?? 0} completed`}
         />
         <MetricCard
-          title="Active Sessions"
+          title="Total Sessions"
           value={metrics?.total_sessions ?? 0}
           icon={Activity}
           color="success"

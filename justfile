@@ -98,52 +98,6 @@ dev-down:
 dev-logs:
     docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml logs -f
 
-# Reset development environment (removes volumes - DATA LOSS!)
-dev-reset:
-    @echo "⚠️  This will DELETE all database data and volumes!"
-    @echo "   Press Ctrl+C to cancel, or wait 5 seconds to continue..."
-    @sleep 5
-    @echo ""
-    @echo "🔄 Resetting dev environment..."
-    @just _smee-stop
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v
-    @just dev
-    @echo "✅ Dev environment reset complete!"
-
-# Force start full dev stack (kills existing processes on ports 5173, 8000, 8001)
-# Builds workspace image if missing
-dev-force: _workspace-check
-    @just _env-check
-    @echo ""
-    @echo "Stopping any existing processes on ports 5173, 8000, 8001..."
-    -lsof -ti:5173 | xargs kill -9 2>/dev/null || true
-    -lsof -ti:8000 | xargs kill -9 2>/dev/null || true
-    -lsof -ti:8001 | xargs kill -9 2>/dev/null || true
-    @echo "Starting Docker services..."
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d
-    @sleep 2
-    @echo "Starting dashboard backend on :8000..."
-    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn syn_dashboard.main:app --host 0.0.0.0 --port 8000 --reload &
-    @sleep 2
-    @echo "Starting feedback API on :8001..."
-    @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    cd lib/ui-feedback/backend/ui-feedback-api && \
-    UI_FEEDBACK_DATABASE_URL=$DATABASE_URL \
-    uv run uvicorn ui_feedback.main:app --host 0.0.0.0 --port 8001 --reload &
-    @sleep 2
-    @echo "Starting dashboard frontend on :5173..."
-    @cd apps/syn-dashboard-ui && pnpm run dev &
-    @sleep 2
-    @just _smee-start
-    @echo ""
-    @echo "✅ Development stack ready!"
-    @echo "   Frontend:     http://localhost:5173"
-    @echo "   Backend:      http://localhost:8000"
-    @echo "   Feedback API: http://localhost:8001"
-    @echo "   API Docs:     http://localhost:8000/docs"
-
 # Clean database, seed workflows, and start full dev stack (fresh start)
 # Fresh start: wipe all data and restart from scratch
 dev-fresh: _workspace-check
@@ -402,12 +356,6 @@ dev-offline:
     @echo "No Docker, no API keys, no smee — just code."
     @echo "Stop with: just dev-offline-stop"
 
-# Stop offline dev mode
-dev-offline-stop:
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @-lsof -ti:8000 | xargs kill 2>/dev/null || true
-    @echo "Offline dev mode stopped."
-
 # Start dashboard backend with webhook recording enabled
 dev-record-webhooks:
     SYN_RECORD_WEBHOOKS=true just dashboard-backend
@@ -564,62 +512,9 @@ test-e2e:
     @echo "Running E2E tests..."
     uv run pytest -m e2e --tb=short
 
-# Fast CI check (unit tests only, with coverage)
-ci-fast:
-    @echo "Running fast CI tests..."
-    uv run pytest -m unit -n auto --cov --tb=short
-
 # Run tests with coverage report
 test-cov:
     uv run pytest --cov=apps/syn-cli/src --cov=packages/syn-domain/src --cov=packages/syn-adapters/src --cov=packages/syn-shared/src --cov-report=term-missing --cov-fail-under=80
-
-# Test TimescaleDB observability stack in isolation
-test-timescale-isolated:
-    @echo "🧪 Starting isolated TimescaleDB test..."
-    docker compose -f docker/docker-compose.observability-test.yaml up -d
-    @echo "⏳ Waiting for TimescaleDB to be ready..."
-    @sleep 3
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_timescale.py
-    @echo "🧹 Cleaning up..."
-    docker compose -f docker/docker-compose.observability-test.yaml down -v
-    @echo "✅ TimescaleDB isolated test complete!"
-
-# Test ObservabilityWriter in isolation
-test-writer-isolated:
-    @echo "🧪 Starting ObservabilityWriter test..."
-    docker compose -f docker/docker-compose.observability-test.yaml up -d
-    @echo "⏳ Waiting for TimescaleDB to be ready..."
-    @sleep 3
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_writer.py
-    @echo "🧹 Cleaning up..."
-    docker compose -f docker/docker-compose.observability-test.yaml down -v
-    @echo "✅ ObservabilityWriter isolated test complete!"
-
-# Test CostProjection in isolation
-test-projection-isolated:
-    @echo "🧪 Starting CostProjection test..."
-    docker compose -f docker/docker-compose.observability-test.yaml up -d
-    @echo "⏳ Waiting for TimescaleDB to be ready..."
-    @sleep 3
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_projection.py
-    @echo "🧹 Cleaning up..."
-    docker compose -f docker/docker-compose.observability-test.yaml down -v
-    @echo "✅ CostProjection isolated test complete!"
-
-# Test E2E observability flow in isolation
-test-observability-e2e:
-    @echo "🧪 Starting E2E observability test..."
-    docker compose -f docker/docker-compose.observability-test.yaml up -d
-    @echo "⏳ Waiting for TimescaleDB to be ready..."
-    @sleep 3
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner pip install -r requirements.txt
-    docker compose -f docker/docker-compose.observability-test.yaml exec test-runner python test_e2e.py
-    @echo "🧹 Cleaning up..."
-    docker compose -f docker/docker-compose.observability-test.yaml down -v
-    @echo "✅ E2E observability test complete!"
 
 # Run E2E container execution tests (full flow: sidecar + workspace + agent)
 test-e2e-container:
@@ -656,11 +551,6 @@ format-check:
 # Run type checker (strict mode)
 typecheck:
     uv run mypy apps packages
-
-# CI-equivalent checks (run before pushing!)
-ci-check: lint format-check typecheck
-    @echo ""
-    @echo "✅ All CI checks passed! Safe to push."
 
 # Run VSA validation (requires event-sourcing-platform submodule)
 vsa-validate:
@@ -728,18 +618,9 @@ test-debt:
     @echo "🔍 Checking for test debt..."
     uv run python scripts/check_test_debt.py --warn-only
 
-# Check for test debt (strict - fails on errors)
-test-debt-strict:
-    @echo "🔍 Checking for test debt (strict)..."
-    uv run python scripts/check_test_debt.py
-
 # Legacy command - replaced by new qa/qa-full structure (see ADR-035)
 # qa: lint format typecheck test dashboard-qa test-debt vsa-validate
 
-# Run Python-only QA (faster, no frontend build)
-qa-python: lint format typecheck test test-debt vsa-validate
-    @echo ""
-    @echo "✅ Python QA checks passed!"
 
 # Run full QA with coverage
 # Legacy command - replaced by new qa-full (see ADR-035)
@@ -819,22 +700,6 @@ submodules-update:
 perf-check:
     uv run python -m syn_perf check
 
-# Run single workspace benchmark (5 iterations)
-perf-single iterations="5":
-    uv run python -m syn_perf single --iterations {{iterations}}
-
-# Run parallel scaling benchmark
-perf-parallel count="10":
-    uv run python -m syn_perf parallel --count {{count}}
-
-# Run throughput benchmark
-perf-throughput duration="30":
-    uv run python -m syn_perf throughput --duration {{duration}}
-
-# Compare all available backends
-perf-compare:
-    uv run python -m syn_perf compare --iterations 3
-
 # Run all benchmarks
 perf-all:
     @echo "=== Backend Availability ==="
@@ -848,21 +713,6 @@ perf-all:
     @echo ""
     @echo "=== Throughput Test (30s) ==="
     uv run python -m syn_perf throughput --duration 30
-
-# Run benchmark and save JSON report
-perf-report:
-    @mkdir -p reports
-    uv run python -m syn_perf single --iterations 10 --output reports/perf-single.json
-    uv run python -m syn_perf parallel --count 10 --output reports/perf-parallel.json
-    @echo "Reports saved to reports/"
-
-# Demo workspace events E2E
-demo-workspace-events:
-    uv run python scripts/demo_workspace_events.py
-
-# Run isolation POC (tests network, GitHub clone, Claude SDK)
-poc-isolation mode="mock":
-    uv run python scripts/poc_e2e_agent_isolation.py --{{mode}}
 
 # Quick isolation tests (no API key needed)
 poc-isolation-quick:
@@ -891,15 +741,6 @@ proxy-start:
         -e ALLOWED_HOSTS="api.anthropic.com,github.com,api.github.com,pypi.org,files.pythonhosted.org" \
         syn-egress-proxy:latest
     @echo "✓ Egress proxy started on port {{PROXY_PORT}}"
-
-# Stop the egress proxy
-proxy-stop:
-    docker rm -f syn-egress-proxy
-    @echo "✓ Egress proxy stopped"
-
-# View proxy logs
-proxy-logs:
-    docker logs -f syn-egress-proxy
 
 # Test network allowlist enforcement
 poc-allowlist:

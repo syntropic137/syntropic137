@@ -54,9 +54,7 @@ def _extract_ts_interfaces() -> dict[str, set[str]]:
     interfaces: dict[str, set[str]] = {}
 
     # Match "export interface Name {" blocks
-    iface_pattern = re.compile(
-        r"export\s+interface\s+(\w+)\s*\{([^}]+)\}", re.DOTALL
-    )
+    iface_pattern = re.compile(r"export\s+interface\s+(\w+)\s*\{([^}]+)\}", re.DOTALL)
     for match in iface_pattern.finditer(content):
         name = match.group(1)
         body = match.group(2)
@@ -118,8 +116,12 @@ KNOWN_EXCEPTIONS: list[tuple[str, str, set[str], set[str]]] = [
         "OperationInfo",
         {"input_preview", "output_preview", "observation_id"},
         {
-            "input_tokens", "output_tokens", "total_tokens",
-            "message_role", "message_content", "thinking_content",
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+            "message_role",
+            "message_content",
+            "thinking_content",
             "operation_id",
         },
     ),
@@ -162,9 +164,7 @@ class TestAPIContract:
         """TypeScript types file must exist."""
         assert TS_TYPES_PATH.exists(), f"Missing: {TS_TYPES_PATH}"
 
-    def test_mapped_schemas_exist_in_openapi(
-        self, openapi_schemas: dict[str, set[str]]
-    ) -> None:
+    def test_mapped_schemas_exist_in_openapi(self, openapi_schemas: dict[str, set[str]]) -> None:
         """All mapped schema names must appear in the OpenAPI spec."""
         for schema_name in SCHEMA_TO_TS:
             assert schema_name in openapi_schemas, (
@@ -172,9 +172,7 @@ class TestAPIContract:
                 f"Available: {sorted(openapi_schemas.keys())}"
             )
 
-    def test_mapped_interfaces_exist_in_ts(
-        self, ts_interfaces: dict[str, set[str]]
-    ) -> None:
+    def test_mapped_interfaces_exist_in_ts(self, ts_interfaces: dict[str, set[str]]) -> None:
         """All mapped TS interface names must appear in types/index.ts."""
         for ts_name in SCHEMA_TO_TS.values():
             assert ts_name in ts_interfaces, (

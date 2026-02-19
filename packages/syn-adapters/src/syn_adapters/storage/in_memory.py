@@ -155,7 +155,9 @@ class InMemoryWorkflowRepository:
             self._event_store.append(
                 aggregate_id=str(aggregate.id) if aggregate.id else "",
                 aggregate_type=aggregate.get_aggregate_type(),
-                event_type=event.event_type if hasattr(event, "event_type") else type(event).__name__,
+                event_type=event.event_type
+                if hasattr(event, "event_type")
+                else type(event).__name__,
                 event_data=event_data,
                 version=aggregate.version + i + 1,
             )

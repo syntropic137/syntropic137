@@ -1004,6 +1004,19 @@ class WorkflowExecutionEngine:
             await self._sessions.save(session)
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
+        # Emit session_started to agent_events so duration projection has a reliable start time.
+        # Tool/token events arrive via the collector, which doesn't emit session lifecycle events.
+        if self._observability_writer is not None:
+            from syn_shared.events import SESSION_STARTED
+
+            await self._observability_writer.record_observation(
+                session_id=session_id,
+                observation_type=SESSION_STARTED,
+                data={"model": phase.agent_config.model, "provider": phase.agent_config.provider},
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+            )
+
         # ADR-035: Initialize conversation tracking variables before try block
         # This ensures we can store partial conversation logs even on early failures
         conversation_lines: list[str] = []

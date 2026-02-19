@@ -202,6 +202,7 @@ class ExecutionSummary(BaseModel):
     total_phases: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal | str = Decimal("0")
+    tool_call_count: int = 0
     error_message: str | None = None
 
 
@@ -297,6 +298,7 @@ class TriggerHistoryEntry(BaseModel):
 
     trigger_id: str
     execution_id: str
+    webhook_delivery_id: str = ""
     github_event_type: str = ""
     repository: str = ""
     pr_number: int | None = None

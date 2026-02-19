@@ -16,7 +16,9 @@ import pytest
 
 # Directories to scan for getattr violations
 API_LAYER = Path(__file__).resolve().parents[1] / "src" / "syn_api" / "v1"
-DASHBOARD_API = Path(__file__).resolve().parents[3] / "apps" / "syn-dashboard" / "src" / "syn_dashboard" / "api"
+DASHBOARD_API = (
+    Path(__file__).resolve().parents[3] / "apps" / "syn-dashboard" / "src" / "syn_dashboard" / "api"
+)
 
 # Pattern: getattr(anything, "string_literal"   — catches both 2-arg and 3-arg forms
 GETATTR_PATTERN = re.compile(r'\bgetattr\(\s*\w+\s*,\s*"[^"]*"')

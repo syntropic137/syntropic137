@@ -17,6 +17,9 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import Se
 from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from syn_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
+from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
+    WorkflowPhaseMetricsProjection,
+)
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
 )
@@ -134,11 +137,13 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     # Execution events - go to EXECUTION projections only
     "PhaseStarted": [
         ("workflow_execution_detail", "on_phase_started"),
+        ("workflow_phase_metrics", "on_phase_started"),
         ("realtime", "on_phase_started"),  # Real-time UI push
     ],
     "PhaseCompleted": [
         ("workflow_execution_list", "on_phase_completed"),
         ("workflow_execution_detail", "on_phase_completed"),
+        ("workflow_phase_metrics", "on_phase_completed"),
         ("realtime", "on_phase_completed"),  # Real-time UI push
     ],
     "WorkflowCompleted": [
@@ -261,6 +266,7 @@ class ProjectionManager:
             "session_list": SessionListProjection(self._store),
             "artifact_list": ArtifactListProjection(self._store),
             "dashboard_metrics": DashboardMetricsProjection(self._store),
+            "workflow_phase_metrics": WorkflowPhaseMetricsProjection(self._store),
             # Observability projections (Pattern 2: Event Log + CQRS)
             "tool_timeline": ToolTimelineProjection(self._store),
             # Cost tracking projections (now query TimescaleDB directly)
@@ -468,6 +474,12 @@ class ProjectionManager:
         """Get the dashboard metrics projection."""
         self._ensure_initialized()
         return self._projections["dashboard_metrics"]
+
+    @property
+    def workflow_phase_metrics(self) -> WorkflowPhaseMetricsProjection:
+        """Get the workflow phase metrics projection."""
+        self._ensure_initialized()
+        return self._projections["workflow_phase_metrics"]
 
     # Observability projections (Pattern 2: Event Log + CQRS)
     @property
