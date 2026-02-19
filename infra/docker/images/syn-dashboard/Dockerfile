@@ -27,8 +27,6 @@ COPY packages/syn-shared/ ./packages/syn-shared/
 # 2. Agentic primitives packages
 COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
 COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_workspace/ ./lib/agentic-primitives/lib/python/agentic_workspace/
-COPY lib/agentic-primitives/lib/python/agentic_security/ ./lib/agentic-primitives/lib/python/agentic_security/
 COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
@@ -56,8 +54,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN uv pip install ./packages/syn-shared
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_logging
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_events
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_workspace
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_security
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_isolation
 RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-domain
