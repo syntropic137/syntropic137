@@ -85,7 +85,6 @@ just dev-fresh
 
 # Or step-by-step:
 just dev              # Start Docker services (PostgreSQL)
-just dev-force        # Force start full stack (kills existing processes)
 just seed-workflows   # Seed workflow definitions
 
 # Run QA checks
@@ -98,12 +97,10 @@ just test
 | Command | Description |
 |---------|-------------|
 | `just dev-fresh` | **Recommended** - Clean DB, start full stack, seed workflows |
-| `just dev-force` | Kill ports 5173/8000, start Docker + backend + frontend |
-| `just dev-reset` | Remove Docker volumes (clean DB), restart Docker only |
 | `just dev` | Start Docker services only |
 | `just dev-down` | Stop all Docker services |
 
-After running `just dev-fresh` or `just dev-force`:
+After running `just dev-fresh`:
 - **Frontend**: http://localhost:5173
 - **Backend API**: http://localhost:8000
 - **API Docs**: http://localhost:8000/docs
@@ -182,10 +179,8 @@ just test                # Run tests with coverage
 
 # Development
 just dev-fresh           # 🚀 Clean DB + start full stack + seed (recommended)
-just dev-force           # Force start full stack (kills existing processes)
 just dev                 # Start Docker environment only
 just dev-down            # Stop Docker environment
-just dev-reset           # Clean DB and restart Docker
 just seed-workflows      # Seed workflows from YAML
 
 # Dashboard
