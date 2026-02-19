@@ -282,9 +282,21 @@ class SessionToolsProjection:
         is_git = event_type in _GIT_EVENT_TYPES
         if is_git:
             obs_id = f"git-{event_type}-{row['time'].isoformat()}"
+
+            # For git_operation events, extract the subcommand and any branch/target
+            git_subcmd = data.get("operation", "") if event_type == "git_operation" else ""
+            git_branch = data.get("branch") or data.get("to_branch") or None
+            if not git_branch and event_type == "git_operation":
+                # Parse branch from "git checkout -b <branch>" or "git checkout <branch>"
+                cmd = data.get("command", "")
+                import re as _re
+                _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
+                if _m:
+                    git_branch = _m.group(1)
+
             return ToolOperation(
                 observation_id=obs_id,
-                tool_name="",
+                tool_name=git_subcmd,
                 tool_use_id=None,
                 operation_type=event_type,
                 timestamp=row["time"],
@@ -297,7 +309,7 @@ class SessionToolsProjection:
                 or data.get("message_preview")
                 or data.get("commit_message")
                 or None,
-                git_branch=data.get("branch") or data.get("to_branch") or None,
+                git_branch=git_branch,
             )
 
         # Generate a unique ID from the row data

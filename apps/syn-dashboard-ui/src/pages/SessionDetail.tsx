@@ -632,7 +632,9 @@ export function SessionDetail() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                            {op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                            {op.operation_type === 'git_operation' && op.tool_name
+                              ? `git ${op.tool_name}`
+                              : op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                           </span>
                           {op.success ? (
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -646,7 +648,7 @@ export function SessionDetail() {
 
                         {/* Summary details */}
                         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
-                          {op.tool_name && (
+                          {op.tool_name && op.operation_type !== 'git_operation' && (
                             <span className="flex items-center gap-1">
                               <Wrench className="h-3 w-3" />
                               {op.tool_name}
