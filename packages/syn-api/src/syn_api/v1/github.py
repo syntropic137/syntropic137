@@ -221,7 +221,7 @@ async def verify_and_process_webhook(
         if event_type == "issue_comment":
             comment_id = payload.get("comment", {}).get("id")
             if comment_id and repo_full_name:
-                await _post_comment_reaction(repo_full_name, comment_id, "rocket")
+                await _post_comment_reaction(repo_full_name, comment_id, "rocket", installation_id)
 
         # Post deterministic "starting" comment on the PR
         pr_number = _extract_pr_number(event_type, payload)
@@ -231,6 +231,7 @@ async def verify_and_process_webhook(
                 pr_number,
                 triggers_fired,
                 compound_event,
+                installation_id,
             )
 
     return Ok(
@@ -271,6 +272,7 @@ async def _post_trigger_started_comment(
     pr_number: int,
     trigger_ids: list[str],
     compound_event: str,
+    installation_id: str | None = None,
 ) -> None:
     """Post a deterministic status comment on the PR when a trigger fires.
 
@@ -287,6 +289,7 @@ async def _post_trigger_started_comment(
         await client.api_post(
             f"/repos/{repo_full_name}/issues/{pr_number}/comments",
             json={"body": body},
+            installation_id=installation_id,
         )
         logger.info("Posted trigger-started comment on %s#%s", repo_full_name, pr_number)
     except Exception:
@@ -301,6 +304,7 @@ async def _post_comment_reaction(
     repo_full_name: str,
     comment_id: int,
     reaction: str = "rocket",
+    installation_id: str | None = None,
 ) -> None:
     """Post a reaction on a GitHub issue/PR comment (best-effort).
 
@@ -314,6 +318,7 @@ async def _post_comment_reaction(
         await client.api_post(
             f"/repos/{repo_full_name}/issues/comments/{comment_id}/reactions",
             json={"content": reaction},
+            installation_id=installation_id,
         )
         logger.info("Posted %s reaction on comment %s in %s", reaction, comment_id, repo_full_name)
     except Exception:

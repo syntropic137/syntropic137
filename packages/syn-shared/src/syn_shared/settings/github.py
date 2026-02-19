@@ -78,9 +78,11 @@ class GitHubAppSettings(BaseSettings):
     installation_id: str = Field(
         default="",
         description=(
-            "GitHub App Installation ID. "
-            "Get from: https://github.com/settings/installations "
-            "or from webhook payload when app is installed."
+            "GitHub App Installation ID (optional). "
+            "Used as the default installation when not provided per-request. "
+            "Most installations are discovered dynamically from webhook payloads, "
+            "so this is only needed for single-installation setups or as a fallback. "
+            "Get from: GitHub org Settings → Installed Apps → Configure → URL."
         ),
     )
 
@@ -103,14 +105,17 @@ class GitHubAppSettings(BaseSettings):
 
     @property
     def is_configured(self) -> bool:
-        """Check if GitHub App is fully configured.
+        """Check if GitHub App is configured.
 
-        Returns True if all required fields are set:
+        Returns True if the App identity fields are set:
         - app_id
         - private_key (non-empty)
-        - installation_id
+
+        Note: installation_id is NOT required here — installations are
+        discovered dynamically from webhook payloads, since a single app
+        can be installed on multiple orgs/accounts.
         """
-        return bool(self.app_id and self.private_key.get_secret_value() and self.installation_id)
+        return bool(self.app_id and self.private_key.get_secret_value())
 
     @property
     def bot_name(self) -> str:
@@ -138,26 +143,26 @@ class GitHubAppSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_complete_config(self) -> Self:
-        """Ensure GitHub App settings are complete if any are provided.
+        """Ensure GitHub App identity fields are both set or both absent.
 
-        If any of app_id, private_key, or installation_id is set,
-        all three must be provided.
+        app_id and private_key must be provided together — one without
+        the other is a misconfiguration.
+
+        installation_id is optional and independent: installations are
+        discovered dynamically from webhook payloads for multi-tenant support.
         """
-        fields = [
+        identity_fields = [
             self.app_id,
             self.private_key.get_secret_value(),
-            self.installation_id,
         ]
-        provided = sum(1 for f in fields if f)
+        provided = sum(1 for f in identity_fields if f)
 
-        if 0 < provided < 3:
+        if provided == 1:
             missing = []
             if not self.app_id:
                 missing.append("SYN_GITHUB_APP_ID")
             if not self.private_key.get_secret_value():
                 missing.append("SYN_GITHUB_PRIVATE_KEY")
-            if not self.installation_id:
-                missing.append("SYN_GITHUB_INSTALLATION_ID")
             msg = f"Incomplete GitHub App config. Missing: {', '.join(missing)}"
             raise ValueError(msg)
 
