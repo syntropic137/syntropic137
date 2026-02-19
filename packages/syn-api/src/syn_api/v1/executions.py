@@ -6,6 +6,7 @@ Extracted from ``v1.workflows`` to separate template CRUD from execution lifecyc
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
@@ -167,6 +168,31 @@ async def list_(
             status_filter=status,
         )
 
+    # Batch-query tool call counts from agent_events (one query for all executions)
+    tool_counts: dict[str, int] = {}
+    if domain_summaries:
+        try:
+            from syn_api._wiring import get_event_store_instance
+
+            event_store = get_event_store_instance()
+            pool = event_store.pool
+            if pool is not None:
+                exec_ids = [s.workflow_execution_id for s in domain_summaries]
+                async with pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        """
+                        SELECT execution_id, COUNT(*) AS cnt
+                        FROM agent_events
+                        WHERE execution_id = ANY($1)
+                          AND event_type = 'tool_execution_completed'
+                        GROUP BY execution_id
+                        """,
+                        exec_ids,
+                    )
+                tool_counts = {row["execution_id"]: row["cnt"] for row in rows}
+        except Exception:
+            logger.debug("Could not query tool counts from agent_events", exc_info=True)
+
     return Ok(
         [
             ExecutionSummary(
@@ -180,6 +206,7 @@ async def list_(
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
                 total_cost_usd=s.total_cost_usd,
+                tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
             )
             for s in domain_summaries
@@ -235,9 +262,11 @@ async def get_detail(
                 except Exception:
                     logger.exception("Failed to load tool operations for session %s", session_id)
 
+            _p_started = p.started_at if hasattr(p, "started_at") else None
+            _p_completed = p.completed_at if hasattr(p, "completed_at") else None
             phases.append(
                 PhaseExecution(
-                    phase_id=p.phase_id,
+                    phase_id=p.workflow_phase_id,
                     name=p.name,
                     status=p.status,
                     session_id=session_id,
@@ -246,8 +275,12 @@ async def get_detail(
                     output_tokens=p.output_tokens,
                     cost_usd=Decimal(str(p.cost_usd)),
                     duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
-                    started_at=p.started_at if hasattr(p, "started_at") else None,
-                    completed_at=p.completed_at if hasattr(p, "completed_at") else None,
+                    started_at=datetime.fromisoformat(_p_started)
+                    if isinstance(_p_started, str)
+                    else _p_started,
+                    completed_at=datetime.fromisoformat(_p_completed)
+                    if isinstance(_p_completed, str)
+                    else _p_completed,
                     operations=ops,
                 )
             )

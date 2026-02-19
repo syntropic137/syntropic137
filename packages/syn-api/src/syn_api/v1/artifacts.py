@@ -6,6 +6,7 @@ Maps to the artifacts context in syn-domain.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -67,7 +68,9 @@ async def list_artifacts(
                     artifact_type=a.artifact_type,
                     title=a.name,
                     size_bytes=a.size_bytes,
-                    created_at=a.created_at,
+                    created_at=datetime.fromisoformat(a.created_at)
+                    if isinstance(a.created_at, str)
+                    else a.created_at,
                 )
                 for a in domain_artifacts
             ]
@@ -133,7 +136,9 @@ async def get_artifact(
                 content_type=content_type,
                 content_hash=artifact.content_hash,
                 size_bytes=artifact.size_bytes,
-                created_at=artifact.created_at,
+                created_at=datetime.fromisoformat(artifact.created_at)
+                if isinstance(artifact.created_at, str)
+                else artifact.created_at,
             )
         )
     except Exception as e:

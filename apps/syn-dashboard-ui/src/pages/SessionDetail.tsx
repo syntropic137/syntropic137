@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Clock,
   Coins,
+  Container,
   Copy,
   Cpu,
   FileText,
@@ -388,6 +389,22 @@ function OperationDetails({ op }: { op: OperationInfo }) {
   )
 }
 
+const PROVIDER_ENVIRONMENTS: Record<string, { backend: string; image: string }> = {
+  claude: { backend: 'docker', image: 'agentic-workspace-claude-cli' },
+}
+
+function WorkspaceEnvironmentBadge({ provider }: { provider: string | null }) {
+  if (!provider) return null
+  const env = PROVIDER_ENVIRONMENTS[provider.toLowerCase()]
+  const label = env ? `${env.backend}:${env.image}` : provider
+  return (
+    <span className="flex items-center gap-1.5">
+      <Container className="h-3.5 w-3.5" />
+      <code className="font-mono">{label}</code>
+    </span>
+  )
+}
+
 export function SessionDetail() {
   const { sessionId } = useParams<{ sessionId: string }>()
   const [session, setSession] = useState<SessionResponse | null>(null)
@@ -525,10 +542,7 @@ export function SessionDetail() {
                 {session.phase_id && <span>Phase: {session.phase_id}</span>}
               </div>
               <div className="mt-1 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-                <span className="flex items-center gap-1">
-                  <Cpu className="h-3.5 w-3.5" />
-                  {session.agent_provider}/{session.agent_model}
-                </span>
+                <WorkspaceEnvironmentBadge provider={session.agent_provider} />
               </div>
             </div>
           </div>

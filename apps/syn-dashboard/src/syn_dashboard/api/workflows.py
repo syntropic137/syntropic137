@@ -31,38 +31,45 @@ async def list_workflows(
     workflow_type: str | None = Query(None, description="Filter by workflow type"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    order_by: str | None = Query(None, description="Sort field (prefix with - for descending)"),
 ) -> WorkflowListResponse:
     """List all workflow templates."""
     offset = (page - 1) * page_size
-    result = await wf.list_workflows(
-        workflow_type=workflow_type,
-        limit=page_size,
-        offset=offset,
-    )
 
-    if isinstance(result, Err):
-        raise HTTPException(status_code=500, detail=result.message)
-
-    # Get total count
-    total_result = await wf.list_workflows(
+    # Fetch all matching workflows, sort, then paginate
+    all_result = await wf.list_workflows(
         workflow_type=workflow_type,
         limit=10000,
         offset=0,
     )
-    total = len(total_result.value) if not isinstance(total_result, Err) else 0
+
+    if isinstance(all_result, Err):
+        raise HTTPException(status_code=500, detail=all_result.message)
+
+    summaries = [
+        WorkflowSummary(
+            id=s.id,
+            name=s.name,
+            workflow_type=s.workflow_type,
+            phase_count=s.phase_count,
+            created_at=s.created_at,
+            runs_count=s.runs_count,
+        )
+        for s in all_result.value
+    ]
+
+    # Apply sort order before pagination
+    if order_by:
+        desc = order_by.startswith("-")
+        field = order_by.lstrip("-")
+        if field in {"runs_count", "name", "workflow_type", "phase_count", "created_at"}:
+            summaries.sort(key=lambda s: getattr(s, field, 0) or 0, reverse=desc)
+
+    total = len(summaries)
+    page_items = summaries[offset : offset + page_size]
 
     return WorkflowListResponse(
-        workflows=[
-            WorkflowSummary(
-                id=s.id,
-                name=s.name,
-                workflow_type=s.workflow_type,
-                phase_count=s.phase_count,
-                created_at=s.created_at,
-                runs_count=s.runs_count,
-            )
-            for s in result.value
-        ],
+        workflows=page_items,
         total=total,
         page=page,
         page_size=page_size,
@@ -96,7 +103,7 @@ async def get_workflow(workflow_id: str) -> WorkflowResponse:
         else:
             phases.append(
                 PhaseDefinition(
-                    phase_id=p.id if hasattr(p, "id") else f"phase-{i}",
+                    phase_id=p.phase_id,
                     name=p.name if hasattr(p, "name") else f"Phase {i}",
                     order=p.order if hasattr(p, "order") else i,
                     description=p.description if hasattr(p, "description") else None,

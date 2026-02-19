@@ -322,6 +322,7 @@ def get_trigger_history(
             TriggerHistoryEntry(
                 trigger_id=e.trigger_id,
                 execution_id=e.execution_id,
+                webhook_delivery_id=e.webhook_delivery_id,
                 github_event_type=e.github_event_type,
                 repository=e.repository,
                 pr_number=e.pr_number,

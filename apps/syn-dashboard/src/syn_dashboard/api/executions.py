@@ -126,6 +126,7 @@ async def list_all_executions(
                 total_phases=e.total_phases,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
+                tool_call_count=e.tool_call_count,
             )
             for e in result.value
         ],
@@ -177,6 +178,7 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
 
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
+    artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
 
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
@@ -190,5 +192,6 @@ async def get_execution(execution_id: str) -> ExecutionDetailResponse:
         total_output_tokens=total_output,
         total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        artifact_ids=artifact_ids,
         error_message=detail.error_message,
     )
