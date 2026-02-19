@@ -193,6 +193,9 @@ async def get_session(
                 tool_use_id=getattr(op, "tool_use_id", None),
                 input_preview=getattr(op, "input_preview", None),
                 output_preview=getattr(op, "output_preview", None),
+                git_sha=getattr(op, "git_sha", None),
+                git_message=getattr(op, "git_message", None),
+                git_branch=getattr(op, "git_branch", None),
             )
             for op in (tool_data or [])
         ]

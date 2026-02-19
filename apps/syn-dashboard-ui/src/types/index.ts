@@ -96,6 +96,11 @@ export interface OperationInfo {
 
   // Thinking details (for THINKING type)
   thinking_content: string | null
+
+  // Git details (for git_commit, git_push, git_branch_changed, git_operation)
+  git_sha: string | null
+  git_message: string | null
+  git_branch: string | null
 }
 
 export interface SessionResponse {

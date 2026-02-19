@@ -10,7 +10,10 @@ Key requirements:
 
 from __future__ import annotations
 
+import json
 import logging
+import re
+import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -43,6 +46,7 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
     SYN_WORKSPACE_PROMPT,
 )
+from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
     from syn_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
@@ -280,7 +284,7 @@ class WorkflowExecutionEngine:
 
     async def _record_observation(
         self,
-        observation_type: ObservationType,
+        observation_type: ObservationType | str,
         session_id: str,
         data: dict[str, Any],
         execution_id: str | None = None,
@@ -290,7 +294,7 @@ class WorkflowExecutionEngine:
         """Record an agent observation to TimescaleDB.
 
         Args:
-            observation_type: Type of observation (TOKEN_USAGE, TOOL_STARTED, TOOL_COMPLETED)
+            observation_type: Type of observation (enum or raw string from hook events)
             session_id: The session ID
             data: Observation data (JSONB)
             execution_id: Optional execution ID
@@ -300,9 +304,15 @@ class WorkflowExecutionEngine:
         if self._observability_writer is None:
             return
 
+        obs_type_str = (
+            observation_type.value
+            if isinstance(observation_type, ObservationType)
+            else str(observation_type)
+        )
+
         await self._observability_writer.record_observation(
             session_id=session_id,
-            observation_type=observation_type.value,
+            observation_type=obs_type_str,
             data=data,
             execution_id=execution_id,
             phase_id=phase_id,
@@ -952,8 +962,6 @@ class WorkflowExecutionEngine:
         Raises:
             WorkflowExecutionError: If phase execution fails
         """
-        import json
-
         from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
         from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
             AgentSessionAggregate,
@@ -1096,7 +1104,7 @@ class WorkflowExecutionEngine:
                 # ADR-029: Run Claude CLI directly (no syn-agent-runner wrapper)
                 # Build the Claude CLI command
                 # ADR-012: Append system prompt for artifact output instructions
-                claude_cmd = [
+                claude_args = [
                     "claude",
                     "--print",  # Non-interactive mode
                     "--verbose",  # Required for stream-json output format
@@ -1110,12 +1118,33 @@ class WorkflowExecutionEngine:
 
                 # Add allowed tools if specified
                 if phase.agent_config.allowed_tools:
-                    claude_cmd.extend(
+                    claude_args.extend(
                         [
                             "--allowedTools",
                             ",".join(phase.agent_config.allowed_tools),
                         ]
                     )
+
+                # Wrap in sh -c to dynamically discover and load plugins from the container.
+                # We can't use $AGENTIC_PLUGIN_FLAGS (set by entrypoint.sh) because docker exec
+                # spawns a new process that doesn't inherit shell-exported vars from entrypoint.
+                # Instead, we inline the same discovery logic as entrypoint.sh:
+                #   scan /opt/agentic/plugins/ for dirs with .claude-plugin/plugin.json
+                # This loads observability hooks (git events, security events, etc.)
+                _quoted_args = " ".join(shlex.quote(a) for a in claude_args)
+                _plugin_scan = (
+                    'PLUGIN_FLAGS=""; '
+                    'PLUGINS_DIR="${AGENTIC_PLUGINS_DIR:-/opt/agentic/plugins}"; '
+                    'if [ -d "$PLUGINS_DIR" ]; then '
+                    '  for d in "$PLUGINS_DIR"/*/; do '
+                    '    if [ -f "${d}.claude-plugin/plugin.json" ]; then '
+                    '      PLUGIN_FLAGS="$PLUGIN_FLAGS --plugin-dir ${d%/}"; '
+                    "    fi; "
+                    "  done; "
+                    "fi; "
+                    f"exec {_quoted_args} $PLUGIN_FLAGS"
+                )
+                claude_cmd = ["sh", "-c", _plugin_scan]
 
                 # Execute Claude CLI and stream events
                 # Claude auth is passed to agent (needed for Claude calls)
@@ -1190,8 +1219,69 @@ class WorkflowExecutionEngine:
                         conversation_lines.append(line)
 
                     # ADR-029: Try hook event first (from agentic_events)
-                    hook_event = parse_jsonl_line(line)
-                    if hook_event:
+                    # Hook events come in two forms:
+                    # 1. Standalone JSONL line with "event_type" (legacy / direct stderr path)
+                    # 2. Embedded in Claude's hook_response stream-json output:
+                    #    {"type":"system","subtype":"hook_response","output":"...JSONL...",
+                    #     "stderr":"...JSONL..."}
+                    # We collect all hook events from either source and process them uniformly.
+                    _hook_events: list[dict] = []
+                    _standalone = parse_jsonl_line(line)
+                    if _standalone:
+                        _hook_events.append(_standalone)
+                    else:
+                        try:
+                            _parsed_line = json.loads(line)
+                            _line_type = _parsed_line.get("type", "")
+                            _line_subtype = _parsed_line.get("subtype", "")
+                            if _line_type == "system":
+                                logger.info(
+                                    "System event: subtype=%s keys=%s",
+                                    _line_subtype,
+                                    list(_parsed_line.keys()),
+                                )
+                            if _line_type == "system" and _line_subtype == "hook_response":
+                                _hook_name = _parsed_line.get("hook_name", "?")
+                                _hook_event = _parsed_line.get("hook_event", "?")
+                                # Check all channels: output, stdout, stderr
+                                # (Claude Code uses 'output'+'stderr' but also has 'stdout')
+                                _seen_hook_jsons: set[str] = set()
+                                for _channel in ("output", "stdout", "stderr"):
+                                    _channel_text = _parsed_line.get(_channel, "")
+                                    logger.info(
+                                        "hook_response hook=%s event=%s channel=%s len=%d content=%r",
+                                        _hook_name,
+                                        _hook_event,
+                                        _channel,
+                                        len(_channel_text),
+                                        _channel_text[:300],
+                                    )
+                                    for _hook_line in _channel_text.splitlines():
+                                        _hook_line = _hook_line.strip()
+                                        if _hook_line and _hook_line not in _seen_hook_jsons:
+                                            _evt = parse_jsonl_line(_hook_line)
+                                            if _evt:
+                                                _seen_hook_jsons.add(_hook_line)
+                                                _hook_events.append(_evt)
+                                            else:
+                                                logger.info(
+                                                    "hook_response line not a hook event: %r",
+                                                    _hook_line[:200],
+                                                )
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+
+                    for hook_event in _hook_events:
+                        # Validate event_type against VALID_EVENT_TYPES (syn_shared.events)
+                        # An unknown type means producer/consumer are out of sync.
+                        _hook_event_type = hook_event.get("event_type")
+                        if _hook_event_type not in VALID_EVENT_TYPES:
+                            logger.warning(
+                                "Unknown event_type from hook: %s — "
+                                "add it to syn_shared.events or check for a producer/consumer mismatch",
+                                _hook_event_type,
+                            )
+
                         # Enrich with workflow context
                         enriched = enrich_event(
                             hook_event,
@@ -1224,8 +1314,6 @@ class WorkflowExecutionEngine:
                                 input_preview = ctx_data.get("input_preview", "")
                                 if input_preview:
                                     try:
-                                        import json
-
                                         input_data = json.loads(input_preview)
                                         agent_name = str(
                                             input_data.get(
@@ -1291,6 +1379,8 @@ class WorkflowExecutionEngine:
                                     # Non-Task tool completed - attribute to active subagent
                                     _attribute_tool_to_latest_subagent(tool_name, active_subagents)
 
+                    # Skip native CLI event processing if we handled hook events
+                    if _hook_events:
                         continue
 
                     # Fall back to Claude CLI native events
@@ -1405,13 +1495,18 @@ class WorkflowExecutionEngine:
                                     tool_name = item.get("name", "unknown")
                                     tool_use_id = item.get("id", "unknown")
                                     tool_input = item.get("input", {})
+                                    if isinstance(tool_input, str):
+                                        try:
+                                            tool_input = json.loads(tool_input)
+                                        except (json.JSONDecodeError, ValueError):
+                                            tool_input = {}
 
                                     # Cache tool_name for enriching tool_result events
                                     tool_names_cache[tool_use_id] = tool_name
 
                                     if self._observability_writer is not None:
                                         await self._record_observation(
-                                            observation_type=ObservationType.TOOL_STARTED,
+                                            observation_type=ObservationType.TOOL_EXECUTION_STARTED,
                                             session_id=session_id,
                                             data={
                                                 "tool_name": tool_name,
@@ -1423,6 +1518,85 @@ class WorkflowExecutionEngine:
                                             workspace_id=workspace_id,
                                         )
                                         logger.debug("Tool started: %s", tool_name)
+
+                                    # Detect git operations from Bash tool_use commands.
+                                    # Claude CLI does NOT emit PreToolUse hook_response events
+                                    # in stream-json, so we detect git operations here instead.
+                                    if (
+                                        tool_name == "Bash"
+                                        and self._observability_writer is not None
+                                    ):
+                                        bash_cmd = tool_input.get("command", "") or ""
+                                        if "git commit" in bash_cmd:
+                                            # Extract commit message heuristically
+                                            _commit_msg = ""
+                                            _m_idx = bash_cmd.find("-m ")
+                                            if _m_idx >= 0:
+                                                _after = bash_cmd[_m_idx + 3 :].strip()
+                                                if _after.startswith('"') or _after.startswith("'"):
+                                                    _q = _after[0]
+                                                    _end = _after.find(_q, 1)
+                                                    _commit_msg = (
+                                                        _after[1:_end]
+                                                        if _end > 0
+                                                        else _after[1:101]
+                                                    )
+                                                else:
+                                                    _commit_msg = (
+                                                        _after.split()[0] if _after.split() else ""
+                                                    )
+                                            await self._record_observation(
+                                                observation_type="git_commit",
+                                                session_id=session_id,
+                                                data={
+                                                    "command": bash_cmd[:500],
+                                                    "commit_message": _commit_msg[:200],
+                                                    "tool_use_id": tool_use_id,
+                                                },
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                                workspace_id=workspace_id,
+                                            )
+                                            logger.info(
+                                                "Git commit detected in Bash command: %r",
+                                                _commit_msg[:100],
+                                            )
+                                        elif "git push" in bash_cmd:
+                                            await self._record_observation(
+                                                observation_type="git_push",
+                                                session_id=session_id,
+                                                data={
+                                                    "command": bash_cmd[:500],
+                                                    "tool_use_id": tool_use_id,
+                                                },
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                                workspace_id=workspace_id,
+                                            )
+                                            logger.info("Git push detected in Bash command")
+                                        elif re.search(r"\bgit\s+\w", bash_cmd):
+                                            # Catch-all for other git operations
+                                            # (clone, pull, fetch, checkout, branch, merge, etc.)
+                                            _git_match = re.search(r"\bgit\s+(\w+)", bash_cmd)
+                                            _git_subcmd = (
+                                                _git_match.group(1) if _git_match else "unknown"
+                                            )
+                                            await self._record_observation(
+                                                observation_type="git_operation",
+                                                session_id=session_id,
+                                                data={
+                                                    "operation": _git_subcmd,
+                                                    "command": bash_cmd[:500],
+                                                    "tool_use_id": tool_use_id,
+                                                },
+                                                execution_id=execution_id,
+                                                phase_id=phase.phase_id,
+                                                workspace_id=workspace_id,
+                                            )
+                                            logger.info(
+                                                "Git operation detected in Bash command: %s",
+                                                _git_subcmd,
+                                            )
 
                                     # ADR-037: Detect Task tool as subagent start (raw CLI format)
                                     if tool_name == "Task" and tool_use_id:
@@ -1480,7 +1654,7 @@ class WorkflowExecutionEngine:
 
                                     if self._observability_writer is not None:
                                         await self._record_observation(
-                                            observation_type=ObservationType.TOOL_COMPLETED,
+                                            observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
                                             session_id=session_id,
                                             data={
                                                 "tool_name": tool_name,  # Now included!

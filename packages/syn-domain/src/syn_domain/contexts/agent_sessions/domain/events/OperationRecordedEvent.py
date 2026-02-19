@@ -16,7 +16,7 @@ class OperationRecordedEvent(DomainEvent):
 
     Supports multiple operation types for full observability:
     - MESSAGE_REQUEST/RESPONSE: LLM API calls
-    - TOOL_STARTED/COMPLETED/BLOCKED: Tool lifecycle
+    - TOOL_EXECUTION_STARTED/COMPLETED/BLOCKED: Tool lifecycle
     - THINKING: Extended thinking content
     - ERROR: Error information
 
@@ -42,7 +42,7 @@ class OperationRecordedEvent(DomainEvent):
 
     # Tool execution details (for TOOL_* types)
     tool_name: str | None = None
-    tool_use_id: str | None = None  # Correlate TOOL_STARTED/COMPLETED
+    tool_use_id: str | None = None  # Correlate TOOL_EXECUTION_STARTED/COMPLETED
     tool_input: dict[str, Any] | None = None  # Tool input parameters
     tool_output: str | None = None  # Tool output (truncated if large)
 
