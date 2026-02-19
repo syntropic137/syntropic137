@@ -14,7 +14,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from syn_shared.events import TOOL_COMPLETED, TOOL_STARTED
+from syn_shared.events import (
+    COST_RECORDED,
+    SESSION_SUMMARY,
+    SUBAGENT_STARTED,
+    SUBAGENT_STOPPED,
+    TOKEN_USAGE,
+    TOOL_COMPLETED,
+    TOOL_STARTED,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -23,8 +31,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Use constants for type safety
-_TOOL_EVENT_TYPES = (TOOL_STARTED, TOOL_COMPLETED)
+# Exclude high-volume, non-activity events from the session timeline.
+# All other event types — including any new ones added to agentic-primitives —
+# appear automatically without requiring changes here.
+_TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
+
+_SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 
 
 @dataclass
@@ -144,13 +156,13 @@ class SessionToolsProjection:
                     FROM agent_events e
                     LEFT JOIN tool_names tn ON tn.tool_use_id = e.data->>'tool_use_id'
                     WHERE e.session_id = $1
-                      AND e.event_type = ANY($4)
+                      AND e.event_type != ALL($4)
                     ORDER BY e.time ASC
                     """,
                     session_id,
                     TOOL_STARTED,
                     TOOL_COMPLETED,
-                    list(_TOOL_EVENT_TYPES),
+                    list(_TIMELINE_EXCLUDE),
                 )
 
                 logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
@@ -239,6 +251,23 @@ class SessionToolsProjection:
 
         event_type = row["event_type"]
         is_completed = event_type == TOOL_COMPLETED
+        is_subagent = event_type in _SUBAGENT_EVENT_TYPES
+
+        if is_subagent:
+            # Subagent events use agent_name as the display name
+            tool_use_id = data.get("subagent_tool_use_id", "")
+            obs_id = f"subagent-{event_type}-{tool_use_id}-{row['time'].isoformat()}"
+            return ToolOperation(
+                observation_id=obs_id,
+                tool_name=data.get("agent_name", "subagent"),
+                tool_use_id=tool_use_id or None,
+                operation_type=event_type,
+                timestamp=row["time"],
+                success=data.get("success") if event_type == SUBAGENT_STOPPED else None,
+                input_preview=None,
+                output_preview=None,
+                duration_ms=data.get("duration_ms") if event_type == SUBAGENT_STOPPED else None,
+            )
 
         # Generate a unique ID from the row data
         tool_use_id = data.get("tool_use_id", "")

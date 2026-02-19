@@ -91,6 +91,10 @@ async def startup(
         except Exception:
             logger.exception("Failed to start subscription coordinator")
 
+        # Reconcile orphaned sessions and containers from any previous run
+        await _reconcile_orphaned_sessions()
+        await _cleanup_orphaned_containers()
+
         return Ok(None)
     except Exception as e:
         return Err(LifecycleError.CONNECTION_FAILED, message=str(e))
@@ -192,6 +196,62 @@ def validate_credentials(
         logger.exception("Failed to validate GitHub App configuration")
 
     return Ok(None)
+
+
+async def _reconcile_orphaned_sessions() -> None:
+    """Mark sessions stuck in 'running' as failed on startup.
+
+    Any session still 'running' when the framework starts is orphaned —
+    its container was killed and can no longer complete normally.
+    """
+    try:
+        from syn_api._wiring import get_projection_mgr
+
+        manager = get_projection_mgr()
+        count = await manager.session_list.reconcile_orphaned()
+        if count:
+            logger.warning("Reconciled %d orphaned session(s) → marked as failed", count)
+        else:
+            logger.debug("No orphaned sessions found")
+    except Exception:
+        logger.exception("Failed to reconcile orphaned sessions (non-fatal)")
+
+
+async def _cleanup_orphaned_containers() -> None:
+    """Stop and remove agent containers left running from a previous framework instance.
+
+    Targets:
+    - Sidecar containers: label syn.component=sidecar
+    - Workspace containers: name prefix agentic-ws-
+    """
+    import asyncio
+
+    async def _docker_rm(filter_arg: str, label: str) -> None:
+        try:
+            # List matching container IDs
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "ps", "-q", "--filter", filter_arg,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            ids = stdout.decode().split() if stdout else []
+            if not ids:
+                return
+
+            logger.warning("Stopping %d orphaned %s container(s): %s", len(ids), label, ids)
+            stop_proc = await asyncio.create_subprocess_exec(
+                "docker", "rm", "-f", *ids,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(stop_proc.wait(), timeout=30)
+            logger.info("Removed %d orphaned %s container(s)", len(ids), label)
+        except Exception:
+            logger.debug("Container cleanup skipped for %s (docker may not be available)", label)
+
+    await _docker_rm("label=syn.component=sidecar", "sidecar")
+    await _docker_rm("name=agentic-ws-", "workspace")
 
 
 async def _seed_offline_data() -> None:

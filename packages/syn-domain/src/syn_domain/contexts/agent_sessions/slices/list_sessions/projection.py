@@ -343,3 +343,32 @@ class SessionListProjection(CheckpointedProjection):
             offset=offset,
         )
         return [SessionSummary.from_dict(d) for d in data]
+
+    async def reconcile_orphaned(
+        self,
+        error_message: str = "Orphaned: framework restarted while agent was active",
+    ) -> int:
+        """Mark all running sessions as failed.
+
+        Call this during startup to clean up sessions that were active when
+        the framework was previously stopped (container crash, kill, restart).
+        Returns the count of sessions reconciled.
+        """
+        running = await self.query(status_filter="running", limit=1000)
+        if not running:
+            return 0
+
+        now_iso = datetime.now(UTC).isoformat()
+        count = 0
+        for session in running:
+            try:
+                data = await self._store.get(self.PROJECTION_NAME, session.id)
+                if data and data.get("status") == "running":
+                    data["status"] = "failed"
+                    data["completed_at"] = now_iso
+                    data["error_message"] = error_message
+                    await self._store.save(self.PROJECTION_NAME, session.id, data)
+                    count += 1
+            except Exception:  # noqa: BLE001
+                pass
+        return count
