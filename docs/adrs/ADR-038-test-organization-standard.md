@@ -119,10 +119,10 @@ All test configuration MUST use centralized constants:
 15432
 
 # ✅ GOOD: Centralized constants
-from syn_shared.events import TOOL_STARTED
+from syn_shared.events import TOOL_EXECUTION_STARTED
 from syn_shared.testing import ENV_TEST_TIMESCALEDB_HOST, TEST_STACK_PORTS
 
-TOOL_STARTED  # "tool_execution_started"
+TOOL_EXECUTION_STARTED  # "tool_execution_started"
 ENV_TEST_TIMESCALEDB_HOST  # "TEST_TIMESCALEDB_HOST"
 TEST_STACK_PORTS["timescaledb"]  # 15432
 ```

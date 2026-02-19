@@ -15,7 +15,7 @@ from uuid import uuid4
 import pytest
 
 # Use centralized event type constants - NO hardcoded strings!
-from syn_shared.events import TOOL_STARTED
+from syn_shared.events import TOOL_EXECUTION_STARTED
 
 # Use typed factories for type-safe event creation
 from syn_shared.events.factories import (
@@ -88,7 +88,7 @@ class TestAgentEventStoreIntegration:
         events = await event_store.query(session_id)
 
         assert len(events) == 1
-        assert events[0]["event_type"] == TOOL_STARTED
+        assert events[0]["event_type"] == TOOL_EXECUTION_STARTED
         assert events[0]["session_id"] == session_id
         assert events[0]["data"]["tool_name"] == "Read"
 
@@ -140,10 +140,10 @@ class TestAgentEventStoreIntegration:
         await event_store.insert_batch(events)
 
         # Query only tool_execution_started
-        tool_events = await event_store.query(session_id, event_type=TOOL_STARTED)
+        tool_events = await event_store.query(session_id, event_type=TOOL_EXECUTION_STARTED)
 
         assert len(tool_events) == 2
-        assert all(e["event_type"] == TOOL_STARTED for e in tool_events)
+        assert all(e["event_type"] == TOOL_EXECUTION_STARTED for e in tool_events)
 
     @pytest.mark.asyncio
     async def test_query_by_execution(self, event_store, session_id):

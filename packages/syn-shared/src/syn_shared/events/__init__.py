@@ -13,8 +13,9 @@ from typing import Literal, get_args
 
 # Tool execution events
 # MUST match agentic_isolation.EventType (the producer)
-TOOL_STARTED = "tool_execution_started"
-TOOL_COMPLETED = "tool_execution_completed"
+# Values are canonical Claude Code hook names (ADR-042)
+TOOL_EXECUTION_STARTED = "tool_execution_started"
+TOOL_EXECUTION_COMPLETED = "tool_execution_completed"
 TOOL_BLOCKED = "tool_blocked"
 
 # Session lifecycle events
@@ -48,9 +49,25 @@ GIT_BRANCH_CHANGED = "git_branch_changed"
 GIT_OPERATION = "git_operation"
 
 # Claude Code hook events (from observability plugin, all 14 lifecycle hooks)
-TOOL_FAILED = "tool_execution_failed"
+TOOL_EXECUTION_FAILED = "tool_execution_failed"
 TEAMMATE_IDLE = "teammate_idle"
 TASK_COMPLETED = "task_completed"
+
+# Security / permission events (from agentic_events.EventType)
+SECURITY_DECISION = "security_decision"
+PERMISSION_REQUESTED = "permission_requested"
+
+# Agent control events (from agentic_events.EventType)
+AGENT_STOPPED = "agent_stopped"
+
+# Context management events (from agentic_events.EventType)
+CONTEXT_COMPACTED = "context_compacted"
+
+# System / notification events (from agentic_events.EventType)
+SYSTEM_NOTIFICATION = "system_notification"
+
+# User interaction events (from agentic_events.EventType)
+USER_PROMPT_SUBMITTED = "user_prompt_submitted"
 
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
@@ -76,6 +93,13 @@ EventType = Literal[
     "git_operation",
     "teammate_idle",
     "task_completed",
+    # Added to match agentic_events.types.EventType (producer)
+    "security_decision",
+    "permission_requested",
+    "agent_stopped",
+    "context_compacted",
+    "system_notification",
+    "user_prompt_submitted",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -88,14 +112,20 @@ def is_valid_event_type(event_type: str) -> bool:
 
 
 __all__ = [
+    "AGENT_STOPPED",
+    "CONTEXT_COMPACTED",
     "COST_RECORDED",
     "ERROR",
     "GIT_BRANCH_CHANGED",
     "GIT_COMMIT",
     "GIT_OPERATION",
     "GIT_PUSH",
+    "SYSTEM_NOTIFICATION",
+    "PERMISSION_REQUESTED",
     "PHASE_COMPLETED",
     "PHASE_STARTED",
+    "USER_PROMPT_SUBMITTED",
+    "SECURITY_DECISION",
     "SESSION_COMPLETED",
     "SESSION_ERROR",
     "SESSION_STARTED",
@@ -106,9 +136,9 @@ __all__ = [
     "TEAMMATE_IDLE",
     "TOKEN_USAGE",
     "TOOL_BLOCKED",
-    "TOOL_COMPLETED",
-    "TOOL_FAILED",
-    "TOOL_STARTED",
+    "TOOL_EXECUTION_COMPLETED",
+    "TOOL_EXECUTION_FAILED",
+    "TOOL_EXECUTION_STARTED",
     "VALID_EVENT_TYPES",
     "EventType",
     "is_valid_event_type",

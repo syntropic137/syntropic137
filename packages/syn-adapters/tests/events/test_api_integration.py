@@ -21,8 +21,8 @@ from syn_shared.events import (
     SESSION_COMPLETED,
     SESSION_STARTED,
     TOKEN_USAGE,
-    TOOL_COMPLETED,
-    TOOL_STARTED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
 )
 
 # Use typed factories for type-safe event creation
@@ -116,7 +116,7 @@ class TestEventsAPI:
         assert len(events) == 9
         event_types = [e["event_type"] for e in events]
         assert SESSION_STARTED in event_types
-        assert TOOL_COMPLETED in event_types
+        assert TOOL_EXECUTION_COMPLETED in event_types
         assert SESSION_COMPLETED in event_types
 
     @pytest.mark.asyncio
@@ -125,11 +125,11 @@ class TestEventsAPI:
         # Filter by event type
         tool_events = await seeded_session.store.query(
             seeded_session.session_id,
-            event_type=TOOL_COMPLETED,
+            event_type=TOOL_EXECUTION_COMPLETED,
         )
 
         assert len(tool_events) == 3
-        assert all(e["event_type"] == TOOL_COMPLETED for e in tool_events)
+        assert all(e["event_type"] == TOOL_EXECUTION_COMPLETED for e in tool_events)
 
     @pytest.mark.asyncio
     async def test_timeline_events(self, seeded_session: SeededSessionData):
@@ -142,8 +142,8 @@ class TestEventsAPI:
             for e in events
             if e["event_type"]
             in (
-                TOOL_STARTED,
-                TOOL_COMPLETED,
+                TOOL_EXECUTION_STARTED,
+                TOOL_EXECUTION_COMPLETED,
                 SESSION_STARTED,
                 SESSION_COMPLETED,
             )
@@ -173,7 +173,7 @@ class TestEventsAPI:
         # Query tool completion events
         tool_events = await seeded_session.store.query(
             seeded_session.session_id,
-            event_type=TOOL_COMPLETED,
+            event_type=TOOL_EXECUTION_COMPLETED,
         )
 
         # Build summary
