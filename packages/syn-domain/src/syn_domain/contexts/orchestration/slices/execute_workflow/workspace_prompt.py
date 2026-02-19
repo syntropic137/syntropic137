@@ -82,4 +82,28 @@ the previous phase failed - report this in your output.
 - **Only `artifacts/output/` collected** - everything else is lost
 - **Push code before session ends** - unpushed commits are lost
 - **Use feature branches** - never push directly to main/master
-- **Write REAL content** - never copy example templates literally"""
+- **Write REAL content** - never copy example templates literally
+
+---
+
+## Task Result (REQUIRED)
+
+**The very last thing in your response must be a `TASK_RESULT` block.**
+
+If you completed the task successfully:
+```
+TASK_RESULT: {"success": true, "comments": "Brief summary of what was accomplished"}
+```
+
+If you could NOT complete the task (blocked, missing access, error, etc.):
+```
+TASK_RESULT: {"success": false, "comments": "Specific reason why — what was missing or what failed"}
+```
+
+Examples of failure reasons:
+- "GitHub App not installed on repo org/repo — cannot clone or push"
+- "Repository org/repo does not exist or is not accessible"
+- "Pull request #42 was not found"
+- "Required environment variable GH_TOKEN is not set"
+
+This is how the orchestrator knows whether to retry, escalate, or mark the task as done."""
