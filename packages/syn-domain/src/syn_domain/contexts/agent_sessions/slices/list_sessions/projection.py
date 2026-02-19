@@ -369,6 +369,6 @@ class SessionListProjection(CheckpointedProjection):
                     data["error_message"] = error_message
                     await self._store.save(self.PROJECTION_NAME, session.id, data)
                     count += 1
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
         return count

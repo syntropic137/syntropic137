@@ -69,9 +69,10 @@ class GitHubAppSettings(BaseSettings):
     private_key: SecretStr = Field(
         default=SecretStr(""),
         description=(
-            "GitHub App private key in PEM format. "
-            "Generate from: https://github.com/settings/apps/<app>/privatekeys "
-            "Store securely - never commit to git!"
+            "GitHub App private key, base64-encoded. "
+            "Download the .pem from: https://github.com/settings/apps/<app>/privatekeys "
+            "Encode it: cat your-app.pem | base64 | tr -d '\\n' | pbcopy "
+            "Paste the result as the value. Never commit the raw key to git!"
         ),
     )
 

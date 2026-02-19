@@ -1307,7 +1307,7 @@ class WorkflowExecutionEngine:
                                 try:
                                     marker = "TASK_RESULT:"
                                     idx = result_text.rfind(marker)
-                                    raw = result_text[idx + len(marker):].strip()
+                                    raw = result_text[idx + len(marker) :].strip()
                                     # Extract just the JSON object (stop at first newline after })
                                     brace_end = raw.find("}")
                                     if brace_end >= 0:

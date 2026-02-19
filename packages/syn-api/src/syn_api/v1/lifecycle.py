@@ -230,7 +230,11 @@ async def _cleanup_orphaned_containers() -> None:
         try:
             # List matching container IDs
             proc = await asyncio.create_subprocess_exec(
-                "docker", "ps", "-q", "--filter", filter_arg,
+                "docker",
+                "ps",
+                "-q",
+                "--filter",
+                filter_arg,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -241,7 +245,10 @@ async def _cleanup_orphaned_containers() -> None:
 
             logger.warning("Stopping %d orphaned %s container(s): %s", len(ids), label, ids)
             stop_proc = await asyncio.create_subprocess_exec(
-                "docker", "rm", "-f", *ids,
+                "docker",
+                "rm",
+                "-f",
+                *ids,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
