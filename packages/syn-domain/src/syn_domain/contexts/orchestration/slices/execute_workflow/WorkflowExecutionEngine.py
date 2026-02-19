@@ -1289,12 +1289,18 @@ class WorkflowExecutionEngine:
                         )
                         logger.debug("Hook event: %s", enriched.get("event_type"))
 
-                        # Store hook events directly via observability writer
+                        # Store hook events directly via observability writer.
+                        # Merge context + metadata so all rich data (sha, branch, message,
+                        # files_changed, etc.) is stored in the event data column.
                         if self._observability_writer is not None:
+                            _hook_data = {
+                                **(enriched.get("context") or {}),
+                                **(enriched.get("metadata") or {}),
+                            }
                             await self._record_observation(
                                 observation_type=enriched.get("event_type", "unknown"),
                                 session_id=session_id,
-                                data=enriched.get("context", {}),
+                                data=_hook_data,
                                 execution_id=execution_id,
                                 phase_id=phase.phase_id,
                                 workspace_id=workspace_id,
@@ -1517,73 +1523,6 @@ class WorkflowExecutionEngine:
                                             workspace_id=workspace_id,
                                         )
                                         logger.debug("Tool started: %s", tool_name)
-
-                                    # Detect git operations from Bash tool_use commands.
-                                    # Claude Code hook events (PreToolUse) do not appear in
-                                    # stream-json output, so we parse the tool_use content
-                                    # here instead to emit typed git observability events.
-                                    if (
-                                        tool_name == "Bash"
-                                        and self._observability_writer is not None
-                                    ):
-                                        import re as _re
-
-                                        bash_cmd = tool_input.get("command", "") or ""
-                                        if "git commit" in bash_cmd:
-                                            _commit_msg = ""
-                                            _m_idx = bash_cmd.find("-m ")
-                                            if _m_idx >= 0:
-                                                _after = bash_cmd[_m_idx + 3 :].strip()
-                                                if _after.startswith('"') or _after.startswith("'"):
-                                                    _q = _after[0]
-                                                    _end = _after.find(_q, 1)
-                                                    _commit_msg = (
-                                                        _after[1:_end]
-                                                        if _end > 0
-                                                        else _after[1:101]
-                                                    )
-                                                else:
-                                                    _commit_msg = (
-                                                        _after.split()[0] if _after.split() else ""
-                                                    )
-                                            await self._record_observation(
-                                                observation_type="git_commit",
-                                                session_id=session_id,
-                                                data={
-                                                    "command": bash_cmd[:500],
-                                                    "commit_message": _commit_msg[:200],
-                                                    "tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                        elif "git push" in bash_cmd:
-                                            await self._record_observation(
-                                                observation_type="git_push",
-                                                session_id=session_id,
-                                                data={
-                                                    "command": bash_cmd[:500],
-                                                    "tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                        elif _re.search(r"\bgit\s+\w", bash_cmd):
-                                            _m = _re.search(r"\bgit\s+(\w+)", bash_cmd)
-                                            await self._record_observation(
-                                                observation_type="git_operation",
-                                                session_id=session_id,
-                                                data={
-                                                    "operation": _m.group(1) if _m else "unknown",
-                                                    "command": bash_cmd[:500],
-                                                    "tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
 
                                     # ADR-037: Detect Task tool as subagent start (raw CLI format)
                                     if tool_name == "Task" and tool_use_id:
