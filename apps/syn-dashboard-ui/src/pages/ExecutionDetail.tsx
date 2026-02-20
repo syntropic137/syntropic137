@@ -101,13 +101,15 @@ export function ExecutionDetail() {
   // Fetch artifact details when artifact IDs are available
   useEffect(() => {
     if (!execution?.artifact_ids.length) return
-    Promise.all(execution.artifact_ids.map((id) => getArtifact(id))).then((details) => {
+    Promise.allSettled(execution.artifact_ids.map((id) => getArtifact(id))).then((results) => {
       const map: Record<string, ArtifactResponse> = {}
-      details.forEach((d) => {
-        map[d.id] = d
+      results.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          map[result.value.id] = result.value
+        }
       })
       setArtifactDetails(map)
-    }).catch(() => {})
+    })
   }, [execution?.artifact_ids.join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) return <PageLoader />
