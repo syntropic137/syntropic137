@@ -18,6 +18,7 @@ class ExecutionState(str, Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 # Valid transitions: from_state -> set of valid to_states
@@ -28,11 +29,13 @@ VALID_TRANSITIONS: dict[ExecutionState, set[ExecutionState]] = {
         ExecutionState.CANCELLED,
         ExecutionState.COMPLETED,
         ExecutionState.FAILED,
+        ExecutionState.INTERRUPTED,
     },
     ExecutionState.PAUSED: {ExecutionState.RUNNING, ExecutionState.CANCELLED},
     ExecutionState.CANCELLED: set(),  # Terminal state
     ExecutionState.COMPLETED: set(),  # Terminal state
     ExecutionState.FAILED: set(),  # Terminal state
+    ExecutionState.INTERRUPTED: set(),  # Terminal state
 }
 
 
@@ -52,6 +55,7 @@ class ExecutionStateMachine:
             ExecutionState.CANCELLED,
             ExecutionState.COMPLETED,
             ExecutionState.FAILED,
+            ExecutionState.INTERRUPTED,
         }
 
     def can_transition_to(self, target: ExecutionState) -> bool:

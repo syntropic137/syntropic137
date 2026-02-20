@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getControlWebSocketUrl } from '../api/client'
 
-export type ExecutionState = 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed' | 'unknown'
+export type ExecutionState = 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed' | 'interrupted' | 'unknown'
 
 interface ControlMessage {
   type: 'state' | 'result' | 'error'

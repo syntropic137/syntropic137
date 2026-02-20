@@ -593,6 +593,48 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
             timeout_seconds=5,
         )
 
+    async def interrupt(self) -> bool:
+        """Send SIGINT to the Claude CLI process inside the container.
+
+        Uses docker exec to find and signal the claude process:
+            docker exec <container> sh -c "kill -INT $(pgrep -n claude)"
+
+        Returns True if signal was delivered successfully. Non-fatal on failure
+        so cleanup can continue even if the process is already gone.
+        """
+        import asyncio
+
+        container_id = getattr(self.isolation_handle, "container_id", None)
+        if not container_id:
+            logger.warning("interrupt(): no container_id on isolation handle, skipping SIGINT")
+            return False
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "exec",
+                container_id,
+                "sh",
+                "-c",
+                "kill -INT $(pgrep -n claude) 2>/dev/null || true",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            success = proc.returncode == 0
+            if success:
+                logger.info("interrupt(): SIGINT delivered to claude process in %s", container_id)
+            else:
+                logger.warning(
+                    "interrupt(): SIGINT failed (exit=%d) for container %s",
+                    proc.returncode,
+                    container_id,
+                )
+            return success
+        except Exception as e:
+            logger.warning("interrupt(): failed to send SIGINT to %s: %s", container_id, e)
+            return False
+
     @property
     def proxy_url(self) -> str | None:
         """Get the proxy URL for HTTP requests."""

@@ -138,6 +138,7 @@ def status(
         "running": "blue",
         "paused": "yellow",
         "cancelled": "orange3",
+        "interrupted": "orange3",
         "completed": "green",
         "failed": "red",
     }
@@ -155,8 +156,59 @@ def status(
 
             console.print(f"Execution: {execution_id}")
             console.print(f"State: [{color}]{state}[/{color}]")
+
+            # For interrupted state, fetch full detail for additional context
+            if state == "interrupted":
+                detail_response = httpx.get(
+                    f"{url}/api/executions/{execution_id}",
+                    timeout=10.0,
+                )
+                if detail_response.status_code == 200:
+                    detail = detail_response.json()
+                    if detail.get("error_message"):
+                        console.print(f"  Reason: {detail['error_message']}")
+                    if detail.get("completed_at"):
+                        console.print(f"  Interrupted at: {detail['completed_at']}")
+                    if detail.get("git_sha"):
+                        console.print(f"  Git SHA: {detail['git_sha']}")
         else:
             console.print("[red]Failed to get status[/red]")
+            raise typer.Exit(1)
+
+    except httpx.ConnectError:
+        _handle_connect_error(url)
+
+
+@app.command()
+def stop(
+    execution_id: str = typer.Argument(..., help="Execution ID to stop"),
+    reason: str | None = typer.Option(None, "--reason", "-r", help="Reason for stopping"),
+    dashboard_url: str | None = typer.Option(None, "--url", "-u", help="Dashboard API URL"),
+) -> None:
+    """Forcefully stop a running execution (no confirmation prompt).
+
+    Sends a cancel signal that causes the engine to interrupt the Claude CLI
+    process via SIGINT and capture partial output as an interrupted execution.
+    """
+    url = _get_dashboard_url(dashboard_url)
+    stop_reason = reason or "Stopped by user via aef stop"
+
+    try:
+        response = httpx.post(
+            f"{url}/api/executions/{execution_id}/cancel",
+            json={"reason": stop_reason},
+            timeout=10.0,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            console.print(f"[orange3]Stop signal sent for execution {execution_id}[/orange3]")
+            console.print(f"  State: {data.get('state', 'unknown')}")
+            if data.get("message"):
+                console.print(f"  Message: {data['message']}")
+        else:
+            error = response.json().get("detail", "Unknown error")
+            console.print(f"[red]Failed to stop: {error}[/red]")
             raise typer.Exit(1)
 
     except httpx.ConnectError:

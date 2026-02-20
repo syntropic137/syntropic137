@@ -13,6 +13,7 @@ const statusColors: Record<string, { bg: string; text: string; ring: string }> =
   completed: { bg: 'bg-emerald-500/20', text: 'text-emerald-400', ring: 'ring-emerald-500/30' },
   failed: { bg: 'bg-red-500/20', text: 'text-red-400', ring: 'ring-red-500/30' },
   cancelled: { bg: 'bg-amber-500/20', text: 'text-amber-400', ring: 'ring-amber-500/30' },
+  interrupted: { bg: 'bg-orange-500/20', text: 'text-orange-400', ring: 'ring-orange-500/30' },
   skipped: { bg: 'bg-slate-500/20', text: 'text-slate-400', ring: 'ring-slate-500/30' },
 }
 

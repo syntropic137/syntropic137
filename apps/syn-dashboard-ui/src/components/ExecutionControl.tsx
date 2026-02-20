@@ -18,6 +18,7 @@ function StateIndicator({ state }: { state: ExecutionState }) {
     cancelled: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Cancelled' },
     completed: { bg: 'bg-green-100', text: 'text-green-700', label: 'Completed' },
     failed: { bg: 'bg-red-100', text: 'text-red-700', label: 'Failed' },
+    interrupted: { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Interrupted' },
     unknown: { bg: 'bg-gray-100', text: 'text-gray-500', label: 'Unknown' },
   }
 

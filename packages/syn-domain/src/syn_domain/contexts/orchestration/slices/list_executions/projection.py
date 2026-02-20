@@ -28,6 +28,7 @@ _SUBSCRIBED_EVENTS = {
     "PhaseCompleted",
     "WorkflowCompleted",
     "WorkflowFailed",
+    "WorkflowInterrupted",
 }
 
 
@@ -88,6 +89,8 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
                 await self.on_workflow_completed(event_data)
             elif event_type == "WorkflowFailed":
                 await self.on_workflow_failed(event_data)
+            elif event_type == "WorkflowInterrupted":
+                await self.on_workflow_interrupted(event_data)
             else:
                 # Unknown event type - skip but advance checkpoint
                 pass
@@ -264,6 +267,22 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
         if existing:
             existing["status"] = "cancelled"
             existing["completed_at"] = event_data.get("cancelled_at")
+            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_workflow_interrupted(self, event_data: dict) -> None:
+        """Handle WorkflowInterrupted event.
+
+        Marks execution as interrupted (forceful stop via SIGINT).
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if existing:
+            existing["status"] = "interrupted"
+            existing["completed_at"] = event_data.get("interrupted_at")
+            existing["error_message"] = event_data.get("reason") or "Interrupted by user"
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def get_by_workflow_id(self, workflow_id: str) -> list[WorkflowExecutionSummary]:

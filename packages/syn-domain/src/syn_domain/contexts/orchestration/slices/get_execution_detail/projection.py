@@ -30,6 +30,7 @@ _SUBSCRIBED_EVENTS = {
     "PhaseCompleted",
     "WorkflowCompleted",
     "WorkflowFailed",
+    "WorkflowInterrupted",
 }
 
 
@@ -90,6 +91,8 @@ class WorkflowExecutionDetailProjection(CheckpointedProjection):
                 await self.on_workflow_completed(event_data)
             elif event_type == "WorkflowFailed":
                 await self.on_workflow_failed(event_data)
+            elif event_type == "WorkflowInterrupted":
+                await self.on_workflow_interrupted(event_data)
 
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(
@@ -390,6 +393,35 @@ class WorkflowExecutionDetailProjection(CheckpointedProjection):
             for phase in existing.get("phases", []):
                 if phase.get("phase_id") == phase_id:
                     phase["status"] = "cancelled"
+                    break
+
+        await self._store.save(self.PROJECTION_NAME, execution_id, existing)
+
+    async def on_workflow_interrupted(self, event_data: dict) -> None:
+        """Handle WorkflowInterrupted event.
+
+        Marks execution as interrupted (forceful stop via SIGINT) and captures
+        the git SHA at the time of interruption.
+        """
+        execution_id = event_data.get("execution_id")
+        if not execution_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if not existing:
+            return
+
+        existing["status"] = "interrupted"
+        existing["completed_at"] = event_data.get("interrupted_at")
+        existing["error_message"] = event_data.get("reason") or "Interrupted by user"
+        existing["git_sha"] = event_data.get("git_sha")
+
+        # Mark interrupted phase
+        phase_id = event_data.get("phase_id")
+        if phase_id:
+            for phase in existing.get("phases", []):
+                if phase.get("phase_id") == phase_id:
+                    phase["status"] = "interrupted"
                     break
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)

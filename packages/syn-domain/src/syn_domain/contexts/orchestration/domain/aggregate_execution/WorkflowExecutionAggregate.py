@@ -207,6 +207,34 @@ class CancelExecutionCommand:
         self.reason = reason
 
 
+class InterruptExecutionCommand:
+    """Command to forcefully interrupt a workflow execution mid-stream.
+
+    Distinct from CancelExecutionCommand (cooperative cancel) — this command
+    represents a forceful stop via SIGINT to the Claude CLI process, capturing
+    partial state (git SHA, partial artifacts, partial token counts).
+    """
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        git_sha: str | None = None,
+        partial_artifact_ids: list[str] | None = None,
+        reason: str | None = None,
+        partial_input_tokens: int = 0,
+        partial_output_tokens: int = 0,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.git_sha = git_sha
+        self.partial_artifact_ids = partial_artifact_ids or []
+        self.reason = reason
+        self.partial_input_tokens = partial_input_tokens
+        self.partial_output_tokens = partial_output_tokens
+
+
 # =============================================================================
 # Aggregate
 # =============================================================================
@@ -519,6 +547,38 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         )
         self._apply(event)  # type: ignore[arg-type]
 
+    @command_handler("InterruptExecutionCommand")
+    def interrupt_execution(self, command: InterruptExecutionCommand) -> None:
+        """Handle InterruptExecutionCommand.
+
+        Forceful interrupt: engine received CANCEL signal mid-streaming, sent SIGINT
+        to Claude CLI, and captured partial state. Distinct from CancelExecutionCommand
+        (cooperative user cancel via control plane).
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowInterruptedEvent import (
+            WorkflowInterruptedEvent,
+        )
+
+        if self.id is None:
+            msg = "Cannot interrupt execution that has not been started"
+            raise ValueError(msg)
+        if self._status not in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED):
+            msg = f"Cannot interrupt execution in status {self._status}"
+            raise ValueError(msg)
+
+        event = WorkflowInterruptedEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            interrupted_at=datetime.now(UTC),
+            reason=command.reason,
+            git_sha=command.git_sha,
+            partial_artifact_ids=command.partial_artifact_ids,
+            partial_input_tokens=command.partial_input_tokens,
+            partial_output_tokens=command.partial_output_tokens,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
     # =========================================================================
     # CONTROL PLANE EVENT SOURCING HANDLERS
     # =========================================================================
@@ -542,3 +602,13 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
             self._completed_at = data.get("cancelled_at")
         self._status = ExecutionStatus.CANCELLED
+
+    @event_sourcing_handler("WorkflowInterrupted")
+    def on_execution_interrupted(self, event: Any) -> None:
+        """Apply WorkflowInterruptedEvent."""
+        if hasattr(event, "interrupted_at"):
+            self._completed_at = event.interrupted_at
+        else:
+            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._completed_at = data.get("interrupted_at")
+        self._status = ExecutionStatus.INTERRUPTED

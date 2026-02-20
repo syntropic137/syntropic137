@@ -86,6 +86,7 @@ async def get_execution_engine() -> WorkflowExecutionEngine:
         artifact_query_service=artifact_query,
         artifact_content_storage=artifact_storage,
         conversation_storage=conversation_storage,
+        controller=get_controller(),
     )
 
 

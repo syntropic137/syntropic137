@@ -221,3 +221,106 @@ class TestWorkflowExecutionListProjection:
         # Should be sorted by started_at descending (most recent first)
         assert executions[0].workflow_execution_id == "exec-2"
         assert executions[1].workflow_execution_id == "exec-1"
+
+
+@pytest.mark.unit
+class TestWorkflowInterruptedProjection:
+    """T-3: Tests for on_workflow_interrupted handler in list_executions projection."""
+
+    @pytest.fixture
+    def mock_store(self) -> AsyncMock:
+        return AsyncMock()
+
+    @pytest.mark.asyncio
+    async def test_sets_interrupted_status(self, mock_store: AsyncMock) -> None:
+        """WorkflowInterrupted event sets status to 'interrupted'."""
+        from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        mock_store.get = AsyncMock(
+            return_value={
+                "workflow_execution_id": "exec-1",
+                "workflow_id": "wf-1",
+                "status": "running",
+                "completed_phases": 0,
+                "total_phases": 2,
+                "total_tokens": 50,
+                "total_cost_usd": "0",
+            }
+        )
+        mock_store.save = AsyncMock()
+
+        projection = WorkflowExecutionListProjection(mock_store)
+        await projection.on_workflow_interrupted(
+            {
+                "execution_id": "exec-1",
+                "workflow_id": "wf-1",
+                "phase_id": "p-1",
+                "interrupted_at": "2026-02-20T10:00:00Z",
+                "git_sha": "abc123",
+                "reason": "User stopped",
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        saved = mock_store.save.call_args[0][2]
+        assert saved["status"] == "interrupted"
+        assert saved["completed_at"] == "2026-02-20T10:00:00Z"
+        assert saved["error_message"] == "User stopped"
+
+    @pytest.mark.asyncio
+    async def test_missing_execution_is_noop(self, mock_store: AsyncMock) -> None:
+        """Graceful no-op when execution_id not found in projection store."""
+        from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        mock_store.get = AsyncMock(return_value=None)
+        mock_store.save = AsyncMock()
+
+        projection = WorkflowExecutionListProjection(mock_store)
+        # Should not raise
+        await projection.on_workflow_interrupted(
+            {
+                "execution_id": "nonexistent",
+                "workflow_id": "wf-1",
+                "phase_id": "p-1",
+                "interrupted_at": "2026-02-20T10:00:00Z",
+                "reason": "User stopped",
+            }
+        )
+
+        mock_store.save.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_reason_uses_default_message(self, mock_store: AsyncMock) -> None:
+        """When reason is None, a default error_message is used."""
+        from syn_domain.contexts.orchestration.slices.list_executions.projection import (
+            WorkflowExecutionListProjection,
+        )
+
+        mock_store.get = AsyncMock(
+            return_value={
+                "workflow_execution_id": "exec-1",
+                "workflow_id": "wf-1",
+                "status": "running",
+                "total_tokens": 0,
+                "total_cost_usd": "0",
+            }
+        )
+        mock_store.save = AsyncMock()
+
+        projection = WorkflowExecutionListProjection(mock_store)
+        await projection.on_workflow_interrupted(
+            {
+                "execution_id": "exec-1",
+                "workflow_id": "wf-1",
+                "phase_id": "p-1",
+                "interrupted_at": "2026-02-20T10:00:00Z",
+                "reason": None,
+            }
+        )
+
+        saved = mock_store.save.call_args[0][2]
+        assert saved["error_message"] == "Interrupted by user"
