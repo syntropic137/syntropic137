@@ -196,11 +196,11 @@ async def get_session(
     try:
         cost = await manager.session_cost.get_session_cost(session_id)
         if cost:
-            input_tokens = getattr(cost, "input_tokens", 0)
-            output_tokens = getattr(cost, "output_tokens", 0)
-            total_cost = getattr(cost, "total_cost_usd", session.total_cost_usd)
-            if getattr(cost, "duration_ms", 0):
-                duration_seconds = getattr(cost, "duration_ms", 0) / 1000.0
+            input_tokens = cost.input_tokens
+            output_tokens = cost.output_tokens
+            total_cost = cost.total_cost_usd
+            if cost.duration_ms:
+                duration_seconds = cost.duration_ms / 1000.0
     except Exception:
         logger.exception("Failed to load cost data for session %s", session_id)
 

@@ -394,3 +394,285 @@ class TestSessionSummaryToDict:
         result = summary.to_dict()
         assert result["started_at"] is None
         assert result["completed_at"] is None
+
+
+# ---------------------------------------------------------------------------
+# Subagent tests — moved from syn_tests/integration/test_subagent_observability.py (#115)
+# ---------------------------------------------------------------------------
+
+from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (  # noqa: E402
+    SubagentRecord,
+)
+
+
+@pytest.mark.unit
+class TestSubagentRecord:
+    """Test SubagentRecord dataclass."""
+
+    def test_create_subagent_record(self) -> None:
+        """Can create a SubagentRecord with all fields."""
+        record = SubagentRecord(
+            subagent_tool_use_id="toolu_123",
+            agent_name="research-agent",
+            started_at="2025-01-08T10:00:00Z",
+            stopped_at="2025-01-08T10:01:00Z",
+            duration_ms=60000,
+            tools_used={"Read": 5, "Write": 2},
+            success=True,
+        )
+
+        assert record.subagent_tool_use_id == "toolu_123"
+        assert record.agent_name == "research-agent"
+        assert record.duration_ms == 60000
+        assert record.tools_used["Read"] == 5
+        assert record.success is True
+
+    def test_subagent_record_from_dict(self) -> None:
+        """Can create SubagentRecord from dictionary."""
+        data = {
+            "subagent_tool_use_id": "toolu_456",
+            "agent_name": "coding-agent",
+            "started_at": "2025-01-08T10:00:00Z",
+            "stopped_at": "2025-01-08T10:02:00Z",
+            "duration_ms": 120000,
+            "tools_used": {"Bash": 10, "Edit": 3},
+            "success": True,
+        }
+
+        record = SubagentRecord.from_dict(data)
+
+        assert record.subagent_tool_use_id == "toolu_456"
+        assert record.agent_name == "coding-agent"
+        assert record.duration_ms == 120000
+        assert record.tools_used["Bash"] == 10
+
+    def test_subagent_record_to_dict(self) -> None:
+        """SubagentRecord can be serialized to dict."""
+        record = SubagentRecord(
+            subagent_tool_use_id="toolu_789",
+            agent_name="test-agent",
+            duration_ms=5000,
+            tools_used={"Read": 1},
+            success=True,
+        )
+
+        data = record.to_dict()
+
+        assert data["subagent_tool_use_id"] == "toolu_789"
+        assert data["agent_name"] == "test-agent"
+        assert data["duration_ms"] == 5000
+        assert data["tools_used"] == {"Read": 1}
+
+
+@pytest.mark.unit
+class TestSessionSummarySubagentFields:
+    """Test SessionSummary subagent-related fields."""
+
+    def test_session_summary_with_subagents(self) -> None:
+        """SessionSummary can include subagent metrics."""
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+            SessionSummary as DomainSessionSummary,
+        )
+
+        subagent1 = SubagentRecord(
+            subagent_tool_use_id="toolu_1",
+            agent_name="research",
+            duration_ms=30000,
+            tools_used={"Read": 5},
+            success=True,
+        )
+        subagent2 = SubagentRecord(
+            subagent_tool_use_id="toolu_2",
+            agent_name="coding",
+            duration_ms=60000,
+            tools_used={"Bash": 10, "Edit": 3},
+            success=True,
+        )
+
+        summary = DomainSessionSummary(
+            id="session-123",
+            workflow_id="workflow-456",
+            agent_type="claude-3-5-sonnet",
+            status="completed",
+            total_tokens=10000,
+            total_cost_usd=Decimal("0.05"),
+            started_at=None,
+            completed_at=None,
+            subagent_count=2,
+            subagents=(subagent1, subagent2),
+            tools_by_subagent={
+                "research": {"Read": 5},
+                "coding": {"Bash": 10, "Edit": 3},
+            },
+            num_turns=5,
+        )
+
+        assert summary.subagent_count == 2
+        assert len(summary.subagents) == 2
+        assert summary.subagents[0].agent_name == "research"
+        assert summary.subagents[1].agent_name == "coding"
+        assert summary.tools_by_subagent["coding"]["Bash"] == 10
+        assert summary.num_turns == 5
+
+    def test_session_summary_from_dict_with_subagents(self) -> None:
+        """SessionSummary.from_dict correctly parses subagent data."""
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+            SessionSummary as DomainSessionSummary,
+        )
+
+        data = {
+            "id": "session-abc",
+            "workflow_id": "workflow-xyz",
+            "agent_type": "claude-3-5-sonnet",
+            "status": "completed",
+            "total_tokens": 5000,
+            "total_cost_usd": "0.025",
+            "subagent_count": 1,
+            "subagents": [
+                {
+                    "subagent_tool_use_id": "toolu_test",
+                    "agent_name": "helper",
+                    "duration_ms": 15000,
+                    "tools_used": {"Read": 3},
+                    "success": True,
+                }
+            ],
+            "tools_by_subagent": {"helper": {"Read": 3}},
+            "num_turns": 3,
+            "duration_api_ms": 12500,
+        }
+
+        summary = DomainSessionSummary.from_dict(data)
+
+        assert summary.subagent_count == 1
+        assert len(summary.subagents) == 1
+        assert summary.subagents[0].agent_name == "helper"
+        assert summary.subagents[0].duration_ms == 15000
+        assert summary.tools_by_subagent["helper"]["Read"] == 3
+        assert summary.num_turns == 3
+        assert summary.duration_api_ms == 12500
+
+    def test_session_summary_to_dict_with_subagents(self) -> None:
+        """SessionSummary.to_dict correctly serializes subagent data."""
+        from syn_domain.contexts.agent_sessions.domain.read_models.session_summary import (
+            SessionSummary as DomainSessionSummary,
+        )
+
+        subagent = SubagentRecord(
+            subagent_tool_use_id="toolu_ser",
+            agent_name="serialization-test",
+            duration_ms=1000,
+            tools_used={"Test": 1},
+            success=True,
+        )
+
+        summary = DomainSessionSummary(
+            id="session-ser",
+            workflow_id="workflow-ser",
+            agent_type="test",
+            status="completed",
+            total_tokens=100,
+            total_cost_usd=Decimal("0.001"),
+            started_at=None,
+            completed_at=None,
+            subagent_count=1,
+            subagents=(subagent,),
+            tools_by_subagent={"serialization-test": {"Test": 1}},
+            num_turns=1,
+            duration_api_ms=500,
+        )
+
+        data = summary.to_dict()
+
+        assert data["subagent_count"] == 1
+        assert len(data["subagents"]) == 1
+        assert data["subagents"][0]["agent_name"] == "serialization-test"
+        assert data["tools_by_subagent"]["serialization-test"]["Test"] == 1
+        assert data["num_turns"] == 1
+        assert data["duration_api_ms"] == 500
+
+
+@pytest.mark.unit
+class TestProjectionSubagentHandlers:
+    """Test projection handlers for subagent events."""
+
+    @pytest.mark.asyncio
+    async def test_session_list_projection_handles_subagent_started(self) -> None:
+        """SessionListProjection.on_subagent_started creates subagent record."""
+        from unittest.mock import AsyncMock
+
+        mock_store = AsyncMock()
+        mock_store.get.return_value = {
+            "id": "session-123",
+            "workflow_id": "workflow-456",
+            "status": "running",
+            "subagents": [],
+            "subagent_count": 0,
+        }
+
+        proj = SessionListProjection(mock_store)
+
+        await proj.on_subagent_started(
+            {
+                "session_id": "session-123",
+                "subagent_tool_use_id": "toolu_abc",
+                "agent_name": "research-agent",
+                "timestamp": "2025-01-08T10:00:00Z",
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        call_args = mock_store.save.call_args
+        saved_data = call_args[0][2]
+
+        assert saved_data["subagent_count"] == 1
+        assert len(saved_data["subagents"]) == 1
+        assert saved_data["subagents"][0]["agent_name"] == "research-agent"
+
+    @pytest.mark.asyncio
+    async def test_session_list_projection_handles_subagent_stopped(self) -> None:
+        """SessionListProjection.on_subagent_stopped updates subagent record."""
+        from unittest.mock import AsyncMock
+
+        mock_store = AsyncMock()
+        mock_store.get.return_value = {
+            "id": "session-123",
+            "workflow_id": "workflow-456",
+            "status": "running",
+            "subagents": [
+                {
+                    "subagent_tool_use_id": "toolu_abc",
+                    "agent_name": "research-agent",
+                    "started_at": "2025-01-08T10:00:00Z",
+                    "stopped_at": None,
+                    "duration_ms": None,
+                    "tools_used": {},
+                    "success": True,
+                }
+            ],
+            "subagent_count": 1,
+            "tools_by_subagent": {},
+        }
+
+        proj = SessionListProjection(mock_store)
+
+        await proj.on_subagent_stopped(
+            {
+                "session_id": "session-123",
+                "subagent_tool_use_id": "toolu_abc",
+                "agent_name": "research-agent",
+                "timestamp": "2025-01-08T10:01:00Z",
+                "duration_ms": 60000,
+                "tools_used": {"Read": 5, "Write": 2},
+                "success": True,
+            }
+        )
+
+        mock_store.save.assert_called_once()
+        call_args = mock_store.save.call_args
+        saved_data = call_args[0][2]
+
+        assert saved_data["subagents"][0]["duration_ms"] == 60000
+        assert saved_data["subagents"][0]["tools_used"]["Read"] == 5
+        assert "research-agent" in saved_data["tools_by_subagent"]
+        assert saved_data["tools_by_subagent"]["research-agent"]["Read"] == 5

@@ -149,7 +149,6 @@ just install            # Install dependencies (uses uv sync)
 # Development
 just dev-fresh          # Clean start: reset DB + start full stack + seed
 just dev                # Start Docker services only
-just dev-force          # Force start (kills existing processes)
 just dev-down           # Stop all services
 
 # Quality Assurance

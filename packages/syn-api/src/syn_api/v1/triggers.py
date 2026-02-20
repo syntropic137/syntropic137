@@ -237,8 +237,8 @@ async def list_triggers(
                 repository=t.repository,
                 workflow_id=t.workflow_id,
                 status=t.status,
-                fire_count=getattr(t, "fire_count", 0),
-                created_at=getattr(t, "created_at", None),
+                fire_count=t.fire_count,
+                created_at=t.created_at if hasattr(t, "created_at") else None,
             )
             for t in triggers
         ]
@@ -273,14 +273,14 @@ async def get_trigger(
             repository=indexed.repository,
             workflow_id=indexed.workflow_id,
             status=indexed.status,
-            fire_count=getattr(indexed, "fire_count", 0),
-            created_at=getattr(indexed, "created_at", None),
+            fire_count=indexed.fire_count,
+            created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
             conditions=list(indexed.conditions) if indexed.conditions else [],
             input_mapping=dict(indexed.input_mapping) if indexed.input_mapping else {},
             config=dict(indexed.config) if isinstance(indexed.config, dict) else {},
-            installation_id=getattr(indexed, "installation_id", "") or "",
-            created_by=getattr(indexed, "created_by", "") or "",
-            last_fired_at=getattr(indexed, "last_fired_at", None),
+            installation_id=indexed.installation_id or "",
+            created_by=indexed.created_by or "",
+            last_fired_at=indexed.last_fired_at if hasattr(indexed, "last_fired_at") else None,
         )
     )
 
@@ -322,6 +322,7 @@ def get_trigger_history(
             TriggerHistoryEntry(
                 trigger_id=e.trigger_id,
                 execution_id=e.execution_id,
+                webhook_delivery_id=e.webhook_delivery_id,
                 github_event_type=e.github_event_type,
                 repository=e.repository,
                 pr_number=e.pr_number,

@@ -49,12 +49,12 @@ async def get_tool_timeline(
         for op in (operations or [])[:limit]:
             result.append(
                 {
-                    "observation_id": getattr(op, "observation_id", ""),
-                    "operation_type": getattr(op, "operation_type", ""),
-                    "tool_name": getattr(op, "tool_name", None),
-                    "timestamp": str(getattr(op, "timestamp", "")),
-                    "duration_ms": getattr(op, "duration_ms", None),
-                    "success": getattr(op, "success", None),
+                    "observation_id": op.observation_id,
+                    "operation_type": op.operation_type,
+                    "tool_name": op.tool_name,
+                    "timestamp": str(op.timestamp),
+                    "duration_ms": op.duration_ms,
+                    "success": op.success,
                 }
             )
         return Ok(result)
@@ -91,12 +91,12 @@ async def get_token_metrics(
             return Ok(
                 {
                     "session_id": session_id,
-                    "input_tokens": getattr(cost, "input_tokens", 0),
-                    "output_tokens": getattr(cost, "output_tokens", 0),
-                    "total_tokens": getattr(cost, "total_tokens", 0),
-                    "total_cost_usd": str(getattr(cost, "total_cost_usd", 0)),
-                    "cache_creation_tokens": getattr(cost, "cache_creation_tokens", 0),
-                    "cache_read_tokens": getattr(cost, "cache_read_tokens", 0),
+                    "input_tokens": cost.input_tokens,
+                    "output_tokens": cost.output_tokens,
+                    "total_tokens": cost.total_tokens,
+                    "total_cost_usd": str(cost.total_cost_usd),
+                    "cache_creation_tokens": cost.cache_creation_tokens,
+                    "cache_read_tokens": cost.cache_read_tokens,
                 }
             )
 
@@ -110,10 +110,10 @@ async def get_token_metrics(
             return Ok(
                 {
                     "execution_id": execution_id,
-                    "input_tokens": getattr(exec_cost, "input_tokens", 0),
-                    "output_tokens": getattr(exec_cost, "output_tokens", 0),
-                    "total_tokens": getattr(exec_cost, "total_tokens", 0),
-                    "total_cost_usd": str(getattr(exec_cost, "total_cost_usd", 0)),
+                    "input_tokens": exec_cost.input_tokens,
+                    "output_tokens": exec_cost.output_tokens,
+                    "total_tokens": exec_cost.total_tokens,
+                    "total_cost_usd": str(exec_cost.total_cost_usd),
                 }
             )
 
@@ -188,11 +188,11 @@ async def get_session_timeline(
         return Ok(
             [
                 TimelineEntry(
-                    time=getattr(op, "timestamp", None),
-                    event_type=getattr(op, "operation_type", ""),
-                    tool_name=getattr(op, "tool_name", None),
-                    duration_ms=getattr(op, "duration_ms", None),
-                    success=getattr(op, "success", None),
+                    time=op.timestamp,
+                    event_type=op.operation_type,
+                    tool_name=op.tool_name,
+                    duration_ms=op.duration_ms,
+                    success=op.success,
                 )
                 for op in (operations or [])[:limit]
             ]
@@ -218,7 +218,7 @@ async def get_session_tool_summary(
 
         tool_stats: dict[str, dict] = {}
         for op in operations or []:
-            name = getattr(op, "tool_name", None) or "unknown"
+            name = op.tool_name or "unknown"
             if name not in tool_stats:
                 tool_stats[name] = {
                     "call_count": 0,
@@ -227,11 +227,11 @@ async def get_session_tool_summary(
                     "total_duration_ms": 0.0,
                 }
             tool_stats[name]["call_count"] += 1
-            if getattr(op, "success", None) is True:
+            if op.success is True:
                 tool_stats[name]["success_count"] += 1
-            elif getattr(op, "success", None) is False:
+            elif op.success is False:
                 tool_stats[name]["error_count"] += 1
-            tool_stats[name]["total_duration_ms"] += getattr(op, "duration_ms", 0) or 0
+            tool_stats[name]["total_duration_ms"] += op.duration_ms or 0
 
         return Ok(
             [

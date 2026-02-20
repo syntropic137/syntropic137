@@ -176,7 +176,7 @@ async def get_trigger_history(
             {
                 "fired_at": e.fired_at.isoformat() if e.fired_at else None,
                 "execution_id": e.execution_id,
-                "webhook_delivery_id": getattr(e, "webhook_delivery_id", None),
+                "webhook_delivery_id": e.webhook_delivery_id,
                 "event_type": e.github_event_type,
                 "pr_number": e.pr_number,
                 "status": e.status,

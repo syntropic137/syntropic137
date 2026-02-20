@@ -46,11 +46,13 @@ export async function listWorkflows(params?: {
   workflow_type?: string
   page?: number
   page_size?: number
+  order_by?: string
 }): Promise<WorkflowListResponse> {
   const searchParams = new URLSearchParams()
   if (params?.workflow_type) searchParams.set('workflow_type', params.workflow_type)
   if (params?.page) searchParams.set('page', String(params.page))
   if (params?.page_size) searchParams.set('page_size', String(params.page_size))
+  if (params?.order_by) searchParams.set('order_by', params.order_by)
 
   const query = searchParams.toString()
   return fetchJSON(`${API_BASE}/workflows${query ? `?${query}` : ''}`)

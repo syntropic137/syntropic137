@@ -66,7 +66,7 @@ async def get_session(session_id: str) -> SessionResponse:
     for op in detail.operations or []:
         # Parse tool input if available
         tool_input_dict: dict[str, Any] | None = None
-        input_preview = getattr(op, "input_preview", None)
+        input_preview = op.input_preview
         if input_preview:
             import json
 
@@ -86,25 +86,25 @@ async def get_session(session_id: str) -> SessionResponse:
                 tool_name=op.tool_name,
                 tool_use_id=op.tool_use_id,
                 tool_input=tool_input_dict,
-                tool_output=getattr(op, "output_preview", None),
-                git_sha=getattr(op, "git_sha", None),
-                git_message=getattr(op, "git_message", None),
-                git_branch=getattr(op, "git_branch", None),
-                git_repo=getattr(op, "git_repo", None),
+                tool_output=op.output_preview,
+                git_sha=op.git_sha,
+                git_message=op.git_message,
+                git_branch=op.git_branch,
+                git_repo=op.git_repo,
             )
         )
 
     return SessionResponse(
         id=detail.id,
         workflow_id=detail.workflow_id,
-        workflow_name=getattr(detail, "workflow_name", None),
+        workflow_name=detail.workflow_name,
         execution_id=detail.execution_id,
         phase_id=detail.phase_id,
         milestone_id=None,
         agent_provider=detail.agent_type,
         agent_model=None,
         status=detail.status,
-        workspace_path=getattr(detail, "workspace_path", None),
+        workspace_path=detail.workspace_path,
         input_tokens=detail.input_tokens,
         output_tokens=detail.output_tokens,
         total_tokens=detail.total_tokens,

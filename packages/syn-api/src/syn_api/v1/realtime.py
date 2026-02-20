@@ -38,7 +38,7 @@ async def get_realtime_health(
     projection = get_realtime()
     return Ok(
         RealtimeHealth(
-            active_executions=getattr(projection, "execution_count", 0),
-            active_connections=getattr(projection, "connection_count", 0),
+            active_executions=projection.execution_count,
+            active_connections=projection.connection_count,
         )
     )

@@ -31,38 +31,48 @@ async def list_workflows(
     workflow_type: str | None = Query(None, description="Filter by workflow type"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    order_by: str | None = Query(None, description="Sort field (prefix with - for descending)"),
 ) -> WorkflowListResponse:
     """List all workflow templates."""
     offset = (page - 1) * page_size
-    result = await wf.list_workflows(
-        workflow_type=workflow_type,
-        limit=page_size,
-        offset=offset,
-    )
 
-    if isinstance(result, Err):
-        raise HTTPException(status_code=500, detail=result.message)
-
-    # Get total count
-    total_result = await wf.list_workflows(
+    # Fetch all matching workflows up to a reasonable cap for in-memory sort + total count.
+    # Workflow templates are system-level configs (not user data), so 500 is more than sufficient.
+    # TODO: push ORDER BY + COUNT into domain projection query to avoid this fetch.
+    all_result = await wf.list_workflows(
         workflow_type=workflow_type,
-        limit=10000,
+        limit=500,
         offset=0,
     )
-    total = len(total_result.value) if not isinstance(total_result, Err) else 0
+
+    if isinstance(all_result, Err):
+        raise HTTPException(status_code=500, detail=all_result.message)
+
+    summaries = [
+        WorkflowSummary(
+            id=s.id,
+            name=s.name,
+            workflow_type=s.workflow_type,
+            phase_count=s.phase_count,
+            created_at=s.created_at,
+            runs_count=s.runs_count,
+        )
+        for s in all_result.value
+    ]
+
+    # Apply sort order before pagination (only reached when order_by is set)
+    if order_by:
+        desc = order_by.startswith("-")
+        field = order_by.lstrip("-")
+        valid_fields = {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
+        if field in valid_fields:
+            summaries.sort(key=lambda s: getattr(s, field) or 0, reverse=desc)
+
+    total = len(summaries)
+    page_items = summaries[offset : offset + page_size]
 
     return WorkflowListResponse(
-        workflows=[
-            WorkflowSummary(
-                id=s.id,
-                name=s.name,
-                workflow_type=s.workflow_type,
-                phase_count=s.phase_count,
-                created_at=s.created_at,
-                runs_count=s.runs_count,
-            )
-            for s in result.value
-        ],
+        workflows=page_items,
         total=total,
         page=page,
         page_size=page_size,
@@ -96,14 +106,14 @@ async def get_workflow(workflow_id: str) -> WorkflowResponse:
         else:
             phases.append(
                 PhaseDefinition(
-                    phase_id=getattr(p, "id", f"phase-{i}"),
-                    name=getattr(p, "name", f"Phase {i}"),
-                    order=getattr(p, "order", i),
-                    description=getattr(p, "description", None),
-                    agent_type=getattr(p, "agent_type", ""),
-                    prompt_template=getattr(p, "prompt_template", None),
-                    timeout_seconds=getattr(p, "timeout_seconds", 300),
-                    allowed_tools=list(getattr(p, "allowed_tools", [])),
+                    phase_id=p.phase_id,
+                    name=p.name if hasattr(p, "name") else f"Phase {i}",
+                    order=p.order if hasattr(p, "order") else i,
+                    description=p.description if hasattr(p, "description") else None,
+                    agent_type=p.agent_type if hasattr(p, "agent_type") else "",
+                    prompt_template=p.prompt_template if hasattr(p, "prompt_template") else None,
+                    timeout_seconds=p.timeout_seconds if hasattr(p, "timeout_seconds") else 300,
+                    allowed_tools=list(p.allowed_tools) if hasattr(p, "allowed_tools") else [],
                 )
             )
 
