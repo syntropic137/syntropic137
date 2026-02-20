@@ -15,6 +15,8 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["websocket"])
 
+_ACTIVITY_CHANNEL = "_activity_"
+
 
 @router.websocket("/ws/executions/{execution_id}")
 async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
@@ -91,7 +93,7 @@ async def activity_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     realtime = rt.get_realtime_projection_ref()
 
-    await realtime.connect("_activity_", websocket)
+    await realtime.connect(_ACTIVITY_CHANNEL, websocket)
 
     try:
         await websocket.send_json(
@@ -112,7 +114,7 @@ async def activity_websocket(websocket: WebSocket) -> None:
         with contextlib.suppress(Exception):
             await websocket.send_json({"type": "error", "error": str(e)})
     finally:
-        await realtime.disconnect("_activity_", websocket)
+        await realtime.disconnect(_ACTIVITY_CHANNEL, websocket)
 
 
 @router.get("/ws/health")

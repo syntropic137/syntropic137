@@ -117,7 +117,7 @@ async def _record_push_commits(payload: dict[str, Any], delivery_id: str) -> Non
         await store.insert_one(
             {
                 "event_type": "git_commit",
-                "session_id": delivery_id,
+                "session_id": f"github_delivery:{delivery_id}",
                 "data": data,
             }
         )
