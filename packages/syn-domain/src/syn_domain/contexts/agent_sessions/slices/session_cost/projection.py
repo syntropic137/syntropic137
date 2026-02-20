@@ -364,12 +364,12 @@ class SessionCostProjection:
                     """
                     SELECT COUNT(*)
                     FROM agent_events
-                    WHERE session_id = $1 AND event_type = 'tool_completed'
+                    WHERE session_id = $1 AND event_type = 'tool_execution_completed'
                     """,
                     session_id,
                 )
 
-            # Get started_at from session_started event
+            # Get started_at from session_started event, or fall back to first token_usage
             started_at = await conn.fetchval(
                 """
                 SELECT MIN(time)
@@ -378,6 +378,8 @@ class SessionCostProjection:
                 """,
                 session_id,
             )
+            if started_at is None and token_result is not None:
+                started_at = token_result.get("started_at")
 
             # Get token counts
             input_tokens = token_result["total_input"] or 0
@@ -412,6 +414,15 @@ class SessionCostProjection:
             session_cost.execution_id = token_result.get("execution_id")
             session_cost.phase_id = token_result.get("phase_id")
             session_cost.workspace_id = token_result.get("workspace_id")
+
+            # Compute duration and completed_at from timestamps
+            completed_at = (
+                exec_result["completed_at"] if exec_result else token_result.get("last_observation")
+            )
+            if completed_at:
+                session_cost.completed_at = completed_at
+            if started_at and completed_at:
+                session_cost.duration_ms = (completed_at - started_at).total_seconds() * 1000
 
             return session_cost
 

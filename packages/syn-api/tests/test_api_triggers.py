@@ -28,12 +28,16 @@ def _reset_storage():
 
 
 @pytest.fixture(autouse=True)
-def _seed_test_workflows():
-    """Seed workflow IDs used in trigger tests into the in-memory store.
+async def _seed_test_workflows():
+    """Seed the in-memory workflow store with workflow IDs used by trigger tests.
 
-    register_trigger validates that the referenced workflow exists.
-    Tests use short IDs (wf-1, ci-fix-workflow, etc.) for readability.
+    Trigger registration validates that the referenced workflow exists (via
+    InMemoryWorkflowRepository.exists), so we must create them first.
     """
+    from syn_api._wiring import ensure_connected
+
+    await ensure_connected()
+
     from syn_adapters.storage.in_memory import get_event_store
 
     store = get_event_store()

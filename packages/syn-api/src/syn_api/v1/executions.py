@@ -6,6 +6,7 @@ Extracted from ``v1.workflows`` to separate template CRUD from execution lifecyc
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Literal
 
@@ -167,6 +168,31 @@ async def list_(
             status_filter=status,
         )
 
+    # Batch-query tool call counts from agent_events (one query for all executions)
+    tool_counts: dict[str, int] = {}
+    if domain_summaries:
+        try:
+            from syn_api._wiring import get_event_store_instance
+
+            event_store = get_event_store_instance()
+            pool = event_store.pool
+            if pool is not None:
+                exec_ids = [s.workflow_execution_id for s in domain_summaries]
+                async with pool.acquire() as conn:
+                    rows = await conn.fetch(
+                        """
+                        SELECT execution_id, COUNT(*) AS cnt
+                        FROM agent_events
+                        WHERE execution_id = ANY($1)
+                          AND event_type = 'tool_execution_completed'
+                        GROUP BY execution_id
+                        """,
+                        exec_ids,
+                    )
+                tool_counts = {row["execution_id"]: row["cnt"] for row in rows}
+        except Exception:
+            logger.debug("Could not query tool counts from agent_events", exc_info=True)
+
     return Ok(
         [
             ExecutionSummary(
@@ -180,6 +206,7 @@ async def list_(
                 total_phases=s.total_phases,
                 total_tokens=s.total_tokens,
                 total_cost_usd=s.total_cost_usd,
+                tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
                 error_message=s.error_message,
             )
             for s in domain_summaries
@@ -216,38 +243,44 @@ async def get_detail(
     if hasattr(detail, "phases") and detail.phases:
         for p in detail.phases:
             ops: list[ToolOperation] = []
-            session_id = getattr(p, "session_id", None)
+            session_id = p.session_id if hasattr(p, "session_id") else None
             if session_id:
                 try:
                     tool_data = await manager.session_tools.get(session_id)
                     ops = [
                         ToolOperation(
-                            observation_id=getattr(op, "observation_id", ""),
-                            operation_type=getattr(op, "operation_type", ""),
-                            timestamp=getattr(op, "timestamp", None),
-                            duration_ms=getattr(op, "duration_ms", None),
-                            success=getattr(op, "success", None),
-                            tool_name=getattr(op, "tool_name", None),
-                            tool_use_id=getattr(op, "tool_use_id", None),
+                            observation_id=op.observation_id,
+                            operation_type=op.operation_type,
+                            timestamp=op.timestamp,
+                            duration_ms=op.duration_ms,
+                            success=op.success,
+                            tool_name=op.tool_name,
+                            tool_use_id=op.tool_use_id,
                         )
                         for op in (tool_data or [])
                     ]
                 except Exception:
                     logger.exception("Failed to load tool operations for session %s", session_id)
 
+            _p_started = p.started_at if hasattr(p, "started_at") else None
+            _p_completed = p.completed_at if hasattr(p, "completed_at") else None
             phases.append(
                 PhaseExecution(
-                    phase_id=getattr(p, "phase_id", ""),
-                    name=getattr(p, "name", ""),
-                    status=getattr(p, "status", ""),
+                    phase_id=p.workflow_phase_id,
+                    name=p.name,
+                    status=p.status,
                     session_id=session_id,
-                    artifact_id=getattr(p, "artifact_id", None),
-                    input_tokens=getattr(p, "input_tokens", 0),
-                    output_tokens=getattr(p, "output_tokens", 0),
-                    cost_usd=Decimal(str(getattr(p, "cost_usd", 0))),
-                    duration_seconds=getattr(p, "duration_seconds", None),
-                    started_at=getattr(p, "started_at", None),
-                    completed_at=getattr(p, "completed_at", None),
+                    artifact_id=p.artifact_id if hasattr(p, "artifact_id") else None,
+                    input_tokens=p.input_tokens,
+                    output_tokens=p.output_tokens,
+                    cost_usd=Decimal(str(p.cost_usd)),
+                    duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
+                    started_at=datetime.fromisoformat(_p_started)
+                    if isinstance(_p_started, str)
+                    else _p_started,
+                    completed_at=datetime.fromisoformat(_p_completed)
+                    if isinstance(_p_completed, str)
+                    else _p_completed,
                     operations=ops,
                 )
             )
@@ -259,8 +292,7 @@ async def get_detail(
             workflow_name=detail.workflow_name,
             status=detail.status,
             phases=phases,
-            total_tokens=getattr(detail, "total_input_tokens", 0)
-            + getattr(detail, "total_output_tokens", 0),
+            total_tokens=detail.total_input_tokens + detail.total_output_tokens,
             total_cost_usd=detail.total_cost_usd,
             started_at=detail.started_at,
             completed_at=detail.completed_at,

@@ -19,11 +19,11 @@ import {
   YAxis,
 } from 'recharts'
 
-import { getExecution } from '../api/client'
-import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge, WorkspaceInfoCard } from '../components'
+import { getArtifact, getExecution } from '../api/client'
+import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
 import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import { useExecutionStream } from '../hooks'
-import type { ExecutionDetailResponse } from '../types'
+import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
 import { SSE_EVENTS } from '../types'
 
 const phaseStatusIcons: Record<string, typeof Play> = {
@@ -47,6 +47,7 @@ export function ExecutionDetail() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [artifactDetails, setArtifactDetails] = useState<Record<string, ArtifactResponse>>({})
 
   // Refresh execution data
   const refreshExecution = useCallback(() => {
@@ -97,6 +98,20 @@ export function ExecutionDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally only depend on status to avoid timer reset
   }, [execution?.status])
 
+  // Fetch artifact details when artifact IDs are available
+  useEffect(() => {
+    if (!execution?.artifact_ids.length) return
+    Promise.allSettled(execution.artifact_ids.map((id) => getArtifact(id))).then((results) => {
+      const map: Record<string, ArtifactResponse> = {}
+      results.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          map[result.value.id] = result.value
+        }
+      })
+      setArtifactDetails(map)
+    })
+  }, [execution?.artifact_ids.join(',')])  // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) return <PageLoader />
 
   if (error || !execution) {
@@ -127,13 +142,10 @@ export function ExecutionDetail() {
   const totalTokens = execution.total_input_tokens + execution.total_output_tokens
   const completedPhases = execution.phases.filter(p => p.status === 'completed').length
 
-  // Prepare phase metrics chart data
-  const phaseChartData = execution.phases.map((p) => ({
-    name: p.name.length > 15 ? p.name.slice(0, 12) + '...' : p.name,
-    tokens: p.input_tokens + p.output_tokens,
-    cost: p.cost_usd,
-    fill: p.status === 'completed' ? '#22c55e' : p.status === 'failed' ? '#ef4444' : '#6366f1',
-  }))
+  const tokenChartData = [
+    { name: 'Input', tokens: execution.total_input_tokens, fill: '#6366f1' },
+    { name: 'Output', tokens: execution.total_output_tokens, fill: '#22c55e' },
+  ]
 
   // Build breadcrumb trail: Workflow → Execution
   const breadcrumbs: BreadcrumbItem[] = [
@@ -206,9 +218,6 @@ export function ExecutionDetail() {
           </CardContent>
         </Card>
       )}
-
-      {/* Workspace Info - ADR-021 */}
-      <WorkspaceInfoCard workspace={execution.workspace} isLoading={loading} />
 
       {/* Metrics */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -314,41 +323,74 @@ export function ExecutionDetail() {
         </CardContent>
       </Card>
 
-      {/* Token Usage by Phase Chart */}
-      <Card>
-        <CardHeader title="Token Usage by Phase" subtitle="Tokens consumed per phase" />
-        <CardContent className="h-[250px]">
-          {phaseChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={phaseChartData} layout="vertical">
-                <XAxis type="number" tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
-                  width={100}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'var(--color-surface-elevated)',
-                    border: '1px solid var(--color-border)',
-                    borderRadius: '8px',
-                    fontSize: '12px',
-                  }}
-                  formatter={(value: number) => [value.toLocaleString(), 'tokens']}
-                />
-                <Bar dataKey="tokens" radius={[0, 4, 4, 0]}>
-                  {phaseChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-[var(--color-text-muted)]">
-              No phase metrics yet
+      {/* Artifacts */}
+      {execution.artifact_ids.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Artifacts"
+            subtitle={`${execution.artifact_ids.length} artifact${execution.artifact_ids.length === 1 ? '' : 's'} produced`}
+          />
+          <CardContent>
+            <div className="space-y-2">
+              {execution.phases
+                .filter((p) => p.artifact_id)
+                .map((p) => {
+                  const detail = artifactDetails[p.artifact_id!]
+                  return (
+                    <Link
+                      key={p.artifact_id}
+                      to={`/artifacts/${p.artifact_id}`}
+                      className="flex items-center gap-3 p-3 rounded-lg border border-[var(--color-border)] hover:bg-[var(--color-surface-elevated)] transition-colors group"
+                    >
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-accent)]/10 shrink-0">
+                        <FileText className="h-4 w-4 text-[var(--color-accent)]" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                          {detail?.title ?? `${p.name} output`}
+                        </p>
+                        <p className="text-xs text-[var(--color-text-muted)] font-mono truncate">
+                          {p.artifact_id}
+                        </p>
+                      </div>
+                      {detail && (
+                        <span className="text-xs text-[var(--color-text-muted)] shrink-0">
+                          {(detail.size_bytes / 1024).toFixed(1)} KB
+                        </span>
+                      )}
+                      <span className="text-[var(--color-accent)] opacity-0 group-hover:opacity-100 transition-opacity text-sm">→</span>
+                    </Link>
+                  )
+                })}
             </div>
-          )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Token Breakdown */}
+      <Card>
+        <CardHeader title="Token Breakdown" subtitle="Input vs output token distribution" />
+        <CardContent className="h-[200px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={tokenChartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+              <XAxis dataKey="name" tick={{ fill: 'var(--color-text-secondary)', fontSize: 12 }} />
+              <YAxis tick={{ fill: 'var(--color-text-muted)', fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: 'var(--color-surface-elevated)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                }}
+                formatter={(value: number) => [value.toLocaleString(), 'tokens']}
+              />
+              <Bar dataKey="tokens" radius={[4, 4, 0, 0]}>
+                {tokenChartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </CardContent>
       </Card>
     </div>

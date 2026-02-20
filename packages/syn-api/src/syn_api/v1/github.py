@@ -57,12 +57,12 @@ async def list_repos(
                     GitHubError.NOT_FOUND,
                     message=f"Installation {installation_id} not found",
                 )
-            repos = getattr(inst, "repositories", [])
+            repos = inst.repositories if hasattr(inst, "repositories") else []
         else:
             active = projection.get_all_active()
             repos = []
             for inst in active:
-                for repo in getattr(inst, "repositories", []):
+                for repo in inst.repositories:
                     repos.append(repo)
 
         # Apply pagination
@@ -103,10 +103,10 @@ async def get_installation(
         return Ok(
             {
                 "installation_id": installation_id,
-                "account": getattr(inst, "account", None),
-                "status": getattr(inst, "status", "active"),
-                "repositories": getattr(inst, "repositories", []),
-                "created_at": str(getattr(inst, "created_at", "")),
+                "account": inst.account_name,
+                "status": inst.status,
+                "repositories": inst.repositories,
+                "created_at": str(inst.installed_at or ""),
             }
         )
     except Exception as e:

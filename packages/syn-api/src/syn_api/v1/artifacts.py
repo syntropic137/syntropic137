@@ -6,6 +6,7 @@ Maps to the artifacts context in syn-domain.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -62,12 +63,14 @@ async def list_artifacts(
             [
                 ArtifactSummary(
                     id=a.id,
-                    workflow_id=getattr(a, "workflow_id", None),
-                    phase_id=getattr(a, "phase_id", None),
-                    artifact_type=getattr(a, "artifact_type", ""),
-                    title=getattr(a, "title", None),
-                    size_bytes=getattr(a, "size_bytes", 0),
-                    created_at=getattr(a, "created_at", None),
+                    workflow_id=a.workflow_id,
+                    phase_id=a.phase_id,
+                    artifact_type=a.artifact_type,
+                    title=a.name,
+                    size_bytes=a.size_bytes,
+                    created_at=datetime.fromisoformat(a.created_at)
+                    if isinstance(a.created_at, str)
+                    else a.created_at,
                 )
                 for a in domain_artifacts
             ]
@@ -112,22 +115,30 @@ async def get_artifact(
                 storage = await get_artifact_storage()
                 raw = await storage.download(artifact_id)
                 content = raw.decode("utf-8", errors="replace")
-                content_type = getattr(artifact, "content_type", "text/plain")
+                content_type = "text/plain"
             except Exception:
                 logger.exception("Failed to load artifact content for %s", artifact_id)
+
+            # Fall back to projection content if storage download failed
+            if content is None:
+                content = artifact.content
+                content_type = "text/plain"
 
         return Ok(
             ArtifactDetail(
                 id=artifact.id,
-                workflow_id=getattr(artifact, "workflow_id", None),
-                phase_id=getattr(artifact, "phase_id", None),
-                session_id=getattr(artifact, "session_id", None),
-                artifact_type=getattr(artifact, "artifact_type", ""),
-                title=getattr(artifact, "title", None),
+                workflow_id=artifact.workflow_id,
+                phase_id=artifact.phase_id,
+                session_id=artifact.session_id,
+                artifact_type=artifact.artifact_type,
+                title=artifact.name,
                 content=content,
                 content_type=content_type,
-                size_bytes=getattr(artifact, "size_bytes", 0),
-                created_at=getattr(artifact, "created_at", None),
+                content_hash=artifact.content_hash,
+                size_bytes=artifact.size_bytes,
+                created_at=datetime.fromisoformat(artifact.created_at)
+                if isinstance(artifact.created_at, str)
+                else artifact.created_at,
             )
         )
     except Exception as e:

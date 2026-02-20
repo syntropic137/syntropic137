@@ -72,7 +72,6 @@ VSA is configured in `vsa.yaml`:
 
 VSA validation is integrated into:
 - ✅ `just qa` - Full QA suite
-- ✅ `just qa-python` - Python-only QA
 - ✅ `scripts/pre_merge_validation.py` - Pre-merge checks
 
 ## Fixing Warnings
