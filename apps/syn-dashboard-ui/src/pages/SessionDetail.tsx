@@ -9,7 +9,6 @@ import {
   Coins,
   Container,
   Copy,
-  Cpu,
   FileText,
   GitBranch,
   GitCommit,
