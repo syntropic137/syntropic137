@@ -131,7 +131,6 @@ class TestGitHubAppClient:
         """Should initialize with valid settings."""
         client = GitHubAppClient(mock_github_settings)
         assert client.app_id == "12345"
-        assert client.installation_id == "67890"
         assert client.bot_username == "test-app[bot]"
 
     def test_generate_jwt(self, mock_github_settings: MagicMock) -> None:
@@ -195,11 +194,12 @@ class TestGitHubAppClient:
         with patch.object(client._http, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
 
-            token = await client.get_installation_token()
+            token = await client.get_installation_token(installation_id="67890")
 
             assert token == "ghs_test_token_12345"
-            assert client._cached_token is not None
-            assert client._cached_token.permissions == {
+            cached = client._cached_tokens.get("67890")
+            assert cached is not None
+            assert cached.permissions == {
                 "contents": "write",
                 "pull_requests": "write",
             }
@@ -210,7 +210,7 @@ class TestGitHubAppClient:
         client = GitHubAppClient(mock_github_settings)
 
         # Pre-cache a token
-        client._cached_token = InstallationToken(
+        client._cached_tokens["67890"] = InstallationToken(
             token="cached_token",
             expires_at=datetime.now(UTC) + timedelta(minutes=30),
             permissions={},
@@ -218,7 +218,7 @@ class TestGitHubAppClient:
         )
 
         with patch.object(client._http, "post", new_callable=AsyncMock) as mock_post:
-            token = await client.get_installation_token()
+            token = await client.get_installation_token(installation_id="67890")
 
             assert token == "cached_token"
             mock_post.assert_not_called()
@@ -297,7 +297,7 @@ class TestGitHubAppClient:
         client = GitHubAppClient(mock_github_settings)
 
         # Mock token fetch
-        client._cached_token = InstallationToken(
+        client._cached_tokens["67890"] = InstallationToken(
             token="test_token",
             expires_at=datetime.now(UTC) + timedelta(hours=1),
             permissions={},

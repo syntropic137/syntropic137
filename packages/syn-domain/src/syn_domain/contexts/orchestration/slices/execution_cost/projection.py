@@ -5,7 +5,7 @@ Pattern: Event Log + CQRS (ADR-018 Pattern 2)
 Subscribes to:
 - AgentObservation: Unified telemetry events (all agent observations)
   - TOKEN_USAGE: Updates token counts and costs
-  - TOOL_COMPLETED: Increments tool_calls count
+  - TOOL_EXECUTION_COMPLETED: Increments tool_calls count
 - SessionCostFinalized: Session completion (for accurate aggregation)
 """
 
@@ -44,7 +44,7 @@ class ExecutionCostProjection:
 
         Aggregates session-level observations to execution level:
         - TOKEN_USAGE: Calculate cost from tokens, update counts
-        - TOOL_COMPLETED: Increment tool_calls count
+        - TOOL_EXECUTION_COMPLETED: Increment tool_calls count
         """
         execution_id = event_data.get("execution_id")
         if not execution_id:
@@ -126,8 +126,8 @@ class ExecutionCostProjection:
             # Increment turns
             execution_cost.turns += 1
 
-        # Handle TOOL_COMPLETED observations
-        elif event_type == ObservationType.TOOL_COMPLETED.value:
+        # Handle TOOL_EXECUTION_COMPLETED observations
+        elif event_type == ObservationType.TOOL_EXECUTION_COMPLETED.value:
             execution_cost.tool_calls += 1
 
             # Track duration if available

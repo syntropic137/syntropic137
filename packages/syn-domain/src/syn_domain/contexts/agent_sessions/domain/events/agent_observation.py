@@ -34,16 +34,18 @@ class ObservationType(str, Enum):
     TOKEN_USAGE = "token_usage"
 
     # Tool lifecycle - from SDK hooks
-    TOOL_STARTED = "tool_started"  # PreToolUse hook
-    TOOL_COMPLETED = "tool_completed"  # PostToolUse hook
+    # Values match syn_shared.events constants (enforced by test_event_type_consistency.py)
+    TOOL_EXECUTION_STARTED = "tool_execution_started"  # PreToolUse hook
+    TOOL_EXECUTION_COMPLETED = "tool_execution_completed"  # PostToolUse hook
     TOOL_BLOCKED = "tool_blocked"  # Safety validation blocked
 
     # Execution lifecycle - from SDK hooks
-    PROMPT_SUBMITTED = "prompt_submitted"  # UserPromptSubmit hook
+    # Values match syn_shared.events constants (enforced by test_event_type_consistency.py)
+    USER_PROMPT_SUBMITTED = "user_prompt_submitted"  # UserPromptSubmit hook
     EXECUTION_STOPPED = "execution_stopped"  # Stop hook
     SUBAGENT_STARTED = "subagent_started"  # Task tool spawns subagent (ADR-037)
     SUBAGENT_STOPPED = "subagent_stopped"  # SubagentStop hook / Task completion
-    CONTEXT_COMPACTING = "context_compacting"  # PreCompact hook
+    CONTEXT_COMPACTING = "context_compacted"  # PreCompact hook
 
     # Progress tracking
     PROGRESS = "progress"  # Periodic progress update
@@ -90,10 +92,10 @@ class AgentObservationEvent(DomainEvent):
 
     # Type-specific payload
     # For TOKEN_USAGE: {input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model}
-    # For TOOL_STARTED: {tool_name, tool_use_id, input_preview}
-    # For TOOL_COMPLETED: {tool_name, tool_use_id, success, output_preview, duration_ms}
+    # For TOOL_EXECUTION_STARTED: {tool_name, tool_use_id, input_preview}
+    # For TOOL_EXECUTION_COMPLETED: {tool_name, tool_use_id, success, output_preview, duration_ms}
     # For TOOL_BLOCKED: {tool_name, tool_use_id, reason}
-    # For PROMPT_SUBMITTED: {prompt}
+    # For USER_PROMPT_SUBMITTED: {prompt}
     # For EXECUTION_STOPPED: {reason}
     # For SUBAGENT_STOPPED: {subagent}
     # For CONTEXT_COMPACTING: {message_count}
@@ -197,12 +199,12 @@ class AgentObservationEvent(DomainEvent):
         phase_id: str | None = None,
         workspace_id: str | None = None,
     ) -> AgentObservationEvent:
-        """Create a TOOL_STARTED observation."""
+        """Create a TOOL_EXECUTION_STARTED observation."""
         from datetime import UTC
 
         return cls(
             session_id=session_id,
-            observation_type=ObservationType.TOOL_STARTED,
+            observation_type=ObservationType.TOOL_EXECUTION_STARTED,
             timestamp=timestamp or datetime.now(UTC),
             data={
                 "tool_name": tool_name,
@@ -229,12 +231,12 @@ class AgentObservationEvent(DomainEvent):
         phase_id: str | None = None,
         workspace_id: str | None = None,
     ) -> AgentObservationEvent:
-        """Create a TOOL_COMPLETED observation."""
+        """Create a TOOL_EXECUTION_COMPLETED observation."""
         from datetime import UTC
 
         return cls(
             session_id=session_id,
-            observation_type=ObservationType.TOOL_COMPLETED,
+            observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
             timestamp=timestamp or datetime.now(UTC),
             data={
                 "tool_name": tool_name,

@@ -87,6 +87,10 @@ async def get_session(session_id: str) -> SessionResponse:
                 tool_use_id=op.tool_use_id,
                 tool_input=tool_input_dict,
                 tool_output=getattr(op, "output_preview", None),
+                git_sha=getattr(op, "git_sha", None),
+                git_message=getattr(op, "git_message", None),
+                git_branch=getattr(op, "git_branch", None),
+                git_repo=getattr(op, "git_repo", None),
             )
         )
 

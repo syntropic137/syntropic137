@@ -26,8 +26,8 @@ from syn_shared.events import (
     SESSION_COMPLETED,
     SESSION_STARTED,
     TOKEN_USAGE,
-    TOOL_COMPLETED,
-    TOOL_STARTED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
 )
 
 # =============================================================================
@@ -102,7 +102,7 @@ def tool_started(
         Event dict ready for insert_batch()
     """
     event: dict[str, Any] = {
-        "event_type": TOOL_STARTED,
+        "event_type": TOOL_EXECUTION_STARTED,
         "session_id": session_id,
         "tool_name": tool_name,
         "tool_use_id": tool_use_id,
@@ -139,7 +139,7 @@ def tool_completed(
         Event dict ready for insert_batch()
     """
     event: dict[str, Any] = {
-        "event_type": TOOL_COMPLETED,
+        "event_type": TOOL_EXECUTION_COMPLETED,
         "session_id": session_id,
         "tool_name": tool_name,
         "tool_use_id": tool_use_id,

@@ -35,7 +35,7 @@ class RecordOperationCommand(BaseModel):
 
     # Tool execution details (for TOOL_* types)
     tool_name: str | None = None
-    tool_use_id: str | None = None  # Correlate TOOL_STARTED/COMPLETED
+    tool_use_id: str | None = None  # Correlate TOOL_EXECUTION_STARTED/COMPLETED
     tool_input: dict[str, Any] | None = None  # Tool input parameters
     tool_output: str | None = None  # Tool output (truncated if large)
 

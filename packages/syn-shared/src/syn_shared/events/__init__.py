@@ -13,8 +13,9 @@ from typing import Literal, get_args
 
 # Tool execution events
 # MUST match agentic_isolation.EventType (the producer)
-TOOL_STARTED = "tool_execution_started"
-TOOL_COMPLETED = "tool_execution_completed"
+# Values are canonical Claude Code hook names (ADR-042)
+TOOL_EXECUTION_STARTED = "tool_execution_started"
+TOOL_EXECUTION_COMPLETED = "tool_execution_completed"
 TOOL_BLOCKED = "tool_blocked"
 
 # Session lifecycle events
@@ -39,11 +40,44 @@ PHASE_COMPLETED = "phase_completed"
 # Error events
 ERROR = "error"
 
+# Git observability events (from agentic-primitives observability plugin)
+# Emitted by post-commit, pre-push, post-merge, post-rewrite hooks and
+# PreToolUse/PostToolUse git command detection (agentic-primitives PR #82)
+GIT_COMMIT = "git_commit"
+GIT_PUSH = "git_push"
+GIT_BRANCH_CHANGED = "git_branch_changed"
+GIT_OPERATION = "git_operation"
+GIT_MERGE = "git_merge"
+GIT_REWRITE = "git_rewrite"
+GIT_CHECKOUT = "git_checkout"
+
+# Claude Code hook events (from observability plugin, all 14 lifecycle hooks)
+TOOL_EXECUTION_FAILED = "tool_execution_failed"
+TEAMMATE_IDLE = "teammate_idle"
+TASK_COMPLETED = "task_completed"
+
+# Security / permission events (from agentic_events.EventType)
+SECURITY_DECISION = "security_decision"
+PERMISSION_REQUESTED = "permission_requested"
+
+# Agent control events (from agentic_events.EventType)
+AGENT_STOPPED = "agent_stopped"
+
+# Context management events (from agentic_events.EventType)
+CONTEXT_COMPACTED = "context_compacted"
+
+# System / notification events (from agentic_events.EventType)
+SYSTEM_NOTIFICATION = "system_notification"
+
+# User interaction events (from agentic_events.EventType)
+USER_PROMPT_SUBMITTED = "user_prompt_submitted"
+
 # Type-safe literal union (like TypeScript)
 # MUST match the constants above and agentic_isolation.EventType
 EventType = Literal[
     "tool_execution_started",
     "tool_execution_completed",
+    "tool_execution_failed",
     "tool_blocked",
     "session_started",
     "session_completed",
@@ -56,6 +90,22 @@ EventType = Literal[
     "phase_started",
     "phase_completed",
     "error",
+    "git_commit",
+    "git_push",
+    "git_branch_changed",
+    "git_operation",
+    "git_merge",
+    "git_rewrite",
+    "git_checkout",
+    "teammate_idle",
+    "task_completed",
+    # Added to match agentic_events.types.EventType (producer)
+    "security_decision",
+    "permission_requested",
+    "agent_stopped",
+    "context_compacted",
+    "system_notification",
+    "user_prompt_submitted",
 ]
 
 # Runtime validation set (auto-generated from Literal)
@@ -68,20 +118,36 @@ def is_valid_event_type(event_type: str) -> bool:
 
 
 __all__ = [
+    "AGENT_STOPPED",
+    "CONTEXT_COMPACTED",
     "COST_RECORDED",
     "ERROR",
+    "GIT_BRANCH_CHANGED",
+    "GIT_CHECKOUT",
+    "GIT_COMMIT",
+    "GIT_MERGE",
+    "GIT_OPERATION",
+    "GIT_PUSH",
+    "GIT_REWRITE",
+    "PERMISSION_REQUESTED",
     "PHASE_COMPLETED",
     "PHASE_STARTED",
+    "SECURITY_DECISION",
     "SESSION_COMPLETED",
     "SESSION_ERROR",
     "SESSION_STARTED",
     "SESSION_SUMMARY",
     "SUBAGENT_STARTED",
     "SUBAGENT_STOPPED",
+    "SYSTEM_NOTIFICATION",
+    "TASK_COMPLETED",
+    "TEAMMATE_IDLE",
     "TOKEN_USAGE",
     "TOOL_BLOCKED",
-    "TOOL_COMPLETED",
-    "TOOL_STARTED",
+    "TOOL_EXECUTION_COMPLETED",
+    "TOOL_EXECUTION_FAILED",
+    "TOOL_EXECUTION_STARTED",
+    "USER_PROMPT_SUBMITTED",
     "VALID_EVENT_TYPES",
     "EventType",
     "is_valid_event_type",

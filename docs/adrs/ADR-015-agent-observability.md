@@ -5,6 +5,7 @@
 **Accepted** - 2025-12-05
 **Updated:** 2025-12-09 - SSE replaced with WebSocket/RealTimeProjection (see ADR-010)
 **Updated:** 2025-12-19 - Observability implementation simplified by ADR-029
+**Updated:** 2026-02-19 - Git events now from real git hooks, not tool call inference (see ADR-043)
 
 > **📝 Note (2025-12-19)**: The observability pipeline described here has been
 > simplified by ADR-029 (Simplified Event System). Key changes:
@@ -17,6 +18,15 @@
 >
 > The core concepts (operation types, timeline projection) remain valid.
 > See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
+>
+> **📝 Note (2026-02-19)**: Git events (`git_commit`, `git_push`, etc.) now come
+> from **real git hooks** installed globally in the workspace container, NOT from
+> Claude Code `PreToolUse`/`PostToolUse` stream parsing. The hooks emit JSONL to
+> **stderr**; the docker exec subprocess in `AgenticEventStreamAdapter` uses
+> `stderr=STDOUT` to merge them into the stdout pipe, where `WorkflowExecutionEngine`
+> reads them. Claude Code tool calls remain `tool_execution_started` /
+> `tool_execution_completed` only — no git inference.
+> See [ADR-043: Git Hook Event Pipeline](./ADR-043-git-hook-event-pipeline.md).
 
 ## Context
 
@@ -83,8 +93,8 @@ Extend `OperationType` enum and add typed optional fields to existing event:
 class OperationType(str, Enum):
     MESSAGE_REQUEST = "message_request"
     MESSAGE_RESPONSE = "message_response"
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
+    TOOL_EXECUTION_STARTED = "tool_started"
+    TOOL_EXECUTION_COMPLETED = "tool_completed"
     TOOL_BLOCKED = "tool_blocked"
     THINKING = "thinking"
     ERROR = "error"
@@ -150,8 +160,8 @@ class OperationType(str, Enum):
     MESSAGE_RESPONSE = "message_response"
 
     # Tool lifecycle
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
+    TOOL_EXECUTION_STARTED = "tool_started"
+    TOOL_EXECUTION_COMPLETED = "tool_completed"
     TOOL_BLOCKED = "tool_blocked"
 
     # Extended thinking
@@ -295,6 +305,7 @@ No migration needed - old events work as-is. Future events get richer data.
 - [ADR-009: Agentic Execution Architecture](./ADR-009-agentic-execution-architecture.md)
 - [ADR-010: Event Subscription Architecture](./ADR-010-event-subscription-architecture.md)
 - [ADR-013: Event Sourcing Projection Consistency](./ADR-013-event-sourcing-projection-consistency.md)
+- [ADR-043: Git Hook Event Pipeline](./ADR-043-git-hook-event-pipeline.md) — how git events reach the engine via real git hooks + stderr merge
 
 ## References
 

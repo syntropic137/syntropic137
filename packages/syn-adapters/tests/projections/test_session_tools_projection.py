@@ -17,7 +17,7 @@ from uuid import uuid4
 
 import pytest
 
-from syn_shared.events import TOOL_COMPLETED, TOOL_STARTED
+from syn_shared.events import TOOL_EXECUTION_COMPLETED, TOOL_EXECUTION_STARTED
 
 # Mark all tests as requiring database
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -62,7 +62,7 @@ class TestSessionToolsProjection:
         # Arrange: Insert a tool_started event using constant
         await event_store.insert_one(
             event={
-                "event_type": TOOL_STARTED,
+                "event_type": TOOL_EXECUTION_STARTED,
                 "session_id": session_id,
                 "tool_name": "Bash",
                 "tool_use_id": "toolu_123",
@@ -76,7 +76,7 @@ class TestSessionToolsProjection:
         # Assert
         assert len(result) == 1
         op = result[0]
-        assert op.operation_type == TOOL_STARTED
+        assert op.operation_type == TOOL_EXECUTION_STARTED
         assert op.tool_name == "Bash"
         assert op.tool_use_id == "toolu_123"
 
@@ -85,7 +85,7 @@ class TestSessionToolsProjection:
         # Arrange: Insert a tool_completed event using constant
         await event_store.insert_one(
             event={
-                "event_type": TOOL_COMPLETED,
+                "event_type": TOOL_EXECUTION_COMPLETED,
                 "session_id": session_id,
                 "tool_use_id": "toolu_456",
                 "success": True,
@@ -98,7 +98,7 @@ class TestSessionToolsProjection:
         # Assert
         assert len(result) == 1
         op = result[0]
-        assert op.operation_type == TOOL_COMPLETED
+        assert op.operation_type == TOOL_EXECUTION_COMPLETED
         assert op.tool_use_id == "toolu_456"
         assert op.success is True
 
@@ -109,7 +109,7 @@ class TestSessionToolsProjection:
         for tool_name in tools:
             await event_store.insert_one(
                 event={
-                    "event_type": TOOL_STARTED,
+                    "event_type": TOOL_EXECUTION_STARTED,
                     "session_id": session_id,
                     "tool_name": tool_name,
                     "tool_use_id": f"toolu_{tool_name}",
@@ -131,14 +131,14 @@ class TestSessionToolsProjection:
         # Arrange: Insert events for two sessions using constant
         await event_store.insert_one(
             event={
-                "event_type": TOOL_STARTED,
+                "event_type": TOOL_EXECUTION_STARTED,
                 "session_id": session_1,
                 "tool_name": "Session1Tool",
             }
         )
         await event_store.insert_one(
             event={
-                "event_type": TOOL_STARTED,
+                "event_type": TOOL_EXECUTION_STARTED,
                 "session_id": session_2,
                 "tool_name": "Session2Tool",
             }
@@ -159,14 +159,14 @@ class TestSessionToolsProjection:
         by hardcoded strings that didn't match.
 
         Now that we use constants:
-        - Producer (WorkflowExecutionEngine) must use TOOL_STARTED, TOOL_COMPLETED
-        - Consumer (SessionToolsProjection) uses TOOL_STARTED, TOOL_COMPLETED
+        - Producer (WorkflowExecutionEngine) must use TOOL_EXECUTION_STARTED, TOOL_EXECUTION_COMPLETED
+        - Consumer (SessionToolsProjection) uses TOOL_EXECUTION_STARTED, TOOL_EXECUTION_COMPLETED
         - Type checker catches any mismatches at dev time!
 
         If this test fails, something is very wrong with the shared constants.
         """
         # Use the shared constants - these are THE source of truth
-        producer_event_types = [TOOL_STARTED, TOOL_COMPLETED]
+        producer_event_types = [TOOL_EXECUTION_STARTED, TOOL_EXECUTION_COMPLETED]
 
         for event_type in producer_event_types:
             await event_store.insert_one(

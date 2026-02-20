@@ -34,8 +34,8 @@ from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
     TOOL_BLOCKED,
-    TOOL_COMPLETED,
-    TOOL_STARTED,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
 )
 
 logger = logging.getLogger(__name__)
@@ -199,10 +199,10 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     # Observability events (Pattern 2: Event Log + CQRS, see ADR-018)
     # These are observations from syn-collector, not commands
     # Use constants from syn_shared.events for type safety
-    TOOL_STARTED: [
+    TOOL_EXECUTION_STARTED: [
         ("tool_timeline", "on_tool_execution_started"),
     ],
-    TOOL_COMPLETED: [
+    TOOL_EXECUTION_COMPLETED: [
         ("tool_timeline", "on_tool_execution_completed"),
         ("session_cost", "on_agent_observation"),
         ("execution_cost", "on_agent_observation"),

@@ -66,15 +66,19 @@ class TestGitHubAppSettings:
                 _env_file=None,
             )
 
-    def test_partial_config_missing_installation_id_raises_error(self) -> None:
-        """Test that partial config (missing installation_id) raises error."""
-        with pytest.raises(ValueError, match="Incomplete GitHub App config"):
-            GitHubAppSettings(
-                app_id="123456",
-                private_key=SecretStr("key"),
-                installation_id="",  # Empty
-                _env_file=None,
-            )
+    def test_app_id_and_private_key_without_installation_id_is_valid(self) -> None:
+        """Test that app_id + private_key without installation_id is fully configured.
+
+        installation_id is optional — installations are discovered dynamically
+        from webhook payloads for multi-org/multi-account support.
+        """
+        settings = GitHubAppSettings(
+            app_id="123456",
+            private_key=SecretStr("key"),
+            installation_id="",  # Not required
+            _env_file=None,
+        )
+        assert settings.is_configured
 
     def test_bot_name_property(self) -> None:
         """Test bot_name property with explicit app_name."""

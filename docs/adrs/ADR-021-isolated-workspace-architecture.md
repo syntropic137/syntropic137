@@ -2,8 +2,9 @@
 
 **Status:** Accepted (Implemented, Enforcement in ADR-023)
 **Date:** 2025-12-11
+**Updated:** 2026-02-18 — Hook event transport: `stderr=STDOUT` required in stream() (see Hook Event Transport section)
 **Deciders:** @neural
-**Tags:** security, isolation, workspaces, scale, firecracker, docker
+**Tags:** security, isolation, workspaces, scale, firecracker, docker, observability, hooks
 
 > **Enforcement Note:** This ADR defines the isolation architecture. The **enforcement mechanisms**
 > (how the executor requires isolation and fails without it) are specified in
@@ -614,6 +615,108 @@ This provides:
 - **ADR-004**: Environment Configuration (settings pattern)
 - **ADR-022**: Secure Token Architecture (credential injection for workspaces)
 - **ADR-023**: Workspace-First Execution Model (**enforcement of this architecture**)
+
+## Hook Event Transport via stderr→stdout Merge (2026-02-18)
+
+### Problem: `stderr=DEVNULL` Silently Discards Hook Events
+
+The `agentic_isolation` docker provider's `stream()` method originally used:
+
+```python
+proc = await asyncio.create_subprocess_exec(
+    *exec_cmd,
+    stdout=asyncio.subprocess.PIPE,
+    stderr=asyncio.subprocess.DEVNULL,  # ❌ Silently discards all hook output
+)
+```
+
+The comment justifying `DEVNULL` was a misattributed concern about OS pipe buffer blocking
+(unread `PIPE` fills up). The real effect was **silently discarding all Claude Code hook output**,
+including git observability events emitted by `observe.py`.
+
+### How Hook Events Flow
+
+Claude Code hooks in the container run as subprocesses triggered by the CLI's hook system:
+
+```
+Container: claude code CLI
+       │
+       ├─► PreToolUse hook → observe.py
+       │       │
+       │       └─► detects git commit in Bash command
+       │           emits JSON to stderr:
+       │           {"event_type": "git_commit", "sha": "abc123", ...}
+       │
+       └─► stdout: normal agent output (JSONL)
+```
+
+Both channels flow through `docker exec`:
+
+```
+docker exec -i <container> python -u agent.py
+              │
+    ┌─────────┴──────────┐
+    │                    │
+  stdout              stderr
+  (agent JSONL)   (hook JSONL + misc)
+```
+
+### Fix: Merge stderr into stdout
+
+```python
+proc = await asyncio.create_subprocess_exec(
+    *exec_cmd,
+    stdout=asyncio.subprocess.PIPE,
+    stderr=asyncio.subprocess.STDOUT,  # ✅ Merge stderr so hook JSONL reaches engine
+)
+```
+
+This is safe because `WorkflowExecutionEngine.parse_jsonl_line()` filters non-JSON lines
+before attempting to parse them — any stderr noise (e.g., pip warnings, git status messages)
+is silently ignored. Only valid JSON lines are processed.
+
+### Complete Observability Pipeline (Containerized Agent)
+
+```
+Container                              Control Plane (Host)
+─────────────────────────────────────  ──────────────────────────────────────
+claude code CLI + observe.py hooks
+       │
+       ├─ agent JSONL  ─┐
+       └─ hook JSONL   ─┤ (stderr merged → stdout via stderr=STDOUT)
+                        │
+              docker exec stream()
+                        │
+                        ▼
+           WorkflowExecutionEngine
+           .parse_jsonl_line()
+                        │
+                        ├─ tool events    → _record_observation("tool_*")
+                        ├─ git events     → _record_observation("git_commit" etc.)
+                        └─ other events   → filtered / ignored
+                                 │
+                                 ▼
+                    agent_events (TimescaleDB)
+                                 │
+                                 ▼
+                    SessionToolsProjection
+                                 │
+                                 ▼
+                    Session timeline (dashboard)
+```
+
+### Rule
+
+**Any workspace provider that streams agent output MUST merge stderr into stdout** (`stderr=STDOUT`
+or equivalent). Do NOT use `stderr=DEVNULL` or `stderr=PIPE` (without reading it) in the
+`stream()` method. Hook-based observability depends on this merge.
+
+This applies to all current and future backends:
+- Docker (`WorkspaceDockerProvider.stream()`)
+- Local subprocess execution
+- Any future Firecracker/VM stream adapters
+
+---
 
 ## Implementation Notes (2025-12-15)
 

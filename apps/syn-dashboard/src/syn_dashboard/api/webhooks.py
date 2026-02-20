@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
 import syn_api.v1.github as gh
+from syn_api._wiring import get_event_store_instance, get_realtime
 from syn_api.types import Err
 
 logger = logging.getLogger(__name__)
@@ -66,4 +68,63 @@ async def github_webhook(
     if webhook_result.deferred:
         response["deferred"] = [{"trigger_id": tid} for tid in webhook_result.deferred]
 
+    # For push events, write commit observability events to the pipeline
+    if x_github_event == "push":
+        try:
+            import json
+
+            payload = json.loads(body)
+            await _record_push_commits(payload, delivery_id=x_github_delivery)
+        except Exception:
+            logger.exception("Failed to record push commit events — webhook response unaffected")
+
     return response
+
+
+async def _record_push_commits(payload: dict[str, Any], delivery_id: str) -> None:
+    """Write git_commit observability events for each commit in a push payload.
+
+    Each commit is stored as a git_commit event in the observability pipeline
+    and broadcast to the global /ws/activity feed for the dashboard live view.
+    """
+    commits: list[dict[str, Any]] = payload.get("commits", [])
+    if not commits:
+        return
+
+    repo = payload.get("repository", {}).get("full_name", "unknown/unknown")
+    ref: str = payload.get("ref", "")
+    branch = ref.removeprefix("refs/heads/") if ref.startswith("refs/heads/") else ref
+
+    store = get_event_store_instance()
+    await store.initialize()
+    realtime = get_realtime()
+
+    for commit in commits:
+        commit_hash: str = commit.get("id", "")
+        if not commit_hash:
+            continue
+
+        data: dict[str, Any] = {
+            "commit_hash": commit_hash,
+            "message": commit.get("message", ""),
+            "author": commit.get("author", {}).get("name", "unknown"),
+            "repository": repo,
+            "branch": branch,
+            "url": commit.get("url", f"https://github.com/{repo}/commit/{commit_hash}"),
+            "timestamp": commit.get("timestamp", datetime.now(UTC).isoformat()),
+        }
+
+        await store.insert_one(
+            {
+                "event_type": "git_commit",
+                "session_id": f"github_delivery:{delivery_id}",
+                "data": data,
+            }
+        )
+
+        await realtime.broadcast_global("git_commit", data)
+
+        logger.info(
+            "Recorded git commit event",
+            extra={"commit_hash": commit_hash[:7], "repo": repo, "branch": branch},
+        )

@@ -372,17 +372,29 @@ class WorkflowValidation(BaseModel):
 
 
 class ToolOperation(BaseModel):
-    """A single tool operation within a phase execution."""
+    """A single timeline event within a session.
+
+    Covers tool executions, git operations, subagent lifecycle, and other
+    observability events. Use operation_type to distinguish categories.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
 
     observation_id: str = ""
     operation_type: str = ""
     timestamp: datetime | None = None
     duration_ms: float | None = None
     success: bool | None = None
+    # Tool-specific fields
     tool_name: str | None = None
     tool_use_id: str | None = None
     input_preview: str | None = None
     output_preview: str | None = None
+    # Git-specific fields (populated for git_commit, git_push, git_branch_changed, git_operation)
+    git_sha: str | None = None
+    git_message: str | None = None
+    git_branch: str | None = None
+    git_repo: str | None = None
 
 
 class PhaseExecution(BaseModel):
