@@ -17,9 +17,12 @@ from uuid import uuid4
 from syn_shared.events import (
     COST_RECORDED,
     GIT_BRANCH_CHANGED,
+    GIT_CHECKOUT,
     GIT_COMMIT,
+    GIT_MERGE,
     GIT_OPERATION,
     GIT_PUSH,
+    GIT_REWRITE,
     SESSION_SUMMARY,
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
@@ -41,7 +44,15 @@ logger = logging.getLogger(__name__)
 _TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
-_GIT_EVENT_TYPES = (GIT_COMMIT, GIT_PUSH, GIT_BRANCH_CHANGED, GIT_OPERATION)
+_GIT_EVENT_TYPES = (
+    GIT_COMMIT,
+    GIT_PUSH,
+    GIT_BRANCH_CHANGED,
+    GIT_OPERATION,
+    GIT_MERGE,
+    GIT_REWRITE,
+    GIT_CHECKOUT,
+)
 
 
 @dataclass
@@ -65,6 +76,7 @@ class ToolOperation:
     git_sha: str | None = None
     git_message: str | None = None
     git_branch: str | None = None
+    git_repo: str | None = None
 
     @property
     def is_started(self) -> bool:
@@ -283,16 +295,21 @@ class SessionToolsProjection:
         if is_git:
             obs_id = f"git-{event_type}-{row['time'].isoformat()}"
 
-            # For git_operation events, extract the subcommand and any branch/target
-            git_subcmd = data.get("operation", "") if event_type == "git_operation" else ""
+            # Extract the operation subcommand for display in the timeline title
+            git_subcmd = data.get("operation", "")
             git_branch = data.get("branch") or data.get("to_branch") or None
             if not git_branch and event_type == "git_operation":
                 # Parse branch from "git checkout -b <branch>" or "git checkout <branch>"
                 cmd = data.get("command", "")
                 import re as _re
+
                 _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
                 if _m:
                     git_branch = _m.group(1)
+
+            # For git_rewrite, use the rewrite type (rebase/amend) as the subcommand
+            if event_type == GIT_REWRITE and not git_subcmd:
+                git_subcmd = data.get("operation", "rebase")
 
             return ToolOperation(
                 observation_id=obs_id,
@@ -304,12 +321,13 @@ class SessionToolsProjection:
                 input_preview=None,
                 output_preview=None,
                 duration_ms=None,
-                git_sha=data.get("sha") or data.get("commit_hash") or None,
+                git_sha=data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None,
                 git_message=data.get("message")
                 or data.get("message_preview")
                 or data.get("commit_message")
                 or None,
                 git_branch=git_branch,
+                git_repo=data.get("repo") or None,
             )
 
         # Generate a unique ID from the row data
@@ -318,7 +336,7 @@ class SessionToolsProjection:
 
         return ToolOperation(
             observation_id=obs_id or str(uuid4()),
-            tool_name=data.get("tool_name", "unknown"),
+            tool_name=data.get("tool_name", ""),
             tool_use_id=data.get("tool_use_id"),
             operation_type=event_type,
             timestamp=row["time"],
