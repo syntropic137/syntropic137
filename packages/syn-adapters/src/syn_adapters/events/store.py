@@ -516,6 +516,7 @@ class AgentEventStore:
                 "event_type": row["event_type"],
                 "session_id": row["session_id"],
                 "execution_id": row["execution_id"],
+                "phase_id": row["phase_id"],
                 "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
             }
             for row in rows

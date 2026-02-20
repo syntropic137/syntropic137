@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Activity, ExternalLink, GitCommit, GitMerge, Wifi, WifiOff } from 'lucide-react'
 
 interface GitEvent {
@@ -21,7 +21,9 @@ function shortHash(hash: string | undefined): string {
 
 function relativeTime(isoString: string | undefined): string {
   if (!isoString) return ''
-  const diff = Date.now() - new Date(isoString).getTime()
+  const ts = new Date(isoString).getTime()
+  if (!Number.isFinite(ts)) return ''
+  const diff = Date.now() - ts
   const mins = Math.floor(diff / 60000)
   if (mins < 1) return 'just now'
   if (mins < 60) return `${mins}m ago`
@@ -77,7 +79,6 @@ function EventRow({ event }: { event: GitEvent }) {
 export function EventFeed() {
   const [events, setEvents] = useState<GitEvent[]>([])
   const [connected, setConnected] = useState(false)
-  const wsRef = useRef<WebSocket | null>(null)
 
   // Load recent events on mount
   useEffect(() => {
@@ -93,7 +94,6 @@ export function EventFeed() {
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws/activity`)
-    wsRef.current = ws
 
     ws.onopen = () => setConnected(true)
     ws.onclose = () => setConnected(false)
@@ -151,7 +151,7 @@ export function EventFeed() {
             </p>
           </div>
         ) : (
-          events.map((event, i) => <EventRow key={`${event.data.commit_hash ?? i}-${i}`} event={event} />)
+          events.map((event, i) => <EventRow key={event.data.commit_hash ?? event.time ?? i} event={event} />)
         )}
       </div>
     </div>
