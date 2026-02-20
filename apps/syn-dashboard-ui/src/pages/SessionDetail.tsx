@@ -46,6 +46,9 @@ const operationIcons: Record<string, typeof Activity> = {
   git_push: GitBranch,
   git_branch_changed: GitBranch,
   git_operation: GitMerge,
+  git_merge: GitMerge,
+  git_rewrite: GitCommit,
+  git_checkout: GitBranch,
   // New v2 types
   message_request: MessageSquare,
   message_response: MessageSquare,
@@ -82,6 +85,9 @@ const operationColors: Record<string, string> = {
   git_push: 'text-orange-400 bg-orange-500/10',
   git_branch_changed: 'text-orange-400 bg-orange-500/10',
   git_operation: 'text-orange-400 bg-orange-500/10',
+  git_merge: 'text-orange-400 bg-orange-500/10',
+  git_rewrite: 'text-orange-400 bg-orange-500/10',
+  git_checkout: 'text-orange-400 bg-orange-500/10',
   // New v2 types
   message_request: 'text-blue-400 bg-blue-500/10',
   message_response: 'text-indigo-400 bg-indigo-500/10',
@@ -650,8 +656,8 @@ export function SessionDetail() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                            {op.operation_type === 'git_operation' && op.tool_name
-                              ? `git ${op.tool_name}`
+                            {op.operation_type.startsWith('git_') && op.tool_name
+                              ? `Git ${op.tool_name.charAt(0).toUpperCase()}${op.tool_name.slice(1)}`
                               : op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                           </span>
                           {op.success ? (
@@ -666,7 +672,7 @@ export function SessionDetail() {
 
                         {/* Summary details */}
                         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
-                          {op.tool_name && op.operation_type !== 'git_operation' && (
+                          {op.tool_name && !op.operation_type.startsWith('git_') && (
                             <span className="flex items-center gap-1">
                               <Wrench className="h-3 w-3" />
                               {op.tool_name}
@@ -683,10 +689,12 @@ export function SessionDetail() {
                               {op.git_sha.slice(0, 7)}
                             </span>
                           )}
-                          {op.git_branch && (
-                            <span className="flex items-center gap-1">
+                          {(op.git_repo || op.git_branch) && (
+                            <span className="flex items-center gap-1 font-mono">
                               <GitBranch className="h-3 w-3" />
-                              {op.git_branch}
+                              {op.git_repo && op.git_branch
+                                ? `${op.git_repo}/${op.git_branch}`
+                                : op.git_repo || op.git_branch}
                             </span>
                           )}
                           {op.message_role && (

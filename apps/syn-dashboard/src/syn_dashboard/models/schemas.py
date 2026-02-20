@@ -130,6 +130,12 @@ class OperationInfo(BaseModel):
     # Thinking details (for THINKING type)
     thinking_content: str | None = None
 
+    # Git details (for git_commit, git_push, git_branch_changed, git_operation)
+    git_sha: str | None = None
+    git_message: str | None = None
+    git_branch: str | None = None
+    git_repo: str | None = None
+
 
 class SessionResponse(BaseModel):
     """Detailed session response."""

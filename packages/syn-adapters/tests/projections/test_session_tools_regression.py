@@ -87,8 +87,14 @@ class TestToolNameEnrichment:
         assert completed.success is True
 
     @pytest.mark.asyncio
-    async def test_completed_without_started_shows_unknown(self) -> None:
-        """Completed event without corresponding started should show 'unknown'."""
+    async def test_completed_without_started_shows_empty_string(self) -> None:
+        """Completed event without corresponding started should have empty tool_name.
+
+        Empty string is intentional: the UI treats falsy tool_name as "no tool"
+        and suppresses the wrench detail row, which is correct for orphaned events.
+        The SQL layer uses COALESCE(..., 'unknown') but that only applies to real
+        DB rows; mock rows without tool_name should yield "" not "unknown".
+        """
         from datetime import datetime
 
         from syn_adapters.projections.session_tools import SessionToolsProjection
@@ -118,8 +124,8 @@ class TestToolNameEnrichment:
         operations = await projection.get("session-123")
 
         assert len(operations) == 1
-        # Should default to 'unknown' rather than crashing
-        assert operations[0].tool_name == "unknown"
+        # Should default to "" (empty, suppresses UI wrench row) rather than crashing
+        assert operations[0].tool_name == ""
 
 
 @pytest.mark.unit

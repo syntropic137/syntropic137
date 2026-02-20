@@ -101,6 +101,7 @@ export interface OperationInfo {
   git_sha: string | null
   git_message: string | null
   git_branch: string | null
+  git_repo: string | null
 }
 
 export interface SessionResponse {
@@ -329,6 +330,9 @@ export const SSE_EVENTS = {
   GIT_PUSH: 'git_push',
   GIT_BRANCH_CHANGED: 'git_branch_changed',
   GIT_OPERATION: 'git_operation',
+  GIT_MERGE: 'git_merge',
+  GIT_REWRITE: 'git_rewrite',
+  GIT_CHECKOUT: 'git_checkout',
 } as const
 
 export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]

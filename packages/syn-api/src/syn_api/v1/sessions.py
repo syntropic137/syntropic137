@@ -183,21 +183,7 @@ async def get_session(
     try:
         tool_data = await manager.session_tools.get(session_id)
         operations = [
-            ToolOperation(
-                observation_id=getattr(op, "observation_id", ""),
-                operation_type=getattr(op, "operation_type", ""),
-                timestamp=getattr(op, "timestamp", None),
-                duration_ms=getattr(op, "duration_ms", None),
-                success=getattr(op, "success", None),
-                tool_name=getattr(op, "tool_name", None),
-                tool_use_id=getattr(op, "tool_use_id", None),
-                input_preview=getattr(op, "input_preview", None),
-                output_preview=getattr(op, "output_preview", None),
-                git_sha=getattr(op, "git_sha", None),
-                git_message=getattr(op, "git_message", None),
-                git_branch=getattr(op, "git_branch", None),
-            )
-            for op in (tool_data or [])
+            ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])
         ]
     except Exception:
         logger.exception("Failed to load tool operations for session %s", session_id)

@@ -378,6 +378,8 @@ class ToolOperation(BaseModel):
     observability events. Use operation_type to distinguish categories.
     """
 
+    model_config = ConfigDict(from_attributes=True)
+
     observation_id: str = ""
     operation_type: str = ""
     timestamp: datetime | None = None
@@ -392,6 +394,7 @@ class ToolOperation(BaseModel):
     git_sha: str | None = None
     git_message: str | None = None
     git_branch: str | None = None
+    git_repo: str | None = None
 
 
 class PhaseExecution(BaseModel):

@@ -47,6 +47,9 @@ GIT_COMMIT = "git_commit"
 GIT_PUSH = "git_push"
 GIT_BRANCH_CHANGED = "git_branch_changed"
 GIT_OPERATION = "git_operation"
+GIT_MERGE = "git_merge"
+GIT_REWRITE = "git_rewrite"
+GIT_CHECKOUT = "git_checkout"
 
 # Claude Code hook events (from observability plugin, all 14 lifecycle hooks)
 TOOL_EXECUTION_FAILED = "tool_execution_failed"
@@ -91,6 +94,9 @@ EventType = Literal[
     "git_push",
     "git_branch_changed",
     "git_operation",
+    "git_merge",
+    "git_rewrite",
+    "git_checkout",
     "teammate_idle",
     "task_completed",
     # Added to match agentic_events.types.EventType (producer)
@@ -117,9 +123,12 @@ __all__ = [
     "COST_RECORDED",
     "ERROR",
     "GIT_BRANCH_CHANGED",
+    "GIT_CHECKOUT",
     "GIT_COMMIT",
+    "GIT_MERGE",
     "GIT_OPERATION",
     "GIT_PUSH",
+    "GIT_REWRITE",
     "PERMISSION_REQUESTED",
     "PHASE_COMPLETED",
     "PHASE_STARTED",
