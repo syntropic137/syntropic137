@@ -1,24 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { cancelExecution, getControlWebSocketUrl } from '../api/client'
+import { useCallback, useEffect, useState } from 'react'
+import { cancelExecution, pauseExecution, resumeExecution } from '../api/client'
 
-export type ExecutionState = 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed' | 'interrupted' | 'unknown'
-
-interface ControlMessage {
-  type: 'state' | 'result' | 'error'
-  execution_id?: string
-  state?: ExecutionState
-  success?: boolean
-  message?: string
-  error?: string
-}
+export type ExecutionState =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'unknown'
 
 interface UseExecutionControlResult {
-  /** Current execution state */
+  /** Current execution state (optimistically updated after each command) */
   state: ExecutionState
-  /** Whether WebSocket is connected */
-  connected: boolean
   /** Last error message */
   error: string | null
+  /** Whether a command is in-flight */
+  loading: boolean
   /** Send pause command */
   pause: (reason?: string) => void
   /** Send resume command */
@@ -34,117 +33,70 @@ interface UseExecutionControlResult {
 }
 
 /**
- * React hook for controlling execution via WebSocket.
+ * React hook for controlling execution via HTTP.
  *
- * @example
- * ```tsx
- * const { state, pause, resume, cancel, canPause, canResume, canCancel } = useExecutionControl(executionId)
- *
- * return (
- *   <div>
- *     <p>State: {state}</p>
- *     {canPause && <button onClick={() => pause()}>Pause</button>}
- *     {canResume && <button onClick={() => resume()}>Resume</button>}
- *     {canCancel && <button onClick={() => cancel()}>Cancel</button>}
- *   </div>
- * )
- * ```
+ * State is initialised from the parent's execution.status and optimistically
+ * updated after each command so buttons swap immediately without waiting for
+ * the next polling cycle.
  */
-export function useExecutionControl(executionId: string, initialState: ExecutionState = 'unknown'): UseExecutionControlResult {
+export function useExecutionControl(
+  executionId: string,
+  initialState: ExecutionState = 'unknown'
+): UseExecutionControlResult {
   const [state, setState] = useState<ExecutionState>(initialState)
-  const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+  const [loading, setLoading] = useState(false)
 
+  // Sync whenever the parent refreshes the execution (e.g. SSE/poll cycle)
   useEffect(() => {
-    // Get WebSocket URL from centralized API client
-    const wsUrl = getControlWebSocketUrl(executionId)
+    setState(initialState)
+  }, [initialState])
 
-    const ws = new WebSocket(wsUrl)
-
-    ws.onopen = () => {
-      setConnected(true)
+  // Pause/cancel are signal-based and async — the returned state is the
+  // pre-transition state ("running"), not the post-transition state. Set the
+  // target state optimistically on success so buttons swap immediately.
+  const pause = useCallback(
+    (reason?: string) => {
+      setLoading(true)
       setError(null)
-    }
-
-    ws.onclose = () => {
-      setConnected(false)
-    }
-
-    ws.onerror = () => {
-      setError('WebSocket connection failed')
-      setConnected(false)
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: ControlMessage = JSON.parse(event.data)
-
-        if (msg.type === 'state' && msg.state) {
-          setState(msg.state)
-        } else if (msg.type === 'result') {
-          // Update state from result
-          if (msg.state) {
-            setState(msg.state as ExecutionState)
-          }
-          // Clear any previous error on successful result
-          if (msg.success) {
-            setError(null)
-          }
-        } else if (msg.type === 'error') {
-          setError(msg.error || 'Unknown error')
-        }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e)
-      }
-    }
-
-    wsRef.current = ws
-
-    // Cleanup on unmount
-    return () => {
-      ws.close()
-    }
-  }, [executionId])
-
-  const sendCommand = useCallback((command: string, options?: Record<string, unknown>) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ command, ...options }))
-    } else {
-      setError('WebSocket not connected')
-    }
-  }, [])
-
-  const pause = useCallback((reason?: string) => {
-    sendCommand('pause', reason ? { reason } : {})
-  }, [sendCommand])
+      pauseExecution(executionId, reason)
+        .then((r) => setState(r.success ? 'paused' : (r.state as ExecutionState)))
+        .catch((e: Error) => setError(e.message))
+        .finally(() => setLoading(false))
+    },
+    [executionId]
+  )
 
   const resume = useCallback(() => {
-    sendCommand('resume')
-  }, [sendCommand])
+    setLoading(true)
+    setError(null)
+    resumeExecution(executionId)
+      .then((r) => setState(r.success ? 'running' : (r.state as ExecutionState)))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [executionId])
 
-  const cancel = useCallback((reason?: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      sendCommand('cancel', reason ? { reason } : {})
-    } else {
-      // WebSocket not available — fall back to HTTP
-      cancelExecution(executionId, reason).then(() => {
-        setState('cancelled')
-      }).catch(() => {
-        setError('Cancel request failed')
-      })
-    }
-  }, [sendCommand, executionId])
+  const cancel = useCallback(
+    (reason?: string) => {
+      setLoading(true)
+      setError(null)
+      cancelExecution(executionId, reason)
+        .then((r) => setState(r.success ? 'cancelled' : (r.state as ExecutionState)))
+        .catch((e: Error) => setError(e.message))
+        .finally(() => setLoading(false))
+    },
+    [executionId]
+  )
 
   return {
     state,
-    connected,
     error,
+    loading,
     pause,
     resume,
     cancel,
-    canPause: state === 'running',
-    canResume: state === 'paused',
-    canCancel: state === 'running' || state === 'paused',
+    canPause: state === 'running' && !loading,
+    canResume: state === 'paused' && !loading,
+    canCancel: (state === 'running' || state === 'paused') && !loading,
   }
 }

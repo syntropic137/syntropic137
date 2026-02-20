@@ -281,21 +281,29 @@ export function getExecutionWebSocketUrl(executionId: string): string {
   return `${protocol}//${window.location.host}/ws/executions/${executionId}`
 }
 
-/**
- * Get WebSocket URL for execution control.
- *
- * @param executionId - The execution ID to control
- * @returns WebSocket URL for the control endpoint
- */
-export function getControlWebSocketUrl(executionId: string): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}${API_BASE}/ws/control/${executionId}`
+
+export async function pauseExecution(
+  executionId: string,
+  reason?: string
+): Promise<{ success: boolean; execution_id: string; state: string; message: string | null }> {
+  return fetchJSON(`${API_BASE}/executions/${executionId}/pause`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export async function resumeExecution(
+  executionId: string
+): Promise<{ success: boolean; execution_id: string; state: string; message: string | null }> {
+  return fetchJSON(`${API_BASE}/executions/${executionId}/resume`, {
+    method: 'POST',
+  })
 }
 
 export async function cancelExecution(
   executionId: string,
   reason?: string
-): Promise<{ execution_id: string; state: string; message: string }> {
+): Promise<{ success: boolean; execution_id: string; state: string; message: string | null }> {
   return fetchJSON(`${API_BASE}/executions/${executionId}/cancel`, {
     method: 'POST',
     body: JSON.stringify({ reason: reason ?? 'Cancelled from UI' }),

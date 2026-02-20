@@ -15,11 +15,17 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true,  // Enable WebSocket proxy
+        configure: (proxy) => {
+          proxy.on('error', () => { /* suppress backend-not-running noise */ })
+        },
       },
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on('error', () => { /* suppress backend-not-running noise */ })
+        },
       },
     },
     fs: {
