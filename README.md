@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/banner-syntropic137.png" alt="Syntropic137 Banner" width="100%" />
+</p>
+
 # Syntropic137
 
 Event-sourced system for tracking AI agent work across workflows, capturing metrics for observability and optimization.
