@@ -4,6 +4,7 @@ import { useExecutionControl, type ExecutionState } from '../hooks'
 
 interface ExecutionControlProps {
   executionId: string
+  initialState?: ExecutionState
   className?: string
 }
 
@@ -40,7 +41,7 @@ function StateIndicator({ state }: { state: ExecutionState }) {
 /**
  * Control buttons for execution management.
  */
-export function ExecutionControl({ executionId, className = '' }: ExecutionControlProps) {
+export function ExecutionControl({ executionId, initialState, className = '' }: ExecutionControlProps) {
   const {
     state,
     connected,
@@ -51,7 +52,7 @@ export function ExecutionControl({ executionId, className = '' }: ExecutionContr
     canPause,
     canResume,
     canCancel,
-  } = useExecutionControl(executionId)
+  } = useExecutionControl(executionId, initialState)
 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
 

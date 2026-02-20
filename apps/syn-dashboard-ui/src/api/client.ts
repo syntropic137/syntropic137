@@ -292,6 +292,16 @@ export function getControlWebSocketUrl(executionId: string): string {
   return `${protocol}//${window.location.host}${API_BASE}/ws/control/${executionId}`
 }
 
+export async function cancelExecution(
+  executionId: string,
+  reason?: string
+): Promise<{ execution_id: string; state: string; message: string }> {
+  return fetchJSON(`${API_BASE}/executions/${executionId}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason ?? 'Cancelled from UI' }),
+  })
+}
+
 /**
  * Check WebSocket health endpoint.
  */

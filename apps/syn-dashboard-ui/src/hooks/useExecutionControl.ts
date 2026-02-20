@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getControlWebSocketUrl } from '../api/client'
+import { cancelExecution, getControlWebSocketUrl } from '../api/client'
 
 export type ExecutionState = 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed' | 'interrupted' | 'unknown'
 
@@ -50,8 +50,8 @@ interface UseExecutionControlResult {
  * )
  * ```
  */
-export function useExecutionControl(executionId: string): UseExecutionControlResult {
-  const [state, setState] = useState<ExecutionState>('unknown')
+export function useExecutionControl(executionId: string, initialState: ExecutionState = 'unknown'): UseExecutionControlResult {
+  const [state, setState] = useState<ExecutionState>(initialState)
   const [connected, setConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -124,8 +124,17 @@ export function useExecutionControl(executionId: string): UseExecutionControlRes
   }, [sendCommand])
 
   const cancel = useCallback((reason?: string) => {
-    sendCommand('cancel', reason ? { reason } : {})
-  }, [sendCommand])
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      sendCommand('cancel', reason ? { reason } : {})
+    } else {
+      // WebSocket not available — fall back to HTTP
+      cancelExecution(executionId, reason).then(() => {
+        setState('cancelled')
+      }).catch(() => {
+        setError('Cancel request failed')
+      })
+    }
+  }, [sendCommand, executionId])
 
   return {
     state,
