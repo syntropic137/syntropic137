@@ -37,11 +37,13 @@ interface UseExecutionControlResult {
  *
  * State is initialised from the parent's execution.status and optimistically
  * updated after each command so buttons swap immediately without waiting for
- * the next polling cycle.
+ * the next polling cycle. Pass onSuccess to trigger an immediate data refresh
+ * (e.g. refreshExecution) after a successful command.
  */
 export function useExecutionControl(
   executionId: string,
-  initialState: ExecutionState = 'unknown'
+  initialState: ExecutionState = 'unknown',
+  onSuccess?: () => void
 ): UseExecutionControlResult {
   const [state, setState] = useState<ExecutionState>(initialState)
   const [error, setError] = useState<string | null>(null)
@@ -60,32 +62,41 @@ export function useExecutionControl(
       setLoading(true)
       setError(null)
       pauseExecution(executionId, reason)
-        .then((r) => setState(r.success ? 'paused' : (r.state as ExecutionState)))
+        .then((r) => {
+          setState(r.success ? 'paused' : (r.state as ExecutionState))
+          if (r.success) onSuccess?.()
+        })
         .catch((e: Error) => setError(e.message))
         .finally(() => setLoading(false))
     },
-    [executionId]
+    [executionId, onSuccess]
   )
 
   const resume = useCallback(() => {
     setLoading(true)
     setError(null)
     resumeExecution(executionId)
-      .then((r) => setState(r.success ? 'running' : (r.state as ExecutionState)))
+      .then((r) => {
+        setState(r.success ? 'running' : (r.state as ExecutionState))
+        if (r.success) onSuccess?.()
+      })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
-  }, [executionId])
+  }, [executionId, onSuccess])
 
   const cancel = useCallback(
     (reason?: string) => {
       setLoading(true)
       setError(null)
       cancelExecution(executionId, reason)
-        .then((r) => setState(r.success ? 'cancelled' : (r.state as ExecutionState)))
+        .then((r) => {
+          setState(r.success ? 'cancelled' : (r.state as ExecutionState))
+          if (r.success) onSuccess?.()
+        })
         .catch((e: Error) => setError(e.message))
         .finally(() => setLoading(false))
     },
-    [executionId]
+    [executionId, onSuccess]
   )
 
   return {

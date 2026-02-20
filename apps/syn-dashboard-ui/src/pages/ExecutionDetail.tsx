@@ -197,7 +197,11 @@ export function ExecutionDetail() {
         {/* Execution controls (pause/cancel) for active executions */}
         <div className="flex items-center gap-4">
           {executionId && ['running', 'paused'].includes(execution.status) && (
-            <ExecutionControl executionId={executionId} initialState={execution.status as 'running' | 'paused'} />
+            <ExecutionControl
+              executionId={executionId}
+              initialState={execution.status as 'running' | 'paused'}
+              onSuccess={refreshExecution}
+            />
           )}
           {/* Connection status indicator */}
           <div className="flex items-center gap-2 text-sm">

@@ -5,6 +5,8 @@ import { useExecutionControl, type ExecutionState } from '../hooks'
 interface ExecutionControlProps {
   executionId: string
   initialState?: ExecutionState
+  /** Called after a successful command so the parent can refresh execution data */
+  onSuccess?: () => void
   className?: string
 }
 
@@ -12,7 +14,7 @@ interface ExecutionControlProps {
  * Pause / Resume / Cancel buttons for a running or paused execution.
  * Uses HTTP endpoints — no WebSocket required.
  */
-export function ExecutionControl({ executionId, initialState, className = '' }: ExecutionControlProps) {
+export function ExecutionControl({ executionId, initialState, onSuccess, className = '' }: ExecutionControlProps) {
   const {
     error,
     loading,
@@ -22,7 +24,7 @@ export function ExecutionControl({ executionId, initialState, className = '' }: 
     canPause,
     canResume,
     canCancel,
-  } = useExecutionControl(executionId, initialState)
+  } = useExecutionControl(executionId, initialState, onSuccess)
 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
 
