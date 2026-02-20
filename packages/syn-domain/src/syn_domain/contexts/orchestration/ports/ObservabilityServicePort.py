@@ -17,8 +17,8 @@ class ObservabilityServicePort(Protocol):
 
     Observation types (from ADR-037):
     - TOKEN_USAGE: Input/output token counts, cache stats
-    - TOOL_STARTED: Tool invocation with input preview
-    - TOOL_COMPLETED: Tool result with output preview, success status
+    - TOOL_EXECUTION_STARTED: Tool invocation with input preview
+    - TOOL_EXECUTION_COMPLETED: Tool result with output preview, success status
     - SUBAGENT_STARTED: Task tool invocation (subagent creation)
     - SUBAGENT_STOPPED: Task tool completion with tools_used breakdown
     """
@@ -36,7 +36,7 @@ class ObservabilityServicePort(Protocol):
 
         Args:
             session_id: The session ID (required).
-            observation_type: Type of observation (TOKEN_USAGE, TOOL_STARTED, etc.).
+            observation_type: Type of observation (TOKEN_USAGE, TOOL_EXECUTION_STARTED, etc.).
             data: Observation data as JSONB (structure depends on observation_type).
             execution_id: Optional execution ID for workflow context.
             phase_id: Optional phase ID for workflow context.

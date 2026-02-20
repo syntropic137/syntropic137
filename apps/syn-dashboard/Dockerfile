@@ -19,7 +19,6 @@ COPY packages/syn-api/ ./packages/syn-api/
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
 COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
 COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_workspace/ ./lib/agentic-primitives/lib/python/agentic_workspace/
 COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
 
 # Copy dashboard project files
@@ -33,7 +32,6 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Install local dependencies first (in dependency order)
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_logging
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_events
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_workspace
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_isolation
 RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-shared

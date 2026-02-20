@@ -29,8 +29,8 @@ class OperationType(str, Enum):
     MESSAGE_RESPONSE = "message_response"  # LLM response received
 
     # Tool lifecycle
-    TOOL_STARTED = "tool_started"  # Tool invocation began
-    TOOL_COMPLETED = "tool_completed"  # Tool finished (success/fail)
+    TOOL_EXECUTION_STARTED = "tool_started"  # Tool invocation began
+    TOOL_EXECUTION_COMPLETED = "tool_completed"  # Tool finished (success/fail)
     TOOL_BLOCKED = "tool_blocked"  # Tool blocked by validator
 
     # Extended thinking
@@ -42,7 +42,7 @@ class OperationType(str, Enum):
     # Legacy (deprecated, keep for backward compat)
     AGENT_REQUEST = "agent_request"  # Deprecated - use MESSAGE_*
     TOOL_EXECUTION = "tool_execution"  # Deprecated - use TOOL_*
-    TOOL_USE = "tool_use"  # Deprecated - use TOOL_COMPLETED
+    TOOL_USE = "tool_use"  # Deprecated - use TOOL_EXECUTION_COMPLETED
     VALIDATION = "validation"  # Keep for validation operations
 
 
@@ -83,7 +83,7 @@ class OperationRecord:
 
     # Tool execution details (for TOOL_* types)
     tool_name: str | None = None
-    tool_use_id: str | None = None  # Correlate TOOL_STARTED/COMPLETED
+    tool_use_id: str | None = None  # Correlate TOOL_EXECUTION_STARTED/COMPLETED
     tool_input: dict[str, Any] | None = None  # Tool input parameters
     tool_output: str | None = None  # Tool output (truncated)
 

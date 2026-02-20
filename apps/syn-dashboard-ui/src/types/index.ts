@@ -96,6 +96,12 @@ export interface OperationInfo {
 
   // Thinking details (for THINKING type)
   thinking_content: string | null
+
+  // Git details (for git_commit, git_push, git_branch_changed, git_operation)
+  git_sha: string | null
+  git_message: string | null
+  git_branch: string | null
+  git_repo: string | null
 }
 
 export interface SessionResponse {
@@ -318,6 +324,15 @@ export const SSE_EVENTS = {
   WORKSPACE_DESTROYING: 'workspace_destroying',
   WORKSPACE_DESTROYED: 'workspace_destroyed',
   WORKSPACE_ERROR: 'workspace_error',
+
+  // Git observability events (agentic-primitives observability plugin)
+  GIT_COMMIT: 'git_commit',
+  GIT_PUSH: 'git_push',
+  GIT_BRANCH_CHANGED: 'git_branch_changed',
+  GIT_OPERATION: 'git_operation',
+  GIT_MERGE: 'git_merge',
+  GIT_REWRITE: 'git_rewrite',
+  GIT_CHECKOUT: 'git_checkout',
 } as const
 
 export type SSEEventType = typeof SSE_EVENTS[keyof typeof SSE_EVENTS]

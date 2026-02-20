@@ -73,7 +73,7 @@ class OperationRecord:
 
     Supports multiple operation types for full observability:
     - MESSAGE_REQUEST/RESPONSE: LLM API calls
-    - TOOL_STARTED/COMPLETED/BLOCKED: Tool lifecycle
+    - TOOL_EXECUTION_STARTED/COMPLETED/BLOCKED: Tool lifecycle
     - THINKING: Extended thinking content
     - ERROR: Error information
     """

@@ -142,7 +142,7 @@ executor = WorkflowExecutor(
 )
 
 # After test
-assert observability.has_observation(ObservationType.TOOL_COMPLETED)
+assert observability.has_observation(ObservationType.TOOL_EXECUTION_COMPLETED)
 ```
 
 ## Related ADRs

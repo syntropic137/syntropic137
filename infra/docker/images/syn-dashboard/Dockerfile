@@ -27,8 +27,6 @@ COPY packages/syn-shared/ ./packages/syn-shared/
 # 2. Agentic primitives packages
 COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
 COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
-COPY lib/agentic-primitives/lib/python/agentic_workspace/ ./lib/agentic-primitives/lib/python/agentic_workspace/
-COPY lib/agentic-primitives/lib/python/agentic_security/ ./lib/agentic-primitives/lib/python/agentic_security/
 COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
 
 # 3. Event sourcing SDK
@@ -43,7 +41,10 @@ COPY packages/syn-tokens/ ./packages/syn-tokens/
 # 6. Adapters layer (depends on domain, shared, agentic packages, tokens)
 COPY packages/syn-adapters/ ./packages/syn-adapters/
 
-# 6. Dashboard application
+# 7. API layer (depends on adapters, domain, shared)
+COPY packages/syn-api/ ./packages/syn-api/
+
+# 8. Dashboard application
 COPY apps/syn-dashboard/ ./apps/syn-dashboard/
 
 # -----------------------------------------------------------------------------
@@ -56,13 +57,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN uv pip install ./packages/syn-shared
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_logging
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_events
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_workspace
-RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_security
 RUN uv pip install ./lib/agentic-primitives/lib/python/agentic_isolation
 RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
 RUN uv pip install ./packages/syn-domain
 RUN uv pip install ./packages/syn-tokens
 RUN uv pip install "./packages/syn-adapters[minio]"
+RUN uv pip install ./packages/syn-api
 RUN uv pip install ./apps/syn-dashboard
 
 # =============================================================================

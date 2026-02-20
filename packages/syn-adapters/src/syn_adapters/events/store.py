@@ -475,6 +475,73 @@ class AgentEventStore:
             for row in rows
         ]
 
+    async def query_recent_by_types(
+        self,
+        event_types: list[str],
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Query most recent events of given types across all sessions.
+
+        Used for the global activity feed (git commits, pushes, etc.).
+
+        Args:
+            event_types: Event type strings to include.
+            limit: Maximum events to return.
+
+        Returns:
+            List of event dicts ordered by time DESC.
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        if self.pool is None:
+            raise RuntimeError("AgentEventStore pool is not initialized")
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT time, event_type, session_id, execution_id, phase_id, data
+                FROM agent_events
+                WHERE event_type = ANY($1)
+                ORDER BY time DESC
+                LIMIT $2
+                """,
+                event_types,
+                limit,
+            )
+
+        return [
+            {
+                "time": row["time"].isoformat(),
+                "event_type": row["event_type"],
+                "session_id": row["session_id"],
+                "execution_id": row["execution_id"],
+                "phase_id": row["phase_id"],
+                "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
+            }
+            for row in rows
+        ]
+
+    # Keys in the top-level event dict that must NOT be overridden by user data.
+    # AgentEvent.from_dict() uses "message" to detect Claude conversation messages,
+    # and the other keys are event metadata. Collisions silently corrupt stored events.
+    _RESERVED_OBSERVATION_KEYS: frozenset[str] = frozenset(
+        {
+            "event_type",
+            "type",
+            "session_id",
+            "execution_id",
+            "phase_id",
+            "workspace_id",
+            "timestamp",
+            "time",
+            "id",
+            # "message" is reserved: from_dict() calls message.get("content", []) to detect
+            # Claude tool_use/tool_result content blocks. A string "message" value crashes it.
+            "message",
+        }
+    )
+
     async def record_observation(
         self,
         session_id: str,
@@ -491,18 +558,30 @@ class AgentEventStore:
 
         Args:
             session_id: Session ID
-            observation_type: Type of observation (e.g., "token_usage", "tool_started")
-            data: Observation data
+            observation_type: Type of observation (e.g., "token_usage", "tool_execution_started")
+            data: Observation-specific payload. Must NOT contain reserved keys
+                  (event_type, session_id, message, timestamp, etc.) — they are
+                  silently dropped with a warning. Use field names specific to the
+                  observation type (e.g., "commit_message" not "message").
             execution_id: Optional execution ID
             phase_id: Optional phase ID
             workspace_id: Optional workspace ID
         """
+        if conflicting := (data.keys() & self._RESERVED_OBSERVATION_KEYS):
+            logger.warning(
+                "record_observation(%s): data contains reserved keys %s — "
+                "they will be ignored to prevent event corruption. "
+                "Rename the field(s) in the caller.",
+                observation_type,
+                sorted(conflicting),
+            )
+        safe_data = {k: v for k, v in data.items() if k not in self._RESERVED_OBSERVATION_KEYS}
         event = {
             "event_type": observation_type,
             "session_id": session_id,
             "timestamp": datetime.now(UTC),
             "workspace_id": workspace_id,
-            **data,
+            **safe_data,
         }
         await self.insert_one(
             event=event,

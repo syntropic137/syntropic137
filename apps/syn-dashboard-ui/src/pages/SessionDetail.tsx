@@ -10,6 +10,9 @@ import {
   Copy,
   Cpu,
   FileText,
+  GitBranch,
+  GitCommit,
+  GitMerge,
   MessageSquare,
   Play,
   Terminal,
@@ -18,7 +21,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { getConversationLog, getSession } from '../api/client'
@@ -38,6 +41,14 @@ const operationIcons: Record<string, typeof Activity> = {
   // Subagent lifecycle events (agentic_isolation v0.3.0)
   subagent_started: Users,
   subagent_stopped: Users,
+  // Git observability events
+  git_commit: GitCommit,
+  git_push: GitBranch,
+  git_branch_changed: GitBranch,
+  git_operation: GitMerge,
+  git_merge: GitMerge,
+  git_rewrite: GitCommit,
+  git_checkout: GitBranch,
   // New v2 types
   message_request: MessageSquare,
   message_response: MessageSquare,
@@ -69,6 +80,14 @@ const operationColors: Record<string, string> = {
   // Subagent lifecycle events (agentic_isolation v0.3.0)
   subagent_started: 'text-violet-400 bg-violet-500/10',
   subagent_stopped: 'text-violet-400 bg-violet-500/10',
+  // Git observability events
+  git_commit: 'text-orange-400 bg-orange-500/10',
+  git_push: 'text-orange-400 bg-orange-500/10',
+  git_branch_changed: 'text-orange-400 bg-orange-500/10',
+  git_operation: 'text-orange-400 bg-orange-500/10',
+  git_merge: 'text-orange-400 bg-orange-500/10',
+  git_rewrite: 'text-orange-400 bg-orange-500/10',
+  git_checkout: 'text-orange-400 bg-orange-500/10',
   // New v2 types
   message_request: 'text-blue-400 bg-blue-500/10',
   message_response: 'text-indigo-400 bg-indigo-500/10',
@@ -377,6 +396,24 @@ export function SessionDetail() {
   const [now, setNow] = useState(() => Date.now())
   const [showConversationLog, setShowConversationLog] = useState(false)
 
+  // Scroll anchoring: when new ops prepend at the top, keep the user's place
+  // unless they're already near the top (watching live updates).
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const capturedScrollHeightRef = useRef(0)
+  // Capture the current scrollHeight during render (before the DOM is mutated).
+  // timelineRef.current still reflects the previous commit at this point.
+  if (timelineRef.current) {
+    capturedScrollHeightRef.current = timelineRef.current.scrollHeight
+  }
+  useLayoutEffect(() => {
+    const el = timelineRef.current
+    if (!el) return
+    const heightDiff = el.scrollHeight - capturedScrollHeightRef.current
+    if (heightDiff > 0 && window.scrollY > 50) {
+      window.scrollBy({ top: heightDiff, behavior: 'instant' })
+    }
+  }, [session?.operations?.length])
+
   useEffect(() => {
     if (!sessionId) return
 
@@ -593,7 +630,7 @@ export function SessionDetail() {
               </p>
             </div>
           ) : (
-            <div className="relative">
+            <div ref={timelineRef} className="relative">
               {/* Timeline line */}
               <div className="absolute left-8 top-0 bottom-0 w-px bg-[var(--color-border)]" />
 
@@ -619,7 +656,9 @@ export function SessionDetail() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                            {op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                            {op.operation_type.startsWith('git_') && op.tool_name
+                              ? `Git ${op.tool_name.charAt(0).toUpperCase()}${op.tool_name.slice(1)}`
+                              : op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                           </span>
                           {op.success ? (
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -633,10 +672,29 @@ export function SessionDetail() {
 
                         {/* Summary details */}
                         <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-secondary)]">
-                          {op.tool_name && (
+                          {op.tool_name && !op.operation_type.startsWith('git_') && (
                             <span className="flex items-center gap-1">
                               <Wrench className="h-3 w-3" />
                               {op.tool_name}
+                            </span>
+                          )}
+                          {op.git_message && (
+                            <span className="flex items-center gap-1 max-w-sm truncate">
+                              <GitCommit className="h-3 w-3 shrink-0" />
+                              {op.git_message}
+                            </span>
+                          )}
+                          {op.git_sha && (
+                            <span className="font-mono text-[var(--color-text-muted)]">
+                              {op.git_sha.slice(0, 7)}
+                            </span>
+                          )}
+                          {(op.git_repo || op.git_branch) && (
+                            <span className="flex items-center gap-1 font-mono">
+                              <GitBranch className="h-3 w-3" />
+                              {op.git_repo && op.git_branch
+                                ? `${op.git_repo}/${op.git_branch}`
+                                : op.git_repo || op.git_branch}
                             </span>
                           )}
                           {op.message_role && (

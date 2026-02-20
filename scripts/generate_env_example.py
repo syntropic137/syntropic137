@@ -128,6 +128,7 @@ def generate_settings_section(
     section_name: str,
     prefix: str = "",
     description: str | None = None,
+    exclude: set[str] | None = None,
 ) -> list[str]:
     """Generate env vars for a settings class."""
     lines: list[str] = []
@@ -147,6 +148,8 @@ def generate_settings_section(
     lines.append("")
 
     for field_name, field_info in settings_class.model_fields.items():
+        if exclude and field_name in exclude:
+            continue
         # Get field type from annotations
         field_type = settings_class.__annotations__.get(field_name, str)
 
@@ -195,6 +198,18 @@ def generate_env_example() -> str:
             "# Copy this file to .env and fill in your values.",
             "# Required variables are marked with [REQUIRED].",
             "# " + "=" * 76,
+            "",
+            "# " + "=" * 76,
+            "# SECURITY WARNING",
+            "# " + "=" * 76,
+            "#",
+            "# The AEF dashboard and API have no built-in authentication. Access control",
+            "# relies entirely on network isolation (Docker internal network). If you expose",
+            "# the dashboard via Cloudflare Tunnel or any public URL, you MUST add",
+            "# authentication at the reverse proxy layer (e.g., Cloudflare Access, nginx",
+            "# basic auth, or VPN). Never expose the dashboard to untrusted networks without",
+            "# external authentication in place.",
+            "#",
             "",
         ]
     )
@@ -260,12 +275,15 @@ def generate_env_example() -> str:
             lines.append("")
 
     # Add GitHub App Settings (SYN_GITHUB_* prefix)
+    # installation_id is excluded: it's discovered dynamically from webhook payloads.
+    # Set it in .env only as an optional fallback for single-installation setups.
     lines.extend(
         generate_settings_section(
             GitHubAppSettings,
             "GITHUB APP (Secure Authentication)",
             prefix="SYN_GITHUB_",
             description="GitHub App for secure API access. See docs/deployment/github-app-setup.md",
+            exclude={"installation_id"},
         )
     )
 

@@ -14,7 +14,22 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from syn_shared.events import TOOL_COMPLETED, TOOL_STARTED
+from syn_shared.events import (
+    COST_RECORDED,
+    GIT_BRANCH_CHANGED,
+    GIT_CHECKOUT,
+    GIT_COMMIT,
+    GIT_MERGE,
+    GIT_OPERATION,
+    GIT_PUSH,
+    GIT_REWRITE,
+    SESSION_SUMMARY,
+    SUBAGENT_STARTED,
+    SUBAGENT_STOPPED,
+    TOKEN_USAGE,
+    TOOL_EXECUTION_COMPLETED,
+    TOOL_EXECUTION_STARTED,
+)
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -23,36 +38,55 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Use constants for type safety
-_TOOL_EVENT_TYPES = (TOOL_STARTED, TOOL_COMPLETED)
+# Exclude high-volume, non-activity events from the session timeline.
+# All other event types — including any new ones added to agentic-primitives —
+# appear automatically without requiring changes here.
+_TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
+
+_SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
+_GIT_EVENT_TYPES = (
+    GIT_COMMIT,
+    GIT_PUSH,
+    GIT_BRANCH_CHANGED,
+    GIT_OPERATION,
+    GIT_MERGE,
+    GIT_REWRITE,
+    GIT_CHECKOUT,
+)
 
 
 @dataclass
 class ToolOperation:
-    """Read model for a tool operation from TimescaleDB.
+    """Read model for a session timeline event from TimescaleDB.
 
-    Represents either a tool_started or tool_completed event.
+    Covers tool executions, git operations, subagent lifecycle, and other
+    observability events recorded during a session.
     """
 
     observation_id: str
     tool_name: str
     tool_use_id: str | None
-    operation_type: str  # "tool_started" or "tool_completed"
+    operation_type: str  # e.g. "tool_started", "git_commit", "subagent_started"
     timestamp: datetime
     success: bool | None  # Only for tool_execution_completed
     input_preview: str | None  # Truncated input for display
     output_preview: str | None  # Truncated output for display
     duration_ms: int | None  # Only for tool_execution_completed
+    # Git-specific fields (populated for git_* event types)
+    git_sha: str | None = None
+    git_message: str | None = None
+    git_branch: str | None = None
+    git_repo: str | None = None
 
     @property
     def is_started(self) -> bool:
         """Check if this is a tool_started event."""
-        return self.operation_type == TOOL_STARTED
+        return self.operation_type == TOOL_EXECUTION_STARTED
 
     @property
     def is_completed(self) -> bool:
         """Check if this is a tool_completed event."""
-        return self.operation_type == TOOL_COMPLETED
+        return self.operation_type == TOOL_EXECUTION_COMPLETED
 
 
 class SessionToolsProjection:
@@ -144,13 +178,13 @@ class SessionToolsProjection:
                     FROM agent_events e
                     LEFT JOIN tool_names tn ON tn.tool_use_id = e.data->>'tool_use_id'
                     WHERE e.session_id = $1
-                      AND e.event_type = ANY($4)
+                      AND e.event_type != ALL($4)
                     ORDER BY e.time ASC
                     """,
                     session_id,
-                    TOOL_STARTED,
-                    TOOL_COMPLETED,
-                    list(_TOOL_EVENT_TYPES),
+                    TOOL_EXECUTION_STARTED,
+                    TOOL_EXECUTION_COMPLETED,
+                    list(_TIMELINE_EXCLUDE),
                 )
 
                 logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
@@ -182,9 +216,9 @@ class SessionToolsProjection:
         if pool is None:
             return []
 
-        # Build dynamic query with type-safe event types
-        conditions = [f"event_type = ANY(${1})"]
-        params: list[Any] = [list(_TOOL_EVENT_TYPES)]
+        # Exclude high-volume, non-activity events (same logic as get())
+        conditions = [f"event_type != ALL(${1})"]
+        params: list[Any] = [list(_TIMELINE_EXCLUDE)]
         param_idx = 2
 
         if execution_id:
@@ -238,7 +272,63 @@ class SessionToolsProjection:
             data = json.loads(data)
 
         event_type = row["event_type"]
-        is_completed = event_type == TOOL_COMPLETED
+        is_completed = event_type == TOOL_EXECUTION_COMPLETED
+        is_subagent = event_type in _SUBAGENT_EVENT_TYPES
+
+        if is_subagent:
+            # Subagent events use agent_name as the display name
+            tool_use_id = data.get("subagent_tool_use_id", "")
+            obs_id = f"subagent-{event_type}-{tool_use_id}-{row['time'].isoformat()}"
+            return ToolOperation(
+                observation_id=obs_id,
+                tool_name=data.get("agent_name", "subagent"),
+                tool_use_id=tool_use_id or None,
+                operation_type=event_type,
+                timestamp=row["time"],
+                success=data.get("success") if event_type == SUBAGENT_STOPPED else None,
+                input_preview=None,
+                output_preview=None,
+                duration_ms=data.get("duration_ms") if event_type == SUBAGENT_STOPPED else None,
+            )
+
+        is_git = event_type in _GIT_EVENT_TYPES
+        if is_git:
+            obs_id = f"git-{event_type}-{row['time'].isoformat()}"
+
+            # Extract the operation subcommand for display in the timeline title
+            git_subcmd = data.get("operation", "")
+            git_branch = data.get("branch") or data.get("to_branch") or None
+            if not git_branch and event_type == "git_operation":
+                # Parse branch from "git checkout -b <branch>" or "git checkout <branch>"
+                cmd = data.get("command", "")
+                import re as _re
+
+                _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
+                if _m:
+                    git_branch = _m.group(1)
+
+            # For git_rewrite, use the rewrite type (rebase/amend) as the subcommand
+            if event_type == GIT_REWRITE and not git_subcmd:
+                git_subcmd = data.get("operation", "rebase")
+
+            return ToolOperation(
+                observation_id=obs_id,
+                tool_name=git_subcmd,
+                tool_use_id=None,
+                operation_type=event_type,
+                timestamp=row["time"],
+                success=True,
+                input_preview=None,
+                output_preview=None,
+                duration_ms=None,
+                git_sha=data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None,
+                git_message=data.get("message")
+                or data.get("message_preview")
+                or data.get("commit_message")
+                or None,
+                git_branch=git_branch,
+                git_repo=data.get("repo") or None,
+            )
 
         # Generate a unique ID from the row data
         tool_use_id = data.get("tool_use_id", "")
@@ -246,7 +336,7 @@ class SessionToolsProjection:
 
         return ToolOperation(
             observation_id=obs_id or str(uuid4()),
-            tool_name=data.get("tool_name", "unknown"),
+            tool_name=data.get("tool_name", ""),
             tool_use_id=data.get("tool_use_id"),
             operation_type=event_type,
             timestamp=row["time"],

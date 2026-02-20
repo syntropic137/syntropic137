@@ -15,6 +15,8 @@ logger = get_logger(__name__)
 
 router = APIRouter(tags=["websocket"])
 
+_ACTIVITY_CHANNEL = "_activity_"
+
 
 @router.websocket("/ws/executions/{execution_id}")
 async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
@@ -79,6 +81,40 @@ async def execution_websocket(websocket: WebSocket, execution_id: str) -> None:
             extra={"execution_id": execution_id},
         )
         await realtime.disconnect(execution_id, websocket)
+
+
+@router.websocket("/ws/activity")
+async def activity_websocket(websocket: WebSocket) -> None:
+    """WebSocket endpoint for the global activity feed.
+
+    Receives repo-level events (git commits, pushes, etc.) that are not
+    scoped to a specific execution. Used by the dashboard home EventFeed.
+    """
+    await websocket.accept()
+    realtime = rt.get_realtime_projection_ref()
+
+    await realtime.connect(_ACTIVITY_CHANNEL, websocket)
+
+    try:
+        await websocket.send_json(
+            {"type": "connected", "channel": "activity", "message": "Subscribed to activity feed"}
+        )
+
+        while True:
+            try:
+                await websocket.receive_json()
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                break
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "error": str(e)})
+    finally:
+        await realtime.disconnect(_ACTIVITY_CHANNEL, websocket)
 
 
 @router.get("/ws/health")

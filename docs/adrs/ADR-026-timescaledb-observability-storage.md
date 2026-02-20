@@ -159,12 +159,12 @@ class ObservationType(str, Enum):
     TOKEN_USAGE = "token_usage"
 
     # Tool lifecycle
-    TOOL_STARTED = "tool_started"
-    TOOL_COMPLETED = "tool_completed"
+    TOOL_EXECUTION_STARTED = "tool_started"
+    TOOL_EXECUTION_COMPLETED = "tool_completed"
     TOOL_BLOCKED = "tool_blocked"
 
     # Execution events
-    PROMPT_SUBMITTED = "prompt_submitted"
+    USER_PROMPT_SUBMITTED = "prompt_submitted"
     EXECUTION_STOPPED = "execution_stopped"
     SUBAGENT_STOPPED = "subagent_stopped"
     CONTEXT_COMPACTING = "context_compacting"
@@ -185,7 +185,7 @@ class ObservationType(str, Enum):
     "model": "claude-sonnet-4-20250514"
 }
 
-# TOOL_STARTED data field
+# TOOL_EXECUTION_STARTED data field
 {
     "tool_name": "bash",
     "tool_use_id": "toolu_abc123",
@@ -193,7 +193,7 @@ class ObservationType(str, Enum):
     # Full input stored in MinIO: agent-operations/{session_id}/{tool_use_id}/input.json
 }
 
-# TOOL_COMPLETED data field
+# TOOL_EXECUTION_COMPLETED data field
 {
     "tool_name": "bash",
     "tool_use_id": "toolu_abc123",
