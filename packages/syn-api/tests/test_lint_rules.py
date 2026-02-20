@@ -20,8 +20,9 @@ DASHBOARD_API = (
     Path(__file__).resolve().parents[3] / "apps" / "syn-dashboard" / "src" / "syn_dashboard" / "api"
 )
 
-# Pattern: getattr(anything, "string_literal"   — catches both 2-arg and 3-arg forms
-GETATTR_PATTERN = re.compile(r'\bgetattr\(\s*\w+\s*,\s*"[^"]*"')
+# Pattern: getattr(anything, "string_literal" or 'string_literal'
+# Catches both 2-arg and 3-arg forms, both quote styles, and attribute-chain receivers
+GETATTR_PATTERN = re.compile(r"""\bgetattr\(\s*[\w.]+\s*,\s*["'][^"']*["']""")
 
 # Files that are allowed to use getattr (with justification)
 ALLOWED_FILES: set[str] = {

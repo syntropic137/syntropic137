@@ -36,10 +36,12 @@ async def list_workflows(
     """List all workflow templates."""
     offset = (page - 1) * page_size
 
-    # Fetch all matching workflows, sort, then paginate
+    # Fetch all matching workflows up to a reasonable cap for in-memory sort + total count.
+    # Workflow templates are system-level configs (not user data), so 500 is more than sufficient.
+    # TODO: push ORDER BY + COUNT into domain projection query to avoid this fetch.
     all_result = await wf.list_workflows(
         workflow_type=workflow_type,
-        limit=10000,
+        limit=500,
         offset=0,
     )
 
@@ -58,12 +60,13 @@ async def list_workflows(
         for s in all_result.value
     ]
 
-    # Apply sort order before pagination
+    # Apply sort order before pagination (only reached when order_by is set)
     if order_by:
         desc = order_by.startswith("-")
         field = order_by.lstrip("-")
-        if field in {"runs_count", "name", "workflow_type", "phase_count", "created_at"}:
-            summaries.sort(key=lambda s: getattr(s, field, 0) or 0, reverse=desc)
+        valid_fields = {"runs_count", "name", "workflow_type", "phase_count", "created_at"}
+        if field in valid_fields:
+            summaries.sort(key=lambda s: getattr(s, field) or 0, reverse=desc)
 
     total = len(summaries)
     page_items = summaries[offset : offset + page_size]
