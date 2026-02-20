@@ -17,9 +17,6 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import Se
 from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from syn_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
-from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
-    WorkflowPhaseMetricsProjection,
-)
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
 )
@@ -33,6 +30,9 @@ from syn_domain.contexts.orchestration.slices.list_executions import (
     WorkflowExecutionListProjection,
 )
 from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
+    WorkflowPhaseMetricsProjection,
+)
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
