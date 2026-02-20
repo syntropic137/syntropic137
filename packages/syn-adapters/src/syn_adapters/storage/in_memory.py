@@ -208,10 +208,6 @@ class InMemoryWorkflowRepository:
 
         return aggregate
 
-    async def exists(self, workflow_id: str) -> bool:
-        """Check if a workflow exists by ID."""
-        return await self.get_by_id(workflow_id) is not None
-
     def get_all(self) -> list[WorkflowTemplateAggregate]:
         """Get all workflows."""
         from event_sourcing import EventEnvelope, EventMetadata

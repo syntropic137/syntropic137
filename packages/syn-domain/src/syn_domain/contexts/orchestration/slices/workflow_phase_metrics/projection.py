@@ -155,8 +155,8 @@ class WorkflowPhaseMetricsProjection(CheckpointedProjection):
         entry["input_tokens"] = entry.get("input_tokens", 0) + event_data.get("input_tokens", 0)
         entry["output_tokens"] = entry.get("output_tokens", 0) + event_data.get("output_tokens", 0)
         entry["total_tokens"] = entry.get("total_tokens", 0) + event_data.get("total_tokens", 0)
-        entry["duration_seconds"] = (
-            entry.get("duration_seconds", 0.0) + event_data.get("duration_seconds", 0.0)
+        entry["duration_seconds"] = entry.get("duration_seconds", 0.0) + event_data.get(
+            "duration_seconds", 0.0
         )
 
         existing_cost = Decimal(str(entry.get("cost_usd", "0")))
