@@ -177,15 +177,10 @@ _env-check:
     # installation_id is intentionally NOT required here — installations are discovered
     # dynamically from webhook payloads (multi-org/multi-account support).
     if [ -n "${SYN_GITHUB_APP_ID:-}" ] && [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
-        if [ -n "${SYN_GITHUB_INSTALLATION_ID:-}" ]; then
-            echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app}, default installation: ${SYN_GITHUB_INSTALLATION_ID})"
-        else
-            echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app}, installations via webhooks)"
-        fi
+        echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app}, installations resolved per-repo)"
     elif [ -n "${SYN_GITHUB_APP_ID:-}" ] || [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
         echo "   ❌ ERROR: GitHub App partially configured!"
         echo "            Both required: SYN_GITHUB_APP_ID, SYN_GITHUB_PRIVATE_KEY"
-        echo "            (SYN_GITHUB_INSTALLATION_ID is optional — installations discovered from webhooks)"
         echo ""
         ERRORS=$((ERRORS + 1))
     else

@@ -94,6 +94,7 @@ services:
       SYN_OBSERVABILITY_DB_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
+      REDIS_URL: redis://redis:6379/0
       # Note: ANTHROPIC_API_KEY should be set via .env or host environment
     depends_on:
       timescaledb:
@@ -101,6 +102,8 @@ services:
       event-store:
         condition: service_healthy
       collector:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:

@@ -31,6 +31,7 @@ _SUBSCRIBED_EVENTS = {
     "WorkflowCompleted",
     "WorkflowFailed",
     "WorkflowInterrupted",
+    "ExecutionCancelled",
 }
 
 
@@ -46,7 +47,7 @@ class WorkflowExecutionDetailProjection(CheckpointedProjection):
     """
 
     PROJECTION_NAME = "workflow_execution_details"
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -93,6 +94,8 @@ class WorkflowExecutionDetailProjection(CheckpointedProjection):
                 await self.on_workflow_failed(event_data)
             elif event_type == "WorkflowInterrupted":
                 await self.on_workflow_interrupted(event_data)
+            elif event_type == "ExecutionCancelled":
+                await self.on_execution_cancelled(event_data)
 
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(

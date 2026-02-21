@@ -501,42 +501,37 @@ class WorkflowExecutionEngine:
             )
 
         except WorkflowInterruptedError as e:
-            # Handle forceful interrupt: emit WorkflowInterruptedEvent and save
+            # User-initiated cancel: emit ExecutionCancelledEvent → status = "cancelled"
             from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-                InterruptExecutionCommand,
+                CancelExecutionCommand,
             )
 
-            interrupt_cmd = InterruptExecutionCommand(
+            cancel_cmd = CancelExecutionCommand(
                 execution_id=ctx.execution_id,
                 phase_id=e.phase_id,
-                git_sha=e.git_sha,
-                partial_artifact_ids=e.partial_artifact_ids,
                 reason=e.reason,
-                partial_input_tokens=e.partial_input_tokens,
-                partial_output_tokens=e.partial_output_tokens,
             )
-            aggregate._handle_command(interrupt_cmd)
+            aggregate._handle_command(cancel_cmd)
             await self._executions.save(aggregate)
 
             logger.info(
-                "Workflow execution interrupted: %s (phase: %s, reason: %s, git_sha: %s)",
+                "Workflow execution cancelled: %s (phase: %s, reason: %s)",
                 workflow_id,
                 e.phase_id,
                 e.reason,
-                e.git_sha,
             )
 
             metrics = ExecutionMetrics.from_results(ctx.phase_results)
             return WorkflowExecutionResult(
                 workflow_id=workflow_id,
                 execution_id=ctx.execution_id,
-                status=ExecutionStatus.INTERRUPTED,
+                status=ExecutionStatus.CANCELLED,
                 started_at=ctx.started_at,
                 completed_at=datetime.now(UTC),
                 phase_results=ctx.phase_results,
                 artifact_ids=ctx.artifact_ids,
                 metrics=metrics,
-                error_message=e.reason or "Interrupted by user",
+                error_message=e.reason or "Cancelled by user",
             )
 
         except Exception as e:
@@ -1132,7 +1127,19 @@ class WorkflowExecutionEngine:
                 # Uses GitHub App to generate installation token if configured
                 from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
-                secrets = await SetupPhaseSecrets.create()
+                # Parse "https://github.com/owner/repo" → "owner/repo"
+                # Skip the sentinel placeholder used for workflows with no repo configured.
+                _PLACEHOLDER = "https://github.com/placeholder/not-configured"
+                _repo: str | None = None
+                if ctx.repo_url and ctx.repo_url != _PLACEHOLDER:
+                    _parts = ctx.repo_url.rstrip("/").split("/")
+                    if len(_parts) >= 2:
+                        _repo = f"{_parts[-2]}/{_parts[-1]}"
+
+                secrets = await SetupPhaseSecrets.create(
+                    repository=_repo,
+                    require_github=_repo is not None,
+                )
 
                 setup_result = await workspace.run_setup_phase(secrets)
                 if setup_result.exit_code != 0:
@@ -2071,6 +2078,10 @@ class WorkflowExecutionEngine:
             )
 
             return result
+
+        except WorkflowInterruptedError:
+            # Let interrupt propagate to execute() where it's handled correctly
+            raise
 
         except Exception as e:
             # Record failure

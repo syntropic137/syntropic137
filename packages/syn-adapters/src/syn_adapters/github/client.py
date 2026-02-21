@@ -225,8 +225,8 @@ class GitHubAppClient:
         Tokens are cached per installation_id and reused until expired.
 
         Args:
-            installation_id: The installation to get a token for. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided. Raises if neither is set.
+            installation_id: The installation to get a token for. Use
+                get_installation_for_repo() to resolve this from a repo name. Raises if not set.
             force_refresh: If True, always fetch a new token.
 
         Returns:
@@ -236,12 +236,13 @@ class GitHubAppClient:
             GitHubAuthError: If token generation fails or no installation_id available.
             GitHubRateLimitError: If rate limited.
         """
-        iid = installation_id or self._settings.installation_id
-        if not iid:
+        if not installation_id:
             msg = (
-                "No installation_id provided. Pass it explicitly or set SYN_GITHUB_INSTALLATION_ID."
+                "No installation_id provided. Use get_installation_for_repo() to resolve it "
+                "from a repository name, or pass it explicitly (e.g. from a webhook payload)."
             )
             raise GitHubAuthError(msg)
+        iid = installation_id
 
         # Return cached token if valid
         cached = self._cached_tokens.get(iid)
@@ -312,8 +313,7 @@ class GitHubAppClient:
 
         Args:
             path: API path (e.g., "/repos/owner/repo").
-            installation_id: Installation to authenticate as. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided.
+            installation_id: Installation to authenticate as. Must be provided explicitly.
 
         Returns:
             Response JSON as dictionary.
@@ -339,8 +339,7 @@ class GitHubAppClient:
         Args:
             path: API path.
             json: Request body.
-            installation_id: Installation to authenticate as. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided.
+            installation_id: Installation to authenticate as. Must be provided explicitly.
 
         Returns:
             Response JSON as dictionary.
@@ -367,8 +366,7 @@ class GitHubAppClient:
         Args:
             path: API path.
             json: Request body.
-            installation_id: Installation to authenticate as. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided.
+            installation_id: Installation to authenticate as. Must be provided explicitly.
 
         Returns:
             Response JSON as dictionary.
@@ -498,8 +496,7 @@ class GitHubAppClient:
         """List repositories accessible to an installation.
 
         Args:
-            installation_id: The installation to list repos for. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided.
+            installation_id: The installation to list repos for. Must be provided explicitly.
 
         Returns:
             List of repository metadata.
@@ -513,6 +510,34 @@ class GitHubAppClient:
 
         self._check_response(response)
         return response.json().get("repositories", [])
+
+    async def get_installation_for_repo(self, repo_full_name: str) -> str:
+        """Look up the installation ID for a repository.
+
+        Calls GET /repos/{owner}/{repo}/installation with App JWT auth.
+        Requires the GitHub App to be installed on the repo's owner account.
+
+        Args:
+            repo_full_name: Repository in "{owner}/{repo}" format.
+
+        Returns:
+            Installation ID string.
+
+        Raises:
+            GitHubAuthError: If lookup fails or app not installed on repo.
+        """
+        jwt_token = self._generate_jwt()
+        response = await self._http.get(
+            f"/repos/{repo_full_name}/installation",
+            headers={"Authorization": f"Bearer {jwt_token}"},
+        )
+        if response.status_code == 404:
+            msg = f"GitHub App not installed on repository: {repo_full_name}"
+            raise GitHubAuthError(msg)
+        self._check_response(response)
+        installation_id = str(response.json()["id"])
+        logger.debug("Resolved installation_id=%s for repo %s", installation_id, repo_full_name)
+        return installation_id
 
 
 # Singleton instance

@@ -190,29 +190,54 @@ async def sync_published_events_to_projections() -> None:
 # ---------------------------------------------------------------------------
 
 
+_controller_singleton: Any = None
+
+
 def get_controller() -> Any:
     """Return a singleton ExecutionController for pause/resume/cancel/inject.
 
+    Returns the same instance on every call so the execution engine and API
+    endpoints share the same signal queue — signals enqueued by an HTTP
+    endpoint are visible to the engine polling in the same process.
+
+    Uses a Redis-backed signal queue (REDIS_URL env var, defaults to
+    redis://localhost:6379/0). Falls back to _NullSignalQueueAdapter only
+    if Redis is explicitly unavailable (no URL and no connection possible).
+
     Wraps: ExecutionController(ProjectionControlStateAdapter, signal_adapter)
     """
+    global _controller_singleton
+    if _controller_singleton is not None:
+        return _controller_singleton
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.control.adapters.projection import ProjectionControlStateAdapter
     from syn_adapters.projection_stores import get_projection_store
 
     state_adapter = ProjectionControlStateAdapter(get_projection_store())
 
-    env = os.environ.get("APP_ENVIRONMENT", "")
-    if env in ("test", "offline"):
-        from syn_adapters.control.adapters.memory import InMemorySignalQueueAdapter
+    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    try:
+        import redis.asyncio as aioredis
 
-        signal_adapter: Any = InMemorySignalQueueAdapter()
-    else:
+        from syn_adapters.control.adapters.redis_adapter import RedisSignalQueueAdapter
+
+        redis_client = aioredis.from_url(redis_url, decode_responses=True)
+        signal_adapter: Any = RedisSignalQueueAdapter(redis_client)
+        logger.info("ExecutionController using Redis signal queue (%s)", redis_url)
+    except Exception:
+        logger.warning(
+            "Redis unavailable (%s) — control signals (pause/cancel/resume) will not work",
+            redis_url,
+            exc_info=True,
+        )
         signal_adapter = _NullSignalQueueAdapter()
 
-    return ExecutionController(
+    _controller_singleton = ExecutionController(
         state_port=state_adapter,
         signal_port=signal_adapter,
     )
+    return _controller_singleton
 
 
 logger = logging.getLogger(__name__)

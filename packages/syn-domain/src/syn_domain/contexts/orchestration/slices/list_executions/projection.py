@@ -29,6 +29,7 @@ _SUBSCRIBED_EVENTS = {
     "WorkflowCompleted",
     "WorkflowFailed",
     "WorkflowInterrupted",
+    "ExecutionCancelled",
 }
 
 
@@ -42,7 +43,7 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 1  # Increment to trigger rebuild on schema change
+    VERSION = 2  # Increment to trigger rebuild on schema change
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -91,6 +92,8 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
                 await self.on_workflow_failed(event_data)
             elif event_type == "WorkflowInterrupted":
                 await self.on_workflow_interrupted(event_data)
+            elif event_type == "ExecutionCancelled":
+                await self.on_execution_cancelled(event_data)
             else:
                 # Unknown event type - skip but advance checkpoint
                 pass
