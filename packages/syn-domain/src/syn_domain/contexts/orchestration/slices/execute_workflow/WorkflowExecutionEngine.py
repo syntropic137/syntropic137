@@ -2079,7 +2079,22 @@ class WorkflowExecutionEngine:
 
             return result
 
-        except WorkflowInterruptedError:
+        except WorkflowInterruptedError as _interrupted_err:
+            # Complete the session as cancelled before propagating
+            if session is not None and self._sessions is not None:
+                try:
+                    complete_session_cmd = CompleteSessionCommand(
+                        aggregate_id=session_id,
+                        success=False,
+                        error_message=f"Cancelled: {_interrupted_err.reason or 'user request'}",
+                    )
+                    session._handle_command(complete_session_cmd)
+                    await self._sessions.save(session)
+                    logger.debug("Session completed (cancelled): %s", session_id)
+                except Exception as _sess_err:
+                    logger.warning(
+                        "Failed to complete session %s during cancel: %s", session_id, _sess_err
+                    )
             # Let interrupt propagate to execute() where it's handled correctly
             raise
 
