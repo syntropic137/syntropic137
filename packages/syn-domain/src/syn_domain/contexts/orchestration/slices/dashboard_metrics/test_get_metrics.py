@@ -55,8 +55,8 @@ class TestDashboardMetricsProjection:
     @pytest.mark.asyncio
     async def test_workflow_created_increments_total(self, projection: DashboardMetricsProjection):
         """Test WorkflowCreated increments total_workflows."""
-        await projection.on_workflow_created({"workflow_id": "wf-1"})
-        await projection.on_workflow_created({"workflow_id": "wf-2"})
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_created({"workflow_id": "wf-2"})
 
         metrics = await projection.get_metrics()
         assert metrics.total_workflows == 2
@@ -65,7 +65,7 @@ class TestDashboardMetricsProjection:
     async def test_workflow_lifecycle(self, projection: DashboardMetricsProjection):
         """Test full workflow lifecycle updates metrics correctly."""
         # Create workflow
-        await projection.on_workflow_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
         metrics = await projection.get_metrics()
         assert metrics.total_workflows == 1
         assert metrics.active_workflows == 0
@@ -84,7 +84,7 @@ class TestDashboardMetricsProjection:
     @pytest.mark.asyncio
     async def test_workflow_failed_updates_counts(self, projection: DashboardMetricsProjection):
         """Test WorkflowFailed updates counts correctly."""
-        await projection.on_workflow_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
         await projection.on_workflow_execution_started({"workflow_id": "wf-1"})
         await projection.on_workflow_failed(
             {"workflow_id": "wf-1", "error": "Something went wrong"}
@@ -196,7 +196,7 @@ class TestGetDashboardMetricsHandler:
     ):
         """Test handler returns metrics correctly."""
         # Setup some data
-        await projection.on_workflow_created({"workflow_id": "wf-1"})
+        await projection.on_workflow_template_created({"workflow_id": "wf-1"})
         await projection.on_session_started({"session_id": "s-1"})
         await projection.on_artifact_created({"artifact_id": "a-1"})
 

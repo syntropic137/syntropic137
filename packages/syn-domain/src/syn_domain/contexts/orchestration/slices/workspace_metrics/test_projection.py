@@ -113,7 +113,7 @@ class TestWorkspaceMetricsProjection:
         assert record["create_duration_ms"] == 150.5
 
     @pytest.mark.asyncio
-    async def test_on_command_executed(
+    async def test_on_workspace_command_executed(
         self, projection: WorkspaceMetricsProjection, store: MockProjectionStore
     ) -> None:
         """Test command execution updates counters."""
@@ -128,7 +128,7 @@ class TestWorkspaceMetricsProjection:
         )
 
         # Execute successful command
-        await projection.on_command_executed(
+        await projection.on_workspace_command_executed(
             {
                 "workspace_id": "ws-123",
                 "command": ["echo", "hello"],
@@ -145,7 +145,7 @@ class TestWorkspaceMetricsProjection:
         assert record["commands_failed"] == 0
 
         # Execute failed command
-        await projection.on_command_executed(
+        await projection.on_workspace_command_executed(
             {
                 "workspace_id": "ws-123",
                 "command": ["false"],
@@ -256,7 +256,7 @@ class TestWorkspaceMetricsProjection:
                 }
             )
             # Execute some commands
-            await projection.on_command_executed(
+            await projection.on_workspace_command_executed(
                 {
                     "workspace_id": ws_id,
                     "command": ["echo", "test"],

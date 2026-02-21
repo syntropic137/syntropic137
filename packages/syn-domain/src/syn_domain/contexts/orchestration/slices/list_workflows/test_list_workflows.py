@@ -46,7 +46,7 @@ class TestWorkflowListProjection:
     """Tests for WorkflowListProjection (template projection)."""
 
     @pytest.mark.asyncio
-    async def test_on_workflow_created(self, projection: WorkflowListProjection):
+    async def test_on_workflow_template_created(self, projection: WorkflowListProjection):
         """Test handling WorkflowCreated event."""
         event_data = {
             "workflow_id": "wf-1",
@@ -58,7 +58,7 @@ class TestWorkflowListProjection:
             "created_at": datetime.now(UTC),
         }
 
-        await projection.on_workflow_created(event_data)
+        await projection.on_workflow_template_created(event_data)
 
         summaries = await projection.get_all()
         assert len(summaries) == 1
@@ -73,7 +73,9 @@ class TestWorkflowListProjection:
     ):
         """Test that WorkflowExecutionStarted increments runs_count."""
         # Create workflow template first
-        await projection.on_workflow_created({"workflow_id": "wf-1", "name": "Test", "phases": []})
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-1", "name": "Test", "phases": []}
+        )
 
         # Start an execution
         await projection.on_workflow_execution_started(
@@ -94,10 +96,10 @@ class TestWorkflowListProjection:
     @pytest.mark.asyncio
     async def test_query_with_workflow_type_filter(self, projection: WorkflowListProjection):
         """Test querying with workflow type filter."""
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {"workflow_id": "wf-1", "name": "Research", "workflow_type": "research", "phases": []}
         )
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {
                 "workflow_id": "wf-2",
                 "name": "Implementation",
@@ -118,7 +120,7 @@ class TestWorkflowListProjection:
     async def test_query_with_pagination(self, projection: WorkflowListProjection):
         """Test querying with limit and offset."""
         for i in range(5):
-            await projection.on_workflow_created(
+            await projection.on_workflow_template_created(
                 {"workflow_id": f"wf-{i}", "name": f"Workflow {i}", "phases": []}
             )
 
@@ -140,7 +142,7 @@ class TestListWorkflowsHandler:
         self, handler: ListWorkflowsHandler, projection: WorkflowListProjection
     ):
         """Test handling a basic query."""
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {"workflow_id": "wf-1", "name": "Test Workflow", "phases": []}
         )
 
@@ -155,7 +157,7 @@ class TestListWorkflowsHandler:
         self, handler: ListWorkflowsHandler, projection: WorkflowListProjection
     ):
         """Test handling a query with filters."""
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {
                 "workflow_id": "wf-1",
                 "name": "Seq Workflow",
@@ -163,7 +165,7 @@ class TestListWorkflowsHandler:
                 "phases": [],
             }
         )
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {
                 "workflow_id": "wf-2",
                 "name": "Par Workflow",

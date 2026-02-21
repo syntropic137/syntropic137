@@ -78,7 +78,7 @@ class TestWorkflowDetailProjection:
             "created_at": datetime.now(UTC),
         }
 
-        await projection.on_workflow_created(event_data)
+        await projection.on_workflow_template_created(event_data)
 
         detail = await projection.get_by_id("wf-1")
         assert detail is not None
@@ -94,7 +94,7 @@ class TestWorkflowDetailProjection:
     ):
         """Test projection increments runs_count on execution start."""
         # First create the workflow template
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {
                 "workflow_id": "wf-1",
                 "name": "Test Workflow",
@@ -130,7 +130,7 @@ class TestWorkflowDetailProjection:
     @pytest.mark.asyncio
     async def test_phases_are_phase_definitions(self, projection: WorkflowDetailProjection):
         """Test that phases are definitions, not execution state."""
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {
                 "workflow_id": "wf-1",
                 "name": "Test Workflow",
@@ -164,7 +164,7 @@ class TestGetWorkflowDetailHandler:
     ):
         """Test handler returns workflow detail."""
         # Setup - create workflow via projection
-        await projection.on_workflow_created(
+        await projection.on_workflow_template_created(
             {
                 "workflow_id": "wf-1",
                 "name": "Test Workflow",
