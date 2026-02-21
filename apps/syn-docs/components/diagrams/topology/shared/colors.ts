@@ -1,3 +1,5 @@
+// Source: APS VIZ01 substandard - https://github.com/AgentParadise/agent-paradise-standards-system
+
 /** Bounded-context → color mapping for the topology graph. */
 export const CONTEXT_COLORS: Record<string, string> = {
   orchestration: '#4D80FF',
@@ -16,9 +18,13 @@ export const CONTEXT_COLORS: Record<string, string> = {
 const DEFAULT_COLOR = '#555';
 
 /** Derive a bounded-context color from a module ID. */
-export function getContextColor(moduleId: string): string {
+export function getContextColor(
+  moduleId: string,
+  overrides?: Record<string, string>,
+): string {
   const lower = moduleId.toLowerCase();
-  for (const [keyword, color] of Object.entries(CONTEXT_COLORS)) {
+  const palette = overrides ? { ...CONTEXT_COLORS, ...overrides } : CONTEXT_COLORS;
+  for (const [keyword, color] of Object.entries(palette)) {
     if (lower.includes(keyword)) return color;
   }
   return DEFAULT_COLOR;

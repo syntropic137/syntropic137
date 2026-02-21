@@ -3,6 +3,12 @@ title: Module Dependency Topology
 description: Interactive force-directed graph of the monorepo's module dependencies, driven by .topology/ data.
 ---
 
+{/* Source: APS VIZ01 substandard - https://github.com/AgentParadise/agent-paradise-standards-system */}
+
+import { TopologyDependencyGraph } from '@/components/diagrams/topology';
+import depData from '../../../../../../.topology/graphs/dependencies.json';
+import modData from '../../../../../../.topology/metrics/modules.json';
+
 # Module Dependency Topology
 
 This visualization renders every module in the monorepo (≥ 100 lines of code) as an interactive force-directed graph. Data is sourced directly from `.topology/graphs/dependencies.json` and `.topology/metrics/modules.json`.
@@ -12,7 +18,11 @@ This visualization renders every module in the monorepo (≥ 100 lines of code) 
 - **Edge opacity** scales with coupling weight
 - **Scroll** to zoom, **drag** to pan, **hover** for module details
 
-<TopologyDependencyGraph />
+<TopologyDependencyGraph
+  dependencies={depData.edges}
+  modules={modData.modules}
+  height={600}
+/>
 
 ## Reading the Graph
 

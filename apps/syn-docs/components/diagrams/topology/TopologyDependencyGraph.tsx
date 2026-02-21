@@ -1,6 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+// Source: APS VIZ01 substandard - https://github.com/AgentParadise/agent-paradise-standards-system
+// This is a local copy of the VIZ01-dashboard TopologyDependencyGraph component.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   forceSimulation,
   forceLink,
@@ -10,21 +13,21 @@ import {
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from 'd3-force';
-import { useTopologyData, type TopoNode, type TopoLink } from './shared/useTopologyData';
-import { CONTEXT_COLORS } from './shared/colors';
-
-/* ------------------------------------------------------------------ */
-/*  Types for the simulation                                          */
-/* ------------------------------------------------------------------ */
+import type { DependencyEdge, ModuleMetric, TopoNode } from './shared/types';
+import { buildTopologyGraph, type FilterOptions } from './shared/filters';
 
 interface SimNode extends SimulationNodeDatum, TopoNode {}
 interface SimLink extends SimulationLinkDatum<SimNode> {
   weight: number;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Helpers                                                           */
-/* ------------------------------------------------------------------ */
+export interface TopologyDependencyGraphProps {
+  dependencies: DependencyEdge[];
+  modules: ModuleMetric[];
+  height?: number;
+  className?: string;
+  filterOptions?: FilterOptions;
+}
 
 function clamp(v: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, v));
@@ -34,12 +37,29 @@ function nodeRadius(loc: number): number {
   return clamp(Math.sqrt(loc) * 0.35, 4, 28);
 }
 
-/* ------------------------------------------------------------------ */
-/*  Component                                                         */
-/* ------------------------------------------------------------------ */
+const LEGEND_ITEMS: ReadonlyArray<readonly [string, string]> = [
+  ['Orchestration / Workflow', '#4D80FF'],
+  ['Session / Observability', '#1A80B3'],
+  ['GitHub', '#8C50DC'],
+  ['Artifact', '#22cc88'],
+  ['Agentic Primitives', '#ff8844'],
+  ['Event Sourcing Platform', '#44aaff'],
+  ['Cost / Token', '#ffcc44'],
+  ['Other', '#555'],
+];
 
-export function TopologyDependencyGraph() {
-  const { nodes, links } = useTopologyData();
+export function TopologyDependencyGraph({
+  dependencies,
+  modules,
+  height = 600,
+  className,
+  filterOptions,
+}: TopologyDependencyGraphProps) {
+  const { nodes, links } = useMemo(
+    () => buildTopologyGraph(modules, dependencies, filterOptions),
+    [modules, dependencies, filterOptions],
+  );
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tooltip, setTooltip] = useState<{
     x: number;
@@ -47,7 +67,6 @@ export function TopologyDependencyGraph() {
     node: TopoNode;
   } | null>(null);
 
-  // Simulation refs (mutable across renders)
   const simNodesRef = useRef<SimNode[]>([]);
   const simLinksRef = useRef<SimLink[]>([]);
   const transformRef = useRef({ x: 0, y: 0, k: 1 });
@@ -57,21 +76,19 @@ export function TopologyDependencyGraph() {
     lastY: 0,
   });
 
-  /* ---------- draw ---------- */
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    const { width, height } = canvas;
+    const { width, height: h } = canvas;
     const { x: tx, y: ty, k } = transformRef.current;
 
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, width, h);
     ctx.save();
-    ctx.translate(tx + width / 2, ty + height / 2);
+    ctx.translate(tx + width / 2, ty + h / 2);
     ctx.scale(k, k);
 
-    // edges
     for (const l of simLinksRef.current) {
       const s = l.source as SimNode;
       const t = l.target as SimNode;
@@ -84,7 +101,6 @@ export function TopologyDependencyGraph() {
       ctx.stroke();
     }
 
-    // nodes
     for (const n of simNodesRef.current) {
       if (n.x == null) continue;
       const r = nodeRadius(n.loc);
@@ -99,7 +115,6 @@ export function TopologyDependencyGraph() {
     ctx.restore();
   }, []);
 
-  /* ---------- simulation ---------- */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || nodes.length === 0) return;
@@ -127,12 +142,9 @@ export function TopologyDependencyGraph() {
       .alphaDecay(0.02)
       .on('tick', draw);
 
-    return () => {
-      sim.stop();
-    };
+    return () => { sim.stop(); };
   }, [nodes, links, draw]);
 
-  /* ---------- resize ---------- */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -143,14 +155,12 @@ export function TopologyDependencyGraph() {
       draw();
     });
     ro.observe(canvas.parentElement!);
-    // initial size
     const parent = canvas.parentElement!;
     canvas.width = parent.clientWidth;
     canvas.height = parent.clientHeight;
     return () => ro.disconnect();
   }, [draw]);
 
-  /* ---------- interaction ---------- */
   const screenToWorld = useCallback((sx: number, sy: number) => {
     const canvas = canvasRef.current!;
     const { x: tx, y: ty, k } = transformRef.current;
@@ -220,20 +230,8 @@ export function TopologyDependencyGraph() {
     dragRef.current.active = false;
   }, []);
 
-  /* ---------- legend ---------- */
-  const legendItems = [
-    ['Orchestration / Workflow', '#4D80FF'],
-    ['Session / Observability', '#1A80B3'],
-    ['GitHub', '#8C50DC'],
-    ['Artifact', '#22cc88'],
-    ['Agentic Primitives', '#ff8844'],
-    ['Event Sourcing Platform', '#44aaff'],
-    ['Cost / Token', '#ffcc44'],
-    ['Other', '#555'],
-  ] as const;
-
   return (
-    <div style={{ position: 'relative', width: '100%', height: 600 }}>
+    <div className={className} style={{ position: 'relative', width: '100%', height }}>
       <canvas
         ref={canvasRef}
         style={{ width: '100%', height: '100%', cursor: 'grab', display: 'block' }}
@@ -244,7 +242,6 @@ export function TopologyDependencyGraph() {
         onPointerLeave={onPointerUp}
       />
 
-      {/* Legend */}
       <div
         style={{
           position: 'absolute',
@@ -258,7 +255,7 @@ export function TopologyDependencyGraph() {
           pointerEvents: 'none',
         }}
       >
-        {legendItems.map(([label, color]) => (
+        {LEGEND_ITEMS.map(([label, color]) => (
           <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: color, flexShrink: 0 }} />
             {label}
@@ -269,7 +266,6 @@ export function TopologyDependencyGraph() {
         </div>
       </div>
 
-      {/* Tooltip */}
       {tooltip && (
         <div
           style={{
