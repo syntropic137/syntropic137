@@ -3,47 +3,29 @@
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from event_sourcing import (
-    CheckpointedProjection,
-    EventEnvelope,
-    ProjectionCheckpoint,
-    ProjectionCheckpointStore,
-    ProjectionResult,
-)
+from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics import (
     DashboardMetrics,
 )
 
-# Event types this projection subscribes to
-_SUBSCRIBED_EVENTS = {
-    "WorkflowTemplateCreated",
-    "WorkflowExecutionStarted",
-    "PhaseStarted",
-    "WorkflowCompleted",
-    "WorkflowFailed",
-    "SessionStarted",
-    "SessionCompleted",
-    "ArtifactCreated",
-}
 
-
-class DashboardMetricsProjection(CheckpointedProjection):
+class DashboardMetricsProjection(AutoDispatchProjection):
     """Builds dashboard metrics read model from events.
 
     This projection aggregates data from workflow, session, and artifact
     events to maintain a summary view of system metrics.
 
-    Implements CheckpointedProjection for per-projection position tracking.
+    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    subscribe and handle events — no separate subscription set needed.
     """
 
     PROJECTION_NAME = "dashboard_metrics"
     METRICS_KEY = "global"  # Single record for global metrics
-    VERSION = 1
+    VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_workflow_created
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -53,8 +35,6 @@ class DashboardMetricsProjection(CheckpointedProjection):
         """
         self._store = store
 
-    # === CheckpointedProjection required methods ===
-
     def get_name(self) -> str:
         """Unique projection name for checkpoint tracking."""
         return self.PROJECTION_NAME
@@ -63,60 +43,10 @@ class DashboardMetricsProjection(CheckpointedProjection):
         """Schema version - increment to trigger rebuild."""
         return self.VERSION
 
-    def get_subscribed_event_types(self) -> set[str] | None:
-        """Event types this projection handles."""
-        return _SUBSCRIBED_EVENTS
-
-    async def handle_event(
-        self,
-        envelope: EventEnvelope[Any],
-        checkpoint_store: ProjectionCheckpointStore,
-    ) -> ProjectionResult:
-        """Handle an event and save checkpoint atomically."""
-        event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            if event_type == "WorkflowTemplateCreated":
-                await self.on_workflow_created(event_data)
-            elif event_type == "WorkflowExecutionStarted":
-                await self.on_workflow_execution_started(event_data)
-            elif event_type == "PhaseStarted":
-                await self.on_phase_started(event_data)
-            elif event_type == "WorkflowCompleted":
-                await self.on_workflow_completed(event_data)
-            elif event_type == "WorkflowFailed":
-                await self.on_workflow_failed(event_data)
-            elif event_type == "SessionStarted":
-                await self.on_session_started(event_data)
-            elif event_type == "SessionCompleted":
-                await self.on_session_completed(event_data)
-            elif event_type == "ArtifactCreated":
-                await self.on_artifact_created(event_data)
-
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception:
-            return ProjectionResult.FAILURE
-
     async def clear_all_data(self) -> None:
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
-
-    @property
-    def name(self) -> str:
-        """Get the projection name (deprecated, use get_name())."""
-        return self.PROJECTION_NAME
 
     async def _get_or_create_metrics(self) -> dict:
         """Get existing metrics or create empty ones."""
@@ -130,8 +60,8 @@ class DashboardMetricsProjection(CheckpointedProjection):
         """Save metrics to store."""
         await self._store.save(self.PROJECTION_NAME, self.METRICS_KEY, metrics)
 
-    async def on_workflow_created(self, _event_data: dict) -> None:
-        """Handle WorkflowCreated event - increment total workflows."""
+    async def on_workflow_template_created(self, _event_data: dict) -> None:
+        """Handle WorkflowTemplateCreated event - increment total workflows."""
         metrics = await self._get_or_create_metrics()
         metrics["total_workflows"] = metrics.get("total_workflows", 0) + 1
         await self._save_metrics(metrics)

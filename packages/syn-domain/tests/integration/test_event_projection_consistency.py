@@ -448,7 +448,7 @@ class TestEventHandlerCompleteness:
 
         # Template projection only needs these handlers
         required_handlers = [
-            "on_workflow_created",
+            "on_workflow_template_created",  # renamed from on_workflow_created (AutoDispatch convention)
             "on_workflow_execution_started",  # To increment runs_count
         ]
 

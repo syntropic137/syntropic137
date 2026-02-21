@@ -4,46 +4,30 @@ This projection maintains a list of workflow executions (runs),
 updated by WorkflowExecutionStarted, PhaseCompleted, WorkflowCompleted,
 and WorkflowFailed events from the WorkflowExecutionAggregate.
 
-Uses CheckpointedProjection (ADR-014) for reliable position tracking.
+Uses AutoDispatchProjection (ADR-014) for reliable position tracking.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 
-from event_sourcing import (
-    CheckpointedProjection,
-    EventEnvelope,
-    ProjectionCheckpoint,
-    ProjectionCheckpointStore,
-    ProjectionResult,
-)
+from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary import (
     WorkflowExecutionSummary,
 )
 
-# Event types this projection subscribes to
-_SUBSCRIBED_EVENTS = {
-    "WorkflowExecutionStarted",
-    "PhaseCompleted",
-    "WorkflowCompleted",
-    "WorkflowFailed",
-    "WorkflowInterrupted",
-    "ExecutionCancelled",
-}
 
-
-class WorkflowExecutionListProjection(CheckpointedProjection):
+class WorkflowExecutionListProjection(AutoDispatchProjection):
     """Builds workflow execution list read model from events.
 
     This projection maintains execution summaries for listing runs
     of workflow templates. Each execution is keyed by execution_id.
 
-    Implements CheckpointedProjection for per-projection position tracking.
+    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    subscribe and handle events — no separate subscription set needed.
     """
 
     PROJECTION_NAME = "workflow_executions"
-    VERSION = 2  # Increment to trigger rebuild on schema change
+    VERSION = 3  # Bumped: migrated to AutoDispatchProjection, removed dead handlers
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -53,8 +37,6 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
         """
         self._store = store
 
-    # === CheckpointedProjection required methods ===
-
     def get_name(self) -> str:
         """Unique projection name for checkpoint tracking."""
         return self.PROJECTION_NAME
@@ -63,69 +45,12 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
         """Schema version - increment to trigger rebuild."""
         return self.VERSION
 
-    def get_subscribed_event_types(self) -> set[str] | None:
-        """Event types this projection handles."""
-        return _SUBSCRIBED_EVENTS
-
-    async def handle_event(
-        self,
-        envelope: EventEnvelope[Any],
-        checkpoint_store: ProjectionCheckpointStore,
-    ) -> ProjectionResult:
-        """Handle an event and save checkpoint atomically.
-
-        Dispatches to the appropriate on_* method based on event type.
-        """
-        event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            # Dispatch to the appropriate handler
-            if event_type == "WorkflowExecutionStarted":
-                await self.on_workflow_execution_started(event_data)
-            elif event_type == "PhaseCompleted":
-                await self.on_phase_completed(event_data)
-            elif event_type == "WorkflowCompleted":
-                await self.on_workflow_completed(event_data)
-            elif event_type == "WorkflowFailed":
-                await self.on_workflow_failed(event_data)
-            elif event_type == "WorkflowInterrupted":
-                await self.on_workflow_interrupted(event_data)
-            elif event_type == "ExecutionCancelled":
-                await self.on_execution_cancelled(event_data)
-            else:
-                # Unknown event type - skip but advance checkpoint
-                pass
-
-            # Save checkpoint after successful processing
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception:
-            # Let the exception propagate for logging by coordinator
-            return ProjectionResult.FAILURE
-
     async def clear_all_data(self) -> None:
         """Clear projection data for rebuild."""
         # Clear all workflow execution summaries
         # This depends on the store implementation supporting delete_all
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
-
-    # === Legacy property for backward compatibility ===
-
-    @property
-    def name(self) -> str:
-        """Get the projection name (deprecated, use get_name())."""
-        return self.PROJECTION_NAME
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
@@ -227,34 +152,6 @@ class WorkflowExecutionListProjection(CheckpointedProjection):
                 "completed_phases", existing.get("completed_phases", 0)
             )
 
-            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
-
-    async def on_execution_paused(self, event_data: dict) -> None:
-        """Handle ExecutionPaused event.
-
-        Marks execution as paused via control plane.
-        """
-        execution_id = event_data.get("execution_id")
-        if not execution_id:
-            return
-
-        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
-        if existing:
-            existing["status"] = "paused"
-            await self._store.save(self.PROJECTION_NAME, execution_id, existing)
-
-    async def on_execution_resumed(self, event_data: dict) -> None:
-        """Handle ExecutionResumed event.
-
-        Marks execution as running again after pause.
-        """
-        execution_id = event_data.get("execution_id")
-        if not execution_id:
-            return
-
-        existing = await self._store.get(self.PROJECTION_NAME, execution_id)
-        if existing:
-            existing["status"] = "running"
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
     async def on_execution_cancelled(self, event_data: dict) -> None:

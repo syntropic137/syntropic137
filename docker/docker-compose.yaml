@@ -95,7 +95,8 @@ services:
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
       REDIS_URL: redis://redis:6379/0
-      # Note: ANTHROPIC_API_KEY should be set via .env or host environment
+      # Note: secrets (GitHub App, Anthropic, storage) are injected via the
+      # dev overlay (docker-compose.dev.yaml) using env_file: ../.env
     depends_on:
       timescaledb:
         condition: service_healthy

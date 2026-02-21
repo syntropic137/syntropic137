@@ -49,12 +49,14 @@ class RedisSignalQueueAdapter:
 
         Overwrites any existing pending signal (cancel wins over pause).
         """
-        payload = json.dumps({
-            "signal_type": signal.signal_type,
-            "execution_id": signal.execution_id,
-            "reason": signal.reason,
-            "inject_message": signal.inject_message,
-        })
+        payload = json.dumps(
+            {
+                "signal_type": signal.signal_type,
+                "execution_id": signal.execution_id,
+                "reason": signal.reason,
+                "inject_message": signal.inject_message,
+            }
+        )
         await self._redis.set(self._key(execution_id), payload, ex=_SIGNAL_TTL_SECONDS)
         logger.debug("Enqueued signal type=%s for execution %s", signal.signal_type, execution_id)
 
