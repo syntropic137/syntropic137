@@ -22,7 +22,6 @@ from syn_adapters.control.commands import (
 from syn_adapters.control.state_machine import (
     ExecutionState,
     ExecutionStateMachine,
-    InvalidTransitionError,
 )
 
 if TYPE_CHECKING:
@@ -41,7 +40,6 @@ class ExecutionController:
     ) -> None:
         self._state_port = state_port
         self._signal_port = signal_port
-        self._state_machines: dict[str, ExecutionStateMachine] = {}
 
     async def handle_command(self, cmd: ControlCommand) -> ControlResult:
         """Handle a control command and return result."""
@@ -176,33 +174,18 @@ class ExecutionController:
         )
 
     async def _get_state_machine(self, execution_id: str) -> ExecutionStateMachine:
-        """Get or create state machine for execution."""
-        if execution_id not in self._state_machines:
-            # Load from port or create new
-            state = await self._state_port.get_state(execution_id)
-            if state:
-                self._state_machines[execution_id] = ExecutionStateMachine(state)
-            else:
-                self._state_machines[execution_id] = ExecutionStateMachine()
-        return self._state_machines[execution_id]
+        """Create a state machine from the current projection state."""
+        state = await self._state_port.get_state(execution_id)
+        if state:
+            return ExecutionStateMachine(state)
+        return ExecutionStateMachine()
 
     async def get_state(self, execution_id: str) -> ExecutionState | None:
-        """Get current state for an execution.
+        """Get current state for an execution from the projection.
 
-        Returns None if the execution is not known (never initialized).
+        Returns None if the execution is not known.
         """
-        # Check cache first
-        if execution_id in self._state_machines:
-            return self._state_machines[execution_id].state
-
-        # Check state port - don't create state machine for unknown executions
-        state = await self._state_port.get_state(execution_id)
-        if state is None:
-            return None
-
-        # Cache and return
-        self._state_machines[execution_id] = ExecutionStateMachine(state)
-        return state
+        return await self._state_port.get_state(execution_id)
 
     async def check_signal(self, execution_id: str) -> ControlSignal | None:
         """Check for pending control signal (called by executor)."""
@@ -210,19 +193,10 @@ class ExecutionController:
 
     async def acknowledge_state(self, execution_id: str, new_state: ExecutionState) -> None:
         """Acknowledge state transition (called by executor)."""
-        sm = await self._get_state_machine(execution_id)
-        try:
-            sm.transition(new_state)
-            await self._state_port.save_state(execution_id, new_state)
-        except InvalidTransitionError:
-            logger.warning(
-                "Invalid state transition acknowledgement",
-                extra={"execution_id": execution_id, "target": new_state.value},
-            )
+        await self._state_port.save_state(execution_id, new_state)
 
     async def initialize_execution(
         self, execution_id: str, initial_state: ExecutionState = ExecutionState.PENDING
     ) -> None:
         """Initialize state for a new execution."""
-        self._state_machines[execution_id] = ExecutionStateMachine(initial_state)
         await self._state_port.save_state(execution_id, initial_state)

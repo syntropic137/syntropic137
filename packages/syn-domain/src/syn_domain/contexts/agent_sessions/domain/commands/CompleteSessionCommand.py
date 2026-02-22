@@ -5,6 +5,8 @@ from __future__ import annotations
 from event_sourcing import command
 from pydantic import BaseModel, ConfigDict, Field
 
+from syn_domain.contexts.agent_sessions._shared.value_objects import SessionStatus
+
 
 @command("CompleteSession", "Marks an agent session as completed")
 class CompleteSessionCommand(BaseModel):
@@ -21,3 +23,7 @@ class CompleteSessionCommand(BaseModel):
     # Outcome
     success: bool = Field(default=True, description="Whether session completed successfully")
     error_message: str | None = Field(default=None, description="Error message if failed")
+    final_status: SessionStatus | None = Field(
+        default=None,
+        description="Override final status (e.g. CANCELLED). Defaults to COMPLETED/FAILED from success flag.",
+    )

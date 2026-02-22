@@ -562,7 +562,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         if self.id is None:
             msg = "Cannot interrupt execution that has not been started"
             raise ValueError(msg)
-        if self._status not in (ExecutionStatus.RUNNING, ExecutionStatus.PAUSED):
+        if self._status is not ExecutionStatus.RUNNING:
             msg = f"Cannot interrupt execution in status {self._status}"
             raise ValueError(msg)
 

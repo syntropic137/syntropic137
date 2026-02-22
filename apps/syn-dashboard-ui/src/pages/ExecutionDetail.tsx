@@ -194,7 +194,7 @@ export function ExecutionDetail() {
             </div>
           </div>
         </div>
-        {/* Execution controls (pause/cancel) for active executions */}
+        {/* Cancel control for active executions */}
         <div className="flex items-center gap-4">
           {executionId && ['running', 'paused'].includes(execution.status) && (
             <ExecutionControl

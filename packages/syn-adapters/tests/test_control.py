@@ -125,15 +125,15 @@ class TestInterruptedState:
         with pytest.raises(InvalidTransitionError):
             sm.transition(ExecutionState.INTERRUPTED)
 
-    def test_paused_cannot_interrupt_via_state_machine(self) -> None:
-        """PAUSED state cannot directly transition to INTERRUPTED (only RUNNING can).
+    def test_paused_can_interrupt_via_state_machine(self) -> None:
+        """PAUSED state can transition to INTERRUPTED.
 
-        The interrupt path goes through the aggregate which requires RUNNING or PAUSED
-        status, but the control plane state machine only allows RUNNING -> INTERRUPTED.
+        Aligns the state machine with the aggregate, which allows interrupting
+        from both RUNNING and PAUSED states.
         """
         sm = ExecutionStateMachine(ExecutionState.PAUSED)
-        with pytest.raises(InvalidTransitionError):
-            sm.transition(ExecutionState.INTERRUPTED)
+        sm.transition(ExecutionState.INTERRUPTED)
+        assert sm.state == ExecutionState.INTERRUPTED
 
 
 class TestExecutionController:

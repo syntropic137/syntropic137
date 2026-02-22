@@ -1093,19 +1093,6 @@ class WorkflowExecutionEngine:
             await self._sessions.save(session)
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
-        # Emit session_started to agent_events so duration projection has a reliable start time.
-        # Tool/token events arrive via the collector, which doesn't emit session lifecycle events.
-        if self._observability_writer is not None:
-            from syn_shared.events import SESSION_STARTED
-
-            await self._observability_writer.record_observation(
-                session_id=session_id,
-                observation_type=SESSION_STARTED,
-                data={"model": phase.agent_config.model, "provider": phase.agent_config.provider},
-                execution_id=ctx.execution_id,
-                phase_id=phase.phase_id,
-            )
-
         # ADR-035: Initialize conversation tracking variables before try block
         # This ensures we can store partial conversation logs even on early failures
         conversation_lines: list[str] = []
@@ -1837,26 +1824,41 @@ class WorkflowExecutionEngine:
 
                 # If CANCEL signal was received, collect partial state and raise interrupt
                 if _interrupt_requested:
-                    git_sha = await self._get_container_git_sha(workspace)
-                    partial_artifacts = await workspace.collect_files(
-                        patterns=["artifacts/output/**/*"]
-                    )
-                    partial_artifact_ids: list[str] = []
-                    for artifact_path, artifact_content in partial_artifacts:
-                        artifact_id = str(uuid4())
-                        content_str = artifact_content.decode("utf-8", errors="replace")
-                        await self._create_artifact(
-                            artifact_id=artifact_id,
-                            workflow_id=ctx.workflow_id,
-                            phase_id=phase.phase_id,
-                            execution_id=ctx.execution_id,
-                            session_id=session_id,
-                            artifact_type=phase.output_artifact_type,
-                            content=content_str,
-                            title=f"{phase.name} (partial): {artifact_path}",
+                    try:
+                        git_sha = await self._get_container_git_sha(workspace)
+                    except Exception as git_err:
+                        logger.warning(
+                            "Failed to collect git SHA during interrupt for %s: %s",
+                            session_id,
+                            git_err,
                         )
-                        partial_artifact_ids.append(artifact_id)
-                        ctx.artifact_ids.append(artifact_id)
+                        git_sha = None
+                    partial_artifact_ids: list[str] = []
+                    try:
+                        partial_artifacts = await workspace.collect_files(
+                            patterns=["artifacts/output/**/*"]
+                        )
+                        for artifact_path, artifact_content in partial_artifacts:
+                            artifact_id = str(uuid4())
+                            content_str = artifact_content.decode("utf-8", errors="replace")
+                            await self._create_artifact(
+                                artifact_id=artifact_id,
+                                workflow_id=ctx.workflow_id,
+                                phase_id=phase.phase_id,
+                                execution_id=ctx.execution_id,
+                                session_id=session_id,
+                                artifact_type=phase.output_artifact_type,
+                                content=content_str,
+                                title=f"{phase.name} (partial): {artifact_path}",
+                            )
+                            partial_artifact_ids.append(artifact_id)
+                            ctx.artifact_ids.append(artifact_id)
+                    except Exception as artifact_err:
+                        logger.warning(
+                            "Failed to collect partial artifacts for %s: %s",
+                            session_id,
+                            artifact_err,
+                        )
 
                     # Store partial conversation log
                     if self._conversation_storage is not None and conversation_lines:
@@ -2083,10 +2085,15 @@ class WorkflowExecutionEngine:
             # Complete the session as cancelled before propagating
             if session is not None and self._sessions is not None:
                 try:
+                    from syn_domain.contexts.agent_sessions._shared.value_objects import (
+                        SessionStatus,
+                    )
+
                     complete_session_cmd = CompleteSessionCommand(
                         aggregate_id=session_id,
                         success=False,
-                        error_message=f"Cancelled: {_interrupted_err.reason or 'user request'}",
+                        final_status=SessionStatus.CANCELLED,
+                        error_message=_interrupted_err.reason or "Interrupted by user",
                     )
                     session._handle_command(complete_session_cmd)
                     await self._sessions.save(session)

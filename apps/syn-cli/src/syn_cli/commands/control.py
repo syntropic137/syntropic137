@@ -183,15 +183,22 @@ def status(
 def stop(
     execution_id: str = typer.Argument(..., help="Execution ID to stop"),
     reason: str | None = typer.Option(None, "--reason", "-r", help="Reason for stopping"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
     dashboard_url: str | None = typer.Option(None, "--url", "-u", help="Dashboard API URL"),
 ) -> None:
-    """Forcefully stop a running execution (no confirmation prompt).
+    """Forcefully stop a running execution via SIGINT.
 
     Sends a cancel signal that causes the engine to interrupt the Claude CLI
     process via SIGINT and capture partial output as an interrupted execution.
     """
     url = _get_dashboard_url(dashboard_url)
     stop_reason = reason or "Stopped by user via aef stop"
+
+    if not force:
+        confirm = typer.confirm(f"Are you sure you want to stop execution {execution_id}?")
+        if not confirm:
+            console.print("[dim]Aborted.[/dim]")
+            raise typer.Exit(0)
 
     try:
         response = httpx.post(

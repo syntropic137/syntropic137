@@ -31,7 +31,7 @@ VALID_TRANSITIONS: dict[ExecutionState, set[ExecutionState]] = {
         ExecutionState.FAILED,
         ExecutionState.INTERRUPTED,
     },
-    ExecutionState.PAUSED: {ExecutionState.RUNNING, ExecutionState.CANCELLED},
+    ExecutionState.PAUSED: {ExecutionState.RUNNING, ExecutionState.CANCELLED, ExecutionState.INTERRUPTED},
     ExecutionState.CANCELLED: set(),  # Terminal state
     ExecutionState.COMPLETED: set(),  # Terminal state
     ExecutionState.FAILED: set(),  # Terminal state
