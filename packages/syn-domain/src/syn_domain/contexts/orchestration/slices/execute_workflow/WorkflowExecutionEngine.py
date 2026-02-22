@@ -49,6 +49,7 @@ from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
     from syn_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
+    from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
@@ -147,6 +148,31 @@ class WorkflowExecutionError(Exception):
         self.__cause__ = cause
 
 
+class WorkflowInterruptedError(Exception):
+    """Raised when workflow execution is forcefully interrupted via SIGINT.
+
+    Carries partial state captured at the time of interruption so the engine
+    can persist a WorkflowInterruptedEvent with meaningful data.
+    """
+
+    def __init__(
+        self,
+        phase_id: str,
+        reason: str | None = None,
+        git_sha: str | None = None,
+        partial_artifact_ids: list[str] | None = None,
+        partial_input_tokens: int = 0,
+        partial_output_tokens: int = 0,
+    ) -> None:
+        super().__init__(f"Execution interrupted in phase {phase_id}: {reason}")
+        self.phase_id = phase_id
+        self.reason = reason
+        self.git_sha = git_sha
+        self.partial_artifact_ids = partial_artifact_ids or []
+        self.partial_input_tokens = partial_input_tokens
+        self.partial_output_tokens = partial_output_tokens
+
+
 @dataclass(frozen=True)
 class WorkflowExecutionResult:
     """Result of a workflow execution.
@@ -238,6 +264,7 @@ class WorkflowExecutionEngine:
         observability_writer: Any | None = None,
         artifact_content_storage: ArtifactContentStoragePort | None = None,
         conversation_storage: ConversationStoragePort | None = None,
+        controller: ExecutionController | None = None,
     ) -> None:
         """Initialize the workflow execution engine.
 
@@ -280,6 +307,7 @@ class WorkflowExecutionEngine:
         self._observability_writer = observability_writer
         self._artifact_content_storage = artifact_content_storage
         self._conversation_storage = conversation_storage
+        self._controller = controller
 
     async def _record_observation(
         self,
@@ -317,6 +345,26 @@ class WorkflowExecutionEngine:
             phase_id=phase_id,
             workspace_id=workspace_id,
         )
+
+    async def _get_container_git_sha(self, workspace: Any) -> str | None:
+        """Get the current git HEAD SHA from inside the workspace container.
+
+        Used to capture the exact code state at the time of interruption for
+        audit trail and reproducibility.
+
+        Returns None if git is unavailable or command fails (non-fatal).
+        """
+        try:
+            result = await workspace.execute(
+                ["git", "rev-parse", "HEAD"],
+                working_directory="/workspace",
+                timeout_seconds=5,
+            )
+            if result.exit_code == 0:
+                return result.stdout.strip() or None
+        except Exception as e:
+            logger.debug("_get_container_git_sha: failed: %s", e)
+        return None
 
     async def execute(
         self,
@@ -450,6 +498,40 @@ class WorkflowExecutionEngine:
                 phase_results=ctx.phase_results,
                 artifact_ids=ctx.artifact_ids,
                 metrics=metrics,
+            )
+
+        except WorkflowInterruptedError as e:
+            # User-initiated cancel: emit ExecutionCancelledEvent → status = "cancelled"
+            from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
+                CancelExecutionCommand,
+            )
+
+            cancel_cmd = CancelExecutionCommand(
+                execution_id=ctx.execution_id,
+                phase_id=e.phase_id,
+                reason=e.reason,
+            )
+            aggregate._handle_command(cancel_cmd)
+            await self._executions.save(aggregate)
+
+            logger.info(
+                "Workflow execution cancelled: %s (phase: %s, reason: %s)",
+                workflow_id,
+                e.phase_id,
+                e.reason,
+            )
+
+            metrics = ExecutionMetrics.from_results(ctx.phase_results)
+            return WorkflowExecutionResult(
+                workflow_id=workflow_id,
+                execution_id=ctx.execution_id,
+                status=ExecutionStatus.CANCELLED,
+                started_at=ctx.started_at,
+                completed_at=datetime.now(UTC),
+                phase_results=ctx.phase_results,
+                artifact_ids=ctx.artifact_ids,
+                metrics=metrics,
+                error_message=e.reason or "Cancelled by user",
             )
 
         except Exception as e:
@@ -1011,19 +1093,6 @@ class WorkflowExecutionEngine:
             await self._sessions.save(session)
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
-        # Emit session_started to agent_events so duration projection has a reliable start time.
-        # Tool/token events arrive via the collector, which doesn't emit session lifecycle events.
-        if self._observability_writer is not None:
-            from syn_shared.events import SESSION_STARTED
-
-            await self._observability_writer.record_observation(
-                session_id=session_id,
-                observation_type=SESSION_STARTED,
-                data={"model": phase.agent_config.model, "provider": phase.agent_config.provider},
-                execution_id=ctx.execution_id,
-                phase_id=phase.phase_id,
-            )
-
         # ADR-035: Initialize conversation tracking variables before try block
         # This ensures we can store partial conversation logs even on early failures
         conversation_lines: list[str] = []
@@ -1045,7 +1114,19 @@ class WorkflowExecutionEngine:
                 # Uses GitHub App to generate installation token if configured
                 from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
-                secrets = await SetupPhaseSecrets.create()
+                # Parse "https://github.com/owner/repo" → "owner/repo"
+                # Skip the sentinel placeholder used for workflows with no repo configured.
+                _PLACEHOLDER = "https://github.com/placeholder/not-configured"
+                _repo: str | None = None
+                if ctx.repo_url and ctx.repo_url != _PLACEHOLDER:
+                    _parts = ctx.repo_url.rstrip("/").split("/")
+                    if len(_parts) >= 2:
+                        _repo = f"{_parts[-2]}/{_parts[-1]}"
+
+                secrets = await SetupPhaseSecrets.create(
+                    repository=_repo,
+                    require_github=_repo is not None,
+                )
 
                 setup_result = await workspace.run_setup_phase(secrets)
                 if setup_result.exit_code != 0:
@@ -1218,6 +1299,8 @@ class WorkflowExecutionEngine:
                 agent_task_result: dict | None = None
 
                 line_count = 0
+                _interrupt_requested = False
+                _interrupt_reason: str | None = None
                 async for line in workspace.stream(
                     claude_cmd,
                     timeout_seconds=phase.timeout_seconds or 300,
@@ -1225,6 +1308,22 @@ class WorkflowExecutionEngine:
                 ):
                     line_count += 1
                     logger.debug("Received line %d: %s", line_count, line[:100])
+
+                    # Poll for CANCEL signal every 10 lines (low overhead, fast response)
+                    if line_count % 10 == 0 and self._controller is not None:
+                        from syn_adapters.control.commands import ControlSignalType
+
+                        signal = await self._controller.check_signal(ctx.execution_id)
+                        if signal and signal.signal_type == ControlSignalType.CANCEL:
+                            logger.info(
+                                "CANCEL signal received for execution %s at line %d — sending SIGINT",
+                                ctx.execution_id,
+                                line_count,
+                            )
+                            _interrupt_requested = True
+                            _interrupt_reason = signal.reason
+                            await workspace.interrupt()
+                            break
 
                     # ADR-035: Collect line for conversation storage
                     if line.strip():
@@ -1723,6 +1822,83 @@ class WorkflowExecutionEngine:
                     total_output_tokens,
                 )
 
+                # If CANCEL signal was received, collect partial state and raise interrupt
+                if _interrupt_requested:
+                    try:
+                        git_sha = await self._get_container_git_sha(workspace)
+                    except Exception as git_err:
+                        logger.warning(
+                            "Failed to collect git SHA during interrupt for %s: %s",
+                            session_id,
+                            git_err,
+                        )
+                        git_sha = None
+                    partial_artifact_ids: list[str] = []
+                    try:
+                        partial_artifacts = await workspace.collect_files(
+                            patterns=["artifacts/output/**/*"]
+                        )
+                        for artifact_path, artifact_content in partial_artifacts:
+                            artifact_id = str(uuid4())
+                            content_str = artifact_content.decode("utf-8", errors="replace")
+                            await self._create_artifact(
+                                artifact_id=artifact_id,
+                                workflow_id=ctx.workflow_id,
+                                phase_id=phase.phase_id,
+                                execution_id=ctx.execution_id,
+                                session_id=session_id,
+                                artifact_type=phase.output_artifact_type,
+                                content=content_str,
+                                title=f"{phase.name} (partial): {artifact_path}",
+                            )
+                            partial_artifact_ids.append(artifact_id)
+                            ctx.artifact_ids.append(artifact_id)
+                    except Exception as artifact_err:
+                        logger.warning(
+                            "Failed to collect partial artifacts for %s: %s",
+                            session_id,
+                            artifact_err,
+                        )
+
+                    # Store partial conversation log
+                    if self._conversation_storage is not None and conversation_lines:
+                        try:
+                            from syn_adapters.conversations import SessionContext
+
+                            conv_context = SessionContext(
+                                execution_id=ctx.execution_id,
+                                phase_id=phase.phase_id,
+                                workflow_id=ctx.workflow_id,
+                                model=phase.agent_config.model,
+                                event_count=len(conversation_lines),
+                                tool_counts={},
+                                total_input_tokens=total_input_tokens,
+                                total_output_tokens=total_output_tokens,
+                                started_at=phase_started_at,
+                                completed_at=datetime.now(UTC),
+                                success=False,
+                            )
+                            await self._conversation_storage.store_session(
+                                session_id=session_id,
+                                lines=conversation_lines,
+                                context=conv_context,
+                            )
+                        except Exception as conv_err:
+                            logger.warning(
+                                "Failed to store partial conversation log for %s: %s",
+                                session_id,
+                                conv_err,
+                            )
+
+                    raise WorkflowInterruptedError(
+                        phase_id=phase.phase_id,
+                        reason=_interrupt_reason,
+                        git_sha=git_sha,
+                        partial_artifact_ids=partial_artifact_ids,
+                        partial_input_tokens=total_input_tokens,
+                        partial_output_tokens=total_output_tokens,
+                    )
+
                 # Check process exit code — non-zero means agent failed
                 exit_code = workspace.last_stream_exit_code
                 if exit_code is not None and exit_code != 0:
@@ -1904,6 +2080,30 @@ class WorkflowExecutionEngine:
             )
 
             return result
+
+        except WorkflowInterruptedError as _interrupted_err:
+            # Complete the session as cancelled before propagating
+            if session is not None and self._sessions is not None:
+                try:
+                    from syn_domain.contexts.agent_sessions._shared.value_objects import (
+                        SessionStatus,
+                    )
+
+                    complete_session_cmd = CompleteSessionCommand(
+                        aggregate_id=session_id,
+                        success=False,
+                        final_status=SessionStatus.CANCELLED,
+                        error_message=_interrupted_err.reason or "Interrupted by user",
+                    )
+                    session._handle_command(complete_session_cmd)
+                    await self._sessions.save(session)
+                    logger.debug("Session completed (cancelled): %s", session_id)
+                except Exception as _sess_err:
+                    logger.warning(
+                        "Failed to complete session %s during cancel: %s", session_id, _sess_err
+                    )
+            # Let interrupt propagate to execute() where it's handled correctly
+            raise
 
         except Exception as e:
             # Record failure

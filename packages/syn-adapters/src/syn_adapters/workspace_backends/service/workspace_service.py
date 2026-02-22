@@ -136,7 +136,12 @@ class SetupPhaseSecrets:
     git_author_email: str | None = None
 
     @classmethod
-    async def create(cls, *, require_github: bool = True) -> SetupPhaseSecrets:
+    async def create(
+        cls,
+        *,
+        repository: str | None = None,
+        require_github: bool = True,
+    ) -> SetupPhaseSecrets:
         """Create SetupPhaseSecrets using GitHub App.
 
         This is the production factory method. It:
@@ -145,6 +150,8 @@ class SetupPhaseSecrets:
         3. Reads ANTHROPIC_API_KEY from environment
 
         Args:
+            repository: Repository in "{owner}/{repo}" format. Required to resolve
+                the correct GitHub App installation ID for the repo.
             require_github: If True (default), raises if GitHub App not configured
 
         Returns:
@@ -155,6 +162,7 @@ class SetupPhaseSecrets:
         """
         import os
 
+        from syn_adapters.github.client import GitHubAuthError
         from syn_shared.settings.github import GitHubAppSettings
 
         github_app_token = None
@@ -168,8 +176,18 @@ class SetupPhaseSecrets:
                 from syn_adapters.github import GitHubAppClient
 
                 client = GitHubAppClient(github_settings)
-                # get_installation_token returns the token string directly
-                github_app_token = await client.get_installation_token()
+                if repository:
+                    installation_id = await client.get_installation_for_repo(repository)
+                elif require_github:
+                    msg = (
+                        "Cannot generate GitHub App token: no repository provided. "
+                        "Pass repository='{owner}/{repo}' to SetupPhaseSecrets.create()."
+                    )
+                    raise GitHubAuthError(msg)
+                else:
+                    installation_id = None
+                if installation_id:
+                    github_app_token = await client.get_installation_token(installation_id)
                 # Use GitHub App bot identity for commits
                 git_author_name = github_settings.bot_name
                 git_author_email = github_settings.bot_email
@@ -592,6 +610,48 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
             ["rm", "-rf", "/workspace/.cleanup"],
             timeout_seconds=5,
         )
+
+    async def interrupt(self) -> bool:
+        """Send SIGINT to the Claude CLI process inside the container.
+
+        Uses docker exec to find and signal the claude process:
+            docker exec <container> sh -c "kill -INT $(pgrep -n claude)"
+
+        Returns True if signal was delivered successfully. Non-fatal on failure
+        so cleanup can continue even if the process is already gone.
+        """
+        import asyncio
+
+        container_id = getattr(self.isolation_handle, "container_id", None)
+        if not container_id:
+            logger.warning("interrupt(): no container_id on isolation handle, skipping SIGINT")
+            return False
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "exec",
+                container_id,
+                "sh",
+                "-c",
+                "kill -INT $(pgrep -n claude) 2>/dev/null || true",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            success = proc.returncode == 0
+            if success:
+                logger.info("interrupt(): SIGINT delivered to claude process in %s", container_id)
+            else:
+                logger.warning(
+                    "interrupt(): SIGINT failed (exit=%d) for container %s",
+                    proc.returncode,
+                    container_id,
+                )
+            return success
+        except Exception as e:
+            logger.warning("interrupt(): failed to send SIGINT to %s: %s", container_id, e)
+            return False
 
     @property
     def proxy_url(self) -> str | None:

@@ -94,13 +94,17 @@ services:
       SYN_OBSERVABILITY_DB_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
-      # Note: ANTHROPIC_API_KEY should be set via .env or host environment
+      REDIS_URL: redis://redis:6379/0
+      # Note: secrets (GitHub App, Anthropic, storage) are injected via the
+      # dev overlay (docker-compose.dev.yaml) using env_file: ../.env
     depends_on:
       timescaledb:
         condition: service_healthy
       event-store:
         condition: service_healthy
       collector:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test:

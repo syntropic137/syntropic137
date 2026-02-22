@@ -14,7 +14,8 @@ Usage:
     settings = GitHubAppSettings()
     if settings.is_configured:
         client = GitHubAppClient(settings)
-        token = await client.get_installation_token()
+        installation_id = await client.get_installation_for_repo("owner/repo")
+        token = await client.get_installation_token(installation_id)
 """
 
 from __future__ import annotations
@@ -76,17 +77,6 @@ class GitHubAppSettings(BaseSettings):
         ),
     )
 
-    installation_id: str = Field(
-        default="",
-        description=(
-            "GitHub App Installation ID (optional). "
-            "Used as the default installation when not provided per-request. "
-            "Most installations are discovered dynamically from webhook payloads, "
-            "so this is only needed for single-installation setups or as a fallback. "
-            "Get from: GitHub org Settings → Installed Apps → Configure → URL."
-        ),
-    )
-
     # =========================================================================
     # WEBHOOK SECURITY
     # =========================================================================
@@ -112,9 +102,9 @@ class GitHubAppSettings(BaseSettings):
         - app_id
         - private_key (non-empty)
 
-        Note: installation_id is NOT required here — installations are
-        discovered dynamically from webhook payloads, since a single app
-        can be installed on multiple orgs/accounts.
+        Note: Installations are resolved dynamically per-repo via
+        get_installation_for_repo(), since a single app can be installed
+        on multiple orgs/accounts.
         """
         return bool(self.app_id and self.private_key.get_secret_value())
 
@@ -149,8 +139,7 @@ class GitHubAppSettings(BaseSettings):
         app_id and private_key must be provided together — one without
         the other is a misconfiguration.
 
-        installation_id is optional and independent: installations are
-        discovered dynamically from webhook payloads for multi-tenant support.
+        Installations are resolved dynamically per-repo for multi-tenant support.
         """
         identity_fields = [
             self.app_id,
@@ -176,9 +165,16 @@ def get_github_settings() -> GitHubAppSettings:
 
     Settings are loaded once on first call and cached.
 
+    op:// references in .env or os.environ are transparently resolved via
+    the 1Password CLI before pydantic reads them. If `op` is unavailable,
+    resolution is silently skipped and pydantic validates as normal.
+
     Returns:
         Validated GitHubAppSettings instance.
     """
+    from syn_shared.settings.op_resolver import resolve_op_secrets
+
+    resolve_op_secrets()
     return GitHubAppSettings()
 
 

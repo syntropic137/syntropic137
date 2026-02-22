@@ -174,3 +174,4 @@ DEEP-DIVE_*.md
 build/
 HANDOFF-*.md
 /workspaces/
+.playwright-mcp/

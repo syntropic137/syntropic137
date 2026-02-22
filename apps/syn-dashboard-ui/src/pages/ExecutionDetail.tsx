@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Clock,
   FileText,
+  OctagonX,
   Play,
   XCircle,
   Zap,
@@ -21,6 +22,7 @@ import {
 
 import { getArtifact, getExecution } from '../api/client'
 import { Breadcrumbs, Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader, StatusBadge } from '../components'
+import { ExecutionControl } from '../components/ExecutionControl'
 import type { BreadcrumbItem } from '../components/Breadcrumbs'
 import { useExecutionStream } from '../hooks'
 import type { ArtifactResponse, ExecutionDetailResponse } from '../types'
@@ -31,6 +33,8 @@ const phaseStatusIcons: Record<string, typeof Play> = {
   running: Play,
   completed: CheckCircle2,
   failed: XCircle,
+  interrupted: OctagonX,
+  cancelled: OctagonX,
 }
 
 const phaseStatusColors: Record<string, string> = {
@@ -38,6 +42,8 @@ const phaseStatusColors: Record<string, string> = {
   running: 'border-blue-500/30 bg-blue-500/10',
   completed: 'border-emerald-500/30 bg-emerald-500/10',
   failed: 'border-red-500/30 bg-red-500/10',
+  interrupted: 'border-orange-500/30 bg-orange-500/10',
+  cancelled: 'border-amber-500/30 bg-amber-500/10',
 }
 
 export function ExecutionDetail() {
@@ -188,17 +194,27 @@ export function ExecutionDetail() {
             </div>
           </div>
         </div>
-        {/* Connection status indicator */}
-        <div className="flex items-center gap-2 text-sm">
-          <span
-            className={clsx(
-              'h-2 w-2 rounded-full',
-              isConnected ? 'bg-emerald-500' : 'bg-slate-400'
-            )}
-          />
-          <span className="text-[var(--color-text-muted)]">
-            {isConnected ? 'Live' : 'Connecting...'}
-          </span>
+        {/* Cancel control for active executions */}
+        <div className="flex items-center gap-4">
+          {executionId && ['running', 'paused'].includes(execution.status) && (
+            <ExecutionControl
+              executionId={executionId}
+              initialState={execution.status as 'running' | 'paused'}
+              onSuccess={refreshExecution}
+            />
+          )}
+          {/* Connection status indicator */}
+          <div className="flex items-center gap-2 text-sm">
+            <span
+              className={clsx(
+                'h-2 w-2 rounded-full',
+                isConnected ? 'bg-emerald-500' : 'bg-slate-400'
+              )}
+            />
+            <span className="text-[var(--color-text-muted)]">
+              {isConnected ? 'Live' : 'Connecting...'}
+            </span>
+          </div>
         </div>
       </div>
 

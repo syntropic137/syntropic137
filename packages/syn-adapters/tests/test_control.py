@@ -92,6 +92,50 @@ class TestExecutionStateMachine:
         assert not sm.can_resume()
 
 
+@pytest.mark.unit
+class TestInterruptedState:
+    """T-2: Tests for INTERRUPTED state transitions in ExecutionStateMachine."""
+
+    def test_running_can_transition_to_interrupted(self) -> None:
+        """RUNNING execution can be interrupted."""
+        sm = ExecutionStateMachine(ExecutionState.RUNNING)
+        sm.transition(ExecutionState.INTERRUPTED)
+        assert sm.state == ExecutionState.INTERRUPTED
+
+    def test_interrupted_is_terminal(self) -> None:
+        """INTERRUPTED is a terminal state (no further transitions)."""
+        sm = ExecutionStateMachine(ExecutionState.INTERRUPTED)
+        assert sm.is_terminal
+
+    def test_cannot_transition_from_interrupted_to_running(self) -> None:
+        """Cannot resume from INTERRUPTED state."""
+        sm = ExecutionStateMachine(ExecutionState.INTERRUPTED)
+        with pytest.raises(InvalidTransitionError):
+            sm.transition(ExecutionState.RUNNING)
+
+    def test_cannot_transition_from_interrupted_to_cancelled(self) -> None:
+        """Cannot cancel an already-interrupted execution."""
+        sm = ExecutionStateMachine(ExecutionState.INTERRUPTED)
+        with pytest.raises(InvalidTransitionError):
+            sm.transition(ExecutionState.CANCELLED)
+
+    def test_pending_cannot_interrupt(self) -> None:
+        """Cannot interrupt a PENDING execution (not yet running)."""
+        sm = ExecutionStateMachine(ExecutionState.PENDING)
+        with pytest.raises(InvalidTransitionError):
+            sm.transition(ExecutionState.INTERRUPTED)
+
+    def test_paused_can_interrupt_via_state_machine(self) -> None:
+        """PAUSED state can transition to INTERRUPTED.
+
+        Aligns the state machine with the aggregate, which allows interrupting
+        from both RUNNING and PAUSED states.
+        """
+        sm = ExecutionStateMachine(ExecutionState.PAUSED)
+        sm.transition(ExecutionState.INTERRUPTED)
+        assert sm.state == ExecutionState.INTERRUPTED
+
+
 class TestExecutionController:
     """Tests for ExecutionController."""
 

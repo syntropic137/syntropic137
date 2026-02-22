@@ -119,12 +119,10 @@ class TestGitHubAppSettings:
             app_id="999",
             app_name="test-app",
             private_key=SecretStr("secret-key"),
-            installation_id="888",
             _env_file=None,
         )
 
         assert settings.app_id == "999"
         assert settings.app_name == "test-app"
         assert settings.private_key.get_secret_value() == "secret-key"
-        assert settings.installation_id == "888"
         assert settings.is_configured

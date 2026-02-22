@@ -59,7 +59,6 @@ def mock_github_settings() -> MagicMock:
     settings = MagicMock()
     settings.app_id = "12345"
     settings.app_name = "test-app"
-    settings.installation_id = "67890"
     settings.private_key = MagicMock()
     settings.private_key.get_secret_value.return_value = TEST_PRIVATE_KEY_B64
     settings.is_configured = True

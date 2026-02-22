@@ -3,6 +3,11 @@
 # Command runner for Agentic Engineering Framework
 # See https://github.com/casey/just
 
+# Docker Compose shorthand variables
+compose := "docker compose -f docker/docker-compose.yaml"
+compose_dev := compose + " -f docker/docker-compose.dev.yaml"
+compose_test := compose + " -f docker/docker-compose.test.yaml"
+
 # Default target
 default: help
 
@@ -40,7 +45,7 @@ dev: _workspace-check
     @uv sync
     @echo ""
     @echo "2️⃣ Building and starting Docker services..."
-    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
+    @{{compose_dev}} up -d --build
     @echo ""
     @echo "3️⃣ Waiting for services to be healthy..."
     @sleep 5
@@ -81,7 +86,7 @@ dev-stop:
     @echo "   Stopping frontend (port 5173)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @echo "   Stopping Docker services..."
-    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml stop
+    @{{compose_dev}} stop
     @echo "✅ Dev stack stopped (data preserved)"
 
 # Stop and remove dev containers (preserves volumes)
@@ -91,12 +96,12 @@ dev-down:
     @echo "   Stopping frontend (port 5173)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @echo "   Removing Docker containers..."
-    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down
+    @{{compose_dev}} down
     @echo "✅ Dev stack shut down (volumes preserved)"
 
 # View development logs
 dev-logs:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml logs -f
+    {{compose_dev}} logs -f
 
 # Clean database, seed workflows, and start full dev stack (fresh start)
 # Fresh start: wipe all data and restart from scratch
@@ -109,13 +114,13 @@ dev-fresh: _workspace-check
     @-lsof -ti:5173 | xargs kill -9 2>/dev/null || true
     @echo ""
     @echo "2️⃣ Tearing down Docker services and volumes..."
-    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v --remove-orphans
+    @{{compose_dev}} down -v --remove-orphans
     @echo ""
     @echo "3️⃣ Syncing Python dependencies..."
     @uv sync
     @echo ""
     @echo "4️⃣ Building and starting Docker services..."
-    @docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml up -d --build
+    @{{compose_dev}} up -d --build
     @echo ""
     @echo "5️⃣ Waiting for services to be healthy..."
     @sleep 8
@@ -159,6 +164,11 @@ dev-doctor: _env-check
 _env-check:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
+    # If OP_VAULT is set, resolve 1Password secrets into the environment
+    # so the checks below see values that were stored in 1Password, not just .env.
+    if [ -n "${OP_VAULT:-}" ]; then
+        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
+    fi
     WARNINGS=0
     ERRORS=0
 
@@ -177,15 +187,10 @@ _env-check:
     # installation_id is intentionally NOT required here — installations are discovered
     # dynamically from webhook payloads (multi-org/multi-account support).
     if [ -n "${SYN_GITHUB_APP_ID:-}" ] && [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
-        if [ -n "${SYN_GITHUB_INSTALLATION_ID:-}" ]; then
-            echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app}, default installation: ${SYN_GITHUB_INSTALLATION_ID})"
-        else
-            echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app}, installations via webhooks)"
-        fi
+        echo "   ✅ GitHub App configured (${SYN_GITHUB_APP_NAME:-syn-app}, installations resolved per-repo)"
     elif [ -n "${SYN_GITHUB_APP_ID:-}" ] || [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
         echo "   ❌ ERROR: GitHub App partially configured!"
         echo "            Both required: SYN_GITHUB_APP_ID, SYN_GITHUB_PRIVATE_KEY"
-        echo "            (SYN_GITHUB_INSTALLATION_ID is optional — installations discovered from webhooks)"
         echo ""
         ERRORS=$((ERRORS + 1))
     else
@@ -427,23 +432,23 @@ dashboard-qa: dashboard-lint dashboard-build
 # Start test stack (ephemeral, ports +10000 from dev)
 test-stack:
     @echo "🧪 Starting test stack..."
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml up -d --build
+    {{compose_test}} up -d --build
     @echo "✅ Test stack running on ports 15432, 18080, 55051, 19000, 16379"
 
 # Stop test stack
 test-stack-stop:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml stop
+    {{compose_test}} stop
 
 # Stop and remove test stack (cleans everything)
 test-stack-down:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml down -v
+    {{compose_test}} down -v
 
 # Restart test stack (clean slate)
 test-stack-restart: test-stack-down test-stack
 
 # View test stack logs
 test-stack-logs:
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.test.yaml logs -f
+    {{compose_test}} logs -f
 
 # --- Testing & Quality Assurance ---
 
@@ -685,7 +690,7 @@ clean:
     find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
     find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
     find . -type f -name "*.pyc" -exec rm {} + 2>/dev/null || true
-    docker compose -f docker/docker-compose.yaml -f docker/docker-compose.dev.yaml down -v 2>/dev/null || true
+    {{compose_dev}} down -v 2>/dev/null || true
     @echo "Cleanup complete."
 
 # Update dependencies to latest versions

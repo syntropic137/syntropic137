@@ -6,6 +6,22 @@
 
 Event-sourced system for tracking AI agent work across workflows, capturing metrics for observability and optimization.
 
+- [Syntropic137](#syntropic137)
+  - [Overview](#overview)
+  - [🏗️ Architecture](#️-architecture)
+  - [Quick Start](#quick-start)
+    - [Prerequisites](#prerequisites)
+    - [Installation](#installation)
+    - [Configuration](#configuration)
+    - [Development Environment](#development-environment)
+    - [CLI Usage](#cli-usage)
+  - [Project Structure](#project-structure)
+    - [Bounded Contexts](#bounded-contexts)
+    - [Key Patterns](#key-patterns)
+  - [Development Commands](#development-commands)
+  - [License](#license)
+
+
 ## Overview
 
 The Syntropic137 provides:
@@ -76,6 +92,32 @@ just install
 # Initialize submodules (if not cloned with --recursive)
 just submodules
 ```
+
+### Configuration
+
+```bash
+cp .env.example .env
+```
+
+`.env.example` is the primary configuration reference — open it and read the header. It covers both setup paths:
+
+**Option A — 1Password (recommended):** Set `OP_VAULT` to your target vault. The resolver fetches every field from the `syntropic137-config` item and injects them at startup. Put any vars you want in 1Password — secrets, non-sensitive config, or a mix. Anything not in the item falls through to `.env` as plaintext.
+
+```bash
+# .env — minimum to get started
+OP_VAULT=syn137-dev
+OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=<your-service-account-token>
+```
+
+Vaults: `syn137-dev` (development) · `syn137-beta` (beta) · `syn137-staging` (staging) · `syn137-prod` (production)
+
+> Tip: include `APP_ENVIRONMENT` in the 1Password item (e.g. `development` for `syn137-dev`). The resolver validates it against the vault at boot and refuses to start on a mismatch — e.g. prod secrets in a dev process.
+
+**Option B — Plain values:** Leave `OP_VAULT` blank and fill in secrets directly in `.env`. No tooling required.
+
+**Precedence (highest → lowest):** shell env → 1Password fields → `.env` plaintext. Any source works; they compose cleanly.
+
+> Full 1Password setup guide: [docs/development/1password-secrets.md](docs/development/1password-secrets.md)
 
 ### Development Environment
 
