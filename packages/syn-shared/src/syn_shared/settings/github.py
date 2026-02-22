@@ -165,9 +165,16 @@ def get_github_settings() -> GitHubAppSettings:
 
     Settings are loaded once on first call and cached.
 
+    op:// references in .env or os.environ are transparently resolved via
+    the 1Password CLI before pydantic reads them. If `op` is unavailable,
+    resolution is silently skipped and pydantic validates as normal.
+
     Returns:
         Validated GitHubAppSettings instance.
     """
+    from syn_shared.settings.op_resolver import resolve_op_secrets
+
+    resolve_op_secrets()
     return GitHubAppSettings()
 
 

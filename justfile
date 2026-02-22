@@ -164,6 +164,11 @@ dev-doctor: _env-check
 _env-check:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
+    # If OP_VAULT is set, resolve 1Password secrets into the environment
+    # so the checks below see values that were stored in 1Password, not just .env.
+    if [ -n "${OP_VAULT:-}" ]; then
+        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
+    fi
     WARNINGS=0
     ERRORS=0
 
