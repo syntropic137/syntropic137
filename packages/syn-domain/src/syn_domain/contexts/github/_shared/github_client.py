@@ -11,7 +11,7 @@ Usage:
 
     settings = GitHubAppSettings()
     client = GitHubAppClient(settings)
-    token = await client.get_installation_token()
+    token_response = await client.get_installation_token(installation_id)
 """
 
 from __future__ import annotations
@@ -143,8 +143,8 @@ class GitHubAppClient:
         are about to expire (within 5 minutes).
 
         Args:
-            installation_id: The installation to get a token for. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided. Raises if neither is set.
+            installation_id: The installation to get a token for. Must be provided explicitly
+                (e.g. from a webhook payload or via get_installation_for_repo()).
             force_refresh: Force a new token even if cached token is valid.
 
         Returns:
@@ -153,10 +153,10 @@ class GitHubAppClient:
         Raises:
             TokenFetchError: If token fetch fails or no installation_id available.
         """
-        iid = installation_id or self._settings.installation_id
+        iid = installation_id
         if not iid:
             raise TokenFetchError(
-                "No installation_id provided. Pass it explicitly or set SYN_GITHUB_INSTALLATION_ID."
+                "No installation_id provided. Pass it explicitly (e.g. from a webhook payload)."
             )
 
         # Check cache
@@ -217,8 +217,7 @@ class GitHubAppClient:
         """List repositories accessible to an installation.
 
         Args:
-            installation_id: The installation to list repos for. Falls back to
-                SYN_GITHUB_INSTALLATION_ID if not provided.
+            installation_id: The installation to list repos for. Must be provided explicitly.
 
         Returns:
             List of repository dictionaries with 'id', 'name', 'full_name', etc.

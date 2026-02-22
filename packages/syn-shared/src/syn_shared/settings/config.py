@@ -30,6 +30,7 @@ class AppEnvironment(str, Enum):
     """Application environment."""
 
     DEVELOPMENT = "development"
+    BETA = "beta"
     STAGING = "staging"
     PRODUCTION = "production"
     TEST = "test"
@@ -522,6 +523,10 @@ def get_settings() -> Settings:
     Settings are loaded once on first call and cached.
     Validates all environment variables immediately.
 
+    op:// references in .env or os.environ are transparently resolved via
+    the 1Password CLI before pydantic reads them. If `op` is unavailable,
+    resolution is silently skipped and pydantic validates as normal.
+
     Returns:
         Validated Settings instance.
 
@@ -529,6 +534,9 @@ def get_settings() -> Settings:
         pydantic.ValidationError: If required env vars are missing or invalid.
             Error message includes which variable failed and why.
     """
+    from syn_shared.settings.op_resolver import resolve_op_secrets
+
+    resolve_op_secrets()
     return Settings()
 
 

@@ -4,32 +4,20 @@ Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 Keyed by workflow_id; accumulates token/cost/duration per phase_id.
 """
 
-from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from event_sourcing import (
-    CheckpointedProjection,
-    EventEnvelope,
-    ProjectionCheckpoint,
-    ProjectionCheckpointStore,
-    ProjectionResult,
-)
-
-# Event types this projection subscribes to
-_SUBSCRIBED_EVENTS = {
-    "PhaseStarted",
-    "PhaseCompleted",
-}
+from event_sourcing import AutoDispatchProjection
 
 
-class WorkflowPhaseMetricsProjection(CheckpointedProjection):
+class WorkflowPhaseMetricsProjection(AutoDispatchProjection):
     """Builds per-phase metrics read model from events.
 
     Stores a pre-aggregated view of token/cost/duration metrics keyed by
     workflow_id so that /api/metrics?workflow_id=<id> is an O(1) read.
 
-    Implements CheckpointedProjection for per-projection position tracking.
+    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    subscribe and handle events — no separate subscription set needed.
     """
 
     PROJECTION_NAME = "workflow_phase_metrics"
@@ -38,54 +26,16 @@ class WorkflowPhaseMetricsProjection(CheckpointedProjection):
     def __init__(self, store: Any) -> None:
         self._store = store
 
-    # === CheckpointedProjection required methods ===
-
     def get_name(self) -> str:
         return self.PROJECTION_NAME
 
     def get_version(self) -> int:
         return self.VERSION
 
-    def get_subscribed_event_types(self) -> set[str] | None:
-        return _SUBSCRIBED_EVENTS
-
-    async def handle_event(
-        self,
-        envelope: EventEnvelope[Any],
-        checkpoint_store: ProjectionCheckpointStore,
-    ) -> ProjectionResult:
-        """Handle an event and save checkpoint atomically."""
-        event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            if event_type == "PhaseStarted":
-                await self.on_phase_started(event_data)
-            elif event_type == "PhaseCompleted":
-                await self.on_phase_completed(event_data)
-
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception:
-            return ProjectionResult.FAILURE
-
     async def clear_all_data(self) -> None:
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
-
-    @property
-    def name(self) -> str:
-        return self.PROJECTION_NAME
 
     # === Private helpers ===
 

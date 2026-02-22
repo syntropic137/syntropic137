@@ -221,8 +221,11 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             msg = f"Cannot complete session: session is {self._status.value}"
             raise ValueError(msg)
 
-        # Determine final status
-        status = SessionStatus.COMPLETED if command.success else SessionStatus.FAILED
+        # Determine final status (explicit override takes precedence)
+        if command.final_status is not None:
+            status = command.final_status
+        else:
+            status = SessionStatus.COMPLETED if command.success else SessionStatus.FAILED
 
         # Create and apply event
         event = SessionCompletedEvent(

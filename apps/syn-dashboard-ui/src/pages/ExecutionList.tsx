@@ -193,13 +193,7 @@ export function ExecutionList() {
                       {exec.workflow_execution_id.slice(0, 8)}...
                     </div>
                     <div className="text-sm text-[var(--color-text-secondary)] truncate">
-                      <Link
-                        to={`/workflows/${exec.workflow_id}`}
-                        className="hover:text-[var(--color-accent)] hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {exec.workflow_name || exec.workflow_id.slice(0, 12)}
-                      </Link>
+                      {exec.workflow_name || exec.workflow_id.slice(0, 12)}
                     </div>
                     <div>
                       <StatusBadge status={exec.status} />
@@ -221,9 +215,9 @@ export function ExecutionList() {
                         {exec.completed_phases}/{exec.total_phases}
                       </span>
                     </div>
-                    <div className="text-sm text-[var(--color-text-secondary)]">
-                      {exec.total_tokens.toLocaleString()}
-                      <span className="text-xs text-[var(--color-text-muted)] ml-1">
+                    <div className="text-sm text-[var(--color-text-secondary)] min-w-0">
+                      <span className="block truncate">{exec.total_tokens.toLocaleString()}</span>
+                      <span className="text-xs text-[var(--color-text-muted)]">
                         (${Number(exec.total_cost_usd).toFixed(4)})
                       </span>
                     </div>

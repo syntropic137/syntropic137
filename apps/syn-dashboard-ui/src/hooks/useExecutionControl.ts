@@ -1,141 +1,87 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { getControlWebSocketUrl } from '../api/client'
+import { useCallback, useState } from 'react'
+import { cancelExecution } from '../api/client'
 
-export type ExecutionState = 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed' | 'unknown'
+export type ExecutionState =
+  | 'pending'
+  | 'running'
+  | 'paused'
+  | 'cancelled'
+  | 'cancelling' // UI-only: cancel sent, waiting for projection to confirm
+  | 'completed'
+  | 'failed'
+  | 'interrupted'
+  | 'unknown'
 
-interface ControlMessage {
-  type: 'state' | 'result' | 'error'
-  execution_id?: string
-  state?: ExecutionState
-  success?: boolean
-  message?: string
-  error?: string
-}
+// States where the projection has caught up — safe to defer back to parent.
+const PROJECTION_TERMINAL_STATES = new Set<ExecutionState>([
+  'cancelled',
+  'completed',
+  'failed',
+  'interrupted',
+])
 
 interface UseExecutionControlResult {
-  /** Current execution state */
+  /** Current execution state (optimistically updated after cancel) */
   state: ExecutionState
-  /** Whether WebSocket is connected */
-  connected: boolean
   /** Last error message */
   error: string | null
-  /** Send pause command */
-  pause: (reason?: string) => void
-  /** Send resume command */
-  resume: () => void
+  /** Whether a command is in-flight */
+  loading: boolean
   /** Send cancel command */
   cancel: (reason?: string) => void
-  /** Whether pause is available */
-  canPause: boolean
-  /** Whether resume is available */
-  canResume: boolean
   /** Whether cancel is available */
   canCancel: boolean
 }
 
 /**
- * React hook for controlling execution via WebSocket.
+ * React hook for cancelling a running execution via HTTP.
  *
- * @example
- * ```tsx
- * const { state, pause, resume, cancel, canPause, canResume, canCancel } = useExecutionControl(executionId)
- *
- * return (
- *   <div>
- *     <p>State: {state}</p>
- *     {canPause && <button onClick={() => pause()}>Pause</button>}
- *     {canResume && <button onClick={() => resume()}>Resume</button>}
- *     {canCancel && <button onClick={() => cancel()}>Cancel</button>}
- *   </div>
- * )
- * ```
+ * After cancel is confirmed by the API the local commandState moves to
+ * 'cancelling'. The displayed state is derived: while commandState is set
+ * and the parent projection hasn't reached a terminal state, we show
+ * commandState (preventing the flicker where a stale refresh overwrites
+ * the optimistic update). Once the projection confirms a terminal state,
+ * we defer back to the parent.
  */
-export function useExecutionControl(executionId: string): UseExecutionControlResult {
-  const [state, setState] = useState<ExecutionState>('unknown')
-  const [connected, setConnected] = useState(false)
+export function useExecutionControl(
+  executionId: string,
+  initialState: ExecutionState = 'unknown'
+): UseExecutionControlResult {
+  // Tracks the local command outcome. null = no command sent yet.
+  const [commandState, setCommandState] = useState<ExecutionState | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const wsRef = useRef<WebSocket | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    // Get WebSocket URL from centralized API client
-    const wsUrl = getControlWebSocketUrl(executionId)
+  // Derived state: once we've sent a cancel, hold the local commandState until
+  // the projection itself reaches a terminal state (meaning it has caught up).
+  const state: ExecutionState =
+    commandState !== null && !PROJECTION_TERMINAL_STATES.has(initialState)
+      ? commandState
+      : initialState
 
-    const ws = new WebSocket(wsUrl)
-
-    ws.onopen = () => {
-      setConnected(true)
+  const cancel = useCallback(
+    (reason?: string) => {
+      setLoading(true)
       setError(null)
-    }
-
-    ws.onclose = () => {
-      setConnected(false)
-    }
-
-    ws.onerror = () => {
-      setError('WebSocket connection failed')
-      setConnected(false)
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const msg: ControlMessage = JSON.parse(event.data)
-
-        if (msg.type === 'state' && msg.state) {
-          setState(msg.state)
-        } else if (msg.type === 'result') {
-          // Update state from result
-          if (msg.state) {
-            setState(msg.state as ExecutionState)
+      cancelExecution(executionId, reason)
+        .then((r) => {
+          if (r.success) {
+            setCommandState('cancelling')
+          } else {
+            setError(r.message ?? `Cannot cancel: ${r.state}`)
           }
-          // Clear any previous error on successful result
-          if (msg.success) {
-            setError(null)
-          }
-        } else if (msg.type === 'error') {
-          setError(msg.error || 'Unknown error')
-        }
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e)
-      }
-    }
-
-    wsRef.current = ws
-
-    // Cleanup on unmount
-    return () => {
-      ws.close()
-    }
-  }, [executionId])
-
-  const sendCommand = useCallback((command: string, options?: Record<string, unknown>) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ command, ...options }))
-    } else {
-      setError('WebSocket not connected')
-    }
-  }, [])
-
-  const pause = useCallback((reason?: string) => {
-    sendCommand('pause', reason ? { reason } : {})
-  }, [sendCommand])
-
-  const resume = useCallback(() => {
-    sendCommand('resume')
-  }, [sendCommand])
-
-  const cancel = useCallback((reason?: string) => {
-    sendCommand('cancel', reason ? { reason } : {})
-  }, [sendCommand])
+        })
+        .catch((e: Error) => setError(e.message))
+        .finally(() => setLoading(false))
+    },
+    [executionId]
+  )
 
   return {
     state,
-    connected,
     error,
-    pause,
-    resume,
+    loading,
     cancel,
-    canPause: state === 'running',
-    canResume: state === 'paused',
-    canCancel: state === 'running' || state === 'paused',
+    canCancel: (state === 'running' || state === 'paused') && !loading,
   }
 }

@@ -305,7 +305,6 @@ class TestGitIdentitySettings:
             "SYN_GIT_TOKEN": "ghp_test123token",
             # GitHub App uses separate SYN_GITHUB_* prefix
             "SYN_GITHUB_APP_ID": "12345",
-            "SYN_GITHUB_INSTALLATION_ID": "67890",
             "SYN_GITHUB_PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
         }
         with patch.dict(os.environ, env, clear=True):
@@ -316,7 +315,6 @@ class TestGitIdentitySettings:
             assert git.credential_type == GitCredentialType.GITHUB_APP
             # GitHub App settings are in separate class
             assert github.app_id == "12345"
-            assert github.installation_id == "67890"
             assert github.is_configured is True
 
     def test_incomplete_github_app_fails_validation(self) -> None:
@@ -325,7 +323,7 @@ class TestGitIdentitySettings:
 
         env = {
             "SYN_GITHUB_APP_ID": "12345",
-            # Missing: INSTALLATION_ID and PRIVATE_KEY
+            # Missing: PRIVATE_KEY
         }
         with (
             patch.dict(os.environ, env, clear=True),

@@ -3,34 +3,18 @@
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-from event_sourcing import (
-    CheckpointedProjection,
-    EventEnvelope,
-    ProjectionCheckpoint,
-    ProjectionCheckpointStore,
-    ProjectionResult,
-)
+from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.orchestration.domain.read_models.workspace_metrics import (
     WorkspaceMetrics,
     WorkspaceMetricsSummary,
 )
 
-# Event types this projection subscribes to
-_SUBSCRIBED_EVENTS = {
-    "WorkspaceCreating",
-    "WorkspaceCreated",
-    "WorkspaceCommandExecuted",
-    "WorkspaceDestroying",
-    "WorkspaceDestroyed",
-    "WorkspaceError",
-}
 
-
-class WorkspaceMetricsProjection(CheckpointedProjection):
+class WorkspaceMetricsProjection(AutoDispatchProjection):
     """Builds workspace metrics read model from lifecycle events.
 
     Tracks:
@@ -39,11 +23,12 @@ class WorkspaceMetricsProjection(CheckpointedProjection):
     - Error rates by backend
     - Performance metrics for observability
 
-    Implements CheckpointedProjection for per-projection position tracking.
+    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    subscribe and handle events — no separate subscription set needed.
     """
 
     PROJECTION_NAME = "workspace_metrics"
-    VERSION = 1
+    VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_command_executed
 
     def __init__(self, store: Any):  # Using Any to avoid circular import
         """Initialize with a projection store.
@@ -53,8 +38,6 @@ class WorkspaceMetricsProjection(CheckpointedProjection):
         """
         self._store = store
 
-    # === CheckpointedProjection required methods ===
-
     def get_name(self) -> str:
         """Unique projection name for checkpoint tracking."""
         return self.PROJECTION_NAME
@@ -63,56 +46,10 @@ class WorkspaceMetricsProjection(CheckpointedProjection):
         """Schema version - increment to trigger rebuild."""
         return self.VERSION
 
-    def get_subscribed_event_types(self) -> set[str] | None:
-        """Event types this projection handles."""
-        return _SUBSCRIBED_EVENTS
-
-    async def handle_event(
-        self,
-        envelope: EventEnvelope[Any],
-        checkpoint_store: ProjectionCheckpointStore,
-    ) -> ProjectionResult:
-        """Handle an event and save checkpoint atomically."""
-        event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            if event_type == "WorkspaceCreating":
-                await self.on_workspace_creating(event_data)
-            elif event_type == "WorkspaceCreated":
-                await self.on_workspace_created(event_data)
-            elif event_type == "WorkspaceCommandExecuted":
-                await self.on_command_executed(event_data)
-            elif event_type == "WorkspaceDestroying":
-                await self.on_workspace_destroying(event_data)
-            elif event_type == "WorkspaceDestroyed":
-                await self.on_workspace_destroyed(event_data)
-            elif event_type == "WorkspaceError":
-                await self.on_workspace_error(event_data)
-
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception:
-            return ProjectionResult.FAILURE
-
     async def clear_all_data(self) -> None:
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
-
-    @property
-    def name(self) -> str:
-        """Get the projection name (deprecated, use get_name())."""
-        return self.PROJECTION_NAME
 
     # === Event handlers ===
 
@@ -154,7 +91,7 @@ class WorkspaceMetricsProjection(CheckpointedProjection):
             )
             await self._store.save(self.PROJECTION_NAME, workspace_id, metrics.to_dict())
 
-    async def on_command_executed(self, event_data: dict) -> None:
+    async def on_workspace_command_executed(self, event_data: dict) -> None:
         """Handle WorkspaceCommandExecuted event."""
         workspace_id = event_data.get("workspace_id", "")
 

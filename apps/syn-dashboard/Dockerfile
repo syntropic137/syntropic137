@@ -48,6 +48,9 @@ FROM python:3.12-slim AS runtime
 # Copy from official docker image instead of apt install (more reliable)
 COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
 
+# Install 1Password CLI for secret resolution at startup (op_resolver.py)
+COPY --from=1password/op:latest /usr/local/bin/op /usr/local/bin/op
+
 WORKDIR /app
 
 # Copy virtual environment from builder

@@ -3,34 +3,23 @@
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
-from datetime import UTC, datetime
 from typing import Any
 
-from event_sourcing import (
-    CheckpointedProjection,
-    EventEnvelope,
-    ProjectionCheckpoint,
-    ProjectionCheckpointStore,
-    ProjectionResult,
-)
+from event_sourcing import AutoDispatchProjection
 
 from syn_domain.contexts.artifacts.domain.read_models.artifact_summary import (
     ArtifactSummary,
 )
 
-# Event types this projection subscribes to
-_SUBSCRIBED_EVENTS = {
-    "ArtifactCreated",
-}
 
-
-class ArtifactListProjection(CheckpointedProjection):
+class ArtifactListProjection(AutoDispatchProjection):
     """Builds artifact list read model from events.
 
     This projection maintains a summary view of all artifacts for
     efficient listing and filtering.
 
-    Implements CheckpointedProjection for per-projection position tracking.
+    Uses AutoDispatchProjection: define on_<snake_case_event> methods to
+    subscribe and handle events — no separate subscription set needed.
 
     Version History:
         v1: Initial schema
@@ -49,8 +38,6 @@ class ArtifactListProjection(CheckpointedProjection):
         """
         self._store = store
 
-    # === CheckpointedProjection required methods ===
-
     def get_name(self) -> str:
         """Unique projection name for checkpoint tracking."""
         return self.PROJECTION_NAME
@@ -59,46 +46,10 @@ class ArtifactListProjection(CheckpointedProjection):
         """Schema version - increment to trigger rebuild."""
         return self.VERSION
 
-    def get_subscribed_event_types(self) -> set[str] | None:
-        """Event types this projection handles."""
-        return _SUBSCRIBED_EVENTS
-
-    async def handle_event(
-        self,
-        envelope: EventEnvelope[Any],
-        checkpoint_store: ProjectionCheckpointStore,
-    ) -> ProjectionResult:
-        """Handle an event and save checkpoint atomically."""
-        event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            if event_type == "ArtifactCreated":
-                await self.on_artifact_created(event_data)
-
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception:
-            return ProjectionResult.FAILURE
-
     async def clear_all_data(self) -> None:
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
-
-    @property
-    def name(self) -> str:
-        """Get the projection name (deprecated, use get_name())."""
-        return self.PROJECTION_NAME
 
     async def on_artifact_created(self, event_data: dict) -> None:
         """Handle ArtifactCreated event."""

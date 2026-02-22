@@ -64,5 +64,6 @@ def _status_to_state(status: str) -> ExecutionState:
         "completed": ExecutionState.COMPLETED,
         "failed": ExecutionState.FAILED,
         "cancelled": ExecutionState.CANCELLED,
+        "interrupted": ExecutionState.INTERRUPTED,
     }
-    return mapping.get(status.lower(), ExecutionState.RUNNING)
+    return mapping.get(status.lower(), ExecutionState.FAILED)
