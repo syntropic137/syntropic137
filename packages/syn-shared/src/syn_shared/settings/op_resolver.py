@@ -167,7 +167,7 @@ def resolve_op_secrets(env_file: str = ".env") -> None:
     for field in item.get("fields", []):
         label = field.get("label", "").strip()
         value = field.get("value", "")
-        if label and value and label not in os.environ:
+        if label and value and not os.environ.get(label):
             os.environ[label] = value
             injected += 1
 
