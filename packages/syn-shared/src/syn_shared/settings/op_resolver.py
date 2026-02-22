@@ -201,7 +201,7 @@ def _validate_environment_match(op_vault: str) -> None:
         return
 
     if actual != expected:
-        raise EnvironmentError(
+        raise OSError(
             f"Environment mismatch — refusing to start.\n"
             f"  OP_VAULT='{op_vault}' expects APP_ENVIRONMENT='{expected}'\n"
             f"  but APP_ENVIRONMENT='{actual}'.\n"

@@ -45,14 +45,18 @@ class TestValidateEnvironmentMatch:
             _validate_environment_match("syn137-prod")  # no raise
 
     def test_mismatch_dev_vault_staging_env_raises(self) -> None:
-        with patch.dict(os.environ, {"APP_ENVIRONMENT": "staging"}):
-            with pytest.raises(EnvironmentError, match="syn137-dev"):
-                _validate_environment_match("syn137-dev")
+        with (
+            patch.dict(os.environ, {"APP_ENVIRONMENT": "staging"}),
+            pytest.raises(EnvironmentError, match="syn137-dev"),
+        ):
+            _validate_environment_match("syn137-dev")
 
     def test_mismatch_prod_vault_dev_env_raises(self) -> None:
-        with patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}):
-            with pytest.raises(EnvironmentError, match="syn137-prod"):
-                _validate_environment_match("syn137-prod")
+        with (
+            patch.dict(os.environ, {"APP_ENVIRONMENT": "development"}),
+            pytest.raises(EnvironmentError, match="syn137-prod"),
+        ):
+            _validate_environment_match("syn137-prod")
 
     def test_test_env_bypasses_check(self) -> None:
         with patch.dict(os.environ, {"APP_ENVIRONMENT": "test"}):
@@ -72,9 +76,11 @@ class TestValidateEnvironmentMatch:
             _validate_environment_match("my-custom-vault")  # no raise
 
     def test_error_message_is_actionable(self) -> None:
-        with patch.dict(os.environ, {"APP_ENVIRONMENT": "staging"}):
-            with pytest.raises(EnvironmentError) as exc_info:
-                _validate_environment_match("syn137-prod")
+        with (
+            patch.dict(os.environ, {"APP_ENVIRONMENT": "staging"}),
+            pytest.raises(EnvironmentError) as exc_info,
+        ):
+            _validate_environment_match("syn137-prod")
         msg = str(exc_info.value)
         assert "syn137-prod" in msg
         assert "production" in msg
@@ -135,21 +141,27 @@ class TestResolveOpSecretsEnvGuard:
         patches = self._patch_op("syn137-dev", _make_op_item("production"))
         # Clear APP_ENVIRONMENT so the item's 'production' value is injected
         env_without_app_env = {k: v for k, v in os.environ.items() if k != "APP_ENVIRONMENT"}
-        with patches[0], patches[1]:
-            with patch.dict(os.environ, {**env_without_app_env, "OP_VAULT": "syn137-dev"}, clear=True):
-                with pytest.raises(EnvironmentError, match="syn137-dev"):
-                    resolve_op_secrets.__wrapped__()
+        with (
+            patches[0],
+            patches[1],
+            patch.dict(os.environ, {**env_without_app_env, "OP_VAULT": "syn137-dev"}, clear=True),
+            pytest.raises(EnvironmentError, match="syn137-dev"),
+        ):
+            resolve_op_secrets.__wrapped__()
 
     def test_shell_env_wins_and_mismatch_is_caught(self) -> None:
         """Shell has APP_ENVIRONMENT=production, vault is syn137-dev → fail."""
         patches = self._patch_op("syn137-dev", _make_op_item("development"))
         # Shell sets a conflicting value; since shell wins it won't be overwritten
         # but the resolver still validates after injection
-        with patches[0], patches[1]:
-            with patch.dict(
+        with (
+            patches[0],
+            patches[1],
+            patch.dict(
                 os.environ,
                 {"OP_VAULT": "syn137-dev", "APP_ENVIRONMENT": "production"},
                 clear=False,
-            ):
-                with pytest.raises(EnvironmentError, match="syn137-dev"):
-                    resolve_op_secrets.__wrapped__()
+            ),
+            pytest.raises(EnvironmentError, match="syn137-dev"),
+        ):
+            resolve_op_secrets.__wrapped__()
