@@ -25,7 +25,7 @@ export function App() {
     <FeedbackProvider
       apiUrl={FEEDBACK_API_URL}
       appName="syn-dashboard"
-      appVersion="0.1.0"
+      appVersion={__APP_VERSION__}
       environment={import.meta.env.MODE}
       gitCommit={import.meta.env.VITE_GIT_COMMIT}
       gitBranch={import.meta.env.VITE_GIT_BRANCH}

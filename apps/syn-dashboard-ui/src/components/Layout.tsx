@@ -68,7 +68,7 @@ export function Layout() {
               <p className="truncate text-xs font-medium text-[var(--color-text-primary)]">
                 Local Dev
               </p>
-              <p className="truncate text-xs text-[var(--color-text-muted)]">v0.1.0</p>
+              <p className="truncate text-xs text-[var(--color-text-muted)]">v{__APP_VERSION__}</p>
             </div>
             <button className="rounded p-1 text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] hover:text-[var(--color-text-primary)]">
               <Settings className="h-4 w-4" />
