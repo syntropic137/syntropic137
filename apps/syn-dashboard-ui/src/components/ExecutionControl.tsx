@@ -16,11 +16,10 @@ interface ExecutionControlProps {
  * While the backend processes the cancel the button is replaced with a
  * "Cancelling…" indicator so the UI never flickers back to the cancel button.
  */
-export function ExecutionControl({ executionId, initialState, onSuccess, className = '' }: ExecutionControlProps) {
+export function ExecutionControl({ executionId, initialState, className = '' }: ExecutionControlProps) {
   const { error, loading, cancel, canCancel, state } = useExecutionControl(
     executionId,
-    initialState,
-    onSuccess
+    initialState
   )
 
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
