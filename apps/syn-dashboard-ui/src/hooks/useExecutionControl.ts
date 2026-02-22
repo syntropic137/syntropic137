@@ -68,7 +68,7 @@ export function useExecutionControl(
           if (r.success) {
             setCommandState('cancelling')
           } else {
-            setError(r.error ?? `Cannot cancel: ${r.state}`)
+            setError(r.message ?? `Cannot cancel: ${r.state}`)
           }
         })
         .catch((e: Error) => setError(e.message))
