@@ -1,3 +1,6 @@
+/** Injected by Vite define at build time (from package.json version) */
+declare const __APP_VERSION__: string
+
 /**
  * Type declarations for @syn137/ui-feedback-react
  *
