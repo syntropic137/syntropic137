@@ -895,6 +895,10 @@ selfhost-up: _selfhost-preflight
             echo "  1Password: loaded from ${_VK}"
         fi
     fi
+    # Resolve 1Password secrets into env so Docker Compose sees them
+    if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
+    fi
     echo "🚀 Starting AEF self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
@@ -923,6 +927,10 @@ selfhost-up-tunnel: _selfhost-preflight
             export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
             echo "  1Password: loaded from ${_VK}"
         fi
+    fi
+    # Resolve 1Password secrets into env so Docker Compose sees them
+    if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
     fi
     echo "🚀 Starting AEF self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
@@ -995,6 +1003,10 @@ selfhost-update:
             export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
             echo "  1Password: loaded from ${_VK}"
         fi
+    fi
+    # Resolve 1Password secrets into env so Docker Compose sees them
+    if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
     fi
     # Detect Cloudflare tunnel
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
