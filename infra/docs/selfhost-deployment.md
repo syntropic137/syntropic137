@@ -1,6 +1,6 @@
-# 🏠 AEF Homelab Deployment Guide
+# Self-Host Deployment Guide
 
-Complete guide for deploying the Syntropic137 on a homelab server (Mac Mini, Linux box, etc.) with secure external access via Cloudflare Tunnel.
+Complete guide for deploying Syntropic137 on a self-hosted server (Mac Mini, Linux box, etc.) with secure external access via Cloudflare Tunnel.
 
 ## Overview
 
@@ -23,8 +23,13 @@ This deployment provides:
 - [uv](https://github.com/astral-sh/uv) package manager
 - [just](https://github.com/casey/just) command runner
 
+> **New machine?** Run the bootstrap script to install all prerequisites automatically:
+> ```bash
+> curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/Syntropic137/syntropic137/main/infra/scripts/bootstrap.sh | bash
+> ```
+
 ### Accounts
-- [Cloudflare account](https://dash.cloudflare.com/) with a domain
+- [Cloudflare account](https://dash.cloudflare.com/) with a domain (recommended — free TLS, DDoS protection, no port forwarding)
 - [GitHub App](../../../docs/deployment/github-app-setup.md) configured
 
 ## Step-by-Step Deployment
@@ -70,15 +75,21 @@ just secrets-check
 
 1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
 2. Navigate to **Networks** → **Tunnels** → **Create a tunnel**
-3. Name it: `syn-homelab`
-4. Copy the tunnel token
+3. Name it: `syn-selfhost`
+4. Copy the tunnel token to a secret file:
+
+```bash
+# Save your tunnel token as a Docker secret
+echo "YOUR_TOKEN_HERE" > infra/docker/secrets/cloudflare-tunnel-token.txt
+chmod 600 infra/docker/secrets/cloudflare-tunnel-token.txt
+```
 
 Add these routes in the tunnel configuration:
 
 | Subdomain | Domain | Service |
 |-----------|--------|---------|
 | `aef` | yourdomain.com | `http://syn-ui:80` |
-| `api.aef` | yourdomain.com | `http://syn-dashboard:8000` |
+| `api.aef` | yourdomain.com | `http://dashboard:8000` |
 
 #### Option B: Via CLI
 
@@ -89,12 +100,12 @@ brew install cloudflared  # macOS
 
 # Login and create tunnel
 cloudflared tunnel login
-cloudflared tunnel create syn-homelab
-cloudflared tunnel route dns syn-homelab aef.yourdomain.com
-cloudflared tunnel route dns syn-homelab api.aef.yourdomain.com
+cloudflared tunnel create syn-selfhost
+cloudflared tunnel route dns syn-selfhost aef.yourdomain.com
+cloudflared tunnel route dns syn-selfhost api.aef.yourdomain.com
 
 # Get token
-cloudflared tunnel token syn-homelab
+cloudflared tunnel token syn-selfhost
 ```
 
 ### Step 5: Configure Environment
@@ -110,8 +121,7 @@ nano infra/.env  # or your preferred editor
 Required settings:
 
 ```bash
-# Cloudflare Tunnel
-CLOUDFLARE_TUNNEL_TOKEN=eyJ...your-token-here
+# Domain
 SYN_DOMAIN=aef.yourdomain.com
 
 # GitHub App
@@ -120,27 +130,33 @@ SYN_GITHUB_APP_NAME=your-app-name
 SYN_GITHUB_INSTALLATION_ID=12345678
 ```
 
+> **Note**: The Cloudflare tunnel token is now stored as a Docker secret file
+> (`infra/docker/secrets/cloudflare-tunnel-token.txt`), not as an env var.
+
 ### Step 6: Deploy
 
 ```bash
-# Start the homelab stack
-just homelab-up
+# Start the self-host stack with Cloudflare Tunnel (recommended)
+just selfhost-up-tunnel
 
 # This will:
 # 1. Build all Docker images
-# 2. Start services
+# 2. Start services (including cloudflared)
 # 3. Wait for health checks
 # 4. Display status
 ```
+
+> **No Cloudflare?** Use `just selfhost-up` for local-only access (no tunnel).
+> The `selfhost-update` and `selfhost-down` commands auto-detect which mode you're running.
 
 ### Step 7: Verify Deployment
 
 ```bash
 # Check service status
-just homelab-status
+just selfhost-status
 
 # Check tunnel status
-just homelab-tunnel-status
+just selfhost-tunnel-status
 
 # Test external access
 curl https://aef.yourdomain.com/health
@@ -153,17 +169,17 @@ curl https://api.aef.yourdomain.com/health
 
 ```bash
 # View all logs
-just homelab-logs
+just selfhost-logs
 
 # View specific service logs
-just homelab-logs syn-dashboard
-just homelab-logs cloudflared
+just selfhost-logs dashboard
+just selfhost-logs cloudflared
 
 # Check health
 just health-check
 
 # Restart a service
-just homelab-restart syn-dashboard
+just selfhost-restart dashboard
 ```
 
 ### Updates
@@ -173,7 +189,7 @@ just homelab-restart syn-dashboard
 git pull
 
 # Upgrade stack (rebuilds images)
-just homelab-upgrade
+just selfhost-update
 ```
 
 ### Troubleshooting
@@ -183,13 +199,13 @@ just homelab-upgrade
 docker ps -a
 
 # View container logs
-docker logs syn-dashboard
+docker logs ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard
 
 # Enter container for debugging
-docker exec -it syn-dashboard /bin/bash
+docker exec -it ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard /bin/bash
 
 # Full reset (WARNING: deletes data)
-just homelab-reset
+just selfhost-reset
 ```
 
 ## Architecture
@@ -210,10 +226,10 @@ just homelab-reset
                               │
                               ▼ (Cloudflare Tunnel)
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Your Homelab                               │
+│                     Your Self-Host                               │
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  cloudflared │───▶│    syn-ui    │───▶│ syn-dashboard│      │
+│  │  cloudflared │───▶│    syn-ui    │───▶│  dashboard   │      │
 │  │              │    │   (nginx)    │    │  (FastAPI)   │      │
 │  └──────────────┘    └──────────────┘    └──────────────┘      │
 │                                                 │                │
@@ -226,12 +242,56 @@ just homelab-reset
 │                           │                                  │   │
 │                           ▼                                  │   │
 │                    ┌──────────────┐                         │   │
-│                    │  PostgreSQL  │◀────────────────────────┘   │
+│                    │ TimescaleDB  │◀────────────────────────┘   │
 │                    │              │                              │
 │                    └──────────────┘                              │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## Portable Deployment with 1Password (Optional)
+
+Instead of managing plain-text secret files, you can use a 1Password service account
+to resolve secrets automatically at startup. This lets you spin up environments
+anywhere without copying secret files around.
+
+### Setup
+
+1. Set `OP_VAULT` in `infra/.env`:
+   ```bash
+   OP_VAULT=syn137-prod
+   ```
+
+   Then store the service account token using one of these methods:
+
+   **macOS (recommended)** — store in Keychain (auto-retrieved by selfhost recipes):
+   ```bash
+   security add-generic-password -U -a "$USER" \
+     -s "SYN_OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD" -w "ops_...your-token..."
+   ```
+
+   **Linux/CI** — set a vault-specific env var:
+   ```bash
+   export OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD=ops_...your-token...
+   ```
+
+   **Fallback** — set the generic token directly in `infra/.env`:
+   ```bash
+   OP_SERVICE_ACCOUNT_TOKEN=ops_...your-token...
+   ```
+
+2. Set `INCLUDE_OP_CLI=1` in `infra/.env` to include the `op` CLI in the dashboard image.
+
+3. Docker secret files (`db-password.txt`, `redis-password.txt`) are still needed for
+   non-Python services (event-store is a Rust binary that doesn't use `op_resolver.py`).
+   Store the same password in both 1Password and the secret file, or set
+   `POSTGRES_PASSWORD` in `.env` as a simpler alternative.
+
+4. **Graceful fallback**: If 1Password is not configured, everything works with
+   `.env` plaintext values and Docker secret files. The `op_resolver.py` module
+   silently skips resolution when `OP_SERVICE_ACCOUNT_TOKEN` is unset.
+
+See `docs/development/1password-secrets.md` for full documentation.
 
 ## Security Considerations
 
@@ -253,7 +313,7 @@ just homelab-reset
 - Run `just security-audit` to check your overall security posture
 
 ### Updates
-- Keep Docker images updated: `just homelab-upgrade`
+- Keep Docker images updated: `just selfhost-update`
 - Monitor Cloudflare security notifications
 
 ## Backup & Recovery
@@ -262,10 +322,10 @@ just homelab-reset
 
 ```bash
 # Manual backup
-docker exec aef-postgres pg_dump -U aef aef > backup-$(date +%Y%m%d).sql
+docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb pg_dump -U ${POSTGRES_USER:-syn} ${POSTGRES_DB:-syn} > backup-$(date +%Y%m%d).sql
 
 # Restore
-cat backup-20250101.sql | docker exec -i aef-postgres psql -U aef aef
+cat backup-20250101.sql | docker exec -i ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb psql -U ${POSTGRES_USER:-syn} ${POSTGRES_DB:-syn}
 ```
 
 ### Configuration Backup
@@ -285,7 +345,7 @@ Back up these files:
 
 ```bash
 # Service status
-just homelab-status
+just selfhost-status
 
 # Health check
 just health-check
@@ -302,7 +362,7 @@ Logs are stored with rotation:
 
 View with:
 ```bash
-just homelab-logs
+just selfhost-logs
 ```
 
 ## Common Issues
@@ -323,10 +383,10 @@ docker system prune -a  # Clean up (careful!)
 
 ```bash
 # Check tunnel logs
-just homelab-logs cloudflared
+just selfhost-logs cloudflared
 
-# Verify token
-echo $CLOUDFLARE_TUNNEL_TOKEN | head -c 20
+# Verify token file exists
+test -s infra/docker/secrets/cloudflare-tunnel-token.txt && echo "Token file OK" || echo "Token file missing or empty"
 
 # Regenerate token in Cloudflare dashboard if needed
 ```
@@ -334,11 +394,11 @@ echo $CLOUDFLARE_TUNNEL_TOKEN | head -c 20
 ### Database Connection Issues
 
 ```bash
-# Check PostgreSQL health
-docker exec aef-postgres pg_isready -U aef
+# Check TimescaleDB health
+docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb pg_isready -U ${POSTGRES_USER:-syn}
 
 # Check connection from dashboard
-docker exec syn-dashboard python -c "import asyncpg; print('OK')"
+docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard python -c "import asyncpg; print('OK')"
 ```
 
 ## Next Steps

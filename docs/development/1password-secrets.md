@@ -17,7 +17,7 @@ One `op item get` call fetches everything at startup.
 
 | Environment | Vault name |
 |---|---|
-| Local dev / homelab | `syn137-dev` |
+| Local dev / self-host | `syn137-dev` |
 | Beta / staging | `syn137-beta` |
 | Production | `syn137-prod` |
 
@@ -83,17 +83,55 @@ LOG_LEVEL=INFO
 
 ## Authentication
 
-**Option A — Service Account (recommended for automation and CI):**
+**Option A — macOS Keychain (recommended for self-host on Mac):**
+
+Store the token in Keychain using a vault-specific name to avoid collisions
+when you have multiple environments or apps on the same machine:
+
+```bash
+# Naming convention: SYN_OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>
+# Example for OP_VAULT=syn137-dev:
+security add-generic-password -U -a "$USER" \
+  -s "SYN_OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV" -w "ops_eyJ..."
+```
+
+The selfhost recipes (`just selfhost-up-tunnel`, `just selfhost-update`, etc.)
+auto-retrieve the token at startup:
+
+1. Read `OP_VAULT` from `infra/.env`
+2. Derive the Keychain service name: `SYN_OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>`
+3. Retrieve the token via `security find-generic-password`
+4. Export as `OP_SERVICE_ACCOUNT_TOKEN` for Docker Compose
+
+To remove a stored token:
+```bash
+security delete-generic-password -a "$USER" -s "SYN_OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV"
+```
+
+**Option B — Service Account env var (Linux/CI):**
 
 Create a service account at https://developer.1password.com/docs/service-accounts/
 and grant it read access to the vaults it needs.
 
+Use a vault-specific env var name to avoid collisions:
 ```bash
-# ~/.zshrc or ~/.zshenv
+# Naming convention: OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>
+# Example for OP_VAULT=syn137-dev:
+export OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV="ops_eyJ..."
+```
+
+The selfhost recipes detect this automatically and map it to the generic
+`OP_SERVICE_ACCOUNT_TOKEN` for Docker Compose.
+
+For GitHub Actions, add as a repository secret named `OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD`.
+
+**Fallback** — you can also set the generic token directly:
+```bash
+# ~/.zshrc or ~/.zshenv (works but collides if you have multiple apps)
 export OP_SERVICE_ACCOUNT_TOKEN="ops_eyJ..."
 ```
 
-**Option B — Interactive (personal dev machine):**
+**Option C — Interactive (personal dev machine):**
 
 ```bash
 op signin   # sets OP_SESSION for the current shell

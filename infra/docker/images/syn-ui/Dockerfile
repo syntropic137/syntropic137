@@ -43,13 +43,15 @@ RUN pnpm run build
 # =============================================================================
 # Runtime Stage
 # =============================================================================
-FROM nginx:alpine AS runtime
+FROM nginx:1.28.2-alpine AS runtime
 
 # Copy built assets to nginx
 COPY --from=builder /workspace/apps/syn-dashboard-ui/dist /usr/share/nginx/html
 
 # Copy nginx configuration
 COPY infra/docker/images/syn-ui/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infra/docker/images/syn-ui/security-headers.conf /etc/nginx/conf.d/security-headers.conf
+COPY infra/docker/images/syn-ui/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

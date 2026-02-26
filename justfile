@@ -7,6 +7,12 @@
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
 compose_test := compose + " -f docker/docker-compose.test.yaml"
+compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
+compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
+
+# Platform detection
+_os := `uname -s`
+_arch := `uname -m`
 
 # Default target
 default: help
@@ -841,38 +847,112 @@ new-package name:
     @echo "Package created at packages/{{name}}"
 
 # ============================================================================
-# INFRASTRUCTURE DEPLOYMENT
+# INFRASTRUCTURE DEPLOYMENT (Self-Host)
 # ============================================================================
 
-# Infrastructure compose directory
-_infra_compose := "infra/docker/compose"
+# --- Self-Host Deployment ---
 
-# --- Homelab Deployment (with Cloudflare Tunnel) ---
+# Pre-flight check: platform detection and Docker availability
+_selfhost-preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Platform: {{_os}} / {{_arch}}"
+    if [[ "{{_os}}" == "Darwin" ]]; then
+        echo "  macOS detected"
+        if ! docker info &>/dev/null; then
+            echo "  ERROR: Docker is not running. Start Docker Desktop first."
+            exit 1
+        fi
+        if [[ "{{_arch}}" == "arm64" ]]; then
+            echo "  Apple Silicon — first event-store build may take 5-10 min"
+        fi
+    elif [[ "{{_os}}" == "Linux" ]]; then
+        echo "  Linux detected"
+        if ! docker info &>/dev/null; then
+            echo "  ERROR: Docker is not running or user not in docker group"
+            exit 1
+        fi
+    fi
 
-# Start AEF stack with Cloudflare Tunnel (homelab)
-homelab-up:
-    @echo "🚀 Starting AEF homelab stack..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
-    @echo ""
-    @echo "⏳ Waiting for services to be ready..."
-    @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
-    @echo ""
-    @just homelab-status
+# Start self-hosted AEF stack (no Cloudflare)
+selfhost-up: _selfhost-preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Load 1Password service account token from macOS Keychain (vault-specific)
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+        if [ "$(uname -s)" = "Darwin" ]; then
+            _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
+            if [ -n "$_TOKEN" ]; then
+                export OP_SERVICE_ACCOUNT_TOKEN="$_TOKEN"
+                echo "  1Password: loaded from Keychain (SYN_${_VK})"
+            fi
+        elif [ -n "${!_VK:-}" ]; then
+            export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
+            echo "  1Password: loaded from ${_VK}"
+        fi
+    fi
+    echo "🚀 Starting AEF self-host stack..."
+    {{compose_selfhost}} up -d --build
+    echo ""
+    echo "⏳ Waiting for services to be ready..."
+    uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    just selfhost-status
 
-# Stop homelab stack
-homelab-down:
-    @echo "Stopping AEF homelab stack..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml down
+# Start self-hosted AEF stack with Cloudflare Tunnel (recommended)
+selfhost-up-tunnel: _selfhost-preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Load 1Password service account token from macOS Keychain (vault-specific)
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+        if [ "$(uname -s)" = "Darwin" ]; then
+            _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
+            if [ -n "$_TOKEN" ]; then
+                export OP_SERVICE_ACCOUNT_TOKEN="$_TOKEN"
+                echo "  1Password: loaded from Keychain (SYN_${_VK})"
+            fi
+        elif [ -n "${!_VK:-}" ]; then
+            export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
+            echo "  1Password: loaded from ${_VK}"
+        fi
+    fi
+    echo "🚀 Starting AEF self-host stack with Cloudflare Tunnel..."
+    {{compose_selfhost_cf}} up -d --build
+    echo ""
+    echo "⏳ Waiting for services to be ready..."
+    uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    just selfhost-status
 
-# View homelab logs (all services or specific service)
-homelab-logs *service:
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml logs -f {{service}}
+# Stop self-host stack (auto-detects Cloudflare Tunnel)
+selfhost-down:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Stopping AEF self-host stack..."
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
+        echo "  (Cloudflare Tunnel detected)"
+        {{compose_selfhost_cf}} down
+    else
+        {{compose_selfhost}} down
+    fi
 
-# Check homelab stack status
-homelab-status:
-    @echo "📊 AEF Homelab Status"
-    @echo "===================="
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml ps
+# View self-host logs (all services or specific service)
+selfhost-logs *service:
+    @{{compose_selfhost}} logs -f {{service}}
+
+# Check self-host stack status
+selfhost-status:
+    @echo "📊 AEF Self-Host Status"
+    @echo "======================="
+    @{{compose_selfhost}} ps
     @echo ""
     @echo "🔗 Access Points:"
     @if [ -n "${SYN_DOMAIN:-}" ]; then \
@@ -885,53 +965,128 @@ homelab-status:
     fi
 
 # Check Cloudflare tunnel status
-homelab-tunnel-status:
+selfhost-tunnel-status:
     @echo "🚇 Cloudflare Tunnel Status"
     @echo "==========================="
-    @docker logs syn-cloudflared 2>&1 | tail -20
+    @docker logs ${COMPOSE_PROJECT_NAME:-syntropic137}-cloudflared 2>&1 | tail -20
 
-# Restart specific homelab service
-homelab-restart service:
+# Restart specific self-host service
+selfhost-restart service:
     @echo "Restarting {{service}}..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml restart {{service}}
+    @{{compose_selfhost}} restart {{service}}
 
-# Pull latest code, rebuild, and restart homelab (turnkey update)
+# Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
+selfhost-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Load 1Password service account token from macOS Keychain (vault-specific)
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+        _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+        if [ "$(uname -s)" = "Darwin" ]; then
+            _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
+            if [ -n "$_TOKEN" ]; then
+                export OP_SERVICE_ACCOUNT_TOKEN="$_TOKEN"
+                echo "  1Password: loaded from Keychain (SYN_${_VK})"
+            fi
+        elif [ -n "${!_VK:-}" ]; then
+            export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
+            echo "  1Password: loaded from ${_VK}"
+        fi
+    fi
+    # Detect Cloudflare tunnel
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
+        COMPOSE="{{compose_selfhost_cf}}"
+        echo "  (Cloudflare Tunnel detected)"
+    else
+        COMPOSE="{{compose_selfhost}}"
+    fi
+    echo "⬆️ Updating AEF self-host..."
+    echo ""
+    echo "1️⃣ Pulling latest code..."
+    git pull --ff-only
+    echo ""
+    echo "2️⃣ Syncing submodules..."
+    git submodule update --init --recursive
+    echo ""
+    echo "3️⃣ Syncing Python dependencies..."
+    uv sync
+    echo ""
+    echo "4️⃣ Rebuilding and restarting services..."
+    $COMPOSE up -d --build
+    echo ""
+    echo "5️⃣ Waiting for services to be healthy..."
+    uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    just selfhost-status
+    echo ""
+    echo "✅ Update complete!"
+
+# Full self-host reset (removes volumes - DATA LOSS!)
+selfhost-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "⚠️  WARNING: This will delete ALL data including the database!"
+    echo "Press Ctrl+C within 5 seconds to cancel..."
+    sleep 5
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
+        echo "  (Cloudflare Tunnel detected)"
+        {{compose_selfhost_cf}} down -v
+    else
+        {{compose_selfhost}} down -v
+    fi
+    just selfhost-up
+
+# --- Deprecated Aliases (homelab → selfhost) ---
+
+# DEPRECATED: use 'just selfhost-up'
+homelab-up:
+    @echo "DEPRECATED: use 'just selfhost-up'"
+    @just selfhost-up
+
+# DEPRECATED: use 'just selfhost-down'
+homelab-down:
+    @echo "DEPRECATED: use 'just selfhost-down'"
+    @just selfhost-down
+
+# DEPRECATED: use 'just selfhost-logs'
+homelab-logs *service:
+    @echo "DEPRECATED: use 'just selfhost-logs'"
+    @just selfhost-logs {{service}}
+
+# DEPRECATED: use 'just selfhost-status'
+homelab-status:
+    @echo "DEPRECATED: use 'just selfhost-status'"
+    @just selfhost-status
+
+# DEPRECATED: use 'just selfhost-tunnel-status'
+homelab-tunnel-status:
+    @echo "DEPRECATED: use 'just selfhost-tunnel-status'"
+    @just selfhost-tunnel-status
+
+# DEPRECATED: use 'just selfhost-restart'
+homelab-restart service:
+    @echo "DEPRECATED: use 'just selfhost-restart'"
+    @just selfhost-restart {{service}}
+
+# DEPRECATED: use 'just selfhost-update'
 homelab-update:
-    @echo "⬆️ Updating AEF homelab..."
-    @echo ""
-    @echo "1️⃣ Pulling latest code..."
-    @git pull --ff-only
-    @echo ""
-    @echo "2️⃣ Syncing submodules..."
-    @git submodule update --init --recursive
-    @echo ""
-    @echo "3️⃣ Syncing Python dependencies..."
-    @uv sync
-    @echo ""
-    @echo "4️⃣ Rebuilding and restarting services..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
-    @echo ""
-    @echo "5️⃣ Waiting for services to be healthy..."
-    @uv run python infra/scripts/health_check.py --wait --timeout 180 || true
-    @echo ""
-    @just homelab-status
-    @echo ""
-    @echo "✅ Update complete!"
+    @echo "DEPRECATED: use 'just selfhost-update'"
+    @just selfhost-update
 
-# Full homelab reset (removes volumes - DATA LOSS!)
+# DEPRECATED: use 'just selfhost-reset'
 homelab-reset:
-    @echo "⚠️  WARNING: This will delete ALL data including the database!"
-    @echo "Press Ctrl+C within 5 seconds to cancel..."
-    @sleep 5
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml down -v
-    @just homelab-up
+    @echo "DEPRECATED: use 'just selfhost-reset'"
+    @just selfhost-reset
 
-# --- Local Infrastructure (No Cloudflare) ---
+# --- Local Infrastructure (No Cloudflare, uses selfhost overlay) ---
 
 # Start infrastructure stack locally
 infra-up:
     @echo "🚀 Starting AEF infrastructure stack..."
-    @cd {{_infra_compose}} && docker compose up -d --build
+    @{{compose_selfhost}} up -d --build
     @echo ""
     @echo "⏳ Waiting for services..."
     @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
@@ -943,15 +1098,15 @@ infra-up:
 
 # Stop infrastructure stack
 infra-down:
-    @cd {{_infra_compose}} && docker compose down
+    @{{compose_selfhost}} down
 
 # View infrastructure logs
 infra-logs *service:
-    @cd {{_infra_compose}} && docker compose logs -f {{service}}
+    @{{compose_selfhost}} logs -f {{service}}
 
 # Check infrastructure status
 infra-status:
-    @cd {{_infra_compose}} && docker compose ps
+    @{{compose_selfhost}} ps
 
 # --- Secrets Management ---
 
@@ -966,7 +1121,7 @@ secrets-rotate:
     @uv run python infra/scripts/secrets_setup.py rotate
     @echo ""
     @echo "⚠️  Restart services to apply new secrets:"
-    @echo "   just homelab-restart syn-dashboard"
+    @echo "   just selfhost-restart dashboard"
 
 # Verify secrets are configured
 secrets-check:
@@ -1008,9 +1163,9 @@ health-json:
 # Build all Docker images
 infra-build:
     @echo "🔨 Building Docker images..."
-    @cd {{_infra_compose}} && docker compose build
+    @{{compose_selfhost}} build
 
 # Build specific image
 infra-build-image image:
     @echo "🔨 Building {{image}}..."
-    @cd {{_infra_compose}} && docker compose build {{image}}
+    @{{compose_selfhost}} build {{image}}

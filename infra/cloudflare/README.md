@@ -1,6 +1,6 @@
-# 🚇 Cloudflare Tunnel Setup for AEF Homelab
+# 🚇 Cloudflare Tunnel Setup for AEF Self-Host
 
-This guide helps you set up secure external access to your homelab AEF deployment using Cloudflare Tunnel.
+This guide helps you set up secure external access to your self-hosted AEF deployment using Cloudflare Tunnel.
 
 ## Why Cloudflare Tunnel?
 
@@ -8,7 +8,7 @@ This guide helps you set up secure external access to your homelab AEF deploymen
 |---------|---------|
 | **No port forwarding** | Works behind NAT, firewalls, CGNAT |
 | **Zero-trust security** | Cloudflare handles TLS termination |
-| **DDoS protection** | Cloudflare's global network protects your homelab |
+| **DDoS protection** | Cloudflare's global network protects your server |
 | **Free tier** | Tunnels are included in the free Cloudflare plan |
 
 ## Prerequisites
@@ -24,7 +24,7 @@ This guide helps you set up secure external access to your homelab AEF deploymen
 1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
 2. Navigate to: **Networks** → **Tunnels** → **Create a tunnel**
 3. Select **Cloudflared** connector type
-4. Name your tunnel: `syn-homelab`
+4. Name your tunnel: `syn-selfhost`
 5. Click **Save tunnel**
 6. **Copy the tunnel token** (long base64 string starting with `eyJ...`)
 
@@ -66,14 +66,14 @@ cp ~/path/to/your-app.pem infra/docker/secrets/github-private-key.pem
 ### Step 5: Deploy
 
 ```bash
-# Start the full homelab stack
-just homelab-up
+# Start the full self-hosted stack with Cloudflare Tunnel
+just selfhost-up-tunnel
 
 # Check status
-just homelab-status
+just selfhost-status
 
 # View tunnel logs
-just homelab-logs cloudflared
+just selfhost-logs cloudflared
 ```
 
 ### Step 6: Verify Access
@@ -109,14 +109,14 @@ scoop install cloudflared
 cloudflared tunnel login
 
 # Create tunnel
-cloudflared tunnel create syn-homelab
+cloudflared tunnel create syn-selfhost
 
 # Configure DNS routes
-cloudflared tunnel route dns syn-homelab aef.yourdomain.com
-cloudflared tunnel route dns syn-homelab api.aef.yourdomain.com
+cloudflared tunnel route dns syn-selfhost aef.yourdomain.com
+cloudflared tunnel route dns syn-selfhost api.aef.yourdomain.com
 
 # Get tunnel token
-cloudflared tunnel token syn-homelab
+cloudflared tunnel token syn-selfhost
 ```
 
 Then add the token to your `.env` file as shown above.
@@ -155,7 +155,7 @@ ingress:
 
 ```bash
 # Check cloudflared container logs
-just homelab-logs cloudflared
+just selfhost-logs cloudflared
 
 # Common issues:
 # - Invalid tunnel token → regenerate in dashboard
@@ -166,7 +166,7 @@ just homelab-logs cloudflared
 
 ```bash
 # Verify services are running
-just homelab-status
+just selfhost-status
 
 # Check if services can reach each other
 docker exec syn-ui wget -qO- http://syn-dashboard:8000/health
@@ -203,27 +203,27 @@ If you experience timeouts, check:
 ## Useful Commands
 
 ```bash
-# Start homelab with tunnel
-just homelab-up
+# Start self-hosted stack with tunnel
+just selfhost-up-tunnel
 
-# Stop homelab
-just homelab-down
+# Stop self-hosted stack (auto-detects tunnel)
+just selfhost-down
 
 # View all logs
-just homelab-logs
+just selfhost-logs
 
 # View tunnel logs only
-just homelab-logs cloudflared
+just selfhost-logs cloudflared
 
 # Check tunnel status
-just homelab-tunnel-status
+just selfhost-tunnel-status
 
 # Restart specific service
-just homelab-restart cloudflared
+just selfhost-restart cloudflared
 ```
 
 ## Related Documentation
 
 - [Cloudflare Tunnel Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 - [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/)
-- [AEF Homelab Deployment Guide](../docs/homelab-deployment.md)
+- [AEF Self-Host Deployment Guide](../docs/selfhost-deployment.md)

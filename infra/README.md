@@ -66,7 +66,7 @@ cp infra/.env.example infra/.env
 
 # 5. Start services
 just infra-up        # Local (no Cloudflare)
-just homelab-up      # Homelab (with Cloudflare Tunnel)
+just selfhost-up      # Self-host (with Cloudflare Tunnel)
 
 # 6. Seed workflows
 just seed-workflows
@@ -84,8 +84,8 @@ just seed-workflows
 | `just infra-up` | Start local infrastructure |
 | `just infra-down` | Stop local infrastructure |
 | `just infra-logs` | Follow service logs |
-| `just homelab-up` | Start with Cloudflare Tunnel |
-| `just homelab-status` | Show container status |
+| `just selfhost-up` | Start self-hosted stack with Cloudflare Tunnel |
+| `just selfhost-status` | Show container status |
 | `just secrets-generate` | Generate deployment secrets |
 | `just secrets-check` | Verify secrets exist |
 | `just seed-workflows` | Seed workflow definitions |
@@ -96,12 +96,9 @@ just seed-workflows
 infra/
 ├── .env.example          # Environment configuration template
 ├── docker/
-│   ├── compose/          # Docker Compose files
-│   │   ├── docker-compose.yaml         # Production base
-│   │   ├── docker-compose.homelab.yaml # Homelab overrides
-│   │   └── docker-compose.dev.yaml     # Dev overrides (in repo root)
 │   ├── images/           # Dockerfiles
 │   └── secrets/          # Docker secrets (gitignored)
+│   # Note: Compose files live in docker/ at the project root
 ├── cloudflare/           # Cloudflare Tunnel configuration
 ├── scripts/              # Setup and management scripts
 │   ├── setup.py          # Interactive setup wizard
@@ -135,18 +132,18 @@ git submodule update --init --recursive
 **MinIO buckets not created**
 The `minio-init` sidecar creates buckets on first start. If it failed:
 ```bash
-docker compose -f infra/docker/compose/docker-compose.yaml restart minio-init
+just selfhost-restart minio-init
 ```
 
 **Stale Docker state**
 Nuclear option — removes all containers and volumes (DATA LOSS):
 ```bash
-just homelab-reset   # Or: just dev-reset for dev stack
+just selfhost-reset   # Or: just dev-reset for dev stack
 ```
 
 ## Further Reading
 
-- [Homelab Deployment Guide](docs/homelab-deployment.md)
+- [Self-Host Deployment Guide](docs/selfhost-deployment.md)
 - [Secrets Management](docs/secrets-management.md)
 - [Cloudflare Tunnel Setup](cloudflare/README.md)
 - [Troubleshooting](docs/troubleshooting.md)

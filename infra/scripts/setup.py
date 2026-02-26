@@ -38,7 +38,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent.resolve()
 INFRA_DIR = SCRIPT_DIR.parent
 PROJECT_ROOT = INFRA_DIR.parent
-COMPOSE_DIR = INFRA_DIR / "docker" / "compose"
+COMPOSE_DIR = PROJECT_ROOT / "docker"
 SECRETS_DIR = INFRA_DIR / "docker" / "secrets"
 ENV_EXAMPLE = INFRA_DIR / ".env.example"
 ENV_FILE = INFRA_DIR / ".env"
@@ -241,6 +241,15 @@ def check_prerequisites(ctx: dict) -> bool:  # noqa: ARG001
         ok("All required ports are available")
     else:
         warn(f"{len(conflicts)} port(s) in use — services may fail to start")
+
+    # Platform detection
+    import platform
+    os_name = platform.system()
+    arch = platform.machine()
+    print()
+    step(f"Platform: {os_name} / {arch}")
+    if os_name == "Darwin" and arch == "arm64":
+        step("Apple Silicon — Rust event-store first build will be slow (~5-10 min)")
 
     return all_ok
 
@@ -526,7 +535,7 @@ def _audit_file_security() -> tuple[int, int]:
 def _audit_network_security() -> tuple[int, int]:
     """Check Docker Compose for host-published ports. Returns (warnings, info)."""
     warnings = 0
-    compose_file = COMPOSE_DIR / "docker-compose.yaml"
+    compose_file = COMPOSE_DIR / "docker-compose.selfhost.yaml"
     if not compose_file.exists():
         step("docker-compose.yaml not found — skipping network audit")
         return 0, 0
@@ -766,14 +775,14 @@ def build_and_start(ctx: dict) -> bool:
     """Build and start the Docker Compose stack."""
     banner("Stage: Build & Start Services")
 
-    compose_files = ["-f", "docker-compose.yaml"]
+    compose_files = ["-f", "docker/docker-compose.yaml", "-f", "docker/docker-compose.selfhost.yaml"]
 
-    # Add homelab override if Cloudflare is configured
+    # Add Cloudflare overlay if tunnel is configured
     if ctx.get("cloudflare_tunnel_token"):
-        compose_files += ["-f", "docker-compose.homelab.yaml"]
-        step("Using homelab compose (with Cloudflare Tunnel)")
+        compose_files += ["-f", "docker/docker-compose.cloudflare.yaml"]
+        step("Using selfhost compose (with Cloudflare Tunnel)")
     else:
-        step("Using base compose (local mode)")
+        step("Using selfhost compose (local mode)")
 
     env = os.environ.copy()
     if ENV_FILE.exists():
@@ -786,7 +795,7 @@ def build_and_start(ctx: dict) -> bool:
 
     result = subprocess.run(
         ["docker", "compose", *compose_files, "up", "-d", "--build"],
-        cwd=COMPOSE_DIR,
+        cwd=PROJECT_ROOT,
         env=env,
         check=False,
     )
@@ -858,8 +867,8 @@ def print_summary(ctx: dict) -> bool:
     print()
     print("  Useful commands:")
     print("    just health-check      Check service health")
-    print("    just homelab-status    Show container status")
-    print("    just homelab-logs      Follow service logs")
+    print("    just selfhost-status    Show container status")
+    print("    just selfhost-logs      Follow service logs")
     print("    just seed-workflows    Re-seed workflow definitions")
     print()
     if ctx.get("skip_github"):

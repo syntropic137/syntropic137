@@ -43,6 +43,7 @@ SECRETS_DIR = SCRIPT_DIR.parent / "docker" / "secrets"
 # Required secrets with their byte lengths (generates 2x chars in hex)
 REQUIRED_SECRETS = {
     "db-password.txt": 32,  # 64 hex chars
+    "redis-password.txt": 32,  # 64 hex chars
     "github-webhook-secret.txt": 32,  # 64 hex chars
 }
 

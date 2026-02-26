@@ -1,0 +1,40 @@
+# Cloudflare Tunnel Docker Compose - Overlay for secure external access
+# Usage: docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml -f docker-compose.cloudflare.yaml up -d
+# Shortcut: just selfhost-up-tunnel
+#
+# Adds Cloudflare Tunnel and removes direct port exposure on syn-ui.
+# Prerequisites:
+#   1. Copy your tunnel token to infra/docker/secrets/cloudflare-tunnel-token.txt
+#   2. Set SYN_DOMAIN in infra/.env
+#   3. Configure tunnel routes in Cloudflare Zero Trust dashboard
+
+services:
+  # ===========================================================================
+  # CLOUDFLARE TUNNEL
+  # ===========================================================================
+  # Provides secure, zero-trust access without port forwarding.
+  # See: infra/cloudflare/README.md for setup instructions.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.2.0
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-cloudflared
+    command: sh -c 'tunnel run --token $(cat /run/secrets/tunnel_token)'
+    secrets:
+      - tunnel_token
+    restart: always
+    depends_on:
+      syn-ui:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # OVERRIDE: Remove direct port exposure — access via tunnel only
+  # ===========================================================================
+  syn-ui:
+    ports: []
+
+secrets:
+  tunnel_token:
+    file: ../infra/docker/secrets/cloudflare-tunnel-token.txt
