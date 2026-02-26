@@ -20,4 +20,14 @@ if [ -f /run/secrets/redis_password ]; then
   export REDIS_URL="redis://:${REDIS_PASSWORD}@redis:6379/0"
 fi
 
+# Read GitHub private key from Docker secret (base64-encode for pydantic settings)
+if [ -f /run/secrets/github_private_key ] && [ -z "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
+  export SYN_GITHUB_PRIVATE_KEY="$(base64 < /run/secrets/github_private_key | tr -d '\n')"
+fi
+
+# Read GitHub webhook secret from Docker secret
+if [ -f /run/secrets/github_webhook_secret ] && [ -z "${SYN_GITHUB_WEBHOOK_SECRET:-}" ]; then
+  export SYN_GITHUB_WEBHOOK_SECRET="$(cat /run/secrets/github_webhook_secret)"
+fi
+
 exec "$@"
