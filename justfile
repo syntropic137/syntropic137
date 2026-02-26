@@ -1110,6 +1110,51 @@ infra-status:
 
 # --- Secrets Management ---
 
+# Store 1Password service account token in macOS Keychain (vault-specific)
+secrets-store-token token:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo "❌ This command is macOS-only. On Linux, export the env var instead:"
+        echo "   export OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>=<token>"
+        exit 1
+    fi
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -z "${OP_VAULT:-}" ]; then
+        echo "❌ OP_VAULT not set in infra/.env"
+        echo "   Set it first: OP_VAULT=syn137-dev"
+        exit 1
+    fi
+    _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+    _SVC="SYN_${_VK}"
+    security add-generic-password -U -a "$USER" -s "$_SVC" -w "{{token}}"
+    echo "✅ Token stored in Keychain as: $_SVC"
+    echo "   Vault: $OP_VAULT"
+    echo "   Selfhost recipes will auto-retrieve this at startup."
+
+# Delete 1Password token from macOS Keychain
+secrets-delete-token:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo "❌ This command is macOS-only."
+        exit 1
+    fi
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -z "${OP_VAULT:-}" ]; then
+        echo "❌ OP_VAULT not set in infra/.env"
+        exit 1
+    fi
+    _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+    _SVC="SYN_${_VK}"
+    security delete-generic-password -a "$USER" -s "$_SVC" 2>/dev/null \
+        && echo "✅ Deleted: $_SVC" \
+        || echo "⚠️  Not found: $_SVC"
+
 # Generate new secrets for deployment
 secrets-generate:
     @echo "🔐 Generating deployment secrets..."
