@@ -244,6 +244,7 @@ def check_prerequisites(ctx: dict) -> bool:  # noqa: ARG001
 
     # Platform detection
     import platform
+
     os_name = platform.system()
     arch = platform.machine()
     print()
@@ -775,7 +776,12 @@ def build_and_start(ctx: dict) -> bool:
     """Build and start the Docker Compose stack."""
     banner("Stage: Build & Start Services")
 
-    compose_files = ["-f", "docker/docker-compose.yaml", "-f", "docker/docker-compose.selfhost.yaml"]
+    compose_files = [
+        "-f",
+        "docker/docker-compose.yaml",
+        "-f",
+        "docker/docker-compose.selfhost.yaml",
+    ]
 
     # Add Cloudflare overlay if tunnel is configured
     if ctx.get("cloudflare_tunnel_token"):
