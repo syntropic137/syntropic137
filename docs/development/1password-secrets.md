@@ -35,27 +35,34 @@ Repeat for `syn137-beta` and `syn137-prod` with environment-appropriate values.
 
 ### Fields to add
 
+**Required:**
+
 | Field label | What it is |
 |---|---|
 | `APP_ENVIRONMENT` | Environment name — **must match the vault** (`development` / `staging` / `production`) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token (preferred over API key) |
-| `ANTHROPIC_API_KEY` | Anthropic API key (fallback) |
-| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key (fallback if no OAuth token) |
 | `SYN_GITHUB_APP_ID` | GitHub App ID |
 | `SYN_GITHUB_APP_NAME` | GitHub App name slug (commits show as `<name>[bot]`) |
 | `SYN_GITHUB_PRIVATE_KEY` | GitHub App signing key (base64-encoded PEM) |
 | `SYN_GITHUB_WEBHOOK_SECRET` | GitHub webhook validation secret |
-| `SYN_OBSERVABILITY_DB_URL` | TimescaleDB URL (dashboard/observability) |
-| `ESP_EVENT_STORE_DB_URL` | TimescaleDB URL (event store) |
-| `SYN_STORAGE_SUPABASE_URL` | Supabase project URL |
-| `SYN_STORAGE_SUPABASE_KEY` | Supabase service role key |
-| `SYN_STORAGE_MINIO_ACCESS_KEY` | MinIO access key |
-| `SYN_STORAGE_MINIO_SECRET_KEY` | MinIO secret key |
+
+**Optional (only if using external services instead of the local stack):**
+
+| Field label | What it is |
+|---|---|
+| `SYN_STORAGE_MINIO_ACCESS_KEY` | MinIO access key (only if overriding default) |
+| `SYN_STORAGE_MINIO_SECRET_KEY` | MinIO secret key (only if overriding default) |
 
 > **`APP_ENVIRONMENT` is the boot-time safety check.** At startup, the resolver
 > compares this field against the vault name. If they disagree (e.g. vault is
 > `syn137-prod` but field says `development`), the process refuses to start.
 > This prevents prod secrets running in dev and vice versa.
+
+> **Note:** Database URLs (`SYN_OBSERVABILITY_DB_URL`, `ESP_EVENT_STORE_DB_URL`)
+> are **not needed** for self-host — they're constructed automatically from
+> Docker Compose service names. Only add them if you're connecting to an
+> external database.
 
 Only add the fields you actually need — skip anything unused for that environment.
 
