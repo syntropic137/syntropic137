@@ -58,6 +58,7 @@ just secrets-check
 Set the remaining non-secret values in `infra/.env`:
 
 ```bash
+APP_ENVIRONMENT=development      # safety check — prevents prod secrets in dev
 SYN_GITHUB_APP_ID=123456
 SYN_GITHUB_APP_NAME=your-app-name
 ANTHROPIC_API_KEY=sk-ant-...
