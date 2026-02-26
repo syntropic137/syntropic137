@@ -1111,7 +1111,7 @@ infra-status:
 # --- Secrets Management ---
 
 # Store 1Password service account token in macOS Keychain (vault-specific)
-secrets-store-token token:
+secrets-store-token:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ "$(uname -s)" != "Darwin" ]; then
@@ -1129,9 +1129,18 @@ secrets-store-token token:
     fi
     _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
     _SVC="SYN_${_VK}"
-    security add-generic-password -U -a "$USER" -s "$_SVC" -w "{{token}}"
+    echo "Storing 1Password token for vault: $OP_VAULT"
+    echo "Keychain entry: $_SVC"
+    echo ""
+    printf "Paste service account token: "
+    read -rs _TOKEN
+    echo ""
+    if [ -z "$_TOKEN" ]; then
+        echo "❌ No token provided"
+        exit 1
+    fi
+    security add-generic-password -U -a "$USER" -s "$_SVC" -w "$_TOKEN"
     echo "✅ Token stored in Keychain as: $_SVC"
-    echo "   Vault: $OP_VAULT"
     echo "   Selfhost recipes will auto-retrieve this at startup."
 
 # Delete 1Password token from macOS Keychain
