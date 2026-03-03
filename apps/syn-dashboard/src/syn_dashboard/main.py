@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from syn_api.types import Err, Ok
+from syn_dashboard import __version__
 from syn_dashboard.api import (
     artifacts_router,
     control_router,
@@ -79,7 +80,7 @@ def create_app() -> FastAPI:
             "Provides real-time observability for workflow execution, "
             "agent sessions, and artifacts."
         ),
-        version="0.1.0",
+        version=__version__,
         lifespan=lifespan,
         debug=config.debug,
         docs_url="/docs",
@@ -129,7 +130,7 @@ def create_app() -> FastAPI:
         """Root endpoint with API info."""
         return {
             "name": "Syntropic137 Dashboard API",
-            "version": "0.1.0",
+            "version": __version__,
             "docs": "/docs",
             "health": "/health",
         }
