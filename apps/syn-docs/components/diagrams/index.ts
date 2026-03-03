@@ -26,6 +26,9 @@ export {
   ScalingDiagram,
 } from './DeploymentDiagram';
 
+// Topology visualization
+export { TopologyDependencyGraph } from './topology';
+
 // Interactive React Flow diagrams (lazy-loaded)
 export {
   SystemArchitectureFlow,
