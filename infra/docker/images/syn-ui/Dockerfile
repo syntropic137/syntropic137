@@ -53,6 +53,13 @@ COPY infra/docker/images/syn-ui/nginx.conf /etc/nginx/conf.d/default.conf
 COPY infra/docker/images/syn-ui/security-headers.conf /etc/nginx/conf.d/security-headers.conf
 COPY infra/docker/images/syn-ui/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
 
+# Install apache2-utils for htpasswd (used by auth entrypoint)
+RUN apk add --no-cache apache2-utils
+
+# Copy entrypoint (generates auth config from env vars at startup)
+COPY infra/docker/images/syn-ui/docker-entrypoint.sh /docker-entrypoint.d/40-auth.sh
+RUN chmod +x /docker-entrypoint.d/40-auth.sh
+
 # Health check
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=5s \
     CMD wget -q --spider http://localhost:80/health || exit 1

@@ -189,6 +189,11 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-ui
     ports:
       - "127.0.0.1:${SYN_UI_PORT:-8008}:80"
+    environment:
+      # Optional basic auth — protects UI and API, webhooks bypass.
+      # Set SYN_API_PASSWORD to enable. Omit for no auth (local-only or Cloudflare Access).
+      - SYN_API_PASSWORD=${SYN_API_PASSWORD:-}
+      - SYN_API_USER=${SYN_API_USER:-admin}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s
