@@ -77,7 +77,6 @@ export SYN_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 # - Pull requests: Read & Write (if needed)
 
 export SYN_GITHUB_APP_ID="123456"
-export SYN_GITHUB_INSTALLATION_ID="987654"
 export SYN_GITHUB_PRIVATE_KEY="$(cat app-private-key.pem)"
 ```
 
@@ -176,7 +175,6 @@ Date:   Wed Dec 11 19:30:00 2025
 
 cat > .env.github-app <<EOF
 SYN_GITHUB_APP_ID="123456"
-SYN_GITHUB_INSTALLATION_ID="987654"
 SYN_GITHUB_PRIVATE_KEY="$(cat syn-app.private-key.pem)"
 EOF
 

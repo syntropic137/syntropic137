@@ -1932,7 +1932,6 @@ Secure token management for agentic operations at scale:
 ```bash
 # GitHub App environment variables
 export SYN_GITHUB_APP_ID=2461312
-export SYN_GITHUB_INSTALLATION_ID=99311335
 export SYN_GITHUB_APP_NAME=aef-engineer-beta
 export SYN_GITHUB_PRIVATE_KEY=$(cat path/to/private-key.pem | base64)
 

@@ -234,7 +234,6 @@ See GitHub Issue #24 for multi-tenancy implementation details.
 # Required
 SYN_GITHUB_APP_ID=2461312
 SYN_GITHUB_APP_NAME=aef-engineer-beta
-SYN_GITHUB_INSTALLATION_ID=99311335
 SYN_GITHUB_PRIVATE_KEY=<base64-encoded-pem>
 
 # Optional

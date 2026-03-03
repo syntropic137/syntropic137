@@ -10,21 +10,21 @@ This table shows the most important event flows in AEF (events that feed the mos
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|
-| ? | workflow_execution_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 5 |
-| ? | workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| ? | workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| ? | workflow_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
+| ? | workflow_execution_started | WorkflowExecutionDetailProjection, WorkflowDetailProjection, WorkflowExecutionListProjection... | 5 |
+| ? | workflow_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, DashboardMetricsProjection | 3 |
+| ? | workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
+| ? | phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
+| ? | workflow_failed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, DashboardMetricsProjection | 3 |
+| ? | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, WorkflowPhaseMetricsProjection | 3 |
+| ? | trigger_fired | TriggerHistoryProjection, TriggerRuleProjection | 2 |
+| ? | session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
+| ? | session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
+| ? | artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
+| ? | session_started | SessionListProjection, DashboardMetricsProjection | 2 |
+| ? | agent_observation | SessionCostProjection, ExecutionCostProjection | 2 |
+| ? | workflow_interrupted | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
 | ? | execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | execution_paused | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | session_started | DashboardMetricsProjection, SessionListProjection | 2 |
-| ? | session_cost_finalized | ExecutionCostProjection, SessionCostProjection | 2 |
-| ? | artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
-| ? | execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | agent_observation | ExecutionCostProjection, SessionCostProjection | 2 |
-| ? | phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| ? | phase_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection | 2 |
-| ? | session_completed | DashboardMetricsProjection, SessionListProjection | 2 |
-| ? | operation_recorded | SessionListProjection | 1 |
+| ? | session_completed | SessionListProjection, DashboardMetricsProjection | 2 |
 
 ---
 
