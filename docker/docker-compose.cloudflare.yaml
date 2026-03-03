@@ -30,7 +30,7 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # OVERRIDE: Remove direct port exposure — access via tunnel only
+  # OVERRIDE: Keep localhost port for local access (no auth on port 80).
+  # Tunnel routes to port 8081 (basic auth required when SYN_API_PASSWORD set).
+  # Update Cloudflare tunnel public hostname to: http://syn-ui:8081
   # ===========================================================================
-  syn-ui:
-    ports: []
