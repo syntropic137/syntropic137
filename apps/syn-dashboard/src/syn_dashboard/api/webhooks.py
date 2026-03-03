@@ -34,7 +34,9 @@ def _check_sig_rate_limit(client_ip: str) -> None:
     # Prune old entries
     _sig_failures[client_ip] = [t for t in attempts if now - t < _WINDOW_SECONDS]
     if len(_sig_failures[client_ip]) >= _MAX_FAILURES:
-        logger.warning("Webhook rate limit: %s blocked (%d failures)", client_ip, len(_sig_failures[client_ip]))
+        logger.warning(
+            "Webhook rate limit: %s blocked (%d failures)", client_ip, len(_sig_failures[client_ip])
+        )
         raise HTTPException(status_code=429, detail="Too many failed signature attempts")
 
 
@@ -54,7 +56,9 @@ async def github_webhook(
 
     Processes installation and other events via syn_api.v1.github.
     """
-    client_ip = request.headers.get("X-Real-IP", request.client.host if request.client else "unknown")
+    client_ip = request.headers.get(
+        "X-Real-IP", request.client.host if request.client else "unknown"
+    )
     body = await request.body()
 
     # Handle ping separately (no processing needed)

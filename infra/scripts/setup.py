@@ -137,6 +137,7 @@ class SetupContext:
     include_op_cli: str = ""
     op_fields: set[str] | None = None
 
+
 # Stage order matters:
 #   1. 1Password first — so vault creds are available to later stages.
 #   2. Cloudflare + smee — so webhook_url exists for the GitHub App manifest.
@@ -154,8 +155,8 @@ STAGES = [
     "configure_cloudflare",
     "configure_smee",
     "configure_github_app",  # needs webhook_url from cloudflare/smee
-    "configure_env",         # must follow all collection stages
-    "security_audit",        # reads .env, so runs after configure_env
+    "configure_env",  # must follow all collection stages
+    "security_audit",  # reads .env, so runs after configure_env
     "build_and_start",
     "wait_for_health",
     "seed_workflows",
@@ -433,11 +434,15 @@ def configure_github_app(ctx: SetupContext) -> bool:
     # Check if GitHub App is already fully configured (1Password or .env)
     op_fields = _get_op_fields(ctx)
     env_vals = parse_env_file(ENV_FILE)
-    gh_keys = {ENV_GITHUB_APP_ID, ENV_GITHUB_APP_NAME, ENV_GITHUB_PRIVATE_KEY, ENV_GITHUB_WEBHOOK_SECRET}
+    gh_keys = {
+        ENV_GITHUB_APP_ID,
+        ENV_GITHUB_APP_NAME,
+        ENV_GITHUB_PRIVATE_KEY,
+        ENV_GITHUB_WEBHOOK_SECRET,
+    }
     has_all_in_op = gh_keys.issubset(op_fields)
     has_all_in_env = all(
-        os.environ.get(k, "").strip() or env_vals.get(k, "").strip()
-        for k in gh_keys
+        os.environ.get(k, "").strip() or env_vals.get(k, "").strip() for k in gh_keys
     )
     if has_all_in_op or has_all_in_env:
         source = "1Password" if has_all_in_op else ".env"
@@ -445,13 +450,11 @@ def configure_github_app(ctx: SetupContext) -> bool:
         if not confirm("Reconfigure GitHub App?", default=False):
             step("Keeping existing GitHub App configuration")
             # Populate ctx from existing values for configure_env
-            ctx.github_app_id = (
-                os.environ.get(ENV_GITHUB_APP_ID, "")
-                or env_vals.get(ENV_GITHUB_APP_ID, "")
+            ctx.github_app_id = os.environ.get(ENV_GITHUB_APP_ID, "") or env_vals.get(
+                ENV_GITHUB_APP_ID, ""
             )
-            ctx.github_app_name = (
-                os.environ.get(ENV_GITHUB_APP_NAME, "")
-                or env_vals.get(ENV_GITHUB_APP_NAME, "")
+            ctx.github_app_name = os.environ.get(ENV_GITHUB_APP_NAME, "") or env_vals.get(
+                ENV_GITHUB_APP_NAME, ""
             )
             return True
         print()
@@ -573,9 +576,7 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
             hint("  base64 < /path/to/your-app.pem | tr -d '\\n'")
 
     if pem_text:
-        ctx.github_private_key_b64 = base64.b64encode(
-            pem_text.encode()
-        ).decode()
+        ctx.github_private_key_b64 = base64.b64encode(pem_text.encode()).decode()
 
     # Webhook secret — generate or read existing, store in ctx for .env
     import secrets as _secrets
@@ -642,8 +643,7 @@ def configure_env(ctx: SetupContext) -> bool:
     # Cloudflare tunnel, they're doing selfhost, not local dev.
     env_vals = parse_env_file(ENV_FILE) if ENV_FILE.exists() else {}
     has_tunnel = (
-        ctx.cloudflare_tunnel_token
-        or env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
+        ctx.cloudflare_tunnel_token or env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
     )
     if has_tunnel:
         substitutions[ENV_DEPLOY_ENV] = "selfhost"
@@ -998,7 +998,9 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     print()
     hint("Don't have a domain on Cloudflare yet? Here's how:")
     hint(f"  1. Go to {_BOLD}Account Home{_RST} on dash.cloudflare.com")
-    hint(f"  2. {_BOLD}Buy a domain{_RST} (right there) or {_BOLD}+ Onboard a domain{_RST} you already own")
+    hint(
+        f"  2. {_BOLD}Buy a domain{_RST} (right there) or {_BOLD}+ Onboard a domain{_RST} you already own"
+    )
     hint(f"  3. Point your registrar's nameservers to the ones Cloudflare gives you")
     hint(f"     (takes 5-30 min to propagate)")
     print()
@@ -1329,7 +1331,6 @@ ENV_AUDIT_GROUPS: list[tuple[str, list[tuple[str, bool]]]] = [
 ]
 
 
-
 def _update_env_file(
     updates: dict[str, str],
     *,
@@ -1375,7 +1376,9 @@ def _update_env_file(
 
     # Atomic write: write to temp file then os.replace() for crash safety
     tmp_fd, tmp_path = tempfile.mkstemp(
-        dir=env_file.parent, prefix=".env.", suffix=".tmp",
+        dir=env_file.parent,
+        prefix=".env.",
+        suffix=".tmp",
     )
     try:
         os.write(tmp_fd, content.encode())
@@ -1424,9 +1427,18 @@ def _keychain_read(vault: str) -> str | None:
     svc = _keychain_service_name(vault)
     try:
         result = subprocess.run(
-            ["security", "find-generic-password",
-             "-a", os.environ.get("USER", "unknown"), "-s", svc, "-w"],
-            capture_output=True, text=True, check=False,
+            [
+                "security",
+                "find-generic-password",
+                "-a",
+                os.environ.get("USER", "unknown"),
+                "-s",
+                svc,
+                "-w",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         token = result.stdout.strip()
         return token if token and result.returncode == 0 else None
@@ -1440,9 +1452,20 @@ def _keychain_write(vault: str, token: str) -> bool:
         return False
     svc = _keychain_service_name(vault)
     result = subprocess.run(
-        ["security", "add-generic-password", "-U",
-         "-a", os.environ.get("USER", "unknown"), "-s", svc, "-w", token],
-        capture_output=True, text=True, check=False,
+        [
+            "security",
+            "add-generic-password",
+            "-U",
+            "-a",
+            os.environ.get("USER", "unknown"),
+            "-s",
+            svc,
+            "-w",
+            token,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if result.returncode != 0:
         warn(f"Keychain write failed: {result.stderr.strip() or 'unknown error'}")
@@ -1573,7 +1596,9 @@ def validate_environment(ctx: SetupContext) -> bool:
         print(f"  {_BOLD}{group_label}{_RST}")
         for var_name, required in variables:
             source, is_set = _resolve_source(
-                var_name, op_fields=op_fields, env_file_vals=env_vals,
+                var_name,
+                op_fields=op_fields,
+                env_file_vals=env_vals,
             )
             # Pad columns for alignment
             name_col = f"    {var_name:<35s}"
@@ -1599,13 +1624,14 @@ def validate_environment(ctx: SetupContext) -> bool:
     # LLM provider check — at least one of the two must be set for non-dev
     _llm_vars = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
     has_llm = any(
-        _resolve_source(v, op_fields=op_fields, env_file_vals=env_vals)[1]
-        for v in _llm_vars
+        _resolve_source(v, op_fields=op_fields, env_file_vals=env_vals)[1] for v in _llm_vars
     )
     if not has_llm:
         env_name = env_vals.get(ENV_APP_ENVIRONMENT, "development")
         if env_name not in ("development", "test", "offline"):
-            warn("No LLM provider set — one of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required")
+            warn(
+                "No LLM provider set — one of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required"
+            )
             required_total += 1  # count as a missing required
         else:
             hint(f"No LLM key set (ok for {env_name} — mock agent available)")
@@ -1709,22 +1735,34 @@ def seed_workflows(ctx: SetupContext) -> bool:
     if ENV_FILE.exists():
         env.update(parse_env_file(ENV_FILE))
 
-    def _run_in_dashboard(script_path: str, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
+    def _run_in_dashboard(
+        script_path: str, extra_args: list[str] | None = None
+    ) -> subprocess.CompletedProcess:
         """Run a Python script inside a one-off dashboard container."""
         cmd = [
-            "docker", "compose", *compose_files,
-            "run", "--rm",
-            "-e", "LOG_LEVEL=WARNING",  # suppress verbose library logs
-            "-v", f"{PROJECT_ROOT / 'scripts'}:/app/scripts:ro",
-            "-v", f"{PROJECT_ROOT / 'workflows'}:/app/workflows:ro",
+            "docker",
+            "compose",
+            *compose_files,
+            "run",
+            "--rm",
+            "-e",
+            "LOG_LEVEL=WARNING",  # suppress verbose library logs
+            "-v",
+            f"{PROJECT_ROOT / 'scripts'}:/app/scripts:ro",
+            "-v",
+            f"{PROJECT_ROOT / 'workflows'}:/app/workflows:ro",
             "--no-deps",
             "dashboard",
-            "python", script_path, *(extra_args or []),
+            "python",
+            script_path,
+            *(extra_args or []),
         ]
         return subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False)
 
     step("Seeding workflow definitions...")
-    result = _run_in_dashboard("/app/scripts/seed_workflows.py", ["--dir", "/app/workflows/examples"])
+    result = _run_in_dashboard(
+        "/app/scripts/seed_workflows.py", ["--dir", "/app/workflows/examples"]
+    )
     if result.returncode == 0:
         ok("Workflows seeded")
     else:
@@ -1744,7 +1782,9 @@ def seed_workflows(ctx: SetupContext) -> bool:
     step("Restarting dashboard to rebuild projections...")
     subprocess.run(
         ["docker", "compose", *compose_files, "restart", "dashboard"],
-        cwd=PROJECT_ROOT, env=env, check=False,
+        cwd=PROJECT_ROOT,
+        env=env,
+        check=False,
     )
     ok("Dashboard restarted — projections will rebuild from event store")
 

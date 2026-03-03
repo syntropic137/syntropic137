@@ -75,6 +75,7 @@ def _container_prefix() -> str:
     Checks (in order): env var → infra/.env → default.
     """
     from shared import ENV_COMPOSE_PROJECT_NAME, ENV_FILE, parse_env_file
+
     project = os.environ.get(ENV_COMPOSE_PROJECT_NAME, "")
     if not project:
         project = parse_env_file(ENV_FILE).get(ENV_COMPOSE_PROJECT_NAME, DEFAULT_PROJECT_NAME)
@@ -191,7 +192,10 @@ def _docker_health_statuses() -> dict[str, str]:
     try:
         result = subprocess.run(
             ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"],
-            capture_output=True, text=True, check=False, timeout=10,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
         )
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return {}
@@ -208,7 +212,9 @@ def _docker_health_statuses() -> dict[str, str]:
 def check_service_docker(service: Service, docker_statuses: dict[str, str]) -> ServiceStatus:
     """Check a service using Docker container health status."""
     if not service.container_name:
-        return ServiceStatus(name=service.name, healthy=False, message="No container name configured")
+        return ServiceStatus(
+            name=service.name, healthy=False, message="No container name configured"
+        )
 
     status_str = docker_statuses.get(service.container_name, "")
     if not status_str:
@@ -345,8 +351,10 @@ def wait_for_services(timeout: int = 120, interval: int = 2, force_docker: bool 
         all_healthy = all(s.healthy for s in statuses)
 
         if all_healthy:
-            print(f"\n\u2713 All services ready after {attempt} attempts "
-                  f"({time.time() - start:.1f}s, via {method})")
+            print(
+                f"\n\u2713 All services ready after {attempt} attempts "
+                f"({time.time() - start:.1f}s, via {method})"
+            )
             print_status(statuses)
             return True
 

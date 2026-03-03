@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    InMemoryTriggerQueryStore,
+)
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition import (
     TriggerCondition,
+)
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+    TriggerRuleAggregate,
 )
 from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
@@ -25,12 +31,6 @@ from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler i
 from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
     SafetyGuards,
     _extract_pr_number,
-)
-from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-    RegisterTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerQueryStore,
 )
 
 
@@ -160,14 +160,14 @@ class TestSafetyGuards:
     async def test_bot_sender_blocked(self) -> None:
         """Test that bot senders are blocked."""
         store = InMemoryTriggerQueryStore()
-        handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="test",
             event="check_run.completed",
             repository="org/repo",
             workflow_id="wf",
         )
-        agg = await handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         guards = SafetyGuards()
@@ -179,14 +179,14 @@ class TestSafetyGuards:
     async def test_human_sender_allowed(self) -> None:
         """Test that human senders pass the bot check."""
         store = InMemoryTriggerQueryStore()
-        handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="test",
             event="check_run.completed",
             repository="org/repo",
             workflow_id="wf",
         )
-        agg = await handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         guards = SafetyGuards()
@@ -197,7 +197,6 @@ class TestSafetyGuards:
     async def test_max_attempts_reached(self) -> None:
         """Test that max attempts blocks the trigger."""
         store = InMemoryTriggerQueryStore()
-        handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="test",
             event="check_run.completed",
@@ -205,7 +204,8 @@ class TestSafetyGuards:
             workflow_id="wf",
             config=(("max_attempts", 2),),
         )
-        agg = await handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         # Record 2 fires for PR #42
@@ -225,14 +225,14 @@ class TestSafetyGuards:
     async def test_idempotency_blocks_duplicate_delivery(self) -> None:
         """Test that duplicate delivery IDs are blocked."""
         store = InMemoryTriggerQueryStore()
-        handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="test",
             event="check_run.completed",
             repository="org/repo",
             workflow_id="wf",
         )
-        agg = await handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         await store.record_delivery("del-123", agg.trigger_id)
@@ -271,7 +271,6 @@ class TestEvaluateWebhookHandler:
     async def test_matching_trigger_fires(self) -> None:
         """Test that a matching trigger fires and returns result."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -279,7 +278,8 @@ class TestEvaluateWebhookHandler:
             repository="org/repo",
             workflow_id="ci-fix-workflow",
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
@@ -322,7 +322,6 @@ class TestEvaluateWebhookHandler:
     async def test_conditions_not_met_skips(self) -> None:
         """Test that conditions not met skips the trigger."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -330,7 +329,8 @@ class TestEvaluateWebhookHandler:
             repository="org/repo",
             workflow_id="ci-fix-workflow",
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
@@ -352,7 +352,6 @@ class TestEvaluateWebhookHandler:
     async def test_bot_sender_blocked_by_guard(self) -> None:
         """Test that bot senders are blocked by safety guard."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -360,7 +359,8 @@ class TestEvaluateWebhookHandler:
             repository="org/repo",
             workflow_id="ci-fix-workflow",
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
@@ -402,7 +402,6 @@ async def _register_trigger(
     cooldown_seconds: int = 300,
 ) -> None:
     """Register a ci-heal trigger and index it in the store."""
-    reg = RegisterTriggerHandler(store=store, repository=NullRepository())
     cmd = RegisterTriggerCommand(
         name="ci-heal",
         event="check_run.completed",
@@ -414,7 +413,8 @@ async def _register_trigger(
             ("cooldown_seconds", cooldown_seconds),
         ),
     )
-    agg = await reg.handle(cmd)
+    agg = TriggerRuleAggregate()
+    agg.register(cmd)
     await _index_aggregate(store, agg)
 
 

@@ -114,15 +114,15 @@ class EventProvenance:
 EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     # Workflow TEMPLATE events
     "WorkflowTemplateCreated": [
-        ("workflow_list", "on_workflow_created"),
-        ("workflow_detail", "on_workflow_created"),
-        ("dashboard_metrics", "on_workflow_created"),
+        ("workflow_list", "on_workflow_template_created"),
+        ("workflow_detail", "on_workflow_template_created"),
+        ("dashboard_metrics", "on_workflow_template_created"),
     ],
     # Legacy event type (before rename to WorkflowTemplateCreated)
     "WorkflowCreated": [
-        ("workflow_list", "on_workflow_created"),
-        ("workflow_detail", "on_workflow_created"),
-        ("dashboard_metrics", "on_workflow_created"),
+        ("workflow_list", "on_workflow_template_created"),
+        ("workflow_detail", "on_workflow_template_created"),
+        ("dashboard_metrics", "on_workflow_template_created"),
     ],
     # WorkflowExecution events (from WorkflowExecutionAggregate)
     # Template projections only update runs_count, not status

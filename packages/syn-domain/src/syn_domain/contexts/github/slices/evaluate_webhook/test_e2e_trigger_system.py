@@ -8,6 +8,12 @@ from __future__ import annotations
 import pytest
 
 from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    InMemoryTriggerQueryStore,
+)
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+    TriggerRuleAggregate,
+)
 from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import (
     PauseTriggerCommand,
 )
@@ -16,15 +22,6 @@ from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
     EvaluateWebhookHandler,
-)
-from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
-    ManageTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-    RegisterTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerQueryStore,
 )
 
 
@@ -136,8 +133,6 @@ class TestE2ERegisterAndFire:
     async def test_register_trigger_then_webhook_fires(self) -> None:
         """Full flow: register CI self-heal, send failure webhook, verify dispatch."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
-
         # Register a CI self-healing trigger
         cmd = RegisterTriggerCommand(
             name="ci-self-heal",
@@ -150,7 +145,8 @@ class TestE2ERegisterAndFire:
             installation_id="inst-123",
             workflow_id="ci-fix-workflow",
         )
-        aggregate = await reg_handler.handle(cmd)
+        aggregate = TriggerRuleAggregate()
+        aggregate.register(cmd)
         trigger_id = aggregate.trigger_id
         await _index_aggregate(store, aggregate)
 
@@ -179,8 +175,6 @@ class TestE2ESafetyGuards:
     async def test_bot_sender_prevented(self) -> None:
         """Verify that bot senders don't trigger workflows."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
-
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -188,7 +182,8 @@ class TestE2ESafetyGuards:
             repository="org/repo",
             workflow_id="ci-fix",
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
@@ -208,8 +203,6 @@ class TestE2ESafetyGuards:
         """Verify that max attempts prevents infinite retry loops."""
         store = InMemoryTriggerQueryStore()
         repo = InMemoryRepository()
-        reg_handler = RegisterTriggerHandler(store=store, repository=repo)
-
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -218,7 +211,8 @@ class TestE2ESafetyGuards:
             workflow_id="ci-fix",
             config=(("max_attempts", 2), ("cooldown_seconds", 0)),
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         eval_handler = EvaluateWebhookHandler(store=store, repository=repo)
@@ -260,8 +254,6 @@ class TestE2ESafetyGuards:
         """Verify that duplicate X-GitHub-Delivery IDs are rejected."""
         store = InMemoryTriggerQueryStore()
         repo = InMemoryRepository()
-        reg_handler = RegisterTriggerHandler(store=store, repository=repo)
-
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -270,7 +262,8 @@ class TestE2ESafetyGuards:
             workflow_id="ci-fix",
             config=(("cooldown_seconds", 0),),
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         eval_handler = EvaluateWebhookHandler(store=store, repository=repo)
@@ -304,8 +297,6 @@ class TestE2EPresets:
     async def test_self_healing_preset_flow(self) -> None:
         """Enable self-healing preset, send CI failure, verify dispatch."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
-
         # Enable preset
         cmd = create_preset_command(
             preset_name="self-healing",
@@ -313,7 +304,8 @@ class TestE2EPresets:
             installation_id="inst-1",
             created_by="test",
         )
-        aggregate = await reg_handler.handle(cmd)
+        aggregate = TriggerRuleAggregate()
+        aggregate.register(cmd)
         await _index_aggregate(store, aggregate)
 
         # Send CI failure
@@ -334,14 +326,13 @@ class TestE2EPresets:
     async def test_review_fix_preset_flow(self) -> None:
         """Enable review-fix preset, send review webhook, verify dispatch."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
-
         # Enable preset
         cmd = create_preset_command(
             preset_name="review-fix",
             repository="org/repo",
         )
-        aggregate = await reg_handler.handle(cmd)
+        aggregate = TriggerRuleAggregate()
+        aggregate.register(cmd)
         await _index_aggregate(store, aggregate)
 
         # Send review webhook
@@ -362,13 +353,13 @@ class TestE2EPresets:
     async def test_review_fix_success_status_does_not_fire(self) -> None:
         """Verify that an 'approved' review doesn't trigger review-fix."""
         store = InMemoryTriggerQueryStore()
-        reg_handler = RegisterTriggerHandler(store=store, repository=NullRepository())
 
         cmd = create_preset_command(
             preset_name="review-fix",
             repository="org/repo",
         )
-        agg = await reg_handler.handle(cmd)
+        agg = TriggerRuleAggregate()
+        agg.register(cmd)
         await _index_aggregate(store, agg)
 
         eval_handler = EvaluateWebhookHandler(store=store, repository=NullRepository())
@@ -393,8 +384,6 @@ class TestE2EPauseResume:
         """Verify paused triggers don't dispatch workflows."""
         store = InMemoryTriggerQueryStore()
         repo = InMemoryRepository()
-        reg_handler = RegisterTriggerHandler(store=store, repository=repo)
-
         cmd = RegisterTriggerCommand(
             name="ci-heal",
             event="check_run.completed",
@@ -402,15 +391,13 @@ class TestE2EPauseResume:
             repository="org/repo",
             workflow_id="ci-fix",
         )
-        aggregate = await reg_handler.handle(cmd)
+        aggregate = TriggerRuleAggregate()
+        aggregate.register(cmd)
         await _index_aggregate(store, aggregate)
 
-        # Pause
-        manage_handler = ManageTriggerHandler(store=store, repository=repo)
-        await manage_handler.pause(
-            PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin")
-        )
-        # Simulate projection updating status
+        # Pause — directly call aggregate and simulate projection update
+        aggregate.pause(PauseTriggerCommand(trigger_id=aggregate.trigger_id, paused_by="admin"))
+        await repo.save(aggregate)
         await store.update_status(aggregate.trigger_id, "paused")
 
         # Try to fire - should not work

@@ -17,14 +17,14 @@ from typing import Any
 
 
 def log_analytics(event: dict[str, Any]) -> None:
-    """Log to analytics file. Fail-safe - never blocks."""
+    """Log analytics event to file, silently ignoring failures."""
     try:
         path = Path(os.getenv("ANALYTICS_PATH", ".agentic/analytics/events.jsonl"))
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as f:
             f.write(json.dumps({"timestamp": datetime.now(UTC).isoformat(), **event}) + "\n")
     except Exception:
-        pass  # Never block on analytics failure
+        pass  # Analytics must never block
 
 
 def main() -> None:
@@ -46,18 +46,18 @@ def main() -> None:
                 "hook_event": event.get("hook_event_name", "Notification"),
                 "session_id": event.get("session_id"),
                 "notification_type": event.get(
-                    "matcher"
+                    "matcher",
                 ),  # permission_prompt, idle_prompt, error, warning
                 "message": event.get("message"),
                 "audit": {
                     "transcript_path": event.get("transcript_path"),
                     "cwd": event.get("cwd"),
                 },
-            }
+            },
         )
 
     except Exception:
-        pass  # Silent fail - notification events don't block
+        pass  # Notification events must never block
 
 
 if __name__ == "__main__":
