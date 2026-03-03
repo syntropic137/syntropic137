@@ -23,11 +23,15 @@ default: help
 help:
     @just --list
 
-# --- First-Time Setup ---
+# --- First-Time Setup / Onboarding ---
 
-# Run interactive setup wizard (git clone → running stack)
-setup *args:
+# Run interactive onboarding wizard (git clone → running stack)
+onboard *args:
     @uv run python infra/scripts/setup.py {{args}}
+
+# Alias: `just setup` = `just onboard`
+setup *args:
+    @just onboard {{args}}
 
 # Check prerequisites only (no changes)
 setup-check:

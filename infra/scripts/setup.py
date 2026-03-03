@@ -593,6 +593,18 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
 
     _persist_github_app_to_env(ctx)
 
+    # Remind user to subscribe to the right webhook events — the manifest
+    # flow does this automatically, but existing apps need manual config.
+    print()
+    callout("Subscribe to webhook events")
+    step(f"Go to https://github.com/settings/apps/{ctx.github_app_name}")
+    step("Permissions & events → Subscribe to events → check:")
+    step(f"  {_PURPLE}Check run{_RST}, {_PURPLE}Issue comment{_RST}, {_PURPLE}Pull request{_RST},")
+    step(f"  {_PURPLE}Pull request review{_RST}, {_PURPLE}Push{_RST}")
+    step("Save changes")
+    print()
+    input("  Press Enter when done...")
+
     ok("GitHub App configured (manual)")
     return True
 
