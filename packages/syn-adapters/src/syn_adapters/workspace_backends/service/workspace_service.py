@@ -813,10 +813,11 @@ class WorkspaceService:
             cfg = WorkspaceServiceConfig(environment=environment or {})
 
         # Choose security profile based on backend type
+        # LOCAL is test-only → development(); everything else (DOCKER_HARDENED, GVISOR) → production()
         security = (
-            SecurityConfig.production()
-            if cfg.backend == IsolationBackendType.GVISOR
-            else SecurityConfig.development()
+            SecurityConfig.development()
+            if cfg.backend == IsolationBackendType.LOCAL
+            else SecurityConfig.production()
         )
 
         # Create adapters using agentic_isolation

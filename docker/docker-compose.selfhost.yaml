@@ -117,9 +117,12 @@ services:
     build:
       args:
         INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
+        INCLUDE_DOCKER_CLI: "1"
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
       - dashboard_logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_dashboard.main:app --host $$DASHBOARD_HOST --port $$DASHBOARD_PORT --root-path /api/v1"]
     environment:
@@ -140,6 +143,12 @@ services:
       # Crown-jewel secrets: injected as env vars (1Password or .env), never as files
       - SYN_GITHUB_PRIVATE_KEY=${SYN_GITHUB_PRIVATE_KEY:-}
       - SYN_GITHUB_WEBHOOK_SECRET=${SYN_GITHUB_WEBHOOK_SECRET:-}
+      # Agent credentials (for workspace containers)
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Workspace configuration
+      - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
+      - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
     secrets:
       - db_password
       - redis_password

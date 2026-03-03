@@ -32,3 +32,8 @@ fi
 if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
 fi
+
+# 4. Export agent credentials if set (for workspace container execution)
+# These may come from .env, 1Password resolution above, or the shell environment.
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && export CLAUDE_CODE_OAUTH_TOKEN
+[ -n "${ANTHROPIC_API_KEY:-}" ] && export ANTHROPIC_API_KEY

@@ -877,7 +877,7 @@ _selfhost-preflight:
     fi
 
 # Start self-hosted AEF stack (no Cloudflare)
-selfhost-up: _selfhost-preflight
+selfhost-up: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
@@ -887,10 +887,13 @@ selfhost-up: _selfhost-preflight
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
+    echo "🌱 Seeding data..."
+    just selfhost-seed || echo "   ⚠️ Seed skipped (data may already exist)"
+    echo ""
     just selfhost-status
 
 # Start self-hosted AEF stack with Cloudflare Tunnel (recommended)
-selfhost-up-tunnel: _selfhost-preflight
+selfhost-up-tunnel: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
@@ -899,6 +902,9 @@ selfhost-up-tunnel: _selfhost-preflight
     echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    echo "🌱 Seeding data..."
+    just selfhost-seed || echo "   ⚠️ Seed skipped (data may already exist)"
     echo ""
     just selfhost-status
 
@@ -950,6 +956,26 @@ selfhost-tunnel-status:
 selfhost-restart service:
     @echo "Restarting {{service}}..."
     @{{compose_selfhost}} restart {{service}}
+
+# Seed workflows and triggers into selfhost stack
+# Runs seed scripts in a temporary dashboard container (DB ports not exposed to host)
+selfhost-seed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "🌱 Seeding workflows..."
+    {{compose_selfhost}} run --rm \
+      -v "$(pwd)/scripts:/app/scripts:ro" \
+      -v "$(pwd)/workflows:/app/workflows:ro" \
+      dashboard \
+      python /app/scripts/seed_workflows.py --dir /app/workflows/examples
+    echo "🌱 Seeding triggers..."
+    {{compose_selfhost}} run --rm \
+      -v "$(pwd)/scripts:/app/scripts:ro" \
+      -v "$(pwd)/workflows:/app/workflows:ro" \
+      dashboard \
+      python /app/scripts/seed_triggers.py
+    echo "✅ Seeding complete"
 
 # Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
 selfhost-update:
