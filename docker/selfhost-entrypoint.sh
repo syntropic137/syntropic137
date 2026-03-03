@@ -32,11 +32,13 @@ fi
 if [ -S /var/run/docker.sock ]; then
   SOCK_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null)
   if [ -n "$SOCK_GID" ] && [ "$SOCK_GID" != "0" ]; then
+    # Linux: create group matching socket GID and add aef to it
     groupadd -g "$SOCK_GID" -o docker-host 2>/dev/null || true
     usermod -aG docker-host aef 2>/dev/null || true
   else
-    chmod 660 /var/run/docker.sock 2>/dev/null || true
-    chgrp aef /var/run/docker.sock 2>/dev/null || true
+    # macOS Docker Desktop: socket owned by root:root — make world-accessible
+    # (chgrp on bind-mounted sockets doesn't persist on macOS)
+    chmod 666 /var/run/docker.sock 2>/dev/null || true
   fi
 fi
 
