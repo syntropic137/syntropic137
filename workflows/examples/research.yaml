@@ -10,10 +10,9 @@ description: |
 type: research
 classification: standard
 
-# Default repository context (can be overridden at runtime)
-repository:
-  url: https://github.com/example/repo
-  ref: main
+# No default repository — research workflows don't need repo access.
+# Override at runtime with: {"inputs": {"topic": "...", "repo_url": "https://github.com/org/repo"}}
+repository: null
 
 # Project association (optional)
 project_name: null

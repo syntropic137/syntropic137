@@ -29,11 +29,12 @@ if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
 fi
 
 # 3. Resolve 1Password secrets into env so Docker Compose sees them
+# Use set -a so eval'd variables are automatically exported.
 if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-    _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
+    _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) || true
+    if [ -n "${_op_exports:-}" ]; then
+        set -a
+        eval "$_op_exports"
+        set +a
+    fi
 fi
-
-# 4. Export agent credentials if set (for workspace container execution)
-# These may come from .env, 1Password resolution above, or the shell environment.
-if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then export CLAUDE_CODE_OAUTH_TOKEN; fi
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then export ANTHROPIC_API_KEY; fi

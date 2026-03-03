@@ -1115,10 +1115,13 @@ class WorkflowExecutionEngine:
                 from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
                 # Parse "https://github.com/owner/repo" → "owner/repo"
-                # Skip the sentinel placeholder used for workflows with no repo configured.
-                _PLACEHOLDER = "https://github.com/placeholder/not-configured"
+                # Skip sentinel/placeholder URLs used for workflows with no repo configured.
+                _SKIP_URLS = {
+                    "https://github.com/placeholder/not-configured",
+                    "https://github.com/example/repo",
+                }
                 _repo: str | None = None
-                if ctx.repo_url and ctx.repo_url != _PLACEHOLDER:
+                if ctx.repo_url and ctx.repo_url not in _SKIP_URLS:
                     _parts = ctx.repo_url.rstrip("/").split("/")
                     if len(_parts) >= 2:
                         _repo = f"{_parts[-2]}/{_parts[-1]}"
