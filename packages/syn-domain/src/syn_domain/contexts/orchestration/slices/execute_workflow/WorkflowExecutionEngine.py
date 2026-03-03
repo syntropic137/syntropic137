@@ -404,6 +404,14 @@ class WorkflowExecutionEngine:
         # 2. Initialize execution context
         # Get repo URL from aggregate's private attribute (set from workflow definition)
         repo_url = getattr(workflow, "_repository_url", None)
+
+        # Substitute template variables in repo_url using workflow inputs.
+        # Trigger-based workflows use templates like "https://github.com/{{repository}}"
+        # where {{repository}} is resolved from the webhook payload at dispatch time.
+        if repo_url and inputs:
+            for key, value in inputs.items():
+                repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+
         ctx = ExecutionContext(
             workflow_id=workflow_id,
             execution_id=execution_id or str(uuid4()),
