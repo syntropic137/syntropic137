@@ -4,65 +4,45 @@ Secrets management for AEF infrastructure.
 Cross-platform (Windows, macOS, Linux).
 
 Usage:
-    python secrets_setup.py generate  # Generate new secrets
-    python secrets_setup.py check     # Verify secrets exist
-    python secrets_setup.py rotate    # Rotate secrets (regenerate)
-    python secrets_setup.py seal      # Encrypt secrets (safe to commit .enc)
-    python secrets_setup.py unseal    # Decrypt .enc files back to plain text
+    just secrets-generate  # Generate new secrets
+    just secrets-check     # Verify secrets exist
+    just secrets-rotate    # Rotate secrets (regenerate)
+    just secrets-seal      # Encrypt secrets (safe to commit .enc)
+    just secrets-unseal    # Decrypt .enc files back to plain text
 
 Examples:
     # First-time setup
-    python infra/scripts/secrets_setup.py generate
+    just secrets-generate
 
     # Verify before deployment
-    python infra/scripts/secrets_setup.py check
+    just secrets-check
 
     # Rotate secrets (use with caution - restarts required)
-    python infra/scripts/secrets_setup.py rotate --force
+    just secrets-rotate --force
 
     # Encrypt secrets for safe storage / git commit
-    python infra/scripts/secrets_setup.py seal
+    just secrets-seal
 
     # Decrypt .enc files to restore plain-text secrets
-    python infra/scripts/secrets_setup.py unseal
+    just secrets-unseal
 """
 
 import argparse
-import contextlib
 import getpass
 import secrets
-import stat
 import subprocess
 import sys
 from pathlib import Path
 
-# Resolve secrets directory relative to this script
-SCRIPT_DIR = Path(__file__).parent.resolve()
-SECRETS_DIR = SCRIPT_DIR.parent / "docker" / "secrets"
-
-# Required secrets with their byte lengths (generates 2x chars in hex)
-REQUIRED_SECRETS = {
-    "db-password.txt": 32,  # 64 hex chars
-    "redis-password.txt": 32,  # 64 hex chars
-    "github-webhook-secret.txt": 32,  # 64 hex chars
-}
+from shared import REQUIRED_SECRETS, SECRETS_DIR, set_secure_permissions
 
 # Optional secrets that must be provided manually
-OPTIONAL_SECRETS = {
-    "github-private-key.pem": "Copy from GitHub App settings",
-}
+OPTIONAL_SECRETS: dict[str, str] = {}
 
 
 def generate_secret(length: int) -> str:
     """Generate a cryptographically secure random hex string."""
     return secrets.token_hex(length)
-
-
-def set_secure_permissions(path: Path) -> None:
-    """Set file permissions to owner read/write only (600)."""
-    # Works on Unix-like systems; silently ignored on Windows
-    with contextlib.suppress(OSError, AttributeError):
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
 
 def generate_secrets(force: bool = False) -> bool:
@@ -131,7 +111,7 @@ def check_secrets() -> bool:
 
     if not SECRETS_DIR.exists():
         print("✗ Secrets directory does not exist!")
-        print(f"  Run: python {__file__} generate")
+        print("  Run: just secrets-generate")
         return False
 
     # Check required secrets

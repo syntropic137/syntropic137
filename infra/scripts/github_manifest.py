@@ -45,7 +45,7 @@ TEMPLATE_DIR = SCRIPT_DIR / "templates"
 GITHUB_BASE = "https://github.com"
 GITHUB_API = "https://api.github.com"
 
-# AEF's required permissions and events
+# Syn137's required permissions and events
 DEFAULT_PERMISSIONS: dict[str, str] = {
     "contents": "write",
     "pull_requests": "write",
@@ -72,8 +72,9 @@ DEFAULT_EVENTS: list[str] = [
     "create",
     "delete",
     "label",
-    "installation",
-    "installation_repositories",
+    # NOTE: "installation" and "installation_repositories" are app-level
+    # events managed by GitHub automatically — including them in a manifest
+    # causes "Default events unsupported" validation errors.
 ]
 
 
@@ -122,30 +123,32 @@ def build_manifest(
     webhook_url: str | None = None,
     setup_url: str | None = None,
 ) -> dict[str, Any]:
-    """Build the GitHub App manifest JSON with AEF's required permissions.
+    """Build the GitHub App manifest JSON with Syn137's required permissions.
 
     Args:
         app_name: Name for the GitHub App (e.g. "syntropic137").
         redirect_url: Local callback URL for the OAuth redirect.
         webhook_url: Optional webhook delivery URL.  When *None* the
-            webhook is created in an inactive state.
+            webhook is created with an inactive hook (no URL required).
         setup_url: Optional setup URL for post-installation redirect.
             When provided, GitHub redirects here after installation
             with ``installation_id`` as a query parameter.
     """
     manifest: dict[str, Any] = {
         "name": app_name,
-        "url": "https://github.com/syntropic137/agentic-engineering-framework",
-        "hook_attributes": {
-            "url": webhook_url or "",
-            "active": bool(webhook_url),
-        },
+        "url": "https://github.com/syntropic137/syntropic137",
         "redirect_url": redirect_url,
-        "setup_url": setup_url or "",
         "public": False,
         "default_permissions": DEFAULT_PERMISSIONS,
         "default_events": DEFAULT_EVENTS,
     }
+    # GitHub rejects hook_attributes with a blank URL.  Only include the
+    # key when we actually have a webhook endpoint; otherwise the app is
+    # created with webhooks disabled (can be configured later).
+    if webhook_url:
+        manifest["hook_attributes"] = {"url": webhook_url, "active": True}
+    if setup_url:
+        manifest["setup_url"] = setup_url
     return manifest
 
 
@@ -630,12 +633,10 @@ def main() -> None:
     install_id = result.get("installation_id")
     if install_id:
         print(f"  Installation ID: {install_id}")
-        print("  Add this to your .env as SYN_GITHUB_INSTALLATION_ID")
+        print("  (Installation IDs are resolved dynamically at runtime — no .env entry needed)")
     else:
-        install_id = input("  Installation ID (from URL after installing): ").strip()
-        if install_id:
-            print(f"\n  Installation ID: {install_id}")
-            print("  Add this to your .env as SYN_GITHUB_INSTALLATION_ID")
+        print("  Installation ID was not auto-detected.")
+        print("  (Installation IDs are resolved dynamically at runtime — no .env entry needed)")
 
     print()
     print("  Done! Run 'python infra/scripts/secrets_setup.py check' to verify.")
