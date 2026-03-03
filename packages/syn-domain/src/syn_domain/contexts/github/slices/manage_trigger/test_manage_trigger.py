@@ -4,6 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    InMemoryTriggerQueryStore,
+)
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
+    TriggerRuleAggregate,
+)
 from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
     DeleteTriggerCommand,
 )
@@ -18,12 +24,6 @@ from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
 )
 from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import (
     ManageTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
-    RegisterTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerQueryStore,
 )
 
 
@@ -63,7 +63,6 @@ async def _index_aggregate(store: InMemoryTriggerQueryStore, aggregate) -> None:
 async def _setup(store: InMemoryTriggerQueryStore) -> tuple[str, InMemoryRepository]:
     """Register a trigger and return (trigger_id, repository)."""
     repo = InMemoryRepository()
-    handler = RegisterTriggerHandler(store=store, repository=repo)
     cmd = RegisterTriggerCommand(
         name="test-trigger",
         event="check_run.completed",
@@ -72,7 +71,9 @@ async def _setup(store: InMemoryTriggerQueryStore) -> tuple[str, InMemoryReposit
         workflow_id="ci-fix-workflow",
         created_by="test",
     )
-    aggregate = await handler.handle(cmd)
+    aggregate = TriggerRuleAggregate()
+    aggregate.register(cmd)
+    await repo.save(aggregate)
     await _index_aggregate(store, aggregate)
     return aggregate.trigger_id, repo
 

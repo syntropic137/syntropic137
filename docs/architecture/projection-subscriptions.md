@@ -10,21 +10,21 @@
 
 This diagram shows which events feed which projections in the AEF system.
 
-**Total Relationships:** 31 events → 13 projections
+**Total Relationships:** 36 events → 16 projections
 
 ```mermaid
 graph LR
     subgraph events["Key Events"]
         e1[workflow_execution_started]
         e2[workflow_completed]
-        e3[workflow_failed]
-        e4[workflow_created]
-        e5[execution_cancelled]
-        e6[execution_paused]
-        e7[session_started]
+        e3[workflow_template_created]
+        e4[phase_started]
+        e5[workflow_failed]
+        e6[phase_completed]
+        e7[trigger_fired]
         e8[session_cost_finalized]
-        e9[artifact_created]
-        e10[execution_resumed]
+        e9[session_summary]
+        e10[artifact_created]
     end
 
     subgraph projections["Projections"]
@@ -36,48 +36,52 @@ graph LR
         p6[SessionListProjection]
         p7[TokenMetricsProjection]
         p8[ToolTimelineProjection]
-        p9[WorkflowDetailProjection]
-        p10[WorkflowExecutionDetailProjection]
-        p11[WorkflowExecutionListProjection]
-        p12[WorkflowListProjection]
-        p13[WorkspaceMetricsProjection]
+        p9[TriggerHistoryProjection]
+        p10[TriggerRuleProjection]
+        p11[WorkflowDetailProjection]
+        p12[WorkflowExecutionDetailProjection]
+        p13[WorkflowExecutionListProjection]
+        p14[WorkflowListProjection]
+        p15[WorkflowPhaseMetricsProjection]
     end
 
-    e5 --> p10
-    e5 --> p11
-    e6 --> p10
-    e6 --> p11
-    e7 --> p2
-    e7 --> p6
-    e8 --> p3
-    e8 --> p5
-    e9 --> p2
-    e9 --> p1
-    e10 --> p10
-    e10 --> p11
+    e2 --> p12
+    e2 --> p13
     e2 --> p2
-    e2 --> p10
-    e2 --> p11
-    e1 --> p2
-    e1 --> p10
-    e1 --> p9
-    e1 --> p11
+    e7 --> p9
+    e7 --> p10
+    e8 --> p5
+    e8 --> p3
     e1 --> p12
-    e3 --> p2
-    e3 --> p10
+    e1 --> p11
+    e1 --> p13
+    e1 --> p14
+    e1 --> p2
+    e9 --> p5
+    e9 --> p3
+    e10 --> p1
+    e10 --> p2
     e3 --> p11
-    e4 --> p2
-    e4 --> p9
+    e3 --> p14
+    e3 --> p2
     e4 --> p12
+    e4 --> p15
+    e4 --> p2
+    e5 --> p12
+    e5 --> p13
+    e5 --> p2
+    e6 --> p12
+    e6 --> p13
+    e6 --> p15
 ```
 
 ---
 
 ## Statistics
 
-- **Events with projections:** 31
-- **Unique projections:** 13
-- **Total event-to-projection mappings:** 51
+- **Events with projections:** 36
+- **Unique projections:** 16
+- **Total event-to-projection mappings:** 59
 
 ---
 
@@ -85,16 +89,16 @@ graph LR
 
 | Event | Projections | Count |
 |-------|-------------|-------|
-| workflow_execution_started | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowDetailProjection... | 5 |
-| workflow_completed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| workflow_failed | DashboardMetricsProjection, WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 3 |
-| workflow_created | DashboardMetricsProjection, WorkflowDetailProjection, WorkflowListProjection | 3 |
-| execution_cancelled | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| execution_paused | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
-| session_started | DashboardMetricsProjection, SessionListProjection | 2 |
-| session_cost_finalized | ExecutionCostProjection, SessionCostProjection | 2 |
-| artifact_created | DashboardMetricsProjection, ArtifactListProjection | 2 |
-| execution_resumed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection | 2 |
+| workflow_execution_started | WorkflowExecutionDetailProjection, WorkflowDetailProjection, WorkflowExecutionListProjection... | 5 |
+| workflow_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, DashboardMetricsProjection | 3 |
+| workflow_template_created | WorkflowDetailProjection, WorkflowListProjection, DashboardMetricsProjection | 3 |
+| phase_started | WorkflowExecutionDetailProjection, WorkflowPhaseMetricsProjection, DashboardMetricsProjection | 3 |
+| workflow_failed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, DashboardMetricsProjection | 3 |
+| phase_completed | WorkflowExecutionDetailProjection, WorkflowExecutionListProjection, WorkflowPhaseMetricsProjection | 3 |
+| trigger_fired | TriggerHistoryProjection, TriggerRuleProjection | 2 |
+| session_cost_finalized | SessionCostProjection, ExecutionCostProjection | 2 |
+| session_summary | SessionCostProjection, ExecutionCostProjection | 2 |
+| artifact_created | ArtifactListProjection, DashboardMetricsProjection | 2 |
 
 ---
 

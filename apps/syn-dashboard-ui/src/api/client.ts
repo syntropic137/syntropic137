@@ -15,7 +15,7 @@ import type {
   WorkflowResponse,
 } from '../types'
 
-const API_BASE = '/api'
+export const API_BASE = '/api/v1'
 
 // =============================================================================
 // API CLIENT

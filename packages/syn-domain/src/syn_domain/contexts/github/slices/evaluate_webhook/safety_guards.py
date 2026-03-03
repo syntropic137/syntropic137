@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
+    from syn_domain.contexts.github._shared.trigger_query_store import (
         TriggerQueryStore,
     )
 

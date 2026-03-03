@@ -3,10 +3,10 @@
 This guide covers deploying AEF's isolated workspace architecture in production.
 It covers single-server deployments (home lab, bare metal) and scaled deployments.
 
-> **📦 Infrastructure as Code**: For turn-key deployment with Docker Compose and Cloudflare Tunnel, see the [Homelab Deployment Guide](../../infra/docs/homelab-deployment.md) in the `infra/` directory. The IaC approach provides:
+> **📦 Infrastructure as Code**: For turn-key deployment with Docker Compose and Cloudflare Tunnel, see the [Self-Host Deployment Guide](../../infra/docs/selfhost-deployment.md) in the `infra/` directory. The IaC approach provides:
 > - Pre-configured Docker Compose stack with all services
 > - Cloudflare Tunnel for secure external access
-> - Just recipes for one-command deployment (`just homelab-up`)
+> - Just recipes for one-command deployment (`just selfhost-up`)
 > - Secrets management scripts
 
 ## Deployment Options

@@ -9,6 +9,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.github._shared.trigger_query_store import (
+        TriggerQueryStore,
+    )
     from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import (
         DeleteTriggerCommand,
     )
@@ -17,9 +20,6 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import (
         ResumeTriggerCommand,
-    )
-    from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-        TriggerQueryStore,
     )
 
 logger = logging.getLogger(__name__)

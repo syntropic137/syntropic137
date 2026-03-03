@@ -295,31 +295,34 @@ async def create_conversation_storage(
 ) -> MinioConversationStorage:
     """Create and initialize a MinioConversationStorage.
 
-    Uses environment variables if parameters not provided:
-    - SYN_STORAGE_MINIO_ENDPOINT
-    - SYN_STORAGE_MINIO_ACCESS_KEY
-    - SYN_STORAGE_MINIO_SECRET_KEY
-    - SYN_DATABASE_URL
+    Uses Pydantic Settings (StorageSettings + Settings) for defaults.
 
     Args:
-        endpoint: MinIO endpoint (default: from env)
-        access_key: Access key (default: from env)
-        secret_key: Secret key (default: from env)
-        db_url: Database URL (default: from env)
+        endpoint: MinIO endpoint (default: from settings)
+        access_key: Access key (default: from settings)
+        secret_key: Secret key (default: from settings)
+        db_url: Database URL (default: from settings)
 
     Returns:
         Initialized MinioConversationStorage
     """
-    import os
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+    storage_settings = settings.storage
 
     storage = MinioConversationStorage(
-        endpoint=endpoint or os.environ.get("SYN_STORAGE_MINIO_ENDPOINT", "localhost:9000"),
-        access_key=access_key or os.environ.get("SYN_STORAGE_MINIO_ACCESS_KEY", "minioadmin"),
-        secret_key=secret_key or os.environ.get("SYN_STORAGE_MINIO_SECRET_KEY", "minioadmin"),
+        endpoint=endpoint or storage_settings.minio_endpoint or "localhost:9000",
+        access_key=access_key or storage_settings.minio_access_key or "minioadmin",
+        secret_key=secret_key
+        or storage_settings.minio_secret_key.get_secret_value()
+        or "minioadmin",
         db_url=db_url
-        or os.environ.get(
-            "SYN_OBSERVABILITY_DB_URL", "postgresql://syn:syn_dev_password@localhost:5432/syn"
+        or str(
+            settings.syn_observability_db_url
+            or "postgresql://syn:syn_dev_password@localhost:5432/syn"
         ),
+        secure=storage_settings.minio_secure,
     )
     await storage.initialize()
     return storage

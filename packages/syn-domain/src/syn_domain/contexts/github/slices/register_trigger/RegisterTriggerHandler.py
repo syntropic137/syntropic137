@@ -13,11 +13,11 @@ from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate im
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.github._shared.trigger_query_store import (
+        TriggerQueryStore,
+    )
     from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
         RegisterTriggerCommand,
-    )
-    from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-        TriggerQueryStore,
     )
 
 logger = logging.getLogger(__name__)

@@ -200,7 +200,7 @@ agentic-engineering-framework/
 | Pattern | Implementation |
 |---------|---------------|
 | Event Sourcing | Commands → Aggregates → Events |
-| CQRS | Commands (12) → Events (31) → Projections (13) |
+| CQRS | Commands (17) → Events (35) → Projections (17) |
 | Event Processing | Processor/Todo pattern (no complex sagas) |
 | Architecture | Vertical Slice Architecture (VSA) |
 | Logging | Centralized DI logger, structured, detailed |

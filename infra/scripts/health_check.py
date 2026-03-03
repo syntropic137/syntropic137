@@ -8,6 +8,7 @@ Usage:
     python health_check.py --wait       # Wait for all services to be ready
     python health_check.py --timeout 60 # Set timeout for --wait (default: 120s)
     python health_check.py --json       # Output as JSON
+    python health_check.py --docker     # Use Docker health status (default when ports not exposed)
 
 Examples:
     # Quick status check
@@ -22,11 +23,24 @@ Examples:
 
 import argparse
 import json
+import os
 import socket
+import subprocess
 import sys
 import time
 import urllib.request
 from dataclasses import asdict, dataclass
+
+from shared import (
+    DEFAULT_PROJECT_NAME,
+    PORT_COLLECTOR,
+    PORT_DASHBOARD,
+    PORT_EVENT_STORE,
+    PORT_MINIO,
+    PORT_POSTGRES,
+    PORT_REDIS,
+    PORT_UI,
+)
 
 
 @dataclass
@@ -39,6 +53,7 @@ class Service:
     health_path: str | None = None
     protocol: str = "http"
     description: str = ""
+    container_name: str = ""
 
 
 @dataclass
@@ -51,64 +66,89 @@ class ServiceStatus:
     response_time_ms: float | None = None
 
 
-# Default services to check (localhost for local checks)
-SERVICES = [
-    Service(
-        name="PostgreSQL",
-        host="localhost",
-        port=5432,
-        description="Database",
-    ),
-    Service(
-        name="Event Store",
-        host="localhost",
-        port=50051,
-        description="Event sourcing gRPC service",
-    ),
-    Service(
-        name="Collector",
-        host="localhost",
-        port=8080,
-        health_path="/health",
-        description="Event collection HTTP API",
-    ),
-    Service(
-        name="Dashboard",
-        host="localhost",
-        port=8000,
-        health_path="/health",
-        description="AEF Dashboard API",
-    ),
-    Service(
-        name="UI",
-        host="localhost",
-        port=80,
-        health_path="/health",
-        description="AEF Dashboard UI",
-    ),
-    Service(
-        name="MinIO",
-        host="localhost",
-        port=9000,
-        health_path="/minio/health/live",
-        description="Object storage",
-    ),
-    Service(
-        name="Redis",
-        host="localhost",
-        port=6379,
-        description="Cache and message broker",
-    ),
-]
+def _container_prefix() -> str:
+    """Derive container name prefix from COMPOSE_PROJECT_NAME.
+
+    Matches the ``container_name:`` pattern in docker-compose.selfhost.yaml:
+    ``${COMPOSE_PROJECT_NAME:-syntropic137}-<service>``.
+
+    Checks (in order): env var → infra/.env → default.
+    """
+    from shared import ENV_COMPOSE_PROJECT_NAME, ENV_FILE, parse_env_file
+
+    project = os.environ.get(ENV_COMPOSE_PROJECT_NAME, "")
+    if not project:
+        project = parse_env_file(ENV_FILE).get(ENV_COMPOSE_PROJECT_NAME, DEFAULT_PROJECT_NAME)
+    return project + "-"
+
+
+def _build_services() -> list[Service]:
+    """Build the service list with the current container name prefix."""
+    prefix = _container_prefix()
+    return [
+        Service(
+            name="PostgreSQL",
+            host="localhost",
+            port=PORT_POSTGRES,
+            description="Database",
+            container_name=f"{prefix}timescaledb",
+        ),
+        Service(
+            name="Event Store",
+            host="localhost",
+            port=PORT_EVENT_STORE,
+            description="Event sourcing gRPC service",
+            container_name=f"{prefix}event-store",
+        ),
+        Service(
+            name="Collector",
+            host="localhost",
+            port=PORT_COLLECTOR,
+            health_path="/health",
+            description="Event collection HTTP API",
+            container_name=f"{prefix}collector",
+        ),
+        Service(
+            name="Dashboard",
+            host="localhost",
+            port=PORT_DASHBOARD,
+            health_path="/health",
+            description="AEF Dashboard API",
+            container_name=f"{prefix}dashboard",
+        ),
+        Service(
+            name="UI",
+            host="localhost",
+            port=PORT_UI,
+            health_path="/health",
+            description="AEF Dashboard UI",
+            container_name=f"{prefix}ui",
+        ),
+        Service(
+            name="MinIO",
+            host="localhost",
+            port=PORT_MINIO,
+            health_path="/minio/health/live",
+            description="Object storage",
+            container_name=f"{prefix}minio",
+        ),
+        Service(
+            name="Redis",
+            host="localhost",
+            port=PORT_REDIS,
+            description="Cache and message broker",
+            container_name=f"{prefix}redis",
+        ),
+    ]
+
+
+# Built lazily via _build_services() — but provide a module-level reference
+# for backward compatibility with code that imports SERVICES directly.
+SERVICES = _build_services()
 
 
 def check_port(host: str, port: int, timeout: float = 2.0) -> tuple[bool, float]:
-    """
-    Check if a TCP port is open.
-
-    Returns:
-        Tuple of (success, response_time_ms)
-    """
+    """Check if a TCP port is open. Returns (success, response_time_ms)."""
     start = time.time()
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -123,12 +163,7 @@ def check_port(host: str, port: int, timeout: float = 2.0) -> tuple[bool, float]
 
 
 def check_http(host: str, port: int, path: str, timeout: float = 5.0) -> tuple[bool, float, str]:
-    """
-    Check if an HTTP endpoint returns 200.
-
-    Returns:
-        Tuple of (success, response_time_ms, message)
-    """
+    """Check if an HTTP endpoint returns 200. Returns (success, response_time_ms, message)."""
     start = time.time()
     try:
         url = f"http://{host}:{port}{path}"
@@ -147,9 +182,70 @@ def check_http(host: str, port: int, path: str, timeout: float = 5.0) -> tuple[b
         return False, elapsed, str(e)
 
 
+# ---------------------------------------------------------------------------
+# Docker-native health checking
+# ---------------------------------------------------------------------------
+
+
+def _docker_health_statuses() -> dict[str, str]:
+    """Query Docker for container health status. Returns {container_name: status}."""
+    try:
+        result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}\t{{.Status}}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return {}
+    if result.returncode != 0:
+        return {}
+    statuses: dict[str, str] = {}
+    for line in result.stdout.strip().splitlines():
+        parts = line.split("\t", 1)
+        if len(parts) == 2:
+            statuses[parts[0]] = parts[1]
+    return statuses
+
+
+def check_service_docker(service: Service, docker_statuses: dict[str, str]) -> ServiceStatus:
+    """Check a service using Docker container health status."""
+    if not service.container_name:
+        return ServiceStatus(
+            name=service.name, healthy=False, message="No container name configured"
+        )
+
+    status_str = docker_statuses.get(service.container_name, "")
+    if not status_str:
+        return ServiceStatus(name=service.name, healthy=False, message="Container not running")
+
+    if "(healthy)" in status_str:
+        return ServiceStatus(name=service.name, healthy=True, message="Docker healthy")
+    if "(health: starting)" in status_str:
+        return ServiceStatus(name=service.name, healthy=False, message="Starting")
+    if "(unhealthy)" in status_str:
+        return ServiceStatus(name=service.name, healthy=False, message="Docker unhealthy")
+    # Container running but no healthcheck defined — treat as healthy
+    if status_str.startswith("Up"):
+        return ServiceStatus(name=service.name, healthy=True, message="Running (no healthcheck)")
+
+    return ServiceStatus(name=service.name, healthy=False, message=f"Unknown: {status_str}")
+
+
+def check_all_docker() -> list[ServiceStatus]:
+    """Check all services via Docker container health."""
+    statuses = _docker_health_statuses()
+    return [check_service_docker(svc, statuses) for svc in SERVICES]
+
+
+# ---------------------------------------------------------------------------
+# Localhost port-based health checking
+# ---------------------------------------------------------------------------
+
+
 def check_service(service: Service) -> ServiceStatus:
-    """Check if a service is healthy."""
-    # First check if port is open
+    """Check if a service is healthy via localhost port probing."""
     port_ok, port_time = check_port(service.host, service.port)
 
     if not port_ok:
@@ -160,7 +256,6 @@ def check_service(service: Service) -> ServiceStatus:
             response_time_ms=port_time,
         )
 
-    # If service has a health endpoint, check it
     if service.health_path:
         http_ok, http_time, msg = check_http(service.host, service.port, service.health_path)
         return ServiceStatus(
@@ -170,7 +265,6 @@ def check_service(service: Service) -> ServiceStatus:
             response_time_ms=http_time,
         )
 
-    # Port is open and no health check needed
     return ServiceStatus(
         name=service.name,
         healthy=True,
@@ -180,8 +274,51 @@ def check_service(service: Service) -> ServiceStatus:
 
 
 def check_all() -> list[ServiceStatus]:
-    """Check all services and return status list."""
+    """Check all services via localhost port probing."""
     return [check_service(svc) for svc in SERVICES]
+
+
+# ---------------------------------------------------------------------------
+# Auto-detection: use Docker health when ports aren't host-exposed
+# ---------------------------------------------------------------------------
+
+
+def _should_use_docker() -> bool:
+    """Return True if Docker health checking is preferred.
+
+    Heuristic: if the majority of service ports aren't reachable on
+    localhost but Docker containers exist, use Docker health status.
+    """
+    docker_statuses = _docker_health_statuses()
+    if not docker_statuses:
+        return False
+    # Check if any of our containers are running
+    our_containers = [s.container_name for s in SERVICES if s.container_name]
+    running = sum(1 for c in our_containers if c in docker_statuses)
+    if running == 0:
+        return False
+    # Quick port probe — if most ports are closed, prefer Docker
+    closed = 0
+    for svc in SERVICES:
+        ok, _ = check_port(svc.host, svc.port, timeout=0.5)
+        if not ok:
+            closed += 1
+    return closed > len(SERVICES) // 2
+
+
+def smart_check_all(force_docker: bool = False) -> tuple[list[ServiceStatus], str]:
+    """Check all services, auto-selecting the best method.
+
+    Returns (statuses, method) where method is "docker" or "localhost".
+    """
+    if force_docker or _should_use_docker():
+        return check_all_docker(), "docker"
+    return check_all(), "localhost"
+
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
 
 
 def print_status(statuses: list[ServiceStatus], as_json: bool = False) -> None:
@@ -194,33 +331,30 @@ def print_status(statuses: list[ServiceStatus], as_json: bool = False) -> None:
     print("-" * 60)
 
     for status in statuses:
-        symbol = "✓" if status.healthy else "✗"
+        symbol = "\u2713" if status.healthy else "\u2717"
         status_text = "healthy" if status.healthy else "unhealthy"
         time_str = f"{status.response_time_ms:.0f}ms" if status.response_time_ms else "N/A"
         print(f"{status.name:<15} {symbol} {status_text:<8} {time_str:<12} {status.message}")
 
 
-def wait_for_services(timeout: int = 120, interval: int = 2) -> bool:
-    """
-    Wait for all services to be ready.
+def wait_for_services(timeout: int = 120, interval: int = 2, force_docker: bool = False) -> bool:
+    """Wait for all services to be ready.
 
-    Args:
-        timeout: Maximum time to wait in seconds
-        interval: Time between checks in seconds
-
-    Returns:
-        True if all services became ready within timeout
+    Returns True if all services became ready within timeout.
     """
     start = time.time()
     attempt = 0
 
     while time.time() - start < timeout:
         attempt += 1
-        statuses = check_all()
+        statuses, method = smart_check_all(force_docker=force_docker)
         all_healthy = all(s.healthy for s in statuses)
 
         if all_healthy:
-            print(f"\n✓ All services ready after {attempt} attempts ({time.time() - start:.1f}s)")
+            print(
+                f"\n\u2713 All services ready after {attempt} attempts "
+                f"({time.time() - start:.1f}s, via {method})"
+            )
             print_status(statuses)
             return True
 
@@ -230,8 +364,9 @@ def wait_for_services(timeout: int = 120, interval: int = 2) -> bool:
 
         time.sleep(interval)
 
-    print(f"\n✗ Timeout after {timeout}s - some services not ready")
-    print_status(check_all())
+    print(f"\n\u2717 Timeout after {timeout}s - some services not ready")
+    statuses, _ = smart_check_all(force_docker=force_docker)
+    print_status(statuses)
     return False
 
 
@@ -245,6 +380,7 @@ Examples:
   %(prog)s --wait             Wait for services to be ready
   %(prog)s --wait --timeout 60  Wait up to 60 seconds
   %(prog)s --json             Output as JSON
+  %(prog)s --docker           Force Docker health check mode
         """,
     )
     parser.add_argument(
@@ -263,6 +399,11 @@ Examples:
         action="store_true",
         help="Output results as JSON",
     )
+    parser.add_argument(
+        "--docker",
+        action="store_true",
+        help="Use Docker container health status instead of localhost port probing",
+    )
     args = parser.parse_args()
 
     if not args.json:
@@ -272,18 +413,20 @@ Examples:
         print()
 
     if args.wait:
-        success = wait_for_services(args.timeout)
+        success = wait_for_services(args.timeout, force_docker=args.docker)
     else:
-        statuses = check_all()
+        statuses, method = smart_check_all(force_docker=args.docker)
+        if not args.json:
+            print(f"(checking via {method})\n")
         print_status(statuses, as_json=args.json)
         success = all(s.healthy for s in statuses)
 
         if not args.json:
             print()
             if success:
-                print("✓ All services healthy!")
+                print("\u2713 All services healthy!")
             else:
-                print("✗ Some services unhealthy")
+                print("\u2717 Some services unhealthy")
 
     sys.exit(0 if success else 1)
 

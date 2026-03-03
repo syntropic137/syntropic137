@@ -32,22 +32,28 @@ logger = logging.getLogger(__name__)
 # Module-level references for lifecycle management
 _subscription_service: Any = None
 _workflow_dispatcher: Any = None
+_degraded_reasons: list[str] = []
 
 
 async def startup(
     skip_validation: bool = False,
     auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[None, LifecycleError]:
+) -> Result[dict, LifecycleError]:
     """Initialize the application: connect to event store, start subscriptions.
+
+    Critical failures (event store, DB) abort startup.
+    Degraded failures (GitHub, Anthropic, Redis, subscriptions) warn and continue.
 
     Args:
         skip_validation: Skip credential validation (for test mode).
         auth: Optional authentication context.
 
     Returns:
-        Ok(None) on success, Err(LifecycleError) on failure.
+        Ok({"mode": "full"|"degraded", ...}) on success,
+        Err(LifecycleError) on critical failure.
     """
-    global _subscription_service, _workflow_dispatcher
+    global _subscription_service, _workflow_dispatcher, _degraded_reasons
+    _degraded_reasons = []
 
     try:
         from syn_shared.settings import get_settings
@@ -56,30 +62,38 @@ async def startup(
 
         # Validate credentials (unless skipped or in test/offline mode)
         if not skip_validation and not settings.uses_in_memory_stores:
-            result = validate_credentials()
-            if isinstance(result, Err):
-                return result
+            validate_credentials()
 
         # Skip subscription service in test environment
         if settings.is_test:
-            return Ok(None)
+            return Ok({"mode": "full"})
 
         # Offline mode: seed demo data and return (no Docker/external services)
         if settings.is_offline:
             await _seed_offline_data()
-            return Ok(None)
+            return Ok({"mode": "full"})
 
-        # Initialize AgentEventStore
+        # ── CRITICAL: event store + DB — abort if unreachable ──────────
         try:
             event_store = get_event_store_instance()
             await event_store.initialize()
-        except Exception:
-            logger.exception("Failed to initialize AgentEventStore")
+        except Exception as e:
+            logger.exception("AgentEventStore initialization failed")
+            return Err(
+                LifecycleError.CONNECTION_FAILED,
+                message=f"AgentEventStore initialization failed: {e}",
+            )
 
-        # Connect to event store
-        await ensure_connected()
+        try:
+            await ensure_connected()
+        except Exception as e:
+            logger.exception("Event store connection failed")
+            return Err(
+                LifecycleError.CONNECTION_FAILED,
+                message=f"Event store connection failed: {e}",
+            )
 
-        # Start subscription coordinator with workflow dispatcher
+        # ── DEGRADED: subscription coordinator ────────────────────────
         try:
             realtime = get_realtime()
             _workflow_dispatcher = await get_workflow_dispatcher()
@@ -89,14 +103,17 @@ async def startup(
             )
             await _subscription_service.start()
         except Exception:
-            logger.exception("Failed to start subscription coordinator")
+            logger.exception("Failed to start subscription coordinator (degraded mode)")
+            _degraded_reasons.append("subscription_coordinator")
 
         # Reconcile orphaned sessions and containers from any previous run
         await _reconcile_orphaned_sessions()
         await _cleanup_orphaned_containers()
 
-        return Ok(None)
+        mode = "degraded" if _degraded_reasons else "full"
+        return Ok({"mode": mode, "degraded_reasons": _degraded_reasons})
     except Exception as e:
+        logger.exception("Unexpected startup failure")
         return Err(LifecycleError.CONNECTION_FAILED, message=str(e))
 
 
@@ -140,9 +157,13 @@ async def health_check(
         auth: Optional authentication context.
 
     Returns:
-        Ok(dict) with health status.
+        Ok(dict) with health status including mode (full/degraded).
     """
-    response: dict = {"status": "healthy"}
+    mode = "degraded" if _degraded_reasons else "full"
+    response: dict = {"status": "healthy", "mode": mode}
+
+    if _degraded_reasons:
+        response["degraded_reasons"] = _degraded_reasons
 
     if _subscription_service is not None:
         try:
@@ -155,47 +176,43 @@ async def health_check(
 
 def validate_credentials(
     auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[None, LifecycleError]:
-    """Validate required API keys and GitHub App configuration.
+) -> None:
+    """Validate API keys and GitHub App configuration (degraded, not critical).
 
     Exports ANTHROPIC_API_KEY to os.environ for agent adapters.
+    Missing credentials add to _degraded_reasons but never abort startup.
 
     Args:
         auth: Optional authentication context.
-
-    Returns:
-        Ok(None) on success, Err(LifecycleError) on failure.
     """
+    global _degraded_reasons
     from syn_shared.settings import get_settings
 
     settings = get_settings()
 
-    # Validate Anthropic API key
+    # Export Anthropic API key if available (needed for agent execution, not dashboard)
     api_key = settings.anthropic_api_key
     if api_key:
         os.environ["ANTHROPIC_API_KEY"] = api_key.get_secret_value()
-    elif not settings.is_test and settings.app_environment != "development":
-        return Err(
-            LifecycleError.VALIDATION_FAILED,
-            message="ANTHROPIC_API_KEY is required",
+    elif not settings.is_test:
+        logger.warning(
+            "ANTHROPIC_API_KEY not configured — agent execution disabled. "
+            "Set it in .env or 1Password to enable workflow runs."
         )
+        _degraded_reasons.append("anthropic_api_key")
 
-    # Validate GitHub App
+    # Validate GitHub App (warn-only — dashboard should work without it)
     try:
         github = get_github_settings()
-        if (
-            not github.is_configured
-            and not settings.is_test
-            and settings.app_environment == "development"
-        ):
-            return Err(
-                LifecycleError.VALIDATION_FAILED,
-                message="GitHub App is REQUIRED but not configured",
+        if not github.is_configured and not settings.is_test:
+            logger.warning(
+                "GitHub App not configured — webhook triggers disabled. "
+                "Run 'just setup --stage configure_github_app' to configure."
             )
+            _degraded_reasons.append("github_app")
     except Exception:
         logger.exception("Failed to validate GitHub App configuration")
-
-    return Ok(None)
+        _degraded_reasons.append("github_app")
 
 
 async def _reconcile_orphaned_sessions() -> None:

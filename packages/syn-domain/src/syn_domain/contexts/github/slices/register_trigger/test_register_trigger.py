@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    InMemoryTriggerQueryStore,
+)
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
     TriggerStatus,
 )
@@ -12,9 +15,6 @@ from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
 )
 from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
     RegisterTriggerHandler,
-)
-from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-    InMemoryTriggerQueryStore,
 )
 
 

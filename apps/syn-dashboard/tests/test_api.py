@@ -265,7 +265,9 @@ class TestRootEndpoints:
         """Test health check endpoint."""
         response = await client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "healthy"}
+        data = response.json()
+        assert data["status"] == "healthy"
+        assert data["mode"] in ("full", "degraded")
 
 
 # =============================================================================
@@ -279,7 +281,7 @@ class TestWorkflowEndpoints:
     @pytest.mark.asyncio
     async def test_list_workflows_empty(self, client: httpx.AsyncClient) -> None:
         """Test listing workflows when none exist."""
-        response = await client.get("/api/workflows")
+        response = await client.get("/workflows")
         assert response.status_code == 200
         data = response.json()
         assert data["workflows"] == []
@@ -291,7 +293,7 @@ class TestWorkflowEndpoints:
         await create_test_workflow("wf-1")
         await create_test_workflow("wf-2")
 
-        response = await client.get("/api/workflows")
+        response = await client.get("/workflows")
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 2
@@ -303,7 +305,7 @@ class TestWorkflowEndpoints:
         for i in range(5):
             await create_test_workflow(f"wf-{i}")
 
-        response = await client.get("/api/workflows?page=1&page_size=2")
+        response = await client.get("/workflows?page=1&page_size=2")
         assert response.status_code == 200
         data = response.json()
         assert data["total"] == 5
@@ -316,7 +318,7 @@ class TestWorkflowEndpoints:
         """Test getting a single workflow."""
         await create_test_workflow("test-wf-1")
 
-        response = await client.get("/api/workflows/test-wf-1")
+        response = await client.get("/workflows/test-wf-1")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "test-wf-1"
@@ -326,7 +328,7 @@ class TestWorkflowEndpoints:
     @pytest.mark.asyncio
     async def test_get_workflow_not_found(self, client: httpx.AsyncClient) -> None:
         """Test getting non-existent workflow."""
-        response = await client.get("/api/workflows/nonexistent")
+        response = await client.get("/workflows/nonexistent")
         assert response.status_code == 404
 
     @pytest.mark.asyncio
@@ -337,7 +339,7 @@ class TestWorkflowEndpoints:
         await create_test_session("sess-1", "test-wf-1", "phase-1")
         await create_test_session("sess-2", "test-wf-1", "phase-2")
 
-        response = await client.get("/api/workflows/test-wf-1/history")
+        response = await client.get("/workflows/test-wf-1/history")
         assert response.status_code == 200
         data = response.json()
         assert data["workflow_id"] == "test-wf-1"
@@ -357,7 +359,7 @@ class TestSessionEndpoints:
     @pytest.mark.asyncio
     async def test_list_sessions_empty(self, client: httpx.AsyncClient) -> None:
         """Test listing sessions when none exist."""
-        response = await client.get("/api/sessions")
+        response = await client.get("/sessions")
         assert response.status_code == 200
         assert response.json() == []
 
@@ -368,7 +370,7 @@ class TestSessionEndpoints:
         await create_test_session("sess-1", "wf-1", "phase-1")
         await create_test_session("sess-2", "wf-1", "phase-2")
 
-        response = await client.get("/api/sessions")
+        response = await client.get("/sessions")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
@@ -381,7 +383,7 @@ class TestSessionEndpoints:
         await create_test_session("sess-1", "wf-1", "phase-1")
         await create_test_session("sess-2", "wf-2", "phase-1")
 
-        response = await client.get("/api/sessions?workflow_id=wf-1")
+        response = await client.get("/sessions?workflow_id=wf-1")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
@@ -394,7 +396,7 @@ class TestSessionEndpoints:
         await create_test_workflow("wf-1")
         await create_test_session("sess-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/sessions/sess-1")
+        response = await client.get("/sessions/sess-1")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "sess-1"
@@ -405,7 +407,7 @@ class TestSessionEndpoints:
     @pytest.mark.asyncio
     async def test_get_session_not_found(self, client: httpx.AsyncClient) -> None:
         """Test getting non-existent session."""
-        response = await client.get("/api/sessions/nonexistent")
+        response = await client.get("/sessions/nonexistent")
         assert response.status_code == 404
 
 
@@ -420,7 +422,7 @@ class TestArtifactEndpoints:
     @pytest.mark.asyncio
     async def test_list_artifacts_empty(self, client: httpx.AsyncClient) -> None:
         """Test listing artifacts when none exist."""
-        response = await client.get("/api/artifacts")
+        response = await client.get("/artifacts")
         assert response.status_code == 200
         assert response.json() == []
 
@@ -431,7 +433,7 @@ class TestArtifactEndpoints:
         await create_test_artifact("art-1", "wf-1", "phase-1")
         await create_test_artifact("art-2", "wf-1", "phase-2")
 
-        response = await client.get("/api/artifacts")
+        response = await client.get("/artifacts")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 2
@@ -444,7 +446,7 @@ class TestArtifactEndpoints:
         await create_test_artifact("art-1", "wf-1", "phase-1")
         await create_test_artifact("art-2", "wf-2", "phase-1")
 
-        response = await client.get("/api/artifacts?workflow_id=wf-1")
+        response = await client.get("/artifacts?workflow_id=wf-1")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
@@ -457,7 +459,7 @@ class TestArtifactEndpoints:
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
         # Explicitly request without content (default is now True in this branch)
-        response = await client.get("/api/artifacts/art-1?include_content=false")
+        response = await client.get("/artifacts/art-1?include_content=false")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "art-1"
@@ -470,7 +472,7 @@ class TestArtifactEndpoints:
         await create_test_workflow("wf-1")
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/artifacts/art-1?include_content=true")
+        response = await client.get("/artifacts/art-1?include_content=true")
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == "art-1"
@@ -483,7 +485,7 @@ class TestArtifactEndpoints:
         await create_test_workflow("wf-1")
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/artifacts/art-1/content")
+        response = await client.get("/artifacts/art-1/content")
         assert response.status_code == 200
         data = response.json()
         assert data["artifact_id"] == "art-1"
@@ -492,7 +494,7 @@ class TestArtifactEndpoints:
     @pytest.mark.asyncio
     async def test_get_artifact_not_found(self, client: httpx.AsyncClient) -> None:
         """Test getting non-existent artifact."""
-        response = await client.get("/api/artifacts/nonexistent")
+        response = await client.get("/artifacts/nonexistent")
         assert response.status_code == 404
 
 
@@ -507,7 +509,7 @@ class TestMetricsEndpoints:
     @pytest.mark.asyncio
     async def test_metrics_empty(self, client: httpx.AsyncClient) -> None:
         """Test metrics when no data exists."""
-        response = await client.get("/api/metrics")
+        response = await client.get("/metrics")
         assert response.status_code == 200
         data = response.json()
         assert data["total_workflows"] == 0
@@ -521,7 +523,7 @@ class TestMetricsEndpoints:
         await create_test_session("sess-1", "wf-1", "phase-1")
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/metrics")
+        response = await client.get("/metrics")
         assert response.status_code == 200
         data = response.json()
         assert data["total_workflows"] == 1
@@ -540,7 +542,7 @@ class TestMetricsEndpoints:
         await create_test_session("sess-2", "wf-1", "phase-2")
         await create_test_artifact("art-1", "wf-1", "phase-1")
 
-        response = await client.get("/api/metrics?workflow_id=wf-1")
+        response = await client.get("/metrics?workflow_id=wf-1")
         assert response.status_code == 200
         data = response.json()
         assert data["total_workflows"] == 1
@@ -579,7 +581,7 @@ class TestExecutionEndpoints:
             },
         )
 
-        response = await client.get(f"/api/workflows/{workflow_id}/runs")
+        response = await client.get(f"/workflows/{workflow_id}/runs")
         assert response.status_code == 200
         data = response.json()
         assert "runs" in data
@@ -591,13 +593,13 @@ class TestExecutionEndpoints:
     @pytest.mark.asyncio
     async def test_list_workflow_runs_not_found(self, client: httpx.AsyncClient) -> None:
         """REGRESSION: GET /api/workflows/{id}/runs returns 404 for unknown workflow."""
-        response = await client.get("/api/workflows/nonexistent-workflow/runs")
+        response = await client.get("/workflows/nonexistent-workflow/runs")
         assert response.status_code == 404
 
     @pytest.mark.asyncio
     async def test_get_execution_not_found(self, client: httpx.AsyncClient) -> None:
         """REGRESSION: GET /api/executions/{id} returns 404 for unknown execution."""
-        response = await client.get("/api/executions/nonexistent-execution")
+        response = await client.get("/executions/nonexistent-execution")
         assert response.status_code == 404
         assert "not found" in response.json()["detail"].lower()
 
@@ -625,7 +627,7 @@ class TestExecutionEndpoints:
             },
         )
 
-        response = await client.get("/api/sessions")
+        response = await client.get("/sessions")
         assert response.status_code == 200
         data = response.json()
         assert len(data) > 0

@@ -4,6 +4,9 @@
 #
 # Adds: container names, ports, persistent volumes, restart policies
 # See: ADR-034 - Test Infrastructure Architecture
+#
+# Project name "syn-dev" avoids clashing with the selfhost stack ("syntropic137").
+name: syn-dev
 
 services:
   timescaledb:
@@ -29,6 +32,9 @@ services:
 
   dashboard:
     container_name: syn-dashboard
+    build:
+      args:
+        INCLUDE_DOCKER_CLI: "1"
     ports:
       - "8000:8000"
     restart: unless-stopped
