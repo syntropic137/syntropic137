@@ -136,19 +136,28 @@ async def verify_and_process_webhook(
 
     await ensure_connected()
 
-    # Verify signature if webhook secret is configured
+    # Verify webhook signature — fail closed on any error
     try:
         github_settings = get_github_settings()
         secret = github_settings.webhook_secret.get_secret_value()
 
-        if secret and signature:
-            expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(expected, signature):
-                return Err(GitHubError.INVALID_SIGNATURE, message="Invalid webhook signature")
-        elif secret and not signature:
+        if not secret:
+            return Err(
+                GitHubError.INVALID_SIGNATURE,
+                message="Webhook secret not configured — rejecting unverified payload",
+            )
+        if not signature:
             return Err(GitHubError.INVALID_SIGNATURE, message="Missing webhook signature")
+
+        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            return Err(GitHubError.INVALID_SIGNATURE, message="Invalid webhook signature")
     except Exception:
         logger.exception("Failed to verify webhook signature")
+        return Err(
+            GitHubError.INVALID_SIGNATURE,
+            message="Signature verification failed — rejecting payload",
+        )
 
     # Parse payload
     try:
