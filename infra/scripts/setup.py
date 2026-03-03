@@ -58,16 +58,12 @@ import sys
 import tempfile
 import urllib.error
 import webbrowser
+from dataclasses import dataclass
 from getpass import getpass
 from pathlib import Path
-from dataclasses import dataclass, field
 
 from shared import (
-    COMPOSE_BASE,
-    COMPOSE_CLOUDFLARE,
     COMPOSE_SELFHOST,
-    SCRIPTS_DIR,
-    DOCKER_DIR,
     ENV_APP_ENVIRONMENT,
     ENV_CLOUDFLARE_TUNNEL_TOKEN,
     ENV_DEPLOY_ENV,
@@ -83,12 +79,11 @@ from shared import (
     INFRA_DIR,
     PORT_UI,
     PROJECT_ROOT,
+    SCRIPTS_DIR,
     SECRETS_DIR,
     compose_file_args,
     format_access_urls,
-    normalize_domain,
     parse_env_file,
-    set_secure_permissions,
 )
 
 REQUIRED_PORTS = {
@@ -945,7 +940,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     Vendor-specific logic (token parsing, URL construction, file persistence)
     lives in ``cloudflare_tunnel.py`` — this function is pure orchestration.
     """
-    from cloudflare_tunnel import dashboard_url, extract_token
+    from cloudflare_tunnel import extract_token
 
     banner("Stage: Configure Cloudflare Tunnel (Recommended)")
 
@@ -1001,8 +996,8 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     hint(
         f"  2. {_BOLD}Buy a domain{_RST} (right there) or {_BOLD}+ Onboard a domain{_RST} you already own"
     )
-    hint(f"  3. Point your registrar's nameservers to the ones Cloudflare gives you")
-    hint(f"     (takes 5-30 min to propagate)")
+    hint("  3. Point your registrar's nameservers to the ones Cloudflare gives you")
+    hint("     (takes 5-30 min to propagate)")
     print()
     hint("No domain? No problem — choose 'n' and we'll use smee.io instead.")
     print()
@@ -1068,7 +1063,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     # which reverse-proxies to dashboard:8000 with rate limiting, security
     # headers, WebSocket support, and SPA routing.  Always route through
     # nginx — never expose the raw API directly.
-    step(f"Subdomain: pick yours  Domain: select from dropdown")
+    step("Subdomain: pick yours  Domain: select from dropdown")
     step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}syn-ui:8081{_RST}")
     hint("Port 8081 enables basic auth on tunnel access (set SYN_API_PASSWORD in .env)")
     step(f"Click {_PURPLE}Save{_RST}")
@@ -1207,16 +1202,14 @@ def _prompt_keychain_token(vault: str) -> None:
         ok(f"Token already in Keychain ({svc})")
         if confirm("Replace token?", default=False):
             token = getpass("  Paste new service account token (hidden): ")
-            if token:
-                if _keychain_write(vault, token):
-                    ok(f"Token updated in Keychain as {svc}")
+            if token and _keychain_write(vault, token):
+                ok(f"Token updated in Keychain as {svc}")
         return
 
     # No existing token — prompt for one
     token = getpass("  Paste service account token (hidden): ")
-    if token:
-        if _keychain_write(vault, token):
-            ok(f"Token stored in Keychain as {svc}")
+    if token and _keychain_write(vault, token):
+        ok(f"Token stored in Keychain as {svc}")
     else:
         warn("No token provided — you can add it later via Keychain")
 
@@ -1384,13 +1377,13 @@ def _update_env_file(
         os.write(tmp_fd, content.encode())
     except BaseException:
         os.close(tmp_fd)
-        os.unlink(tmp_path)
+        Path(tmp_path).unlink()
         raise
     os.close(tmp_fd)
     try:
-        os.replace(tmp_path, env_file)
+        Path(tmp_path).replace(env_file)
     except BaseException:
-        os.unlink(tmp_path)
+        Path(tmp_path).unlink()
         raise
 
     if not quiet:
@@ -1549,7 +1542,7 @@ def _resolve_source(
         return ("shell", True)
     if var_name in op_fields:
         return ("1Password", True)
-    if var_name in env_file_vals and env_file_vals[var_name]:
+    if env_file_vals.get(var_name):
         return (".env", True)
     return ("\u2014", False)
 
@@ -1888,9 +1881,9 @@ def main() -> None:
 
     print()
     print(f"{_CYAN}{_BOLD}  ___  ___ ___   ___      _")
-    print(f" / _ \\| __| __| / __| ___| |_ _  _ _ __")
-    print(f"| (_| | _|| _|  \\__ \\/ -_)  _| || | '_ \\")
-    print(f" \\__,_|___|_|   |___/\\___|\\__|\\__,_| .__/")
+    print(" / _ \\| __| __| / __| ___| |_ _  _ _ __")
+    print("| (_| | _|| _|  \\__ \\/ -_)  _| || | '_ \\")
+    print(" \\__,_|___|_|   |___/\\___|\\__|\\__,_| .__/")
     print(f"                                   |_|{_RST}")
     print()
     print(f"  {_BOLD}Syntropic137{_RST} {_DIM}— Turnkey Setup{_RST}")
