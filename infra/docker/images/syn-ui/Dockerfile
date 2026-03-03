@@ -54,7 +54,7 @@ COPY infra/docker/images/syn-ui/security-headers.conf /etc/nginx/conf.d/security
 COPY infra/docker/images/syn-ui/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=5s \
     CMD wget -q --spider http://localhost:80/health || exit 1
 
 EXPOSE 80

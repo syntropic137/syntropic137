@@ -121,26 +121,28 @@ services:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
       - dashboard_logs:/app/logs
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
-    command: ["sh", "-c", "uvicorn syn_dashboard.main:app --host $$DASHBOARD_HOST --port $$DASHBOARD_PORT"]
+    command: ["sh", "-c", "uvicorn syn_dashboard.main:app --host $$DASHBOARD_HOST --port $$DASHBOARD_PORT --root-path /api/v1"]
     environment:
       - LOG_FORMAT=${LOG_FORMAT:-json}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
       - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
-      - SYN_GITHUB_INSTALLATION_ID=${SYN_GITHUB_INSTALLATION_ID:-}
       - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
       # 1Password (optional)
       - OP_VAULT=${OP_VAULT:-}
       - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
-      # MinIO
+      # MinIO (artifact storage)
+      - SYN_STORAGE_PROVIDER=minio
       - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - SYN_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - SYN_STORAGE_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - SYN_STORAGE_MINIO_SECURE=false
+      # Crown-jewel secrets: injected as env vars (1Password or .env), never as files
+      - SYN_GITHUB_PRIVATE_KEY=${SYN_GITHUB_PRIVATE_KEY:-}
+      - SYN_GITHUB_WEBHOOK_SECRET=${SYN_GITHUB_WEBHOOK_SECRET:-}
     secrets:
       - db_password
       - redis_password
-      - github_private_key
-      - github_webhook_secret
     restart: always
     read_only: true
     security_opt:
@@ -173,10 +175,11 @@ services:
     ports:
       - "127.0.0.1:80:80"
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
-      interval: 30s
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+      interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 5s
     depends_on:
       dashboard:
         condition: service_healthy
@@ -283,10 +286,6 @@ services:
 # SECRETS (file-based)
 # =============================================================================
 secrets:
-  github_private_key:
-    file: ../infra/docker/secrets/github-private-key.pem
-  github_webhook_secret:
-    file: ../infra/docker/secrets/github-webhook-secret.txt
   db_password:
     file: ../infra/docker/secrets/db-password.txt
   redis_password:

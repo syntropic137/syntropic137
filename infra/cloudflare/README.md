@@ -34,10 +34,10 @@ In the tunnel configuration, add these public hostnames:
 
 | Subdomain | Domain | Type | URL |
 |-----------|--------|------|-----|
-| `aef` | yourdomain.com | HTTP | `http://syn-ui:80` |
-| `api.aef` | yourdomain.com | HTTP | `http://syn-dashboard:8000` |
+| `syn` (or your choice) | yourdomain.com | HTTP | `http://syn-ui:80` |
 
-**Important:** The service URLs use Docker container names, not `localhost`.
+**Important:** The service URL uses the Docker service name, not `localhost`.
+nginx (`syn-ui`) handles both static assets and API proxying — you only need one route.
 
 ### Step 3: Configure Environment
 
@@ -56,11 +56,11 @@ cp .env.example .env
 ### Step 4: Generate Secrets
 
 ```bash
-# From repo root
+# From repo root — generates DB/Redis passwords
 just secrets-generate
 
-# Copy your GitHub App private key
-cp ~/path/to/your-app.pem infra/docker/secrets/github-private-key.pem
+# GitHub App private key and webhook secret are configured via
+# `just setup` and stored in infra/.env (or resolved from 1Password).
 ```
 
 ### Step 5: Deploy
@@ -80,8 +80,9 @@ just selfhost-logs cloudflared
 
 ```bash
 # Test external access (replace with your domain)
-curl https://aef.yourdomain.com/health
-curl https://api.aef.yourdomain.com/health
+curl https://aef.yourdomain.com/health        # nginx health
+curl https://aef.yourdomain.com/api/health     # API health (proxied by nginx)
+curl https://aef.yourdomain.com/api/docs       # Swagger UI
 ```
 
 ## Alternative: CLI Setup
@@ -111,9 +112,8 @@ cloudflared tunnel login
 # Create tunnel
 cloudflared tunnel create syn-selfhost
 
-# Configure DNS routes
+# Configure DNS route (one route — nginx handles API proxying)
 cloudflared tunnel route dns syn-selfhost aef.yourdomain.com
-cloudflared tunnel route dns syn-selfhost api.aef.yourdomain.com
 
 # Get tunnel token
 cloudflared tunnel token syn-selfhost
@@ -133,15 +133,9 @@ tunnel: <your-tunnel-id>
 credentials-file: /path/to/credentials.json
 
 ingress:
-  # Main UI
+  # Single route — nginx handles UI + API proxying (/api/* → dashboard:8000)
   - hostname: aef.yourdomain.com
     service: http://localhost:80
-    originRequest:
-      noTLSVerify: true
-
-  # API endpoint
-  - hostname: api.aef.yourdomain.com
-    service: http://localhost:8000
     originRequest:
       noTLSVerify: true
 
@@ -169,7 +163,7 @@ just selfhost-logs cloudflared
 just selfhost-status
 
 # Check if services can reach each other
-docker exec syn-ui wget -qO- http://syn-dashboard:8000/health
+docker exec syntropic137-cloudflared wget -qO- http://syn-ui:80/health
 ```
 
 ### DNS Not Resolving
