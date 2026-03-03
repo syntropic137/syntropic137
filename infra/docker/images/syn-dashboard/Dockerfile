@@ -112,7 +112,10 @@ ENV LOG_FORMAT=json
 ENV LOG_LEVEL=INFO
 
 # Create non-root user for security
-RUN useradd -m -u 1000 aef && \
+# Install gosu for runtime privilege de-escalation (selfhost entrypoint)
+RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd -m -u 1000 aef && \
     mkdir -p /app/logs && \
     chown -R aef:aef /app
 

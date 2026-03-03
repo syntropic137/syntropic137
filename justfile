@@ -854,15 +854,21 @@ new-package name:
 
 # --- Self-Host Deployment ---
 
-# Pre-flight check: platform detection and Docker availability
+# Pre-flight check: platform, Docker, env, secrets, workspaces
 _selfhost-preflight:
     #!/usr/bin/env bash
     set -euo pipefail
+    ERRORS=0
+
+    echo "🔍 Selfhost pre-flight checks"
+    echo ""
+
+    # --- Platform & Docker ---
     echo "Platform: {{_os}} / {{_arch}}"
     if [[ "{{_os}}" == "Darwin" ]]; then
         echo "  macOS detected"
         if ! docker info &>/dev/null; then
-            echo "  ERROR: Docker is not running. Start Docker Desktop first."
+            echo "  ❌ Docker is not running. Start Docker Desktop first."
             exit 1
         fi
         if [[ "{{_arch}}" == "arm64" ]]; then
@@ -871,10 +877,49 @@ _selfhost-preflight:
     elif [[ "{{_os}}" == "Linux" ]]; then
         echo "  Linux detected"
         if ! docker info &>/dev/null; then
-            echo "  ERROR: Docker is not running or user not in docker group"
+            echo "  ❌ Docker is not running or user not in docker group"
             exit 1
         fi
     fi
+
+    # --- Environment file ---
+    if [ ! -f infra/.env ]; then
+        echo "  ❌ infra/.env not found. Run 'just setup' or copy from infra/.env.example"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  ✅ infra/.env"
+    fi
+
+    # --- Docker secrets ---
+    for secret in db-password redis-password; do
+        if [ ! -f "infra/docker/secrets/${secret}.txt" ]; then
+            echo "  ❌ infra/docker/secrets/${secret}.txt missing. Run 'just setup' to generate."
+            ERRORS=$((ERRORS + 1))
+        else
+            echo "  ✅ ${secret}.txt"
+        fi
+    done
+
+    # --- Agent credentials (needed for workflow execution) ---
+    source infra/scripts/selfhost-env.sh 2>/dev/null || true
+    if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        echo "  ⚠️  No agent credentials found (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)."
+        echo "     Workflows that spawn agent containers will fail."
+        echo "     Set one in infra/.env or your shell environment."
+    else
+        echo "  ✅ Agent credentials"
+    fi
+
+    # --- Workspaces directory ---
+    mkdir -p workspaces
+    echo "  ✅ workspaces/"
+
+    if [ "$ERRORS" -gt 0 ]; then
+        echo ""
+        echo "❌ ${ERRORS} pre-flight check(s) failed. Fix the above issues and retry."
+        exit 1
+    fi
+    echo ""
 
 # Start self-hosted AEF stack (no Cloudflare)
 selfhost-up: _selfhost-preflight _workspace-check

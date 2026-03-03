@@ -149,15 +149,20 @@ services:
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
+    # Run as root so entrypoint can match Docker socket GID, then drop to 'aef' via gosu.
+    # no-new-privileges is omitted here (unlike other services) because gosu needs
+    # setuid to de-escalate. All other hardening remains (read_only, cap_drop, etc.).
+    user: root
     secrets:
       - db_password
       - redis_password
     restart: always
     read_only: true
-    security_opt:
-      - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID   # Required for gosu to drop privileges
+      - SETGID   # Required for gosu to match Docker socket GID
     tmpfs:
       - /tmp
     deploy:
