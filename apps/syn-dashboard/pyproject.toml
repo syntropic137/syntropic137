@@ -1,6 +1,6 @@
 [project]
 name = "syn-dashboard"
-version = "0.4.0"
+version = "0.5.0"
 description = "Dashboard API for Syntropic137"
 requires-python = ">=3.12"
 

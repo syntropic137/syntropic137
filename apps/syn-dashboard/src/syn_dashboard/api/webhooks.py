@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +18,32 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
+# --- Signature-failure rate limiter ---
+# Tracks failed signature attempts per IP. After _MAX_FAILURES within
+# _WINDOW_SECONDS, the IP is blocked with 429 before we even check the
+# signature — protecting against brute-force and replay attacks.
+_MAX_FAILURES = 5
+_WINDOW_SECONDS = 60
+_sig_failures: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_sig_rate_limit(client_ip: str) -> None:
+    """Raise 429 if this IP has too many recent signature failures."""
+    now = time.monotonic()
+    attempts = _sig_failures[client_ip]
+    # Prune old entries
+    _sig_failures[client_ip] = [t for t in attempts if now - t < _WINDOW_SECONDS]
+    if len(_sig_failures[client_ip]) >= _MAX_FAILURES:
+        logger.warning(
+            "Webhook rate limit: %s blocked (%d failures)", client_ip, len(_sig_failures[client_ip])
+        )
+        raise HTTPException(status_code=429, detail="Too many failed signature attempts")
+
+
+def _record_sig_failure(client_ip: str) -> None:
+    """Record a signature verification failure for rate limiting."""
+    _sig_failures[client_ip].append(time.monotonic())
+
 
 @router.post("/github")
 async def github_webhook(
@@ -28,6 +56,9 @@ async def github_webhook(
 
     Processes installation and other events via syn_api.v1.github.
     """
+    client_ip = request.headers.get(
+        "X-Real-IP", request.client.host if request.client else "unknown"
+    )
     body = await request.body()
 
     # Handle ping separately (no processing needed)
@@ -40,6 +71,9 @@ async def github_webhook(
             payload = {}
         return {"status": "pong", "zen": payload.get("zen", "")}
 
+    # Check if this IP is rate-limited from too many signature failures
+    _check_sig_rate_limit(client_ip)
+
     # Process through syn_api
     result = await gh.verify_and_process_webhook(
         body=body,
@@ -51,6 +85,7 @@ async def github_webhook(
     if isinstance(result, Err):
         error_name = result.error.value if hasattr(result.error, "value") else str(result.error)
         if "signature" in error_name.lower():
+            _record_sig_failure(client_ip)
             raise HTTPException(status_code=401, detail=result.message)
         if "payload" in error_name.lower():
             raise HTTPException(status_code=400, detail=result.message)

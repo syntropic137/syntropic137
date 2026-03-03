@@ -210,6 +210,7 @@ Click **Create GitHub App**
    - **Only select repositories**: Choose specific repos
 5. Click **Install**
 6. Note the Installation ID from the URL: `https://github.com/settings/installations/[INSTALLATION_ID]`
+   > Installation IDs are resolved dynamically at runtime via `get_installation_for_repo()` -- you do not need to add this to your `.env`.
 
 ### Step 4: Configure Environment Variables
 
@@ -222,40 +223,26 @@ SYN_GITHUB_APP_NAME=syn-app                  # Your app's slug
 SYN_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----
 ...your private key content...
 -----END RSA PRIVATE KEY-----"
-SYN_GITHUB_INSTALLATION_ID=12345678         # From installation URL
 
 # Optional: Webhook security
 SYN_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 ```
 
-#### For Docker/Kubernetes
+#### For Docker Self-Host
 
-When using Docker or Kubernetes, you may need to handle the multi-line private key specially:
+The private key is base64-encoded and stored in `infra/.env` (or resolved
+from 1Password). The `just setup` wizard handles this automatically.
 
-```yaml
-# docker-compose.yaml
-services:
-  syn-dashboard:
-    environment:
-      - SYN_GITHUB_APP_ID=123456
-      - SYN_GITHUB_PRIVATE_KEY_FILE=/run/secrets/github_private_key
-    secrets:
-      - github_private_key
-
-secrets:
-  github_private_key:
-    file: ./github-app-private-key.pem
-```
-
-Or base64 encode the key:
+To encode manually:
 
 ```bash
-# Encode
-cat private-key.pem | base64 -w0 > private-key.b64
-
-# In environment
-SYN_GITHUB_PRIVATE_KEY_B64=$(cat private-key.b64)
+# Base64-encode the PEM and add to infra/.env
+base64 < private-key.pem | tr -d '\n'
+# → paste the output as: SYN_GITHUB_PRIVATE_KEY=<base64>
 ```
+
+Docker Compose passes the env var to the dashboard container. No file-based
+Docker secrets are needed for the private key.
 
 ### Step 5: Verify Configuration
 

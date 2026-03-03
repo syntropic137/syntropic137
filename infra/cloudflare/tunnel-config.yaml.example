@@ -1,12 +1,12 @@
-# Cloudflare Tunnel Configuration for AEF Homelab
+# Cloudflare Tunnel Configuration for AEF Self-Host
 #
 # This file is for running cloudflared as a standalone service (not via Docker).
-# For Docker deployment, use CLOUDFLARE_TUNNEL_TOKEN environment variable instead.
+# For Docker deployment, refer to the selfhost docs which use CLOUDFLARE_TUNNEL_TOKEN via .env.
 #
 # Setup:
-#   1. Create tunnel: cloudflared tunnel create syn-homelab
+#   1. Create tunnel: cloudflared tunnel create syn-selfhost
 #   2. Copy credentials: cp ~/.cloudflared/<tunnel-id>.json ./credentials.json
-#   3. Configure DNS: cloudflared tunnel route dns syn-homelab syn.yourdomain.com
+#   3. Configure DNS: cloudflared tunnel route dns syn-selfhost syn.yourdomain.com
 #   4. Copy this file: cp tunnel-config.yaml.example tunnel-config.yaml
 #   5. Edit with your tunnel ID and domain
 #   6. Run: cloudflared tunnel --config tunnel-config.yaml run

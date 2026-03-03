@@ -47,7 +47,7 @@ class TestControlHTTPEndpoints:
         """Test getting state for unknown execution returns 'unknown'."""
         with patch(f"{API_MODULE}.get_state", new_callable=AsyncMock) as mock:
             mock.return_value = Ok({"state": "unknown"})
-            response = client.get("/api/executions/unknown-exec/state")
+            response = client.get("/executions/unknown-exec/state")
             assert response.status_code == 200
             data = response.json()
             assert data["execution_id"] == "unknown-exec"
@@ -58,7 +58,7 @@ class TestControlHTTPEndpoints:
         """Test getting state for running execution."""
         with patch(f"{API_MODULE}.get_state", new_callable=AsyncMock) as mock:
             mock.return_value = Ok({"state": "running"})
-            response = client.get("/api/executions/test-exec-running/state")
+            response = client.get("/executions/test-exec-running/state")
             assert response.status_code == 200
             data = response.json()
             assert data["execution_id"] == "test-exec-running"
@@ -70,7 +70,7 @@ class TestControlHTTPEndpoints:
         with patch(f"{API_MODULE}.pause", new_callable=AsyncMock) as mock:
             mock.return_value = _ok_control("test-exec", "paused", "Pause signal queued")
             response = client.post(
-                "/api/executions/test-exec/pause",
+                "/executions/test-exec/pause",
                 json={"reason": "Test pause"},
             )
             assert response.status_code == 200
@@ -83,7 +83,7 @@ class TestControlHTTPEndpoints:
         """Test pausing an already paused execution fails."""
         with patch(f"{API_MODULE}.pause", new_callable=AsyncMock) as mock:
             mock.return_value = _err_control("Cannot pause: execution is paused")
-            response = client.post("/api/executions/test-exec-paused/pause")
+            response = client.post("/executions/test-exec-paused/pause")
             assert response.status_code == 400
             assert "Cannot pause" in response.json()["detail"]
 
@@ -92,7 +92,7 @@ class TestControlHTTPEndpoints:
         """Test resuming a paused execution."""
         with patch(f"{API_MODULE}.resume", new_callable=AsyncMock) as mock:
             mock.return_value = _ok_control("test-exec", "running", "Resume signal queued")
-            response = client.post("/api/executions/test-exec/resume")
+            response = client.post("/executions/test-exec/resume")
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
@@ -103,7 +103,7 @@ class TestControlHTTPEndpoints:
         """Test resuming a running execution fails."""
         with patch(f"{API_MODULE}.resume", new_callable=AsyncMock) as mock:
             mock.return_value = _err_control("Cannot resume: execution is running")
-            response = client.post("/api/executions/test-exec-running/resume")
+            response = client.post("/executions/test-exec-running/resume")
             assert response.status_code == 400
             assert "Cannot resume" in response.json()["detail"]
 
@@ -113,7 +113,7 @@ class TestControlHTTPEndpoints:
         with patch(f"{API_MODULE}.cancel", new_callable=AsyncMock) as mock:
             mock.return_value = _ok_control("test-exec", "cancelled", "Cancel signal queued")
             response = client.post(
-                "/api/executions/test-exec/cancel",
+                "/executions/test-exec/cancel",
                 json={"reason": "User cancelled"},
             )
             assert response.status_code == 200
@@ -126,7 +126,7 @@ class TestControlHTTPEndpoints:
         """Test cancelling a paused execution."""
         with patch(f"{API_MODULE}.cancel", new_callable=AsyncMock) as mock:
             mock.return_value = _ok_control("test-exec", "cancelled", "Cancel signal queued")
-            response = client.post("/api/executions/test-exec/cancel")
+            response = client.post("/executions/test-exec/cancel")
             assert response.status_code == 200
             data = response.json()
             assert data["success"] is True
@@ -137,7 +137,7 @@ class TestControlHTTPEndpoints:
         with patch(f"{API_MODULE}.inject", new_callable=AsyncMock) as mock:
             mock.return_value = _ok_control("test-exec", "running", "Context injection queued")
             response = client.post(
-                "/api/executions/test-exec/inject",
+                "/executions/test-exec/inject",
                 json={"message": "Additional context", "role": "user"},
             )
             assert response.status_code == 200
@@ -153,7 +153,7 @@ class TestControlWebSocket:
         """Test WebSocket connection and initial state message."""
         with patch(f"{API_MODULE}.get_state", new_callable=AsyncMock) as mock:
             mock.return_value = Ok({"state": "unknown"})
-            with client.websocket_connect("/api/ws/control/test-exec") as websocket:
+            with client.websocket_connect("/ws/control/test-exec") as websocket:
                 data = websocket.receive_json()
                 assert data["type"] == "state"
                 assert data["execution_id"] == "test-exec"
@@ -168,7 +168,7 @@ class TestControlWebSocket:
         ):
             mock_state.return_value = Ok({"state": "running"})
             mock_pause.return_value = _ok_control("test-exec", "paused", "Pause signal queued")
-            with client.websocket_connect("/api/ws/control/test-exec") as websocket:
+            with client.websocket_connect("/ws/control/test-exec") as websocket:
                 websocket.receive_json()  # initial state
                 websocket.send_json({"command": "pause", "reason": "Test"})
                 data = websocket.receive_json()
@@ -179,7 +179,7 @@ class TestControlWebSocket:
         """Test sending unknown command via WebSocket."""
         with patch(f"{API_MODULE}.get_state", new_callable=AsyncMock) as mock:
             mock.return_value = Ok({"state": "unknown"})
-            with client.websocket_connect("/api/ws/control/test-exec") as websocket:
+            with client.websocket_connect("/ws/control/test-exec") as websocket:
                 websocket.receive_json()  # initial state
                 websocket.send_json({"command": "unknown"})
                 data = websocket.receive_json()

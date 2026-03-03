@@ -1,7 +1,7 @@
 {
   "version": "0.8.0",
   "schema_version": "2.3.0",
-  "generated_at": "2026-02-13T23:23:33.893863+00:00",
+  "generated_at": "2026-03-03T05:37:30.645753+00:00",
   "bounded_contexts": [
     {
       "name": "artifacts",
@@ -539,6 +539,7 @@
           "path": "slices/get_execution_detail",
           "files": [
             "__init__.py",
+            "test_interrupted.py",
             "projection.py"
           ],
           "slice_type": "query"
@@ -550,6 +551,7 @@
             "__init__.py",
             "workspace_prompt.py",
             "test_execute_workflow.py",
+            "test_signal_polling.py",
             "ExecuteWorkflowHandler.py",
             "WorkflowExecutionEngine.py"
           ],
@@ -632,18 +634,22 @@
           "slice_type": "unknown"
         },
         {
-          "name": "create_workflow",
-          "path": "slices/create_workflow",
-          "files": [],
-          "slice_type": "unknown"
-        },
-        {
           "name": "list_workflows",
           "path": "slices/list_workflows",
           "files": [
             "handler.py",
             "slice.yaml",
             "test_list_workflows.py",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "workflow_phase_metrics",
+          "path": "slices/workflow_phase_metrics",
+          "files": [
+            "test_projection.py",
             "__init__.py",
             "projection.py"
           ],
@@ -698,12 +704,6 @@
           "slice_type": "unknown"
         },
         {
-          "name": "aggregate_workflow",
-          "path": "domain/aggregate_workflow",
-          "files": [],
-          "slice_type": "unknown"
-        },
-        {
           "name": "aggregate_workflow_template",
           "path": "domain/aggregate_workflow_template",
           "files": [
@@ -731,7 +731,8 @@
           "files": [
             "WorkflowExecutionAggregate.py",
             "__init__.py",
-            "value_objects.py"
+            "value_objects.py",
+            "test_interrupt.py"
           ],
           "slice_type": "unknown"
         },
@@ -775,6 +776,7 @@
             "WorkflowCompletedEvent.py",
             "__init__.py",
             "WorkflowExecutionStartedEvent.py",
+            "WorkflowInterruptedEvent.py",
             "ExecutionPausedEvent.py",
             "WorkspaceDestroyingEvent.py",
             "WorkspaceErrorEvent.py",
@@ -833,7 +835,7 @@
         "name": "AgentSessionAggregate",
         "context": "agent_sessions",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/agent_sessions/domain/aggregate_session/AgentSessionAggregate.py",
-        "line_count": 320,
+        "line_count": 323,
         "command_handlers": [],
         "event_handlers": [],
         "folder_name": "aggregate_session"
@@ -886,7 +888,7 @@
         "name": "WorkflowTemplateAggregate",
         "context": "orchestration",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py",
-        "line_count": 200,
+        "line_count": 208,
         "command_handlers": [],
         "event_handlers": [],
         "entities": [
@@ -903,7 +905,7 @@
         "name": "WorkflowExecutionAggregate",
         "context": "orchestration",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py",
-        "line_count": 544,
+        "line_count": 614,
         "command_handlers": [],
         "event_handlers": [],
         "entities": [
@@ -911,7 +913,7 @@
             "name": "value_objects",
             "identity_field": "phase_id",
             "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/value_objects.py",
-            "line_count": 164
+            "line_count": 165
           }
         ],
         "value_objects": [
@@ -1348,6 +1350,17 @@
         "decorator_present": false
       },
       {
+        "name": "WorkflowInterruptedEvent",
+        "context": "orchestration",
+        "event_type": "WorkflowInterrupted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/domain/events/WorkflowInterruptedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
         "name": "ExecutionPausedEvent",
         "context": "orchestration",
         "event_type": "ExecutionPaused",
@@ -1457,7 +1470,7 @@
         ],
         "read_model": null,
         "context": "artifacts",
-        "line_count": 218
+        "line_count": 169
       },
       {
         "name": "SessionListProjection",
@@ -1471,7 +1484,7 @@
         ],
         "read_model": null,
         "context": "agent_sessions",
-        "line_count": 345
+        "line_count": 314
       },
       {
         "name": "SessionCostProjection",
@@ -1483,7 +1496,7 @@
         ],
         "read_model": null,
         "context": "agent_sessions",
-        "line_count": 437
+        "line_count": 448
       },
       {
         "name": "TokenMetricsProjection",
@@ -1556,7 +1569,7 @@
         "name": "WorkspaceMetricsProjection",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workspace_metrics/projection.py",
         "subscribed_events": [
-          "command_executed",
+          "workspace_command_executed",
           "workspace_created",
           "workspace_creating",
           "workspace_destroyed",
@@ -1565,24 +1578,23 @@
         ],
         "read_model": null,
         "context": "orchestration",
-        "line_count": 310
+        "line_count": 247
       },
       {
         "name": "WorkflowExecutionDetailProjection",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_execution_detail/projection.py",
         "subscribed_events": [
           "execution_cancelled",
-          "execution_paused",
-          "execution_resumed",
           "phase_completed",
           "phase_started",
           "workflow_completed",
           "workflow_execution_started",
-          "workflow_failed"
+          "workflow_failed",
+          "workflow_interrupted"
         ],
         "read_model": "WorkflowExecutionDetail",
         "context": "orchestration",
-        "line_count": 409
+        "line_count": 327
       },
       {
         "name": "ExecutionCostProjection",
@@ -1600,39 +1612,49 @@
         "name": "WorkflowDetailProjection",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/slices/get_workflow_detail/projection.py",
         "subscribed_events": [
-          "workflow_created",
-          "workflow_execution_started"
+          "workflow_execution_started",
+          "workflow_template_created"
         ],
         "read_model": "WorkflowDetail",
         "context": "orchestration",
-        "line_count": 158
+        "line_count": 106
       },
       {
         "name": "WorkflowExecutionListProjection",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_executions/projection.py",
         "subscribed_events": [
           "execution_cancelled",
-          "execution_paused",
-          "execution_resumed",
           "phase_completed",
           "workflow_completed",
           "workflow_execution_started",
-          "workflow_failed"
+          "workflow_failed",
+          "workflow_interrupted"
         ],
         "read_model": null,
         "context": "orchestration",
-        "line_count": 332
+        "line_count": 251
       },
       {
         "name": "WorkflowListProjection",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/slices/list_workflows/projection.py",
         "subscribed_events": [
-          "workflow_created",
-          "workflow_execution_started"
+          "workflow_execution_started",
+          "workflow_template_created"
         ],
         "read_model": null,
         "context": "orchestration",
-        "line_count": 170
+        "line_count": 118
+      },
+      {
+        "name": "WorkflowPhaseMetricsProjection",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/orchestration/slices/workflow_phase_metrics/projection.py",
+        "subscribed_events": [
+          "phase_completed",
+          "phase_started"
+        ],
+        "read_model": null,
+        "context": "orchestration",
+        "line_count": 134
       },
       {
         "name": "DashboardMetricsProjection",
@@ -1643,13 +1665,13 @@
           "session_completed",
           "session_started",
           "workflow_completed",
-          "workflow_created",
           "workflow_execution_started",
-          "workflow_failed"
+          "workflow_failed",
+          "workflow_template_created"
         ],
         "read_model": null,
         "context": "orchestration",
-        "line_count": 202
+        "line_count": 132
       }
     ],
     "upcasters": [],
@@ -1658,36 +1680,36 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
+        "tool_execution_started": [
+          "ToolTimelineProjection"
+        ],
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
+        ],
         "subagent_started": [
           "SessionListProjection"
         ],
-        "trigger_deleted": [
-          "TriggerRuleProjection"
+        "workflow_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
         ],
-        "tool_execution_started": [
-          "ToolTimelineProjection"
+        "trigger_fired": [
+          "TriggerHistoryProjection",
+          "TriggerRuleProjection"
         ],
         "app_installed": [
           "InstallationProjection"
         ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "session_completed": [
-          "SessionListProjection",
-          "DashboardMetricsProjection"
+        "session_cost_finalized": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
         ],
         "installation_revoked": [
           "InstallationProjection"
         ],
-        "workflow_created": [
-          "WorkflowDetailProjection",
-          "WorkflowListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "session_summary": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
+        "tool_execution_completed": [
+          "ToolTimelineProjection"
         ],
         "workflow_execution_started": [
           "WorkflowExecutionDetailProjection",
@@ -1696,83 +1718,54 @@
           "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "execution_paused": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
-        ],
-        "session_cost_finalized": [
+        "session_summary": [
           "SessionCostProjection",
           "ExecutionCostProjection"
-        ],
-        "token_usage": [
-          "TokenMetricsProjection"
-        ],
-        "workspace_creating": [
-          "WorkspaceMetricsProjection"
-        ],
-        "trigger_resumed": [
-          "TriggerRuleProjection"
-        ],
-        "trigger_fired": [
-          "TriggerHistoryProjection",
-          "TriggerRuleProjection"
-        ],
-        "operation_recorded": [
-          "SessionListProjection"
-        ],
-        "trigger_paused": [
-          "TriggerRuleProjection"
-        ],
-        "tool_blocked": [
-          "ToolTimelineProjection"
-        ],
-        "phase_started": [
-          "WorkflowExecutionDetailProjection",
-          "DashboardMetricsProjection"
-        ],
-        "tool_execution_completed": [
-          "ToolTimelineProjection"
-        ],
-        "execution_cancelled": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "workspace_destroyed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workflow_failed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
         ],
         "artifact_created": [
           "ArtifactListProjection",
           "DashboardMetricsProjection"
         ],
-        "phase_completed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
+        "workflow_template_created": [
+          "WorkflowDetailProjection",
+          "WorkflowListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "token_refreshed": [
+          "InstallationProjection"
+        ],
+        "trigger_paused": [
+          "TriggerRuleProjection"
+        ],
+        "session_started": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "agent_observation": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "workspace_command_executed": [
+          "WorkspaceMetricsProjection"
         ],
         "workspace_error": [
           "WorkspaceMetricsProjection"
         ],
-        "execution_resumed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
+        "tool_blocked": [
+          "ToolTimelineProjection"
         ],
-        "installation_suspended": [
-          "InstallationProjection"
+        "trigger_deleted": [
+          "TriggerRuleProjection"
         ],
-        "command_executed": [
+        "workspace_destroyed": [
           "WorkspaceMetricsProjection"
         ],
-        "workflow_completed": [
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
+        ],
+        "workflow_interrupted": [
           "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
+          "WorkflowExecutionListProjection"
         ],
         "trigger_registered": [
           "TriggerRuleProjection"
@@ -1780,21 +1773,48 @@
         "workspace_created": [
           "WorkspaceMetricsProjection"
         ],
-        "agent_observation": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
+        "subagent_stopped": [
+          "SessionListProjection"
         ],
-        "token_refreshed": [
+        "execution_cancelled": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "installation_suspended": [
           "InstallationProjection"
         ],
-        "session_started": [
+        "phase_started": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowPhaseMetricsProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workflow_failed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "session_completed": [
           "SessionListProjection",
           "DashboardMetricsProjection"
+        ],
+        "trigger_resumed": [
+          "TriggerRuleProjection"
+        ],
+        "phase_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "WorkflowPhaseMetricsProjection"
+        ],
+        "token_usage": [
+          "TokenMetricsProjection"
+        ],
+        "operation_recorded": [
+          "SessionListProjection"
         ]
       },
       "projection_to_read_model": {
-        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail",
-        "WorkflowDetailProjection": "WorkflowDetail"
+        "WorkflowDetailProjection": "WorkflowDetail",
+        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail"
       }
     }
   }

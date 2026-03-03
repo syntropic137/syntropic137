@@ -230,7 +230,7 @@ class TestGitHubAppClient:
         client = GitHubAppClient(mock_github_settings)
 
         # Pre-cache an expired token
-        client._cached_token = InstallationToken(
+        client._cached_tokens["67890"] = InstallationToken(
             token="expired_token",
             expires_at=datetime.now(UTC) - timedelta(minutes=5),
             permissions={},
@@ -250,7 +250,7 @@ class TestGitHubAppClient:
         with patch.object(client._http, "post", new_callable=AsyncMock) as mock_post:
             mock_post.return_value = mock_response
 
-            token = await client.get_installation_token()
+            token = await client.get_installation_token(installation_id="67890")
 
             assert token == "new_token"
             mock_post.assert_called_once()
@@ -268,7 +268,7 @@ class TestGitHubAppClient:
             mock_post.return_value = mock_response
 
             with pytest.raises(GitHubAuthError, match="JWT authentication failed"):
-                await client.get_installation_token()
+                await client.get_installation_token(installation_id="67890")
 
     @pytest.mark.asyncio
     async def test_get_installation_token_rate_limit(self, mock_github_settings: MagicMock) -> None:
@@ -286,7 +286,7 @@ class TestGitHubAppClient:
             mock_post.return_value = mock_response
 
             with pytest.raises(GitHubRateLimitError) as exc_info:
-                await client.get_installation_token()
+                await client.get_installation_token(installation_id="67890")
 
             assert exc_info.value.reset_at is not None
 
@@ -315,7 +315,7 @@ class TestGitHubAppClient:
         with patch.object(client._http, "get", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = mock_response
 
-            repos = await client.list_accessible_repos()
+            repos = await client.list_accessible_repos(installation_id="67890")
 
             assert len(repos) == 2
             assert repos[0]["full_name"] == "org/repo1"

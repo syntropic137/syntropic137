@@ -1,0 +1,333 @@
+# Self-Host Docker Compose - Production overlay for self-hosted deployments
+# Usage: docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml up -d
+# Shortcut: just selfhost-up
+#
+# Adds: container names, persistent volumes, secrets, resource limits,
+#        restart policies, log rotation, syn-ui frontend, syn-internal network.
+#
+# Replaces the former infra/docker/compose/docker-compose.yaml and
+# docker-compose.homelab.yaml files (consolidated per ADR-034).
+
+services:
+  # ===========================================================================
+  # DATABASE
+  # ===========================================================================
+  timescaledb:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb
+    environment:
+      # Clear POSTGRES_PASSWORD from base compose — _FILE variant is exclusive
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - FOWNER
+      - DAC_OVERRIDE
+    tmpfs:
+      - /tmp
+      - /run
+      - /var/run/postgresql
+    deploy:
+      resources:
+        limits:
+          memory: ${POSTGRES_MEMORY_LIMIT:-1g}
+          cpus: "${POSTGRES_CPU_LIMIT:-1.0}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # EVENT STORE
+  # ===========================================================================
+  event-store:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-event-store
+    volumes:
+      - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
+    command: ["/usr/local/bin/eventstore"]
+    secrets:
+      - db_password
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: ${EVENT_STORE_MEMORY_LIMIT:-512m}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # COLLECTOR
+  # ===========================================================================
+  collector:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-collector
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: ${COLLECTOR_MEMORY_LIMIT:-256m}
+          cpus: "${COLLECTOR_CPU_LIMIT:-0.25}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # DASHBOARD API
+  # ===========================================================================
+  dashboard:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard
+    build:
+      args:
+        INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
+        INCLUDE_DOCKER_CLI: "1"
+    volumes:
+      - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+      - dashboard_logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../workspaces:/workspaces
+    entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
+    command: ["sh", "-c", "uvicorn syn_dashboard.main:app --host $$DASHBOARD_HOST --port $$DASHBOARD_PORT --root-path /api/v1"]
+    environment:
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
+      - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
+      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
+      # 1Password (optional)
+      - OP_VAULT=${OP_VAULT:-}
+      - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
+      # MinIO (artifact storage)
+      - SYN_STORAGE_PROVIDER=minio
+      - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
+      - SYN_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - SYN_STORAGE_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - SYN_STORAGE_MINIO_SECURE=false
+      # Crown-jewel secrets: injected as env vars (1Password or .env), never as files
+      - SYN_GITHUB_PRIVATE_KEY=${SYN_GITHUB_PRIVATE_KEY:-}
+      - SYN_GITHUB_WEBHOOK_SECRET=${SYN_GITHUB_WEBHOOK_SECRET:-}
+      # Agent credentials (for workspace containers)
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Workspace configuration
+      - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
+      - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
+    # Run as root so entrypoint can match Docker socket GID, then drop to 'aef' via gosu.
+    # no-new-privileges is omitted here (unlike other services) because gosu needs
+    # setuid to de-escalate. All other hardening remains (read_only, cap_drop, etc.).
+    user: root
+    secrets:
+      - db_password
+      - redis_password
+    restart: always
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID   # Required for gosu to drop privileges
+      - SETGID   # Required for gosu to match Docker socket GID
+    tmpfs:
+      - /tmp
+      - /home/aef/.config  # 1Password CLI needs writable config dir on read-only FS
+    deploy:
+      resources:
+        limits:
+          memory: ${DASHBOARD_MEMORY_LIMIT:-512m}
+          cpus: "${DASHBOARD_CPU_LIMIT:-0.5}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # FRONTEND (nginx)
+  # ===========================================================================
+  syn-ui:
+    build:
+      context: ..
+      dockerfile: infra/docker/images/syn-ui/Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-ui
+    ports:
+      - "127.0.0.1:${SYN_UI_PORT:-8008}:80"
+    environment:
+      # Optional basic auth — protects UI and API, webhooks bypass.
+      # Set SYN_API_PASSWORD to enable. Omit for no auth (local-only or Cloudflare Access).
+      - SYN_API_PASSWORD=${SYN_API_PASSWORD:-}
+      - SYN_API_USER=${SYN_API_USER:-admin}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /run
+    deploy:
+      resources:
+        limits:
+          memory: ${UI_MEMORY_LIMIT:-256m}
+          cpus: "${UI_CPU_LIMIT:-0.25}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # MINIO
+  # ===========================================================================
+  minio:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-minio
+    volumes:
+      - minio_data:/data
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: ${MINIO_MEMORY_LIMIT:-256m}
+          cpus: "${MINIO_CPU_LIMIT:-0.25}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
+  minio-init:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-minio-init
+    networks:
+      - syn-internal
+
+  # ===========================================================================
+  # REDIS
+  # ===========================================================================
+  redis:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-redis
+    # Read password from Docker secret, then exec redis-server as redis user
+    user: "999:999"
+    entrypoint: ["sh", "-c", "exec redis-server --dir /data --appendonly yes --requirepass \"$(cat /run/secrets/redis_password)\""]
+    command: []
+    secrets:
+      - redis_password
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$(cat /run/secrets/redis_password)\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: ${REDIS_MEMORY_LIMIT:-256m}
+          cpus: "${REDIS_CPU_LIMIT:-0.25}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - syn-internal
+
+# =============================================================================
+# SECRETS (file-based)
+# =============================================================================
+secrets:
+  db_password:
+    file: ../infra/docker/secrets/db-password.txt
+  redis_password:
+    file: ../infra/docker/secrets/redis-password.txt
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  db_data:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_db_data
+  dashboard_logs:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_dashboard_logs
+  minio_data:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_minio_data
+  redis_data:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_redis_data
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  syn-internal:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_internal
+    driver: bridge

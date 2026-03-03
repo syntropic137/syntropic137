@@ -7,6 +7,12 @@
 compose := "docker compose -f docker/docker-compose.yaml"
 compose_dev := compose + " -f docker/docker-compose.dev.yaml"
 compose_test := compose + " -f docker/docker-compose.test.yaml"
+compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
+compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
+
+# Platform detection
+_os := `uname -s`
+_arch := `uname -m`
 
 # Default target
 default: help
@@ -17,11 +23,15 @@ default: help
 help:
     @just --list
 
-# --- First-Time Setup ---
+# --- First-Time Setup / Onboarding ---
 
-# Run interactive setup wizard (git clone → running stack)
-setup *args:
+# Run interactive onboarding wizard (git clone → running stack)
+onboard *args:
     @uv run python infra/scripts/setup.py {{args}}
+
+# Alias: `just setup` = `just onboard`
+setup *args:
+    @just onboard {{args}}
 
 # Check prerequisites only (no changes)
 setup-check:
@@ -645,10 +655,12 @@ generate-llms-txt:
     uv run python scripts/generate_llms_txt.py
 
 # Seed workflows from YAML files
+# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
 seed-workflows:
     uv run python scripts/seed_workflows.py
 
 # Seed trigger presets (self-healing, review-fix)
+# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
 seed-triggers:
     uv run python scripts/seed_triggers.py
 
@@ -841,119 +853,371 @@ new-package name:
     @echo "Package created at packages/{{name}}"
 
 # ============================================================================
-# INFRASTRUCTURE DEPLOYMENT
+# INFRASTRUCTURE DEPLOYMENT (Self-Host)
 # ============================================================================
 
-# Infrastructure compose directory
-_infra_compose := "infra/docker/compose"
+# --- Self-Host Deployment ---
 
-# --- Homelab Deployment (with Cloudflare Tunnel) ---
+# Pre-flight check: platform, Docker, env, secrets, workspaces
+_selfhost-preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ERRORS=0
 
-# Start AEF stack with Cloudflare Tunnel (homelab)
-homelab-up:
-    @echo "🚀 Starting AEF homelab stack..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
-    @echo ""
-    @echo "⏳ Waiting for services to be ready..."
-    @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
-    @echo ""
-    @just homelab-status
+    echo "🔍 Selfhost pre-flight checks"
+    echo ""
 
-# Stop homelab stack
-homelab-down:
-    @echo "Stopping AEF homelab stack..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml down
+    # --- Platform & Docker ---
+    echo "Platform: {{_os}} / {{_arch}}"
+    if [[ "{{_os}}" == "Darwin" ]]; then
+        echo "  macOS detected"
+        if ! docker info &>/dev/null; then
+            echo "  ❌ Docker is not running. Start Docker Desktop first."
+            exit 1
+        fi
+        if [[ "{{_arch}}" == "arm64" ]]; then
+            echo "  Apple Silicon — first event-store build may take 5-10 min"
+        fi
+    elif [[ "{{_os}}" == "Linux" ]]; then
+        echo "  Linux detected"
+        if ! docker info &>/dev/null; then
+            echo "  ❌ Docker is not running or user not in docker group"
+            exit 1
+        fi
+    fi
 
-# View homelab logs (all services or specific service)
-homelab-logs *service:
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml logs -f {{service}}
+    # --- Environment file ---
+    if [ ! -f infra/.env ]; then
+        echo "  ❌ infra/.env not found. Run 'just setup' or copy from infra/.env.example"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  ✅ infra/.env"
+    fi
 
-# Check homelab stack status
-homelab-status:
-    @echo "📊 AEF Homelab Status"
-    @echo "===================="
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml ps
-    @echo ""
-    @echo "🔗 Access Points:"
-    @if [ -n "${SYN_DOMAIN:-}" ]; then \
-        echo "   UI:  https://${SYN_DOMAIN}"; \
-        echo "   API: https://api.${SYN_DOMAIN}"; \
-    else \
-        echo "   UI:  http://localhost:80"; \
-        echo "   API: http://localhost:8000"; \
-        echo "   (Set SYN_DOMAIN in .env for external access)"; \
+    # --- Docker secrets ---
+    for secret in db-password redis-password; do
+        if [ ! -f "infra/docker/secrets/${secret}.txt" ]; then
+            echo "  ❌ infra/docker/secrets/${secret}.txt missing. Run 'just setup' to generate."
+            ERRORS=$((ERRORS + 1))
+        else
+            echo "  ✅ ${secret}.txt"
+        fi
+    done
+
+    # --- Agent credentials (needed for workflow execution) ---
+    source infra/scripts/selfhost-env.sh 2>/dev/null || true
+    if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        echo "  ⚠️  No agent credentials found (CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY)."
+        echo "     Workflows that spawn agent containers will fail."
+        echo "     Set one in infra/.env or your shell environment."
+    else
+        echo "  ✅ Agent credentials"
+    fi
+
+    # --- Workspaces directory ---
+    mkdir -p workspaces
+    echo "  ✅ workspaces/"
+
+    if [ "$ERRORS" -gt 0 ]; then
+        echo ""
+        echo "❌ ${ERRORS} pre-flight check(s) failed. Fix the above issues and retry."
+        exit 1
+    fi
+    echo ""
+
+# Start self-hosted AEF stack (no Cloudflare)
+selfhost-up: _selfhost-preflight _workspace-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "🚀 Starting AEF self-host stack..."
+    {{compose_selfhost}} up -d --build
+    echo ""
+    echo "⏳ Waiting for services to be ready..."
+    uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    echo "🌱 Seeding data..."
+    just selfhost-seed || echo "   ⚠️ Seed skipped (data may already exist)"
+    echo ""
+    just selfhost-status
+
+# Start self-hosted AEF stack with Cloudflare Tunnel (recommended)
+selfhost-up-tunnel: _selfhost-preflight _workspace-check
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "🚀 Starting AEF self-host stack with Cloudflare Tunnel..."
+    {{compose_selfhost_cf}} up -d --build
+    echo ""
+    echo "⏳ Waiting for services to be ready..."
+    uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    echo "🌱 Seeding data..."
+    just selfhost-seed || echo "   ⚠️ Seed skipped (data may already exist)"
+    echo ""
+    just selfhost-status
+    echo ""
+    echo "🔒 Tunnel auth reminder:"
+    echo "   Ensure your Cloudflare tunnel routes to http://syn-ui:8081 (not port 80)"
+    echo "   Port 8081 requires basic auth when SYN_API_PASSWORD is set."
+    echo "   Update: Zero Trust → Networks → Connectors → [tunnel] → Public Hostname"
+
+# Stop self-host stack (auto-detects Cloudflare Tunnel)
+selfhost-down:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "Stopping AEF self-host stack..."
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        echo "  (Cloudflare Tunnel detected)"
+        {{compose_selfhost_cf}} down
+    else
+        {{compose_selfhost}} down
+    fi
+
+# View self-host logs (all services or specific service, auto-detects tunnel)
+selfhost-logs *service:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        {{compose_selfhost_cf}} logs -f {{service}}
+    else
+        {{compose_selfhost}} logs -f {{service}}
+    fi
+
+# Check self-host stack status (auto-detects tunnel)
+selfhost-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "📊 AEF Self-Host Status"
+    echo "======================="
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        echo "  (Cloudflare Tunnel detected)"
+        {{compose_selfhost_cf}} ps
+    else
+        {{compose_selfhost}} ps
+    fi
+    echo ""
+    echo "🔗 Access Points:"
+    if [ -n "${SYN_DOMAIN:-}" ]; then
+        _domain=$(echo "${SYN_DOMAIN}" | sed -E 's|^https?://||' | sed 's|/$||')
+        echo "   UI:       https://$_domain"
+        echo "   API:      https://$_domain/api/v1"
+        echo "   API Docs: https://$_domain/api/v1/docs"
+    else
+        _port="${SYN_UI_PORT:-8008}"
+        echo "   UI:       http://localhost:$_port"
+        echo "   API:      http://localhost:$_port/api/v1"
+        echo "   API Docs: http://localhost:$_port/api/v1/docs"
+        echo "   (Set SYN_DOMAIN in .env for external access)"
     fi
 
 # Check Cloudflare tunnel status
-homelab-tunnel-status:
+selfhost-tunnel-status:
     @echo "🚇 Cloudflare Tunnel Status"
     @echo "==========================="
-    @docker logs syn-cloudflared 2>&1 | tail -20
+    @docker logs ${COMPOSE_PROJECT_NAME:-syntropic137}-cloudflared 2>&1 | tail -20
 
-# Restart specific homelab service
-homelab-restart service:
+# Restart specific self-host service
+selfhost-restart service:
     @echo "Restarting {{service}}..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml restart {{service}}
+    @{{compose_selfhost}} restart {{service}}
 
-# Pull latest code, rebuild, and restart homelab (turnkey update)
+# Seed workflows and triggers into selfhost stack
+# Runs seed scripts in a temporary dashboard container (DB ports not exposed to host)
+selfhost-seed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "🌱 Seeding workflows..."
+    {{compose_selfhost}} run --rm \
+      -v "$(pwd)/scripts:/app/scripts:ro" \
+      -v "$(pwd)/workflows:/app/workflows:ro" \
+      dashboard \
+      python /app/scripts/seed_workflows.py --dir /app/workflows/examples
+    echo "🌱 Seeding triggers..."
+    {{compose_selfhost}} run --rm \
+      -v "$(pwd)/scripts:/app/scripts:ro" \
+      -v "$(pwd)/workflows:/app/workflows:ro" \
+      dashboard \
+      python /app/scripts/seed_triggers.py
+    echo "✅ Seeding complete"
+
+# Pull latest code, rebuild, and restart self-host (auto-detects tunnel)
+selfhost-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    # Detect Cloudflare tunnel
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        COMPOSE="{{compose_selfhost_cf}}"
+        echo "  (Cloudflare Tunnel detected)"
+    else
+        COMPOSE="{{compose_selfhost}}"
+    fi
+    echo "⬆️ Updating AEF self-host..."
+    echo ""
+    echo "1️⃣ Pulling latest code..."
+    git pull --ff-only
+    echo ""
+    echo "2️⃣ Syncing submodules..."
+    git submodule update --init --recursive
+    echo ""
+    echo "3️⃣ Syncing Python dependencies..."
+    uv sync
+    echo ""
+    echo "4️⃣ Rebuilding and restarting services..."
+    $COMPOSE up -d --build
+    echo ""
+    echo "5️⃣ Waiting for services to be healthy..."
+    uv run python infra/scripts/health_check.py --wait --timeout 180 || true
+    echo ""
+    just selfhost-status
+    echo ""
+    echo "✅ Update complete!"
+
+# Full self-host reset (removes volumes - DATA LOSS!)
+selfhost-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    echo "⚠️  WARNING: This will delete ALL data including the database!"
+    echo "Press Ctrl+C within 5 seconds to cancel..."
+    sleep 5
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        echo "  (Cloudflare Tunnel detected)"
+        {{compose_selfhost_cf}} down -v
+    else
+        {{compose_selfhost}} down -v
+    fi
+    just selfhost-up
+
+# --- Deprecated Aliases (homelab → selfhost) ---
+
+# DEPRECATED: use 'just selfhost-up'
+homelab-up:
+    @echo "DEPRECATED: use 'just selfhost-up'"
+    @just selfhost-up
+
+# DEPRECATED: use 'just selfhost-down'
+homelab-down:
+    @echo "DEPRECATED: use 'just selfhost-down'"
+    @just selfhost-down
+
+# DEPRECATED: use 'just selfhost-logs'
+homelab-logs *service:
+    @echo "DEPRECATED: use 'just selfhost-logs'"
+    @just selfhost-logs {{service}}
+
+# DEPRECATED: use 'just selfhost-status'
+homelab-status:
+    @echo "DEPRECATED: use 'just selfhost-status'"
+    @just selfhost-status
+
+# DEPRECATED: use 'just selfhost-tunnel-status'
+homelab-tunnel-status:
+    @echo "DEPRECATED: use 'just selfhost-tunnel-status'"
+    @just selfhost-tunnel-status
+
+# DEPRECATED: use 'just selfhost-restart'
+homelab-restart service:
+    @echo "DEPRECATED: use 'just selfhost-restart'"
+    @just selfhost-restart {{service}}
+
+# DEPRECATED: use 'just selfhost-update'
 homelab-update:
-    @echo "⬆️ Updating AEF homelab..."
-    @echo ""
-    @echo "1️⃣ Pulling latest code..."
-    @git pull --ff-only
-    @echo ""
-    @echo "2️⃣ Syncing submodules..."
-    @git submodule update --init --recursive
-    @echo ""
-    @echo "3️⃣ Syncing Python dependencies..."
-    @uv sync
-    @echo ""
-    @echo "4️⃣ Rebuilding and restarting services..."
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml up -d --build
-    @echo ""
-    @echo "5️⃣ Waiting for services to be healthy..."
-    @uv run python infra/scripts/health_check.py --wait --timeout 180 || true
-    @echo ""
-    @just homelab-status
-    @echo ""
-    @echo "✅ Update complete!"
+    @echo "DEPRECATED: use 'just selfhost-update'"
+    @just selfhost-update
 
-# Full homelab reset (removes volumes - DATA LOSS!)
+# DEPRECATED: use 'just selfhost-reset'
 homelab-reset:
-    @echo "⚠️  WARNING: This will delete ALL data including the database!"
-    @echo "Press Ctrl+C within 5 seconds to cancel..."
-    @sleep 5
-    @cd {{_infra_compose}} && docker compose -f docker-compose.yaml -f docker-compose.homelab.yaml down -v
-    @just homelab-up
+    @echo "DEPRECATED: use 'just selfhost-reset'"
+    @just selfhost-reset
 
-# --- Local Infrastructure (No Cloudflare) ---
+# --- Local Infrastructure (No Cloudflare, uses selfhost overlay) ---
 
 # Start infrastructure stack locally
 infra-up:
     @echo "🚀 Starting AEF infrastructure stack..."
-    @cd {{_infra_compose}} && docker compose up -d --build
+    @{{compose_selfhost}} up -d --build
     @echo ""
     @echo "⏳ Waiting for services..."
     @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
     @echo ""
     @echo "✅ Infrastructure stack started!"
-    @echo "   Dashboard: http://localhost:8000"
-    @echo "   UI:        http://localhost:80"
-    @echo "   API Docs:  http://localhost:8000/docs"
+    @echo "   UI:        http://localhost:$${SYN_UI_PORT:-8008}"
+    @echo "   API:       http://localhost:$${SYN_UI_PORT:-8008}/api/v1"
+    @echo "   API Docs:  http://localhost:$${SYN_UI_PORT:-8008}/api/v1/docs"
 
 # Stop infrastructure stack
 infra-down:
-    @cd {{_infra_compose}} && docker compose down
+    @{{compose_selfhost}} down
 
 # View infrastructure logs
 infra-logs *service:
-    @cd {{_infra_compose}} && docker compose logs -f {{service}}
+    @{{compose_selfhost}} logs -f {{service}}
 
 # Check infrastructure status
 infra-status:
-    @cd {{_infra_compose}} && docker compose ps
+    @{{compose_selfhost}} ps
 
 # --- Secrets Management ---
+
+# Store 1Password service account token in macOS Keychain (vault-specific)
+secrets-store-token:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo "❌ This command is macOS-only. On Linux, export the env var instead:"
+        echo "   export OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>=<token>"
+        exit 1
+    fi
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -z "${OP_VAULT:-}" ]; then
+        echo "❌ OP_VAULT not set in infra/.env"
+        echo "   Set it first: OP_VAULT=syn137-dev"
+        exit 1
+    fi
+    _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+    _SVC="SYN_${_VK}"
+    echo "Storing 1Password token for vault: $OP_VAULT"
+    echo "Keychain entry: $_SVC"
+    echo ""
+    printf "Paste service account token: "
+    read -rs _TOKEN
+    echo ""
+    if [ -z "$_TOKEN" ]; then
+        echo "❌ No token provided"
+        exit 1
+    fi
+    security add-generic-password -U -a "$USER" -s "$_SVC" -w "$_TOKEN"
+    echo "✅ Token stored in Keychain as: $_SVC"
+    echo "   Selfhost recipes will auto-retrieve this at startup."
+
+# Delete 1Password token from macOS Keychain
+secrets-delete-token:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "$(uname -s)" != "Darwin" ]; then
+        echo "❌ This command is macOS-only."
+        exit 1
+    fi
+    if [ -f infra/.env ]; then
+        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
+    fi
+    if [ -z "${OP_VAULT:-}" ]; then
+        echo "❌ OP_VAULT not set in infra/.env"
+        exit 1
+    fi
+    _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+    _SVC="SYN_${_VK}"
+    security delete-generic-password -a "$USER" -s "$_SVC" 2>/dev/null \
+        && echo "✅ Deleted: $_SVC" \
+        || echo "⚠️  Not found: $_SVC"
 
 # Generate new secrets for deployment
 secrets-generate:
@@ -966,7 +1230,7 @@ secrets-rotate:
     @uv run python infra/scripts/secrets_setup.py rotate
     @echo ""
     @echo "⚠️  Restart services to apply new secrets:"
-    @echo "   just homelab-restart syn-dashboard"
+    @echo "   just selfhost-restart dashboard"
 
 # Verify secrets are configured
 secrets-check:
@@ -1008,9 +1272,9 @@ health-json:
 # Build all Docker images
 infra-build:
     @echo "🔨 Building Docker images..."
-    @cd {{_infra_compose}} && docker compose build
+    @{{compose_selfhost}} build
 
 # Build specific image
 infra-build-image image:
     @echo "🔨 Building {{image}}..."
-    @cd {{_infra_compose}} && docker compose build {{image}}
+    @{{compose_selfhost}} build {{image}}

@@ -404,6 +404,14 @@ class WorkflowExecutionEngine:
         # 2. Initialize execution context
         # Get repo URL from aggregate's private attribute (set from workflow definition)
         repo_url = getattr(workflow, "_repository_url", None)
+
+        # Substitute template variables in repo_url using workflow inputs.
+        # Trigger-based workflows use templates like "https://github.com/{{repository}}"
+        # where {{repository}} is resolved from the webhook payload at dispatch time.
+        if repo_url and inputs:
+            for key, value in inputs.items():
+                repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+
         ctx = ExecutionContext(
             workflow_id=workflow_id,
             execution_id=execution_id or str(uuid4()),
@@ -1115,10 +1123,13 @@ class WorkflowExecutionEngine:
                 from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
                 # Parse "https://github.com/owner/repo" → "owner/repo"
-                # Skip the sentinel placeholder used for workflows with no repo configured.
-                _PLACEHOLDER = "https://github.com/placeholder/not-configured"
+                # Skip sentinel/placeholder URLs used for workflows with no repo configured.
+                _SKIP_URLS = {
+                    "https://github.com/placeholder/not-configured",
+                    "https://github.com/example/repo",
+                }
                 _repo: str | None = None
-                if ctx.repo_url and ctx.repo_url != _PLACEHOLDER:
+                if ctx.repo_url and ctx.repo_url not in _SKIP_URLS:
                     _parts = ctx.repo_url.rstrip("/").split("/")
                     if len(_parts) >= 2:
                         _repo = f"{_parts[-2]}/{_parts[-1]}"

@@ -17,10 +17,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': {
+      '/api/v1': {
         target: 'http://localhost:8000',
         changeOrigin: true,
         ws: true,  // Enable WebSocket proxy
+        rewrite: (p: string) => p.replace(/^\/api\/v1/, ''),  // Strip /api/v1/ — mirrors nginx behavior
         configure: (proxy) => {
           proxy.on('error', () => { /* suppress backend-not-running noise */ })
         },

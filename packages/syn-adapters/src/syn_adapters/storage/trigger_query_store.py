@@ -11,12 +11,12 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import (
-    TriggerConfig,
-)
-from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
+from syn_domain.contexts.github._shared.trigger_query_store import (
     TriggerQueryStore,
     _IndexedTrigger,
+)
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig import (
+    TriggerConfig,
 )
 
 logger = logging.getLogger(__name__)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { API_BASE } from '../api/client'
 import { Activity, ExternalLink, GitCommit, GitMerge, Wifi, WifiOff } from 'lucide-react'
 
 interface GitEvent {
@@ -82,7 +83,7 @@ export function EventFeed() {
 
   // Load recent events on mount
   useEffect(() => {
-    fetch('/api/events/recent?limit=30')
+    fetch(`${API_BASE}/events/recent?limit=30`)
       .then((r) => r.json())
       .then((data) => {
         if (data.events) setEvents(data.events as GitEvent[])

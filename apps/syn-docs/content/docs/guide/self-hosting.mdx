@@ -1,6 +1,6 @@
 ---
 title: Self-Hosting
-description: Deploy Syntropic137 on your own infrastructure — from homelab to Kubernetes
+description: Deploy Syntropic137 on your own infrastructure — from bare metal to Kubernetes
 ---
 
 ## Deployment Architecture
@@ -16,14 +16,14 @@ Syntropic137 runs as a set of Docker services connected through a shared network
 git clone https://github.com/syntropic137/agentic-engineering-framework.git
 cd agentic-engineering-framework
 
-# Run the homelab setup wizard
-just homelab-setup
+# Run the setup wizard
+just setup
 
-# Start all services
-docker compose up -d
+# Start the selfhost stack
+just selfhost-up
 ```
 
-The dashboard will be available at `http://localhost:8000`.
+The dashboard will be available at `http://localhost:8008`.
 
 ## Services
 
@@ -64,7 +64,7 @@ Each agent execution runs in an isolated Docker workspace with a two-phase secur
 
 ## Scaling Options
 
-### Single Server (Homelab)
+### Single Server (Self-Host)
 
 Recommended for **10–100 concurrent agents**:
 - 4+ CPU cores, 8GB+ RAM (16GB recommended)

@@ -2,8 +2,8 @@
 
 This guide explains how to set up and run the Syntropic137 locally.
 
-> **📦 For Production/Homelab**: If you're deploying to a homelab or production environment, see:
-> - [Homelab Deployment Guide](infra/docs/homelab-deployment.md) - Docker Compose + Cloudflare Tunnel
+> **📦 For Production/Self-Host**: If you're deploying to a self-hosted or production environment, see:
+> - [Self-Host Deployment Guide](infra/docs/selfhost-deployment.md) - Docker Compose + Cloudflare Tunnel
 > - [Production Deployment Guide](deployment/production-deployment.md) - Workspace isolation options
 
 ## Quick Start

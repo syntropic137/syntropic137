@@ -25,14 +25,14 @@ from syn_domain.contexts.github.slices.evaluate_webhook.safety_guards import (
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.github._shared.trigger_query_store import (
+        TriggerQueryStore,
+    )
     from syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate import (
         TriggerRuleAggregate,
     )
     from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import (
         TriggerDebouncer,
-    )
-    from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
-        TriggerQueryStore,
     )
 
 logger = logging.getLogger(__name__)

@@ -3,6 +3,7 @@
 Contains:
 - Value objects: InstallationId, InstallationToken
 - GitHub API client
+- Trigger query store port and in-memory adapter
 """
 
 from syn_domain.contexts.github._shared.github_client import (
@@ -13,6 +14,13 @@ from syn_domain.contexts.github._shared.github_client import (
     TokenResponse,
     get_github_client,
     reset_github_client,
+)
+from syn_domain.contexts.github._shared.trigger_query_store import (
+    InMemoryTriggerQueryStore,
+    TriggerQueryStore,
+    get_trigger_query_store,
+    reset_trigger_store,
+    set_trigger_store,
 )
 from syn_domain.contexts.github._shared.value_objects import (
     GitHubAccount,
@@ -25,12 +33,17 @@ __all__ = [
     "GitHubAccount",
     "GitHubAppClient",
     "GitHubAppClientError",
+    "InMemoryTriggerQueryStore",
     "InstallationId",
     "InstallationToken",
     "JWTGenerationError",
     "RepositoryPermission",
     "TokenFetchError",
     "TokenResponse",
+    "TriggerQueryStore",
     "get_github_client",
+    "get_trigger_query_store",
     "reset_github_client",
+    "reset_trigger_store",
+    "set_trigger_store",
 ]
