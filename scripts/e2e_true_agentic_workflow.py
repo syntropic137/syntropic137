@@ -141,7 +141,6 @@ async def check_prerequisites() -> bool:
         required_vars.extend(
             [
                 ("SYN_GITHUB_APP_ID", "GitHub App ID", True),
-                ("SYN_GITHUB_INSTALLATION_ID", "GitHub Installation ID", True),
                 ("SYN_GITHUB_PRIVATE_KEY", "GitHub Private Key", True),
             ]
         )
@@ -188,7 +187,7 @@ async def start_workflow(
 
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            f"{DASHBOARD_URL}/api/workflows/{WORKFLOW_ID}/execute",
+            f"{DASHBOARD_URL}/workflows/{WORKFLOW_ID}/execute",
             json={
                 "inputs": inputs,
                 "provider": "claude",
@@ -222,7 +221,7 @@ async def poll_workflow_status(execution_id: str) -> str:
 
             try:
                 response = await client.get(
-                    f"{DASHBOARD_URL}/api/executions/{execution_id}",
+                    f"{DASHBOARD_URL}/executions/{execution_id}",
                     timeout=10.0,
                 )
 
