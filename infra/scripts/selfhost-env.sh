@@ -35,5 +35,5 @@ fi
 
 # 4. Export agent credentials if set (for workspace container execution)
 # These may come from .env, 1Password resolution above, or the shell environment.
-[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && export CLAUDE_CODE_OAUTH_TOKEN
-[ -n "${ANTHROPIC_API_KEY:-}" ] && export ANTHROPIC_API_KEY
+if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then export CLAUDE_CODE_OAUTH_TOKEN; fi
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then export ANTHROPIC_API_KEY; fi

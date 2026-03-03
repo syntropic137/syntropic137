@@ -165,6 +165,7 @@ services:
       - SETGID   # Required for gosu to match Docker socket GID
     tmpfs:
       - /tmp
+      - /home/aef/.config  # 1Password CLI needs writable config dir on read-only FS
     deploy:
       resources:
         limits:
@@ -187,7 +188,7 @@ services:
       dockerfile: infra/docker/images/syn-ui/Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-ui
     ports:
-      - "127.0.0.1:80:80"
+      - "127.0.0.1:${SYN_UI_PORT:-8008}:80"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s

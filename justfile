@@ -985,9 +985,10 @@ selfhost-status:
         echo "   API:      https://$_domain/api/v1"
         echo "   API Docs: https://$_domain/api/v1/docs"
     else
-        echo "   UI:       http://localhost:80"
-        echo "   API:      http://localhost:80/api/v1"
-        echo "   API Docs: http://localhost:80/api/v1/docs"
+        _port="${SYN_UI_PORT:-8008}"
+        echo "   UI:       http://localhost:$_port"
+        echo "   API:      http://localhost:$_port/api/v1"
+        echo "   API Docs: http://localhost:$_port/api/v1/docs"
         echo "   (Set SYN_DOMAIN in .env for external access)"
     fi
 
@@ -1124,9 +1125,9 @@ infra-up:
     @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
     @echo ""
     @echo "✅ Infrastructure stack started!"
-    @echo "   UI:        http://localhost:80"
-    @echo "   API:       http://localhost:80/api/v1"
-    @echo "   API Docs:  http://localhost:80/api/v1/docs"
+    @echo "   UI:        http://localhost:$${SYN_UI_PORT:-8008}"
+    @echo "   API:       http://localhost:$${SYN_UI_PORT:-8008}/api/v1"
+    @echo "   API Docs:  http://localhost:$${SYN_UI_PORT:-8008}/api/v1/docs"
 
 # Stop infrastructure stack
 infra-down:
