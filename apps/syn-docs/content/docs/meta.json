@@ -3,6 +3,7 @@
     "index",
     "guide",
     "api",
-    "cli"
+    "cli",
+    "architecture"
   ]
 }
