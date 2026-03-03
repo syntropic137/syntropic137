@@ -26,7 +26,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-syn}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-syn_dev_password}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U syn -d syn"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn}"]
       interval: 5s
       timeout: 5s
       retries: 5

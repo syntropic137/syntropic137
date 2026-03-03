@@ -81,8 +81,8 @@ just selfhost-logs cloudflared
 ```bash
 # Test external access (replace with your domain)
 curl https://aef.yourdomain.com/health        # nginx health
-curl https://aef.yourdomain.com/api/health     # API health (proxied by nginx)
-curl https://aef.yourdomain.com/api/docs       # Swagger UI
+curl https://aef.yourdomain.com/api/v1/health   # API health (proxied by nginx)
+curl https://aef.yourdomain.com/api/v1/docs    # Swagger UI
 ```
 
 ## Alternative: CLI Setup

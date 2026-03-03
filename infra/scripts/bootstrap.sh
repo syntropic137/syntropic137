@@ -210,26 +210,24 @@ install_node() {
             brew install node
         else
             info "Installing Node.js via NodeSource..."
-            if [[ "$(id -u)" -ne 0 ]]; then
-                err "Node.js installation via NodeSource requires root."
-                err "Run this script as root, or install Node.js manually:"
-                err "  https://nodejs.org/en/download/"
-                return 1
-            fi
             if has apt-get; then
                 local tmpfile
                 tmpfile="$(mktemp)"
                 scurl https://deb.nodesource.com/setup_lts.x -o "$tmpfile"
-                bash "$tmpfile"
+                sudo bash "$tmpfile"
                 rm -f "$tmpfile"
-                apt-get install -y -qq nodejs
+                sudo apt-get install -y -qq nodejs
             elif has dnf; then
                 local tmpfile
                 tmpfile="$(mktemp)"
                 scurl https://rpm.nodesource.com/setup_lts.x -o "$tmpfile"
-                bash "$tmpfile"
+                sudo bash "$tmpfile"
                 rm -f "$tmpfile"
-                dnf install -y nodejs
+                sudo dnf install -y nodejs
+            else
+                err "Cannot detect package manager. Install Node.js manually:"
+                err "  https://nodejs.org/en/download/"
+                return 1
             fi
         fi
         ok "Node.js installed"

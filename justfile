@@ -968,24 +968,37 @@ selfhost-down:
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
     echo "Stopping AEF self-host stack..."
-    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
         {{compose_selfhost_cf}} down
     else
         {{compose_selfhost}} down
     fi
 
-# View self-host logs (all services or specific service)
+# View self-host logs (all services or specific service, auto-detects tunnel)
 selfhost-logs *service:
-    @{{compose_selfhost}} logs -f {{service}}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source infra/scripts/selfhost-env.sh
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        {{compose_selfhost_cf}} logs -f {{service}}
+    else
+        {{compose_selfhost}} logs -f {{service}}
+    fi
 
-# Check self-host stack status
+# Check self-host stack status (auto-detects tunnel)
 selfhost-status:
     #!/usr/bin/env bash
     set -euo pipefail
+    source infra/scripts/selfhost-env.sh
     echo "📊 AEF Self-Host Status"
     echo "======================="
-    {{compose_selfhost}} ps
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
+        echo "  (Cloudflare Tunnel detected)"
+        {{compose_selfhost_cf}} ps
+    else
+        {{compose_selfhost}} ps
+    fi
     echo ""
     echo "🔗 Access Points:"
     if [ -n "${SYN_DOMAIN:-}" ]; then
@@ -1038,7 +1051,7 @@ selfhost-update:
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
     # Detect Cloudflare tunnel
-    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         COMPOSE="{{compose_selfhost_cf}}"
         echo "  (Cloudflare Tunnel detected)"
     else
@@ -1073,7 +1086,7 @@ selfhost-reset:
     echo "⚠️  WARNING: This will delete ALL data including the database!"
     echo "Press Ctrl+C within 5 seconds to cancel..."
     sleep 5
-    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
+    if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
         {{compose_selfhost_cf}} down -v
     else

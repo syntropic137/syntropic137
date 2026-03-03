@@ -1,7 +1,7 @@
 # Cloudflare Tunnel Configuration for AEF Self-Host
 #
 # This file is for running cloudflared as a standalone service (not via Docker).
-# For Docker deployment, use CLOUDFLARE_TUNNEL_TOKEN environment variable instead.
+# For Docker deployment, refer to the selfhost docs which use CLOUDFLARE_TUNNEL_TOKEN via .env.
 #
 # Setup:
 #   1. Create tunnel: cloudflared tunnel create syn-selfhost

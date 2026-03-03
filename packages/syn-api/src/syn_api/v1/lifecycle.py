@@ -78,6 +78,7 @@ async def startup(
             event_store = get_event_store_instance()
             await event_store.initialize()
         except Exception as e:
+            logger.exception("AgentEventStore initialization failed")
             return Err(
                 LifecycleError.CONNECTION_FAILED,
                 message=f"AgentEventStore initialization failed: {e}",
@@ -86,6 +87,7 @@ async def startup(
         try:
             await ensure_connected()
         except Exception as e:
+            logger.exception("Event store connection failed")
             return Err(
                 LifecycleError.CONNECTION_FAILED,
                 message=f"Event store connection failed: {e}",
@@ -111,6 +113,7 @@ async def startup(
         mode = "degraded" if _degraded_reasons else "full"
         return Ok({"mode": mode, "degraded_reasons": _degraded_reasons})
     except Exception as e:
+        logger.exception("Unexpected startup failure")
         return Err(LifecycleError.CONNECTION_FAILED, message=str(e))
 
 
