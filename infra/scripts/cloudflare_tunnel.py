@@ -15,9 +15,12 @@ Why a separate module?
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from shared import SECRET_CF_TUNNEL_TOKEN, set_secure_permissions
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Constants

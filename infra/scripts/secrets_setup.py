@@ -27,14 +27,19 @@ Examples:
     just secrets-unseal
 """
 
+from __future__ import annotations
+
 import argparse
 import getpass
 import secrets
 import subprocess
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from shared import REQUIRED_SECRETS, SECRETS_DIR, set_secure_permissions
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Optional secrets that must be provided manually
 OPTIONAL_SECRETS: dict[str, str] = {}
