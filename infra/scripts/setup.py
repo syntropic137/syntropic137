@@ -1055,7 +1055,8 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     # headers, WebSocket support, and SPA routing.  Always route through
     # nginx — never expose the raw API directly.
     step(f"Subdomain: pick yours  Domain: select from dropdown")
-    step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}syn-ui:80{_RST}")
+    step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}syn-ui:8081{_RST}")
+    hint("Port 8081 enables basic auth on tunnel access (set SYN_API_PASSWORD in .env)")
     step(f"Click {_PURPLE}Save{_RST}")
     print()
 

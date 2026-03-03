@@ -952,6 +952,11 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     just selfhost-seed || echo "   ⚠️ Seed skipped (data may already exist)"
     echo ""
     just selfhost-status
+    echo ""
+    echo "🔒 Tunnel auth reminder:"
+    echo "   Ensure your Cloudflare tunnel routes to http://syn-ui:8081 (not port 80)"
+    echo "   Port 8081 requires basic auth when SYN_API_PASSWORD is set."
+    echo "   Update: Zero Trust → Networks → Connectors → [tunnel] → Public Hostname"
 
 # Stop self-host stack (auto-detects Cloudflare Tunnel)
 selfhost-down:

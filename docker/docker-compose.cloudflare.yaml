@@ -30,7 +30,13 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # OVERRIDE: Keep localhost port for local access (no auth on port 80).
-  # Tunnel routes to port 8081 (basic auth required when SYN_API_PASSWORD set).
-  # Update Cloudflare tunnel public hostname to: http://syn-ui:8081
+  # IMPORTANT: In Cloudflare Zero Trust dashboard, set the tunnel's public
+  # hostname service URL to:  http://syn-ui:8081
+  #
+  # Port 8081 = basic auth required (when SYN_API_PASSWORD is set)
+  # Port 80   = localhost only, no auth (for local dev/testing/Playwright)
+  #
+  # If your tunnel still points to syn-ui:80, the UI/API is exposed without
+  # authentication. Update it now:
+  #   Zero Trust → Networks → Connectors → [your tunnel] → Public Hostname
   # ===========================================================================
