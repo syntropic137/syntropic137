@@ -1771,15 +1771,19 @@ def print_summary(ctx: SetupContext) -> bool:
     print("  Run 'just setup --stage security_audit' to re-check security posture.")
 
     print()
+    callout("Next step: start the stack")
+    print(f"    {_BOLD}just selfhost-up-tunnel{_RST}    Start with Cloudflare Tunnel (recommended)")
+    print(f"    {_BOLD}just selfhost-up{_RST}           Start local-only (no external access)")
+    print()
     print("  Useful commands:")
     print("    just health-check      Check service health")
     print("    just selfhost-status    Show container status")
     print("    just selfhost-logs      Follow service logs")
-    print("    just seed-workflows    Re-seed workflow definitions")
+    print("    just selfhost-down      Stop the stack")
     print()
     if ctx.skip_github:
         print("  GitHub App not configured. To add it later:")
-        print("    just setup --stage configure_github_app")
+        print("    just onboard --stage configure_github_app")
         print()
 
     return True
