@@ -651,10 +651,12 @@ generate-llms-txt:
     uv run python scripts/generate_llms_txt.py
 
 # Seed workflows from YAML files
+# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
 seed-workflows:
     uv run python scripts/seed_workflows.py
 
 # Seed trigger presets (self-healing, review-fix)
+# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
 seed-triggers:
     uv run python scripts/seed_triggers.py
 
@@ -878,27 +880,7 @@ _selfhost-preflight:
 selfhost-up: _selfhost-preflight
     #!/usr/bin/env bash
     set -euo pipefail
-    # Load 1Password service account token from macOS Keychain (vault-specific)
-    if [ -f infra/.env ]; then
-        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
-    fi
-    if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-        _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
-        if [ "$(uname -s)" = "Darwin" ]; then
-            _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
-            if [ -n "$_TOKEN" ]; then
-                export OP_SERVICE_ACCOUNT_TOKEN="$_TOKEN"
-                echo "  1Password: loaded from Keychain (SYN_${_VK})"
-            fi
-        elif [ -n "${!_VK:-}" ]; then
-            export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
-            echo "  1Password: loaded from ${_VK}"
-        fi
-    fi
-    # Resolve 1Password secrets into env so Docker Compose sees them
-    if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
-    fi
+    source infra/scripts/selfhost-env.sh
     echo "🚀 Starting AEF self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
@@ -911,27 +893,7 @@ selfhost-up: _selfhost-preflight
 selfhost-up-tunnel: _selfhost-preflight
     #!/usr/bin/env bash
     set -euo pipefail
-    # Load 1Password service account token from macOS Keychain (vault-specific)
-    if [ -f infra/.env ]; then
-        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
-    fi
-    if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-        _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
-        if [ "$(uname -s)" = "Darwin" ]; then
-            _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
-            if [ -n "$_TOKEN" ]; then
-                export OP_SERVICE_ACCOUNT_TOKEN="$_TOKEN"
-                echo "  1Password: loaded from Keychain (SYN_${_VK})"
-            fi
-        elif [ -n "${!_VK:-}" ]; then
-            export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
-            echo "  1Password: loaded from ${_VK}"
-        fi
-    fi
-    # Resolve 1Password secrets into env so Docker Compose sees them
-    if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
-    fi
+    source infra/scripts/selfhost-env.sh
     echo "🚀 Starting AEF self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
     echo ""
@@ -944,6 +906,7 @@ selfhost-up-tunnel: _selfhost-preflight
 selfhost-down:
     #!/usr/bin/env bash
     set -euo pipefail
+    source infra/scripts/selfhost-env.sh
     echo "Stopping AEF self-host stack..."
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
@@ -958,18 +921,23 @@ selfhost-logs *service:
 
 # Check self-host stack status
 selfhost-status:
-    @echo "📊 AEF Self-Host Status"
-    @echo "======================="
-    @{{compose_selfhost}} ps
-    @echo ""
-    @echo "🔗 Access Points:"
-    @if [ -n "${SYN_DOMAIN:-}" ]; then \
-        echo "   UI:  https://${SYN_DOMAIN}"; \
-        echo "   API: https://api.${SYN_DOMAIN}"; \
-    else \
-        echo "   UI:  http://localhost:80"; \
-        echo "   API: http://localhost:8000"; \
-        echo "   (Set SYN_DOMAIN in .env for external access)"; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 AEF Self-Host Status"
+    echo "======================="
+    {{compose_selfhost}} ps
+    echo ""
+    echo "🔗 Access Points:"
+    if [ -n "${SYN_DOMAIN:-}" ]; then
+        _domain=$(echo "${SYN_DOMAIN}" | sed -E 's|^https?://||' | sed 's|/$||')
+        echo "   UI:       https://$_domain"
+        echo "   API:      https://$_domain/api/v1"
+        echo "   API Docs: https://$_domain/api/v1/docs"
+    else
+        echo "   UI:       http://localhost:80"
+        echo "   API:      http://localhost:80/api/v1"
+        echo "   API Docs: http://localhost:80/api/v1/docs"
+        echo "   (Set SYN_DOMAIN in .env for external access)"
     fi
 
 # Check Cloudflare tunnel status
@@ -987,27 +955,7 @@ selfhost-restart service:
 selfhost-update:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Load 1Password service account token from macOS Keychain (vault-specific)
-    if [ -f infra/.env ]; then
-        eval "$(grep -E '^OP_VAULT=' infra/.env | head -1)"
-    fi
-    if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-        _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
-        if [ "$(uname -s)" = "Darwin" ]; then
-            _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
-            if [ -n "$_TOKEN" ]; then
-                export OP_SERVICE_ACCOUNT_TOKEN="$_TOKEN"
-                echo "  1Password: loaded from Keychain (SYN_${_VK})"
-            fi
-        elif [ -n "${!_VK:-}" ]; then
-            export OP_SERVICE_ACCOUNT_TOKEN="${!_VK}"
-            echo "  1Password: loaded from ${_VK}"
-        fi
-    fi
-    # Resolve 1Password secrets into env so Docker Compose sees them
-    if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
-    fi
+    source infra/scripts/selfhost-env.sh
     # Detect Cloudflare tunnel
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}' 2>/dev/null | grep -q .; then
         COMPOSE="{{compose_selfhost_cf}}"
@@ -1040,6 +988,7 @@ selfhost-update:
 selfhost-reset:
     #!/usr/bin/env bash
     set -euo pipefail
+    source infra/scripts/selfhost-env.sh
     echo "⚠️  WARNING: This will delete ALL data including the database!"
     echo "Press Ctrl+C within 5 seconds to cancel..."
     sleep 5
@@ -1104,9 +1053,9 @@ infra-up:
     @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
     @echo ""
     @echo "✅ Infrastructure stack started!"
-    @echo "   Dashboard: http://localhost:8000"
     @echo "   UI:        http://localhost:80"
-    @echo "   API Docs:  http://localhost:8000/docs"
+    @echo "   API:       http://localhost:80/api/v1"
+    @echo "   API Docs:  http://localhost:80/api/v1/docs"
 
 # Stop infrastructure stack
 infra-down:

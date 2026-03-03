@@ -56,8 +56,8 @@ def serve(
     ctx: click.Context,
     port: int,
     host: str,
-    eventstore_host: str,
-    eventstore_port: int,
+    eventstore_host: str,  # noqa: ARG001  FIXME(#162): will be used when real store is wired
+    eventstore_port: int,  # noqa: ARG001  FIXME(#162): will be used when real store is wired
     dedup_max_size: int,
 ) -> None:
     """Start the event collector service.
@@ -71,11 +71,14 @@ def serve(
     from syn_collector.collector.store import InMemoryEventStore
 
     logger.info(f"Starting collector service on {host}:{port}")
-    # TODO: Use eventstore_host and eventstore_port to create real gRPC client
-    logger.info(f"Event store: {eventstore_host}:{eventstore_port} (not connected yet)")
-
-    # TODO: Create real event store client when available
-    # For now, use in-memory store
+    # FIXME(#162): Collector uses InMemoryEventStore — all events lost on restart.
+    # Per ADR-026, observability events should go to AgentEventStore (TimescaleDB),
+    # NOT the gRPC domain event store. The EventStoreProtocol interface here is the
+    # wrong abstraction. Needs a TimescaleDBCollectorStore or direct AgentEventStore usage.
+    logger.warning(
+        "Collector using InMemoryEventStore — events will be LOST on restart. "
+        "See issue #162 for fix plan."
+    )
     event_store = InMemoryEventStore()
 
     app = create_app(

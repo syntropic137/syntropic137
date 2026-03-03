@@ -4,6 +4,10 @@ set -e
 # Selfhost entrypoint — reads Docker secrets and exports env vars before
 # exec-ing the container's original CMD. This ensures DATABASE_URL and
 # REDIS_URL are built from secrets rather than dev defaults.
+#
+# GitHub secrets (SYN_GITHUB_PRIVATE_KEY, SYN_GITHUB_WEBHOOK_SECRET) are
+# passed as env vars via compose (sourced from 1Password or .env), not as
+# Docker secret files.
 
 # Read DB password from Docker secret if available
 if [ -f /run/secrets/db_password ]; then
@@ -18,16 +22,6 @@ fi
 if [ -f /run/secrets/redis_password ]; then
   REDIS_PASSWORD="$(cat /run/secrets/redis_password)"
   export REDIS_URL="redis://:${REDIS_PASSWORD}@redis:6379/0"
-fi
-
-# Read GitHub private key from Docker secret (base64-encode for pydantic settings)
-if [ -f /run/secrets/github_private_key ] && [ -z "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
-  export SYN_GITHUB_PRIVATE_KEY="$(base64 < /run/secrets/github_private_key | tr -d '\n')"
-fi
-
-# Read GitHub webhook secret from Docker secret
-if [ -f /run/secrets/github_webhook_secret ] && [ -z "${SYN_GITHUB_WEBHOOK_SECRET:-}" ]; then
-  export SYN_GITHUB_WEBHOOK_SECRET="$(cat /run/secrets/github_webhook_secret)"
 fi
 
 exec "$@"

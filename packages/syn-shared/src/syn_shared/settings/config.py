@@ -363,6 +363,20 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
+    # REDIS
+    # =========================================================================
+
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description=(
+            "Redis connection URL for caching and control signal queues. "
+            "Format: redis://[:password]@host:port/db "
+            "For Docker: redis://redis:6379/0 "
+            "For selfhost: built from secrets in selfhost-entrypoint.sh"
+        ),
+    )
+
+    # =========================================================================
     # DASHBOARD
     # =========================================================================
 

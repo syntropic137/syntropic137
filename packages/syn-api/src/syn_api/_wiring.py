@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Any
 
 from syn_adapters.agents import AgentProvider, get_agent
@@ -216,7 +215,9 @@ def get_controller() -> Any:
 
     state_adapter = ProjectionControlStateAdapter(get_projection_store())
 
-    redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+    from syn_shared.settings import get_settings
+
+    redis_url = get_settings().redis_url
     try:
         import redis.asyncio as aioredis
 

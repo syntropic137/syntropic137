@@ -16,11 +16,15 @@ Usage:
 
 from __future__ import annotations
 
+import logging
+import os
 from enum import Enum
 from pathlib import Path
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
 
 
 class StorageProvider(str, Enum):
@@ -153,11 +157,11 @@ class StorageSettings(BaseSettings):
     )
 
     minio_secure: bool = Field(
-        default=True,
+        default=False,
         description=(
             "Use HTTPS for MinIO connections. "
-            "Set to false for local development without TLS. "
-            "Default: true (use HTTPS)."
+            "Default: false (Docker-internal networking uses plain HTTP). "
+            "Set to true for external deployments with TLS."
         ),
     )
 
@@ -233,6 +237,18 @@ class StorageSettings(BaseSettings):
     # =========================================================================
     # VALIDATION
     # =========================================================================
+
+    @model_validator(mode="after")
+    def warn_local_provider_in_production(self) -> StorageSettings:
+        """Warn if using LOCAL storage outside test/offline mode."""
+        if self.provider == StorageProvider.LOCAL:
+            app_env = os.environ.get("APP_ENVIRONMENT", "development").lower()
+            if app_env not in ("test", "offline"):
+                _logger.warning(
+                    "SYN_STORAGE_PROVIDER=local — artifact storage uses filesystem. "
+                    "Set SYN_STORAGE_PROVIDER=minio for Docker/selfhost deployments."
+                )
+        return self
 
     @model_validator(mode="after")
     def validate_provider_config(self) -> StorageSettings:

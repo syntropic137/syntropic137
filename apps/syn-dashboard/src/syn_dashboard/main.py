@@ -10,7 +10,7 @@ from agentic_logging import get_logger, setup_logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from syn_api.types import Ok
+from syn_api.types import Err, Ok
 from syn_dashboard.api import (
     artifacts_router,
     control_router,
@@ -56,11 +56,11 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Syntropic137 Dashboard...")
 
     result = await lifecycle.startup()
-    if hasattr(result, "value"):
-        logger.info("Startup complete")
-    else:
-        msg = getattr(result, "message", "unknown error")
-        logger.error("Startup failed: %s", msg)
+    if isinstance(result, Err):
+        logger.error("Startup failed: %s — refusing to serve traffic", result.message)
+        raise RuntimeError(f"Startup aborted: {result.message}")
+
+    logger.info("Startup complete (mode=%s)", result.value.get("mode", "full"))
 
     yield
 
@@ -105,24 +105,23 @@ def create_app() -> FastAPI:
         app.add_middleware(WebhookRecorderMiddleware)
         logger.info("Webhook recording enabled — saving to fixtures/webhooks/")
 
-    # Register API routers
-    app.include_router(workflows_router, prefix="/api")
-    app.include_router(execution_router, prefix="/api")  # Workflow execution
-    app.include_router(executions_router, prefix="/api")  # Execution detail
-    app.include_router(sessions_router, prefix="/api")
-    app.include_router(artifacts_router, prefix="/api")
-    app.include_router(metrics_router, prefix="/api")
-    app.include_router(observability_router, prefix="/api")  # Tool/token metrics
-    app.include_router(control_router, prefix="/api")  # Execution control (pause/resume/cancel)
-    app.include_router(costs_router, prefix="/api")  # Cost tracking
-    app.include_router(events_router, prefix="/api")  # Raw event queries (ADR-029)
-    app.include_router(conversations_router, prefix="/api")  # Conversation logs (ADR-035)
-    app.include_router(triggers_router, prefix="/api")  # Trigger rules (self-healing)
-
-    # Webhooks (no /api prefix - must match GitHub's webhook URL exactly)
+    # ── API routers ────────────────────────────────────────────────────
+    # No prefix here — versioning is handled at the routing layer (nginx).
+    # nginx: location /api/v1/ → proxy_pass http://dashboard:8000/
+    # So /api/v1/workflows → strips to /workflows → matches these routes.
+    app.include_router(workflows_router)
+    app.include_router(execution_router)
+    app.include_router(executions_router)
+    app.include_router(sessions_router)
+    app.include_router(artifacts_router)
+    app.include_router(metrics_router)
+    app.include_router(observability_router)
+    app.include_router(control_router)
+    app.include_router(costs_router)
+    app.include_router(events_router)
+    app.include_router(conversations_router)
+    app.include_router(triggers_router)
     app.include_router(webhooks_router)
-
-    # WebSocket endpoint for real-time events (no /api prefix)
     app.include_router(websocket_router)
 
     @app.get("/")
