@@ -200,5 +200,5 @@ volumes:
 
 networks:
   default:
-    name: syn-network
+    name: syn-dev-network
     external: true
