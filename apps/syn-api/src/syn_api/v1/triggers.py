@@ -5,6 +5,7 @@ Maps to the github context in syn-domain.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from syn_api._wiring import (
@@ -277,7 +278,9 @@ async def get_trigger(
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
             conditions=list(indexed.conditions) if indexed.conditions else [],
             input_mapping=dict(indexed.input_mapping) if indexed.input_mapping else {},
-            config=dict(indexed.config) if isinstance(indexed.config, dict) else {},
+            config=dataclasses.asdict(indexed.config)
+            if dataclasses.is_dataclass(indexed.config)
+            else (dict(indexed.config) if isinstance(indexed.config, dict) else {}),
             installation_id=indexed.installation_id or "",
             created_by=indexed.created_by or "",
             last_fired_at=indexed.last_fired_at if hasattr(indexed, "last_fired_at") else None,

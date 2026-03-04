@@ -10,7 +10,6 @@ See ADR-041: Offline Development Mode and Webhook Recording.
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import hmac
 import json
@@ -24,7 +23,7 @@ from syn_api.types import Err, Ok
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 _TEST_WEBHOOK_SECRET = "test-webhook-secret"
-os.environ.setdefault("SYN_GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+os.environ["SYN_GITHUB_WEBHOOK_SECRET"] = _TEST_WEBHOOK_SECRET
 
 # Path to webhook fixtures (relative to repo root)
 _FIXTURES_DIR = Path(__file__).resolve().parents[4] / "fixtures" / "webhooks"
@@ -58,7 +57,8 @@ async def _reset_storage():
         repository=get_workflow_repository(),
         event_publisher=get_event_publisher(),
     )
-    with contextlib.suppress(Exception):
+    workflow_repo = get_workflow_repository()
+    if not await workflow_repo.exists("self-heal-pr"):
         await handler.handle(
             CreateWorkflowTemplateCommand(
                 aggregate_id="self-heal-pr",
