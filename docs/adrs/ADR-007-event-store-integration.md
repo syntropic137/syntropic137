@@ -99,7 +99,7 @@ EVENTSTORE_TENANT_ID=syn137
 
 # For local development (Docker)
 # Event Store Server connects to PostgreSQL internally
-DATABASE_URL=postgres://syn137:syn137_dev_password@postgres:5432/syn137
+DATABASE_URL=postgres://syn:syn_dev_password@postgres:5432/syn
 ```
 
 ### Docker Compose Services

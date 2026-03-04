@@ -68,13 +68,13 @@ just dev-reset
 When Docker is running, PostgreSQL is available at:
 
 ```
-postgresql://syn137:syn137_dev_password@localhost:5432/syn137
+postgresql://syn:syn_dev_password@localhost:5432/syn
 ```
 
 Add this to your `.env` file:
 
 ```bash
-DATABASE_URL=postgresql://syn137:syn137_dev_password@localhost:5432/syn137
+DATABASE_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
 ```
 
 ### Running the CLI
@@ -168,7 +168,7 @@ just dev-reset
 
 ```bash
 # Connect to database directly
-docker exec -it syn-postgres psql -U syn137 -d syn137
+docker exec -it syn-postgres psql -U syn -d syn
 
 # Check tables
 \dt event_store.*

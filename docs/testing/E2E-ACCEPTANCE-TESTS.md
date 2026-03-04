@@ -192,7 +192,7 @@ docker network inspect syn-network
 
 **Validation Commands:**
 ```bash
-docker exec syn-postgres psql -U syn137 -d syn137 -c "\dt"
+docker exec syn-postgres psql -U syn -d syn -c "\dt"
 ```
 
 ---
@@ -696,7 +696,7 @@ curl -s http://localhost:8000/api/workflows | jq '.total'
 **Validation:**
 ```bash
 # After starting a workflow
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT event_type, aggregate_id, global_nonce FROM events WHERE event_type = 'WorkflowExecutionStarted' ORDER BY global_nonce DESC LIMIT 1;"
 ```
 
@@ -719,7 +719,7 @@ docker exec syn-postgres psql -U syn137 -d syn137 -c \
 **Validation:**
 ```bash
 # After a phase completes
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT event_type, convert_from(payload, 'UTF8')::json as payload FROM events WHERE event_type = 'PhaseCompleted' ORDER BY global_nonce DESC LIMIT 1;"
 ```
 
@@ -740,7 +740,7 @@ docker exec syn-postgres psql -U syn137 -d syn137 -c \
 **Validation:**
 ```bash
 # Check session events
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT event_type, aggregate_id FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce;"
 ```
 
@@ -761,7 +761,7 @@ docker exec syn-postgres psql -U syn137 -d syn137 -c \
 **Validation:**
 ```bash
 # Compare event store to API
-EVENT_COUNT=$(docker exec syn-postgres psql -U syn137 -d syn137 -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
+EVENT_COUNT=$(docker exec syn-postgres psql -U syn -d syn -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
 API_COUNT=$(curl -s http://localhost:8000/api/sessions?status=completed | jq 'length')
 echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 ```
@@ -783,7 +783,7 @@ echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 **Validation:**
 ```bash
 # Full event audit
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 ```
 
@@ -1759,20 +1759,20 @@ _Add any observations, recommendations, or follow-up items here._
 
 ```bash
 # List all events
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 
 # Find missing PhaseCompleted events
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT
      (SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted') as session_completed,
      (SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted') as phase_completed;"
 
 # Check projection sync
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "SELECT projection_name, last_event_position FROM projection_states;"
 
 # Reset projections (DANGEROUS - rebuilds from scratch)
-docker exec syn-postgres psql -U syn137 -d syn137 -c \
+docker exec syn-postgres psql -U syn -d syn -c \
   "UPDATE projection_states SET last_event_position = 0 WHERE projection_name = 'global_subscription';"
 ```

@@ -84,7 +84,7 @@ localhost:5432 - accepting connections
 ```
 
 #### F1.4: Database Query ✅
-- **Command:** `docker exec syn-postgres psql -U syn137 -d syn137 -c "SELECT COUNT(*) FROM events;"`
+- **Command:** `docker exec syn-postgres psql -U syn -d syn -c "SELECT COUNT(*) FROM events;"`
 - **Expected:** Returns event count
 - **Result:** ✅ PASS
 - **Evidence:**

@@ -78,8 +78,8 @@ timescaledb:
   container_name: syn-db
   environment:
     POSTGRES_DB: syn        # Single unified database
-    POSTGRES_USER: syn137
-    POSTGRES_PASSWORD: syn137_dev_password
+    POSTGRES_USER: syn
+    POSTGRES_PASSWORD: syn_dev_password
   ports:
     - "5432:5432"           # Standard PostgreSQL port
 ```
@@ -90,12 +90,12 @@ Both services connect to the same database:
 
 ```bash
 # Event Store (Rust)
-DATABASE_URL=postgres://syn137:syn137_dev_password@timescaledb:5432/syn137
+DATABASE_URL=postgres://syn:syn_dev_password@timescaledb:5432/syn
 
 # Dashboard API (Python) - via settings
 TIMESCALE_HOST=timescaledb
 TIMESCALE_PORT=5432
-TIMESCALE_DB=syn137
+TIMESCALE_DB=syn
 ```
 
 ## Decision Drivers

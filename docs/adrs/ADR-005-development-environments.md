@@ -123,7 +123,7 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: syn137
+      POSTGRES_DB: syn
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -169,7 +169,7 @@ test:
 ```bash
 # .env.development (local dev)
 APP_ENVIRONMENT=development
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/syn137
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/syn
 EVENT_STORE_URL=grpc://localhost:50051
 LOG_LEVEL=DEBUG
 LOG_FORMAT=console
