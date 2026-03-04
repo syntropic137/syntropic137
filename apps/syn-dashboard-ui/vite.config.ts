@@ -14,16 +14,14 @@ const uiFeedbackPath = path.resolve(__dirname, '../../lib/ui-feedback/packages/u
 // Vite registers its own 'error' handler (which prints full stack traces) AFTER
 // `configure` runs.  We use queueMicrotask to strip Vite's handlers once they
 // exist, leaving only our concise handler.
-function quietProxy(proxy: import('http-proxy').Server, label: string) {
-  const handler = (err: Error, _req: unknown, res: unknown) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function quietProxy(proxy: any, label: string) {
+  const handler = (err: Error) => {
     const code = (err as NodeJS.ErrnoException).code
     if (code === 'EPIPE' || code === 'ECONNRESET' || code === 'ECONNREFUSED') {
       console.log(`\x1b[33m[proxy:${label}]\x1b[0m ${code} — backend closed or not running`)
     } else {
       console.error(`[proxy:${label}]`, err.message)
-    }
-    if (res && typeof res === 'object' && 'writeHead' in res && !(res as { headersSent: boolean }).headersSent) {
-      (res as import('http').ServerResponse).writeHead(502).end()
     }
   }
   proxy.on('error', handler)
@@ -32,10 +30,13 @@ function quietProxy(proxy: import('http-proxy').Server, label: string) {
     proxy.removeAllListeners('error')
     proxy.on('error', handler)
   })
-  // Suppress socket-level errors on the proxied connection (prevents secondary stack traces)
-  proxy.on('proxyReq', (proxyReq) => { proxyReq.on('error', () => {}) })
-  proxy.on('proxyRes', (proxyRes) => { proxyRes.on('error', () => {}) })
-  proxy.on('open', (proxySocket) => { proxySocket.on('error', () => {}) })
+  // Suppress socket-level errors on proxied connections (prevents secondary stack traces)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proxy.on('proxyReq', (p: any) => { p.on('error', () => {}) })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proxy.on('proxyRes', (p: any) => { p.on('error', () => {}) })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  proxy.on('open', (p: any) => { p.on('error', () => {}) })
 }
 
 // https://vite.dev/config/
