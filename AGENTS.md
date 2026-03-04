@@ -22,13 +22,15 @@ The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and Open
 
 ```
 syntropic137/
-├── apps/syn-dashboard/        # FastAPI dashboard + API
+├── apps/
+│   ├── syn-api/               # FastAPI HTTP server (routes + v1 application services)
+│   ├── syn-cli/               # CLI tool ("syn") — HTTP client for syn-api
+│   └── syn-dashboard-ui/      # Dashboard frontend (Vite + React)
 ├── packages/
 │   ├── syn-domain/            # Domain events, aggregates, ports
 │   ├── syn-adapters/          # Orchestration + observability adapters
 │   ├── syn-collector/         # Event ingestion API
-│   ├── syn-shared/            # Shared settings, configuration
-│   └── syn-cli/               # CLI tool ("syn")
+│   └── syn-shared/            # Shared settings, configuration
 ├── lib/                       # Git submodules (we manage both — dogfooding)
 │   ├── agentic-primitives/    # Composable agent building blocks, isolation providers
 │   └── event-sourcing-platform/ # ES infrastructure, VSA tool, projections

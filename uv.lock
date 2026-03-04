@@ -13,7 +13,6 @@ members = [
     "syn-api",
     "syn-cli",
     "syn-collector",
-    "syn-dashboard",
     "syn-domain",
     "syn-perf",
     "syn-shared",
@@ -1578,20 +1577,30 @@ provides-extras = ["postgres", "claude", "openai", "agents", "minio", "all"]
 [[package]]
 name = "syn-api"
 version = "0.5.1"
-source = { editable = "packages/syn-api" }
+source = { editable = "apps/syn-api" }
 dependencies = [
+    { name = "agentic-logging" },
+    { name = "asyncpg" },
+    { name = "fastapi" },
     { name = "pydantic" },
+    { name = "sse-starlette" },
     { name = "syn-adapters" },
     { name = "syn-domain" },
     { name = "syn-shared" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
+    { name = "asyncpg", specifier = ">=0.30.0" },
+    { name = "fastapi", specifier = ">=0.115.0" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "sse-starlette", specifier = ">=2.2.0" },
     { name = "syn-adapters", editable = "packages/syn-adapters" },
     { name = "syn-domain", editable = "packages/syn-domain" },
     { name = "syn-shared", editable = "packages/syn-shared" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
 
 [[package]]
@@ -1601,7 +1610,6 @@ source = { editable = "apps/syn-cli" }
 dependencies = [
     { name = "httpx" },
     { name = "rich" },
-    { name = "syn-api" },
     { name = "typer" },
 ]
 
@@ -1609,7 +1617,6 @@ dependencies = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "rich", specifier = ">=13.9.0" },
-    { name = "syn-api", editable = "packages/syn-api" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
 
@@ -1650,46 +1657,6 @@ requires-dist = [
     { name = "syn-shared", editable = "packages/syn-shared" },
     { name = "uvicorn", specifier = ">=0.32" },
     { name = "watchfiles", specifier = ">=0.24" },
-]
-provides-extras = ["dev"]
-
-[[package]]
-name = "syn-dashboard"
-version = "0.5.1"
-source = { editable = "apps/syn-dashboard" }
-dependencies = [
-    { name = "agentic-logging" },
-    { name = "asyncpg" },
-    { name = "fastapi" },
-    { name = "sse-starlette" },
-    { name = "syn-adapters" },
-    { name = "syn-api" },
-    { name = "syn-domain" },
-    { name = "syn-shared" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "agentic-logging", directory = "lib/agentic-primitives/lib/python/agentic_logging" },
-    { name = "asyncpg", specifier = ">=0.30.0" },
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
-    { name = "sse-starlette", specifier = ">=2.2.0" },
-    { name = "syn-adapters", editable = "packages/syn-adapters" },
-    { name = "syn-api", editable = "packages/syn-api" },
-    { name = "syn-domain", editable = "packages/syn-domain" },
-    { name = "syn-shared", editable = "packages/syn-shared" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
 provides-extras = ["dev"]
 
@@ -1791,7 +1758,6 @@ dependencies = [
     { name = "syn-api" },
     { name = "syn-cli" },
     { name = "syn-collector" },
-    { name = "syn-dashboard" },
     { name = "syn-domain" },
     { name = "syn-shared" },
 ]
@@ -1817,10 +1783,9 @@ requires-dist = [
     { name = "minio", specifier = ">=7.2.20" },
     { name = "sqlmodel", specifier = ">=0.0.27" },
     { name = "syn-adapters", editable = "packages/syn-adapters" },
-    { name = "syn-api", editable = "packages/syn-api" },
+    { name = "syn-api", editable = "apps/syn-api" },
     { name = "syn-cli", editable = "apps/syn-cli" },
     { name = "syn-collector", editable = "packages/syn-collector" },
-    { name = "syn-dashboard", editable = "apps/syn-dashboard" },
     { name = "syn-domain", editable = "packages/syn-domain" },
     { name = "syn-shared", editable = "packages/syn-shared" },
 ]

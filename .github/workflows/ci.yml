@@ -96,8 +96,7 @@ jobs:
         run: |
           uv run pytest -m unit \
             --cov=apps/syn-cli/src \
-            --cov=apps/syn-dashboard/src \
-            --cov=packages/syn-api/src \
+            --cov=apps/syn-api/src \
             --cov=packages/syn-domain/src \
             --cov=packages/syn-adapters/src \
             --cov=packages/syn-shared/src \

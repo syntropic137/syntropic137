@@ -1,4 +1,4 @@
-"""Tests for control CLI commands (HTTP delegation)."""
+"""Tests for control CLI commands."""
 
 from __future__ import annotations
 
@@ -19,6 +19,23 @@ def _mock_response(status_code: int = 200, json_data: dict | None = None) -> Mag
     return resp
 
 
+def _mock_client(*responses: MagicMock) -> MagicMock:
+    client = MagicMock()
+    all_responses = list(responses)
+    call_idx = {"i": 0}
+
+    def _next_response(*_args: object, **_kwargs: object) -> MagicMock:
+        idx = call_idx["i"]
+        call_idx["i"] += 1
+        return all_responses[idx] if idx < len(all_responses) else _mock_response()
+
+    client.get.side_effect = _next_response
+    client.post.side_effect = _next_response
+    client.__enter__ = lambda _self: client
+    client.__exit__ = MagicMock(return_value=False)
+    return client
+
+
 @pytest.mark.unit
 class TestControlHelp:
     def test_control_help(self) -> None:
@@ -31,34 +48,32 @@ class TestControlHelp:
 @pytest.mark.unit
 class TestControlPause:
     def test_pause_success(self) -> None:
-        with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(200, {"state": "paused"})
+        client = _mock_client(_mock_response(200, {"state": "paused"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "pause", "exec-001"])
         assert result.exit_code == 0
         assert "Pause signal sent" in result.stdout
 
     def test_pause_with_reason(self) -> None:
-        with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(200, {"state": "paused", "message": "OK"})
+        client = _mock_client(_mock_response(200, {"state": "paused", "message": "OK"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(
                 app, ["control", "pause", "exec-001", "--reason", "investigating"]
             )
         assert result.exit_code == 0
-        mock_post.assert_called_once()
-        call_kwargs = mock_post.call_args
+        client.post.assert_called_once()
+        call_kwargs = client.post.call_args
         assert call_kwargs.kwargs.get("json") == {"reason": "investigating"}
 
     def test_pause_failure(self) -> None:
-        with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(404, {"detail": "Not found"})
+        client = _mock_client(_mock_response(404, {"detail": "Not found"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "pause", "exec-bad"])
         assert result.exit_code == 1
         assert "Failed to pause" in result.stdout
 
     def test_pause_connection_error(self) -> None:
-        import httpx
-
-        with patch("httpx.post", side_effect=httpx.ConnectError("refused")):
+        with patch("syn_cli.commands.control.get_client", side_effect=ConnectionError("refused")):
             result = runner.invoke(app, ["control", "pause", "exec-001"])
         assert result.exit_code == 1
         assert "Could not connect" in result.stdout
@@ -67,8 +82,8 @@ class TestControlPause:
 @pytest.mark.unit
 class TestControlResume:
     def test_resume_success(self) -> None:
-        with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(200, {"state": "running"})
+        client = _mock_client(_mock_response(200, {"state": "running"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "resume", "exec-001"])
         assert result.exit_code == 0
         assert "Resume signal sent" in result.stdout
@@ -77,15 +92,15 @@ class TestControlResume:
 @pytest.mark.unit
 class TestControlCancel:
     def test_cancel_with_force(self) -> None:
-        with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(200, {"state": "cancelled"})
+        client = _mock_client(_mock_response(200, {"state": "cancelled"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "cancel", "exec-001", "--force"])
         assert result.exit_code == 0
         assert "Cancel signal sent" in result.stdout
 
     def test_cancel_confirmed(self) -> None:
-        with patch("httpx.post") as mock_post:
-            mock_post.return_value = _mock_response(200, {"state": "cancelled"})
+        client = _mock_client(_mock_response(200, {"state": "cancelled"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "cancel", "exec-001"], input="y\n")
         assert result.exit_code == 0
 
@@ -98,25 +113,15 @@ class TestControlCancel:
 @pytest.mark.unit
 class TestControlStatus:
     def test_status_running(self) -> None:
-        with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(200, {"state": "running"})
+        client = _mock_client(_mock_response(200, {"state": "running"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "status", "exec-001"])
         assert result.exit_code == 0
         assert "running" in result.stdout
 
     def test_status_completed(self) -> None:
-        with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(200, {"state": "completed"})
+        client = _mock_client(_mock_response(200, {"state": "completed"}))
+        with patch("syn_cli.commands.control.get_client", return_value=client):
             result = runner.invoke(app, ["control", "status", "exec-001"])
         assert result.exit_code == 0
         assert "completed" in result.stdout
-
-    def test_status_custom_url(self) -> None:
-        with patch("httpx.get") as mock_get:
-            mock_get.return_value = _mock_response(200, {"state": "running"})
-            result = runner.invoke(
-                app, ["control", "status", "exec-001", "--url", "http://custom:9000"]
-            )
-        assert result.exit_code == 0
-        mock_get.assert_called_once()
-        assert "custom:9000" in mock_get.call_args[0][0]

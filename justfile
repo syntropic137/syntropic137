@@ -364,7 +364,7 @@ dev-offline:
     @echo "Starting AEF in offline mode (no Docker, no external services)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @-lsof -ti:8000 | xargs kill 2>/dev/null || true
-    @APP_ENVIRONMENT=offline uv run uvicorn syn_dashboard.main:app \
+    @APP_ENVIRONMENT=offline uv run uvicorn syn_api.main:app \
         --host 0.0.0.0 --port 8000 --reload &
     @sleep 3
     @cd apps/syn-dashboard-ui && pnpm run dev &
@@ -378,9 +378,9 @@ dev-offline:
     @echo "No Docker, no API keys, no smee — just code."
     @echo "Stop with: just dev-offline-stop"
 
-# Start dashboard backend with webhook recording enabled
+# Start API backend with webhook recording enabled
 dev-record-webhooks:
-    SYN_RECORD_WEBHOOKS=true just dashboard-backend
+    SYN_RECORD_WEBHOOKS=true just api-backend
 
 # Replay recorded webhooks against a running dashboard
 replay-webhooks *args:
@@ -390,11 +390,11 @@ replay-webhooks *args:
 cli *args:
     uv run --package syn-cli syn {{args}}
 
-# Start the dashboard backend (API server)
+# Start the API backend server
 # Loads .env for database connection and API keys
-dashboard-backend:
+api-backend:
     @if [ -f .env ]; then set -a && . ./.env && set +a; fi && \
-    uv run uvicorn syn_dashboard.main:app --host 0.0.0.0 --port 8000 --reload
+    uv run uvicorn syn_api.main:app --host 0.0.0.0 --port 8000 --reload
 
 # Start the dashboard frontend (Vite dev server)
 dashboard-frontend:

@@ -2,15 +2,40 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
-from syn_api.types import Ok, WorkflowSummary, WorkflowValidation
 from syn_cli.main import app
 
 runner = CliRunner()
+
+
+def _mock_response(status_code: int = 200, json_data: dict | None = None) -> MagicMock:
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.json.return_value = json_data or {}
+    return resp
+
+
+def _mock_client(*responses: MagicMock) -> MagicMock:
+    """Create a mock httpx.Client context manager returning sequential responses."""
+    client = MagicMock()
+    # Track call order across get/post
+    all_responses = list(responses)
+    call_idx = {"i": 0}
+
+    def _next_response(*_args: object, **_kwargs: object) -> MagicMock:
+        idx = call_idx["i"]
+        call_idx["i"] += 1
+        return all_responses[idx] if idx < len(all_responses) else _mock_response()
+
+    client.get.side_effect = _next_response
+    client.post.side_effect = _next_response
+    client.__enter__ = lambda _self: client
+    client.__exit__ = MagicMock(return_value=False)
+    return client
 
 
 @pytest.mark.unit
@@ -25,22 +50,23 @@ class TestWorkflowHelp:
 @pytest.mark.unit
 class TestWorkflowList:
     def test_list_empty(self) -> None:
-        with patch("syn_api.v1.workflows.list_workflows", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok([])
+        client = _mock_client(_mock_response(200, {"workflows": []}))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(app, ["workflow", "list"])
         assert result.exit_code == 0
         assert "No workflows found" in result.stdout
 
     def test_list_with_results(self) -> None:
-        summary = WorkflowSummary(
-            id="wf-123-abc-def",
-            name="Test Workflow",
-            workflow_type="research",
-            classification="standard",
-            phase_count=3,
-        )
-        with patch("syn_api.v1.workflows.list_workflows", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok([summary])
+        workflows = [
+            {
+                "id": "wf-123-abc-def",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "phase_count": 3,
+            }
+        ]
+        client = _mock_client(_mock_response(200, {"workflows": workflows}))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(app, ["workflow", "list"])
         assert result.exit_code == 0
         assert "Test Workflow" in result.stdout
@@ -50,8 +76,8 @@ class TestWorkflowList:
 @pytest.mark.unit
 class TestWorkflowCreate:
     def test_create_success(self) -> None:
-        with patch("syn_api.v1.workflows.create_workflow", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok("wf-new-id")
+        client = _mock_client(_mock_response(200, {"id": "wf-new-id"}))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(
                 app,
                 ["workflow", "create", "My Workflow", "--type", "research"],
@@ -73,29 +99,28 @@ class TestWorkflowValidate:
         assert result.exit_code == 0
 
     def test_validate_valid_file(self) -> None:
-        validation = WorkflowValidation(
-            valid=True,
-            name="Test",
-            workflow_type="research",
-            phase_count=2,
-            errors=[],
-        )
-        with patch("syn_api.v1.workflows.validate_yaml", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok(validation)
+        validation = {
+            "valid": True,
+            "name": "Test",
+            "workflow_type": "research",
+            "phase_count": 2,
+        }
+        client = _mock_client(_mock_response(200, validation))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(app, ["workflow", "validate", "/tmp/test.yaml"])
         assert result.exit_code == 0
         assert "Valid" in result.stdout
 
     def test_validate_invalid_file(self) -> None:
-        validation = WorkflowValidation(
-            valid=False,
-            name="",
-            workflow_type="",
-            phase_count=0,
-            errors=["Missing required field: name"],
-        )
-        with patch("syn_api.v1.workflows.validate_yaml", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok(validation)
+        validation = {
+            "valid": False,
+            "name": "",
+            "workflow_type": "",
+            "phase_count": 0,
+            "errors": ["Missing required field: name"],
+        }
+        client = _mock_client(_mock_response(200, validation))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(app, ["workflow", "validate", "/tmp/bad.yaml"])
         assert result.exit_code == 1
         assert "Invalid" in result.stdout
@@ -104,22 +129,23 @@ class TestWorkflowValidate:
 @pytest.mark.unit
 class TestWorkflowRun:
     def test_run_not_found(self) -> None:
-        with patch("syn_api.v1.workflows.list_workflows", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok([])
+        client = _mock_client(_mock_response(200, {"workflows": []}))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(app, ["workflow", "run", "nonexistent"])
         assert result.exit_code == 1
         assert "No workflow found" in result.stdout
 
     def test_run_dry_run(self) -> None:
-        summary = WorkflowSummary(
-            id="wf-test-123",
-            name="Test Workflow",
-            workflow_type="research",
-            classification="standard",
-            phase_count=2,
-        )
-        with patch("syn_api.v1.workflows.list_workflows", new_callable=AsyncMock) as mock:
-            mock.return_value = Ok([summary])
+        workflows = [
+            {
+                "id": "wf-test-123",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "phase_count": 2,
+            }
+        ]
+        client = _mock_client(_mock_response(200, {"workflows": workflows}))
+        with patch("syn_cli.commands.workflow.get_client", return_value=client):
             result = runner.invoke(app, ["workflow", "run", "wf-test-123", "--dry-run"])
         assert result.exit_code == 0
         assert "DRY RUN" in result.stdout

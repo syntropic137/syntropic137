@@ -16,11 +16,11 @@ class TestVersionCommand:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
         assert "Syntropic137" in result.stdout
-        assert "0.2.0" in result.stdout
+        assert "0.5.1" in result.stdout
 
     def test_version_v_prefix(self) -> None:
         result = runner.invoke(app, ["version"])
-        assert "v0.2.0" in result.stdout
+        assert "v0.5.1" in result.stdout
 
 
 @pytest.mark.unit
