@@ -278,8 +278,8 @@ async def get_trigger(
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
             conditions=list(indexed.conditions) if indexed.conditions else [],
             input_mapping=dict(indexed.input_mapping) if indexed.input_mapping else {},
-            config=dataclasses.asdict(indexed.config)
-            if dataclasses.is_dataclass(indexed.config)
+            config=dataclasses.asdict(indexed.config)  # type: ignore[arg-type]  # guarded by is_dataclass
+            if dataclasses.is_dataclass(indexed.config) and not isinstance(indexed.config, type)
             else (dict(indexed.config) if isinstance(indexed.config, dict) else {}),
             installation_id=indexed.installation_id or "",
             created_by=indexed.created_by or "",
