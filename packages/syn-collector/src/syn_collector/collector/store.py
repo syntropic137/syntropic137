@@ -40,12 +40,17 @@ def _event_to_dict(event: CollectedEvent) -> dict[str, Any]:
     - "session_id" → str
     - remaining keys → data payload
     """
-    return {
-        "event_type": event.event_type.value,
-        "session_id": event.session_id,
-        "timestamp": event.timestamp.isoformat(),
-        **event.data,
-    }
+    # Spread data first so reserved fields cannot be overridden by payload keys
+    payload: dict[str, Any] = dict(event.data)
+    payload.update(
+        {
+            "event_type": event.event_type.value,
+            "session_id": event.session_id,
+            "timestamp": event.timestamp.isoformat(),
+            "event_id": event.event_id,
+        }
+    )
+    return payload
 
 
 class TimescaleDBObservabilityStore:

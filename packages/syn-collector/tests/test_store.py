@@ -51,6 +51,24 @@ class TestEventToDict:
         assert result["tool_name"] == "Read"
         assert result["tool_use_id"] == "tu_123"
 
+    def test_includes_event_id(self, sample_event: CollectedEvent) -> None:
+        """event_id should be included for downstream dedup/correlation."""
+        result = _event_to_dict(sample_event)
+        assert result["event_id"] == "abc123def456789012345678901234"
+
+    def test_reserved_keys_not_overridden_by_data(self) -> None:
+        """Reserved fields must not be overridden by keys in event.data."""
+        event = CollectedEvent(
+            event_id="safe-event-id-00000000000000",
+            event_type=EventType.SESSION_STARTED,
+            session_id="real-session",
+            timestamp=datetime(2026, 3, 3, 12, 0, 0, tzinfo=UTC),
+            data={"event_type": "INJECTED", "session_id": "INJECTED"},
+        )
+        result = _event_to_dict(event)
+        assert result["event_type"] == "session_started"
+        assert result["session_id"] == "real-session"
+
     def test_dict_compatible_with_agent_event_from_dict(self, sample_event: CollectedEvent) -> None:
         """Mapped dict should be parseable by AgentEvent.from_dict()."""
         from syn_adapters.events.models import AgentEvent

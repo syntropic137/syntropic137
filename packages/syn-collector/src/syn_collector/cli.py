@@ -84,6 +84,7 @@ def serve(
     """
     import uvicorn
 
+    from syn_adapters.storage.in_memory import InMemoryStorageError
     from syn_collector.collector.service import create_app
     from syn_collector.collector.store import (
         InMemoryObservabilityStore,
@@ -96,9 +97,7 @@ def serve(
 
     if resolved_url:
         logger.info(f"Starting collector service on {host}:{port} with TimescaleDB")
-        ts_store = TimescaleDBObservabilityStore(resolved_url)
-        asyncio.get_event_loop().run_until_complete(ts_store.initialize())
-        store = ts_store
+        store = TimescaleDBObservabilityStore(resolved_url)
     else:
         # Attempt in-memory — will raise InMemoryStorageError if not test/offline
         app_env = os.environ.get("APP_ENVIRONMENT", "production")
@@ -107,7 +106,7 @@ def serve(
             logger.warning(
                 f"No DB URL provided — using InMemoryObservabilityStore (APP_ENVIRONMENT={app_env})"
             )
-        except Exception as e:
+        except InMemoryStorageError as e:
             click.echo(
                 f"Error: No database URL provided and in-memory storage not allowed.\n"
                 f"  Set --db-url or SYN_OBSERVABILITY_DB_URL for production use.\n"
