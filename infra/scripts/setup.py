@@ -748,7 +748,7 @@ def _audit_network_security() -> tuple[int, int]:
         "postgres": "PostgreSQL",
         "event-store": "EventStoreDB",
         "redis": "Redis",
-        "syn-dashboard": "API",
+        "api": "API",
         "minio": "MinIO",
     }
 

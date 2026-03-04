@@ -33,8 +33,8 @@ from dataclasses import asdict, dataclass
 
 from shared import (
     DEFAULT_PROJECT_NAME,
+    PORT_API,
     PORT_COLLECTOR,
-    PORT_DASHBOARD,
     PORT_EVENT_STORE,
     PORT_MINIO,
     PORT_POSTGRES,
@@ -111,7 +111,7 @@ def _build_services() -> list[Service]:
         Service(
             name="API",
             host="localhost",
-            port=PORT_DASHBOARD,
+            port=PORT_API,
             health_path="/health",
             description="AEF API",
             container_name=f"{prefix}api",

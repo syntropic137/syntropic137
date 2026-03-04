@@ -10,23 +10,8 @@ just dev
 curl http://localhost:8000/
 ```
 
-> **Note:** The triggers API router is not yet registered in `main.py`. Two options for testing:
-> - **Option A**: Use the CLI (`just cli triggers ...`) — works now
-> - **Option B**: Use curl against the webhook endpoint — works now
-> - The `/api/triggers` REST endpoints require adding `triggers_router` to `main.py` first (see step 0 below)
-
----
-
-## Step 0 (Optional): Register the triggers router
-
-If you want to test via the REST API at `/api/triggers`:
-
-```python
-# In apps/syn-dashboard/src/syn_dashboard/main.py, add:
-from syn_dashboard.api import triggers_router
-# ...
-app.include_router(triggers_router, prefix="/api")
-```
+> **Note:** The triggers API is available at `/triggers` on the API server.
+> Test via CLI (`just cli triggers ...`), curl against the REST API, or the webhook endpoint.
 
 ---
 

@@ -85,10 +85,10 @@ services:
   api:
     build:
       context: ..
-      dockerfile: infra/docker/images/syn-dashboard/Dockerfile
+      dockerfile: infra/docker/images/syn-api/Dockerfile
     environment:
-      DASHBOARD_PORT: "8000"
-      DASHBOARD_HOST: "0.0.0.0"
+      SYN_API_PORT: "8000"
+      SYN_API_HOST: "0.0.0.0"
       # ADR-030: Use explicit database URLs
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
       EVENT_STORE_HOST: event-store

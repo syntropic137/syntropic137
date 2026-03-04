@@ -1,0 +1,23 @@
+[project]
+name = "syn-api"
+version = "0.5.1"
+description = "HTTP API server for the Syntropic137"
+requires-python = ">=3.12"
+dependencies = [
+    "syn-domain",
+    "syn-adapters",
+    "syn-shared",
+    "pydantic>=2.12.5",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.2.0",
+    "asyncpg>=0.30.0",
+    "agentic-logging",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.13"]
+build-backend = "uv_build"
+
+[project.scripts]
+syn-api = "syn_api.main:run"

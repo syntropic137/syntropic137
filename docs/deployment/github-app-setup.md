@@ -249,9 +249,9 @@ Docker secrets are needed for the private key.
 Test that everything is configured correctly:
 
 ```bash
-# Start the dashboard
-cd apps/syn-dashboard
-uv run python -m syn_dashboard
+# Start the API server
+cd apps/syn-api
+uv run uvicorn syn_api.main:app
 
 # Check health endpoint
 curl http://localhost:8000/health
