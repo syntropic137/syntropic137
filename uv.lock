@@ -1619,11 +1619,11 @@ version = "0.5.0"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
-    { name = "event-sourcing-python" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "syn-adapters", extra = ["postgres"] },
     { name = "syn-shared" },
     { name = "uvicorn" },
     { name = "watchfiles" },
@@ -1639,7 +1639,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.0" },
-    { name = "event-sourcing-python", directory = "lib/event-sourcing-platform/event-sourcing/python" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.0" },
@@ -1647,6 +1646,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
+    { name = "syn-adapters", extras = ["postgres"], editable = "packages/syn-adapters" },
     { name = "syn-shared", editable = "packages/syn-shared" },
     { name = "uvicorn", specifier = ">=0.32" },
     { name = "watchfiles", specifier = ">=0.24" },

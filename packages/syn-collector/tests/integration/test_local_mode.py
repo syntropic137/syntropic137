@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from syn_collector.collector.service import create_app
-from syn_collector.collector.store import InMemoryEventStore
+from syn_collector.collector.store import InMemoryObservabilityStore
 from syn_collector.watcher.hooks import HookWatcher
 from syn_collector.watcher.transcript import TranscriptWatcher
 
@@ -23,14 +23,14 @@ class TestLocalModeIntegration:
     """Integration tests for local file-based operation."""
 
     @pytest.fixture
-    def event_store(self) -> InMemoryEventStore:
+    def event_store(self) -> InMemoryObservabilityStore:
         """Create shared event store."""
-        return InMemoryEventStore()
+        return InMemoryObservabilityStore()
 
     @pytest.fixture
-    def collector_client(self, event_store: InMemoryEventStore) -> TestClient:
+    def collector_client(self, event_store: InMemoryObservabilityStore) -> TestClient:
         """Create test client for collector."""
-        app = create_app(event_store=event_store)
+        app = create_app(store=event_store)
         return TestClient(app)
 
     @pytest.fixture
@@ -50,7 +50,7 @@ class TestLocalModeIntegration:
         self,
         temp_hooks_file: Path,
         collector_client: TestClient,
-        event_store: InMemoryEventStore,
+        event_store: InMemoryObservabilityStore,
     ) -> None:
         """Test flow from hook file write to collector store."""
         # Create hook events file
@@ -107,7 +107,7 @@ class TestLocalModeIntegration:
         assert data["duplicates"] == 0
 
         # Verify events in store
-        stored_events = event_store.get_events("test-session-001")
+        stored_events = [e for e in event_store.events if e["session_id"] == "test-session-001"]
         assert len(stored_events) == 3
 
     @pytest.mark.asyncio
@@ -297,8 +297,8 @@ class TestScaleSimulation:
     @pytest.mark.asyncio
     async def test_concurrent_batches(self) -> None:
         """Test processing multiple batches concurrently."""
-        event_store = InMemoryEventStore()
-        app = create_app(event_store=event_store)
+        event_store = InMemoryObservabilityStore()
+        app = create_app(store=event_store)
 
         with TestClient(app) as client:
             # Create batches from multiple "agents"
@@ -343,8 +343,8 @@ class TestScaleSimulation:
     @pytest.mark.asyncio
     async def test_deduplication_under_load(self) -> None:
         """Test deduplication with high event volume."""
-        event_store = InMemoryEventStore()
-        app = create_app(event_store=event_store, dedup_max_size=1000)
+        event_store = InMemoryObservabilityStore()
+        app = create_app(store=event_store, dedup_max_size=1000)
 
         with TestClient(app) as client:
             from syn_collector.events.types import CollectedEvent, EventBatch, EventType
@@ -400,8 +400,8 @@ class TestScaleSimulation:
     @pytest.mark.asyncio
     async def test_recovery_after_reset(self) -> None:
         """Test that reset clears state properly."""
-        event_store = InMemoryEventStore()
-        app = create_app(event_store=event_store)
+        event_store = InMemoryObservabilityStore()
+        app = create_app(store=event_store)
 
         with TestClient(app) as client:
             from syn_collector.events.types import CollectedEvent, EventBatch, EventType
