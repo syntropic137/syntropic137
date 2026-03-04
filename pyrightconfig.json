@@ -1,8 +1,7 @@
 {
   "include": [
-    "packages/syn-api/src",
-    "apps/syn-cli/src",
-    "apps/syn-dashboard/src"
+    "apps/syn-api/src",
+    "apps/syn-cli/src"
   ],
   "exclude": [
     "**/__pycache__",

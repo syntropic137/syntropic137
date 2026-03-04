@@ -1,3 +1,3 @@
-"""AEF CLI — thin presentation layer over syn-api."""
+"""AEF CLI — thin HTTP client for syn-api."""
 
-__version__ = "0.2.0"
+__version__ = "0.5.1"

@@ -89,7 +89,8 @@ Add these routes in the tunnel configuration:
 
 | Subdomain | Domain | Service |
 |-----------|--------|---------|
-| `aef` | yourdomain.com | `http://gateway:8081` |
+| `aef` | yourdomain.com | `http://syn-ui:80` |
+| `api.aef` | yourdomain.com | `http://api:8000` |
 
 #### Option B: Via CLI
 
@@ -228,7 +229,7 @@ just selfhost-reset
 │                     Your Self-Host                               │
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  cloudflared │───▶│   gateway    │───▶│     api      │      │
+│  │  cloudflared │───▶│    syn-ui    │───▶│     api      │      │
 │  │              │    │   (nginx)    │    │  (FastAPI)   │      │
 │  └──────────────┘    └──────────────┘    └──────────────┘      │
 │                                                 │                │

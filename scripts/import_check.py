@@ -48,9 +48,9 @@ def main() -> int:
         modules_tested.append(InstallationAggregate.__name__)
 
         # Apps
-        from syn_dashboard.main import app as dashboard_app
+        from syn_api.main import app as api_app
 
-        modules_tested.append(dashboard_app.title)
+        modules_tested.append(api_app.title)
 
         from syn_cli.main import app as cli_app
 

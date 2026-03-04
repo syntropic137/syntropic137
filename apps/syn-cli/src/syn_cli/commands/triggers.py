@@ -7,15 +7,22 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
-from syn_api.types import Err, Ok
-from syn_cli._async import run
-from syn_cli._output import console, status_style
+from syn_cli._output import console, print_error, status_style
+from syn_cli.client import get_client
 
 app = typer.Typer(
     name="triggers",
     help="Manage self-healing trigger rules",
     no_args_is_help=True,
 )
+
+
+def _handle_connect_error() -> None:
+    from syn_cli.client import get_api_url
+
+    print_error(f"Could not connect to API at {get_api_url()}")
+    console.print("[dim]Make sure the API server is running.[/dim]")
+    raise typer.Exit(1)
 
 
 @app.command("register")
@@ -37,14 +44,11 @@ def register_trigger(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Register a new trigger rule."""
-    import syn_api.v1.triggers as tr
-
-    # Parse conditions
     parsed_conditions = []
     for cond_str in condition or []:
         parts = cond_str.split(maxsplit=2)
         if len(parts) < 2:
-            console.print(f"[red]Invalid condition format: '{cond_str}'[/red]")
+            print_error(f"Invalid condition format: '{cond_str}'")
             console.print("Expected: 'field operator [value]'")
             raise typer.Exit(1)
         cond = {"field": parts[0], "operator": parts[1]}
@@ -52,33 +56,39 @@ def register_trigger(
             cond["value"] = parts[2]
         parsed_conditions.append(cond)
 
-    result = run(
-        tr.register_trigger(
-            name=name,
-            event=event,
-            repository=repository,
-            workflow_id=workflow,
-            conditions=parsed_conditions or None,
-            installation_id=installation_id,
-            config={
-                "max_attempts": max_attempts,
-                "budget_per_trigger_usd": budget,
-                "daily_limit": daily_limit,
-            },
-            created_by=created_by,
-        )
-    )
+    try:
+        with get_client() as client:
+            resp = client.post(
+                "/triggers",
+                json={
+                    "name": name,
+                    "event": event,
+                    "repository": repository,
+                    "workflow_id": workflow,
+                    "conditions": parsed_conditions or None,
+                    "installation_id": installation_id,
+                    "config": {
+                        "max_attempts": max_attempts,
+                        "budget_per_trigger_usd": budget,
+                        "daily_limit": daily_limit,
+                    },
+                    "created_by": created_by,
+                },
+            )
+    except Exception:
+        _handle_connect_error()
+        return
 
-    match result:
-        case Ok(trigger_id):
-            console.print(f"[green]Trigger registered:[/green] {trigger_id}")
-            console.print(f"  Name: {name}")
-            console.print(f"  Event: {event}")
-            console.print(f"  Repository: {repository}")
-            console.print(f"  Workflow: {workflow}")
-        case Err(error, message=msg):
-            console.print(f"[red]Failed to register trigger: {msg or error}[/red]")
-            raise typer.Exit(1)
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
+
+    data = resp.json()
+    console.print(f"[green]Trigger registered:[/green] {data.get('trigger_id', '')}")
+    console.print(f"  Name: {name}")
+    console.print(f"  Event: {event}")
+    console.print(f"  Repository: {repository}")
+    console.print(f"  Workflow: {workflow}")
 
 
 @app.command("enable")
@@ -89,24 +99,27 @@ def enable_preset(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Enable a built-in preset for a repository."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.post(
+                f"/triggers/presets/{preset}",
+                json={
+                    "repository": repository,
+                    "installation_id": installation_id,
+                    "created_by": created_by,
+                },
+            )
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(
-        tr.enable_preset(
-            preset_name=preset,
-            repository=repository,
-            installation_id=installation_id,
-            created_by=created_by,
-        )
-    )
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok(trigger_id):
-            console.print(f"[green]Preset '{preset}' enabled:[/green] {trigger_id}")
-            console.print(f"  Repository: {repository}")
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    data = resp.json()
+    console.print(f"[green]Preset '{preset}' enabled:[/green] {data.get('trigger_id', '')}")
+    console.print(f"  Repository: {repository}")
 
 
 @app.command("list")
@@ -117,38 +130,48 @@ def list_triggers(
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status")] = None,
 ) -> None:
     """List all registered triggers."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            params = {}
+            if repository:
+                params["repository"] = repository
+            if status:
+                params["status"] = status
+            resp = client.get("/triggers", params=params)
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(tr.list_triggers(repository=repository, status=status))
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok(triggers):
-            if not triggers:
-                console.print("[dim]No triggers found.[/dim]")
-                return
+    data = resp.json()
+    triggers = data.get("triggers", [])
 
-            table = Table(title="Trigger Rules")
-            table.add_column("ID", style="cyan")
-            table.add_column("Name")
-            table.add_column("Event")
-            table.add_column("Repository")
-            table.add_column("Status")
-            table.add_column("Fires", justify="right")
+    if not triggers:
+        console.print("[dim]No triggers found.[/dim]")
+        return
 
-            for t in triggers:
-                style = status_style(t.status)
-                table.add_row(
-                    t.trigger_id,
-                    t.name,
-                    t.event,
-                    t.repository,
-                    f"[{style}]{t.status}[/{style}]",
-                    str(t.fire_count),
-                )
-            console.print(table)
-        case Err(error, message=msg):
-            console.print(f"[red]Failed: {msg or error}[/red]")
-            raise typer.Exit(1)
+    table = Table(title="Trigger Rules")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Event")
+    table.add_column("Repository")
+    table.add_column("Status")
+    table.add_column("Fires", justify="right")
+
+    for t in triggers:
+        style = status_style(t.get("status", ""))
+        table.add_row(
+            t.get("trigger_id", ""),
+            t.get("name", ""),
+            t.get("event", ""),
+            t.get("repository", ""),
+            f"[{style}]{t.get('status', '')}[/{style}]",
+            str(t.get("fire_count", 0)),
+        )
+    console.print(table)
 
 
 @app.command("show")
@@ -156,32 +179,37 @@ def show_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Show trigger details."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.get(f"/triggers/{trigger_id}")
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(tr.get_trigger(trigger_id))
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok(detail):
-            console.print(f"[bold]Trigger: {detail.name}[/bold]")
-            console.print(f"  ID: {detail.trigger_id}")
-            console.print(f"  Status: {detail.status}")
-            console.print(f"  Event: {detail.event}")
-            console.print(f"  Repository: {detail.repository}")
-            console.print(f"  Workflow: {detail.workflow_id}")
-            console.print(f"  Fire Count: {detail.fire_count}")
-            if detail.conditions:
-                console.print(f"  Conditions: {len(detail.conditions)}")
-                for c in detail.conditions:
-                    console.print(
-                        f"    - {c.get('field', '')} {c.get('operator', '')} {c.get('value', '')}"
-                    )
-            if detail.config:
-                console.print("  Config:")
-                for k, v in detail.config.items():
-                    console.print(f"    {k}: {v}")
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    detail = resp.json()
+    console.print(f"[bold]Trigger: {detail.get('name', '')}[/bold]")
+    console.print(f"  ID: {detail.get('trigger_id', '')}")
+    console.print(f"  Status: {detail.get('status', '')}")
+    console.print(f"  Event: {detail.get('event', '')}")
+    console.print(f"  Repository: {detail.get('repository', '')}")
+    console.print(f"  Workflow: {detail.get('workflow_id', '')}")
+    console.print(f"  Fire Count: {detail.get('fire_count', 0)}")
+    conditions = detail.get("conditions") or []
+    if conditions:
+        console.print(f"  Conditions: {len(conditions)}")
+        for c in conditions:
+            console.print(
+                f"    - {c.get('field', '')} {c.get('operator', '')} {c.get('value', '')}"
+            )
+    config = detail.get("config") or {}
+    if config:
+        console.print("  Config:")
+        for k, v in config.items():
+            console.print(f"    {k}: {v}")
 
 
 @app.command("history")
@@ -190,36 +218,40 @@ def trigger_history(
     limit: Annotated[int, typer.Option(help="Max entries to show")] = 50,
 ) -> None:
     """Show trigger execution history."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.get(f"/triggers/{trigger_id}/history", params={"limit": limit})
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = tr.get_trigger_history(trigger_id=trigger_id, limit=limit)
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok(entries):
-            if not entries:
-                console.print(f"[dim]No history for trigger {trigger_id}.[/dim]")
-                return
+    data = resp.json()
+    entries = data.get("entries", [])
 
-            table = Table(title=f"History for {trigger_id}")
-            table.add_column("Fired At")
-            table.add_column("Execution ID", style="cyan")
-            table.add_column("Event")
-            table.add_column("PR #", justify="right")
-            table.add_column("Status")
+    if not entries:
+        console.print(f"[dim]No history for trigger {trigger_id}.[/dim]")
+        return
 
-            for entry in entries:
-                fired_at = entry.fired_at.isoformat() if entry.fired_at else "-"
-                table.add_row(
-                    fired_at,
-                    entry.execution_id,
-                    entry.github_event_type,
-                    str(entry.pr_number or "-"),
-                    entry.status,
-                )
-            console.print(table)
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    table = Table(title=f"History for {trigger_id}")
+    table.add_column("Fired At")
+    table.add_column("Execution ID", style="cyan")
+    table.add_column("Event")
+    table.add_column("PR #", justify="right")
+    table.add_column("Status")
+
+    for entry in entries:
+        table.add_row(
+            entry.get("fired_at") or "-",
+            entry.get("execution_id", ""),
+            entry.get("event_type", ""),
+            str(entry.get("pr_number") or "-"),
+            entry.get("status", ""),
+        )
+    console.print(table)
 
 
 @app.command("pause")
@@ -228,16 +260,21 @@ def pause_trigger(
     reason: Annotated[str | None, typer.Option(help="Reason for pausing")] = None,
 ) -> None:
     """Pause a trigger rule."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.patch(
+                f"/triggers/{trigger_id}",
+                json={"action": "pause", "reason": reason, "paused_by": "cli"},
+            )
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(tr.pause_trigger(trigger_id=trigger_id, reason=reason, paused_by="cli"))
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok():
-            console.print(f"[yellow]Trigger paused:[/yellow] {trigger_id}")
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    console.print(f"[yellow]Trigger paused:[/yellow] {trigger_id}")
 
 
 @app.command("resume")
@@ -245,16 +282,21 @@ def resume_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Resume a paused trigger rule."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.patch(
+                f"/triggers/{trigger_id}",
+                json={"action": "resume", "resumed_by": "cli"},
+            )
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(tr.resume_trigger(trigger_id=trigger_id, resumed_by="cli"))
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok():
-            console.print(f"[green]Trigger resumed:[/green] {trigger_id}")
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    console.print(f"[green]Trigger resumed:[/green] {trigger_id}")
 
 
 @app.command("delete")
@@ -262,16 +304,18 @@ def delete_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Delete a trigger rule."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.delete(f"/triggers/{trigger_id}")
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(tr.delete_trigger(trigger_id=trigger_id, deleted_by="cli"))
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok():
-            console.print(f"[red]Trigger deleted:[/red] {trigger_id}")
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    console.print(f"[red]Trigger deleted:[/red] {trigger_id}")
 
 
 @app.command("disable")
@@ -281,16 +325,23 @@ def disable_all(
     ],
 ) -> None:
     """Disable all triggers for a repository."""
-    import syn_api.v1.triggers as tr
+    try:
+        with get_client() as client:
+            resp = client.post(
+                "/triggers/disable",
+                json={"repository": repository, "paused_by": "cli"},
+            )
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(tr.disable_triggers(repository=repository, paused_by="cli"))
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok(count):
-            if count == 0:
-                console.print(f"[dim]No active triggers for {repository}.[/dim]")
-            else:
-                console.print(f"[yellow]Paused {count} trigger(s) for {repository}[/yellow]")
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    data = resp.json()
+    count = data.get("count", 0)
+    if count == 0:
+        console.print(f"[dim]No active triggers for {repository}.[/dim]")
+    else:
+        console.print(f"[yellow]Paused {count} trigger(s) for {repository}[/yellow]")

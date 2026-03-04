@@ -7,9 +7,8 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
-from syn_api.types import Err, Ok
-from syn_cli._async import run
-from syn_cli._output import console
+from syn_cli._output import console, print_error
+from syn_cli.client import get_client
 
 app = typer.Typer(
     name="agent",
@@ -18,28 +17,47 @@ app = typer.Typer(
 )
 
 
+def _handle_connect_error() -> None:
+    from syn_cli.client import get_api_url
+
+    print_error(f"Could not connect to API at {get_api_url()}")
+    console.print("[dim]Make sure the API server is running.[/dim]")
+    raise typer.Exit(1)
+
+
 @app.command("list")
 def list_providers() -> None:
     """List available agent providers."""
-    import syn_api.v1.agents as ag
+    try:
+        with get_client() as client:
+            resp = client.get("/agents/providers")
+    except Exception:
+        _handle_connect_error()
+        return
 
-    result = run(ag.list_providers())
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
 
-    match result:
-        case Ok(providers):
-            table = Table(title="Agent Providers")
-            table.add_column("Provider", style="cyan")
-            table.add_column("Display Name")
-            table.add_column("Available")
-            table.add_column("Default Model")
+    providers = resp.json()
+    if not isinstance(providers, list):
+        providers = providers.get("providers", [])
 
-            for p in providers:
-                available = "[green]Yes[/green]" if p.available else "[red]No[/red]"
-                table.add_row(p.provider, p.display_name, available, p.default_model)
-            console.print(table)
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    table = Table(title="Agent Providers")
+    table.add_column("Provider", style="cyan")
+    table.add_column("Display Name")
+    table.add_column("Available")
+    table.add_column("Default Model")
+
+    for p in providers:
+        available = "[green]Yes[/green]" if p.get("available") else "[red]No[/red]"
+        table.add_row(
+            p.get("provider", ""),
+            p.get("display_name", ""),
+            available,
+            p.get("default_model", ""),
+        )
+    console.print(table)
 
 
 @app.command("test")
@@ -58,22 +76,28 @@ def test_agent(
     ] = None,
 ) -> None:
     """Test an agent provider with a simple prompt."""
-    import syn_api.v1.agents as ag
-
-    with console.status(f"Testing {provider}..."):
-        result = run(ag.test_agent(provider=provider, prompt=prompt, model=model))
-
-    match result:
-        case Ok(test_result):
-            console.print(f"[green]Response from {test_result.provider}:[/green]")
-            console.print(f"  Model: {test_result.model}")
-            console.print(f"  Response: {test_result.response_text}")
-            console.print(
-                f"  Tokens: {test_result.input_tokens} in / {test_result.output_tokens} out"
+    try:
+        with get_client() as client, console.status(f"Testing {provider}..."):
+            resp = client.post(
+                "/agents/test",
+                json={"provider": provider, "prompt": prompt, "model": model},
+                timeout=60.0,
             )
-        case Err(error, message=msg):
-            console.print(f"[red]{msg or error}[/red]")
-            raise typer.Exit(1)
+    except Exception:
+        _handle_connect_error()
+        return
+
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        raise typer.Exit(1)
+
+    result = resp.json()
+    console.print(f"[green]Response from {result.get('provider', provider)}:[/green]")
+    console.print(f"  Model: {result.get('model', 'unknown')}")
+    console.print(f"  Response: {result.get('response_text', '')}")
+    console.print(
+        f"  Tokens: {result.get('input_tokens', 0)} in / {result.get('output_tokens', 0)} out"
+    )
 
 
 @app.command("chat")
@@ -92,8 +116,6 @@ def chat_session(
     ] = None,
 ) -> None:
     """Start an interactive chat session."""
-    import syn_api.v1.agents as ag
-
     console.print(f"[bold]Chat with {provider}[/bold] (type 'exit' to quit)\n")
 
     messages: list[dict[str, str]] = []
@@ -116,13 +138,22 @@ def chat_session(
 
         messages.append({"role": "user", "content": user_input})
 
-        with console.status("Thinking..."):
-            result = run(ag.chat(provider=provider, messages=messages, model=model))
+        try:
+            with get_client() as client, console.status("Thinking..."):
+                resp = client.post(
+                    "/agents/chat",
+                    json={"provider": provider, "messages": messages, "model": model},
+                    timeout=120.0,
+                )
+        except Exception:
+            print_error("Lost connection to API server")
+            break
 
-        match result:
-            case Ok(chat_result):
-                console.print(f"[bold green]Agent:[/bold green] {chat_result.response_text}\n")
-                messages.append({"role": "assistant", "content": chat_result.response_text})
-            case Err(error, message=msg):
-                console.print(f"[red]{msg or error}[/red]\n")
-                break
+        if resp.status_code != 200:
+            print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+            break
+
+        result = resp.json()
+        response_text = result.get("response_text", "")
+        console.print(f"[bold green]Agent:[/bold green] {response_text}\n")
+        messages.append({"role": "assistant", "content": response_text})

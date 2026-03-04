@@ -13,7 +13,6 @@ dependencies = [
     "syn-api",
     "syn-cli",
     "syn-collector",
-    "syn-dashboard",
     "syn-domain",
     "syn-adapters",
     "syn-shared",
@@ -53,7 +52,6 @@ exclude = ["apps/syn-dashboard-ui", "apps/syn-docs"]
 syn-api = { workspace = true }
 syn-cli = { workspace = true }
 syn-collector = { workspace = true }
-syn-dashboard = { workspace = true }
 syn-domain = { workspace = true }
 syn-adapters = { workspace = true }
 syn-shared = { workspace = true }
@@ -95,7 +93,7 @@ ignore = [
     "B008",   # do not perform function calls in argument defaults
     # NOTE: Do NOT add B009 here. B009 catches 2-arg getattr(obj, "literal").
     # For 3-arg getattr(obj, "literal", default) — which is the real bug pattern —
-    # see test_no_getattr_in_api_layer in packages/syn-api/tests/test_lint_rules.py.
+    # see test_no_getattr_in_api_layer in apps/syn-api/tests/test_lint_rules.py.
     # Both checks together enforce: use direct attribute access, not getattr. (#116)
 ]
 
@@ -113,7 +111,7 @@ ignore = [
 "**/token_injector.py" = ["ARG002"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["syn_api", "syn_cli", "syn_collector", "syn_dashboard", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
+known-first-party = ["syn_api", "syn_cli", "syn_collector", "syn_domain", "syn_adapters", "syn_shared", "syn_perf"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -191,8 +189,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = [
     "apps/syn-cli/tests",
-    "apps/syn-dashboard/tests",
-    "packages/syn-api/tests",
+    "apps/syn-api/tests",
     "packages/syn-collector/tests",
     "packages/syn-domain/tests",
     "packages/syn-domain/src",  # VSA co-located tests
@@ -201,8 +198,7 @@ testpaths = [
 ]
 pythonpath = [
     "apps/syn-cli/src",
-    "apps/syn-dashboard/src",
-    "packages/syn-api/src",
+    "apps/syn-api/src",
     "packages/syn-collector/src",
     "packages/syn-domain/src",
     "packages/syn-adapters/src",

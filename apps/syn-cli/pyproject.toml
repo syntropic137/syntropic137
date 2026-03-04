@@ -5,7 +5,6 @@ description = "CLI for Syntropic137 — thin wrapper over syn-api"
 requires-python = ">=3.12"
 
 dependencies = [
-    "syn-api",
     "typer>=0.15.0",
     "rich>=13.9.0",
     "httpx>=0.28.0",

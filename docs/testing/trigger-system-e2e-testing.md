@@ -22,10 +22,10 @@ curl http://localhost:8000/
 If you want to test via the REST API at `/api/triggers`:
 
 ```python
-# In apps/syn-dashboard/src/syn_dashboard/main.py, add:
-from syn_dashboard.api import triggers_router
+# In apps/syn-api/src/syn_api/main.py, add:
+from syn_api.routes import triggers_router
 # ...
-app.include_router(triggers_router, prefix="/api")
+app.include_router(triggers_router)
 ```
 
 ---

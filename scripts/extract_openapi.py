@@ -29,7 +29,7 @@ def _patch_deferred_annotations() -> None:
 
     from pydantic import BaseModel
 
-    from syn_dashboard.api import events
+    from syn_api.routes import events
 
     ns = {"datetime": datetime}
 
@@ -45,7 +45,7 @@ def _patch_deferred_annotations() -> None:
 
 
 def main() -> None:
-    from syn_dashboard.main import create_app
+    from syn_api.main import create_app
 
     _patch_deferred_annotations()
 
