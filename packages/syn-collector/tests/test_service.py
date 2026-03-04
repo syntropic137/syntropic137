@@ -6,15 +6,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from syn_collector.collector.service import create_app
-from syn_collector.collector.store import InMemoryEventStore
+from syn_collector.collector.store import InMemoryObservabilityStore
 from syn_collector.events.types import CollectedEvent, EventBatch, EventType
 
 
 @pytest.fixture
 def test_client() -> TestClient:
     """Create test client with fresh state."""
-    event_store = InMemoryEventStore()
-    app = create_app(event_store=event_store)
+    store = InMemoryObservabilityStore()
+    app = create_app(store=store)
     return TestClient(app)
 
 
@@ -153,7 +153,7 @@ class TestStatsEndpoint:
 class TestResetEndpoint:
     """Tests for reset endpoint."""
 
-    def test_reset_clears_state(
+    def test_reset_clears_dedup_state(
         self, test_client: TestClient, sample_event: CollectedEvent
     ) -> None:
         """Reset should clear deduplication state."""

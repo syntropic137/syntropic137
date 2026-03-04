@@ -17,7 +17,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "watchfiles>=0.24",
     "syn-shared",
-    "event-sourcing-python",
+    "syn-adapters[postgres]",
 ]
 
 [project.optional-dependencies]

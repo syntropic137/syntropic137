@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -45,44 +46,79 @@ def main(ctx: click.Context, log_level: str) -> None:
     setup_logging(log_level)
 
 
+def _resolve_db_url(db_url: str | None) -> str | None:
+    """Resolve DB URL from CLI flag or environment.
+
+    Priority: CLI flag > SYN_OBSERVABILITY_DB_URL env var > None
+    """
+    if db_url:
+        return db_url
+    return os.environ.get("SYN_OBSERVABILITY_DB_URL")
+
+
 @main.command()
 @click.option("--port", default=8080, help="Port to listen on")
 @click.option("--host", default="0.0.0.0", help="Host to bind to")
-@click.option("--eventstore-host", default="localhost", help="Event store host")
-@click.option("--eventstore-port", default=50051, help="Event store port")
+@click.option(
+    "--db-url",
+    default=None,
+    envvar="SYN_OBSERVABILITY_DB_URL",
+    help="TimescaleDB connection URL for observability events",
+)
 @click.option("--dedup-max-size", default=100000, help="Max dedup cache size")
 @click.pass_context
 def serve(
     ctx: click.Context,
     port: int,
     host: str,
-    eventstore_host: str,  # noqa: ARG001  FIXME(#162): will be used when real store is wired
-    eventstore_port: int,  # noqa: ARG001  FIXME(#162): will be used when real store is wired
+    db_url: str | None,
     dedup_max_size: int,
 ) -> None:
     """Start the event collector service.
 
     Receives batched events from sidecars and writes
-    to the event store.
+    to TimescaleDB via AgentEventStore.
+
+    Requires --db-url or SYN_OBSERVABILITY_DB_URL unless
+    APP_ENVIRONMENT is test/offline.
     """
     import uvicorn
 
     from syn_collector.collector.service import create_app
-    from syn_collector.collector.store import InMemoryEventStore
-
-    logger.info(f"Starting collector service on {host}:{port}")
-    # FIXME(#162): Collector uses InMemoryEventStore — all events lost on restart.
-    # Per ADR-026, observability events should go to AgentEventStore (TimescaleDB),
-    # NOT the gRPC domain event store. The EventStoreProtocol interface here is the
-    # wrong abstraction. Needs a TimescaleDBCollectorStore or direct AgentEventStore usage.
-    logger.warning(
-        "Collector using InMemoryEventStore — events will be LOST on restart. "
-        "See issue #162 for fix plan."
+    from syn_collector.collector.store import (
+        InMemoryObservabilityStore,
+        ObservabilityStoreProtocol,
+        TimescaleDBObservabilityStore,
     )
-    event_store = InMemoryEventStore()
+
+    resolved_url = _resolve_db_url(db_url)
+    store: ObservabilityStoreProtocol
+
+    if resolved_url:
+        logger.info(f"Starting collector service on {host}:{port} with TimescaleDB")
+        ts_store = TimescaleDBObservabilityStore(resolved_url)
+        asyncio.get_event_loop().run_until_complete(ts_store.initialize())
+        store = ts_store
+    else:
+        # Attempt in-memory — will raise InMemoryStorageError if not test/offline
+        app_env = os.environ.get("APP_ENVIRONMENT", "production")
+        try:
+            store = InMemoryObservabilityStore()
+            logger.warning(
+                f"No DB URL provided — using InMemoryObservabilityStore (APP_ENVIRONMENT={app_env})"
+            )
+        except Exception as e:
+            click.echo(
+                f"Error: No database URL provided and in-memory storage not allowed.\n"
+                f"  Set --db-url or SYN_OBSERVABILITY_DB_URL for production use.\n"
+                f"  Set APP_ENVIRONMENT=test for testing without a database.\n"
+                f"  Detail: {e}",
+                err=True,
+            )
+            sys.exit(1)
 
     app = create_app(
-        event_store=event_store,
+        store=store,
         dedup_max_size=dedup_max_size,
     )
 

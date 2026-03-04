@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** - 2025-12-09
+**Accepted** - 2025-12-09 | **Storage layer superseded by [ADR-026](ADR-026-simplified-observability-events.md)** — Collector now writes directly to TimescaleDB via `AgentEventStore`, not to the gRPC event store.
 
 ## Context
 
