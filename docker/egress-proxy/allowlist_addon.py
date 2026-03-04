@@ -1,7 +1,7 @@
 """Mitmproxy addon for network allowlist enforcement.
 
 This addon blocks traffic to hosts not in the allowlist.
-Used by AEF to restrict agent network access to only approved services.
+Used by Syn137 to restrict agent network access to only approved services.
 
 See ADR-021: Isolated Workspace Architecture - Network Allowlist
 
@@ -112,11 +112,11 @@ class AllowlistAddon:
 
         flow.response = http.Response.make(
             403,
-            b"Blocked by AEF Egress Proxy: Host not in allowlist",
+            b"Blocked by Syn137 Egress Proxy: Host not in allowlist",
             {
                 "Content-Type": "text/plain",
-                "X-AEF-Blocked": "true",
-                "X-AEF-Blocked-Host": host,
+                "X-Syn-Blocked": "true",
+                "X-Syn-Blocked-Host": host,
             },
         )
 

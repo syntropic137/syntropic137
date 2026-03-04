@@ -110,7 +110,7 @@ Based on the code finding GitHub App working:
 2. Check how `docker_network` setting is passed to adapter
 3. Test actual network behavior:
    ```bash
-   docker inspect aef-ws-{container-id} | jq '.[0].NetworkSettings'
+   docker inspect syn137-ws-{container-id} | jq '.[0].NetworkSettings'
    ```
 
 ### Integration Test Needed

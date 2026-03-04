@@ -1,11 +1,11 @@
 [project]
 name = "syn-perf"
 version = "0.5.1"
-description = "Performance benchmarking suite for AEF isolated workspaces"
+description = "Performance benchmarking suite for Syntropic137 isolated workspaces"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "AEF Team" }]
+authors = [{ name = "Syn137 Team" }]
 
 dependencies = [
     "syn-adapters",

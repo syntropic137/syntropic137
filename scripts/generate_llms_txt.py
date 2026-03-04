@@ -22,7 +22,7 @@ def generate_llms_txt() -> str:
     lines: list[str] = []
 
     # Header
-    lines.append("# AEF API Reference")
+    lines.append("# Syn137 API Reference")
     lines.append("")
     lines.append("> Programmatic interface to the Syntropic137")
     lines.append("> Version: 0.1.0")

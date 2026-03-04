@@ -109,7 +109,7 @@ async def verify_pr_created(execution_id: str, claimed_pr: int) -> bool:
     github_pr = await github.get_pr(claimed_pr)
 
     # Source 3: Ground truth (git)
-    branch_exists = await git_branch_exists(f"aef/{execution_id}")
+    branch_exists = await git_branch_exists(f"syn/{execution_id}")
 
     # All three must agree
     return (
@@ -198,7 +198,7 @@ In tests, we need to:
 └─────────────────────────────────────────────────────────────┘
                            ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Level 2: Contract Tests (AEF)                              │
+│  Level 2: Contract Tests (Syn137)                              │
 │  - Record/Replay: Capture real gh responses, replay in test │
 │  - Verify workflow template renders correct commands        │
 │  - Verify agent receives proper prompt with credentials     │

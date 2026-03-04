@@ -1,6 +1,6 @@
 # GitHub App Setup Guide
 
-This guide walks you through setting up a GitHub App for secure agent commits in AEF.
+This guide walks you through setting up a GitHub App for secure agent commits in Syn137.
 
 ## Why Use a GitHub App?
 
@@ -11,7 +11,7 @@ This guide walks you through setting up a GitHub App for secure agent commits in
 
 GitHub Apps provide:
 - **Short-lived tokens**: Installation tokens expire after 1 hour
-- **Clear attribution**: Commits show as `aef-agent[bot]` not a personal account
+- **Clear attribution**: Commits show as `syn137-agent[bot]` not a personal account
 - **Fine-grained permissions**: Request only what's needed
 - **Organization-level control**: Admins can manage app access centrally
 - **Self-healing capabilities**: Read CI logs, respond to PR reviews, fix issues automatically
@@ -79,7 +79,7 @@ If you have an organization (e.g., `syntropic137`), create the app through the o
 #### Basic Information
 
 Fill in the app details:
-- **GitHub App name**: `aef-agent` (or your preferred name, e.g., `agentparadise-bot`)
+- **GitHub App name**: `syn137-agent` (or your preferred name, e.g., `agentparadise-bot`)
 - **Homepage URL**: Your organization's URL (e.g., `https://github.com/syntropic137`)
 - **Webhook URL**: `https://your-domain.com/webhooks/github` (can leave blank for local dev)
 - **Webhook secret**: Generate a strong random secret (e.g., `openssl rand -hex 32`)
@@ -269,7 +269,7 @@ curl -X POST http://localhost:8000/webhooks/github \
 
 ```
 ┌──────────────────┐     ┌─────────────────┐     ┌────────────────┐
-│  AEF Agent       │────▶│  GitHub App     │────▶│   GitHub API   │
+│  Syn137 Agent       │────▶│  GitHub App     │────▶│   GitHub API   │
 │  needs token     │     │  Client         │     │                │
 └──────────────────┘     └─────────────────┘     └────────────────┘
                               │
@@ -294,12 +294,12 @@ curl -X POST http://localhost:8000/webhooks/github \
 When an agent makes a commit, it appears as:
 
 ```
-Author: aef-agent[bot] <123456+aef-agent[bot]@users.noreply.github.com>
-Committer: aef-agent[bot] <123456+aef-agent[bot]@users.noreply.github.com>
+Author: syn137-agent[bot] <123456+syn137-agent[bot]@users.noreply.github.com>
+Committer: syn137-agent[bot] <123456+syn137-agent[bot]@users.noreply.github.com>
 
 fix(api): handle null response in user endpoint
 
-Applied by AEF agent
+Applied by Syn137 agent
 - Workflow: code-review-123
 - Execution: exec-abc
 - Session: session-xyz

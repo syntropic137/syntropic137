@@ -1,13 +1,13 @@
 # Primitives Workflow
 
-This document describes how to work with Claude commands, tools, and hooks (primitives) in AEF.
+This document describes how to work with Claude commands, tools, and hooks (primitives) in Syn137.
 
 ## Overview
 
-AEF uses primitives from the `agentic-primitives` library (submodule at `lib/agentic-primitives/`). The workflow supports:
+Syn137 uses primitives from the `agentic-primitives` library (submodule at `lib/agentic-primitives/`). The workflow supports:
 
-1. **Syncing shared primitives** from `agentic-primitives` → AEF
-2. **Creating repo-specific commands** that stay only in AEF
+1. **Syncing shared primitives** from `agentic-primitives` → Syn137
+2. **Creating repo-specific commands** that stay only in Syn137
 3. **Contributing new primitives** back to `agentic-primitives`
 
 ## Directory Structure
@@ -28,7 +28,7 @@ AEF uses primitives from the `agentic-primitives` library (submodule at `lib/age
 │   │   ├── pre-commit-qa.md
 │   │   ├── qa-setup.md
 │   │   └── review.md
-│   └── sync-event-sourcing.md  # LOCAL: AEF-specific command
+│   └── sync-event-sourcing.md  # LOCAL: Syn137-specific command
 ├── hooks/
 │   ├── handlers/*.py         # Hook handlers (from AP)
 │   └── validators/**/*.py    # Hook validators (from AP)
@@ -70,21 +70,21 @@ Simply create a `.md` file in `.claude/commands/`:
 
 ```bash
 # Create directly at root (no category)
-echo "Your command content" > .claude/commands/my-aef-command.md
+echo "Your command content" > .claude/commands/my-syn137-command.md
 
 # Or with a category subdirectory
-mkdir -p .claude/commands/aef/
-echo "Your command content" > .claude/commands/aef/my-command.md
+mkdir -p .claude/commands/syn137/
+echo "Your command content" > .claude/commands/syn137/my-command.md
 ```
 
-**Convention for AEF-specific commands:**
+**Convention for Syn137-specific commands:**
 - Put them at the root level (like `sync-event-sourcing.md`)
-- Or create an `aef/` category for AEF-specific commands
+- Or create a `syn137/` category for Syn137-specific commands
 - They will be automatically preserved during sync
 
 ## Contributing Back to agentic-primitives
 
-If you create a command in AEF that should be shared:
+If you create a command in Syn137 that should be shared:
 
 ### 1. List Local Commands
 ```bash
@@ -144,7 +144,7 @@ git push origin feat/add-new-command
 ### 4. After Merge, Sync Back
 
 ```bash
-cd ../..  # Back to AEF root
+cd ../..  # Back to Syn137 root
 git submodule update --remote lib/agentic-primitives
 just primitives-sync
 ```
@@ -168,7 +168,7 @@ Your command will now be managed, and you can delete the local copy if desired.
                               │ (build + install)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                              AEF                                    │
+│                              Syn137                                    │
 │  .claude/                                                          │
 │  ├── commands/                                                     │
 │  │   ├── devops/manage-security-patches.md  ← MANAGED             │

@@ -148,7 +148,7 @@ echo "   Prune stale:         git worktree prune"
 /git/create-worktree vsa-qa-integration
 
 # Results in:
-../agentic-engineering-framework_worktrees/20260118_vsa-qa-integration/
+../syntropic137_worktrees/20260118_vsa-qa-integration/
 
 # With branch:
 feature/20260118-vsa-qa-integration

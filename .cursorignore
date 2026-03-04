@@ -8,5 +8,5 @@
 !.workspaces/
 !worktrees/
 
-# AEF Execution Workspaces (runtime artifacts - large files, pollute context)
+# Syn137 Execution Workspaces (runtime artifacts - large files, pollute context)
 .syn-workspaces/

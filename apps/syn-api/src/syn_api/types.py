@@ -1,4 +1,4 @@
-"""Result type and shared Pydantic models for the AEF API.
+"""Result type and shared Pydantic models for the Syn137 API.
 
 Provides a discriminated union Result type for typed error handling,
 plus Pydantic response models used across all v1 modules.

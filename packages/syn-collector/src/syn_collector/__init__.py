@@ -1,4 +1,4 @@
-"""AEF Event Collector - Scalable observability for AI agents.
+"""Syn137 Event Collector - Scalable observability for AI agents.
 
 This package provides:
 - Event collection service (FastAPI) for receiving batched events

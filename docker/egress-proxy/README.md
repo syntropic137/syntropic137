@@ -1,4 +1,4 @@
-# AEF Egress Proxy
+# Syn137 Egress Proxy
 
 Network allowlist enforcement for isolated agent workspaces.
 

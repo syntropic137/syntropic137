@@ -1,4 +1,4 @@
-"""Test fixtures for AEF integration tests.
+"""Test fixtures for Syn137 integration tests.
 
 See: ADR-034 - Test Infrastructure Architecture
 """

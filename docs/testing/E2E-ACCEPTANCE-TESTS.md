@@ -1,4 +1,4 @@
-# AEF End-to-End Acceptance Tests
+# Syn137 End-to-End Acceptance Tests
 
 **Version:** 4.0.0
 **Created:** 2025-12-02
@@ -9,7 +9,7 @@
 
 ## Overview
 
-This document defines acceptance tests for validating the Syntropic137 (AEF) stack end-to-end. Tests are organized by feature and include specific validation criteria.
+This document defines acceptance tests for validating the Syntropic137 stack end-to-end. Tests are organized by feature and include specific validation criteria.
 
 **Version 4.0** adds:
 - **WebSocket Control Plane** - Real-time execution control (pause/resume/cancel)
@@ -36,7 +36,7 @@ This document defines acceptance tests for validating the Syntropic137 (AEF) sta
 
 > **GOLDEN RULE: If it's not in the Event Store, it didn't happen.**
 
-All state changes in AEF **MUST** be persisted to the event store via aggregates. This is non-negotiable because:
+All state changes in Syn137 **MUST** be persisted to the event store via aggregates. This is non-negotiable because:
 
 1. **Projections depend on events** - Read models are built from event streams
 2. **Audit trail** - Events provide complete history of all actions
@@ -112,7 +112,7 @@ python -c "from claude_agent_sdk import query; print('SDK OK')"
 
 ## ⚠️ Mocking Policy: Test Environment Only
 
-> **CRITICAL**: All mock objects in the AEF codebase are **strictly test-only**.
+> **CRITICAL**: All mock objects in the Syn137 codebase are **strictly test-only**.
 
 ### Environment Variable Enforcement
 
@@ -186,13 +186,13 @@ docker network inspect syn-network
 
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
-| 1.2.1 | Database `aef` exists | ⬜ |
-| 1.2.2 | User `aef` can connect | ⬜ |
+| 1.2.1 | Database `syn` exists | ⬜ |
+| 1.2.2 | User `syn` can connect | ⬜ |
 | 1.2.3 | Event Store Server has created `events` table | ⬜ |
 
 **Validation Commands:**
 ```bash
-docker exec aef-postgres psql -U aef -d aef -c "\dt"
+docker exec syn-postgres psql -U syn137 -d syn137 -c "\dt"
 ```
 
 ---
@@ -696,7 +696,7 @@ curl -s http://localhost:8000/api/workflows | jq '.total'
 **Validation:**
 ```bash
 # After starting a workflow
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT event_type, aggregate_id, global_nonce FROM events WHERE event_type = 'WorkflowExecutionStarted' ORDER BY global_nonce DESC LIMIT 1;"
 ```
 
@@ -719,7 +719,7 @@ docker exec aef-postgres psql -U aef -d aef -c \
 **Validation:**
 ```bash
 # After a phase completes
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT event_type, convert_from(payload, 'UTF8')::json as payload FROM events WHERE event_type = 'PhaseCompleted' ORDER BY global_nonce DESC LIMIT 1;"
 ```
 
@@ -740,7 +740,7 @@ docker exec aef-postgres psql -U aef -d aef -c \
 **Validation:**
 ```bash
 # Check session events
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT event_type, aggregate_id FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce;"
 ```
 
@@ -761,7 +761,7 @@ docker exec aef-postgres psql -U aef -d aef -c \
 **Validation:**
 ```bash
 # Compare event store to API
-EVENT_COUNT=$(docker exec aef-postgres psql -U aef -d aef -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
+EVENT_COUNT=$(docker exec syn-postgres psql -U syn137 -d syn137 -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
 API_COUNT=$(curl -s http://localhost:8000/api/sessions?status=completed | jq 'length')
 echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 ```
@@ -783,7 +783,7 @@ echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 **Validation:**
 ```bash
 # Full event audit
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 ```
 
@@ -1520,12 +1520,12 @@ pytest packages/syn-adapters/tests/test_executor_control.py -v
 
 | # | Acceptance Criteria | Status |
 |---|---------------------|--------|
-| 13.5.1 | `aef control pause <id>` sends pause signal | ⬜ |
-| 13.5.2 | `aef control pause <id> --reason "..."` includes reason | ⬜ |
-| 13.5.3 | `aef control resume <id>` sends resume signal | ⬜ |
-| 13.5.4 | `aef control cancel <id>` prompts for confirmation | ⬜ |
-| 13.5.5 | `aef control cancel <id> --force` skips confirmation | ⬜ |
-| 13.5.6 | `aef control status <id>` shows current state | ⬜ |
+| 13.5.1 | `syn control pause <id>` sends pause signal | ⬜ |
+| 13.5.2 | `syn control pause <id> --reason "..."` includes reason | ⬜ |
+| 13.5.3 | `syn control resume <id>` sends resume signal | ⬜ |
+| 13.5.4 | `syn control cancel <id>` prompts for confirmation | ⬜ |
+| 13.5.5 | `syn control cancel <id> --force` skips confirmation | ⬜ |
+| 13.5.6 | `syn control status <id>` shows current state | ⬜ |
 | 13.5.7 | Status shows colored output (green/yellow/red) | ⬜ |
 | 13.5.8 | Error messages shown when API unavailable | ⬜ |
 | 13.5.9 | `SYN_DASHBOARD_URL` environment variable supported | ⬜ |
@@ -1534,19 +1534,19 @@ pytest packages/syn-adapters/tests/test_executor_control.py -v
 **Validation Commands:**
 ```bash
 # Pause execution
-aef control pause exec-123 --reason "Need to review"
+syn control pause exec-123 --reason "Need to review"
 
 # Resume execution
-aef control resume exec-123
+syn control resume exec-123
 
 # Cancel with force
-aef control cancel exec-123 --force --reason "Timeout"
+syn control cancel exec-123 --force --reason "Timeout"
 
 # Check status
-aef control status exec-123
+syn control status exec-123
 
 # Use custom dashboard URL
-SYN_DASHBOARD_URL=http://prod:8000 aef control status exec-123
+SYN_DASHBOARD_URL=http://prod:8000 syn control status exec-123
 ```
 
 ### F13.6 End-to-End Control Flow ⭐ CRITICAL
@@ -1712,7 +1712,7 @@ _Add any observations, recommendations, or follow-up items here._
 - **WebSocket Endpoint:** `/api/ws/control/{execution_id}` for bidirectional control
 - **New Events:** `ExecutionPaused`, `ExecutionResumed`, `ExecutionCancelled`
 - **Executor Enhancement:** `control_signal_checker` parameter for signal handling
-- **CLI Commands:** `aef control pause|resume|cancel|status`
+- **CLI Commands:** `syn control pause|resume|cancel|status`
 - **Test Count:** Increased from 210 to 264 criteria
 - **Browser Automation:** F13.6 tests recommended for Playwright/Cypress
 
@@ -1759,20 +1759,20 @@ _Add any observations, recommendations, or follow-up items here._
 
 ```bash
 # List all events
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 
 # Find missing PhaseCompleted events
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT
      (SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted') as session_completed,
      (SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted') as phase_completed;"
 
 # Check projection sync
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "SELECT projection_name, last_event_position FROM projection_states;"
 
 # Reset projections (DANGEROUS - rebuilds from scratch)
-docker exec aef-postgres psql -U aef -d aef -c \
+docker exec syn-postgres psql -U syn137 -d syn137 -c \
   "UPDATE projection_states SET last_event_position = 0 WHERE projection_name = 'global_subscription';"
 ```

@@ -516,7 +516,7 @@ print(f"Created {len(pids)} processes")
     async def run_all_validations(self) -> bool:
         """Run all validation checks."""
         print("\n" + "=" * 60)
-        print("🔒 AEF Isolation Validation")
+        print("🔒 Syn137 Isolation Validation")
         print(f"   Backend: {self.backend}")
         print("=" * 60 + "\n")
 
@@ -577,7 +577,7 @@ print(f"Created {len(pids)} processes")
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate AEF workspace isolation")
+    parser = argparse.ArgumentParser(description="Validate Syn137 workspace isolation")
     parser.add_argument(
         "--backend",
         choices=["gvisor", "docker_hardened"],

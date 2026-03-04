@@ -105,7 +105,7 @@ async def _execute_phase_isolated(
 
         # 3. Execute agent subprocess INSIDE workspace
         exit_code, stdout, stderr = await workspace.execute_command([
-            "python", "-m", "aef_agent_runner",
+            "python", "-m", "syn_agent_runner",
             "--task-file", "/workspace/task.json",
             "--output-dir", "/workspace/output",
         ])
@@ -127,7 +127,7 @@ async def _execute_phase_isolated(
 - Easy to resource-limit
 
 **Cons**:
-- Need to package `aef_agent_runner` in workspace image
+- Need to package `syn_agent_runner` in workspace image
 - Event streaming requires IPC (files, sockets, or stdout)
 - Adds startup latency (~200ms)
 
@@ -180,14 +180,14 @@ async for event_file in watch_events(workspace):
 
 ### Phase 1: Agent Runner Package
 
-Create `packages/aef-agent-runner/` - a minimal package that:
+Create `packages/syn-agent-runner/` - a minimal package that:
 1. Reads task from JSON file
 2. Executes via `claude-agent-sdk`
 3. Writes events to stdout (JSONL)
 4. Writes artifacts to output dir
 
 ```python
-# aef_agent_runner/__main__.py
+# syn_agent_runner/__main__.py
 import json
 import sys
 from pathlib import Path
@@ -214,10 +214,10 @@ Update `docker/workspace/Dockerfile`:
 FROM python:3.12-slim
 
 # Install agent runner
-RUN pip install aef-agent-runner
+RUN pip install syn-agent-runner
 
 # Entry point
-ENTRYPOINT ["python", "-m", "aef_agent_runner"]
+ENTRYPOINT ["python", "-m", "syn_agent_runner"]
 ```
 
 ### Phase 3: Engine Integration
@@ -268,7 +268,7 @@ async def _execute_phase(
 
         # 5. Execute agent INSIDE workspace
         process = await workspace.execute_streaming([
-            "python", "-m", "aef_agent_runner",
+            "python", "-m", "syn_agent_runner",
             "--task", "/workspace/task.json",
             "--output", "/workspace/output",
         ])
@@ -294,14 +294,14 @@ async def _execute_phase(
 ## Milestones
 
 ### Milestone 1: Agent Runner Package (4h)
-- [ ] Create `packages/aef-agent-runner/`
+- [ ] Create `packages/syn-agent-runner/`
 - [ ] Implement task parsing from JSON
 - [ ] Implement JSONL event output
 - [ ] Add tests
 
 ### Milestone 2: Workspace Image Update (2h)
 - [ ] Update `docker/workspace/Dockerfile`
-- [ ] Add aef-agent-runner to image
+- [ ] Add syn-agent-runner to image
 - [ ] Test image build
 
 ### Milestone 3: Streaming Execution (4h)

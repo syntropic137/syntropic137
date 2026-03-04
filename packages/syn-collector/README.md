@@ -1,4 +1,4 @@
-# AEF Event Collector
+# Syn137 Event Collector
 
 Scalable event collection for AI agent observability in the Syntropic137.
 
@@ -14,7 +14,7 @@ The `syn-collector` package provides:
 ## Installation
 
 ```bash
-# Part of the AEF monorepo
+# Part of the Syntropic137 monorepo
 uv sync
 ```
 

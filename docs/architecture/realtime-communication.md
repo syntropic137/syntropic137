@@ -7,7 +7,7 @@
 
 ## Overview
 
-AEF provides **real-time communication** for long-running workflow executions through two mechanisms:
+Syn137 provides **real-time communication** for long-running workflow executions through two mechanisms:
 
 1. **WebSocket** - Bidirectional control plane (pause, resume, cancel)
 2. **Server-Sent Events (SSE)** - Unidirectional event streaming (execution progress)
@@ -70,7 +70,7 @@ C4Container
 
 **Purpose:** Bidirectional real-time control signals
 
-**Endpoint:** `wss://api.aef.dev/api/ws/control/{execution_id}`
+**Endpoint:** `wss://api.syn137.dev/api/ws/control/{execution_id}`
 
 **Direction:** Bidirectional (client ↔ server)
 
@@ -106,7 +106,7 @@ Server → Client (State Updates):
 
 **Purpose:** Unidirectional event streaming from server to client
 
-**Endpoint:** `https://api.aef.dev/api/executions/{execution_id}/stream`
+**Endpoint:** `https://api.syn137.dev/api/executions/{execution_id}/stream`
 
 **Direction:** Unidirectional (server → client)
 
@@ -401,7 +401,7 @@ async def check_control_signals(self):
 
 ```typescript
 // WebSocket for control
-const controlSocket = new WebSocket(`wss://api.aef.dev/ws/control/${executionId}`);
+const controlSocket = new WebSocket(`wss://api.syn137.dev/ws/control/${executionId}`);
 
 controlSocket.onmessage = (event) => {
   const message = JSON.parse(event.data);

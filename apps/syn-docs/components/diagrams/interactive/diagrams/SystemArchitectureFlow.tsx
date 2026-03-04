@@ -35,7 +35,7 @@ const nodes: Node[] = [
   },
   {
     id: 'grpPlatform', type: 'groupNode', position: { x: CX - 300, y: Y_PLATFORM },
-    data: { title: 'AEF Platform', color: 'purple' },
+    data: { title: 'Syn137 Platform', color: 'purple' },
     style: { width: 600, height: 220 },
   },
   {

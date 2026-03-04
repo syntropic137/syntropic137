@@ -289,7 +289,7 @@ await store_session_summary(summary)
 
 **Key Design Decisions:**
 
-1. **Trust EventParser** - Do NOT parse raw Claude CLI events directly in AEF
+1. **Trust EventParser** - Do NOT parse raw Claude CLI events directly in Syn137
 2. **One assistant message → multiple events** - EventParser produces both `TOKEN_USAGE` AND `TOOL_EXECUTION_STARTED` from a single assistant message with tool_use
 3. **session_summary over session_completed** - We skip EventParser's `session_completed` and store our richer `session_summary` with cumulative totals
 

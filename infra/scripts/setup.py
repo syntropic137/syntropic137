@@ -454,7 +454,7 @@ def configure_github_app(ctx: SetupContext) -> bool:
             return True
         print()
 
-    print("  AEF uses a GitHub App for secure agent commits, webhooks,")
+    print("  Syn137 uses a GitHub App for secure agent commits, webhooks,")
     print("  and self-healing CI integration.")
     print()
     print("  Options:")
@@ -824,7 +824,7 @@ def _audit_github_app(ctx: SetupContext) -> tuple[int, int]:
         # Check for dangerous permissions
         if DEFAULT_PERMISSIONS.get("workflows") == "write":
             warn("workflows:write is set — this allows modifying GitHub Actions workflows")
-            step("  Consider removing unless AEF needs to create/edit workflow files")
+            step("  Consider removing unless Syn137 needs to create/edit workflow files")
             warnings += 1
         else:
             ok("workflows:write not requested (good)")
@@ -1851,7 +1851,7 @@ STAGE_FUNCS: dict[str, callable] = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="AEF Interactive Setup Wizard",
+        description="Syn137 Interactive Setup Wizard",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"Available stages: {', '.join(STAGES)}",
     )

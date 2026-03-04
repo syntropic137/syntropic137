@@ -9,7 +9,7 @@
 
 ## Context
 
-Agents running in AEF workspaces were not consistently writing artifacts to the expected locations, causing:
+Agents running in Syn137 workspaces were not consistently writing artifacts to the expected locations, causing:
 
 1. **Artifact passing failures** - Phase 2 couldn't find Phase 1 outputs
 2. **Template substitution failures** - `{{phase_id}}` placeholders remained unsubstituted
@@ -26,7 +26,7 @@ The previous structure had several issues:
 └── output/          ← Created ad-hoc, not documented
 ```
 
-1. **Split ownership**: Prompt lived in `agentic-primitives`, directory creation in AEF's setup script
+1. **Split ownership**: Prompt lived in `agentic-primitives`, directory creation in Syn137's setup script
 2. **Ambiguous naming**: `artifacts/` didn't distinguish input from output
 3. **No repo convention**: Agents chose arbitrary locations for git operations
 4. **Weak instructions**: Prompt said "write to artifacts/" but competing phase prompts confused agents
@@ -59,8 +59,8 @@ The previous structure had several issues:
 |-----------|---------------|
 | `agentic-primitives` Dockerfile | Create directory structure at build time |
 | `agentic-primitives` prompt | Document structure, provide explicit instructions |
-| AEF WorkspaceService | Inject files to `artifacts/input/`, validate structure |
-| AEF WorkflowExecutionEngine | Collect from `artifacts/output/`, inject to next phase |
+| Syn137 WorkspaceService | Inject files to `artifacts/input/`, validate structure |
+| Syn137 WorkflowExecutionEngine | Collect from `artifacts/output/`, inject to next phase |
 
 ---
 
@@ -109,7 +109,7 @@ This conditional framing helps agents understand that:
 - Coding tasks = push code, summarize in artifacts
 - Everything else = artifacts ARE the deliverable
 
-### 3. AEF Framework Updates
+### 3. Syn137 Framework Updates
 
 ```python
 # Inject previous phase outputs
@@ -171,7 +171,7 @@ artifacts = await workspace.collect_files(
 
 1. Update `agentic-primitives` (Dockerfile + prompt)
 2. Rebuild Docker image
-3. Update AEF inject/collect paths
+3. Update Syn137 inject/collect paths
 4. Update workflow prompts to reference new paths
 5. Test end-to-end artifact passing
 

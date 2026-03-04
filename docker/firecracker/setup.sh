@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Firecracker Setup Script for AEF
+# Firecracker Setup Script for Syn137
 #
-# This script sets up Firecracker for running AEF isolated workspaces.
+# This script sets up Firecracker for running Syn137 isolated workspaces.
 # Works on Linux systems with KVM support.
 #
 # Usage:
@@ -242,7 +242,7 @@ build_rootfs() {
 main() {
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║         Firecracker Setup for AEF Isolated Workspaces        ║"
+    echo "║      Firecracker Setup for Syn137 Isolated Workspaces         ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
 
@@ -289,7 +289,7 @@ main() {
     echo "To test:"
     echo "  ./docker/firecracker/test.sh"
     echo ""
-    echo "To configure AEF to use Firecracker:"
+    echo "To configure Syn137 to use Firecracker:"
     echo "  export SYN_WORKSPACE_ISOLATION_BACKEND=firecracker"
     echo ""
 }

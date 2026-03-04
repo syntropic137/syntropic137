@@ -1,6 +1,6 @@
 # v1 API Reference
 
-Version 1 of the AEF programmatic API.
+Version 1 of the Syn137 programmatic API.
 
 ## Changelog
 

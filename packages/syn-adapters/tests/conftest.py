@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 # CONFIGURE RECORDINGS PATH
 # =============================================================================
 
-# Set recordings directory for agentic_events when running from AEF
+# Set recordings directory for agentic_events when running from Syntropic137
 _SYN_ROOT = Path(__file__).parent.parent.parent.parent
 _RECORDINGS_DIR = (
     _SYN_ROOT / "lib/agentic-primitives/providers/workspaces/claude-cli/fixtures/recordings"

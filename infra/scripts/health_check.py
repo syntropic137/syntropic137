@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Health check for AEF infrastructure services.
+Health check for Syn137 infrastructure services.
 Cross-platform (Windows, macOS, Linux).
 
 Usage:
@@ -113,7 +113,7 @@ def _build_services() -> list[Service]:
             host="localhost",
             port=PORT_API,
             health_path="/health",
-            description="AEF API",
+            description="Syn137 API",
             container_name=f"{prefix}api",
         ),
         Service(
@@ -121,7 +121,7 @@ def _build_services() -> list[Service]:
             host="localhost",
             port=PORT_UI,
             health_path="/health",
-            description="AEF Gateway (nginx)",
+            description="Syn137 Gateway (nginx)",
             container_name=f"{prefix}gateway",
         ),
         Service(
@@ -372,7 +372,7 @@ def wait_for_services(timeout: int = 120, interval: int = 2, force_docker: bool 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Check AEF service health",
+        description="Check Syn137 service health",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -408,7 +408,7 @@ Examples:
 
     if not args.json:
         print("=" * 50)
-        print("AEF Infrastructure Health Check")
+        print("Syn137 Infrastructure Health Check")
         print("=" * 50)
         print()
 

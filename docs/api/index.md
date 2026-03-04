@@ -1,4 +1,4 @@
-# AEF API
+# Syn137 API
 
 Programmatic interface to the Syntropic137.
 
@@ -9,7 +9,7 @@ Programmatic interface to the Syntropic137.
 ## Installation
 
 ```bash
-# As part of the AEF workspace
+# As part of the Syn137 workspace
 uv sync
 ```
 

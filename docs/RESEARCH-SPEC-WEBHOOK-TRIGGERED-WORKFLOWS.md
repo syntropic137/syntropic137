@@ -13,7 +13,7 @@ Phase 2 enables **automatic workflow execution triggered by GitHub webhooks**. W
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│    GitHub       │     │   AEF Webhook   │     │   Workflow      │
+│    GitHub       │     │   Syn137 Webhook   │     │   Workflow      │
 │    Event        │────▶│   Handler       │────▶│   Executor      │
 │ (Issue Created) │     │                 │     │                 │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
@@ -48,15 +48,15 @@ Before Phase 2 can work, Phase 1 must be complete:
 
 | GitHub Event | Trigger Condition | Workflow Type |
 |--------------|-------------------|---------------|
-| `issues.opened` | Issue created with label `aef:auto` | Research/Triage |
-| `issues.labeled` | Label `aef:implement` added | Implementation |
-| `issue_comment.created` | Comment starts with `/aef` | Command-based |
+| `issues.opened` | Issue created with label `syn:auto` | Research/Triage |
+| `issues.labeled` | Label `syn:implement` added | Implementation |
+| `issue_comment.created` | Comment starts with `/syn` | Command-based |
 
 ### Priority 2: PR-Based Triggers
 
 | GitHub Event | Trigger Condition | Workflow Type |
 |--------------|-------------------|---------------|
-| `pull_request.opened` | PR opened with label `aef:review` | Code Review |
+| `pull_request.opened` | PR opened with label `syn:review` | Code Review |
 | `pull_request_review.submitted` | Review requests changes | Fix Review |
 | `pull_request.synchronize` | New commits pushed | Re-review |
 
@@ -75,7 +75,7 @@ Before Phase 2 can work, Phase 1 must be complete:
 ### Component: Webhook Handler Service
 
 ```python
-# aef-webhook/src/aef_webhook/handler.py
+# syn137-webhook/src/syn137_webhook/handler.py
 
 from fastapi import FastAPI, Request, HTTPException
 from syn_domain.contexts.workflows import WorkflowExecutionEngine
@@ -130,7 +130,7 @@ def verify_signature(payload: bytes, signature: str) -> bool:
 # Configuration-driven mapping
 WEBHOOK_TRIGGERS = {
     "issues.opened": {
-        "condition": lambda p: "aef:auto" in [l["name"] for l in p["issue"]["labels"]],
+        "condition": lambda p: "syn:auto" in [l["name"] for l in p["issue"]["labels"]],
         "workflow_template": "research-workflow-v1",
         "inputs_from": lambda p: {
             "issue_number": p["issue"]["number"],
@@ -140,7 +140,7 @@ WEBHOOK_TRIGGERS = {
         }
     },
     "issue_comment.created": {
-        "condition": lambda p: p["comment"]["body"].startswith("/aef"),
+        "condition": lambda p: p["comment"]["body"].startswith("/syn"),
         "workflow_template": "command-workflow-v1",
         "inputs_from": lambda p: {
             "command": parse_command(p["comment"]["body"]),
@@ -306,13 +306,13 @@ For local development, expose webhook endpoint via Cloudflare Tunnel:
 brew install cloudflared
 
 # Create tunnel
-cloudflared tunnel create aef-webhooks
+cloudflared tunnel create syn137-webhooks
 
 # Route to local service
-cloudflared tunnel route dns aef-webhooks webhooks.aef.dev
+cloudflared tunnel route dns syn137-webhooks webhooks.syn137.dev
 
 # Start tunnel
-cloudflared tunnel run --url http://localhost:8001 aef-webhooks
+cloudflared tunnel run --url http://localhost:8001 syn137-webhooks
 ```
 
 ### 2. Docker Service
@@ -320,8 +320,8 @@ cloudflared tunnel run --url http://localhost:8001 aef-webhooks
 ```yaml
 # docker-compose.dev.yaml
 services:
-  aef-webhook:
-    build: ./packages/aef-webhook
+  syn137-webhook:
+    build: ./packages/syn137-webhook
     ports:
       - "8001:8001"
     environment:
@@ -329,13 +329,13 @@ services:
       - SYN_EVENT_STORE_URL=http://syn-event-store:50051
     depends_on:
       - syn-event-store
-      - aef-postgres
+      - syn-postgres
 ```
 
 ### 3. GitHub App Webhook Configuration
 
 In GitHub App settings:
-- Webhook URL: `https://webhooks.aef.dev/webhooks/github`
+- Webhook URL: `https://webhooks.syn137.dev/webhooks/github`
 - Webhook Secret: (generate and store in SYN_GITHUB_WEBHOOK_SECRET)
 - Events: issues, issue_comment, pull_request, pull_request_review, push
 
@@ -344,7 +344,7 @@ In GitHub App settings:
 ## Milestones
 
 ### Milestone 1: Webhook Handler Service (4h)
-- [ ] Create `packages/aef-webhook/` package
+- [ ] Create `packages/syn137-webhook/` package
 - [ ] Implement FastAPI webhook endpoint
 - [ ] Implement signature verification
 - [ ] Add rate limiting
@@ -372,7 +372,7 @@ In GitHub App settings:
 ### Milestone 5: E2E Test (2h)
 - [ ] Create test repository
 - [ ] Configure GitHub App webhooks
-- [ ] Create issue with `aef:auto` label
+- [ ] Create issue with `syn:auto` label
 - [ ] Verify workflow execution starts
 - [ ] Verify events in event store
 
@@ -397,8 +397,8 @@ In GitHub App settings:
 2. ✅ Signature validation rejects invalid requests
 3. ✅ Rate limiting prevents floods
 4. ✅ WebhookReceived events in event store
-5. ✅ Issue with `aef:auto` label triggers workflow
-6. ✅ `/aef` comment triggers command workflow
+5. ✅ Issue with `syn:auto` label triggers workflow
+6. ✅ `/syn` comment triggers command workflow
 7. ✅ Dashboard shows webhook history
 8. ✅ Execution linked to triggering webhook
 

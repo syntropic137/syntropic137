@@ -1,4 +1,4 @@
-"""Event types and ID generation for AEF collector.
+"""Event types and ID generation for Syn137 collector.
 
 This module provides:
 - Event type definitions (Pydantic models)

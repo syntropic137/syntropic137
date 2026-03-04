@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""E2E Acceptance Test Runner for AEF.
+"""E2E Acceptance Test Runner for Syn137.
 
 This script runs automated acceptance tests for features F8-F12 (Agentic Integration).
 For F1-F7 (Infrastructure, CLI, API, Frontend), use manual validation or dedicated scripts.
@@ -578,7 +578,7 @@ def print_summary(results: list[FeatureResult]) -> None:
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="E2E Acceptance Test Runner for AEF (Features F8-F12)",
+        description="E2E Acceptance Test Runner for Syn137 (Features F8-F12)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -601,7 +601,7 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    print_header("AEF E2E ACCEPTANCE TESTS (F8-F12)")
+    print_header("Syn137 E2E ACCEPTANCE TESTS (F8-F12)")
     print(f"\n  Date: {datetime.now(UTC).isoformat()}")
     print(f"  Feature: {args.feature}")
     print(f"  Live tests: {'Yes' if args.live else 'No'}")

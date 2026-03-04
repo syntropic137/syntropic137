@@ -203,7 +203,7 @@ def generate_env_example() -> str:
             "# SECURITY WARNING",
             "# " + "=" * 76,
             "#",
-            "# The AEF dashboard and API have no built-in authentication. Access control",
+            "# The Syn137 dashboard and API have no built-in authentication. Access control",
             "# relies entirely on network isolation (Docker internal network). If you expose",
             "# the dashboard via Cloudflare Tunnel or any public URL, you MUST add",
             "# authentication at the reverse proxy layer (e.g., Cloudflare Access, nginx",
@@ -496,7 +496,7 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
                 "# " + "=" * 76,
                 "# EXTERNAL / UNKNOWN VARIABLES",
                 "# " + "=" * 76,
-                "# These variables are not defined in the AEF settings classes.",
+                "# These variables are not defined in the Syn137 settings classes.",
                 "# They may come from external tools, plugins, or manual additions.",
                 "# Review periodically - remove if no longer needed.",
                 "",
@@ -545,7 +545,7 @@ def main() -> None:
 
         # Warn about external/unknown variables
         if extra:
-            print(f"⚠️  {len(extra)} external variables found (not in AEF settings):")
+            print(f"⚠️  {len(extra)} external variables found (not in Syn137 settings):")
             for var in sorted(extra):
                 print(f"   - {var}")
             print("   These are preserved in 'EXTERNAL / UNKNOWN VARIABLES' section.")

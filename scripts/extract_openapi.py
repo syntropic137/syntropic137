@@ -1,4 +1,4 @@
-"""Extract OpenAPI JSON spec from the AEF Dashboard FastAPI application.
+"""Extract OpenAPI JSON spec from the Syn137 Dashboard FastAPI application.
 
 Sets APP_ENVIRONMENT=test to skip credential validation during import.
 Safe because the FastAPI lifespan only runs under uvicorn, not at import time.

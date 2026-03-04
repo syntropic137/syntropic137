@@ -9,7 +9,7 @@
 
 ## Overview
 
-AEF uses multiple storage systems optimized for different data patterns:
+Syn137 uses multiple storage systems optimized for different data patterns:
 
 - **EventStore** - Domain events (Event Sourcing)
 - **TimescaleDB** - Observability events (Time-series)

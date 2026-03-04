@@ -307,7 +307,7 @@ export function HeroScene() {
         camera={{ position: [0, 0, 5.5], fov: 55 }}
         style={{ background: 'transparent' }}
         gl={{ alpha: true, antialias: true }}
-        aria-label="Interactive 3D visualization of the AEF architecture"
+        aria-label="Interactive 3D visualization of the Syn137 architecture"
         role="img"
         tabIndex={-1}
       >

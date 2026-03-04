@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-AEF provides orchestration and observability for agentic workflows. Currently, workflows are triggered manually via the dashboard API or CLI. There is no mechanism for GitHub events (CI failures, review comments) to automatically trigger corrective workflows.
+Syn137 provides orchestration and observability for agentic workflows. Currently, workflows are triggered manually via the dashboard API or CLI. There is no mechanism for GitHub events (CI failures, review comments) to automatically trigger corrective workflows.
 
 ### The Problem
 
@@ -107,7 +107,7 @@ Two presets ship with the system:
 - **`self-healing`**: Triggers on `check_run.completed` with `conclusion == "failure"`, dispatches `ci-fix-workflow`
 - **`review-fix`**: Triggers on `pull_request_review.submitted` with `state == "changes_requested"`, dispatches `fix-review-workflow`
 
-Presets are registered via `aef triggers enable <preset> --repository <repo>`.
+Presets are registered via `syn triggers enable <preset> --repository <repo>`.
 
 ### 7. Input Mapping
 

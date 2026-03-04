@@ -128,7 +128,7 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
 
         # Add execution ID header for tracing
         exec_header = ok_response.headers.add()
-        exec_header.header.key = "X-AEF-Execution-ID"
+        exec_header.header.key = "X-Syn-Execution-ID"
         exec_header.header.value = EXECUTION_ID or "unknown"
 
         logger.info(f"Auth approved: {method} {host}{path}")

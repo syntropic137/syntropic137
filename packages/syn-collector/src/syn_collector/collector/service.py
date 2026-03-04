@@ -50,7 +50,7 @@ def create_app(
             await store.close()  # type: ignore[union-attr]
 
     application = FastAPI(
-        title="AEF Event Collector",
+        title="Syn137 Event Collector",
         description="Scalable event collection for agent observability",
         version="0.1.0",
         lifespan=lifespan,

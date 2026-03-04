@@ -123,7 +123,7 @@ services:
   postgres:
     image: postgres:16
     environment:
-      POSTGRES_DB: aef
+      POSTGRES_DB: syn137
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
@@ -169,7 +169,7 @@ test:
 ```bash
 # .env.development (local dev)
 APP_ENVIRONMENT=development
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/aef
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/syn137
 EVENT_STORE_URL=grpc://localhost:50051
 LOG_LEVEL=DEBUG
 LOG_FORMAT=console
@@ -206,7 +206,7 @@ LOG_LEVEL=WARNING
 ## File Structure
 
 ```
-agentic-engineering-framework/
+syntropic137/
 ├── docker/
 │   ├── docker-compose.dev.yaml    # Local development stack
 │   ├── docker-compose.ci.yaml     # CI/CD stack (if needed)

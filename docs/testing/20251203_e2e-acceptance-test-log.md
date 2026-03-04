@@ -56,16 +56,16 @@ Node Version: v22.17.1
 ### F1: Docker Infrastructure (4 tests) ✅ PASS
 
 #### F1.1: PostgreSQL Container Running ✅
-- **Command:** `docker ps --filter "name=aef"`
+- **Command:** `docker ps --filter "name=syn"`
 - **Expected:** Container running, healthy status
 - **Result:** ✅ PASS
 - **Evidence:**
 ```
-aef-postgres   Up 25 hours (healthy)    0.0.0.0:5432->5432/tcp
+syn-postgres   Up 25 hours (healthy)    0.0.0.0:5432->5432/tcp
 ```
 
 #### F1.2: Event Store Container Running ✅
-- **Command:** `docker ps --filter "name=aef"`
+- **Command:** `docker ps --filter "name=syn"`
 - **Expected:** Container running
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -75,8 +75,8 @@ syn-event-store   Up 6 hours (unhealthy)   0.0.0.0:50051->50051/tcp
 - **Note:** Docker reports "unhealthy" but logs show server is processing events correctly.
 
 #### F1.3: PostgreSQL Connection ✅
-- **Command:** `docker exec aef-postgres pg_isready`
-- **Expected:** Can connect to aef database
+- **Command:** `docker exec syn-postgres pg_isready`
+- **Expected:** Can connect to syn database
 - **Result:** ✅ PASS
 - **Evidence:**
 ```
@@ -84,7 +84,7 @@ localhost:5432 - accepting connections
 ```
 
 #### F1.4: Database Query ✅
-- **Command:** `docker exec aef-postgres psql -U aef -d aef -c "SELECT COUNT(*) FROM events;"`
+- **Command:** `docker exec syn-postgres psql -U syn137 -d syn137 -c "SELECT COUNT(*) FROM events;"`
 - **Expected:** Returns event count
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -146,7 +146,7 @@ Workflows:
 - **Result:** ✅ PASS
 - **Evidence:**
 ```
-Usage: aef [OPTIONS] COMMAND [ARGS]...
+Usage: syn [OPTIONS] COMMAND [ARGS]...
 
 Commands:
   version    Show version information.
@@ -261,7 +261,7 @@ Summary: 0 succeeded, 2 failed
 <!doctype html>
 <html lang="en">
   <head>
-    <title>AEF Dashboard</title>
+    <title>Syn137 Dashboard</title>
   </head>
 </html>
 ```

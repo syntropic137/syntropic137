@@ -1,6 +1,6 @@
-# 🚇 Cloudflare Tunnel Setup for AEF Self-Host
+# 🚇 Cloudflare Tunnel Setup for Syn137 Self-Host
 
-This guide helps you set up secure external access to your self-hosted AEF deployment using Cloudflare Tunnel.
+This guide helps you set up secure external access to your self-hosted Syn137 deployment using Cloudflare Tunnel.
 
 ## Why Cloudflare Tunnel?
 
@@ -15,7 +15,7 @@ This guide helps you set up secure external access to your self-hosted AEF deplo
 
 1. A **Cloudflare account** (free tier works)
 2. A **domain** with DNS managed by Cloudflare
-3. AEF stack running locally (test with `just infra-up` first)
+3. Syn137 stack running locally (test with `just infra-up` first)
 
 ## Quick Setup (Recommended)
 
@@ -50,7 +50,7 @@ cp .env.example .env
 
 # Edit .env and add your tunnel token
 # CLOUDFLARE_TUNNEL_TOKEN=eyJ...your-token...
-# SYN_DOMAIN=aef.yourdomain.com
+# SYN_DOMAIN=syn137.yourdomain.com
 ```
 
 ### Step 4: Generate Secrets
@@ -80,9 +80,9 @@ just selfhost-logs cloudflared
 
 ```bash
 # Test external access (replace with your domain)
-curl https://aef.yourdomain.com/health        # nginx health
-curl https://aef.yourdomain.com/api/v1/health   # API health (proxied by nginx)
-curl https://aef.yourdomain.com/api/v1/docs    # Swagger UI
+curl https://syn137.yourdomain.com/health        # nginx health
+curl https://syn137.yourdomain.com/api/v1/health   # API health (proxied by nginx)
+curl https://syn137.yourdomain.com/api/v1/docs    # Swagger UI
 ```
 
 ## Alternative: CLI Setup
@@ -113,7 +113,7 @@ cloudflared tunnel login
 cloudflared tunnel create syn-selfhost
 
 # Configure DNS route (one route — nginx handles API proxying)
-cloudflared tunnel route dns syn-selfhost aef.yourdomain.com
+cloudflared tunnel route dns syn-selfhost syn137.yourdomain.com
 
 # Get tunnel token
 cloudflared tunnel token syn-selfhost
@@ -134,7 +134,7 @@ credentials-file: /path/to/credentials.json
 
 ingress:
   # Single route — nginx handles UI + API proxying (/api/* → api:8000)
-  - hostname: aef.yourdomain.com
+  - hostname: syn137.yourdomain.com
     service: http://localhost:80
     originRequest:
       noTLSVerify: true
@@ -170,7 +170,7 @@ docker exec syntropic137-cloudflared wget -qO- http://gateway:80/health
 
 ```bash
 # Check DNS propagation
-dig aef.yourdomain.com
+dig syn137.yourdomain.com
 
 # Verify DNS records exist in Cloudflare dashboard
 # Should show CNAME pointing to <tunnel-id>.cfargotunnel.com
@@ -220,4 +220,4 @@ just selfhost-restart cloudflared
 
 - [Cloudflare Tunnel Docs](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
 - [Cloudflare Zero Trust](https://developers.cloudflare.com/cloudflare-one/)
-- [AEF Self-Host Deployment Guide](../docs/selfhost-deployment.md)
+- [Syn137 Self-Host Deployment Guide](../docs/selfhost-deployment.md)

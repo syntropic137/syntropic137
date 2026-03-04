@@ -1,4 +1,4 @@
-"""Event type definitions for AEF collector.
+"""Event type definitions for Syn137 collector.
 
 Defines the core event types used throughout the collection system:
 - CollectedEvent: Individual event with deterministic ID

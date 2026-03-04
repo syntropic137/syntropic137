@@ -1,4 +1,4 @@
-# AEF Event Collector - Production Dockerfile
+# Syn137 Event Collector - Production Dockerfile
 # Multi-stage build for minimal image size
 # Build context: repo root (not packages/syn-collector)
 

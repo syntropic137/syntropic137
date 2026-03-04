@@ -1,4 +1,4 @@
-# Egress Proxy for AEF Isolated Workspaces
+# Egress Proxy for Syn137 Isolated Workspaces
 #
 # This proxy enforces network allowlisting for agent containers.
 # Only traffic to allowed hosts (e.g., api.anthropic.com, github.com)

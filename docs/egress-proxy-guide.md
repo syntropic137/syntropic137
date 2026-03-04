@@ -148,7 +148,7 @@ services:
 
   claude-agent:
     build: .
-    container_name: aef-claude-agent
+    container_name: syn137-claude-agent
     depends_on:
       - egress-proxy
     networks:
@@ -290,7 +290,7 @@ async def test_disallowed_hosts():
 | **mitmproxy Dockerfile** | Low | 1h | None |
 | **Allowlist script** | Low | 30m | None |
 | **Docker Compose setup** | Medium | 1h | Docker knowledge |
-| **WorkspaceService integration** | Medium | 2-3h | AEF codebase knowledge |
+| **WorkspaceService integration** | Medium | 2-3h | Syn137 codebase knowledge |
 | **Testing** | Medium | 2h | Test infrastructure |
 | **Documentation** | Low | 1h | None |
 | **Production hardening** | High | 1-2 days | Performance tuning |

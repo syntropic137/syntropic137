@@ -17,7 +17,7 @@
 
 ## Context
 
-The Syntropic137 (AEF) executes coding agents that can:
+The Syntropic137 executes coding agents that can:
 1. Read and write files
 2. Execute shell commands
 3. Install packages
@@ -377,7 +377,7 @@ The following gaps must be closed for production readiness:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           AEF Control Plane (Host)                          │
+│                           Syn137 Control Plane (Host)                          │
 │  ┌─────────────┐    ┌──────────────┐    ┌────────────────┐                  │
 │  │ Dashboard   │◀──▶│ Workflow     │◀──▶│ Event Store    │                  │
 │  │ (UI)        │    │ Orchestrator │    │ (PostgreSQL)   │                  │
@@ -480,7 +480,7 @@ await router.execute_command(
 | Environment | Identity | Committer |
 |-------------|----------|-----------|
 | **Local Development** | User's `.gitconfig` | `NeuralEmpowerment <neuralempowerment@gmail.com>` |
-| **CI/CD** | Bot account | `syn-bot[bot] <bot@aef.dev>` |
+| **CI/CD** | Bot account | `syn-bot[bot] <bot@syn137.dev>` |
 | **Production** | GitHub App | `syn-app[bot] <123456+syn-app[bot]@users.noreply.github.com>` |
 
 **Configuration:**
@@ -492,7 +492,7 @@ export SYN_GIT_USER_EMAIL="neuralempowerment@gmail.com"
 
 # Bot identity (production)
 export SYN_GIT_USER_NAME="syn-bot[bot]"
-export SYN_GIT_USER_EMAIL="bot@aef.dev"
+export SYN_GIT_USER_EMAIL="bot@syn137.dev"
 ```
 
 #### 2. Git Credentials Injection
@@ -557,7 +557,7 @@ Date:   Wed Dec 11 19:30:00 2025
 
     feat: implement code review suggestions
 
-    Applied by AEF agent in workflow execution #456
+    Applied by Syn137 agent in workflow execution #456
 ```
 
 #### 4. Commit Metadata & Traceability
@@ -567,7 +567,7 @@ All agent commits should include:
 ```python
 commit_message = f"""feat: {user_provided_summary}
 
-Applied by AEF agent
+Applied by Syn137 agent
 - Workflow: {workflow_id}
 - Execution: {execution_id}
 - Session: {session_id}
@@ -729,7 +729,7 @@ The `syn-workspace-claude` image is the reference implementation for Claude agen
 - **Default**: Configured in `syn_shared.settings.workspace.docker_image`
 
 Includes:
-- `aef_agent_runner` package (runs inside container)
+- `syn_agent_runner` package (runs inside container)
 - `claude-agent-sdk` (agentic execution)
 - `anthropic` SDK (API client)
 - `gh` CLI (GitHub operations)
@@ -740,7 +740,7 @@ Includes:
 `AgentContainerContract` validates container requirements before execution:
 
 - **Location**: `packages/syn-adapters/src/syn_adapters/workspaces/contract.py`
-- **Validates**: Required commands (`python`, `git`, `gh`) and modules (`aef_agent_runner`, `anthropic`, `claude_agent_sdk`)
+- **Validates**: Required commands (`python`, `git`, `gh`) and modules (`syn_agent_runner`, `anthropic`, `claude_agent_sdk`)
 - **Integration**: Called by `WorkspaceRouter.create()` after workspace setup
 - **Fail-fast**: Raises `RuntimeError` with actionable fix instructions
 

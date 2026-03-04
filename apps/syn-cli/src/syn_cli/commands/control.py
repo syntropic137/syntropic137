@@ -169,7 +169,7 @@ def stop(
     Sends a cancel signal that causes the engine to interrupt the Claude CLI
     process via SIGINT and capture partial output as an interrupted execution.
     """
-    stop_reason = reason or "Stopped by user via aef stop"
+    stop_reason = reason or "Stopped by user via syn stop"
 
     if not force:
         confirm = typer.confirm(f"Are you sure you want to stop execution {execution_id}?")

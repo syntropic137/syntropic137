@@ -1,6 +1,6 @@
 # Sidecar Proxy for Secure Token Injection
 
-This directory contains the Envoy sidecar proxy configuration for the AEF secure token architecture.
+This directory contains the Envoy sidecar proxy configuration for the Syn137 secure token architecture.
 
 ## Purpose
 
@@ -34,7 +34,7 @@ The sidecar proxy intercepts outbound requests from agent containers and:
 ## Configuration Files
 
 - `envoy.yaml` - Main Envoy configuration
-- `config.yaml` - AEF-specific token injection configuration
+- `config.yaml` - Syn137-specific token injection configuration
 
 ## Environment Variables
 
@@ -71,7 +71,7 @@ spec:
     - name: https_proxy
       value: "http://localhost:8081"
   - name: sidecar
-    image: aef-sidecar:latest
+    image: syn-sidecar:latest
     env:
     - name: SYN_EXECUTION_ID
       valueFrom:
@@ -92,7 +92,7 @@ services:
       - sidecar
 
   sidecar:
-    image: aef-sidecar:latest
+    image: syn-sidecar:latest
     environment:
       - SYN_EXECUTION_ID=${EXECUTION_ID}
       - SYN_TOKEN_SERVICE_URL=http://token-service:8080

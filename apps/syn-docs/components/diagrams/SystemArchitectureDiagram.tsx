@@ -18,7 +18,7 @@ export function SystemArchitectureDiagram() {
       <DiagramArrow label="REST / WebSocket / Webhooks" />
 
       {/* Platform — structured into service tiers */}
-      <DiagramGroup title="AEF Platform" color="purple" className="w-full">
+      <DiagramGroup title="Syn137 Platform" color="purple" className="w-full">
         <DiagramGrid columns={3}>
           <DiagramNode icon="server" label="FastAPI Server" sublabel=":8000" color="purple" />
           <DiagramNode icon="workflow" label="Workflow Engine" color="purple" />

@@ -6,7 +6,7 @@
 
 ## Context
 
-AEF (Agentic Engineering Framework) needs a clear answer to: *who is the primary client of this system?*
+Syntropic137 needs a clear answer to: *who is the primary client of this system?*
 
 Two directions were possible:
 
@@ -17,7 +17,7 @@ The system has grown to include a FastAPI dashboard, a React UI, and a Typer CLI
 
 ### The Primary Client Is Claude Code
 
-AEF's primary use case is **orchestrating AI agents at scale**. The humans who deploy AEF are themselves engineers building agent pipelines. The operators of those pipelines are often other agents — specifically Claude Code agents that:
+Syn137's primary use case is **orchestrating AI agents at scale**. The humans who deploy Syn137 are themselves engineers building agent pipelines. The operators of those pipelines are often other agents — specifically Claude Code agents that:
 
 - Need to spawn sub-agents to handle discrete tasks
 - Need to monitor execution status programmatically
@@ -33,7 +33,7 @@ The React dashboard and FastAPI backend are valuable for human observability —
 
 ## Decision
 
-**The `syn` CLI is the primary client interface for AEF. Every capability must be accessible via CLI before it is accessible via any other interface.**
+**The `syn` CLI is the primary client interface for Syn137. Every capability must be accessible via CLI before it is accessible via any other interface.**
 
 Specifically:
 
@@ -136,7 +136,7 @@ Exit codes must be consistent and documented. Agents use exit codes to branch.
 
 ### Good
 
-- Claude Code agents can use AEF as infrastructure today with minimal setup
+- Claude Code agents can use Syn137 as infrastructure today with minimal setup
 - The CLI serves as living documentation of what the API can do
 - Any future interface (web app, VS Code extension, Slack bot) is built on the same foundation
 - Testing the CLI is testing the API — no divergence

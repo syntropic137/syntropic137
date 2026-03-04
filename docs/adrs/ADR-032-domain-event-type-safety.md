@@ -14,7 +14,7 @@
 
 ## Context
 
-AEF uses event sourcing with a Rust-based Event Store Server. Type safety is critical because:
+Syn137 uses event sourcing with a Rust-based Event Store Server. Type safety is critical because:
 - Events are the source of truth for the entire system
 - Type mismatches can cause data corruption or silent failures
 - Python's dynamic nature means errors can slip through without proper validation
@@ -176,7 +176,7 @@ All 32 domain events now inherit from `DomainEvent` with strict validation.
 
 ## Related: Observability Event Type Safety (ADR-038)
 
-AEF has **two event systems** with different type safety strategies:
+Syn137 has **two event systems** with different type safety strategies:
 
 | Event System | Purpose | Type Safety Approach |
 |--------------|---------|---------------------|

@@ -7,7 +7,7 @@
 
 ## Context
 
-AEF needs to record git operations (commits, pushes, merges) that an agent
+Syn137 needs to record git operations (commits, pushes, merges) that an agent
 performs during a session — with real metadata: commit SHA, branch, message,
 files changed, token estimates.
 

@@ -126,7 +126,7 @@ async def main() -> int:
 
 ## Test Summary
 
-This file was created by the AEF E2E test script to verify:
+This file was created by the Syn137 E2E test script to verify:
 
 1. ✅ GitHub App authentication (JWT → Installation Token)
 2. ✅ Token Vending Service (scoped, short-lived tokens)
