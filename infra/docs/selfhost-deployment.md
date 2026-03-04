@@ -89,8 +89,7 @@ Add these routes in the tunnel configuration:
 
 | Subdomain | Domain | Service |
 |-----------|--------|---------|
-| `aef` | yourdomain.com | `http://gateway:80` |
-| `api.aef` | yourdomain.com | `http://api:8000` |
+| `aef` | yourdomain.com | `http://gateway:8081` |
 
 #### Option B: Via CLI
 

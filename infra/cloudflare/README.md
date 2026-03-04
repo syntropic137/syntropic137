@@ -34,7 +34,7 @@ In the tunnel configuration, add these public hostnames:
 
 | Subdomain | Domain | Type | URL |
 |-----------|--------|------|-----|
-| `syn` (or your choice) | yourdomain.com | HTTP | `http://gateway:80` |
+| `syn` (or your choice) | yourdomain.com | HTTP | `http://gateway:8081` |
 
 **Important:** The service URL uses the Docker service name, not `localhost`.
 nginx (`gateway`) handles both static assets and API proxying — you only need one route.

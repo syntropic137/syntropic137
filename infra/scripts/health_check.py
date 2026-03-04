@@ -109,19 +109,19 @@ def _build_services() -> list[Service]:
             container_name=f"{prefix}collector",
         ),
         Service(
-            name="Dashboard",
+            name="API",
             host="localhost",
             port=PORT_DASHBOARD,
             health_path="/health",
-            description="AEF Dashboard API",
+            description="AEF API",
             container_name=f"{prefix}api",
         ),
         Service(
-            name="UI",
+            name="Gateway",
             host="localhost",
             port=PORT_UI,
             health_path="/health",
-            description="AEF Dashboard UI",
+            description="AEF Gateway (nginx)",
             container_name=f"{prefix}gateway",
         ),
         Service(
