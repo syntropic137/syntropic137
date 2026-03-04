@@ -1,13 +1,16 @@
-"""Event store writer for persisting events via gRPC.
+"""Observability store for persisting collected events.
 
-Connects to the AEF Event Store service and writes
-collected events as domain events.
+Routes events to TimescaleDB via syn-adapters (AgentEventStore + EventBuffer).
+Replaces the original gRPC-based EventStoreProtocol which used domain event
+store concepts (aggregate_id, version) that are wrong for observability data.
+
+See: ADR-026 (observability → TimescaleDB), ADR-013 (no in-memory in production)
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from syn_collector.events.types import CollectedEvent
@@ -15,185 +18,108 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class EventStoreProtocol(Protocol):
-    """Protocol for event store clients."""
+@runtime_checkable
+class ObservabilityStoreProtocol(Protocol):
+    """Protocol for observability event storage."""
 
-    async def append(
-        self,
-        aggregate_id: str,
-        aggregate_type: str,
-        event_type: str,
-        event_data: dict[str, Any],
-        version: int,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
-        """Append an event to the store."""
+    async def write_event(self, event: CollectedEvent) -> None:
+        """Write a single event to the store."""
+        ...
+
+    async def write_batch(self, events: list[CollectedEvent]) -> None:
+        """Write multiple events to the store."""
         ...
 
 
-class EventStoreWriter:
-    """Write collected events to the event store.
+def _event_to_dict(event: CollectedEvent) -> dict[str, Any]:
+    """Map a CollectedEvent to the dict shape AgentEvent.from_dict() expects.
 
-    Translates CollectedEvent instances to the event store format
-    and handles batch writes.
+    AgentEvent.from_dict() looks for:
+    - "event_type" or "type" → EventType
+    - "timestamp" or "time" → datetime
+    - "session_id" → str
+    - remaining keys → data payload
+    """
+    # Spread data first so reserved fields cannot be overridden by payload keys
+    payload: dict[str, Any] = dict(event.data)
+    payload.update(
+        {
+            "event_type": event.event_type.value,
+            "session_id": event.session_id,
+            "timestamp": event.timestamp.isoformat(),
+            "event_id": event.event_id,
+        }
+    )
+    return payload
 
-    Attributes:
-        client: Event store client (gRPC or in-memory)
+
+class TimescaleDBObservabilityStore:
+    """Observability store backed by TimescaleDB via AgentEventStore + EventBuffer.
+
+    Creates its own EventBuffer instance (not the singleton) to avoid
+    coupling to the dashboard's buffer lifecycle.
     """
 
-    def __init__(
-        self,
-        client: EventStoreProtocol | None = None,
-        *,
-        aggregate_type: str = "AgentSession",
-    ) -> None:
-        """Initialize the event store writer.
+    def __init__(self, db_url: str) -> None:
+        self._db_url = db_url
+        self._store: Any = None  # AgentEventStore, set in initialize()
+        self._buffer: Any = None  # EventBuffer, set in initialize()
 
-        Args:
-            client: Event store client (optional for testing)
-            aggregate_type: Type name for events (default AgentSession)
-        """
-        self._client = client
-        self._aggregate_type = aggregate_type
-        self._version_cache: dict[str, int] = {}
+    async def initialize(self) -> None:
+        """Create store and buffer, connect to DB."""
+        from syn_adapters.events.buffer import EventBuffer
+        from syn_adapters.events.store import AgentEventStore
 
-    async def write(self, event: CollectedEvent) -> str | None:
-        """Write a single event to the store.
+        self._store = AgentEventStore(self._db_url)
+        await self._store.initialize()
 
-        Args:
-            event: CollectedEvent to persist
+        self._buffer = EventBuffer(self._store)
+        await self._buffer.start()
 
-        Returns:
-            Event ID from store, or None if no client
-        """
-        if self._client is None:
-            logger.debug("No event store client configured, skipping write")
-            return None
+        logger.info("TimescaleDB observability store initialized")
 
-        # Get next version for this aggregate
-        version = self._get_next_version(event.session_id)
+    async def write_event(self, event: CollectedEvent) -> None:
+        """Write a single event via the buffer."""
+        if self._buffer is None:
+            msg = "Store not initialized — call initialize() first"
+            raise RuntimeError(msg)
+        await self._buffer.add(_event_to_dict(event))
 
-        try:
-            event_id = await self._client.append(
-                aggregate_id=event.session_id,
-                aggregate_type=self._aggregate_type,
-                event_type=event.event_type.value,
-                event_data=event.data,
-                version=version,
-                metadata={
-                    "collector_event_id": event.event_id,
-                    "collector_timestamp": event.timestamp.isoformat(),
-                },
-            )
+    async def write_batch(self, events: list[CollectedEvent]) -> None:
+        """Write multiple events via the buffer."""
+        if self._buffer is None:
+            msg = "Store not initialized — call initialize() first"
+            raise RuntimeError(msg)
+        await self._buffer.add_many([_event_to_dict(e) for e in events])
 
-            # Update version cache on success
-            self._version_cache[event.session_id] = version
-
-            return event_id
-
-        except Exception as e:
-            logger.error(
-                f"Failed to write event to store: {e}",
-                extra={
-                    "event_id": event.event_id,
-                    "session_id": event.session_id,
-                    "error": str(e),
-                },
-            )
-            raise
-
-    async def write_batch(self, events: list[CollectedEvent]) -> list[str]:
-        """Write multiple events to the store.
-
-        Events are written sequentially to maintain ordering.
-
-        Args:
-            events: List of events to persist
-
-        Returns:
-            List of event IDs from store
-        """
-        event_ids: list[str] = []
-
-        for event in events:
-            event_id = await self.write(event)
-            if event_id:
-                event_ids.append(event_id)
-
-        return event_ids
-
-    def _get_next_version(self, session_id: str) -> int:
-        """Get next version for an aggregate.
-
-        Args:
-            session_id: Aggregate identifier
-
-        Returns:
-            Next version number (starts at 1)
-        """
-        current = self._version_cache.get(session_id, 0)
-        return current + 1
-
-    def reset_version_cache(self) -> None:
-        """Clear version cache (for testing)."""
-        self._version_cache.clear()
+    async def close(self) -> None:
+        """Flush remaining events and close connections."""
+        if self._buffer is not None:
+            await self._buffer.stop()
+        if self._store is not None:
+            await self._store.close()
+        logger.info("TimescaleDB observability store closed")
 
 
-class InMemoryEventStore:
-    """In-memory event store for testing.
+class InMemoryObservabilityStore:
+    """In-memory observability store for TESTING ONLY.
 
-    Stores events in a list, useful for unit tests.
+    Raises InMemoryStorageError if used outside test/offline environments.
     """
 
     def __init__(self) -> None:
-        """Initialize empty store."""
+        from syn_adapters.storage.in_memory import _assert_test_environment
+
+        _assert_test_environment()
         self.events: list[dict[str, Any]] = []
 
-    async def append(
-        self,
-        aggregate_id: str,
-        aggregate_type: str,
-        event_type: str,
-        event_data: dict[str, Any],
-        version: int,
-        metadata: dict[str, Any] | None = None,
-    ) -> str:
-        """Append event to in-memory list.
+    async def write_event(self, event: CollectedEvent) -> None:
+        """Store event dict in memory."""
+        self.events.append(_event_to_dict(event))
 
-        Returns:
-            Generated event ID
-        """
-        import uuid
-
-        event_id = str(uuid.uuid4())
-
-        self.events.append(
-            {
-                "event_id": event_id,
-                "aggregate_id": aggregate_id,
-                "aggregate_type": aggregate_type,
-                "event_type": event_type,
-                "event_data": event_data,
-                "version": version,
-                "metadata": metadata or {},
-            }
-        )
-
-        return event_id
-
-    def get_events(self, aggregate_id: str | None = None) -> list[dict[str, Any]]:
-        """Get stored events, optionally filtered.
-
-        Args:
-            aggregate_id: Optional filter by aggregate
-
-        Returns:
-            List of stored events
-        """
-        if aggregate_id is None:
-            return self.events.copy()
-
-        return [e for e in self.events if e["aggregate_id"] == aggregate_id]
+    async def write_batch(self, events: list[CollectedEvent]) -> None:
+        """Store multiple event dicts in memory."""
+        self.events.extend(_event_to_dict(e) for e in events)
 
     def clear(self) -> None:
         """Clear all stored events."""

@@ -10,22 +10,41 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# Copy local dependencies first (for layer caching)
+# Copy root pyproject.toml and uv.lock for dependency resolution
+COPY pyproject.toml uv.lock ./
+
+# -----------------------------------------------------------------------------
+# Copy local dependencies (order matters for layer caching)
+# -----------------------------------------------------------------------------
+
+# 1. Shared utilities (no deps on other local packages)
 COPY packages/syn-shared/ ./packages/syn-shared/
+
+# 2. Agentic primitives packages
+COPY lib/agentic-primitives/lib/python/agentic_logging/ ./lib/agentic-primitives/lib/python/agentic_logging/
+COPY lib/agentic-primitives/lib/python/agentic_events/ ./lib/agentic-primitives/lib/python/agentic_events/
+COPY lib/agentic-primitives/lib/python/agentic_isolation/ ./lib/agentic-primitives/lib/python/agentic_isolation/
+
+# 3. Event sourcing SDK
 COPY lib/event-sourcing-platform/event-sourcing/python/ ./lib/event-sourcing-platform/event-sourcing/python/
 
-# Copy collector project files
-COPY packages/syn-collector/pyproject.toml packages/syn-collector/README.md ./packages/syn-collector/
-COPY packages/syn-collector/src/ ./packages/syn-collector/src/
+# 4. Domain layer (depends on syn-shared)
+COPY packages/syn-domain/ ./packages/syn-domain/
 
-# Create virtual environment and install dependencies
+# 5. Token vending service
+COPY packages/syn-tokens/ ./packages/syn-tokens/
+
+# 6. Adapters layer (depends on domain, shared, agentic packages, tokens)
+COPY packages/syn-adapters/ ./packages/syn-adapters/
+
+# 7. Collector (depends on syn-adapters[postgres], syn-shared)
+COPY packages/syn-collector/ ./packages/syn-collector/
+
+# Create virtual environment and install
 RUN uv venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Install local dependencies first
-RUN uv pip install ./packages/syn-shared
-RUN uv pip install ./lib/event-sourcing-platform/event-sourcing/python
-RUN uv pip install ./packages/syn-collector
+RUN uv pip install "./packages/syn-collector[dev]"
 
 # Runtime stage
 FROM python:3.12-slim AS runtime
@@ -34,7 +53,10 @@ WORKDIR /app
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/packages/syn-collector/src /app/src
+
+# Copy source directories that .pth files reference (for editable installs)
+COPY --from=builder /app/packages /app/packages
+COPY --from=builder /app/lib /app/lib
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1

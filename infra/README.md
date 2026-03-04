@@ -32,7 +32,7 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 |---------|------|-------|-----------------|
 | **syn-ui** | nginx reverse proxy + SPA frontend | Custom (Node build + nginx) | 80 |
 | **dashboard** | FastAPI API backend, workflow engine, GitHub App | Custom (Python 3.12) | 8000 |
-| **collector** | Agent event ingestion (batched writes to event store) | Custom (Python 3.12) | 8080 |
+| **collector** | Agent event ingestion (batched writes to TimescaleDB) | Custom (Python 3.12) | 8080 |
 | **event-store** | Rust gRPC event sourcing server | Custom (Rust) | 50051 |
 | **timescaledb** | PostgreSQL 16 + TimescaleDB (unified data store) | `timescale/timescaledb:2.25.1-pg16` | 5432 |
 | **redis** | Pub/sub + caching (AOF persistence) | `redis:7-alpine` | 6379 |
@@ -45,8 +45,8 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 1. **GitHub webhook** hits `syn-ui` at `/api/v1/webhooks/github` (auth-exempt, HMAC-verified).
 2. **syn-ui** proxies to **dashboard**, which matches the event against trigger rules.
 3. **dashboard** spawns a **workspace container** via the Docker socket. The container runs Claude CLI inside an isolated environment with a cloned repo.
-4. Agent JSONL stdout flows to the **collector**, which batches events and writes to the **event-store** via gRPC.
-5. The **event-store** persists events to **timescaledb** (hypertables for append-only workloads).
+4. Agent JSONL stdout flows to the **collector**, which batches events and writes directly to **timescaledb** via `AgentEventStore` (COPY-based batch inserts).
+5. Domain events (workflow state, aggregates) flow through the **event-store** (Rust gRPC) to **timescaledb**.
 6. The **dashboard** reads events back for the SPA frontend via REST and WebSocket/SSE connections.
 
 ### Compose File Layering

@@ -23,11 +23,11 @@ uv sync
 ### Start Collector Service
 
 ```bash
-# Start the collector service
-uv run syn-collector serve --port 8080
+# Start the collector service (requires TimescaleDB)
+uv run syn-collector serve --port 8080 --db-url postgresql://syn:syn_dev_password@localhost:5432/syn
 
-# With event store connection
-uv run syn-collector serve --port 8080 --eventstore-host localhost --eventstore-port 50051
+# Or via environment variable
+SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn uv run syn-collector serve --port 8080
 ```
 
 ### Start File Watcher (Sidecar)
@@ -77,17 +77,16 @@ uv run syn-collector sidecar \
 Environment variables:
 
 ```bash
+SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn  # TimescaleDB connection
 EVENT_COLLECTOR_URL=http://localhost:8080
 EVENT_COLLECTOR_API_KEY=sk-xxx  # For cloud deployments
-EVENTSTORE_HOST=localhost
-EVENTSTORE_PORT=50051
 EVENT_BATCH_SIZE=100
 EVENT_BATCH_INTERVAL_MS=1000
 ```
 
 ## Architecture
 
-See [ADR-017: Scalable Event Collection Architecture](../../docs/adrs/ADR-017-scalable-event-collection-architecture.md) for detailed architecture documentation.
+See [ADR-026: Simplified Observability Events](../../docs/adrs/ADR-026-simplified-observability-events.md) for the current storage architecture (TimescaleDB via `AgentEventStore`). [ADR-017](../../docs/adrs/ADR-017-scalable-event-collection-architecture.md) covers the original collection architecture (partially superseded).
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -105,7 +104,7 @@ See [ADR-017: Scalable Event Collection Architecture](../../docs/adrs/ADR-017-sc
                           │       Event Collector Service                │
                           │  - FastAPI Server                           │
                           │  - Deduplication Filter                      │
-                          │  - Event Store Writer                        │
+                          │  - TimescaleDB Store (AgentEventStore)        │
                           └─────────────────────────────────────────────┘
 ```
 
