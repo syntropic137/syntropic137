@@ -149,7 +149,7 @@ services:
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
-    # Run as root so entrypoint can match Docker socket GID, then drop to 'aef' via gosu.
+    # Run as root so entrypoint can match Docker socket GID, then drop to 'syn' via gosu.
     # no-new-privileges is omitted here (unlike other services) because gosu needs
     # setuid to de-escalate. All other hardening remains (read_only, cap_drop, etc.).
     user: root
@@ -165,7 +165,7 @@ services:
       - SETGID   # Required for gosu to match Docker socket GID
     tmpfs:
       - /tmp
-      - /home/aef/.config  # 1Password CLI needs writable config dir on read-only FS
+      - /home/syn/.config  # 1Password CLI needs writable config dir on read-only FS
     deploy:
       resources:
         limits:

@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-We need to test the AEF event pipeline without spending API tokens. Manual testing finds bugs that automated tests miss, indicating gaps in test coverage.
+We need to test the Syn137 event pipeline without spending API tokens. Manual testing finds bugs that automated tests miss, indicating gaps in test coverage.
 
 **Challenges:**
 
@@ -29,7 +29,7 @@ Use recorded agent sessions from `agentic-primitives` with a new `RecordingEvent
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        AEF Event Flow                               │
+│                        Syn137 Event Flow                               │
 │                                                                     │
 │  EventStreamPort (interface)                                        │
 │       │                                                             │
@@ -53,7 +53,7 @@ Use recorded agent sessions from `agentic-primitives` with a new `RecordingEvent
 
 1. **SessionRecorder** (agentic-primitives): Captures agent events with timing to JSONL
 2. **SessionPlayer** (agentic-primitives): Replays recordings at configurable speed
-3. **RecordingEventStreamAdapter** (syn-adapters): Bridges recordings to AEF's event pipeline
+3. **RecordingEventStreamAdapter** (syn-adapters): Bridges recordings to Syn137's event pipeline
 
 ### Usage
 

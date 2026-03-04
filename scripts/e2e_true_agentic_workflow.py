@@ -518,7 +518,7 @@ async def run_e2e_test() -> bool:
     # Generate unique execution ID
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     execution_id = f"e2e-{timestamp}"
-    topic = f"E2E validation test for AEF workflow system - execution {execution_id}"
+    topic = f"E2E validation test for Syn137 workflow system - execution {execution_id}"
 
     # Step 1: Check prerequisites
     if not await check_prerequisites():

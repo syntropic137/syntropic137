@@ -13,7 +13,7 @@ Analyze changes since the last version, automatically determine the appropriate 
 ## Variables
 
 CHANNEL: beta      # beta | stable (stable requires explicit confirmation)
-REPO: aef          # aef | agentic-primitives | both
+REPO: syn137          # syn137 | agentic-primitives | both
 MESSAGE: ""        # Optional version message
 
 ## Agent Instructions
@@ -32,7 +32,7 @@ MESSAGE: ""        # Optional version message
 
 ## Current Status
 
-**AEF is in BETA** - All releases should use `beta` channel until production-ready.
+**Syn137 is in BETA** - All releases should use `beta` channel until production-ready.
 
 Beta versions follow: `v0.{minor}.{patch}-beta.{build}`
 Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
@@ -43,7 +43,7 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
 
 1. **Verify Clean State**
    ```bash
-   cd /Users/neural/Code/syntropic137/agentic-engineering-framework
+   cd /Users/neural/Code/syntropic137/syntropic137
 
    # Check for uncommitted changes
    if [ -n "$(git status --porcelain)" ]; then
@@ -85,9 +85,9 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
    ```bash
    echo "=== Current Version ==="
 
-   # For AEF
-   CURRENT_AEF=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-   echo "AEF: $CURRENT_AEF"
+   # For Syn137
+   CURRENT_SYN137=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+   echo "Syn137: $CURRENT_SYN137"
 
    # For agentic-primitives (if both)
    if [ "$REPO" = "both" ]; then
@@ -101,14 +101,14 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
 5. **Analyze Changes Since Last Version**
    ```bash
    echo ""
-   echo "=== Analyzing Changes Since $CURRENT_AEF ==="
+   echo "=== Analyzing Changes Since $CURRENT_SYN137 ==="
 
    # Get commit messages
-   git log $CURRENT_AEF..HEAD --pretty=format:"%s" --no-merges > /tmp/commits.txt
+   git log $CURRENT_SYN137..HEAD --pretty=format:"%s" --no-merges > /tmp/commits.txt
 
    # Get file changes
-   git diff $CURRENT_AEF..HEAD --stat > /tmp/diffstat.txt
-   git diff $CURRENT_AEF..HEAD --name-only > /tmp/files.txt
+   git diff $CURRENT_SYN137..HEAD --stat > /tmp/diffstat.txt
+   git diff $CURRENT_SYN137..HEAD --name-only > /tmp/files.txt
 
    # Show summary
    echo ""
@@ -172,14 +172,14 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
 7. **Calculate Next Version**
    ```bash
    # Parse current version (e.g., v0.2.0-beta.3)
-   VERSION_CORE=$(echo $CURRENT_AEF | sed 's/-beta.*//' | sed 's/^v//')
+   VERSION_CORE=$(echo $CURRENT_SYN137 | sed 's/-beta.*//' | sed 's/^v//')
    MAJOR=$(echo $VERSION_CORE | cut -d. -f1)
    MINOR=$(echo $VERSION_CORE | cut -d. -f2)
    PATCH=$(echo $VERSION_CORE | cut -d. -f3)
 
    # Get beta number if exists
-   if [[ $CURRENT_AEF == *"-beta."* ]]; then
-     BETA_NUM=$(echo $CURRENT_AEF | sed 's/.*-beta\.//')
+   if [[ $CURRENT_SYN137 == *"-beta."* ]]; then
+     BETA_NUM=$(echo $CURRENT_SYN137 | sed 's/.*-beta\.//')
    else
      BETA_NUM=0
    fi
@@ -225,10 +225,10 @@ Example: `v0.3.0-beta.1`, `v0.3.0-beta.2`, etc.
    echo "=== Generating Changelog ==="
 
    # Get commits since last tag
-   CHANGELOG=$(git log $CURRENT_AEF..HEAD --pretty=format:"- %s (%h)" --no-merges)
+   CHANGELOG=$(git log $CURRENT_SYN137..HEAD --pretty=format:"- %s (%h)" --no-merges)
 
    # Get PR numbers if available
-   PR_LINKS=$(git log $CURRENT_AEF..HEAD --pretty=format:"%s" --no-merges | \
+   PR_LINKS=$(git log $CURRENT_SYN137..HEAD --pretty=format:"%s" --no-merges | \
               grep -oE '\(#[0-9]+\)' | sort -u)
 
    echo ""
@@ -341,7 +341,7 @@ $(if [ -n "$MESSAGE" ]; then echo "$MESSAGE"; fi)"
     ```bash
     if [ "$REPO" = "both" ]; then
       echo ""
-      echo "⚠️  Remember to update agentic-primitives submodule pointer in AEF!"
+      echo "⚠️  Remember to update agentic-primitives submodule pointer in Syn137!"
       echo ""
       echo "Commands:"
       echo "  cd lib/agentic-primitives"

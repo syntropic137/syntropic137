@@ -140,7 +140,7 @@ static_resources:
           # Rate limiting per agent
           - name: envoy.filters.http.ratelimit
             typed_config:
-              domain: aef-agents
+              domain: syn137-agents
               rate_limit_service:
                 grpc_service:
                   envoy_grpc:

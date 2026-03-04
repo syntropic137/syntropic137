@@ -1,5 +1,5 @@
 """
-Shared utilities for AEF infrastructure scripts.
+Shared utilities for Syn137 infrastructure scripts.
 
 Canonical implementations of common operations used across setup.py,
 secrets_setup.py, cloudflare_tunnel.py, health_check.py, and friends.

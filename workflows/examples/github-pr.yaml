@@ -90,7 +90,7 @@ phases:
            --title "Agent: {{change_description}}" \
            --body "## Summary
 
-         This PR was created by an AEF agent.
+         This PR was created by a Syn137 agent.
 
          **Change:** {{change_description}}
          **Execution ID:** {{execution_id}}

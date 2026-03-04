@@ -5,7 +5,7 @@
 -- permissive for ease of development. In production, implement proper
 -- per-user/per-tenant authorization using auth.uid() or similar.
 
--- Insert default bucket for AEF artifacts
+-- Insert default bucket for Syn137 artifacts
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES (
     'syn-artifacts',
@@ -70,5 +70,5 @@ END $$;
 -- Log that storage is initialized
 DO $$
 BEGIN
-    RAISE NOTICE 'AEF artifact storage bucket created successfully';
+    RAISE NOTICE 'Syn137 artifact storage bucket created successfully';
 END $$;

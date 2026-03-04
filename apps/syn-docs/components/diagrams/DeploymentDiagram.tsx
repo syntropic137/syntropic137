@@ -86,9 +86,9 @@ export function ScalingDiagram() {
 
       {/* Servers */}
       <DiagramGrid columns={3}>
-        <DiagramNode icon="server" label="AEF Server 1" color="purple" size="sm" />
-        <DiagramNode icon="server" label="AEF Server 2" color="purple" size="sm" />
-        <DiagramNode icon="server" label="AEF Server 3" color="purple" size="sm" />
+        <DiagramNode icon="server" label="Syn137 Server 1" color="purple" size="sm" />
+        <DiagramNode icon="server" label="Syn137 Server 2" color="purple" size="sm" />
+        <DiagramNode icon="server" label="Syn137 Server 3" color="purple" size="sm" />
       </DiagramGrid>
 
       <DiagramArrow label="Shared state" />

@@ -1,4 +1,4 @@
-# AEF Dashboard UI - Production Dockerfile
+# Syn137 Dashboard UI - Production Dockerfile
 # Multi-stage build: Node for build, nginx for serving
 #
 # Build context: Repository root (not this directory)

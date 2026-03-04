@@ -90,7 +90,7 @@ def generate_projection_subscriptions(manifest: dict[str, Any]) -> str:
 
 ## Overview
 
-This diagram shows which events feed which projections in the AEF system.
+This diagram shows which events feed which projections in the Syn137 system.
 
 **Total Relationships:** {len(event_to_projections)} events → {len(unique_projections)} projections
 
@@ -186,7 +186,7 @@ def generate_event_flow_summary(manifest: dict[str, Any]) -> str:
 
 ## Top Event Flows
 
-This table shows the most important event flows in AEF (events that feed the most projections):
+This table shows the most important event flows in Syn137 (events that feed the most projections):
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|

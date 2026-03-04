@@ -6,7 +6,7 @@
 
 ## Context
 
-The Syntropic137 (AEF) needs comprehensive observability for agent execution across multiple deployment environments. We require:
+The Syntropic137 needs comprehensive observability for agent execution across multiple deployment environments. We require:
 
 1. **Tool-level observability** - Track every tool call (started, completed, blocked) with metadata
 2. **Token usage tracking** - Per-turn and cumulative token metrics from Claude transcripts
@@ -110,7 +110,7 @@ Event Collector → Event Store
 
 #### Pattern B: SDK Agent (Containerized/Stdout)
 
-Used by: `claude-agent-sdk`, `aef-agent-runner`, production workloads
+Used by: `claude-agent-sdk`, `syn-agent-runner`, production workloads
 
 ```
 claude-agent-sdk query()
@@ -221,7 +221,7 @@ See [ADR-018](./ADR-018-commands-vs-observations-event-architecture.md) for the 
 |-------------|--------------|---------------|-------|
 | **Local Filesystem** | Background daemon | `http://localhost:8080` | Run via `uv run syn-collector daemon` |
 | **Local Docker** | Same container or sidecar container | `http://collector:8080` | Docker network |
-| **Cloud Sandbox (E2B)** | Baked into agent image | `https://collector.aef.example.com` | HTTPS + API key auth |
+| **Cloud Sandbox (E2B)** | Baked into agent image | `https://collector.syn137.example.com` | HTTPS + API key auth |
 
 ### Event Sources
 
@@ -466,7 +466,7 @@ EVENT_COLLECTOR_API_KEY=sk-xxx
 # Event store connection
 EVENTSTORE_HOST=localhost
 EVENTSTORE_PORT=50051
-EVENTSTORE_TENANT_ID=aef
+EVENTSTORE_TENANT_ID=syn
 
 # Sidecar settings
 EVENT_BATCH_SIZE=100

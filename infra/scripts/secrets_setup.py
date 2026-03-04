@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Secrets management for AEF infrastructure.
+Secrets management for Syn137 infrastructure.
 Cross-platform (Windows, macOS, Linux).
 
 Usage:
@@ -336,7 +336,7 @@ def unseal_secrets(passphrase: str | None = None) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Manage AEF deployment secrets",
+        description="Manage Syn137 deployment secrets",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -361,7 +361,7 @@ Examples:
     args = parser.parse_args()
 
     print("=" * 50)
-    print("AEF Secrets Management")
+    print("Syn137 Secrets Management")
     print("=" * 50)
     print()
 

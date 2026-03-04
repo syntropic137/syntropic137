@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "AEF Dashboard API",
+    "title": "Syn137 Dashboard API",
     "description": "Dashboard API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
     "version": "0.1.0"
   },

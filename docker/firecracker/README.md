@@ -1,6 +1,6 @@
 # Firecracker MicroVM Setup
 
-Firecracker provides the **strongest isolation** for AEF workspaces using lightweight
+Firecracker provides the **strongest isolation** for Syn137 workspaces using lightweight
 MicroVMs. Each agent runs in its own VM with a separate kernel, providing true
 kernel-level isolation.
 
@@ -66,12 +66,12 @@ You can either download a pre-built kernel or compile your own:
 
 #### Option A: Download Pre-built (Recommended)
 ```bash
-# Download AEF-optimized kernel
+# Download Syn137-optimized kernel
 ./docker/firecracker/download-kernel.sh
 
 # Or manually download:
 curl -L https://s3.amazonaws.com/spec.ccfc.min/ci-artifacts/kernels/x86_64/vmlinux-5.10.204 \
-    -o /var/lib/aef/firecracker/vmlinux
+    -o /var/lib/syn/firecracker/vmlinux
 ```
 
 #### Option B: Build Custom Kernel
@@ -88,7 +88,7 @@ The rootfs is an ext4 image containing the OS for workspaces:
 ./docker/firecracker/build-rootfs.sh
 
 # This creates:
-#   /var/lib/aef/firecracker/rootfs.ext4
+#   /var/lib/syn/firecracker/rootfs.ext4
 ```
 
 ## Directory Structure
@@ -96,7 +96,7 @@ The rootfs is an ext4 image containing the OS for workspaces:
 After setup, you'll have:
 
 ```
-/var/lib/aef/firecracker/
+/var/lib/syn/firecracker/
 ├── vmlinux              # Linux kernel (uncompressed)
 ├── rootfs.ext4          # Root filesystem (ext4 image)
 ├── config/              # Firecracker VM configs
@@ -180,7 +180,7 @@ sudo chmod 666 /dev/kvm
 
 ```bash
 # Verify kernel exists
-ls -la /var/lib/aef/firecracker/vmlinux
+ls -la /var/lib/syn/firecracker/vmlinux
 
 # Re-download if needed
 ./docker/firecracker/download-kernel.sh
@@ -190,10 +190,10 @@ ls -la /var/lib/aef/firecracker/vmlinux
 
 ```bash
 # Check Firecracker logs
-journalctl -u aef-firecracker -f
+journalctl -u syn-firecracker -f
 
 # Verify rootfs is valid
-file /var/lib/aef/firecracker/rootfs.ext4
+file /var/lib/syn/firecracker/rootfs.ext4
 # Should show: ext4 filesystem data
 
 # Test manually
@@ -201,7 +201,7 @@ firecracker --api-sock /tmp/firecracker-test.socket &
 curl --unix-socket /tmp/firecracker-test.socket \
     -X PUT "http://localhost/boot-source" \
     -H "Content-Type: application/json" \
-    -d '{"kernel_image_path": "/var/lib/aef/firecracker/vmlinux"}'
+    -d '{"kernel_image_path": "/var/lib/syn/firecracker/vmlinux"}'
 ```
 
 ### VM Doesn't Start

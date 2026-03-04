@@ -14,7 +14,7 @@
 
 ## Context
 
-AEF uses raw SQL with `asyncpg` for high-performance database operations, particularly for the `AgentEventStore` which needs to handle 100K+ events/sec. While raw SQL provides maximum performance, it lacks the compile-time type safety that ORMs provide.
+Syn137 uses raw SQL with `asyncpg` for high-performance database operations, particularly for the `AgentEventStore` which needs to handle 100K+ events/sec. While raw SQL provides maximum performance, it lacks the compile-time type safety that ORMs provide.
 
 During E2E testing, we discovered a **schema drift** issue:
 - Python code expected `TEXT` columns for `session_id` and `execution_id`

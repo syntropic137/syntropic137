@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GitHub App Manifest Flow — one-click GitHub App creation for AEF.
+GitHub App Manifest Flow — one-click GitHub App creation for Syn137.
 
 Implements the GitHub App Manifest flow:
 https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
@@ -441,7 +441,7 @@ def run_manifest_flow(
 ) -> dict[str, Any]:
     """Run the full GitHub App Manifest flow end-to-end.
 
-    1. Build manifest JSON with AEF permissions.
+    1. Build manifest JSON with Syn137 permissions.
     2. Start a local callback server on an ephemeral port.
     3. Open the user's browser to the GitHub manifest creation page.
     4. Wait for the redirect carrying the temporary ``code``.
@@ -598,7 +598,7 @@ def main() -> None:
     """Interactive CLI for the manifest flow."""
     print()
     print("=" * 55)
-    print("  GitHub App Manifest Flow — AEF Setup")
+    print("  GitHub App Manifest Flow — Syn137 Setup")
     print("=" * 55)
     print()
 

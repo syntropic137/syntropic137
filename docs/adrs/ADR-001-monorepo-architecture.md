@@ -26,7 +26,7 @@ We organize using `apps/` and `packages/` directories with **minimal nesting**. 
 > **Note:** This is inspired by Turborepo's organization pattern, but we use **uv workspaces** for Python package management and **just** for task running.
 
 ```
-agentic-engineering-framework/
+syntropic137/
 ├── lib/                              # Git submodules (external dependencies)
 │   ├── agentic-primitives/           # Composable agent building blocks
 │   └── event-sourcing-platform/      # Event sourcing infrastructure + VSA tool

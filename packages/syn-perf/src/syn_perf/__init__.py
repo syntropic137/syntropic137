@@ -1,4 +1,4 @@
-"""AEF Performance Benchmarking Suite.
+"""Syntropic137 Performance Benchmarking Suite.
 
 Provides performance benchmarks for isolated workspace operations:
 - Single workspace timing

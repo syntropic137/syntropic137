@@ -26,7 +26,7 @@ Create a bot account:
 ```bash
 # Bot identity
 export SYN_GIT_USER_NAME="syn-bot[bot]"
-export SYN_GIT_USER_EMAIL="bot@aef.dev"
+export SYN_GIT_USER_EMAIL="bot@syn137.dev"
 export SYN_GIT_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
 ```
 
@@ -92,11 +92,11 @@ export SYN_GITHUB_PRIVATE_KEY="$(cat app-private-key.pem)"
 
 ```bash
 # Generate SSH key (if you don't have one)
-ssh-keygen -t ed25519 -C "syn-bot@yourdomain.com" -f ~/.ssh/aef_bot_key
+ssh-keygen -t ed25519 -C "syn-bot@yourdomain.com" -f ~/.ssh/syn137_bot_key
 
 # Add to GitHub: https://github.com/settings/keys
 
-export SYN_GIT_SSH_KEY="$(cat ~/.ssh/aef_bot_key | base64)"
+export SYN_GIT_SSH_KEY="$(cat ~/.ssh/syn137_bot_key | base64)"
 ```
 
 **Pros:**
@@ -115,12 +115,12 @@ All agent commits include metadata for traceability:
 
 ```
 commit abc123def456
-Author: syn-bot[bot] <bot@aef.dev>
+Author: syn-bot[bot] <bot@syn137.dev>
 Date:   Wed Dec 11 19:30:00 2025
 
     feat: implement code review suggestions
 
-    Applied by AEF agent
+    Applied by Syn137 agent
     - Workflow: code-review-workflow
     - Execution: exec-123456
     - Session: session-789
@@ -145,8 +145,8 @@ Date:   Wed Dec 11 19:30:00 2025
 
 1. Go to **Settings > Developer settings > GitHub Apps > New GitHub App**
 2. Fill in:
-   - **Name**: `aef-production` (or your org name)
-   - **Homepage URL**: Your AEF dashboard URL
+   - **Name**: `syn137-production` (or your org name)
+   - **Homepage URL**: Your Syn137 dashboard URL
    - **Webhook**: Uncheck "Active" (not needed)
 3. **Permissions**:
    - Repository permissions:
@@ -190,8 +190,8 @@ chmod 600 .env.github-app
 ```bash
 # Start a test container with git identity
 docker run --rm -it \
-  -e GIT_USER_NAME="AEF Bot" \
-  -e GIT_USER_EMAIL="bot@aef.dev" \
+  -e GIT_USER_NAME="Syn137 Bot" \
+  -e GIT_USER_EMAIL="bot@syn137.dev" \
   python:3.12-slim bash
 
 # Inside container:
@@ -207,7 +207,7 @@ git commit -m "test: agent commit"
 git log --format="Author: %an <%ae>"
 ```
 
-### Test with AEF
+### Test with Syn137
 
 ```bash
 # Run POC with git operations

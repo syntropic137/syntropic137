@@ -39,7 +39,7 @@ class PostgresProjectionStore:
         """Get or create the connection pool."""
         if self._pool is None:
             settings = get_settings()
-            # Use AEF Observability DB URL (ADR-030)
+            # Use Syn137 Observability DB URL (ADR-030)
             if not settings.syn_observability_db_url:
                 raise ValueError(
                     "SYN_OBSERVABILITY_DB_URL must be configured. Set it in your .env file."

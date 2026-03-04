@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-AEF is open-source software that also runs in production under the `syntropic137` org. As the number of integrations grows (GitHub App, Anthropic, OpenAI, Supabase, MinIO, TimescaleDB), secret sprawl becomes a real risk:
+Syn137 is open-source software that also runs in production under the `syntropic137` org. As the number of integrations grows (GitHub App, Anthropic, OpenAI, Supabase, MinIO, TimescaleDB), secret sprawl becomes a real risk:
 
 - App ID and private key stored in separate, unlinked secrets → they drift out of sync (e.g. wrong App ID used with a valid key)
 - No canonical list of what secrets exist → contributors don't know what to configure
@@ -83,9 +83,9 @@ Precedence (highest → lowest):
 
 ### 1. `SYN_` Prefix for All Product Secrets
 
-All AEF-managed secrets use the `SYN_` prefix.
+All Syn137-managed secrets use the `SYN_` prefix.
 
-**Rationale:** The prefix is the product namespace, not an org name — consistent with the package names (`syn-adapters`, `syn-shared`). It prevents collisions when AEF runs alongside other tools that use the same underlying services (e.g. a separate GitHub App in the same shell environment). Contributors don't need to know about Syntropic137 to understand the convention.
+**Rationale:** The prefix is the product namespace, not an org name — consistent with the package names (`syn-adapters`, `syn-shared`). It prevents collisions when Syn137 runs alongside other tools that use the same underlying services (e.g. a separate GitHub App in the same shell environment). Contributors don't need to know about Syntropic137 to understand the convention.
 
 Generic names like `GITHUB_APP_ID` are not used because they are ambiguous and prone to collision.
 
@@ -127,7 +127,7 @@ This means ecosystem-standard names that don't carry the `SYN_` prefix work with
 
 These are intentional exceptions to the `SYN_` prefix rule. Prefixing them would require aliasing inside every agent container that invokes the SDKs directly.
 
-All other AEF-managed secrets use the `SYN_` prefix as described in Decision 1.
+All other Syn137-managed secrets use the `SYN_` prefix as described in Decision 1.
 
 ### 5. Graceful Fallback — No 1Password Required
 

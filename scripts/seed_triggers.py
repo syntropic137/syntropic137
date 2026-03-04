@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIGGER_WORKFLOWS_DIR = REPO_ROOT / "workflows" / "triggers"
 
 DEFAULT_REPOSITORIES = [
-    "syntropic137/agentic-engineering-framework",
+    "syntropic137/syntropic137",
     "syntropic137/sandbox_syn-engineer-beta",
 ]
 

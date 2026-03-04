@@ -29,7 +29,7 @@ RETRY_BUFFER_SECONDS: float = 5
 # blocks other triggers from firing (prevents concurrent workflows).
 # NOTE: Disabled — cooldown is now per-trigger via guard #3 (repo+PR+trigger_id).
 # Different trigger types (self-heal vs review-fix) should not block each other.
-# See: https://github.com/syntropic137/agentic-engineering-framework/issues/101
+# See: https://github.com/syntropic137/syntropic137/issues/101
 CROSS_TRIGGER_COOLDOWN_SECONDS: float = 0
 
 

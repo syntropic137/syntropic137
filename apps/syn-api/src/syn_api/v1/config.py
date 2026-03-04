@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 _ENV_TEMPLATE = """\
 # =============================================================================
-# AEF — Environment Configuration Template
+# Syntropic137 — Environment Configuration Template
 # =============================================================================
 
 # Application
@@ -227,7 +227,7 @@ async def validate_config(
 async def get_env_template(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, ConfigError]:
-    """Get the .env template for configuring AEF.
+    """Get the .env template for configuring Syntropic137.
 
     Args:
         auth: Optional authentication context.

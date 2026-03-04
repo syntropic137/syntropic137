@@ -16,7 +16,7 @@
 
 ## Context
 
-The Syntropic137 (AEF) was initially implemented with a **chat completion model** where agents are thin wrappers around LLM APIs (Anthropic Messages API, OpenAI Chat API). This model is fundamentally misaligned with the framework's purpose.
+The Syntropic137 was initially implemented with a **chat completion model** where agents are thin wrappers around LLM APIs (Anthropic Messages API, OpenAI Chat API). This model is fundamentally misaligned with the framework's purpose.
 
 ### Current (Incorrect) Architecture
 
@@ -55,7 +55,7 @@ We will adopt an **Agentic SDK-first architecture** where agents are backed by a
 
 ### Core Principle: Agentic SDKs, Not APIs
 
-| Abstraction Level | Example | Use In AEF |
+| Abstraction Level | Example | Use In Syn137 |
 |------------------|---------|------------|
 | Raw LLM API | `anthropic.messages.create()` | ❌ **No** - Not agentic |
 | Agentic SDK | `claude_agent_sdk.query()` | ✅ **Yes** - Full agent capabilities |
@@ -205,7 +205,7 @@ class ArtifactBundle:
 
 ### Event Bridge: Hooks → Domain Events
 
-Hook events from `.agentic/analytics/events.jsonl` are bridged to AEF domain events:
+Hook events from `.agentic/analytics/events.jsonl` are bridged to Syn137 domain events:
 
 ```
 Agent Execution
@@ -220,14 +220,14 @@ Agent Execution
 EventBridge (watches JSONL)
       │
       ▼
-AEF Event Store (domain events)
+Syn137 Event Store (domain events)
 ```
 
 ## Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         AEF Workflow Orchestrator                            │
+│                         Syn137 Workflow Orchestrator                            │
 │  - Manages workflow phases                                                   │
 │  - Provides tasks + context to agents                                        │
 │  - Collects artifacts for next phase                                         │
@@ -261,7 +261,7 @@ AEF Event Store (domain events)
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                         Event Bridge → Event Store                           │
-│  Hook events (JSONL) → Translated → AEF Domain Events                       │
+│  Hook events (JSONL) → Translated → Syn137 Domain Events                       │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 

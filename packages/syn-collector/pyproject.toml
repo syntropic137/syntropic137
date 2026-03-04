@@ -1,7 +1,7 @@
 [project]
 name = "syn-collector"
 version = "0.5.1"
-description = "Event collection service for AEF agent observability"
+description = "Event collection service for Syn137 agent observability"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

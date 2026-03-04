@@ -1,4 +1,4 @@
-# AEF Sidecar Proxy
+# Syn137 Sidecar Proxy
 # Envoy-based proxy for secure token injection and observability
 #
 # Build: docker build -t syn-sidecar:latest .

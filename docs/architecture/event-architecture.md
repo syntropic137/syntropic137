@@ -7,7 +7,7 @@
 
 ## Overview
 
-AEF uses **two distinct event patterns** based on the nature of the data:
+Syn137 uses **two distinct event patterns** based on the nature of the data:
 
 1. **Domain Events** (Full Event Sourcing) - For core business logic with validation
 2. **Observability Events** (Event Log) - For high-volume telemetry and observations
@@ -125,7 +125,7 @@ sequenceDiagram
     end
 ```
 
-### Examples in AEF
+### Examples in Syn137
 - `CreateWorkflow` → `WorkflowAggregate` → `WorkflowCreated`
 - `StartExecution` → `WorkflowExecutionAggregate` → `ExecutionStarted`
 - `CompletePhase` → `WorkflowExecutionAggregate` → `PhaseCompleted`
@@ -177,7 +177,7 @@ sequenceDiagram
     end
 ```
 
-### Examples in AEF
+### Examples in Syn137
 - `ToolExecuted` - Agent used a tool
 - `TokensUsed` - Token consumption recorded
 - `WorkspaceCreated` - Workspace lifecycle event

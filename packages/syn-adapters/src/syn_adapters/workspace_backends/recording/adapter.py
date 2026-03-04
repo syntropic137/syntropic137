@@ -2,7 +2,7 @@
 
 ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
-Replays pre-recorded agent sessions through AEF's event pipeline.
+Replays pre-recorded agent sessions through Syn137's event pipeline.
 This enables integration testing of the full event flow without API calls.
 
 Supports workspace file capture for testing artifact flow between phases.
@@ -61,7 +61,7 @@ class RecordingEventStreamAdapter:
 
     ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
-    Enables integration testing of the full AEF event pipeline
+    Enables integration testing of the full Syn137 event pipeline
     using pre-recorded agent sessions, without spending tokens.
 
     This adapter implements the EventStreamPort protocol and can be

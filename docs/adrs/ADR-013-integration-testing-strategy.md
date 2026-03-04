@@ -93,7 +93,7 @@ class MemoryEventStoreClient:
 
 **Example: SDK Message Parsing (from tool observability)**
 ```python
-# packages/aef-agent-runner/tests/test_runner.py
+# packages/syn-agent-runner/tests/test_runner.py
 @dataclass
 class MockToolUseBlock:
     """Mock SDK ToolUseBlock - no API calls needed."""
@@ -109,7 +109,7 @@ class TestToolObservabilityParsing:
         message = MockAssistantMessage(
             content=[MockToolUseBlock(name="Bash", id="toolu_001")]
         )
-        with mock.patch("aef_agent_runner.runner.emit_tool_use") as m:
+        with mock.patch("syn_agent_runner.runner.emit_tool_use") as m:
             runner._handle_assistant_message(message)
             m.assert_called_once()
 ```
@@ -151,7 +151,7 @@ class MockAssistantMessage:
 - Portable: Can be shared across test modules
 - SDK-agnostic: Works even if SDK types aren't exported
 
-**Consider for agentic-primitives**: These mock patterns could become canonical test fixtures that all AEF packages share.
+**Consider for agentic-primitives**: These mock patterns could become canonical test fixtures that all Syn137 packages share.
 
 ### Fast Development Mode (from event-sourcing-platform)
 
@@ -312,6 +312,6 @@ Key insight: The platform uses **persistent dev containers** for fast iteration,
 - ADR-018: Commands vs Observations Event Architecture
 
 ### Implementation Examples
-- `packages/aef-agent-runner/tests/test_runner.py` - Fast unit tests for SDK message parsing
+- `packages/syn-agent-runner/tests/test_runner.py` - Fast unit tests for SDK message parsing
 - `packages/syn-adapters/tests/conftest.py` - Test fixture patterns
 - `docker/test-observability/` - Isolated integration test environment

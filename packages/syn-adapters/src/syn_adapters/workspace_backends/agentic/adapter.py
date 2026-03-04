@@ -1,7 +1,7 @@
 """Agentic workspace adapters - thin wrappers around agentic_isolation.
 
-These adapters implement AEF's domain ports by delegating to the
-agentic_isolation library from agentic-primitives. This keeps AEF
+These adapters implement Syn137's domain ports by delegating to the
+agentic_isolation library from agentic-primitives. This keeps Syn137
 focused on orchestration and observability, not container management.
 
 See ADR-021: Isolated Workspace Architecture
@@ -97,7 +97,7 @@ class AgenticIsolationAdapter:
         """Create an isolated workspace container.
 
         Args:
-            config: Isolation configuration from AEF domain
+            config: Isolation configuration from Syn137 domain
 
         Returns:
             IsolationHandle for subsequent operations
@@ -108,7 +108,7 @@ class AgenticIsolationAdapter:
             IsolationHandle,
         )
 
-        # Map AEF config to agentic_isolation config
+        # Map Syn137 config to agentic_isolation config
         ws_config = WorkspaceConfig(
             provider="docker",
             image=config.image or self._default_image,

@@ -3,7 +3,7 @@ title: CLI Reference
 description: Command-line interface for Syntropic137.
 ---
 
-The `aef` CLI provides commands for managing workflows, agents, and the Syntropic137
+The `syn` CLI provides commands for managing workflows, agents, and the Syntropic137
 platform from your terminal.
 
 ## Installation
@@ -12,48 +12,48 @@ The CLI is included when you install Syntropic137:
 
 ```bash
 uv sync
-aef --help
+syn --help
 ```
 
 ## Commands
 
-### `aef workflow`
+### `syn workflow`
 
 Manage and trigger workflows.
 
 ```bash
 # List workflows
-aef workflow list
+syn workflow list
 
 # Run a workflow
-aef workflow run --name <workflow-name>
+syn workflow run --name <workflow-name>
 
 # Get workflow status
-aef workflow status <execution-id>
+syn workflow status <execution-id>
 ```
 
-### `aef agent`
+### `syn agent`
 
 Manage agent sessions.
 
 ```bash
 # List active sessions
-aef agent list
+syn agent list
 
 # View session details
-aef agent show <session-id>
+syn agent show <session-id>
 ```
 
-### `aef config`
+### `syn config`
 
 Manage configuration.
 
 ```bash
 # Show current config
-aef config show
+syn config show
 
 # Validate configuration
-aef config validate
+syn config validate
 ```
 
 ## Global Options

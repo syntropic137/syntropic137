@@ -1,6 +1,6 @@
 # Production Deployment Guide
 
-This guide covers deploying AEF's isolated workspace architecture in production.
+This guide covers deploying Syn137's isolated workspace architecture in production.
 It covers single-server deployments (home lab, bare metal) and scaled deployments.
 
 > **📦 Infrastructure as Code**: For turn-key deployment with Docker Compose and Cloudflare Tunnel, see the [Self-Host Deployment Guide](../../infra/docs/selfhost-deployment.md) in the `infra/` directory. The IaC approach provides:
@@ -50,12 +50,12 @@ sudo usermod -aG docker $USER
 sudo reboot
 ```
 
-#### 2. Install AEF
+#### 2. Install Syn137
 
 ```bash
 # Clone repository
-git clone https://github.com/syntropic137/agentic-engineering-framework.git
-cd agentic-engineering-framework
+git clone https://github.com/syntropic137/syntropic137.git
+cd syntropic137
 
 # Install with uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -74,7 +74,7 @@ Create `.env` file:
 
 ```bash
 # =============================================================================
-# AEF Production Configuration
+# Syn137 Production Configuration
 # =============================================================================
 
 # ---- Isolation Backend ----
@@ -124,7 +124,7 @@ SYN_OTEL_ENDPOINT=http://localhost:4317
 # Start supporting services (Postgres, Redis)
 docker compose -f docker/docker-compose.dev.yaml up -d
 
-# Start AEF
+# Start Syn137
 uv run python -m syn_cli start
 ```
 
@@ -157,7 +157,7 @@ For scaling beyond a single server.
         ┌────────────────────┼────────────────────┐
         ▼                    ▼                    ▼
 ┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-│  AEF Server 1 │    │  AEF Server 2 │    │  AEF Server 3 │
+│  Syn137 Server 1 │    │  Syn137 Server 2 │    │  Syn137 Server 3 │
 │               │    │               │    │               │
 │ Firecracker   │    │ Firecracker   │    │ Firecracker   │
 │ Workspaces    │    │ Workspaces    │    │ Workspaces    │
@@ -179,7 +179,7 @@ All servers must share:
 
 ```bash
 # Same database
-SYN_DATABASE_URL=postgresql://aef:password@db.internal:5432/aef
+SYN_DATABASE_URL=postgresql://syn:password@db.internal:5432/syn
 
 # Same Redis for coordination
 SYN_REDIS_URL=redis://redis.internal:6379
@@ -192,26 +192,26 @@ SYN_ARTIFACT_STORAGE_URL=s3://syn-artifacts
 
 ```nginx
 # nginx.conf
-upstream aef_servers {
+upstream syn137_servers {
     least_conn;  # Route to least loaded server
-    server aef1.internal:8000;
-    server aef2.internal:8000;
-    server aef3.internal:8000;
+    server syn1.internal:8000;
+    server syn2.internal:8000;
+    server syn3.internal:8000;
 }
 
 server {
     listen 443 ssl;
-    server_name aef.example.com;
+    server_name syn137.example.com;
 
     location / {
-        proxy_pass http://aef_servers;
+        proxy_pass http://syn137_servers;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
 
     # WebSocket for real-time updates
     location /ws {
-        proxy_pass http://aef_servers;
+        proxy_pass http://syn137_servers;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -234,13 +234,13 @@ For maximum scale and cloud-native deployments.
 ### Helm Chart Installation
 
 ```bash
-# Add AEF Helm repository
-helm repo add aef https://charts.aef.dev
+# Add Syn137 Helm repository
+helm repo add syn137 https://charts.syn137.dev
 helm repo update
 
 # Install with custom values
-helm install aef aef/aef-platform \
-    --namespace aef \
+helm install syn137 syn137/syn137-platform \
+    --namespace syn \
     --create-namespace \
     --values values-production.yaml
 ```
@@ -248,7 +248,7 @@ helm install aef aef/aef-platform \
 ### values-production.yaml
 
 ```yaml
-# AEF Kubernetes Production Values
+# Syn137 Kubernetes Production Values
 
 replicaCount: 3
 
@@ -299,7 +299,7 @@ ingress:
   enabled: true
   className: nginx
   hosts:
-    - host: aef.example.com
+    - host: syn137.example.com
       paths:
         - path: /
           pathType: Prefix
@@ -345,7 +345,7 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      aef.dev/component: workspace
+      syn137.dev/component: workspace
   policyTypes:
     - Ingress
     - Egress
@@ -380,11 +380,11 @@ spec:
   provider:
     vault:
       server: "https://vault.internal:8200"
-      path: "aef"
+      path: "syn"
       auth:
         kubernetes:
           mountPath: "kubernetes"
-          role: "aef-service"
+          role: "syn137-service"
 EOF
 ```
 
@@ -399,11 +399,11 @@ EOF
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: aef-metrics
+  name: syn137-metrics
 spec:
   selector:
     matchLabels:
-      app: aef
+      app: syn
   endpoints:
     - port: metrics
       interval: 15s
@@ -413,18 +413,18 @@ spec:
 
 | Metric | Description | Alert Threshold |
 |--------|-------------|-----------------|
-| `aef_workspace_active_count` | Active workspaces | > 80% capacity |
-| `aef_workspace_creation_latency_seconds` | Time to create workspace | > 5s |
-| `aef_workspace_overflow_total` | Cloud overflow count | > 10/hour |
-| `aef_workspace_failed_total` | Failed workspace creations | > 5/hour |
-| `aef_isolation_breach_total` | Security breach attempts | > 0 |
+| `syn137_workspace_active_count` | Active workspaces | > 80% capacity |
+| `syn137_workspace_creation_latency_seconds` | Time to create workspace | > 5s |
+| `syn137_workspace_overflow_total` | Cloud overflow count | > 10/hour |
+| `syn137_workspace_failed_total` | Failed workspace creations | > 5/hour |
+| `syn137_isolation_breach_total` | Security breach attempts | > 0 |
 
 ### Dashboards
 
 Import Grafana dashboards:
 
 ```bash
-# Download AEF dashboards
+# Download Syn137 dashboards
 curl -L https://grafana.com/api/dashboards/xxxxx/revisions/1/download \
     -o syn-workspaces.json
 
@@ -442,10 +442,10 @@ curl -X POST http://grafana.internal/api/dashboards/db \
 
 ```bash
 # Automated backup with pg_dump
-pg_dump -h localhost -U aef -d aef | gzip > backup-$(date +%Y%m%d).sql.gz
+pg_dump -h localhost -U syn -d syn | gzip > backup-$(date +%Y%m%d).sql.gz
 
 # Restore
-gunzip -c backup-20250101.sql.gz | psql -h localhost -U aef -d aef
+gunzip -c backup-20250101.sql.gz | psql -h localhost -U syn -d syn
 ```
 
 ### Disaster Recovery
@@ -458,12 +458,12 @@ gunzip -c backup-20250101.sql.gz | psql -h localhost -U aef -d aef
 apiVersion: velero.io/v1
 kind: Schedule
 metadata:
-  name: aef-daily-backup
+  name: syn137-daily-backup
 spec:
   schedule: "0 2 * * *"  # Daily at 2 AM
   template:
     includedNamespaces:
-      - aef
+      - syn
     ttl: 720h  # 30 days retention
 ```
 
@@ -516,20 +516,20 @@ export SYN_SECURITY_MAX_MEMORY=256Mi
 
 ```bash
 # Kubernetes
-kubectl rollout restart deployment/aef -n aef
+kubectl rollout restart deployment/syn -n syn
 
 # Docker Compose
-docker compose pull && docker compose up -d --no-deps aef
+docker compose pull && docker compose up -d --no-deps syn
 ```
 
 ### Scaling
 
 ```bash
 # Scale up
-kubectl scale deployment/aef --replicas=5 -n aef
+kubectl scale deployment/syn --replicas=5 -n syn
 
 # Horizontal Pod Autoscaler
-kubectl autoscale deployment/aef --min=3 --max=20 --cpu-percent=70 -n aef
+kubectl autoscale deployment/syn --min=3 --max=20 --cpu-percent=70 -n syn
 ```
 
 ---

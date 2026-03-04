@@ -12,7 +12,7 @@
 
 ## Context
 
-The Syntropic137 (AEF) executes untrusted code in agent containers. These agents require access to external APIs:
+The Syntropic137 executes untrusted code in agent containers. These agents require access to external APIs:
 
 - **Claude API** (Anthropic) - For LLM inference ($15-75 per 1M tokens)
 - **GitHub API** - For repository operations (clone, commit, push, PR)
@@ -218,7 +218,7 @@ Every API request is logged with context:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              AEF Control Plane                               │
+│                              Syn137 Control Plane                               │
 │                                                                             │
 │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐ │
 │  │  Secret Store   │    │ Token Vending   │    │   Spend Tracker         │ │
@@ -411,7 +411,7 @@ The sidecar proxy pattern (Envoy-based token injection) provides excellent secur
 2. **Envoy Configuration**: Complex YAML config for ext_authz, clusters, listeners
 3. **Token Injection Service**: HTTP service for Envoy to call for token lookup
 4. **Network Orchestration**: Docker network config, DNS resolution, port routing
-5. **Build Pipeline**: New Docker image to build/maintain (`aef-sidecar-proxy`)
+5. **Build Pipeline**: New Docker image to build/maintain (`syn-sidecar-proxy`)
 
 Estimated implementation time: **2-3 days** for a production-ready solution.
 

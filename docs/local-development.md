@@ -10,8 +10,8 @@ This guide explains how to set up and run the Syntropic137 locally.
 
 ```bash
 # 1. Clone the repository
-git clone --recursive https://github.com/syntropic137/agentic-engineering-framework.git
-cd agentic-engineering-framework
+git clone --recursive https://github.com/syntropic137/syntropic137.git
+cd syntropic137
 
 # 2. Install dependencies
 uv sync
@@ -68,13 +68,13 @@ just dev-reset
 When Docker is running, PostgreSQL is available at:
 
 ```
-postgresql://aef:aef_dev_password@localhost:5432/aef
+postgresql://syn:syn_dev_password@localhost:5432/syn
 ```
 
 Add this to your `.env` file:
 
 ```bash
-DATABASE_URL=postgresql://aef:aef_dev_password@localhost:5432/aef
+DATABASE_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
 ```
 
 ### Running the CLI
@@ -90,7 +90,7 @@ just cli workflow seed --dry-run
 just cli workflow validate workflows/examples/research.yaml
 
 # Direct execution
-uv run aef --help
+uv run syn --help
 ```
 
 ## Testing
@@ -128,7 +128,7 @@ uv run pytest -m integration
 ## Project Structure
 
 ```
-agentic-engineering-framework/
+syntropic137/
 ├── apps/
 │   └── syn-cli/              # CLI application
 ├── packages/
@@ -158,7 +158,7 @@ agentic-engineering-framework/
 docker ps
 
 # View container logs
-docker logs aef-postgres
+docker logs syn-postgres
 
 # Restart services
 just dev-reset
@@ -168,7 +168,7 @@ just dev-reset
 
 ```bash
 # Connect to database directly
-docker exec -it aef-postgres psql -U aef -d aef
+docker exec -it syn-postgres psql -U syn -d syn
 
 # Check tables
 \dt event_store.*
@@ -182,7 +182,7 @@ docker exec -it aef-postgres psql -U aef -d aef
 uv sync
 
 # Check package installation
-uv pip list | grep aef
+uv pip list | grep syn
 ```
 
 ## Making Changes

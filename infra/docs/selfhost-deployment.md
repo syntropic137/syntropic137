@@ -5,7 +5,7 @@ Complete guide for deploying Syntropic137 on a self-hosted server (Mac Mini, Lin
 ## Overview
 
 This deployment provides:
-- **Full AEF stack**: Dashboard UI, API, Event Store, PostgreSQL
+- **Full Syn137 stack**: Dashboard UI, API, Event Store, PostgreSQL
 - **Secure external access**: Via Cloudflare Tunnel (no port forwarding)
 - **Automatic restarts**: Services restart on failure or reboot
 - **Log management**: Automatic log rotation
@@ -38,8 +38,8 @@ This deployment provides:
 
 ```bash
 # Clone the repository
-git clone https://github.com/syntropic137/agentic-engineering-framework.git
-cd agentic-engineering-framework
+git clone https://github.com/syntropic137/syntropic137.git
+cd syntropic137
 
 # Initialize submodules
 git submodule update --init --recursive
@@ -89,8 +89,7 @@ Add these routes in the tunnel configuration:
 
 | Subdomain | Domain | Service |
 |-----------|--------|---------|
-| `aef` | yourdomain.com | `http://syn-ui:80` |
-| `api.aef` | yourdomain.com | `http://api:8000` |
+| `syn137` | yourdomain.com | `http://gateway:8081` |
 
 #### Option B: Via CLI
 
@@ -102,8 +101,8 @@ brew install cloudflared  # macOS
 # Login and create tunnel
 cloudflared tunnel login
 cloudflared tunnel create syn-selfhost
-cloudflared tunnel route dns syn-selfhost aef.yourdomain.com
-cloudflared tunnel route dns syn-selfhost api.aef.yourdomain.com
+cloudflared tunnel route dns syn-selfhost syn137.yourdomain.com
+cloudflared tunnel route dns syn-selfhost api.syn137.yourdomain.com
 
 # Get token
 cloudflared tunnel token syn-selfhost
@@ -123,7 +122,7 @@ Required settings:
 
 ```bash
 # Domain
-SYN_DOMAIN=aef.yourdomain.com
+SYN_DOMAIN=syn137.yourdomain.com
 
 # GitHub App
 SYN_GITHUB_APP_ID=123456
@@ -159,8 +158,8 @@ just selfhost-status
 just selfhost-tunnel-status
 
 # Test external access
-curl https://aef.yourdomain.com/health
-curl https://api.aef.yourdomain.com/health
+curl https://syn137.yourdomain.com/health
+curl https://api.syn137.yourdomain.com/health
 ```
 
 ## Management Commands
@@ -229,7 +228,7 @@ just selfhost-reset
 │                     Your Self-Host                               │
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  cloudflared │───▶│    syn-ui    │───▶│     api      │      │
+│  │  cloudflared │───▶│   gateway   │───▶│     api      │      │
 │  │              │    │   (nginx)    │    │  (FastAPI)   │      │
 │  └──────────────┘    └──────────────┘    └──────────────┘      │
 │                                                 │                │

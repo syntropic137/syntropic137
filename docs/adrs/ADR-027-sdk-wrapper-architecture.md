@@ -12,14 +12,14 @@
 > 2. Using `agentic_events` JSONL hooks for observability
 > 3. Storing events directly in TimescaleDB via `AgentEventStore`
 >
-> The `aef-agent-runner` package referenced here has been deleted.
+> The `syn-agent-runner` package referenced here has been deleted.
 > See `lib/agentic-primitives/docs/adrs/029-simplified-event-system.md`.
 
 ## Context
 
 ### The Problem: Duplicated SDK Integration
 
-Currently, `aef-agent-runner` implements its own Claude SDK integration with:
+Currently, `syn-agent-runner` implements its own Claude SDK integration with:
 - Custom tool parsing from `AssistantMessage.content`
 - Custom event emission via `emit_tool_use()`, `emit_token_usage()`
 - Custom hooks configuration in `hooks.py`
@@ -34,7 +34,7 @@ This duplication creates:
 1. **Maintenance burden** - Two codebases to update for SDK changes
 2. **Inconsistent behavior** - Different parsing logic, different event schemas
 3. **Testing complexity** - Can't reuse mock fixtures
-4. **Integration friction** - aef-agent-runner events don't match agentic-primitives schema
+4. **Integration friction** - syn-agent-runner events don't match agentic-primitives schema
 
 ### The Vision: Clean Electrical Cabinet
 
@@ -51,7 +51,7 @@ Adopt `agentic-primitives` as the **canonical SDK integration layer**:
 ### 1. Use `HookClient` for Event Emission
 
 ```python
-# BEFORE: aef-agent-runner/events.py (custom)
+# BEFORE: syn-agent-runner/events.py (custom)
 def emit_tool_use(tool_name: str, tool_input: dict, tool_use_id: str):
     print(json.dumps({"type": "tool_use", ...}))
 
@@ -66,14 +66,14 @@ await client.emit(HookEvent(
 ))
 ```
 
-### 2. Extend `InstrumentedAgent` for AEF Specifics
+### 2. Extend `InstrumentedAgent` for Syn137 Specifics
 
 ```python
-# packages/aef-agent-runner/src/aef_agent_runner/agent.py
+# packages/syn-agent-runner/src/syn_agent_runner/agent.py
 from agentic_primitives.examples.claude_sdk.agent import InstrumentedAgent
 
-class AEFAgent(InstrumentedAgent):
-    """AEF-specific agent with TimescaleDB observability."""
+class Syn137Agent(InstrumentedAgent):
+    """Syn137-specific agent with TimescaleDB observability."""
 
     def __init__(
         self,
@@ -124,9 +124,9 @@ class TimescaleDBBackend(Backend):
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│                         aef-agent-runner                           │
+│                         syn-agent-runner                           │
 │  ┌─────────────────────────────────────────────────────────────┐  │
-│  │                      AEFAgent                                │  │
+│  │                      Syn137Agent                                │  │
 │  │           (extends InstrumentedAgent)                        │  │
 │  │                         │                                    │  │
 │  │            ┌────────────┴────────────┐                       │  │
@@ -147,7 +147,7 @@ class TimescaleDBBackend(Backend):
              ▼                          ▼
       ┌──────────────┐          ┌───────────────┐
       │ TimescaleDB  │          │ Collector     │
-      │ (aef-infra)  │          │ (sidecar)     │
+      │ (syn-infra)  │          │ (sidecar)     │
       └──────────────┘          └───────────────┘
 ```
 
@@ -155,7 +155,7 @@ class TimescaleDBBackend(Backend):
 
 ### Phase 1: Add agentic-primitives Dependency (5 min)
 ```toml
-# packages/aef-agent-runner/pyproject.toml
+# packages/syn-agent-runner/pyproject.toml
 dependencies = [
     "agentic-hooks>=0.1.0",  # From lib/agentic-primitives
 ]
@@ -168,7 +168,7 @@ dependencies = [
 ### Phase 3: Refactor AgentRunner to Use Primitives (1h)
 - Replace custom event emission with `HookClient`
 - Replace tool parsing with `InstrumentedAgent` pattern
-- Keep AEF-specific additions (workspace_id, phase_id)
+- Keep Syn137-specific additions (workspace_id, phase_id)
 
 ### Phase 4: Wire Dashboard API (30 min)
 - Dashboard queries same `HookEvent` schema from TimescaleDB
@@ -190,7 +190,7 @@ dependencies = [
 
 ### Negative
 - **Migration effort** - Refactoring existing code
-- **Dependency** - aef-agent-runner depends on agentic-primitives
+- **Dependency** - syn-agent-runner depends on agentic-primitives
 - **Versioning** - Need to keep primitives in sync
 
 ### Neutral

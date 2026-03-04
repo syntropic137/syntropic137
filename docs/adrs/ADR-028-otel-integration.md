@@ -19,10 +19,10 @@ author: Neural
 
 > **⚠️ Superseded**: This ADR proposed using OpenTelemetry as the primary
 > observability mechanism. ADR-029 simplified this by:
-> 1. Using JSONL (`agentic_events`) instead of OTel for AEF's custom dashboard
+> 1. Using JSONL (`agentic_events`) instead of OTel for Syn137's custom dashboard
 > 2. Storing events directly in TimescaleDB (no OTel Collector required)
 > 3. OTel remains available for external monitoring if needed, but is not
->    required for AEF's core observability pipeline.
+>    required for Syn137's core observability pipeline.
 >
 > The `syn-adapters/observability/otel_config.py` and `conventions.py` files
 > referenced here have been deleted.
@@ -30,7 +30,7 @@ author: Neural
 
 ## Context
 
-AEF executes agents inside isolated Docker containers. Previously, observability was handled by:
+Syn137 executes agents inside isolated Docker containers. Previously, observability was handled by:
 
 1. **JSONL files** written inside containers
 2. **Collector service** that parsed and stored events
@@ -49,7 +49,7 @@ The Claude Code CLI now has **native OpenTelemetry support**:
 
 ### Hierarchy of Correlation
 
-AEF has a clear hierarchy that must be preserved in telemetry:
+Syn137 has a clear hierarchy that must be preserved in telemetry:
 
 ```
 Workflow Template (reusable definition)
@@ -66,17 +66,17 @@ We will integrate OpenTelemetry as the **primary observability mechanism** for a
 
 ### 1. Semantic Conventions
 
-Define `AEFSemanticConventions` for platform-level attributes:
+Define `Syn137SemanticConventions` for platform-level attributes:
 
 ```python
-class AEFSemanticConventions:
-    WORKFLOW_TEMPLATE_ID = "aef.workflow.template.id"
-    WORKFLOW_EXECUTION_ID = "aef.workflow.execution.id"
-    WORKFLOW_PHASE_ID = "aef.workflow.phase.id"
-    WORKFLOW_PHASE_NAME = "aef.workflow.phase.name"
-    AGENT_SESSION_ID = "aef.agent.session.id"
-    GITHUB_PR_NUMBER = "aef.github.pr.number"
-    GITHUB_REPO = "aef.github.repo"
+class Syn137SemanticConventions:
+    WORKFLOW_TEMPLATE_ID = "syn.workflow.template.id"
+    WORKFLOW_EXECUTION_ID = "syn.workflow.execution.id"
+    WORKFLOW_PHASE_ID = "syn.workflow.phase.id"
+    WORKFLOW_PHASE_NAME = "syn.workflow.phase.name"
+    AGENT_SESSION_ID = "syn.agent.session.id"
+    GITHUB_PR_NUMBER = "syn.github.pr.number"
+    GITHUB_REPO = "syn.github.repo"
 ```
 
 ### 2. OTel Config Factory
@@ -91,7 +91,7 @@ def create_phase_otel_config(
     phase_name: str,
     github_pr: str | None = None,
 ) -> OTelConfig:
-    """Create OTel config with AEF resource attributes."""
+    """Create OTel config with Syn137 resource attributes."""
 ```
 
 ### 3. Environment Injection
@@ -104,8 +104,8 @@ def _create_otel_environment(self, ...) -> dict[str, str]:
         "OTEL_EXPORTER_OTLP_ENDPOINT": get_collector_endpoint(),
         "OTEL_SERVICE_NAME": "agentic-agent",
         "OTEL_RESOURCE_ATTRIBUTES": ",".join([
-            f"aef.workflow.execution.id={execution_id}",
-            f"aef.workflow.phase.id={phase_id}",
+            f"syn.workflow.execution.id={execution_id}",
+            f"syn.workflow.phase.id={phase_id}",
             ...
         ]),
     }
@@ -185,7 +185,7 @@ Add `agent_session_id` to `PhaseExecutionDetail` for UI display and OTel correla
 ```
 packages/syn-adapters/src/syn_adapters/observability/
 ├── __init__.py
-├── conventions.py      # AEFSemanticConventions
+├── conventions.py      # Syn137SemanticConventions
 └── otel_config.py      # create_phase_otel_config, get_collector_endpoint
 
 docker/

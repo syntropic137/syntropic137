@@ -1,4 +1,4 @@
-# Envoy Sidecar Proxy Configuration for AEF
+# Envoy Sidecar Proxy Configuration for Syn137
 # See: docker/sidecar-proxy/README.md
 #
 # This configuration:
@@ -41,7 +41,7 @@ static_resources:
                           response_code: "%RESPONSE_CODE%"
                           duration_ms: "%DURATION%"
                           request_id: "%REQ(X-REQUEST-ID)%"
-                          execution_id: "%REQ(X-AEF-EXECUTION-ID)%"
+                          execution_id: "%REQ(X-Syn-EXECUTION-ID)%"
                 route_config:
                   name: local_route
                   virtual_hosts:

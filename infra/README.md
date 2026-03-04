@@ -1,6 +1,6 @@
-# AEF Self-Host Deployment Guide
+# Syn137 Self-Host Deployment Guide
 
-The definitive guide for self-hosting the Syntropic137 Agentic Engineering Framework (AEF). This stack orchestrates AI agent execution in isolated Docker containers and streams every event to a real-time observability dashboard.
+The definitive guide for self-hosting the Syntropic137 platform. This stack orchestrates AI agent execution in isolated Docker containers and streams every event to a real-time observability dashboard.
 
 **What you get:** A single `just selfhost-up` command that starts a complete agent orchestration platform — API backend, SPA dashboard, event store, object storage, and a reverse proxy — all on your own hardware.
 
@@ -91,8 +91,8 @@ docker-compose.yaml              # Base: images, env, health checks, dependencie
 ### Step 1: Clone with submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/agentparadise/agentic-engineering-framework.git
-cd agentic-engineering-framework
+git clone --recurse-submodules https://github.com/agentparadise/syntropic137.git
+cd syntropic137
 ```
 
 If you already cloned without `--recurse-submodules`:
@@ -311,11 +311,11 @@ The dashboard container mounts `/var/run/docker.sock` to spawn workspace contain
 
 **Mitigations applied:**
 
-- The `selfhost-entrypoint.sh` script matches the Docker socket GID so the unprivileged `aef` user (UID 1000) can access it
-- The container runs as `root` initially, then drops to `aef` via `gosu` after GID matching
+- The `selfhost-entrypoint.sh` script matches the Docker socket GID so the unprivileged `syn` user (UID 1000) can access it
+- The container runs as `root` initially, then drops to `syn` via `gosu` after GID matching
 - On macOS (Docker Desktop), the socket is made world-accessible since `chgrp` does not persist on bind-mounted sockets
 
-**Risk:** Any process that can access the Docker socket has effective root on the host. The `aef` user inside the dashboard container can create, start, and stop containers.
+**Risk:** Any process that can access the Docker socket has effective root on the host. The `syn` user inside the dashboard container can create, start, and stop containers.
 
 ### Container Hardening
 
@@ -330,7 +330,7 @@ All containers (except dashboard, which needs `gosu`) apply:
 | Resource limits | Memory and CPU limits prevent runaway containers |
 | Log rotation | `json-file` driver with `max-size` and `max-file` caps |
 
-The dashboard container omits `no-new-privileges` because `gosu` requires `setuid` to de-escalate from root to `aef`.
+The dashboard container omits `no-new-privileges` because `gosu` requires `setuid` to de-escalate from root to `syn`.
 
 ### Docker Secrets
 

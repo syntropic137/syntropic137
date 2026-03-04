@@ -108,10 +108,10 @@ const { state, pause, resume, cancel, canPause, canResume, canCancel } = useExec
 ### 6. CLI Integration
 
 ```bash
-aef control pause <execution_id> --reason "Need to review"
-aef control resume <execution_id>
-aef control cancel <execution_id> --force
-aef control status <execution_id>
+syn control pause <execution_id> --reason "Need to review"
+syn control resume <execution_id>
+syn control cancel <execution_id> --force
+syn control status <execution_id>
 ```
 
 ## Architecture Diagram

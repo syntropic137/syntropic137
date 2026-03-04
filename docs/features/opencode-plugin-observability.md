@@ -1,12 +1,12 @@
 # OpenCode Plugin-Based Observability
 
 > **Status:** Architecture Complete - Ready for Implementation
-> **Related Issue:** [#51 - OpenCode Integration](https://github.com/syntropic137/agentic-engineering-framework/issues/51)
+> **Related Issue:** [#51 - OpenCode Integration](https://github.com/syntropic137/syntropic137/issues/51)
 > **Related ADRs:** ADR-038 (planned)
 
 ## Overview
 
-OpenCode uses a **plugin system** to extend functionality and capture events. This document describes how AEF leverages OpenCode's plugin architecture to achieve full observability without depending on upstream telemetry features.
+OpenCode uses a **plugin system** to extend functionality and capture events. This document describes how Syn137 leverages OpenCode's plugin architecture to achieve full observability without depending on upstream telemetry features.
 
 ## Why Plugins > Waiting for Native Observability
 
@@ -17,8 +17,8 @@ OpenCode uses a **plugin system** to extend functionality and capture events. Th
 ### Benefits of Plugin Approach
 
 - ✅ **Zero upstream dependencies** - works with OpenCode today
-- ✅ **Full control** - capture exactly what AEF needs
-- ✅ **Custom event schema** - map directly to AEF domain events
+- ✅ **Full control** - capture exactly what Syn137 needs
+- ✅ **Custom event schema** - map directly to Syn137 domain events
 - ✅ **Security enforcement** - block unsafe operations at plugin layer
 - ✅ **No performance overhead** - async event emission
 - ✅ **Production-ready** - no experimental features required
@@ -64,7 +64,7 @@ Plugins receive a context object with:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@aef/opencode-plugin", "opencode-skills"]
+  "plugin": ["@syn137/opencode-plugin", "opencode-skills"]
 }
 ```
 
@@ -74,7 +74,7 @@ Plugins are loaded in sequence. Bun automatically installs npm packages at start
 
 Reference: [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
 
-### Tool Events (Critical for AEF)
+### Tool Events (Critical for Syn137)
 
 | Event | When Fired | Use Case |
 |-------|-----------|----------|
@@ -87,7 +87,7 @@ Reference: [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
   // input.tool: "bash" | "read" | "edit" | ...
   // output.args: { command: "ls -la", ... }
 
-  // Emit to AEF collector
+  // Emit to Syn137 collector
   await emitEvent("tool_execution_started", {
     tool_name: input.tool,
     args: output.args,
@@ -141,7 +141,7 @@ Reference: [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
 - `permission.replied` - Permission decisions
 - `todo.updated` - Todo changes
 
-## AEF Observability Plugin Design
+## Syn137 Observability Plugin Design
 
 ### Architecture
 
@@ -150,12 +150,12 @@ Reference: [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
 │  OpenCode Container                                          │
 │                                                              │
 │  ┌────────────────────────────────────────────────────┐     │
-│  │  AEF Observability Plugin                          │     │
+│  │  Syn137 Observability Plugin                          │     │
 │  │                                                    │     │
 │  │  ┌──────────────┐      ┌──────────────────────┐  │     │
 │  │  │ Event Hooks  │─────▶│  Event Mapper        │  │     │
 │  │  │              │      │                      │  │     │
-│  │  │ • tool.*     │      │ OpenCode → AEF      │  │     │
+│  │  │ • tool.*     │      │ OpenCode → Syn137      │  │     │
 │  │  │ • session.*  │      │ event schema        │  │     │
 │  │  │ • file.*     │      │                      │  │     │
 │  │  └──────────────┘      └──────────┬───────────┘  │     │
@@ -171,16 +171,16 @@ Reference: [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
                                         │
                                         ▼
                            ┌─────────────────────┐
-                           │  AEF Collector      │
+                           │  Syn137 Collector      │
                            │  POST /events       │
                            └─────────────────────┘
 ```
 
 ### Event Mapping
 
-OpenCode plugin events map to AEF domain events:
+OpenCode plugin events map to Syn137 domain events:
 
-| OpenCode Event | AEF Domain Event | Attributes |
+| OpenCode Event | Syn137 Domain Event | Attributes |
 |---------------|------------------|------------|
 | `tool.execute.before` | `ToolExecutionStarted` | tool_name, args, session_id, timestamp |
 | `tool.execute.after` | `ToolExecutionCompleted` | tool_name, result, duration_ms, tokens |
@@ -194,10 +194,10 @@ OpenCode plugin events map to AEF domain events:
 
 **Core Plugin:**
 ```typescript
-// packages/opencode-aef-plugin/src/index.ts
+// packages/opencode-syn137-plugin/src/index.ts
 import type { Plugin } from "@opencode-ai/plugin"
 
-interface AEFPluginConfig {
+interface Syn137PluginConfig {
   collectorUrl: string
   sessionId: string
   apiKey?: string
@@ -205,12 +205,12 @@ interface AEFPluginConfig {
   batchSize: number
 }
 
-export const AEFObservabilityPlugin: Plugin = async ({
+export const Syn137ObservabilityPlugin: Plugin = async ({
   project,
   client,
   directory
 }) => {
-  const config: AEFPluginConfig = {
+  const config: Syn137PluginConfig = {
     collectorUrl: process.env.SYN_COLLECTOR_URL || "http://syn-collector:8080",
     sessionId: process.env.SYN_SESSION_ID || crypto.randomUUID(),
     apiKey: process.env.SYN_API_KEY,
@@ -261,7 +261,7 @@ export const AEFObservabilityPlugin: Plugin = async ({
       } catch (error) {
         if (attempt === config.retryAttempts - 1) {
           await client.app.log({
-            service: "aef-observability",
+            service: "syn137-observability",
             level: "error",
             message: "Failed to emit events after retries",
             extra: { error: error.message, eventCount: batch.length },
@@ -353,7 +353,7 @@ Plugins can enforce security policies by blocking unsafe operations:
 
     for (const pattern of dangerousPatterns) {
       if (pattern.test(output.args.command)) {
-        throw new Error(`Blocked by AEF security policy: dangerous command pattern`)
+        throw new Error(`Blocked by Syn137 security policy: dangerous command pattern`)
       }
     }
   }
@@ -362,7 +362,7 @@ Plugins can enforce security policies by blocking unsafe operations:
   if (input.tool === "read") {
     const sensitiveFiles = [".env", ".env.local", "id_rsa", ".ssh/"]
     if (sensitiveFiles.some(f => output.args.filePath.includes(f))) {
-      throw new Error(`Blocked by AEF security policy: sensitive file access`)
+      throw new Error(`Blocked by Syn137 security policy: sensitive file access`)
     }
   }
 
@@ -377,12 +377,12 @@ Plugins can add custom tools that agents can invoke:
 ```typescript
 import { tool } from "@opencode-ai/plugin"
 
-export const AEFPlugin: Plugin = async (ctx) => {
+export const Syn137Plugin: Plugin = async (ctx) => {
   return {
     tool: {
       // Custom tool for emitting structured events
-      emit_aef_metric: tool({
-        description: "Emit a custom metric to AEF observability",
+      emit_syn137_metric: tool({
+        description: "Emit a custom metric to Syn137 observability",
         args: {
           metric_name: tool.schema.string(),
           value: tool.schema.number(),
@@ -397,9 +397,9 @@ export const AEFPlugin: Plugin = async (ctx) => {
         },
       }),
 
-      // Custom tool for querying AEF dashboard
-      query_aef_metrics: tool({
-        description: "Query AEF metrics dashboard for session stats",
+      // Custom tool for querying Syn137 dashboard
+      query_syn137_metrics: tool({
+        description: "Query Syn137 metrics dashboard for session stats",
         args: {
           session_id: tool.schema.string(),
         },
@@ -421,7 +421,7 @@ Use OpenCode's structured logging API for debugging:
 
 ```typescript
 await client.app.log({
-  service: "aef-observability",
+  service: "syn137-observability",
   level: "info",  // debug | info | warn | error
   message: "Tool execution captured",
   extra: {
@@ -470,7 +470,7 @@ Logs are written to OpenCode's log directory (`~/.local/share/opencode/log/`).
 Gateway adds trace ID to OpenTelemetry spans:
 
 ```python
-# packages/aef-gateway/src/proxy.py
+# packages/syn137-gateway/src/proxy.py
 from opentelemetry import trace
 
 @app.post("/v1/messages")
@@ -483,7 +483,7 @@ async def proxy_anthropic(request: Request):
         attributes={
             "gen_ai.provider.name": "anthropic",
             "gen_ai.request.model": body["model"],
-            "aef.trace_id": trace_id,  # Link to plugin
+            "syn137.trace_id": trace_id,  # Link to plugin
         }
     ) as span:
         # Proxy request...
@@ -501,9 +501,9 @@ FROM oven/bun:latest
 # Install OpenCode
 RUN bun install -g @opencode-ai/cli
 
-# Install AEF plugin
-COPY packages/opencode-aef-plugin /app/aef-plugin
-WORKDIR /app/aef-plugin
+# Install Syn137 plugin
+COPY packages/opencode-syn137-plugin /app/syn137-plugin
+WORKDIR /app/syn137-plugin
 RUN bun install
 
 # Copy OpenCode config
@@ -517,7 +517,7 @@ CMD ["opencode"]
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["file:///app/aef-plugin"]
+  "plugin": ["file:///app/syn137-plugin"]
 }
 ```
 
@@ -526,7 +526,7 @@ CMD ["opencode"]
 SYN_COLLECTOR_URL=http://syn-collector:8080
 SYN_SESSION_ID=<generated-by-workspace-service>
 SYN_API_KEY=<optional-auth>
-AI_API_BASE_URL=http://aef-gateway:8081  # Route through gateway
+AI_API_BASE_URL=http://syn137-gateway:8081  # Route through gateway
 ```
 
 ### WorkspaceService Integration
@@ -545,7 +545,7 @@ class OpenCodeWorkspaceBackend(WorkspaceBackend):
 
         # Start container with plugin configured
         container = await self.docker.containers.run(
-            "aef/opencode:latest",
+            "syn137/opencode:latest",
             environment={
                 "SYN_COLLECTOR_URL": self.collector_url,
                 "SYN_SESSION_ID": session_id,
@@ -564,16 +564,16 @@ class OpenCodeWorkspaceBackend(WorkspaceBackend):
 ### Unit Tests (Plugin)
 
 ```typescript
-// packages/opencode-aef-plugin/test/plugin.test.ts
+// packages/opencode-syn137-plugin/test/plugin.test.ts
 import { describe, test, expect, mock } from "bun:test"
-import { AEFObservabilityPlugin } from "../src"
+import { Syn137ObservabilityPlugin } from "../src"
 
-describe("AEFObservabilityPlugin", () => {
+describe("Syn137ObservabilityPlugin", () => {
   test("emits tool_execution_started on tool.execute.before", async () => {
     const mockFetch = mock(() => Promise.resolve({ ok: true }))
     global.fetch = mockFetch
 
-    const plugin = await AEFObservabilityPlugin({
+    const plugin = await Syn137ObservabilityPlugin({
       project: { name: "test" },
       client: { app: { log: () => {} } },
       directory: "/test",
@@ -598,7 +598,7 @@ describe("AEFObservabilityPlugin", () => {
 ### Integration Tests (Recording-Based)
 
 ```python
-# aef_tests/integration/test_opencode_observability.py
+# syn_tests/integration/test_opencode_observability.py
 import pytest
 from syn_adapters.workspace_backends.opencode import OpenCodeWorkspaceBackend
 
@@ -684,5 +684,5 @@ for (let attempt = 0; attempt < config.retryAttempts; attempt++) {
 - [OpenCode Plugin Documentation](https://opencode.ai/docs/plugins/)
 - [OpenCode GitHub Repository](https://github.com/stackblitz/opencode)
 - [Bun Shell API](https://bun.sh/docs/runtime/shell)
-- [AEF Issue #51 - OpenCode Integration](https://github.com/syntropic137/agentic-engineering-framework/issues/51)
+- [Syn137 Issue #51 - OpenCode Integration](https://github.com/syntropic137/syntropic137/issues/51)
 

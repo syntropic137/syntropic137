@@ -5,7 +5,7 @@
   // ─────────────────────────────────────────────────────────────────────────────
   // WINDOW & TITLE
   // ─────────────────────────────────────────────────────────────────────────────
-  "window.title": "⚡ AEF • ${activeEditorShort}${separator}${rootName}",
+  "window.title": "⚡ Syn137 • ${activeEditorShort}${separator}${rootName}",
   "window.titleSeparator": " │ ",
   // ─────────────────────────────────────────────────────────────────────────────
   // WORKBENCH COLOR CUSTOMIZATIONS

@@ -167,5 +167,5 @@
   <text x="510" y="2081" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="middle">Artifacts</text>
   <text x="1140" y="100" font-size="16" font-weight="bold" font-family="Arial, Helvetica, sans-serif" fill="#666666" text-anchor="start">Packages</text>
   <rect x="1140" y="120" width="240" height="42" fill="#d4f1d4" stroke="#d0d0d0" stroke-width="1" rx="6" opacity="1"/>
-  <text x="1155" y="140" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• aef-domain</text>
+  <text x="1155" y="140" font-size="12" font-weight="normal" font-family="Arial, Helvetica, sans-serif" fill="#1a1a1a" text-anchor="start">• syn-domain</text>
 </svg>

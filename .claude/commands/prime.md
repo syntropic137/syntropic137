@@ -1,5 +1,5 @@
 ---
-description: Prime context for AEF (Syntropic137)
+description: Prime context for Syn137 (Syntropic137)
 argument-hint: [optional: focus area like "adapters", "dashboard", "cli", "events"]
 model: sonnet
 allowed-tools: Read, Glob, Grep
@@ -7,11 +7,11 @@ allowed-tools: Read, Glob, Grep
 
 # Prime
 
-Quickly understand the AEF codebase structure, patterns, and architecture.
+Quickly understand the Syn137 codebase structure, patterns, and architecture.
 
 ## Purpose
 
-Build working context for the Syntropic137 by reading key files and understanding the dual-purpose architecture: **Orchestration** (running agents in Docker) and **Observability** (capturing and analyzing agent events).
+Build working context for Syntropic137 by reading key files and understanding the dual-purpose architecture: **Orchestration** (running agents in Docker) and **Observability** (capturing and analyzing agent events).
 
 ## Variables
 
@@ -20,9 +20,9 @@ FOCUS_AREA: $ARGUMENTS
 ## Codebase Structure
 
 ```
-agentic-engineering-framework/
+syntropic137/
 ├── apps/                           # Applications
-│   ├── syn-cli/                    # CLI tool (`aef` command)
+│   ├── syn-cli/                    # CLI tool (`syn` command)
 │   ├── syn-dashboard/              # FastAPI backend (port 8000)
 │   └── syn-dashboard-ui/           # React frontend (port 5173)
 │
@@ -57,7 +57,7 @@ agentic-engineering-framework/
 │   └── examples/                   # Sample workflows
 │
 ├── docs/adrs/                      # Architecture Decision Records
-├── aef_tests/                      # Integration test fixtures
+├── syn_tests/                      # Integration test fixtures
 ├── justfile                        # Command runner (just --list)
 └── AGENTS.md                       # Agent instructions & RIPER-5 protocol
 ```
@@ -164,7 +164,7 @@ just test-stack         # Start ephemeral test infra (ports +10000)
 just test-integration   # Integration tests
 
 # CLI
-just cli --help         # AEF CLI commands
+just cli --help         # Syn137 CLI commands
 just cli run <workflow> # Run a workflow
 
 # Direct uv commands (when just recipe doesn't exist)
@@ -176,7 +176,7 @@ uv run <command>        # Run arbitrary command in venv
 
 ## Report
 
-## AEF Context Loaded
+## Syn137 Context Loaded
 
 **Purpose:** Event-sourced system for AI agent orchestration and observability
 

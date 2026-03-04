@@ -5,7 +5,7 @@
 
 ## Context
 
-The AEF application uses Event Sourcing for persistence (ADR-007). While the write side (commands) was well-structured, the initial read side implementation had issues:
+The Syn137 application uses Event Sourcing for persistence (ADR-007). While the write side (commands) was well-structured, the initial read side implementation had issues:
 
 1. **Monolithic Read Models**: A single `read_models.py` file contained all read model logic, violating Vertical Slice Architecture (VSA) principles
 2. **Tight Coupling**: Read models were tightly coupled to infrastructure (PostgreSQL)
