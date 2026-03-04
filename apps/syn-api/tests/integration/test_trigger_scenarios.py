@@ -10,6 +10,7 @@ See ADR-041: Offline Development Mode and Webhook Recording.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -57,7 +58,7 @@ async def _reset_storage():
         repository=get_workflow_repository(),
         event_publisher=get_event_publisher(),
     )
-    try:
+    with contextlib.suppress(Exception):
         await handler.handle(
             CreateWorkflowTemplateCommand(
                 aggregate_id="self-heal-pr",
@@ -82,8 +83,6 @@ async def _reset_storage():
                 ],
             )
         )
-    except Exception:
-        pass  # May already exist if reset didn't clear workflow repo
 
     yield
     reset_trigger_store()
