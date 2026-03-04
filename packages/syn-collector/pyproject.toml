@@ -1,6 +1,6 @@
 [project]
 name = "syn-collector"
-version = "0.5.2"
+version = "0.5.3"
 description = "Event collection service for Syn137 agent observability"
 readme = "README.md"
 requires-python = ">=3.12"
