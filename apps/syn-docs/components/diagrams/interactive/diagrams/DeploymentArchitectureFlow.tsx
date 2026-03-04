@@ -55,7 +55,7 @@ const nodes: Node[] = [
   { id: 'webhooks', type: 'flowNode', position: extPositions.webhooks, data: { icon: 'github', label: 'GitHub Webhooks', color: 'indigo' } },
 
   // Frontend
-  { id: 'ui', type: 'flowNode', position: frontPos, data: { icon: 'monitor', label: 'syn-ui', sublabel: 'nginx :80', color: 'purple', size: 'sm' } },
+  { id: 'ui', type: 'flowNode', position: frontPos, data: { icon: 'monitor', label: 'gateway', sublabel: 'nginx :80', color: 'purple', size: 'sm' } },
 
   // Backend
   { id: 'dashboard', type: 'flowNode', position: backPositions.dashboard, data: { icon: 'server', label: 'syn-api', sublabel: 'FastAPI :8000', color: 'cyan', size: 'sm' } },

@@ -47,11 +47,11 @@ Use `_PURPLE` to highlight actionable values within `step()` lines — button na
 ```python
 # Good — purple draws the eye to what matters
 step(f"Type: {_PURPLE}Cloudflared{_RST}")
-step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}syn-ui:80{_RST}")
+step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}gateway:80{_RST}")
 
 # Bad — bold soup, everything shouts equally
 step(f"Type: {_BOLD}Cloudflared{_RST}")
-step(f"Service type: {_BOLD}HTTP{_RST}  URL: {_BOLD}syn-ui:80{_RST}")
+step(f"Service type: {_BOLD}HTTP{_RST}  URL: {_BOLD}gateway:80{_RST}")
 ```
 
 Never invent new colour functions. If you need a new semantic level, propose adding it to this table first.

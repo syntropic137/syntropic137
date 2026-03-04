@@ -30,7 +30,7 @@ The dashboard will be available at `http://localhost:8008`.
 | Service | Port | Description |
 |---------|------|-------------|
 | `syn-api` | 8000 | FastAPI backend — REST API, WebSocket, SSE |
-| `syn-ui` | 80 | React dashboard frontend |
+| `gateway` | 80 | nginx reverse proxy + React dashboard frontend |
 | `event-store` | 50051 | gRPC event sourcing server |
 | `event-collector` | 8080 | High-throughput event ingestion |
 | `timescaledb` | 5432 | PostgreSQL + TimescaleDB for events and metrics |

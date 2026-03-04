@@ -2,7 +2,7 @@
 # Usage: docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml -f docker-compose.cloudflare.yaml up -d
 # Shortcut: just selfhost-up-tunnel
 #
-# Adds Cloudflare Tunnel and removes direct port exposure on syn-ui.
+# Adds Cloudflare Tunnel and removes direct port exposure on gateway.
 # Prerequisites:
 #   1. Set CLOUDFLARE_TUNNEL_TOKEN in infra/.env (or resolve via 1Password)
 #   2. Set SYN_DOMAIN in infra/.env
@@ -22,21 +22,21 @@ services:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     restart: always
     depends_on:
-      syn-ui:
+      gateway:
         condition: service_healthy
-      dashboard:
+      api:
         condition: service_healthy
     networks:
       - syn-internal
 
   # ===========================================================================
   # IMPORTANT: In Cloudflare Zero Trust dashboard, set the tunnel's public
-  # hostname service URL to:  http://syn-ui:8081
+  # hostname service URL to:  http://gateway:8081
   #
   # Port 8081 = basic auth required (when SYN_API_PASSWORD is set)
   # Port 80   = localhost only, no auth (for local dev/testing/Playwright)
   #
-  # If your tunnel still points to syn-ui:80, the UI/API is exposed without
+  # If your tunnel still points to gateway:80, the UI/API is exposed without
   # authentication. Update it now:
   #   Zero Trust → Networks → Connectors → [your tunnel] → Public Hostname
   # ===========================================================================

@@ -1059,12 +1059,12 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     print()
     step(f"Click the {_PURPLE}Published application routes{_RST} tab at the top")
     step(f"Click {_PURPLE}Add a published application route{_RST}")
-    # cloudflared runs inside Docker on the same network as syn-ui (nginx),
-    # which reverse-proxies to dashboard:8000 with rate limiting, security
+    # cloudflared runs inside Docker on the same network as gateway (nginx),
+    # which reverse-proxies to api:8000 with rate limiting, security
     # headers, WebSocket support, and SPA routing.  Always route through
     # nginx — never expose the raw API directly.
     step("Subdomain: pick yours  Domain: select from dropdown")
-    step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}syn-ui:8081{_RST}")
+    step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}gateway:8081{_RST}")
     hint("Port 8081 enables basic auth on tunnel access (set SYN_API_PASSWORD in .env)")
     step(f"Click {_PURPLE}Save{_RST}")
     print()
@@ -1709,7 +1709,7 @@ def wait_for_health(ctx: SetupContext) -> bool:  # noqa: ARG001
 def seed_workflows(ctx: SetupContext) -> bool:
     """Seed workflow definitions from workflows/examples/ and workflows/triggers/.
 
-    Seeds run inside the dashboard container via ``docker compose run`` so they
+    Seeds run inside the API container via ``docker compose run`` so they
     have network access to the event store and database (ports aren't exposed
     to the host in selfhost mode).
     """
@@ -1728,10 +1728,10 @@ def seed_workflows(ctx: SetupContext) -> bool:
     if ENV_FILE.exists():
         env.update(parse_env_file(ENV_FILE))
 
-    def _run_in_dashboard(
+    def _run_in_api(
         script_path: str, extra_args: list[str] | None = None
     ) -> subprocess.CompletedProcess:
-        """Run a Python script inside a one-off dashboard container."""
+        """Run a Python script inside a one-off API container."""
         cmd = [
             "docker",
             "compose",
@@ -1745,7 +1745,7 @@ def seed_workflows(ctx: SetupContext) -> bool:
             "-v",
             f"{PROJECT_ROOT / 'workflows'}:/app/workflows:ro",
             "--no-deps",
-            "dashboard",
+            "api",
             "python",
             script_path,
             *(extra_args or []),
@@ -1753,9 +1753,7 @@ def seed_workflows(ctx: SetupContext) -> bool:
         return subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=False)
 
     step("Seeding workflow definitions...")
-    result = _run_in_dashboard(
-        "/app/scripts/seed_workflows.py", ["--dir", "/app/workflows/examples"]
-    )
+    result = _run_in_api("/app/scripts/seed_workflows.py", ["--dir", "/app/workflows/examples"])
     if result.returncode == 0:
         ok("Workflows seeded")
     else:
@@ -1765,21 +1763,21 @@ def seed_workflows(ctx: SetupContext) -> bool:
     trigger_script = PROJECT_ROOT / "scripts" / "seed_triggers.py"
     if trigger_script.exists():
         step("Seeding trigger presets...")
-        result = _run_in_dashboard("/app/scripts/seed_triggers.py")
+        result = _run_in_api("/app/scripts/seed_triggers.py")
         if result.returncode == 0:
             ok("Triggers seeded")
         else:
             warn("Trigger seeding failed (non-blocking) — retry with: just seed-triggers")
 
-    # Restart dashboard so its projection coordinator catches up on seeded events
-    step("Restarting dashboard to rebuild projections...")
+    # Restart API so its projection coordinator catches up on seeded events
+    step("Restarting API to rebuild projections...")
     subprocess.run(
-        ["docker", "compose", *compose_files, "restart", "dashboard"],
+        ["docker", "compose", *compose_files, "restart", "api"],
         cwd=PROJECT_ROOT,
         env=env,
         check=False,
     )
-    ok("Dashboard restarted — projections will rebuild from event store")
+    ok("API restarted — projections will rebuild from event store")
 
     return True
 

@@ -114,7 +114,7 @@ def _build_services() -> list[Service]:
             port=PORT_DASHBOARD,
             health_path="/health",
             description="AEF Dashboard API",
-            container_name=f"{prefix}dashboard",
+            container_name=f"{prefix}api",
         ),
         Service(
             name="UI",
@@ -122,7 +122,7 @@ def _build_services() -> list[Service]:
             port=PORT_UI,
             health_path="/health",
             description="AEF Dashboard UI",
-            container_name=f"{prefix}ui",
+            container_name=f"{prefix}gateway",
         ),
         Service(
             name="MinIO",

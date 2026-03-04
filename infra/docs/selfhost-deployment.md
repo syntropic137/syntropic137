@@ -89,8 +89,8 @@ Add these routes in the tunnel configuration:
 
 | Subdomain | Domain | Service |
 |-----------|--------|---------|
-| `aef` | yourdomain.com | `http://syn-ui:80` |
-| `api.aef` | yourdomain.com | `http://dashboard:8000` |
+| `aef` | yourdomain.com | `http://gateway:80` |
+| `api.aef` | yourdomain.com | `http://api:8000` |
 
 #### Option B: Via CLI
 
@@ -172,14 +172,14 @@ curl https://api.aef.yourdomain.com/health
 just selfhost-logs
 
 # View specific service logs
-just selfhost-logs dashboard
+just selfhost-logs api
 just selfhost-logs cloudflared
 
 # Check health
 just health-check
 
 # Restart a service
-just selfhost-restart dashboard
+just selfhost-restart api
 ```
 
 ### Updates
@@ -199,10 +199,10 @@ just selfhost-update
 docker ps -a
 
 # View container logs
-docker logs ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard
+docker logs ${COMPOSE_PROJECT_NAME:-syntropic137}-api
 
 # Enter container for debugging
-docker exec -it ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard /bin/bash
+docker exec -it ${COMPOSE_PROJECT_NAME:-syntropic137}-api /bin/bash
 
 # Full reset (WARNING: deletes data)
 just selfhost-reset
@@ -229,7 +229,7 @@ just selfhost-reset
 │                     Your Self-Host                               │
 │                                                                  │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  cloudflared │───▶│    syn-ui    │───▶│  dashboard   │      │
+│  │  cloudflared │───▶│   gateway    │───▶│     api      │      │
 │  │              │    │   (nginx)    │    │  (FastAPI)   │      │
 │  └──────────────┘    └──────────────┘    └──────────────┘      │
 │                                                 │                │
@@ -459,8 +459,8 @@ grep CLOUDFLARE_TUNNEL_TOKEN infra/.env
 # Check TimescaleDB health
 docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb pg_isready -U ${POSTGRES_USER:-syn}
 
-# Check connection from dashboard
-docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard python -c "import asyncpg; print('OK')"
+# Check connection from API container
+docker exec ${COMPOSE_PROJECT_NAME:-syntropic137}-api python -c "import asyncpg; print('OK')"
 ```
 
 ## Next Steps

@@ -958,7 +958,7 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     just selfhost-status
     echo ""
     echo "🔒 Tunnel auth reminder:"
-    echo "   Ensure your Cloudflare tunnel routes to http://syn-ui:8081 (not port 80)"
+    echo "   Ensure your Cloudflare tunnel routes to http://gateway:8081 (not port 80)"
     echo "   Port 8081 requires basic auth when SYN_API_PASSWORD is set."
     echo "   Update: Zero Trust → Networks → Connectors → [tunnel] → Public Hostname"
 
@@ -1007,7 +1007,7 @@ selfhost-status:
         echo "   API:      https://$_domain/api/v1"
         echo "   API Docs: https://$_domain/api/v1/docs"
     else
-        _port="${SYN_UI_PORT:-8008}"
+        _port="${SYN_GATEWAY_PORT:-8008}"
         echo "   UI:       http://localhost:$_port"
         echo "   API:      http://localhost:$_port/api/v1"
         echo "   API Docs: http://localhost:$_port/api/v1/docs"
@@ -1026,7 +1026,7 @@ selfhost-restart service:
     @{{compose_selfhost}} restart {{service}}
 
 # Seed workflows and triggers into selfhost stack
-# Runs seed scripts in a temporary dashboard container (DB ports not exposed to host)
+# Runs seed scripts in a temporary API container (DB ports not exposed to host)
 selfhost-seed:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1035,13 +1035,13 @@ selfhost-seed:
     {{compose_selfhost}} run --rm \
       -v "$(pwd)/scripts:/app/scripts:ro" \
       -v "$(pwd)/workflows:/app/workflows:ro" \
-      dashboard \
+      api \
       python /app/scripts/seed_workflows.py --dir /app/workflows/examples
     echo "🌱 Seeding triggers..."
     {{compose_selfhost}} run --rm \
       -v "$(pwd)/scripts:/app/scripts:ro" \
       -v "$(pwd)/workflows:/app/workflows:ro" \
-      dashboard \
+      api \
       python /app/scripts/seed_triggers.py
     echo "✅ Seeding complete"
 
@@ -1147,9 +1147,9 @@ infra-up:
     @uv run python infra/scripts/health_check.py --wait --timeout 120 || true
     @echo ""
     @echo "✅ Infrastructure stack started!"
-    @echo "   UI:        http://localhost:$${SYN_UI_PORT:-8008}"
-    @echo "   API:       http://localhost:$${SYN_UI_PORT:-8008}/api/v1"
-    @echo "   API Docs:  http://localhost:$${SYN_UI_PORT:-8008}/api/v1/docs"
+    @echo "   UI:        http://localhost:$${SYN_GATEWAY_PORT:-8008}"
+    @echo "   API:       http://localhost:$${SYN_GATEWAY_PORT:-8008}/api/v1"
+    @echo "   API Docs:  http://localhost:$${SYN_GATEWAY_PORT:-8008}/api/v1/docs"
 
 # Stop infrastructure stack
 infra-down:
@@ -1230,7 +1230,7 @@ secrets-rotate:
     @uv run python infra/scripts/secrets_setup.py rotate
     @echo ""
     @echo "⚠️  Restart services to apply new secrets:"
-    @echo "   just selfhost-restart dashboard"
+    @echo "   just selfhost-restart api"
 
 # Verify secrets are configured
 secrets-check:

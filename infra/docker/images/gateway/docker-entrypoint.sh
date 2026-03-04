@@ -27,7 +27,7 @@ cat > "$AUTH_DIR/locations.conf" <<'LOCATIONS'
 # GitHub webhook endpoint — NO auth (uses HMAC signature verification)
 location = /api/v1/webhooks/github {
     auth_basic off;
-    proxy_pass http://dashboard:8000/webhooks/github;
+    proxy_pass http://api:8000/webhooks/github;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
@@ -41,7 +41,7 @@ location = /api/v1/webhooks/github {
 
 # API v1 proxy
 location /api/v1/ {
-    proxy_pass http://dashboard:8000/;
+    proxy_pass http://api:8000/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection 'upgrade';
@@ -66,7 +66,7 @@ location /api/v1/ {
 
 # WebSocket proxy
 location /ws/ {
-    proxy_pass http://dashboard:8000/ws/;
+    proxy_pass http://api:8000/ws/;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -78,7 +78,7 @@ location /ws/ {
 
 # Legacy WebSocket path
 location /api/v1/ws {
-    proxy_pass http://dashboard:8000/ws;
+    proxy_pass http://api:8000/ws;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -90,7 +90,7 @@ location /api/v1/ws {
 
 # SSE endpoint
 location /api/v1/stream {
-    proxy_pass http://dashboard:8000/stream;
+    proxy_pass http://api:8000/stream;
     proxy_http_version 1.1;
     proxy_set_header Connection '';
     proxy_set_header Host $host;
