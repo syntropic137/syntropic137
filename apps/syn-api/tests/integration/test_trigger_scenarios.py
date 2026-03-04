@@ -10,6 +10,8 @@ See ADR-041: Offline Development Mode and Webhook Recording.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
@@ -20,23 +22,76 @@ from syn_api.types import Err, Ok
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
+_TEST_WEBHOOK_SECRET = "test-webhook-secret"
+os.environ["SYN_GITHUB_WEBHOOK_SECRET"] = _TEST_WEBHOOK_SECRET
+
 # Path to webhook fixtures (relative to repo root)
 _FIXTURES_DIR = Path(__file__).resolve().parents[4] / "fixtures" / "webhooks"
 
 
 @pytest.fixture(autouse=True)
-def _reset_storage():
-    """Reset in-memory storage between tests."""
+async def _reset_storage():
+    """Reset in-memory storage between tests and seed required workflows."""
     import syn_api._wiring
     from syn_domain.contexts.github.slices.register_trigger.trigger_store import (
         reset_trigger_store,
     )
+    from syn_shared.settings.github import reset_github_settings
 
     reset_trigger_store()
+    reset_github_settings()
     syn_api._wiring._test_trigger_repo = None
+
+    # Seed the "self-heal-pr" workflow that trigger presets reference
+    from syn_adapters.storage import get_event_publisher, get_workflow_repository
+    from syn_api._wiring import ensure_connected
+    from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
+        CreateWorkflowTemplateCommand,
+    )
+    from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
+        CreateWorkflowTemplateHandler,
+    )
+
+    await ensure_connected()
+    handler = CreateWorkflowTemplateHandler(
+        repository=get_workflow_repository(),
+        event_publisher=get_event_publisher(),
+    )
+    workflow_repo = get_workflow_repository()
+    if not await workflow_repo.exists("self-heal-pr"):
+        await handler.handle(
+            CreateWorkflowTemplateCommand(
+                aggregate_id="self-heal-pr",
+                name="Self-Heal PR",
+                description="Workflow for self-healing CI and review fixes",
+                workflow_type="implementation",
+                classification="standard",
+                repository_url="https://github.com/demo/offline-repo",
+                phases=[
+                    {
+                        "phase_id": "diagnose",
+                        "name": "diagnose",
+                        "order": 1,
+                        "description": "Analyze failure and identify root cause",
+                    },
+                    {
+                        "phase_id": "fix",
+                        "name": "fix",
+                        "order": 2,
+                        "description": "Apply automated fix",
+                    },
+                ],
+            )
+        )
+
     yield
     reset_trigger_store()
     syn_api._wiring._test_trigger_repo = None
+
+
+def _sign(body: bytes) -> str:
+    """Compute HMAC-SHA256 signature for a webhook payload."""
+    return "sha256=" + hmac.new(_TEST_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
 
 
 def _load_fixture(filename: str) -> tuple[dict, str]:
@@ -90,15 +145,17 @@ async def test_self_healing_check_run_failure():
 
     # Load fixture and inject webhook
     payload, event_type = _load_fixture("check_run_failure.jsonl")
+    body = json.dumps(payload).encode()
 
     result = await verify_and_process_webhook(
-        body=json.dumps(payload).encode(),
+        body=body,
         event_type=event_type,
         delivery_id="test-delivery-001",
+        signature=_sign(body),
     )
 
     # Assert webhook was processed
-    assert isinstance(result, Ok)
+    assert isinstance(result, Ok), f"Webhook processing failed: {result}"
     assert result.value.status == "processed"
     assert result.value.event == "check_run"
 
@@ -129,15 +186,17 @@ async def test_issue_comment_trigger():
 
     # Load fixture and inject webhook
     payload, event_type = _load_fixture("issue_comment_command.jsonl")
+    body = json.dumps(payload).encode()
 
     result = await verify_and_process_webhook(
-        body=json.dumps(payload).encode(),
+        body=body,
         event_type=event_type,
         delivery_id="test-delivery-002",
+        signature=_sign(body),
     )
 
     # Assert webhook was processed
-    assert isinstance(result, Ok)
+    assert isinstance(result, Ok), f"Webhook processing failed: {result}"
     assert result.value.status == "processed"
     assert result.value.event == "issue_comment"
 
@@ -148,15 +207,17 @@ async def test_installation_event_does_not_crash():
     from syn_api.v1.github import verify_and_process_webhook
 
     payload, event_type = _load_fixture("installation_created.jsonl")
+    body = json.dumps(payload).encode()
 
     result = await verify_and_process_webhook(
-        body=json.dumps(payload).encode(),
+        body=body,
         event_type=event_type,
         delivery_id="test-delivery-003",
+        signature=_sign(body),
     )
 
     # Should process without error (may not fire triggers)
-    assert isinstance(result, Ok)
+    assert isinstance(result, Ok), f"Webhook processing failed: {result}"
     assert result.value.status == "processed"
     assert result.value.event == "installation"
 
@@ -167,15 +228,17 @@ async def test_webhook_with_no_matching_triggers():
     from syn_api.v1.github import verify_and_process_webhook
 
     payload, event_type = _load_fixture("check_run_failure.jsonl")
+    body = json.dumps(payload).encode()
 
     # Don't seed any triggers — inject webhook directly
     result = await verify_and_process_webhook(
-        body=json.dumps(payload).encode(),
+        body=body,
         event_type=event_type,
         delivery_id="test-delivery-004",
+        signature=_sign(body),
     )
 
-    assert isinstance(result, Ok)
+    assert isinstance(result, Ok), f"Webhook processing failed: {result}"
     assert result.value.triggers_fired == []
 
 
@@ -184,10 +247,12 @@ async def test_invalid_json_payload():
     """Invalid JSON payload returns error."""
     from syn_api.v1.github import verify_and_process_webhook
 
+    body = b"not json"
     result = await verify_and_process_webhook(
-        body=b"not json",
+        body=body,
         event_type="check_run",
         delivery_id="test-delivery-005",
+        signature=_sign(body),
     )
 
     assert isinstance(result, Err)
