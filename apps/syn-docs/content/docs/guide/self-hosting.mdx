@@ -13,8 +13,8 @@ Syntropic137 runs as a set of Docker services connected through a shared network
 
 ```bash
 # Clone the repository
-git clone https://github.com/syntropic137/agentic-engineering-framework.git
-cd agentic-engineering-framework
+git clone https://github.com/syntropic137/syntropic137.git
+cd syntropic137
 
 # Run the setup wizard
 just setup
@@ -96,10 +96,10 @@ brew install cloudflare/cloudflare/cloudflared
 cloudflared tunnel login
 
 # Create tunnel
-cloudflared tunnel create aef
+cloudflared tunnel create syn137
 
 # Route traffic
-cloudflared tunnel route dns aef aef.yourdomain.com
+cloudflared tunnel route dns syn137 syn137.yourdomain.com
 ```
 
 Add `cloudflared` to your Docker Compose to run it as a service.

@@ -5,7 +5,7 @@ This directory contains configuration for running Supabase locally for object st
 ## Quick Start
 
 ```bash
-# Start main AEF services first
+# Start main Syn137 services first
 just dev
 
 # Then add Supabase services
@@ -18,7 +18,7 @@ docker compose -f docker/docker-compose.dev.yaml -f docker/docker-compose.supaba
 |---------|-----|-------------|
 | Supabase API | http://localhost:54321 | Main Supabase API endpoint |
 | Supabase Studio | http://localhost:54323 | Admin UI |
-| Supabase DB | localhost:54329 | PostgreSQL (separate from AEF DB) |
+| Supabase DB | localhost:54329 | PostgreSQL (separate from Syn137 DB) |
 
 ## Environment Variables
 
@@ -77,7 +77,7 @@ artifacts = await storage.list_objects("workflows/123/bundles/abc/")
 
 Check if Kong is running:
 ```bash
-docker logs aef-supabase-kong
+docker logs syn-supabase-kong
 ```
 
 ### Bucket not found

@@ -1,6 +1,6 @@
 # justfile
 #
-# Command runner for Agentic Engineering Framework
+# Command runner for Syntropic137
 # See https://github.com/casey/just
 
 # Docker Compose shorthand variables
@@ -361,7 +361,7 @@ _workspace-check:
 # Start dashboard in offline mode (no Docker, no external services)
 # Seeds demo data automatically — just open http://localhost:5173
 dev-offline:
-    @echo "Starting AEF in offline mode (no Docker, no external services)..."
+    @echo "Starting Syn137 in offline mode (no Docker, no external services)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @-lsof -ti:8000 | xargs kill 2>/dev/null || true
     @APP_ENVIRONMENT=offline uv run uvicorn syn_api.main:app \
@@ -834,9 +834,9 @@ poc-git-identity:
         git config --global user.email "bot@syntropic137.com" && \
         git clone --depth 1 https://github.com/octocat/Hello-World.git /tmp/repo && \
         cd /tmp/repo && \
-        echo "# AEF Test" >> README && \
+        echo "# Syn137 Test" >> README && \
         git add README && \
-        git commit -m "Test commit from AEF agent" && \
+        git commit -m "Test commit from Syn137 agent" && \
         git log -1 --format="Author: %an <%ae>" && \
         echo "" && \
         echo "✓ Git identity injection successful!"'
@@ -925,12 +925,12 @@ _selfhost-preflight:
     fi
     echo ""
 
-# Start self-hosted AEF stack (no Cloudflare)
+# Start self-hosted Syn137 stack (no Cloudflare)
 selfhost-up: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
-    echo "🚀 Starting AEF self-host stack..."
+    echo "🚀 Starting Syn137 self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
     echo "⏳ Waiting for services to be ready..."
@@ -941,12 +941,12 @@ selfhost-up: _selfhost-preflight _workspace-check
     echo ""
     just selfhost-status
 
-# Start self-hosted AEF stack with Cloudflare Tunnel (recommended)
+# Start self-hosted Syn137 stack with Cloudflare Tunnel (recommended)
 selfhost-up-tunnel: _selfhost-preflight _workspace-check
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
-    echo "🚀 Starting AEF self-host stack with Cloudflare Tunnel..."
+    echo "🚀 Starting Syn137 self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
     echo ""
     echo "⏳ Waiting for services to be ready..."
@@ -967,7 +967,7 @@ selfhost-down:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
-    echo "Stopping AEF self-host stack..."
+    echo "Stopping Syn137 self-host stack..."
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
         {{compose_selfhost_cf}} down
@@ -991,7 +991,7 @@ selfhost-status:
     #!/usr/bin/env bash
     set -euo pipefail
     source infra/scripts/selfhost-env.sh
-    echo "📊 AEF Self-Host Status"
+    echo "📊 Syn137 Self-Host Status"
     echo "======================="
     if docker ps --filter "name=cloudflared" --format '{{{{.Names}}}}' 2>/dev/null | grep -q .; then
         echo "  (Cloudflare Tunnel detected)"
@@ -1057,7 +1057,7 @@ selfhost-update:
     else
         COMPOSE="{{compose_selfhost}}"
     fi
-    echo "⬆️ Updating AEF self-host..."
+    echo "⬆️ Updating Syn137 self-host..."
     echo ""
     echo "1️⃣ Pulling latest code..."
     git pull --ff-only
@@ -1140,7 +1140,7 @@ homelab-reset:
 
 # Start infrastructure stack locally
 infra-up:
-    @echo "🚀 Starting AEF infrastructure stack..."
+    @echo "🚀 Starting Syn137 infrastructure stack..."
     @{{compose_selfhost}} up -d --build
     @echo ""
     @echo "⏳ Waiting for services..."

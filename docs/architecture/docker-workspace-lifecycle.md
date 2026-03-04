@@ -7,7 +7,7 @@
 
 ## Overview
 
-AEF executes agent code in **isolated Docker containers** with a two-phase lifecycle inspired by OpenAI Codex:
+Syn137 executes agent code in **isolated Docker containers** with a two-phase lifecycle inspired by OpenAI Codex:
 
 1. **Setup Phase** - Secrets available, configure persistent credentials (~30 seconds)
 2. **Agent Phase** - Secrets cleared, agent executes task using cached credentials
@@ -319,8 +319,8 @@ async def execute_workflow(self, workflow: Workflow) -> ExecutionResult:
         environment={
             "GITHUB_APP_TOKEN": token,
             "ANTHROPIC_API_KEY": self.anthropic_key,
-            "GIT_AUTHOR_NAME": "AEF Bot",
-            "GIT_AUTHOR_EMAIL": "bot@aef.dev",
+            "GIT_AUTHOR_NAME": "Syn137 Bot",
+            "GIT_AUTHOR_EMAIL": "bot@syn137.dev",
         },
         command=["/workspace/setup.sh"],
     )
@@ -350,7 +350,7 @@ async def execute_workflow(self, workflow: Workflow) -> ExecutionResult:
 | **OpenAI Codex** | Setup phase secrets (inspiration) | Secrets removed before agent runs |
 | **E2B** | Environment variables | Simpler, less secure (tokens in agent env) |
 | **Devin** | GitHub App integration | Platform manages tokens |
-| **AEF** | Setup phase + GitHub App | **Hybrid: Best of both** |
+| **Syn137** | Setup phase + GitHub App | **Hybrid: Best of both** |
 
 ---
 

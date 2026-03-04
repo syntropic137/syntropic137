@@ -7,7 +7,7 @@ This document describes all environment variables used by Syntropic137.
 1. Generate `.env.example`: `just gen-env`
 2. Copy to `.env`: `cp .env.example .env`
 3. Fill in required values
-4. Run `aef` commands - settings are validated on startup
+4. Run `syn` commands - settings are validated on startup
 
 ## Generating .env.example
 

@@ -1,6 +1,6 @@
 # GitHub App Security Model
 
-This document describes how AEF securely integrates with GitHub using GitHub Apps instead of Personal Access Tokens (PATs).
+This document describes how Syn137 securely integrates with GitHub using GitHub Apps instead of Personal Access Tokens (PATs).
 
 ## Why GitHub Apps?
 
@@ -17,7 +17,7 @@ This document describes how AEF securely integrates with GitHub using GitHub App
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          AEF Control Plane                           │
+│                          Syn137 Control Plane                           │
 │                                                                     │
 │   ┌─────────────────────────────────────────────────────────────┐   │
 │   │                    GitHubAppClient                           │   │
@@ -109,7 +109,7 @@ installation_token = response.json()['token']
 
 ```yaml
 # Vault policy for private key
-path "secret/data/aef/github/private-key" {
+path "secret/data/syn/github/private-key" {
   capabilities = ["read"]
 }
 
@@ -133,7 +133,7 @@ Installation tokens are automatically scoped to:
     },
     "repositories": [
         "syntropic137/sandbox_aef-engineer-beta",
-        "syntropic137/agentic-engineering-framework"
+        "syntropic137/syntropic137"
     ]
 }
 ```
@@ -176,7 +176,7 @@ All GitHub operations are auditable:
 ```
 
 ```json
-// AEF internal audit log
+// Syn137 internal audit log
 {
   "timestamp": "2025-12-12T01:30:00Z",
   "execution_id": "exec-abc123",
@@ -199,7 +199,7 @@ Date:   Thu Dec 12 01:30:00 2025 -0800
 
     feat: implement code review suggestions
 
-    Applied by AEF agent
+    Applied by Syn137 agent
     - Workflow: code-review-v1
     - Execution: exec-abc123
     - Session: session-xyz

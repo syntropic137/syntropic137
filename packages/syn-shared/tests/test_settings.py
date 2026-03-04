@@ -28,7 +28,7 @@ class TestSettings:
             # Use _env_file=None to prevent reading from .env file
             settings = Settings(_env_file=None)
 
-            assert settings.app_name == "agentic-engineering-framework"
+            assert settings.app_name == "syntropic137"
             assert settings.app_environment == AppEnvironment.DEVELOPMENT
             assert settings.debug is False
             assert settings.syn_observability_db_url is None

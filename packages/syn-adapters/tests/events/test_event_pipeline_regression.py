@@ -199,18 +199,18 @@ class TestToolNameExtraction:
 
 @pytest.mark.unit
 class TestEventTypeMapping:
-    """Test that Claude CLI event types map correctly to AEF types."""
+    """Test that Claude CLI event types map correctly to Syn137 types."""
 
     @pytest.mark.parametrize(
         "recording_name",
         get_all_recordings() or ["skip"],
     )
     def test_all_events_have_valid_type(self, recording_name: str) -> None:
-        """REGRESSION: All events should map to valid AEF event types."""
+        """REGRESSION: All events should map to valid Syn137 event types."""
         if recording_name == "skip":
             pytest.skip("No recordings available")
 
-        # Valid AEF event types
+        # Valid Syn137 event types
         valid_types = {
             "tool_execution_started",
             "tool_execution_completed",

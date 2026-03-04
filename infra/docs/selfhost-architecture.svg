@@ -18,7 +18,7 @@
   <rect width="960" height="720" fill="#1a1a2e" rx="8"/>
 
   <!-- Title -->
-  <text x="480" y="36" text-anchor="middle" fill="#ccd6f6" font-size="18" font-weight="bold">Syntropic137 (AEF) Self-Host Architecture</text>
+  <text x="480" y="36" text-anchor="middle" fill="#ccd6f6" font-size="18" font-weight="bold">Syntropic137 Self-Host Architecture</text>
 
   <!-- Legend -->
   <rect x="30" y="52" width="12" height="12" rx="2" fill="#4a7cf7" opacity="0.9"/>

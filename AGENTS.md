@@ -3,11 +3,11 @@ description:
 globs:
 alwaysApply: true
 ---
-# Syntropic137 (AEF)
+# Syntropic137
 
 ## What This Is
 
-Agentic Engineering Framework — orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability. Two capabilities: **orchestration** (workspace lifecycle, secure token handling, GitHub App integration) and **observability** (tool use, tokens, costs, errors — all streamed to a real-time dashboard).
+Syntropic137 — orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability. Two capabilities: **orchestration** (workspace lifecycle, secure token handling, GitHub App integration) and **observability** (tool use, tokens, costs, errors — all streamed to a real-time dashboard).
 
 The end goal: a `gh`-style CLI (`syn`) that integrates with Claude Code and OpenClaw for agentic workflow automation.
 

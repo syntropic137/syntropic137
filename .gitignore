@@ -160,7 +160,7 @@ worktrees/
 logs/
 
 # =============================================================================
-# AEF Execution Workspaces (generated at runtime)
+# Syn137 Execution Workspaces (generated at runtime)
 # =============================================================================
 .syn-workspaces/
 

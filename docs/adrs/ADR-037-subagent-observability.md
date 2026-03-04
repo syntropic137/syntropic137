@@ -21,7 +21,7 @@ The `agentic-primitives` library (v0.3.0) added subagent detection in `EventPars
 
 ## Decision
 
-Integrate subagent observability into AEF's event pipeline:
+Integrate subagent observability into Syn137's event pipeline:
 
 ### 1. Event Types (syn-shared)
 

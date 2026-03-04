@@ -32,6 +32,6 @@ export function baseOptions(): BaseLayoutProps {
       ),
     },
     links: [],
-    githubUrl: 'https://github.com/syntropic137/agentic-engineering-framework',
+    githubUrl: 'https://github.com/syntropic137/syntropic137',
   };
 }

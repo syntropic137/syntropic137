@@ -35,7 +35,7 @@ The Syntropic137 provides:
 
 The system is organized into 4 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
-![AEF Architecture](./docs/architecture/vsa-overview.svg)
+![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
 <details>
 <summary>📊 Context Overview</summary>
@@ -83,8 +83,8 @@ just diagram  # Generates docs/architecture/vsa-overview.svg
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/syntropic137/agentic-engineering-framework.git
-cd agentic-engineering-framework
+git clone --recursive https://github.com/syntropic137/syntropic137.git
+cd syntropic137
 
 # Install dependencies
 just install
@@ -151,31 +151,31 @@ After running `just dev-fresh`:
 
 ```bash
 # List available workflows
-aef list
+syn list
 
 # Run a workflow
-aef run simple-research --topic "AI agents"
+syn run simple-research --topic "AI agents"
 
 # Check workflow status
-aef status <workflow-id>
+syn status <workflow-id>
 
 # View artifacts
-aef artifacts <workflow-id>
+syn artifacts <workflow-id>
 
 # View metrics
-aef metrics <workflow-id>
+syn metrics <workflow-id>
 ```
 
 ## Project Structure
 
 ```
-agentic-engineering-framework/
+syntropic137/
 ├── lib/                          # Git submodules
 │   ├── agentic-primitives/       # Composable agent building blocks
 │   └── event-sourcing-platform/  # Event sourcing infrastructure
 │
 ├── apps/
-│   └── cli/                      # `aef` CLI application
+│   └── cli/                      # `syn` CLI application
 │
 ├── packages/
 │   ├── domain/                   # Core domain + VSA contexts

@@ -10,7 +10,7 @@ Following ADR-026 (TimescaleDB for Observability), we had **two PostgreSQL insta
 
 ```
 ┌──────────────────┐     ┌──────────────────┐
-│ aef-postgres     │     │ aef-timescaledb  │
+│ syn-postgres     │     │ syn-timescaledb  │
 │ :5432            │     │ :5433            │
 │                  │     │                  │
 │ ├── events       │     │ └── agent_events │
@@ -45,7 +45,7 @@ Following ADR-026 (TimescaleDB for Observability), we had **two PostgreSQL insta
 
 ```
 ┌────────────────────────────────────────────┐
-│ aef-timescaledb (single instance)          │
+│ syn-timescaledb (single instance)          │
 │ :5432                                      │
 │                                            │
 │ Tables managed by ESP (sqlx migrations):   │
@@ -77,9 +77,9 @@ timescaledb:
   image: timescale/timescaledb:latest-pg16
   container_name: syn-db
   environment:
-    POSTGRES_DB: aef        # Single unified database
-    POSTGRES_USER: aef
-    POSTGRES_PASSWORD: aef_dev_password
+    POSTGRES_DB: syn        # Single unified database
+    POSTGRES_USER: syn
+    POSTGRES_PASSWORD: syn_dev_password
   ports:
     - "5432:5432"           # Standard PostgreSQL port
 ```
@@ -90,12 +90,12 @@ Both services connect to the same database:
 
 ```bash
 # Event Store (Rust)
-DATABASE_URL=postgres://aef:aef_dev_password@timescaledb:5432/aef
+DATABASE_URL=postgres://syn:syn_dev_password@timescaledb:5432/syn
 
 # Dashboard API (Python) - via settings
 TIMESCALE_HOST=timescaledb
 TIMESCALE_PORT=5432
-TIMESCALE_DB=aef
+TIMESCALE_DB=syn
 ```
 
 ## Decision Drivers
@@ -183,7 +183,7 @@ Configure based on storage costs vs debugging needs.
 
 ## Authentication Strategy
 
-AEF is primarily a **GitHub-integrated service**. Authentication approach:
+Syn137 is primarily a **GitHub-integrated service**. Authentication approach:
 
 | Component | Auth Method | Rationale |
 |-----------|-------------|-----------|
@@ -208,7 +208,7 @@ For a managed service with multiple organizations:
 │                 Dashboard App                    │
 │  ┌───────────────────────────────────────────┐  │
 │  │ GitHub OAuth Login                         │  │
-│  │  → Map GitHub org to AEF tenant            │  │
+│  │  → Map GitHub org to Syn137 tenant            │  │
 │  │  → Use GitHub App for repo operations      │  │
 │  └───────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────┘

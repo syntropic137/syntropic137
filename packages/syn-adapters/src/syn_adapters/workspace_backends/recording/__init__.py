@@ -2,7 +2,7 @@
 
 ⚠️  TEST ENVIRONMENT ONLY ⚠️
 
-Replays pre-recorded agent sessions through AEF's event pipeline,
+Replays pre-recorded agent sessions through Syn137's event pipeline,
 enabling integration testing without API calls.
 
 Usage:

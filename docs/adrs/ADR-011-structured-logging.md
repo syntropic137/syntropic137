@@ -98,7 +98,7 @@ AGENTIC_SESSION_ID=session-abc123
 
 ### 1. Custom Logging Implementation
 
-Build our own logging system tailored to AEF.
+Build our own logging system tailored to Syn137.
 
 **Rejected**: Duplicates effort already done in agentic-primitives. Using the
 submodule keeps things consistent across the ecosystem.
@@ -121,7 +121,7 @@ Use a third-party logging library.
 
 ### Positive
 
-- Consistent logging format across all AEF components
+- Consistent logging format across all Syn137 components
 - AI-friendly structured output for debugging
 - Per-component log levels enable focused debugging
 - Session correlation across workflow execution

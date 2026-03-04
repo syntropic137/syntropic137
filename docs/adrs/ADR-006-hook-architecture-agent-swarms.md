@@ -7,7 +7,7 @@
 
 ## Context
 
-The agentic-engineering-framework needs to capture observability events from AI agent operations (tool calls, token usage, session lifecycle). The existing approach in `agentic-primitives` uses subprocess-based hooks:
+The Syntropic137 needs to capture observability events from AI agent operations (tool calls, token usage, session lifecycle). The existing approach in `agentic-primitives` uses subprocess-based hooks:
 
 ```bash
 # Current approach
@@ -111,7 +111,7 @@ Security validators (bash command checking, file path validation, PII detection)
 
 See project plans:
 - `PROJECT-PLAN_20251201_AGENTIC-PRIMITIVES-HOOKS.md`
-- `PROJECT-PLAN_20251201_AEF-WORKFLOW-EXECUTION.md`
+- `PROJECT-PLAN_20251201_SYN137-WORKFLOW-EXECUTION.md`
 
 ## References
 

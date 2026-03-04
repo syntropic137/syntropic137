@@ -6,7 +6,7 @@
 
 ## Top Event Flows
 
-This table shows the most important event flows in AEF (events that feed the most projections):
+This table shows the most important event flows in Syn137 (events that feed the most projections):
 
 | Command | Event | Projections | Count |
 |---------|-------|-------------|-------|

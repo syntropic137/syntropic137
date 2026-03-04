@@ -49,4 +49,4 @@ SELECT add_compression_policy('agent_events', INTERVAL '1 day', if_not_exists =>
 -- SELECT add_retention_policy('agent_events', INTERVAL '90 days', if_not_exists => TRUE);
 
 -- Grant permissions (adjust as needed for your environment)
--- GRANT SELECT, INSERT ON agent_events TO aef_app;
+-- GRANT SELECT, INSERT ON agent_events TO syn_app;

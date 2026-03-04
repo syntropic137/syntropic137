@@ -5,7 +5,7 @@ Accepted
 
 ## Context
 
-AEF needs accurate token usage and cost tracking for agent sessions to:
+Syn137 needs accurate token usage and cost tracking for agent sessions to:
 1. Monitor context window utilization for optimization
 2. Track costs accurately for billing and budgeting
 3. Enable evals and benchmarking with reliable metrics
@@ -98,7 +98,7 @@ From the `usage` field in each `assistant` message event:
 
 ### Compaction Handling
 
-**Decision**: Compaction is not a primary concern for AEF's phase-based execution model.
+**Decision**: Compaction is not a primary concern for Syn137's phase-based execution model.
 
 Reasons:
 1. **Each phase starts fresh** - context doesn't accumulate across phases

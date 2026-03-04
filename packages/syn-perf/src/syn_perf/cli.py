@@ -1,4 +1,4 @@
-"""CLI for AEF performance benchmarks."""
+"""CLI for Syntropic137 performance benchmarks."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from syn_perf.reporters import ConsoleReporter, JSONReporter
 
 app = typer.Typer(
     name="syn-perf",
-    help="Performance benchmarks for AEF isolated workspaces.",
+    help="Performance benchmarks for Syntropic137 isolated workspaces.",
     no_args_is_help=True,
 )
 

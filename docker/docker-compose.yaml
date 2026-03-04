@@ -12,7 +12,7 @@ services:
   # =============================================================================
   # UNIFIED DATABASE - TimescaleDB (ADR-030)
   # =============================================================================
-  # Single database instance for all AEF data:
+  # Single database instance for all Syn137 data:
   # - Domain events (event_store.events) - hypertable for append-only workloads
   # - Observability events (public.agent_events) - hypertable for time-series
   # - Workflow definitions, artifacts, projections

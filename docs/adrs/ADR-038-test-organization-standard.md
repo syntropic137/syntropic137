@@ -7,7 +7,7 @@
 
 ## Context
 
-AEF uses Vertical Slice Architecture (VSA) where each feature is a self-contained "slice" with its own command, handler, and tests. However, test organization has become inconsistent:
+Syn137 uses Vertical Slice Architecture (VSA) where each feature is a self-contained "slice" with its own command, handler, and tests. However, test organization has become inconsistent:
 
 ### Current State (Problems)
 
@@ -144,8 +144,8 @@ NOT on feature branch PRs (unit tests sufficient for fast iteration).
 | Model unit tests | `tests/{module}/` | `tests/events/test_models.py` |
 | Adapter unit tests | `tests/{adapter}/` | `tests/workspace_backends/test_*.py` |
 | Integration tests | `tests/integration/` | `tests/integration/test_e2e.py` |
-| E2E tests | `aef_tests/integration/` | Root-level cross-package E2E |
-| Shared fixtures | `aef_tests/fixtures/` | Infrastructure, factories |
+| E2E tests | `syn_tests/integration/` | Root-level cross-package E2E |
+| Shared fixtures | `syn_tests/fixtures/` | Infrastructure, factories |
 
 ## Consequences
 

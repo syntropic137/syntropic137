@@ -8,7 +8,7 @@
 
 ## Overview
 
-This diagram shows which events feed which projections in the AEF system.
+This diagram shows which events feed which projections in the Syn137 system.
 
 **Total Relationships:** 36 events → 16 projections
 

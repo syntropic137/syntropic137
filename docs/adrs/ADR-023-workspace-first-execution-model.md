@@ -7,7 +7,7 @@
 
 ## Context
 
-The Syntropic137 (AEF) has developed multiple architectural components that were designed independently and never fully integrated:
+The Syntropic137 has developed multiple architectural components that were designed independently and never fully integrated:
 
 1. **ADR-009**: Agentic Execution Architecture - Defined `AgenticProtocol` and workspace concept
 2. **ADR-014**: Workflow Execution Model - Separated templates from executions
@@ -187,7 +187,7 @@ async def _execute_phase(self, execution, phase, ctx):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            AEF Control Plane                                 │
+│                            Syn137 Control Plane                                 │
 │                                                                              │
 │  ┌─────────────────┐   ┌────────────────────────┐   ┌───────────────────┐   │
 │  │ WorkflowEngine  │──▶│ WorkflowExecution      │──▶│ Event Store       │   │

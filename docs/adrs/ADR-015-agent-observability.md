@@ -30,7 +30,7 @@
 
 ## Context
 
-The AEF dashboard needs **full observability** into agent execution sessions. Currently:
+The Syn137 dashboard needs **full observability** into agent execution sessions. Currently:
 
 1. Only **one aggregate operation** is recorded per session at completion
 2. Individual tool calls were previously sent to SSE but **not persisted** as domain events

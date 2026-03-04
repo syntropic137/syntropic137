@@ -1,4 +1,4 @@
-# AEF API Server - Production Dockerfile
+# Syn137 API Server - Production Dockerfile
 # Multi-stage build for minimal image size
 #
 # Build context: Repository root (not this directory)
@@ -111,11 +111,11 @@ ENV LOG_LEVEL=INFO
 # Install gosu for runtime privilege de-escalation (selfhost entrypoint)
 RUN apt-get update && apt-get install -y --no-install-recommends gosu && \
     rm -rf /var/lib/apt/lists/* && \
-    useradd -m -u 1000 aef && \
+    useradd -m -u 1000 syn && \
     mkdir -p /app/logs && \
-    chown -R aef:aef /app
+    chown -R syn:syn /app
 
-USER aef
+USER syn
 
 # Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \

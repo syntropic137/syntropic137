@@ -48,7 +48,7 @@ This mapping is canonical and avoids "hyphen in import path" errors.
 ### 3. Directory Structure
 
 ```
-agentic-engineering-framework/
+syntropic137/
 ├── pyproject.toml              # Workspace root
 ├── uv.lock                     # Single lockfile for all members
 ├── justfile                    # Task runner
@@ -96,7 +96,7 @@ agentic-engineering-framework/
 
 ```toml
 [project]
-name = "agentic-engineering-framework"
+name = "syntropic137"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
@@ -168,7 +168,7 @@ uv add --package syn-domain sqlalchemy
 - Must remember naming convention (hyphens vs underscores)
 
 ### Neutral
-- `aef-` prefix required for unique package names (publishability)
+- `syn-` prefix required for unique package names (publishability)
 - Structure is more complex than single-package projects
 
 ## References

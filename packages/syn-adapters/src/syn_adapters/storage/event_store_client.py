@@ -1,4 +1,4 @@
-"""Event Store Client factory for AEF.
+"""Event Store Client factory for Syn137.
 
 This module provides factory functions to create EventStoreClient instances
 based on the application environment. See ADR-007 for architecture details.

@@ -31,7 +31,7 @@ function getRawContent(slug?: string[]): string {
 
 function getEditUrl(slug?: string[]): string {
   const branch = process.env.NEXT_PUBLIC_EDIT_BRANCH || 'main';
-  const base = `https://github.com/syntropic137/agentic-engineering-framework/edit/${branch}/apps/syn-docs/content/docs`;
+  const base = `https://github.com/syntropic137/syntropic137/edit/${branch}/apps/syn-docs/content/docs`;
   if (!slug || slug.length === 0) return `${base}/index.mdx`;
 
   const slugPath = slug.join('/');

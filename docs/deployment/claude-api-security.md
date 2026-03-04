@@ -1,6 +1,6 @@
 # Claude API Security & Cost Protection
 
-This document describes how AEF secures Claude API access and prevents runaway costs from compromised or misbehaving agents.
+This document describes how Syn137 secures Claude API access and prevents runaway costs from compromised or misbehaving agents.
 
 ## The Risk
 
@@ -26,7 +26,7 @@ Claude API costs can escalate rapidly:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          AEF Control Plane                           │
+│                          Syn137 Control Plane                           │
 │                                                                     │
 │   ┌─────────────────┐    ┌─────────────────┐                       │
 │   │  Secret Store   │    │ Token Vending   │                       │

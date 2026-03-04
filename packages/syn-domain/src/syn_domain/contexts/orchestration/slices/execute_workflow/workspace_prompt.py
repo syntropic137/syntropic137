@@ -1,9 +1,9 @@
-"""AEF Workspace prompt for artifact output instructions.
+"""Syn137 Workspace prompt for artifact output instructions.
 
 Previously provided by agentic-primitives' agentic_workspace package (ADR-012).
 Inlined here after agentic_workspace was removed in agentic-primitives v3.1.0.
 
-The prompt defines the contract between AEF orchestrators and agents running
+The prompt defines the contract between Syn137 orchestrators and agents running
 in containerized workspaces. It instructs agents on workspace structure,
 artifact output, and critical rules.
 """
@@ -13,9 +13,9 @@ from __future__ import annotations
 from typing import Final
 
 SYN_WORKSPACE_PROMPT: Final[str] = """\
-## AEF Workspace Environment
+## Syn137 Workspace Environment
 
-You are an agent running in an ephemeral Docker workspace managed by the Syntropic137 (AEF).
+You are an agent running in an ephemeral Docker workspace managed by Syntropic137.
 
 ### Workspace Structure
 

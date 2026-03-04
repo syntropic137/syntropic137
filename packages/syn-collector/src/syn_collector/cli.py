@@ -1,4 +1,4 @@
-"""CLI for AEF Event Collector.
+"""CLI for Syn137 Event Collector.
 
 Provides commands for:
 - serve: Start the collector service
@@ -37,7 +37,7 @@ def setup_logging(level: str = "INFO") -> None:
 @click.option("--log-level", default="INFO", help="Log level")
 @click.pass_context
 def main(ctx: click.Context, log_level: str) -> None:
-    """AEF Event Collector CLI.
+    """Syn137 Event Collector CLI.
 
     Scalable event collection for AI agent observability.
     """

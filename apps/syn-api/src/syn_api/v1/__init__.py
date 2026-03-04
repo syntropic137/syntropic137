@@ -1,4 +1,4 @@
-"""AEF API v1 namespace.
+"""Syn137 API v1 namespace.
 
 All public operations are available through sub-modules:
 

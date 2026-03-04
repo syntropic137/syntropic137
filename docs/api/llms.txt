@@ -1,4 +1,4 @@
-# AEF API Reference
+# Syn137 API Reference
 
 > Programmatic interface to the Syntropic137
 > Version: 0.1.0

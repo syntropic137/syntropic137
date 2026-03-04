@@ -7,7 +7,7 @@
 
 ## Context
 
-We discovered that the AEF platform had **two separate executor implementations** with inconsistent observability wiring:
+We discovered that the Syn137 platform had **two separate executor implementations** with inconsistent observability wiring:
 
 1. **WorkflowExecutionEngine** (syn-domain) - Used by CLI, has event sourcing and `observability_writer`
 2. **AgenticWorkflowExecutor** (syn-adapters) - Used by Dashboard, has `collector_url` (but wasn't being passed)

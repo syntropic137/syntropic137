@@ -7,7 +7,7 @@
 
 ## Context
 
-AEF requires different testing modes:
+Syn137 requires different testing modes:
 
 1. **Unit tests** - Fast, no infrastructure, run in CI
 2. **Integration tests** - Test full pipeline with real services

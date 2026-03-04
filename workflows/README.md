@@ -63,16 +63,16 @@ phases:
 
 ```bash
 # Seed all workflows from the examples directory
-aef workflow seed
+syn workflow seed
 
 # Seed from a specific directory
-aef workflow seed --dir workflows/custom
+syn workflow seed --dir workflows/custom
 
 # Seed a single workflow file
-aef workflow seed --file workflows/examples/research.yaml
+syn workflow seed --file workflows/examples/research.yaml
 
 # Validate without seeding (dry-run)
-aef workflow seed --dry-run
+syn workflow seed --dry-run
 ```
 
 ## Creating Custom Workflows
@@ -80,5 +80,5 @@ aef workflow seed --dry-run
 1. Copy an example from `workflows/examples/`
 2. Modify the phases and configuration
 3. Place in `workflows/custom/` (gitignored) or create a PR to add to `examples/`
-4. Run `aef workflow seed` to load into the system
+4. Run `syn workflow seed` to load into the system
 

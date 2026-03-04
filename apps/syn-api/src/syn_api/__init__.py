@@ -1,4 +1,4 @@
-"""AEF API — Programmatic interface to the Syntropic137.
+"""Syn137 API — Programmatic interface to the Syntropic137.
 
 Usage:
     import syn_api

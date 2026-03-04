@@ -52,14 +52,14 @@ Each data type has fundamentally different:
 
 ### 1. Clean Interface from agentic-primitives
 
-The `agentic-primitives` library provides a **clean abstraction** for AEF to consume. AEF doesn't need to understand Claude CLI internals:
+The `agentic-primitives` library provides a **clean abstraction** for Syn137 to consume. Syn137 doesn't need to understand Claude CLI internals:
 
 ```python
 # In agentic-primitives (Claude CLI specific for now)
 class SessionOutputStream:
     """Stream of structured outputs from an agent session.
 
-    AEF consumes this without knowing how Claude CLI works internally.
+    Syn137 consumes this without knowing how Claude CLI works internally.
     """
 
     @property
@@ -91,12 +91,12 @@ class SessionOutputStream:
         ...
 ```
 
-### 2. AEF Integration
+### 2. Syn137 Integration
 
-AEF integrates cleanly without understanding container internals:
+Syn137 integrates cleanly without understanding container internals:
 
 ```python
-# In AEF WorkflowExecutionEngine
+# In Syn137 WorkflowExecutionEngine
 async def execute_phase(self, phase: WorkflowPhase) -> PhaseResult:
     # Get structured output stream from workspace
     output_stream = await workspace.run_agent(task=phase.task)
@@ -181,7 +181,7 @@ agentic_isolation/
 
 This keeps Claude CLI specifics isolated while providing clean interface.
 
-### Phase 2: AEF Integration
+### Phase 2: Syn137 Integration
 
 - Add `ConversationStoragePort` and MinIO adapter
 - Create `session_conversations` table
@@ -198,7 +198,7 @@ This keeps Claude CLI specifics isolated while providing clean interface.
 ### Positive
 
 1. **Clean separation** - Three data types, three purposes, three storage mechanisms
-2. **AEF stays simple** - Consumes structured interface, doesn't parse JSONL
+2. **Syn137 stays simple** - Consumes structured interface, doesn't parse JSONL
 3. **Full fidelity** - Conversation logs preserved for ML/learning
 4. **Queryable metrics** - Observability events in TimescaleDB
 5. **Future-proof** - Can add other agents by implementing same interface

@@ -30,7 +30,7 @@ services:
     environment:
       STUDIO_PG_META_URL: http://meta:8080
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-syn_dev_password}
-      DEFAULT_ORGANIZATION_NAME: AEF Development
+      DEFAULT_ORGANIZATION_NAME: Syn137 Development
       DEFAULT_PROJECT_NAME: syn-local
       SUPABASE_URL: http://kong:8000
       SUPABASE_PUBLIC_URL: http://localhost:54321
@@ -158,7 +158,7 @@ services:
       supabase-db:
         condition: service_healthy
 
-  # Supabase Postgres (separate from main AEF postgres)
+  # Supabase Postgres (separate from main Syn137 postgres)
   supabase-db:
     image: supabase/postgres:15.1.0.147
     container_name: syn-supabase-db

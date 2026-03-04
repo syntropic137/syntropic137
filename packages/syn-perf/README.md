@@ -1,10 +1,10 @@
-# AEF Performance Benchmarks
+# Syntropic137 Performance Benchmarks
 
-Performance benchmarking suite for AEF isolated workspaces.
+Performance benchmarking suite for Syntropic137 isolated workspaces.
 
 ## Installation
 
-This package is part of the AEF monorepo workspace.
+This package is part of the Syntropic137 monorepo workspace.
 
 ```bash
 uv sync

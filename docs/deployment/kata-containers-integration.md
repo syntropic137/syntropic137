@@ -15,7 +15,7 @@ isolation similar to Firecracker, but with full OCI compatibility for Kubernetes
 │                           Kubernetes Node                                │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐       │
-│  │  Regular Pod     │  │  Kata Pod (AEF)  │  │  Kata Pod (AEF)  │       │
+│  │  Regular Pod     │  │  Kata Pod (Syn137)  │  │  Kata Pod (Syn137)  │       │
 │  │  (host kernel)   │  │  ┌────────────┐  │  │  ┌────────────┐  │       │
 │  │                  │  │  │  VM Kernel │  │  │  │  VM Kernel │  │       │
 │  │                  │  │  │  (isolated)│  │  │  │  (isolated)│  │       │
@@ -167,8 +167,8 @@ def build_kata_pod_spec(
             "name": name,
             "namespace": "syn-workspaces",
             "labels": {
-                "aef.dev/component": "workspace",
-                "aef.dev/session-id": config.session_id,
+                "syn137.dev/component": "workspace",
+                "syn137.dev/session-id": config.session_id,
             },
         },
         "spec": {

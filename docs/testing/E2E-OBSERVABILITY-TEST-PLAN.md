@@ -92,7 +92,7 @@ docker logs -f <container_name>
 
 ```bash
 # Query event store directly
-just cli exec psql postgresql://aef:aef@localhost:5432/aef_dev
+just cli exec psql postgresql://syn137:syn137@localhost:5432/syn137_dev
 
 # SQL queries
 SELECT

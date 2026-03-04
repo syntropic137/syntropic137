@@ -1,4 +1,4 @@
-# AEF Architecture Documentation
+# Syn137 Architecture Documentation
 
 **Last Updated:** 2026-02-03
 
@@ -6,7 +6,7 @@
 
 ## 📐 High-Level Architecture
 
-![AEF VSA Overview](./vsa-overview.svg)
+![Syn137 VSA Overview](./vsa-overview.svg)
 
 ### VSA Overview Diagram
 
@@ -97,7 +97,7 @@ claude generate-architecture-docs
 
 ## 🏗️ Architecture Principles
 
-AEF follows these architectural patterns:
+Syn137 follows these architectural patterns:
 
 | Pattern | Description | Key ADRs |
 |---------|-------------|----------|
@@ -126,7 +126,7 @@ AEF follows these architectural patterns:
 ```
 VSA Scanner → Manifest JSON → Diagram Generator → Markdown + Mermaid
     ↓              ↓                  ↓                    ↓
-  Code     .topology/aef-    Python script      docs/architecture/
+  Code     .topology/syn-    Python script      docs/architecture/
            manifest.json                     projection-subscriptions.md
 ```
 

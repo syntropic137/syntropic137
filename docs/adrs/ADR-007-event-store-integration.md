@@ -13,7 +13,7 @@ informed: All Stakeholders
 
 ## Context
 
-The Syntropic137 (AEF) uses event sourcing for domain aggregates (Workflows, Sessions, Artifacts). We need to decide how to persist events and integrate with the `event-sourcing-platform` library.
+The Syntropic137 uses event sourcing for domain aggregates (Workflows, Sessions, Artifacts). We need to decide how to persist events and integrate with the `event-sourcing-platform` library.
 
 ### Options Considered
 
@@ -40,7 +40,7 @@ We will use the **Event Store Server via gRPC** for all non-test environments.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        AEF Application                               │
+│                        Syn137 Application                               │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Domain Layer (syn-domain)                                          │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐     │
@@ -95,11 +95,11 @@ We will use the **Event Store Server via gRPC** for all non-test environments.
 # Event Store Server connection
 EVENTSTORE_HOST=localhost
 EVENTSTORE_PORT=50051
-EVENTSTORE_TENANT_ID=aef
+EVENTSTORE_TENANT_ID=syn137
 
 # For local development (Docker)
 # Event Store Server connects to PostgreSQL internally
-DATABASE_URL=postgres://aef:aef_dev_password@postgres:5432/aef
+DATABASE_URL=postgres://syn:syn_dev_password@postgres:5432/syn
 ```
 
 ### Docker Compose Services

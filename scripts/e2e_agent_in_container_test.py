@@ -16,7 +16,7 @@ NOTE: This script uses the simplified event system (ADR-029).
 
 Prerequisites:
 - Docker installed and running
-- AEF workspace image built: just workspace-build
+- Syn137 workspace image built: just workspace-build
 - Sidecar image built: docker build -t syn-sidecar:latest docker/sidecar-proxy/
 
 Usage:

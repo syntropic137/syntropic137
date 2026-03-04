@@ -1,4 +1,4 @@
-"""Integration tests for AEF observability pipeline.
+"""Integration tests for Syn137 observability pipeline.
 
 These tests validate the full pipeline with live services:
   Recording → Collector → TimescaleDB → Dashboard API

@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # =========================================================================
 
     app_name: str = Field(
-        default="agentic-engineering-framework",
+        default="syntropic137",
         description="Application name for logging and identification",
     )
 
@@ -106,7 +106,7 @@ class Settings(BaseSettings):
         Field(
             default=None,
             description=(
-                "AEF Observability database URL for agent metrics and application data. "
+                "Syn137 Observability database URL for agent metrics and application data. "
                 "Format: postgresql://user:password@host:port/database "
                 "Used by Dashboard API (Python) for: agent_events, workflows, artifacts, projections. "
                 "For local dev: postgresql://syn:syn_dev_password@localhost:5432/syn "

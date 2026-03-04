@@ -1,4 +1,4 @@
-# Cloudflare Tunnel Configuration for AEF Self-Host
+# Cloudflare Tunnel Configuration for Syn137 Self-Host
 #
 # This file is for running cloudflared as a standalone service (not via Docker).
 # For Docker deployment, refer to the selfhost docs which use CLOUDFLARE_TUNNEL_TOKEN via .env.
@@ -19,7 +19,7 @@ credentials-file: /etc/cloudflared/credentials.json
 
 # Ingress rules define how traffic is routed
 ingress:
-  # AEF Dashboard UI (main entry point)
+  # Syn137 Dashboard UI (main entry point)
   - hostname: syn.yourdomain.com
     service: http://localhost:80
     originRequest:
@@ -30,7 +30,7 @@ ingress:
       # Keep-alive timeout
       tcpKeepAlive: 30s
 
-  # AEF API (for direct API access)
+  # Syn137 API (for direct API access)
   - hostname: api.syn.yourdomain.com
     service: http://localhost:8000
     originRequest:
