@@ -2,7 +2,7 @@
 # Multi-stage build: Node for build, nginx for serving
 #
 # Build context: Repository root (not this directory)
-# Build: docker build -f infra/docker/images/syn-ui/Dockerfile -t syn-ui .
+# Build: docker build -f infra/docker/images/gateway/Dockerfile -t gateway .
 
 # =============================================================================
 # Build Stage
@@ -49,15 +49,15 @@ FROM nginx:1.28.2-alpine AS runtime
 COPY --from=builder /workspace/apps/syn-dashboard-ui/dist /usr/share/nginx/html
 
 # Copy nginx configuration
-COPY infra/docker/images/syn-ui/nginx.conf /etc/nginx/conf.d/default.conf
-COPY infra/docker/images/syn-ui/security-headers.conf /etc/nginx/conf.d/security-headers.conf
-COPY infra/docker/images/syn-ui/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
+COPY infra/docker/images/gateway/nginx.conf /etc/nginx/conf.d/default.conf
+COPY infra/docker/images/gateway/security-headers.conf /etc/nginx/conf.d/security-headers.conf
+COPY infra/docker/images/gateway/rate-limit.conf /etc/nginx/conf.d/00-rate-limit.conf
 
 # Install apache2-utils for htpasswd (used by auth entrypoint)
 RUN apk add --no-cache apache2-utils
 
 # Copy entrypoint (generates auth config from env vars at startup)
-COPY infra/docker/images/syn-ui/docker-entrypoint.sh /docker-entrypoint.d/40-auth.sh
+COPY infra/docker/images/gateway/docker-entrypoint.sh /docker-entrypoint.d/40-auth.sh
 RUN chmod +x /docker-entrypoint.d/40-auth.sh
 
 # Health check

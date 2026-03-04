@@ -30,8 +30,8 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 
 | Service | Role | Image | Port (internal) |
 |---------|------|-------|-----------------|
-| **syn-ui** | nginx reverse proxy + SPA frontend | Custom (Node build + nginx) | 80 |
-| **dashboard** | FastAPI API backend, workflow engine, GitHub App | Custom (Python 3.12) | 8000 |
+| **gateway** | nginx reverse proxy + SPA frontend | Custom (Node build + nginx) | 80 |
+| **api** | FastAPI API backend, workflow engine, GitHub App | Custom (Python 3.12) | 8000 |
 | **collector** | Agent event ingestion (batched writes to TimescaleDB) | Custom (Python 3.12) | 8080 |
 | **event-store** | Rust gRPC event sourcing server | Custom (Rust) | 50051 |
 | **timescaledb** | PostgreSQL 16 + TimescaleDB (unified data store) | `timescale/timescaledb:2.25.1-pg16` | 5432 |
@@ -42,18 +42,18 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 
 ### Data Flow
 
-1. **GitHub webhook** hits `syn-ui` at `/api/v1/webhooks/github` (auth-exempt, HMAC-verified).
-2. **syn-ui** proxies to **dashboard**, which matches the event against trigger rules.
-3. **dashboard** spawns a **workspace container** via the Docker socket. The container runs Claude CLI inside an isolated environment with a cloned repo.
+1. **GitHub webhook** hits `gateway` at `/api/v1/webhooks/github` (auth-exempt, HMAC-verified).
+2. **gateway** proxies to **api**, which matches the event against trigger rules.
+3. **api** spawns a **workspace container** via the Docker socket. The container runs Claude CLI inside an isolated environment with a cloned repo.
 4. Agent JSONL stdout flows to the **collector**, which batches events and writes directly to **timescaledb** via `AgentEventStore` (COPY-based batch inserts).
 5. Domain events (workflow state, aggregates) flow through the **event-store** (Rust gRPC) to **timescaledb**.
-6. The **dashboard** reads events back for the SPA frontend via REST and WebSocket/SSE connections.
+6. The **api** reads events back for the SPA frontend via REST and WebSocket/SSE connections.
 
 ### Compose File Layering
 
 ```
 docker-compose.yaml              # Base: images, env, health checks, dependencies
-  + docker-compose.selfhost.yaml # Selfhost: volumes, secrets, resource limits, syn-ui, network
+  + docker-compose.selfhost.yaml # Selfhost: volumes, secrets, resource limits, gateway, network
     + docker-compose.cloudflare.yaml  # Optional: adds cloudflared, removes port exposure
 ```
 
@@ -261,7 +261,7 @@ All configuration lives in `infra/.env`. Copy from `infra/.env.example` to get s
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYN_UI_PORT` | No | `8008` | Host port for the nginx reverse proxy |
+| `SYN_GATEWAY_PORT` | No | `8008` | Host port for the nginx reverse proxy |
 | `SYN_API_PASSWORD` | No | *(empty)* | Basic auth password. Empty = no auth. |
 | `SYN_API_USER` | No | `admin` | Basic auth username |
 | `RESTART_POLICY` | No | `always` | Container restart policy |
@@ -272,8 +272,8 @@ All configuration lives in `infra/.env`. Copy from `infra/.env.example` to get s
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DASHBOARD_MEMORY_LIMIT` | `512m` | Dashboard API memory limit |
-| `DASHBOARD_CPU_LIMIT` | `0.5` | Dashboard API CPU limit |
+| `API_MEMORY_LIMIT` | `512m` | API memory limit |
+| `API_CPU_LIMIT` | `0.5` | API CPU limit |
 | `UI_MEMORY_LIMIT` | `256m` | nginx memory limit |
 | `UI_CPU_LIMIT` | `0.25` | nginx CPU limit |
 | `POSTGRES_MEMORY_LIMIT` | `1g` | PostgreSQL memory limit |
@@ -433,8 +433,8 @@ A Cloudflare Tunnel provides secure external access without opening ports on you
 
 The `docker-compose.cloudflare.yaml` overlay:
 1. Adds a `cloudflared` container that connects to Cloudflare's edge network
-2. Removes the `ports:` declaration from `syn-ui` so there is no direct port exposure
-3. All traffic flows through the tunnel: `Internet -> Cloudflare Edge -> cloudflared -> syn-ui -> dashboard`
+2. Removes the `ports:` declaration from `gateway` so there is no direct port exposure
+3. All traffic flows through the tunnel: `Internet -> Cloudflare Edge -> cloudflared -> gateway -> api`
 
 ### Setup
 
@@ -448,7 +448,7 @@ The `docker-compose.cloudflare.yaml` overlay:
 
 | Public hostname | Service | Description |
 |----------------|---------|-------------|
-| `syn.yourdomain.com` | `http://syn-ui:80` | Dashboard UI + API |
+| `syn.yourdomain.com` | `http://gateway:80` | Dashboard UI + API |
 
 **3. Set environment variables** in `infra/.env`:
 
@@ -607,7 +607,7 @@ just selfhost-status
 
 # Check logs for a specific service
 just selfhost-logs timescaledb
-just selfhost-logs dashboard
+just selfhost-logs api
 ```
 
 ### Event Store Build Slow on Apple Silicon
@@ -631,7 +631,7 @@ just infra-build-image event-store
 
 4. Check dashboard logs for signature verification errors:
    ```bash
-   just selfhost-logs dashboard 2>&1 | grep -i webhook
+   just selfhost-logs api 2>&1 | grep -i webhook
    ```
 
 ### Container OOM (Out of Memory)
@@ -639,14 +639,14 @@ just infra-build-image event-store
 If a container is killed with exit code 137, it ran out of memory. Increase the limit in `infra/.env`:
 
 ```bash
-# Example: increase dashboard from 512m to 1g
-DASHBOARD_MEMORY_LIMIT=1g
+# Example: increase API from 512m to 1g
+API_MEMORY_LIMIT=1g
 ```
 
 Then restart:
 
 ```bash
-just selfhost-restart dashboard
+just selfhost-restart api
 ```
 
 ### Port 8008 Already in Use
@@ -656,7 +656,7 @@ just selfhost-restart dashboard
 lsof -i :8008
 
 # Change the port in infra/.env
-SYN_UI_PORT=8009
+SYN_GATEWAY_PORT=8009
 ```
 
 ### Submodule Build Errors
@@ -693,7 +693,7 @@ ls -la /var/run/docker.sock
 
 # The selfhost-entrypoint.sh should auto-match the GID.
 # If it fails, check dashboard logs:
-just selfhost-logs dashboard 2>&1 | grep -i socket
+just selfhost-logs api 2>&1 | grep -i socket
 ```
 
 On Linux, the Docker socket typically has group `docker` (GID varies). The entrypoint creates a matching group inside the container. If this fails, verify Docker is running with standard socket permissions.
@@ -712,7 +712,7 @@ infra/
   docker/
     images/
       syn-dashboard/        # Dashboard API Dockerfile
-      syn-ui/               # nginx + SPA Dockerfile, nginx.conf, entrypoint
+      gateway/              # nginx + SPA Dockerfile, nginx.conf, entrypoint
     secrets/                # Docker secrets (gitignored)
       db-password.txt
       redis-password.txt

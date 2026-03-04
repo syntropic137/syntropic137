@@ -3,7 +3,7 @@
 # Shortcut: just selfhost-up
 #
 # Adds: container names, persistent volumes, secrets, resource limits,
-#        restart policies, log rotation, syn-ui frontend, syn-internal network.
+#        restart policies, log rotation, gateway frontend, syn-internal network.
 #
 # Replaces the former infra/docker/compose/docker-compose.yaml and
 # docker-compose.homelab.yaml files (consolidated per ADR-034).
@@ -110,17 +110,17 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # DASHBOARD API
+  # API
   # ===========================================================================
-  dashboard:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-dashboard
+  api:
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-api
     build:
       args:
         INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
         INCLUDE_DOCKER_CLI: "1"
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
-      - dashboard_logs:/app/logs
+      - api_logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock
       - ../workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
@@ -169,8 +169,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${DASHBOARD_MEMORY_LIMIT:-512m}
-          cpus: "${DASHBOARD_CPU_LIMIT:-0.5}"
+          memory: ${API_MEMORY_LIMIT:-512m}
+          cpus: "${API_CPU_LIMIT:-0.5}"
     logging:
       driver: "json-file"
       options:
@@ -182,13 +182,13 @@ services:
   # ===========================================================================
   # FRONTEND (nginx)
   # ===========================================================================
-  syn-ui:
+  gateway:
     build:
       context: ..
-      dockerfile: infra/docker/images/syn-ui/Dockerfile
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-ui
+      dockerfile: infra/docker/images/gateway/Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-gateway
     ports:
-      - "127.0.0.1:${SYN_UI_PORT:-8008}:80"
+      - "127.0.0.1:${SYN_GATEWAY_PORT:-8008}:80"
     environment:
       # Optional basic auth — protects UI and API, webhooks bypass.
       # Set SYN_API_PASSWORD to enable. Omit for no auth (local-only or Cloudflare Access).
@@ -201,7 +201,7 @@ services:
       retries: 3
       start_period: 5s
     depends_on:
-      dashboard:
+      api:
         condition: service_healthy
     restart: always
     read_only: true
@@ -317,8 +317,8 @@ secrets:
 volumes:
   db_data:
     name: ${COMPOSE_PROJECT_NAME:-syntropic137}_db_data
-  dashboard_logs:
-    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_dashboard_logs
+  api_logs:
+    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_api_logs
   minio_data:
     name: ${COMPOSE_PROJECT_NAME:-syntropic137}_minio_data
   redis_data:

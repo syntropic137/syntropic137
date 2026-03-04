@@ -30,8 +30,8 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
-  dashboard:
-    container_name: syn-dashboard
+  api:
+    container_name: syn-api
     build:
       args:
         INCLUDE_DOCKER_CLI: "1"
