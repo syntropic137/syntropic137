@@ -45,8 +45,11 @@ services:
       SYN_OBSERVABILITY_DB_URL: postgres://syn:syn_dev_password@timescaledb:5432/syn
       EVENT_STORE_HOST: event-store
       EVENT_STORE_PORT: "50051"
-      # Override MinIO endpoint for Docker network
+      # MinIO storage for artifacts (ADR default is 'local' which isn't implemented)
+      SYN_STORAGE_PROVIDER: minio
       SYN_STORAGE_MINIO_ENDPOINT: minio:9000
+      SYN_STORAGE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      SYN_STORAGE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       # Workspace directory configuration for Docker-in-Docker
       # Container path where workspaces are accessible
       SYN_WORKSPACE_CONTAINER_DIR: /workspaces
