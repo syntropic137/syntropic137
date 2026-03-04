@@ -107,7 +107,7 @@ async def register_trigger(
                 for c in aggregate.conditions
             ],
             input_mapping=aggregate.input_mapping,
-            config={},
+            config=aggregate.config,
             installation_id=aggregate.installation_id,
             created_by=aggregate.created_by,
             status=aggregate.status.value,
@@ -194,7 +194,7 @@ async def enable_preset(
                 for c in aggregate.conditions
             ],
             input_mapping=aggregate.input_mapping,
-            config={},
+            config=aggregate.config,
             installation_id=aggregate.installation_id,
             created_by=aggregate.created_by,
             status=aggregate.status.value,

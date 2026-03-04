@@ -341,49 +341,42 @@ async def _seed_offline_data() -> None:
 
 _OFFLINE_WORKFLOW_DEFS: list[dict] = [
     {
-        "name": "self-healing-ci",
+        "aggregate_id": "self-heal-pr",
+        "name": "Self-Heal PR",
         "description": "Automatically fix failing CI checks by analyzing logs and applying patches.",
+        "workflow_type": "implementation",
+        "classification": "standard",
+        "repository_url": "https://github.com/demo/offline-repo",
         "phases": [
             {
+                "phase_id": "diagnose",
                 "name": "diagnose",
+                "order": 1,
                 "description": "Analyze CI failure logs and identify root cause",
-                "agent_provider": "claude",
                 "prompt_template": "Analyze the following CI failure and identify the root cause:\n{ci_logs}",
             },
             {
+                "phase_id": "fix",
                 "name": "fix",
+                "order": 2,
                 "description": "Apply automated fix based on diagnosis",
-                "agent_provider": "claude",
                 "prompt_template": "Apply a fix for the diagnosed issue:\n{diagnosis}",
             },
         ],
     },
     {
-        "name": "code-review-fix",
-        "description": "Address code review feedback by analyzing comments and applying changes.",
-        "phases": [
-            {
-                "name": "analyze",
-                "description": "Parse review comments and plan changes",
-                "agent_provider": "claude",
-                "prompt_template": "Analyze the following code review comments and plan fixes:\n{review_comments}",
-            },
-            {
-                "name": "apply",
-                "description": "Apply the planned changes",
-                "agent_provider": "claude",
-                "prompt_template": "Apply the following planned changes:\n{plan}",
-            },
-        ],
-    },
-    {
-        "name": "documentation-sync",
+        "aggregate_id": "documentation-sync",
+        "name": "Documentation Sync",
         "description": "Keep documentation in sync with code changes.",
+        "workflow_type": "custom",
+        "classification": "simple",
+        "repository_url": "https://github.com/demo/offline-repo",
         "phases": [
             {
+                "phase_id": "detect",
                 "name": "detect",
+                "order": 1,
                 "description": "Detect documentation that needs updating",
-                "agent_provider": "claude",
                 "prompt_template": "Identify documentation that needs updating based on:\n{changes}",
             },
         ],
