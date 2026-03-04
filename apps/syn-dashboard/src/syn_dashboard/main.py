@@ -108,7 +108,7 @@ def create_app() -> FastAPI:
 
     # ── API routers ────────────────────────────────────────────────────
     # No prefix here — versioning is handled at the routing layer (nginx).
-    # nginx: location /api/v1/ → proxy_pass http://dashboard:8000/
+    # nginx: location /api/v1/ → proxy_pass http://api:8000/
     # So /api/v1/workflows → strips to /workflows → matches these routes.
     app.include_router(workflows_router)
     app.include_router(execution_router)

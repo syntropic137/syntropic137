@@ -80,9 +80,9 @@ services:
       start_period: 10s
 
   # =============================================================================
-  # DASHBOARD API - Query and Control Service
+  # API - Query and Control Service
   # =============================================================================
-  dashboard:
+  api:
     build:
       context: ..
       dockerfile: infra/docker/images/syn-dashboard/Dockerfile

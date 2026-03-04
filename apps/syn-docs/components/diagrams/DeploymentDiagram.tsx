@@ -19,7 +19,7 @@ export function DeploymentArchitectureDiagram() {
       {/* Application Layer */}
       <DiagramGrid columns={2} className="items-start">
         <DiagramGroup title="Frontend" color="purple" className="h-full">
-          <DiagramNode icon="monitor" label="syn-ui" sublabel="nginx :80" color="purple" />
+          <DiagramNode icon="monitor" label="gateway" sublabel="nginx :80" color="purple" />
         </DiagramGroup>
 
         <DiagramGroup title="Backend" color="cyan" columns={1} className="h-full">

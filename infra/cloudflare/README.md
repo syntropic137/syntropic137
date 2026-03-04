@@ -34,10 +34,10 @@ In the tunnel configuration, add these public hostnames:
 
 | Subdomain | Domain | Type | URL |
 |-----------|--------|------|-----|
-| `syn` (or your choice) | yourdomain.com | HTTP | `http://syn-ui:80` |
+| `syn` (or your choice) | yourdomain.com | HTTP | `http://gateway:8081` |
 
 **Important:** The service URL uses the Docker service name, not `localhost`.
-nginx (`syn-ui`) handles both static assets and API proxying — you only need one route.
+nginx (`gateway`) handles both static assets and API proxying — you only need one route.
 
 ### Step 3: Configure Environment
 
@@ -133,7 +133,7 @@ tunnel: <your-tunnel-id>
 credentials-file: /path/to/credentials.json
 
 ingress:
-  # Single route — nginx handles UI + API proxying (/api/* → dashboard:8000)
+  # Single route — nginx handles UI + API proxying (/api/* → api:8000)
   - hostname: aef.yourdomain.com
     service: http://localhost:80
     originRequest:
@@ -163,7 +163,7 @@ just selfhost-logs cloudflared
 just selfhost-status
 
 # Check if services can reach each other
-docker exec syntropic137-cloudflared wget -qO- http://syn-ui:80/health
+docker exec syntropic137-cloudflared wget -qO- http://gateway:80/health
 ```
 
 ### DNS Not Resolving
