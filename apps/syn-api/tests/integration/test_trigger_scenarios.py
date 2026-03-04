@@ -92,9 +92,7 @@ async def _reset_storage():
 
 def _sign(body: bytes) -> str:
     """Compute HMAC-SHA256 signature for a webhook payload."""
-    return "sha256=" + hmac.new(
-        _TEST_WEBHOOK_SECRET.encode(), body, hashlib.sha256
-    ).hexdigest()
+    return "sha256=" + hmac.new(_TEST_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
 
 
 def _load_fixture(filename: str) -> tuple[dict, str]:
