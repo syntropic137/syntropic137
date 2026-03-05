@@ -13,9 +13,18 @@ if [ -f infra/.env ]; then
     set +a
 fi
 
-# 2. Load 1Password service account token from macOS Keychain (vault-specific)
-if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
-    _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
+# 2. Derive vault name from APP_ENVIRONMENT (no separate OP_VAULT needed)
+case "${APP_ENVIRONMENT:-}" in
+    development) _OP_VAULT="syn137-dev" ;;
+    production)  _OP_VAULT="syn137-prod" ;;
+    beta)        _OP_VAULT="syn137-beta" ;;
+    staging)     _OP_VAULT="syn137-staging" ;;
+    *)           _OP_VAULT="" ;;
+esac
+
+# 3. Load 1Password service account token from macOS Keychain (vault-specific)
+if [ -n "$_OP_VAULT" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+    _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$_OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
     if [ "$(uname -s)" = "Darwin" ]; then
         _TOKEN=$(security find-generic-password -a "$USER" -s "SYN_${_VK}" -w 2>/dev/null || true)
         if [ -n "$_TOKEN" ]; then
@@ -28,7 +37,7 @@ if [ -n "${OP_VAULT:-}" ] && [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     fi
 fi
 
-# 3. Resolve 1Password secrets into env so Docker Compose sees them
+# 4. Resolve 1Password secrets into env so Docker Compose sees them
 # Use set -a so eval'd variables are automatically exported.
 if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) || true

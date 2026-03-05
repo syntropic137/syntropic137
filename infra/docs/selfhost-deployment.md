@@ -294,7 +294,7 @@ The setup wizard detects what's already configured and skips accordingly:
 │     via manifest flow or manual entry.                  │
 │  5. configure_env — writes collected values to .env     │
 │     (1Password users: .env only needs non-secret        │
-│     config like SYN_DOMAIN, DEPLOY_ENV)                 │
+│     config like SYN_DOMAIN, OP_VAULT)                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -310,12 +310,13 @@ secret collection for anything already in the vault.
 
 ```
 just setup
-  → configures 1Password vault
+  → configures 1Password (vault derived from APP_ENVIRONMENT)
   → detects GitHub secrets in vault → skips
   → detects tunnel token in vault → skips (or creates tunnel)
-  → writes minimal .env (SYN_DOMAIN, DEPLOY_ENV, etc.)
+  → writes minimal .env (SYN_DOMAIN, APP_ENVIRONMENT, etc.)
 
 just selfhost-up
+  → APP_ENVIRONMENT=development → vault syn137-dev
   → op_env_export.py resolves secrets from vault
   → docker compose interpolates env vars
   → containers receive secrets as env vars (tmpfs only)

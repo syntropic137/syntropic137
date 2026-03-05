@@ -1,27 +1,51 @@
-# 1Password Secret Management
+# Secret Management
 
-Secrets are stored in a single 1Password item and resolved transparently at
-startup. No code changes are needed to consume them — pydantic sees the
-resolved values exactly as if they were plaintext.
+This guide covers how to configure secrets for Syntropic137. Most users will
+use **Path A** (Docker secret files + `.env`) — it's the simplest and requires
+no external tools. **Path B** (1Password) is an optional add-on for teams that
+want centralized, portable secret management.
 
-If the `op` CLI is not installed or not authenticated, resolution is silently
-skipped and the system behaves exactly as it does today with plaintext `.env`.
+If the `op` CLI is not installed or not authenticated, 1Password resolution is
+silently skipped and the system behaves exactly as it does with plaintext `.env`.
 
 ---
 
-## How Secrets Reach the Dashboard
+## Quick Start (Path A — No 1Password)
+
+This is the default path. Run `just setup` and follow the prompts — the wizard
+handles secret generation, GitHub App creation, and `.env` configuration
+automatically.
+
+```bash
+just setup
+```
+
+The wizard will:
+1. Generate DB and Redis passwords → `infra/docker/secrets/`
+2. Walk you through GitHub App creation (opens browser)
+3. Write all values to `infra/.env`
+4. Build and start the stack
+
+That's it. Skip to [Verifying](#verifying) to confirm everything works.
+
+If you want to understand what's happening under the hood or configure secrets
+manually, read on.
+
+---
+
+## How Secrets Reach the Application
 
 There are **two independent paths** — you only need one:
 
 | Path | How secrets get in | Good for |
 |------|-------------------|----------|
-| **Docker secret files** | Raw files in `infra/docker/secrets/` → mounted at `/run/secrets/` → entrypoint reads and exports as env vars | Simple selfhost without 1Password |
-| **1Password** | `op_resolver.py` fetches from vault → injects into `os.environ` at startup | Portable, multi-machine, CI/CD |
+| **A: Docker secret files** | Raw files in `infra/docker/secrets/` → mounted at `/run/secrets/` → entrypoint reads and exports as env vars | Most users, simple selfhost |
+| **B: 1Password** | `op_resolver.py` fetches from vault → injects into `os.environ` at startup | Teams, multi-machine, CI/CD |
 
 Both paths end at the same place: env vars that pydantic reads. If both are
 configured, 1Password takes precedence (existing env vars are never overwritten).
 
-### What the selfhost stack actually needs
+### What the selfhost stack needs
 
 | Secret | Docker secret file | 1Password field | Notes |
 |--------|-------------------|-----------------|-------|
@@ -98,10 +122,18 @@ in 1Password.
 
 ## Path B: 1Password
 
-### Structure
+> **Requires 1Password Business or Teams.** Service accounts — needed for
+> non-interactive secret resolution — are not available on Individual or Family
+> plans. If you're on a personal plan, use [Path A](#path-a-docker-secret-files-no-1password).
 
-One vault per environment, one item per vault named **`syntropic137-config`**.
-Each secret is a field on that item, labeled after its env var.
+### Starting fresh
+
+If you're setting up for the first time, you won't have GitHub App credentials
+yet — the setup wizard creates them. Here's the bootstrap order:
+
+#### 1. Create the vault
+
+In 1Password, create a vault for your environment:
 
 | Environment | Vault name |
 |---|---|
@@ -109,15 +141,99 @@ Each secret is a field on that item, labeled after its env var.
 | Beta / staging | `syn137-beta` |
 | Production | `syn137-prod` |
 
-### Creating the item
+#### 2. Create the item with empty fields
 
-1. Open 1Password → select the vault (e.g. `syn137-dev`)
-2. **+** → choose any type (API Credential works well)
-3. Title: `syntropic137-config`
-4. Add each field below — label = env var name, value = the secret
-5. Save
+Create a new item in the vault with all the field labels pre-created. You'll
+fill in the values as you go through setup — some you'll have now (like
+`APP_ENVIRONMENT` and `ANTHROPIC_API_KEY`), others come later after the
+setup wizard creates the GitHub App.
 
-### Fields to add
+**Via the GUI (recommended, especially with multiple 1Password accounts):**
+
+1. Open 1Password → switch to your business/teams account
+2. Select the vault (e.g., `syn137-dev`)
+3. **+** → choose **API Credential**
+4. Title: `syntropic137-config`
+5. Add each field from the table below — set the label to the env var name,
+   leave the value empty for fields you don't have yet
+6. Save
+
+**Via the CLI (single-account setups):**
+
+```bash
+op signin
+
+op item create \
+  --category "API Credential" \
+  --title "syntropic137-config" \
+  --vault "syn137-dev" \
+  'APP_ENVIRONMENT=development' \
+  'ANTHROPIC_API_KEY=' \
+  'CLAUDE_CODE_OAUTH_TOKEN=' \
+  'SYN_GITHUB_APP_ID=' \
+  'SYN_GITHUB_APP_NAME=' \
+  'SYN_GITHUB_PRIVATE_KEY=' \
+  'SYN_GITHUB_WEBHOOK_SECRET=' \
+  'CLOUDFLARE_TUNNEL_TOKEN='
+```
+
+> **Multiple 1Password accounts?** If you have both personal and business
+> accounts, add `--account my-business.1password.com` to the command. The GUI
+> is usually easier in this case — just switch accounts in the sidebar.
+
+This uses your personal 1Password session (interactive login), not the service
+account. The service account only needs **read** access.
+
+#### 3. Create a service account
+
+1. Go to https://my.1password.com → **Developer** → **Service Accounts**
+2. Create a new service account
+3. Grant it **read-only** access to your vault (e.g., `syn137-dev`)
+4. Copy the token (`ops_eyJ...`)
+
+#### 4. Store the service account token
+
+```bash
+just secrets-store-token
+```
+
+This stores the token in macOS Keychain (see [Storing the Service Account Token](#storing-the-service-account-token) for Linux/CI options).
+
+#### 5. Run the setup wizard
+
+```bash
+just setup
+```
+
+The wizard creates the GitHub App and writes credentials to `infra/.env`.
+
+#### 6. Copy GitHub credentials back to 1Password
+
+After the wizard completes, the GitHub App credentials exist in `infra/.env`
+but not yet in 1Password. Update the item with the values the wizard generated:
+
+```bash
+# Read the values from infra/.env (printed by the wizard)
+# Then update the 1Password item:
+op signin
+
+op item edit "syntropic137-config" \
+  --vault "syn137-dev" \
+  'SYN_GITHUB_APP_ID=123456' \
+  'SYN_GITHUB_APP_NAME=your-app-name' \
+  'SYN_GITHUB_PRIVATE_KEY=<base64-encoded-pem>' \
+  'SYN_GITHUB_WEBHOOK_SECRET=<webhook-secret>'
+```
+
+Now 1Password is the source of truth. On subsequent startups, the resolver
+fetches all values from the vault automatically.
+
+### Structure
+
+One vault per environment, one item per vault named **`syntropic137-config`**.
+Each secret is a field on that item, labeled after its env var.
+
+### Fields reference
 
 | Field label | What it is | How to get the value |
 |---|---|---|
@@ -128,6 +244,7 @@ Each secret is a field on that item, labeled after its env var.
 | `SYN_GITHUB_APP_NAME` | GitHub App slug | Same page, the URL slug (e.g. `syn-engineer-beta`) |
 | `SYN_GITHUB_PRIVATE_KEY` | GitHub App signing key (**base64-encoded**) | `cat your-app.pem \| base64 \| tr -d '\n'` |
 | `SYN_GITHUB_WEBHOOK_SECRET` | GitHub webhook HMAC secret | `openssl rand -hex 32` (must match GitHub App settings) |
+| `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel token | Zero Trust → Networks → Connectors → your tunnel → Install |
 
 > **`APP_ENVIRONMENT` is a boot-time safety check.** The resolver compares this
 > field against the vault name. If they disagree (e.g. vault is `syn137-prod`
@@ -138,17 +255,16 @@ You only need **one** of `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ### `.env` setup
 
-Your `.env` only needs to know which vault to use. Everything else comes from
-the 1Password item.
+The vault name is derived automatically from `APP_ENVIRONMENT` — no separate
+`OP_VAULT` variable is needed.
 
 ```bash
 # infra/.env
 
-OP_VAULT=syn137-dev
-INCLUDE_OP_CLI=1          # include op CLI in dashboard image
+APP_ENVIRONMENT=development   # → vault syn137-dev
+INCLUDE_OP_CLI=1              # include op CLI in dashboard image
 
 # Non-secret values still go here
-APP_ENVIRONMENT=development
 LOG_LEVEL=INFO
 ```
 
@@ -156,11 +272,35 @@ LOG_LEVEL=INFO
 
 ## Storing the Service Account Token
 
-Create a 1Password service account at
-https://my.1password.com → **Developer** → **Service Accounts**, grant it
-read access to your vault, and copy the token (`ops_eyJ...`).
+The service account token authenticates the `op` CLI for non-interactive use.
+There are several ways to provide it, and they can coexist safely.
 
-### macOS — Keychain (recommended)
+### Token precedence
+
+The resolver looks for the token in this order (highest priority first):
+
+| Priority | Source | Example | Used by |
+|----------|--------|---------|---------|
+| 1 | **Vault-specific env var** (shell or `.env`) | `OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=ops_eyJ...` | `just dev`, `just setup`, runtime |
+| 2 | **macOS Keychain** | Stored via `just secrets-store-token` | `just setup`, `just selfhost-*` |
+| 3 | **Generic env var** (shell or `.env`) | `OP_SERVICE_ACCOUNT_TOKEN=ops_eyJ...` | All (fallback) |
+
+The vault-specific env var **always wins**, even if the generic
+`OP_SERVICE_ACCOUNT_TOKEN` is already set. This prevents a stale generic
+token from another app from shadowing the correct vault-specific one.
+
+### For local dev — vault-specific env var in `.env` (recommended)
+
+The simplest option for day-to-day development. Add to your root `.env`:
+
+```bash
+OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=ops_eyJ...
+```
+
+This is picked up by `just dev`, `just setup`, and the runtime resolver
+without any Keychain prompts or extra steps.
+
+### macOS — Keychain
 
 ```bash
 # One command — prompts for token with hidden input (nothing in shell history)
@@ -168,18 +308,23 @@ just secrets-store-token
 ```
 
 Under the hood this stores `SYN_OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>` in
-Keychain (e.g. `SYN_OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV` for `OP_VAULT=syn137-dev`).
+Keychain (e.g. `SYN_OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV` for `APP_ENVIRONMENT=development`).
 
 The selfhost recipes auto-retrieve it at startup:
-1. Read `OP_VAULT` from `infra/.env`
-2. Derive the Keychain service name
-3. Retrieve via `security find-generic-password`
-4. Export as `OP_SERVICE_ACCOUNT_TOKEN` for Docker Compose
+1. Read `APP_ENVIRONMENT` from `infra/.env`
+2. Derive vault name (e.g. `development` → `syn137-dev`)
+3. Derive the Keychain service name
+4. Retrieve via `security find-generic-password`
+5. Export as `OP_SERVICE_ACCOUNT_TOKEN` for Docker Compose
 
 To remove:
 ```bash
 just secrets-delete-token
 ```
+
+> **Both `.env` and Keychain?** No conflict. The vault-specific env var in
+> `.env` takes precedence. The Keychain acts as a backup for contexts that
+> don't source `.env` (like selfhost recipes).
 
 ### Linux/CI — vault-specific env var
 
@@ -200,6 +345,7 @@ export OP_SERVICE_ACCOUNT_TOKEN="ops_eyJ..."
 ```
 
 Works but collides if you have multiple apps or environments on the same machine.
+Prefer the vault-specific naming convention instead.
 
 ### Interactive (personal dev)
 
@@ -213,16 +359,16 @@ op signin   # sets OP_SESSION for the current shell
 
 ```bash
 # One-off from shell
-OP_VAULT=syn137-prod uv run python -m dashboard
+APP_ENVIRONMENT=production uv run python -m dashboard
 
-# Persistent: change OP_VAULT in infra/.env
+# Persistent: change APP_ENVIRONMENT in infra/.env
 ```
 
 With direnv, create a per-machine `.envrc` (gitignored):
 
 ```bash
 # .envrc
-export OP_VAULT=syn137-dev
+export APP_ENVIRONMENT=development
 ```
 
 ```bash
@@ -233,7 +379,13 @@ direnv allow
 
 ## Verifying
 
-### Check the 1Password item is readable
+### Check secret files are in place (Path A)
+
+```bash
+just secrets-check
+```
+
+### Check the 1Password item is readable (Path B)
 
 ```bash
 op item get syntropic137-config --vault syn137-dev --format json
@@ -255,11 +407,12 @@ Should print the resolved value, not blank or an error.
 
 ## How resolution works
 
-1. Resolver reads `OP_VAULT` from `.env` / shell
-2. Fetches the entire `syntropic137-config` item in one `op item get` call
-3. Injects each field label→value into `os.environ`
-4. Existing env vars are never overwritten — shell always wins
-5. pydantic reads from `os.environ` as normal
+1. Resolver reads `APP_ENVIRONMENT` from `.env` / shell
+2. Derives the vault name (e.g. `development` → `syn137-dev`)
+3. Fetches the entire `syntropic137-config` item in one `op item get` call
+4. Injects each field label→value into `os.environ`
+5. Existing env vars are never overwritten — shell always wins
+6. pydantic reads from `os.environ` as normal
 
 Precedence: **shell env > 1Password item fields > Docker secrets > .env plaintext**
 
@@ -267,6 +420,6 @@ Precedence: **shell env > 1Password item fields > Docker secrets > .env plaintex
 
 ## Without 1Password
 
-If `op` is not installed, `OP_VAULT` is not set, or no token/session is
-present, the resolver skips silently. Use Docker secret files + `infra/.env`
-plaintext values — everything works the same way.
+If `op` is not installed, `APP_ENVIRONMENT` is `test`/`offline`/unset, or no
+token/session is present, the resolver skips silently. Use Docker secret files
++ `infra/.env` plaintext values — everything works the same way.

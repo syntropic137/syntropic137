@@ -35,10 +35,10 @@ Usage:
     just setup --stage <name>     # Re-run a single stage
 
 Stages:
-    check_prerequisites, init_submodules, generate_secrets,
-    configure_1password, validate_environment, configure_cloudflare,
-    configure_smee, configure_github_app, configure_env,
-    security_audit, build_and_start, wait_for_health,
+    detect_environment, check_prerequisites, init_submodules,
+    generate_secrets, configure_1password, validate_environment,
+    configure_cloudflare, configure_smee, configure_github_app,
+    configure_env, security_audit, build_and_start, wait_for_health,
     seed_workflows, print_summary
 """
 
@@ -66,7 +66,6 @@ from shared import (
     COMPOSE_SELFHOST,
     ENV_APP_ENVIRONMENT,
     ENV_CLOUDFLARE_TUNNEL_TOKEN,
-    ENV_DEPLOY_ENV,
     ENV_EXAMPLE,
     ENV_FILE,
     ENV_GITHUB_APP_ID,
@@ -74,7 +73,6 @@ from shared import (
     ENV_GITHUB_PRIVATE_KEY,
     ENV_GITHUB_WEBHOOK_SECRET,
     ENV_INCLUDE_OP_CLI,
-    ENV_OP_VAULT,
     ENV_SYN_DOMAIN,
     INFRA_DIR,
     PORT_UI,
@@ -105,6 +103,7 @@ class SetupContext:
     Producers and consumers:
       skip_github            — main() → configure_github_app
       non_interactive        — main() → all stages
+      app_environment        — detect_environment → configure_1password, configure_env
       github_app_id          — configure_github_app → configure_env
       github_app_name        — configure_github_app → configure_env
       github_private_key_b64 — configure_github_app → configure_env
@@ -120,6 +119,7 @@ class SetupContext:
 
     skip_github: bool = False
     non_interactive: bool = False
+    app_environment: str = ""
     github_app_id: str = ""
     github_app_name: str = ""
     github_private_key_b64: str = ""
@@ -134,14 +134,17 @@ class SetupContext:
 
 
 # Stage order matters:
+#   0. detect_environment — sets APP_ENVIRONMENT before anything else.
 #   1. 1Password first — so vault creds are available to later stages.
+#      Vault default derives from APP_ENVIRONMENT.
 #   2. Cloudflare + smee — so webhook_url exists for the GitHub App manifest.
 #   3. GitHub App — needs both vault creds and webhook_url.
-#   4. configure_env — writes defaults (APP_ENVIRONMENT, DEPLOY_ENV) and acts
-#      as a safety net.  Collection stages write their own values to .env
-#      immediately via _update_env_file() so --stage X works in isolation.
+#   4. configure_env — writes remaining defaults and acts as a safety net.
+#      Collection stages write their own values to .env immediately via
+#      _update_env_file() so --stage X works in isolation.
 #   5. Security audit — reads .env, so runs after configure_env.
 STAGES = [
+    "detect_environment",
     "check_prerequisites",
     "init_submodules",
     "generate_secrets",
@@ -277,6 +280,66 @@ def port_in_use(port: int) -> bool:
 # ---------------------------------------------------------------------------
 # Stages
 # ---------------------------------------------------------------------------
+
+
+def detect_environment(ctx: SetupContext) -> bool:
+    """Detect or prompt for the target environment (development / production).
+
+    Runs as the very first stage so the environment banner prints immediately
+    after the ASCII art and later stages can derive defaults from it.
+    """
+    banner("Stage: Detect Environment")
+
+    env_vals = parse_env_file(ENV_FILE)
+    existing = (
+        os.environ.get(ENV_APP_ENVIRONMENT, "").strip()
+        or env_vals.get(ENV_APP_ENVIRONMENT, "").strip()
+    )
+
+    if ctx.non_interactive:
+        chosen = existing or "development"
+    elif existing:
+        step(f"Current environment: {_BOLD}{existing}{_RST}")
+        if confirm(f"Keep {existing}?", default=True):
+            chosen = existing
+        else:
+            chosen = _prompt_environment_choice()
+    else:
+        chosen = _prompt_environment_choice()
+
+    ctx.app_environment = chosen
+    _update_env_file({ENV_APP_ENVIRONMENT: chosen})
+
+    # Print a clear banner so the user knows what they're configuring
+    label = f"  Environment: {chosen}"
+    box_width = max(len(label) + 2, 50)
+    print()
+    print(f"  {_CYAN}┌{'─' * box_width}┐{_RST}")
+    print(f"  {_CYAN}│{_RST}{_BOLD}{label.ljust(box_width)}{_RST}{_CYAN}│{_RST}")
+    print(f"  {_CYAN}└{'─' * box_width}┘{_RST}")
+    print()
+
+    ok(f"Environment set to {chosen}")
+    return True
+
+
+def _prompt_environment_choice() -> str:
+    """Present a numbered menu and return the chosen environment string."""
+    choices = ["development", "production"]
+    print()
+    for i, name in enumerate(choices, 1):
+        print(f"    {_BOLD}{i}{_RST}) {name}")
+    print()
+    while True:
+        raw = input("  Select environment [1]: ").strip()
+        if not raw or raw == "1":
+            return choices[0]
+        if raw == "2":
+            return choices[1]
+        # Allow typing the name directly
+        if raw.lower() in choices:
+            return raw.lower()
+        warn("Please enter 1 or 2")
 
 
 def check_prerequisites(ctx: SetupContext) -> bool:  # noqa: ARG001
@@ -612,7 +675,7 @@ def configure_env(ctx: SetupContext) -> bool:
     already write their values to .env immediately via _update_env_file().
     This stage handles:
       1. Creating .env from template if it doesn't exist yet.
-      2. Writing non-secret defaults (APP_ENVIRONMENT, DEPLOY_ENV, OP_VAULT).
+      2. Writing non-secret defaults (APP_ENVIRONMENT).
       3. Writing any ctx values that earlier stages might have collected but
          not yet persisted (belt-and-suspenders).
     """
@@ -634,21 +697,10 @@ def configure_env(ctx: SetupContext) -> bool:
     if ctx.syn_domain:
         substitutions[ENV_SYN_DOMAIN] = ctx.syn_domain
 
-    # Infer DEPLOY_ENV from what was configured — if the user set up a
-    # Cloudflare tunnel, they're doing selfhost, not local dev.
-    env_vals = parse_env_file(ENV_FILE) if ENV_FILE.exists() else {}
-    has_tunnel = (
-        ctx.cloudflare_tunnel_token or env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
-    )
-    if has_tunnel:
-        substitutions[ENV_DEPLOY_ENV] = "selfhost"
-
-    # APP_ENVIRONMENT feeds the poka-yoke vault/environment mismatch guard.
-    substitutions.setdefault(ENV_APP_ENVIRONMENT, "development")
+    # APP_ENVIRONMENT determines vault name (no separate OP_VAULT needed).
+    substitutions.setdefault(ENV_APP_ENVIRONMENT, ctx.app_environment or "development")
 
     # 1Password settings from the configure_1password stage
-    if ctx.op_vault:
-        substitutions[ENV_OP_VAULT] = ctx.op_vault
     if ctx.include_op_cli:
         substitutions[ENV_INCLUDE_OP_CLI] = ctx.include_op_cli
 
@@ -1214,6 +1266,21 @@ def _prompt_keychain_token(vault: str) -> None:
         warn("No token provided — you can add it later via Keychain")
 
 
+# Canonical env→vault mapping (mirrored from op_resolver.py — this script is
+# stdlib-only and cannot import from syn_shared).
+_ENV_TO_VAULT: dict[str, str] = {
+    "development": "syn137-dev",
+    "beta": "syn137-beta",
+    "staging": "syn137-staging",
+    "production": "syn137-prod",
+}
+
+
+def _vault_name_for_env(app_env: str) -> str:
+    """Derive the 1Password vault name from the environment."""
+    return _ENV_TO_VAULT.get(app_env, f"syn137-{app_env}")
+
+
 def configure_1password(ctx: SetupContext) -> bool:
     """Optional 1Password secret management configuration.
 
@@ -1228,36 +1295,36 @@ def configure_1password(ctx: SetupContext) -> bool:
     """
     banner("Stage: Configure 1Password (Optional)")
 
+    # Derive vault name from APP_ENVIRONMENT (no user prompt needed)
+    vault = _vault_name_for_env(ctx.app_environment) if ctx.app_environment else "syn137-dev"
+
     if ctx.non_interactive:
-        op_vault = os.environ.get(ENV_OP_VAULT, "")
-        if op_vault:
-            ctx.op_vault = op_vault
+        if _keychain_read(vault) or os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
+            ctx.op_vault = vault
             ctx.include_op_cli = "1"
-            ok("1Password config read from environment")
+            ok(f"1Password config detected (vault: {vault})")
         else:
-            step("No 1Password config in environment — skipping")
+            step("No 1Password token found — skipping")
         return True
 
-    # Detect existing configuration
-    env_vals = parse_env_file(ENV_FILE)
-    existing_vault = env_vals.get(ENV_OP_VAULT, "").strip()
-    has_keychain_token = bool(existing_vault and _keychain_read(existing_vault))
+    has_keychain_token = bool(_keychain_read(vault))
 
-    # Already fully configured — offer to keep or reconfigure
+    # Already fully configured — auto-skip
     if has_keychain_token:
-        ok(f"1Password already configured (vault: {existing_vault}, token in Keychain)")
+        ok(f"1Password already configured (vault: {vault}, token in Keychain)")
         if not confirm("Reconfigure 1Password?", default=False):
-            ctx.op_vault = existing_vault
+            ctx.op_vault = vault
             ctx.include_op_cli = "1"
+            _update_env_file({ENV_INCLUDE_OP_CLI: "1"})
             step("Keeping existing 1Password configuration")
             return True
-        # Reconfigure — prompt for vault then token
+        # Reconfigure — re-prompt for token only
         print()
-        vault = prompt("1Password vault name", default=existing_vault)
-        ctx.op_vault = vault
+        step(f"Vault: {vault} (derived from APP_ENVIRONMENT={ctx.app_environment})")
         _prompt_keychain_token(vault)
+        ctx.op_vault = vault
         ctx.include_op_cli = "1"
-        _update_env_file({ENV_OP_VAULT: vault, ENV_INCLUDE_OP_CLI: "1"})
+        _update_env_file({ENV_INCLUDE_OP_CLI: "1"})
         ok("1Password reconfigured")
         return True
 
@@ -1266,11 +1333,11 @@ def configure_1password(ctx: SetupContext) -> bool:
         step("Skipping 1Password — using .env for secrets")
         return True
 
-    vault = prompt("1Password vault name", default=existing_vault or "syn137-dev")
+    step(f"Vault: {vault} (derived from APP_ENVIRONMENT={ctx.app_environment})")
     ctx.op_vault = vault
     _prompt_keychain_token(vault)
     ctx.include_op_cli = "1"
-    _update_env_file({ENV_OP_VAULT: vault, ENV_INCLUDE_OP_CLI: "1"})
+    _update_env_file({ENV_INCLUDE_OP_CLI: "1"})
     ok("1Password configured")
     return True
 
@@ -1407,7 +1474,7 @@ def _keychain_service_name(vault: str) -> str:
     """Derive the macOS Keychain service name for a 1Password vault.
 
     Must match selfhost-env.sh:
-      ``SYN_OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')``
+      ``SYN_OP_SERVICE_ACCOUNT_TOKEN_$(echo "$_OP_VAULT" | tr '[:lower:]-' '[:upper:]_')``
     """
     vk = vault.upper().replace("-", "_")
     return f"SYN_OP_SERVICE_ACCOUNT_TOKEN_{vk}"
@@ -1466,24 +1533,62 @@ def _keychain_write(vault: str, token: str) -> bool:
     return True
 
 
+def _keychain_delete(vault: str) -> bool:
+    """Remove the 1Password SA token from macOS Keychain. Returns success."""
+    if platform.system() != "Darwin":
+        return False
+    svc = _keychain_service_name(vault)
+    result = subprocess.run(
+        [
+            "security",
+            "delete-generic-password",
+            "-a",
+            os.environ.get("USER", "unknown"),
+            "-s",
+            svc,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        warn(f"Keychain delete failed: {result.stderr.strip() or 'not found'}")
+        return False
+    return True
+
+
 def _ensure_op_token(vault: str) -> None:
-    """Load the service account token from macOS Keychain if not already set.
+    """Load the service account token from macOS Keychain or vault-specific env var.
 
     Mirrors the justfile's Keychain lookup so ``op`` works even when the
     setup script is invoked outside of ``just``.
+
+    Precedence (highest first):
+    1. Vault-specific env var (OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV)
+    2. macOS Keychain
+    3. Generic OP_SERVICE_ACCOUNT_TOKEN (already in env — no action needed)
     """
-    if os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
-        return  # already set — nothing to do
+    # Vault-specific env var always wins
+    vault_key = f"OP_SERVICE_ACCOUNT_TOKEN_{vault.upper().replace('-', '_')}"
+    vault_token = os.environ.get(vault_key, "").strip()
+    if vault_token:
+        os.environ["OP_SERVICE_ACCOUNT_TOKEN"] = vault_token
+        return
+
+    # Keychain is next
     token = _keychain_read(vault)
     if token:
         os.environ["OP_SERVICE_ACCOUNT_TOKEN"] = token
+        return
+
+    # Generic OP_SERVICE_ACCOUNT_TOKEN already in env — nothing to do
 
 
 def _get_op_fields(ctx: SetupContext) -> set[str]:
     """Get 1Password fields, fetching lazily if not yet cached in *ctx*."""
     if ctx.op_fields is not None:
         return ctx.op_fields
-    vault = ctx.op_vault or parse_env_file(ENV_FILE).get(ENV_OP_VAULT, "")
+    vault = ctx.op_vault or _vault_name_for_env(ctx.app_environment or "development")
     fields = _fetch_op_fields(vault) if vault else set()
     ctx.op_fields = fields
     return fields
@@ -1556,9 +1661,8 @@ def validate_environment(ctx: SetupContext) -> bool:
     """
     banner("Stage: Environment Audit")
 
-    # Determine vault name from ctx or .env
-    env_vals = parse_env_file(ENV_FILE)
-    vault = ctx.op_vault or env_vals.get(ENV_OP_VAULT, "")
+    # Derive vault name from APP_ENVIRONMENT
+    vault = ctx.op_vault or _vault_name_for_env(ctx.app_environment or "development")
 
     env_label = vault or "local"
     width = 60
@@ -1819,7 +1923,56 @@ def print_summary(ctx: SetupContext) -> bool:
         print("    just onboard --stage configure_github_app")
         print()
 
+    # -- 1Password: show what to copy back into the vault item --
+    if ctx.op_vault:
+        _print_op_summary(ctx)
+
     return True
+
+
+def _print_op_summary(ctx: SetupContext) -> None:
+    """Print a copy-pasteable summary of values to add to 1Password."""
+    # Collect fields that were actually populated during setup.
+    fields: list[tuple[str, str]] = []
+    if ctx.github_app_id:
+        fields.append((ENV_GITHUB_APP_ID, ctx.github_app_id))
+    if ctx.github_app_name:
+        fields.append((ENV_GITHUB_APP_NAME, ctx.github_app_name))
+    if ctx.github_private_key_b64:
+        fields.append((ENV_GITHUB_PRIVATE_KEY, ctx.github_private_key_b64))
+    if ctx.github_webhook_secret:
+        fields.append((ENV_GITHUB_WEBHOOK_SECRET, ctx.github_webhook_secret))
+    if ctx.cloudflare_tunnel_token:
+        fields.append((ENV_CLOUDFLARE_TUNNEL_TOKEN, ctx.cloudflare_tunnel_token))
+
+    if not fields:
+        return
+
+    vault = ctx.op_vault
+    item = "syntropic137-config"
+    width = 60
+
+    print(f"  {_CYAN}{_BOLD}{'━' * width}{_RST}")
+    print(f"  {_BOLD}1Password: Update your vault item{_RST}")
+    print(f"  {_CYAN}{_BOLD}{'━' * width}{_RST}")
+    print()
+    print(f"  Add these values to {_BOLD}\"{item}\"{_RST} in vault {_BOLD}\"{vault}\"{_RST}:")
+    print()
+    for label, value in fields:
+        # Truncate long values (like PEM keys) for display
+        display = value if len(value) <= 40 else value[:20] + "..." + value[-10:]
+        print(f"    {label}={display}")
+    print()
+
+    # Build op item edit command
+    print(f"  {_DIM}Copy-paste command (requires `op signin`):{_RST}")
+    print()
+    parts = [f"  op item edit \"{item}\" --vault \"{vault}\""]
+    for label, value in fields:
+        # Quote values that might contain special characters
+        parts.append(f"    '{label}={value}'")
+    print(f"    {' \\\n'.join(parts)}")
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -1827,6 +1980,7 @@ def print_summary(ctx: SetupContext) -> bool:
 # ---------------------------------------------------------------------------
 
 STAGE_FUNCS: dict[str, callable] = {
+    "detect_environment": detect_environment,
     "check_prerequisites": check_prerequisites,
     "init_submodules": init_submodules,
     "generate_secrets": generate_secrets,
