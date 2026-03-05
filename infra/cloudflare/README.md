@@ -60,7 +60,7 @@ cp .env.example .env
 just secrets-generate
 
 # GitHub App private key and webhook secret are configured via
-# `just setup` and stored in infra/.env (or resolved from 1Password).
+# `just onboard` and stored in infra/.env (or resolved from 1Password).
 ```
 
 ### Step 5: Deploy

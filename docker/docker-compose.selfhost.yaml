@@ -13,7 +13,7 @@ services:
   # DATABASE
   # ===========================================================================
   timescaledb:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-timescaledb
+    container_name: syn137-timescaledb
     environment:
       # Clear POSTGRES_PASSWORD from base compose — _FILE variant is exclusive
       POSTGRES_PASSWORD: ""
@@ -56,7 +56,7 @@ services:
   # EVENT STORE
   # ===========================================================================
   event-store:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-event-store
+    container_name: syn137-event-store
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
@@ -87,7 +87,7 @@ services:
   # COLLECTOR
   # ===========================================================================
   collector:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-collector
+    container_name: syn137-collector
     restart: always
     read_only: true
     security_opt:
@@ -113,7 +113,7 @@ services:
   # API
   # ===========================================================================
   api:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-api
+    container_name: syn137-api
     build:
       args:
         INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
@@ -186,7 +186,7 @@ services:
     build:
       context: ..
       dockerfile: infra/docker/images/gateway/Dockerfile
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-gateway
+    container_name: syn137-gateway
     ports:
       - "127.0.0.1:${SYN_GATEWAY_PORT:-8008}:80"
     environment:
@@ -234,7 +234,7 @@ services:
   # MINIO
   # ===========================================================================
   minio:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-minio
+    container_name: syn137-minio
     volumes:
       - minio_data:/data
     restart: always
@@ -259,7 +259,7 @@ services:
       - syn-internal
 
   minio-init:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-minio-init
+    container_name: syn137-minio-init
     networks:
       - syn-internal
 
@@ -267,7 +267,7 @@ services:
   # REDIS
   # ===========================================================================
   redis:
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-redis
+    container_name: syn137-redis
     # Read password from Docker secret, then exec redis-server as redis user
     user: "999:999"
     entrypoint: ["sh", "-c", "exec redis-server --dir /data --appendonly yes --requirepass \"$(cat /run/secrets/redis_password)\""]
@@ -316,18 +316,18 @@ secrets:
 # =============================================================================
 volumes:
   db_data:
-    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_db_data
+    name: syn137_db_data
   api_logs:
-    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_api_logs
+    name: syn137_api_logs
   minio_data:
-    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_minio_data
+    name: syn137_minio_data
   redis_data:
-    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_redis_data
+    name: syn137_redis_data
 
 # =============================================================================
 # NETWORKS
 # =============================================================================
 networks:
   syn-internal:
-    name: ${COMPOSE_PROJECT_NAME:-syntropic137}_internal
+    name: syn137_internal
     driver: bridge

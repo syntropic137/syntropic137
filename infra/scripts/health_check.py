@@ -23,7 +23,6 @@ Examples:
 
 import argparse
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -32,7 +31,6 @@ import urllib.request
 from dataclasses import asdict, dataclass
 
 from shared import (
-    DEFAULT_PROJECT_NAME,
     PORT_API,
     PORT_COLLECTOR,
     PORT_EVENT_STORE,
@@ -67,19 +65,12 @@ class ServiceStatus:
 
 
 def _container_prefix() -> str:
-    """Derive container name prefix from COMPOSE_PROJECT_NAME.
+    """Container name prefix for selfhost stack (docker-compose.selfhost.yaml).
 
-    Matches the ``container_name:`` pattern in docker-compose.selfhost.yaml:
-    ``${COMPOSE_PROJECT_NAME:-syntropic137}-<service>``.
-
-    Checks (in order): env var → infra/.env → default.
+    This script is only invoked by ``just selfhost-*`` recipes.
+    Dev containers use a different prefix (``syn-``) and do not use this script.
     """
-    from shared import ENV_COMPOSE_PROJECT_NAME, ENV_FILE, parse_env_file
-
-    project = os.environ.get(ENV_COMPOSE_PROJECT_NAME, "")
-    if not project:
-        project = parse_env_file(ENV_FILE).get(ENV_COMPOSE_PROJECT_NAME, DEFAULT_PROJECT_NAME)
-    return project + "-"
+    return "syn137-"
 
 
 def _build_services() -> list[Service]:
