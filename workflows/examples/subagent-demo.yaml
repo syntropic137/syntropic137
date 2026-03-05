@@ -2,7 +2,7 @@
 # Demonstrates subagent observability by having the main agent delegate to subagents.
 # Use this to test the SUBAGENT_STARTED/SUBAGENT_STOPPED event flow in the dashboard.
 
-id: subagent-demo-workflow
+id: subagent-demo-workflow-v2
 name: Subagent Observability Demo
 description: |
   A demonstration workflow that instructs the agent to spawn subagents
@@ -85,13 +85,16 @@ phases:
     prompt_template: |
       You are a verification agent. Review the coordination phase results.
 
-      Previous Results:
+      ## Previous Phase Output (injected from coordinator)
+
       {{coordinator}}
 
-      Please:
-      1. Confirm that 3 subagents were spawned
+      ## Instructions
+
+      1. Confirm that 3 subagents were spawned (look for Task tool usage in the output above)
       2. List what each subagent accomplished
-      3. Check if hello.py was created at `/workspace/artifacts/output/hello.py` (use Read tool)
+      3. Verify the coordinator produced a hello.py file by checking `artifacts/input/coordinator.md`
+         (each phase runs in its own container — previous phase outputs are in `artifacts/input/`, NOT `artifacts/output/`)
       4. Note any issues or successes
 
       Output a brief verification report.

@@ -207,7 +207,7 @@ def validate_credentials(
         if not github.is_configured and not settings.is_test:
             logger.warning(
                 "GitHub App not configured — webhook triggers disabled. "
-                "Run 'just setup --stage configure_github_app' to configure."
+                "Run 'just onboard --stage configure_github_app' to configure."
             )
             _degraded_reasons.append("github_app")
     except Exception:
