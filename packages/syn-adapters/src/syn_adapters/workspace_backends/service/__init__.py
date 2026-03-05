@@ -42,11 +42,13 @@ Usage:
 See ADR-021, ADR-023, ADR-024 for architectural decisions.
 """
 
-from syn_adapters.workspace_backends.service.workspace_service import (
+from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
     GitHubAppNotConfiguredError,
-    ManagedWorkspace,
     SetupPhaseSecrets,
+)
+from syn_adapters.workspace_backends.service.workspace_service import (
     WorkspaceBackend,
     WorkspaceService,
     WorkspaceServiceConfig,

@@ -15,6 +15,9 @@ from event_sourcing import AutoDispatchProjection
 from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
     WorkflowExecutionDetail,
 )
+from syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail import (
+    PhaseDetail,
+)
 
 
 class WorkflowExecutionDetailProjection(AutoDispatchProjection):
@@ -52,6 +55,31 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         """Clear projection data for rebuild."""
         if hasattr(self._store, "delete_all"):
             await self._store.delete_all(self.PROJECTION_NAME)
+
+    @staticmethod
+    def _find_phase(
+        phases: list[dict[str, Any]], phase_id: str
+    ) -> tuple[int, dict[str, Any]] | None:
+        """Find a phase by ID, returning (index, phase_dict) or None."""
+        for i, p in enumerate(phases):
+            if p.get("phase_id") == phase_id:
+                return i, p
+        return None
+
+    @staticmethod
+    def _aggregate_totals(
+        detail: dict[str, Any],
+        input_tokens: int,
+        output_tokens: int,
+        duration: float,
+        cost: Decimal,
+    ) -> None:
+        """Add phase metrics to execution totals."""
+        detail["total_input_tokens"] = detail.get("total_input_tokens", 0) + input_tokens
+        detail["total_output_tokens"] = detail.get("total_output_tokens", 0) + output_tokens
+        detail["total_duration_seconds"] = detail.get("total_duration_seconds", 0.0) + duration
+        existing_cost = Decimal(str(detail.get("total_cost_usd", "0")))
+        detail["total_cost_usd"] = str(existing_cost + cost)
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
@@ -96,30 +124,16 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             return
 
         phase_id = event_data.get("phase_id", "")
-        phase_name = event_data.get("phase_name", phase_id)
-
-        # Check if phase already exists
         phases = existing.get("phases", [])
-        phase_exists = any(p.get("phase_id") == phase_id for p in phases)
 
-        if not phase_exists:
-            phases.append(
-                {
-                    "phase_id": phase_id,
-                    "name": phase_name,
-                    "status": "running",
-                    "session_id": event_data.get("session_id"),
-                    "artifact_id": None,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "total_tokens": 0,
-                    "duration_seconds": 0.0,
-                    "cost_usd": "0",
-                    "started_at": event_data.get("started_at"),
-                    "completed_at": None,
-                    "error_message": None,
-                }
+        if self._find_phase(phases, phase_id) is None:
+            phase = PhaseDetail.running(
+                phase_id=phase_id,
+                name=event_data.get("phase_name", phase_id),
+                session_id=event_data.get("session_id"),
+                started_at=event_data.get("started_at"),
             )
+            phases.append(phase.to_dict())
             existing["phases"] = phases
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -139,53 +153,28 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         phase_id = event_data.get("phase_id")
         phases = existing.get("phases", [])
 
-        # Find and update the phase
-        phase_found = False
-        for phase in phases:
-            if phase.get("phase_id") == phase_id:
-                phase["status"] = "completed"
-                phase["session_id"] = event_data.get("session_id")
-                phase["artifact_id"] = event_data.get("artifact_id")
-                phase["input_tokens"] = event_data.get("input_tokens", 0)
-                phase["output_tokens"] = event_data.get("output_tokens", 0)
-                phase["total_tokens"] = event_data.get("total_tokens", 0)
-                phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
-                phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
-                phase["completed_at"] = event_data.get("completed_at")
-                phase_found = True
-                break
+        found = self._find_phase(phases, phase_id or "")
+        if found:
+            _, phase = found
+            phase["status"] = "completed"
+            phase["session_id"] = event_data.get("session_id")
+            phase["artifact_id"] = event_data.get("artifact_id")
+            phase["input_tokens"] = event_data.get("input_tokens", 0)
+            phase["output_tokens"] = event_data.get("output_tokens", 0)
+            phase["total_tokens"] = event_data.get("total_tokens", 0)
+            phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
+            phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
+            phase["completed_at"] = event_data.get("completed_at")
+        else:
+            new_phase = PhaseDetail.completed(phase_id or "", phase_id or "", event_data)
+            phases.append(new_phase.to_dict())
 
-        # If phase not found (wasn't added by on_phase_started), add it now
-        if not phase_found:
-            phases.append(
-                {
-                    "phase_id": phase_id,
-                    "name": phase_id,  # Use ID as name if not known
-                    "status": "completed",
-                    "session_id": event_data.get("session_id"),
-                    "artifact_id": event_data.get("artifact_id"),
-                    "input_tokens": event_data.get("input_tokens", 0),
-                    "output_tokens": event_data.get("output_tokens", 0),
-                    "total_tokens": event_data.get("total_tokens", 0),
-                    "duration_seconds": event_data.get("duration_seconds", 0.0),
-                    "cost_usd": str(event_data.get("cost_usd", "0")),
-                    "started_at": None,
-                    "completed_at": event_data.get("completed_at"),
-                    "error_message": None,
-                }
-            )
-
-        # Update totals
+        # Aggregate totals
         input_tokens = event_data.get("input_tokens", 0)
         output_tokens = event_data.get("output_tokens", 0)
         duration = event_data.get("duration_seconds", 0.0)
         cost = Decimal(str(event_data.get("cost_usd", "0")))
-
-        existing["total_input_tokens"] = existing.get("total_input_tokens", 0) + input_tokens
-        existing["total_output_tokens"] = existing.get("total_output_tokens", 0) + output_tokens
-        existing["total_duration_seconds"] = existing.get("total_duration_seconds", 0.0) + duration
-        existing_cost = Decimal(str(existing.get("total_cost_usd", "0")))
-        existing["total_cost_usd"] = str(existing_cost + cost)
+        self._aggregate_totals(existing, input_tokens, output_tokens, duration, cost)
 
         # Add artifact ID if present
         artifact_id = event_data.get("artifact_id")
@@ -248,11 +237,11 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # Mark failed phase if specified
         failed_phase_id = event_data.get("failed_phase_id")
         if failed_phase_id:
-            for phase in existing.get("phases", []):
-                if phase.get("phase_id") == failed_phase_id:
-                    phase["status"] = "failed"
-                    phase["error_message"] = event_data.get("error_message")
-                    break
+            found = self._find_phase(existing.get("phases", []), failed_phase_id)
+            if found:
+                _, phase = found
+                phase["status"] = "failed"
+                phase["error_message"] = event_data.get("error_message")
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -276,10 +265,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # Mark current phase as cancelled
         phase_id = event_data.get("phase_id")
         if phase_id:
-            for phase in existing.get("phases", []):
-                if phase.get("phase_id") == phase_id:
-                    phase["status"] = "cancelled"
-                    break
+            found = self._find_phase(existing.get("phases", []), phase_id)
+            if found:
+                _, phase = found
+                phase["status"] = "cancelled"
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
@@ -305,10 +294,10 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         # Mark interrupted phase
         phase_id = event_data.get("phase_id")
         if phase_id:
-            for phase in existing.get("phases", []):
-                if phase.get("phase_id") == phase_id:
-                    phase["status"] = "interrupted"
-                    break
+            found = self._find_phase(existing.get("phases", []), phase_id)
+            if found:
+                _, phase = found
+                phase["status"] = "interrupted"
 
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 

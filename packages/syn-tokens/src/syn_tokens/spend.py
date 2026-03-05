@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Protocol
 
 from syn_tokens.models import DEFAULT_BUDGETS, SpendBudget, WorkflowType
+from syn_tokens.threshold import ThresholdMonitor
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -29,10 +30,6 @@ logger = logging.getLogger(__name__)
 
 # Redis key prefixes
 REDIS_BUDGET_PREFIX = "syn:budget:"
-
-# Alert thresholds
-ALERT_THRESHOLD_PERCENT = 80  # Alert at 80% budget usage
-CRITICAL_THRESHOLD_PERCENT = 95  # Critical at 95%
 
 # Claude pricing (per 1M tokens)
 CLAUDE_PRICING = {
@@ -60,18 +57,6 @@ class SpendCheckResult:
     allowed: bool
     reason: str | None = None
     budget: SpendBudget | None = None
-
-
-@dataclass
-class SpendAlert:
-    """Alert for budget threshold breach."""
-
-    execution_id: str
-    workflow_type: str
-    threshold: str  # "warning" or "critical"
-    metric: str  # "input_tokens", "output_tokens", "cost"
-    usage_percent: float
-    message: str
 
 
 class BudgetStore(Protocol):
@@ -207,15 +192,18 @@ class SpendTracker:
         self,
         store: BudgetStore,
         alert_callback: Callable[..., Awaitable[None]] | None = None,
+        threshold_monitor: ThresholdMonitor | None = None,
     ) -> None:
         """Initialize the spend tracker.
 
         Args:
             store: Budget storage backend
             alert_callback: Optional async callback for alerts
+            threshold_monitor: Optional threshold monitor (uses defaults if not provided)
         """
         self._store = store
         self._alert_callback = alert_callback
+        self._threshold_monitor = threshold_monitor or ThresholdMonitor()
 
     async def allocate_budget(
         self,
@@ -431,57 +419,8 @@ class SpendTracker:
 
     async def _check_thresholds(self, budget: SpendBudget) -> None:
         """Check if any thresholds are breached and send alerts."""
-        alerts = []
+        alerts = self._threshold_monitor.check(budget)
 
-        # Check input token threshold
-        if budget.input_usage_percent >= CRITICAL_THRESHOLD_PERCENT:
-            alerts.append(
-                SpendAlert(
-                    execution_id=budget.execution_id,
-                    workflow_type=budget.workflow_type.value,
-                    threshold="critical",
-                    metric="input_tokens",
-                    usage_percent=budget.input_usage_percent,
-                    message=f"Input tokens at {budget.input_usage_percent:.1f}% of budget",
-                )
-            )
-        elif budget.input_usage_percent >= ALERT_THRESHOLD_PERCENT:
-            alerts.append(
-                SpendAlert(
-                    execution_id=budget.execution_id,
-                    workflow_type=budget.workflow_type.value,
-                    threshold="warning",
-                    metric="input_tokens",
-                    usage_percent=budget.input_usage_percent,
-                    message=f"Input tokens at {budget.input_usage_percent:.1f}% of budget",
-                )
-            )
-
-        # Check cost threshold
-        if budget.cost_usage_percent >= CRITICAL_THRESHOLD_PERCENT:
-            alerts.append(
-                SpendAlert(
-                    execution_id=budget.execution_id,
-                    workflow_type=budget.workflow_type.value,
-                    threshold="critical",
-                    metric="cost",
-                    usage_percent=budget.cost_usage_percent,
-                    message=f"Cost at {budget.cost_usage_percent:.1f}% of budget (${budget.used_cost_usd:.2f})",
-                )
-            )
-        elif budget.cost_usage_percent >= ALERT_THRESHOLD_PERCENT:
-            alerts.append(
-                SpendAlert(
-                    execution_id=budget.execution_id,
-                    workflow_type=budget.workflow_type.value,
-                    threshold="warning",
-                    metric="cost",
-                    usage_percent=budget.cost_usage_percent,
-                    message=f"Cost at {budget.cost_usage_percent:.1f}% of budget (${budget.used_cost_usd:.2f})",
-                )
-            )
-
-        # Send alerts
         for alert in alerts:
             logger.warning(
                 "Spend alert: %s (execution=%s, threshold=%s, metric=%s)",
