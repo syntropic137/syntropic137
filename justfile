@@ -131,11 +131,7 @@ onboard-dev *flags:
     fi
 
     # 7b. Resolve 1Password secrets into env (so step 8 sees them)
-    if [ -f .env ]; then set -a && source .env && set +a; fi
-    case "${APP_ENVIRONMENT:-development}" in
-        development|production|beta|staging)
-            _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true ;;
-    esac
+    source scripts/resolve_env.sh
 
     # 8. GitHub App setup (runs by default — skip with --skip-github)
     #    Required for agent workflows to push code.
@@ -169,9 +165,7 @@ onboard-dev *flags:
     echo ""
     if echo "{{flags}}" | grep -q -- "--1password"; then
         # Re-source to pick up any values written during setup + resolve 1Password
-        if [ -f .env ]; then set -a && source .env && set +a; fi
-        if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
-        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
+        source scripts/resolve_env.sh
         # Derive vault name
         case "${APP_ENVIRONMENT:-development}" in
             development) _VAULT="syn137-dev" ;;
@@ -355,97 +349,109 @@ setup-stage stage:
 # Setup and run the FULL development environment (backend + frontend)
 # Always rebuilds images to pick up code changes
 dev: _workspace-check
-    @echo "🚀 Starting full dev stack..."
-    @echo ""
-    @just _env-check
-    @echo ""
-    @echo "1️⃣ Syncing Python dependencies..."
-    @uv sync
-    @echo ""
-    @echo "2️⃣ Building and starting Docker services..."
-    @{{compose_dev}} up -d --build
-    @echo ""
-    @echo "3️⃣ Waiting for services to be healthy..."
-    @sleep 5
-    @echo ""
-    @echo "4️⃣ Seeding workflows..."
-    @just seed-workflows || echo "   ⚠️ Seed skipped (workflows may already exist)"
-    @echo ""
-    @echo "5️⃣ Seeding triggers..."
-    @just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
-    @echo ""
-    @echo "6️⃣ Starting dashboard frontend..."
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
-    @cd apps/syn-dashboard-ui && pnpm run dev &
-    @sleep 3
-    @echo ""
-    @just _webhook-start
-    @echo ""
-    @echo "✅ Full development stack ready!"
-    @echo ""
-    @echo "   🌐 Frontend:     http://localhost:5173"
-    @echo "   🚀 Backend API:  http://localhost:8000"
-    @echo "   📊 API Docs:     http://localhost:8000/docs"
-    @echo "   💾 Database:     localhost:5432"
-    @echo "   📦 Event Store:  localhost:50051"
-    @echo "   🗂️  MinIO:        http://localhost:9001"
-    @echo ""
-    @echo "💡 Tips:"
-    @echo "   • View logs:     just dev-logs"
-    @echo "   • Stop stack:    just dev-stop"
-    @echo "   • Fresh start:   just dev-fresh"
-    @echo "   • Run CLI:       just cli --help"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🚀 Starting full dev stack..."
+    echo ""
+    just _env-check
+    echo ""
+
+    # Resolve .env + 1Password so Docker Compose inherits secrets
+    source scripts/resolve_env.sh
+
+    echo "1️⃣ Syncing Python dependencies..."
+    uv sync
+    echo ""
+    echo "2️⃣ Building and starting Docker services..."
+    {{compose_dev}} up -d --build
+    echo ""
+    echo "3️⃣ Waiting for services to be healthy..."
+    sleep 5
+    echo ""
+    echo "4️⃣ Seeding workflows..."
+    just seed-workflows || echo "   ⚠️ Seed skipped (workflows may already exist)"
+    echo ""
+    echo "5️⃣ Seeding triggers..."
+    just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
+    echo ""
+    echo "6️⃣ Starting dashboard frontend..."
+    lsof -ti:5173 | xargs kill 2>/dev/null || true
+    cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
+    cd apps/syn-dashboard-ui && pnpm run dev &
+    sleep 3
+    echo ""
+    just _webhook-start
+    echo ""
+    echo "✅ Full development stack ready!"
+    echo ""
+    echo "   🌐 Frontend:     http://localhost:5173"
+    echo "   🚀 Backend API:  http://localhost:8000"
+    echo "   📊 API Docs:     http://localhost:8000/docs"
+    echo "   💾 Database:     localhost:5432"
+    echo "   📦 Event Store:  localhost:50051"
+    echo "   🗂️  MinIO:        http://localhost:9001"
+    echo ""
+    echo "💡 Tips:"
+    echo "   • View logs:     just dev-logs"
+    echo "   • Stop stack:    just dev-stop"
+    echo "   • Fresh start:   just dev-fresh"
+    echo "   • Run CLI:       just cli --help"
 
 # Clean database, seed workflows, and start full dev stack (fresh start)
 # Fresh start: wipe all data and restart from scratch
 dev-fresh: _workspace-check
-    @echo "🧹 Fresh start: wiping databases and restarting full stack..."
-    @echo ""
-    @just _env-check
-    @echo ""
-    @echo "1️⃣ Stopping any existing processes..."
-    @-lsof -ti:5173 | xargs kill -9 2>/dev/null || true
-    @echo ""
-    @echo "2️⃣ Tearing down Docker services and volumes..."
-    @{{compose_dev}} down -v --remove-orphans
-    @echo ""
-    @echo "3️⃣ Syncing Python dependencies..."
-    @uv sync
-    @echo ""
-    @echo "4️⃣ Building and starting Docker services..."
-    @{{compose_dev}} up -d --build
-    @echo ""
-    @echo "5️⃣ Waiting for services to be healthy..."
-    @sleep 8
-    @echo ""
-    @echo "6️⃣ Running database migrations..."
-    @-just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
-    @echo ""
-    @echo "7️⃣ Seeding workflows..."
-    @just seed-workflows
-    @echo ""
-    @echo "8️⃣ Seeding triggers..."
-    @just seed-triggers
-    @echo ""
-    @echo "9️⃣ Starting dashboard frontend..."
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
-    @cd apps/syn-dashboard-ui && pnpm run dev &
-    @sleep 3
-    @echo ""
-    @just _webhook-start
-    @echo ""
-    @echo "✅ Fresh development environment ready!"
-    @echo ""
-    @echo "   🌐 Frontend:     http://localhost:5173"
-    @echo "   🚀 Backend API:  http://localhost:8000"
-    @echo "   📊 API Docs:     http://localhost:8000/docs"
-    @echo "   💾 Database:     localhost:5432"
-    @echo "   📦 Event Store:  localhost:50051"
-    @echo "   🗂️  MinIO:        http://localhost:9001"
-    @echo ""
-    @echo "💡 All data has been wiped. Workflows have been re-seeded."
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🧹 Fresh start: wiping databases and restarting full stack..."
+    echo ""
+    just _env-check
+    echo ""
+
+    # Resolve .env + 1Password so Docker Compose inherits secrets
+    source scripts/resolve_env.sh
+
+    echo "1️⃣ Stopping any existing processes..."
+    lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+    echo ""
+    echo "2️⃣ Tearing down Docker services and volumes..."
+    {{compose_dev}} down -v --remove-orphans
+    echo ""
+    echo "3️⃣ Syncing Python dependencies..."
+    uv sync
+    echo ""
+    echo "4️⃣ Building and starting Docker services..."
+    {{compose_dev}} up -d --build
+    echo ""
+    echo "5️⃣ Waiting for services to be healthy..."
+    sleep 8
+    echo ""
+    echo "6️⃣ Running database migrations..."
+    just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
+    echo ""
+    echo "7️⃣ Seeding workflows..."
+    just seed-workflows
+    echo ""
+    echo "8️⃣ Seeding triggers..."
+    just seed-triggers
+    echo ""
+    echo "9️⃣ Starting dashboard frontend..."
+    lsof -ti:5173 | xargs kill 2>/dev/null || true
+    cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
+    cd apps/syn-dashboard-ui && pnpm run dev &
+    sleep 3
+    echo ""
+    just _webhook-start
+    echo ""
+    echo "✅ Fresh development environment ready!"
+    echo ""
+    echo "   🌐 Frontend:     http://localhost:5173"
+    echo "   🚀 Backend API:  http://localhost:8000"
+    echo "   📊 API Docs:     http://localhost:8000/docs"
+    echo "   💾 Database:     localhost:5432"
+    echo "   📦 Event Store:  localhost:50051"
+    echo "   🗂️  MinIO:        http://localhost:9001"
+    echo ""
+    echo "💡 All data has been wiped. Workflows have been re-seeded."
 
 # Stop development environment (preserves data)
 dev-stop:
@@ -1238,14 +1244,7 @@ proxy-start:
 # Check .env for common misconfigurations and warn loudly
 _env-check:
     #!/usr/bin/env bash
-    if [ -f .env ]; then set -a && source .env && set +a; fi
-    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
-    # If APP_ENVIRONMENT maps to a known vault, resolve 1Password secrets
-    # so the checks below see values stored in 1Password, not just .env.
-    case "${APP_ENVIRONMENT:-}" in
-        development|production|beta|staging)
-            _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true ;;
-    esac
+    source scripts/resolve_env.sh
     WARNINGS=0
     ERRORS=0
 
