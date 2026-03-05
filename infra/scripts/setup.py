@@ -2139,14 +2139,21 @@ def _print_op_summary(ctx: SetupContext) -> None:
         "echo ''\n"
         "echo '✅ Secrets saved to 1Password.'\n"
         "\n"
-        "# --- Clean secret values from .env (keep keys with empty values) ---\n"
-        "echo '🧹 Cleaning secret values from .env...'\n"
-        "_SECRETS_TO_CLEAR=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET"
-        " ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN)\n"
-        'for _KEY in "${_SECRETS_TO_CLEAR[@]}"; do\n'
+        "# --- Clean secret values from .env files (keep keys with empty values) ---\n"
+        "echo '🧹 Cleaning secret values from .env files...'\n"
+        "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET"
+        " ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN)\n"
+        'for _KEY in "${_ROOT_SECRETS[@]}"; do\n'
         '  if grep -q "^${_KEY}=" .env 2>/dev/null; then\n'
         "    sed -i '' \"s|^${_KEY}=.*|${_KEY}=|\" .env\n"
-        '    echo "   cleared: ${_KEY}"\n'
+        '    echo "   cleared: ${_KEY} (.env)"\n'
+        "  fi\n"
+        "done\n"
+        "_INFRA_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN)\n"
+        'for _KEY in "${_INFRA_SECRETS[@]}"; do\n'
+        '  if grep -q "^${_KEY}=" infra/.env 2>/dev/null; then\n'
+        "    sed -i '' \"s|^${_KEY}=.*|${_KEY}=|\" infra/.env\n"
+        '    echo "   cleared: ${_KEY} (infra/.env)"\n'
         "  fi\n"
         "done\n"
         "echo ''\n"
