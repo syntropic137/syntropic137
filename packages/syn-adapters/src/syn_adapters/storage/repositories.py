@@ -73,6 +73,9 @@ _workflow_execution_repository: RepositoryAdapter[WorkflowExecutionAggregate] | 
 _session_repository: RepositoryAdapter[AgentSessionAggregate] | None = None
 _artifact_repository: RepositoryAdapter[ArtifactAggregate] | None = None
 _trigger_repository: RepositoryAdapter[Any] | None = None
+_organization_repository: RepositoryAdapter[Any] | None = None
+_system_repository: RepositoryAdapter[Any] | None = None
+_repo_repository: RepositoryAdapter[Any] | None = None
 
 
 def _get_repository_factory() -> Any:
@@ -286,6 +289,120 @@ def get_trigger_repository() -> Any:
     return _trigger_repository
 
 
+def get_organization_repository() -> Any:
+    """Get an OrganizationAggregate repository.
+
+    For TEST: Returns in-memory repository
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
+
+    Returns:
+        Repository for OrganizationAggregate with get_by_id/save/exists interface.
+    """
+    settings = get_settings()
+
+    if settings.is_test:
+        from syn_adapters.storage.in_memory import (
+            get_organization_repository as get_inmem_org_repo,
+        )
+
+        return get_inmem_org_repo()
+
+    global _organization_repository
+
+    if _organization_repository is not None:
+        return _organization_repository
+
+    from syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate import (
+        OrganizationAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        OrganizationAggregate,
+        aggregate_type="Organization",
+    )
+    _organization_repository = RepositoryAdapter(sdk_repo)
+
+    logger.debug("Created OrganizationAggregate repository (SDK wrapped)")
+    return _organization_repository
+
+
+def get_system_repository() -> Any:
+    """Get a SystemAggregate repository.
+
+    For TEST: Returns in-memory repository
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
+
+    Returns:
+        Repository for SystemAggregate with get_by_id/save/exists interface.
+    """
+    settings = get_settings()
+
+    if settings.is_test:
+        from syn_adapters.storage.in_memory import (
+            get_system_repository as get_inmem_sys_repo,
+        )
+
+        return get_inmem_sys_repo()
+
+    global _system_repository
+
+    if _system_repository is not None:
+        return _system_repository
+
+    from syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate import (
+        SystemAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        SystemAggregate,
+        aggregate_type="System",
+    )
+    _system_repository = RepositoryAdapter(sdk_repo)
+
+    logger.debug("Created SystemAggregate repository (SDK wrapped)")
+    return _system_repository
+
+
+def get_repo_repository() -> Any:
+    """Get a RepoAggregate repository.
+
+    For TEST: Returns in-memory repository
+    For DEV/PROD: Returns RepositoryAdapter wrapping EventStoreRepository
+
+    Returns:
+        Repository for RepoAggregate with get_by_id/save/exists interface.
+    """
+    settings = get_settings()
+
+    if settings.is_test:
+        from syn_adapters.storage.in_memory import (
+            get_repo_repository as get_inmem_repo_repo,
+        )
+
+        return get_inmem_repo_repo()
+
+    global _repo_repository
+
+    if _repo_repository is not None:
+        return _repo_repository
+
+    from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import (
+        RepoAggregate,
+    )
+
+    factory = _get_repository_factory()
+    sdk_repo = factory.create_repository(
+        RepoAggregate,
+        aggregate_type="Repo",
+    )
+    _repo_repository = RepositoryAdapter(sdk_repo)
+
+    logger.debug("Created RepoAggregate repository (SDK wrapped)")
+    return _repo_repository
+
+
 def reset_repositories() -> None:
     """Reset all cached repositories (for testing).
 
@@ -297,12 +414,18 @@ def reset_repositories() -> None:
         _workflow_execution_repository, \
         _session_repository, \
         _artifact_repository, \
-        _trigger_repository
+        _trigger_repository, \
+        _organization_repository, \
+        _system_repository, \
+        _repo_repository
     _workflow_repository = None
     _workflow_execution_repository = None
     _session_repository = None
     _artifact_repository = None
     _trigger_repository = None
+    _organization_repository = None
+    _system_repository = None
+    _repo_repository = None
 
     # Also reset in-memory repos if we're in test mode
     settings = get_settings()

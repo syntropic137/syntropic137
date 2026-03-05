@@ -361,6 +361,111 @@ class InMemoryArtifactRepository:
         self._artifacts = {}
 
 
+class InMemoryOrganizationRepository:
+    """In-memory repository for Organization aggregates.
+
+    Used for testing ONLY.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
+    """
+
+    def __init__(self) -> None:
+        _assert_test_environment()
+        self._organizations: dict[str, Any] = {}
+
+    async def save(self, aggregate: Any) -> None:
+        """Save the organization aggregate."""
+        if aggregate.id:
+            self._organizations[str(aggregate.id)] = aggregate
+
+    async def get_by_id(self, organization_id: str) -> Any:
+        """Get organization by ID."""
+        return self._organizations.get(organization_id)
+
+    async def exists(self, organization_id: str) -> bool:
+        """Check if organization exists."""
+        return organization_id in self._organizations
+
+    def get_all(self) -> list[Any]:
+        """Get all organizations."""
+        return list(self._organizations.values())
+
+    def clear(self) -> None:
+        """Clear all organizations."""
+        self._organizations = {}
+
+
+class InMemorySystemRepository:
+    """In-memory repository for System aggregates.
+
+    Used for testing ONLY.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
+    """
+
+    def __init__(self) -> None:
+        _assert_test_environment()
+        self._systems: dict[str, Any] = {}
+
+    async def save(self, aggregate: Any) -> None:
+        """Save the system aggregate."""
+        if aggregate.id:
+            self._systems[str(aggregate.id)] = aggregate
+
+    async def get_by_id(self, system_id: str) -> Any:
+        """Get system by ID."""
+        return self._systems.get(system_id)
+
+    async def exists(self, system_id: str) -> bool:
+        """Check if system exists."""
+        return system_id in self._systems
+
+    def get_all(self) -> list[Any]:
+        """Get all systems."""
+        return list(self._systems.values())
+
+    def clear(self) -> None:
+        """Clear all systems."""
+        self._systems = {}
+
+
+class InMemoryRepoRepository:
+    """In-memory repository for Repo aggregates.
+
+    Used for testing ONLY.
+
+    Raises:
+        InMemoryStorageError: If instantiated outside test environment.
+    """
+
+    def __init__(self) -> None:
+        _assert_test_environment()
+        self._repos: dict[str, Any] = {}
+
+    async def save(self, aggregate: Any) -> None:
+        """Save the repo aggregate."""
+        if aggregate.id:
+            self._repos[str(aggregate.id)] = aggregate
+
+    async def get_by_id(self, repo_id: str) -> Any:
+        """Get repo by ID."""
+        return self._repos.get(repo_id)
+
+    async def exists(self, repo_id: str) -> bool:
+        """Check if repo exists."""
+        return repo_id in self._repos
+
+    def get_all(self) -> list[Any]:
+        """Get all repos."""
+        return list(self._repos.values())
+
+    def clear(self) -> None:
+        """Clear all repos."""
+        self._repos = {}
+
+
 class InMemoryWorkflowExecutionRepository:
     """In-memory repository for WorkflowExecution aggregates.
 
@@ -409,6 +514,9 @@ _workflow_execution_repository: InMemoryWorkflowExecutionRepository | None = Non
 _event_publisher: InMemoryEventPublisher | None = None
 _session_repository: InMemorySessionRepository | None = None
 _artifact_repository: InMemoryArtifactRepository | None = None
+_organization_repository: InMemoryOrganizationRepository | None = None
+_system_repository: InMemorySystemRepository | None = None
+_repo_repository: InMemoryRepoRepository | None = None
 
 
 def get_event_store() -> InMemoryEventStore:
@@ -483,6 +591,42 @@ def get_workflow_execution_repository() -> InMemoryWorkflowExecutionRepository:
     return _workflow_execution_repository
 
 
+def get_organization_repository() -> InMemoryOrganizationRepository:
+    """Get the global in-memory organization repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _organization_repository
+    if _organization_repository is None:
+        _organization_repository = InMemoryOrganizationRepository()
+    return _organization_repository
+
+
+def get_system_repository() -> InMemorySystemRepository:
+    """Get the global in-memory system repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _system_repository
+    if _system_repository is None:
+        _system_repository = InMemorySystemRepository()
+    return _system_repository
+
+
+def get_repo_repository() -> InMemoryRepoRepository:
+    """Get the global in-memory repo repository.
+
+    Raises:
+        InMemoryStorageError: If not in test environment.
+    """
+    global _repo_repository
+    if _repo_repository is None:
+        _repo_repository = InMemoryRepoRepository()
+    return _repo_repository
+
+
 def reset_storage() -> None:
     """Reset all storage (for testing between tests).
 
@@ -498,3 +642,9 @@ def reset_storage() -> None:
         _artifact_repository.clear()
     if _workflow_execution_repository is not None:
         _workflow_execution_repository.clear()
+    if _organization_repository is not None:
+        _organization_repository.clear()
+    if _system_repository is not None:
+        _system_repository.clear()
+    if _repo_repository is not None:
+        _repo_repository.clear()

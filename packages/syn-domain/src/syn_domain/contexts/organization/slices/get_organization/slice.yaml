@@ -1,0 +1,5 @@
+id: get-organization
+name: Get Organization
+description: Query slice to get a single organization by ID.
+type: query
+context: organization

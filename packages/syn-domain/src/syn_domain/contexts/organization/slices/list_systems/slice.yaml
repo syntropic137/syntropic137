@@ -1,0 +1,5 @@
+id: list-systems
+name: List Systems
+description: Query slice to list systems with optional organization filter.
+type: query
+context: organization
