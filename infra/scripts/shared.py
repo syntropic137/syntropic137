@@ -66,6 +66,18 @@ ENV_GITHUB_PRIVATE_KEY = "SYN_GITHUB_PRIVATE_KEY"
 ENV_GITHUB_WEBHOOK_SECRET = "SYN_GITHUB_WEBHOOK_SECRET"
 
 # ---------------------------------------------------------------------------
+# API routing constants
+# ---------------------------------------------------------------------------
+
+# The webhook route as registered in the FastAPI app (no gateway prefix).
+# Source of truth: apps/syn-api/src/syn_api/routes/webhooks.py (prefix="/webhooks")
+WEBHOOK_ROUTE = "/webhooks/github"
+
+# Gateway prefix stripped by nginx in selfhost mode.
+# Source of truth: infra/docker/images/gateway/docker-entrypoint.sh
+GATEWAY_API_PREFIX = "/api/v1"
+
+# ---------------------------------------------------------------------------
 # Compose file stacking (single source of truth)
 # ---------------------------------------------------------------------------
 

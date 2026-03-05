@@ -67,7 +67,11 @@ class ServiceStatus:
 
 
 def _container_prefix() -> str:
-    """Container name prefix matching docker-compose.selfhost.yaml."""
+    """Container name prefix for selfhost stack (docker-compose.selfhost.yaml).
+
+    This script is only invoked by ``just selfhost-*`` recipes.
+    Dev containers use a different prefix (``syn-``) and do not use this script.
+    """
     return "syn137-"
 
 

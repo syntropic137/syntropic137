@@ -357,7 +357,7 @@ When using a Cloudflare Tunnel, you can add a Cloudflare Access policy for addit
 The resolution chain runs when you execute any `just selfhost-*` recipe:
 
 ```
-APP_ENVIRONMENT (from .env)
+APP_ENVIRONMENT (from root .env — see § Environment Files above)
   -> derive vault name (e.g. development → syn137-dev)
   -> macOS Keychain (service account token)
     -> infra/scripts/selfhost-env.sh (sources .env, loads token)

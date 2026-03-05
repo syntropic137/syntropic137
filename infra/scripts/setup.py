@@ -74,6 +74,7 @@ from shared import (
     ENV_GITHUB_WEBHOOK_SECRET,
     ENV_INCLUDE_OP_CLI,
     ENV_SYN_DOMAIN,
+    GATEWAY_API_PREFIX,
     INFRA_DIR,
     INFRA_ENV_FILE,
     PORT_UI,
@@ -82,6 +83,7 @@ from shared import (
     ROOT_ENV_FILE,
     SCRIPTS_DIR,
     SECRETS_DIR,
+    WEBHOOK_ROUTE,
     compose_file_args,
     format_access_urls,
     parse_env_file,
@@ -1190,8 +1192,9 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         domain = ctx.syn_domain.rstrip("/")
         if not domain.startswith("http"):
             domain = f"https://{domain}"
-        # Dev tunnel goes direct to API; selfhost goes through nginx gateway
-        webhook_path = "/webhooks/github" if is_dev else "/api/v1/webhooks/github"
+        # Dev tunnel goes direct to API; selfhost routes through nginx
+        # which strips the /api/v1 prefix before proxying.
+        webhook_path = WEBHOOK_ROUTE if is_dev else f"{GATEWAY_API_PREFIX}{WEBHOOK_ROUTE}"
         ctx.webhook_url = f"{domain}{webhook_path}"
         ok(f"Webhook URL: {ctx.webhook_url}")
     else:
