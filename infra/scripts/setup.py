@@ -2146,14 +2146,14 @@ def _print_op_summary(ctx: SetupContext) -> None:
         " ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN)\n"
         'for _KEY in "${_ROOT_SECRETS[@]}"; do\n'
         '  if grep -q "^${_KEY}=" .env 2>/dev/null; then\n'
-        "    sed -i '' \"s|^${_KEY}=.*|${_KEY}=|\" .env\n"
+        "    sed -i '' \"s|^${_KEY}=.*|# ${_KEY}= # managed by 1Password|\" .env\n"
         '    echo "   cleared: ${_KEY} (.env)"\n'
         "  fi\n"
         "done\n"
         "_INFRA_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN)\n"
         'for _KEY in "${_INFRA_SECRETS[@]}"; do\n'
         '  if grep -q "^${_KEY}=" infra/.env 2>/dev/null; then\n'
-        "    sed -i '' \"s|^${_KEY}=.*|${_KEY}=|\" infra/.env\n"
+        "    sed -i '' \"s|^${_KEY}=.*|# ${_KEY}= # managed by 1Password|\" infra/.env\n"
         '    echo "   cleared: ${_KEY} (infra/.env)"\n'
         "  fi\n"
         "done\n"
