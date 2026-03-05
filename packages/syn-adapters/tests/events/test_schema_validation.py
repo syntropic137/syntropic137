@@ -1,4 +1,4 @@
-"""Tests for schema validation in AgentEventStore.
+"""Tests for schema validation in EventStoreSchema.
 
 Tests both positive (schema matches) and negative (schema mismatch) cases.
 
@@ -12,17 +12,22 @@ from unittest.mock import AsyncMock
 import pytest
 
 from syn_adapters.events.models import EXPECTED_COLUMNS
-from syn_adapters.events.store import AgentEventStore, SchemaValidationError
+from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError
+
+# Verify backward-compatible import path
+from syn_adapters.events.store import SchemaValidationError as StoreSchemaValidationError
+
+assert SchemaValidationError is StoreSchemaValidationError
 
 
 @pytest.mark.integration
 class TestSchemaValidation:
-    """Tests for _validate_schema method."""
+    """Tests for EventStoreSchema.validate method."""
 
     @pytest.fixture
-    def store(self) -> AgentEventStore:
-        """Create a store instance."""
-        return AgentEventStore("postgresql://test:test@localhost/test")
+    def schema(self) -> EventStoreSchema:
+        """Create an EventStoreSchema instance."""
+        return EventStoreSchema()
 
     @pytest.fixture
     def mock_conn(self) -> AsyncMock:
@@ -31,7 +36,9 @@ class TestSchemaValidation:
 
     # ==================== POSITIVE TESTS ====================
 
-    async def test_valid_schema_passes(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
+    async def test_valid_schema_passes(
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
+    ) -> None:
         """Should pass when schema matches expected columns."""
         # Mock DB returns matching schema (simplified - all text types)
         mock_conn.fetch.return_value = [
@@ -44,10 +51,10 @@ class TestSchemaValidation:
         ]
 
         # Should not raise
-        await store._validate_schema(mock_conn)
+        await schema.validate(mock_conn)
 
     async def test_valid_schema_with_extra_columns(
-        self, store: AgentEventStore, mock_conn: AsyncMock
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
     ) -> None:
         """Should pass when DB has extra columns beyond expected."""
         mock_conn.fetch.return_value = [
@@ -61,12 +68,12 @@ class TestSchemaValidation:
         ]
 
         # Should not raise - extra columns are allowed
-        await store._validate_schema(mock_conn)
+        await schema.validate(mock_conn)
 
     # ==================== NEGATIVE TESTS ====================
 
     async def test_missing_column_raises(
-        self, store: AgentEventStore, mock_conn: AsyncMock
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
     ) -> None:
         """Should raise SchemaValidationError when a column is missing."""
         # Missing 'session_id' column
@@ -80,11 +87,11 @@ class TestSchemaValidation:
         ]
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await store._validate_schema(mock_conn)
+            await schema.validate(mock_conn)
 
         assert "Missing column: session_id" in str(exc_info.value)
 
-    async def test_wrong_type_raises(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
+    async def test_wrong_type_raises(self, schema: EventStoreSchema, mock_conn: AsyncMock) -> None:
         """Should raise SchemaValidationError when column type is wrong."""
         # session_id should be text, not uuid
         mock_conn.fetch.return_value = [
@@ -97,14 +104,14 @@ class TestSchemaValidation:
         ]
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await store._validate_schema(mock_conn)
+            await schema.validate(mock_conn)
 
         assert "session_id" in str(exc_info.value)
         assert "expected 'text'" in str(exc_info.value)
         assert "got 'uuid'" in str(exc_info.value)
 
     async def test_multiple_errors_reported(
-        self, store: AgentEventStore, mock_conn: AsyncMock
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
     ) -> None:
         """Should report all mismatches, not just the first one."""
         # Multiple issues: missing column AND wrong type
@@ -118,18 +125,18 @@ class TestSchemaValidation:
         ]
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await store._validate_schema(mock_conn)
+            await schema.validate(mock_conn)
 
         error_msg = str(exc_info.value)
         assert "Missing column: session_id" in error_msg
         assert "event_type" in error_msg
 
-    async def test_empty_table_raises(self, store: AgentEventStore, mock_conn: AsyncMock) -> None:
+    async def test_empty_table_raises(self, schema: EventStoreSchema, mock_conn: AsyncMock) -> None:
         """Should raise SchemaValidationError when table has no columns (doesn't exist)."""
         mock_conn.fetch.return_value = []
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await store._validate_schema(mock_conn)
+            await schema.validate(mock_conn)
 
         # Should report all expected columns as missing
         error_msg = str(exc_info.value)
@@ -137,7 +144,7 @@ class TestSchemaValidation:
             assert f"Missing column: {col}" in error_msg
 
     async def test_timestamp_without_tz_passes(
-        self, store: AgentEventStore, mock_conn: AsyncMock
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
     ) -> None:
         """Timestamp without tz passes because validation uses first-word match.
 
@@ -154,10 +161,10 @@ class TestSchemaValidation:
         ]
 
         # Passes because 'timestamp without time zone' starts with 'timestamp'
-        await store._validate_schema(mock_conn)
+        await schema.validate(mock_conn)
 
     async def test_completely_wrong_time_type_raises(
-        self, store: AgentEventStore, mock_conn: AsyncMock
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
     ) -> None:
         """Should catch when time column is completely wrong type."""
         mock_conn.fetch.return_value = [
@@ -170,12 +177,12 @@ class TestSchemaValidation:
         ]
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await store._validate_schema(mock_conn)
+            await schema.validate(mock_conn)
 
         assert "time" in str(exc_info.value)
 
     async def test_json_vs_jsonb_mismatch_raises(
-        self, store: AgentEventStore, mock_conn: AsyncMock
+        self, schema: EventStoreSchema, mock_conn: AsyncMock
     ) -> None:
         """Should catch json vs jsonb mismatch."""
         mock_conn.fetch.return_value = [
@@ -188,7 +195,7 @@ class TestSchemaValidation:
         ]
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await store._validate_schema(mock_conn)
+            await schema.validate(mock_conn)
 
         assert "data" in str(exc_info.value)
         assert "jsonb" in str(exc_info.value)

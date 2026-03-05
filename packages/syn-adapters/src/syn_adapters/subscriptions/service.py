@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
 
+from syn_adapters.subscriptions.position_checkpoint import PositionCheckpoint
+
 if TYPE_CHECKING:
     from event_sourcing import EventStoreClient
 
@@ -51,6 +53,7 @@ class EventSubscriptionService:
         projection_store: ProjectionStoreProtocol,
         batch_size: int = 100,
         position_save_interval: int = 10,
+        checkpoint: PositionCheckpoint | None = None,
     ) -> None:
         """Initialize the subscription service.
 
@@ -60,12 +63,16 @@ class EventSubscriptionService:
             projection_store: Store for persisting subscription position.
             batch_size: Number of events to process before saving position.
             position_save_interval: Seconds between position saves during live.
+            checkpoint: Optional position checkpoint for persistence and drift detection.
         """
         self._event_store = event_store_client
         self._projection_manager = projection_manager
         self._projection_store = projection_store
         self._batch_size = batch_size
         self._position_save_interval = position_save_interval
+        self._checkpoint = checkpoint or PositionCheckpoint(
+            projection_store, SUBSCRIPTION_POSITION_KEY
+        )
 
         # State
         self._running = False
@@ -223,105 +230,14 @@ class EventSubscriptionService:
         )
 
     async def _load_position(self) -> None:
-        """Load last processed position from projection store.
-
-        Also validates for position drift - when the saved position exists
-        but projection data is missing (e.g., after a database reset).
-        """
-        try:
-            position = await self._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
-            if position is not None:
-                self._last_position = position
-                logger.info(
-                    "Loaded subscription position",
-                    extra={"position": self._last_position},
-                )
-
-                # Check for position drift by validating projections have data
-                await self._validate_position_consistency()
-            else:
-                self._last_position = 0
-                logger.info("No previous subscription position found, starting from 0")
-        except Exception as e:
-            logger.warning(
-                "Failed to load subscription position, starting from 0",
-                extra={"error": str(e)},
-            )
-            self._last_position = 0
-
-    async def _validate_position_consistency(self) -> None:
-        """Validate that position is consistent with projection data.
-
-        Detects position drift scenarios:
-        1. Position saved but projection store was reset (different container/DB)
-        2. Position saved but projections failed to persist
-        3. Event store and projection store using different backends
-
-        Logs a CRITICAL warning if drift is detected but does NOT reset position
-        automatically - this requires operator intervention to decide:
-        - Reset position to 0 (reprocess all events)
-        - Keep position (skip historical events)
-        """
-        if self._last_position == 0:
-            return  # Nothing to validate
-
-        # Try to get some projection data to verify consistency
-        # We check if the workflow_executions projection has any data
-        try:
-            executions = await self._projection_store.get_all("workflow_executions")
-            sessions = await self._projection_store.get_all("agent_sessions")
-
-            total_records = len(executions) + len(sessions)
-
-            if total_records == 0 and self._last_position > 10:
-                # We have a significant position but no projection data
-                # This is a strong indicator of position drift
-                logger.critical(
-                    "[SUBSCRIPTION] ⚠️ POSITION DRIFT DETECTED! "
-                    "Saved position exists but projection data is empty. "
-                    "This indicates the projection store was reset while event store wasn't. "
-                    "Consider running 'just dev-fresh' to reset both stores, "
-                    "or manually reset the subscription position to 0.",
-                    extra={
-                        "saved_position": self._last_position,
-                        "workflow_executions_count": len(executions),
-                        "agent_sessions_count": len(sessions),
-                        "action_required": "Operator intervention needed",
-                    },
-                )
-            elif total_records > 0:
-                logger.info(
-                    "[SUBSCRIPTION] ✅ Position consistency check passed",
-                    extra={
-                        "saved_position": self._last_position,
-                        "workflow_executions_count": len(executions),
-                        "agent_sessions_count": len(sessions),
-                    },
-                )
-        except Exception as e:
-            # If we can't check, log a warning but continue
-            logger.warning(
-                "[SUBSCRIPTION] ⚠️ Could not validate position consistency",
-                extra={"error": str(e), "saved_position": self._last_position},
-            )
+        """Load last processed position from projection store."""
+        self._last_position = await self._checkpoint.load()
+        await self._checkpoint.validate_consistency(self._last_position)
 
     async def _save_position(self) -> None:
         """Save current position to projection store."""
-        try:
-            await self._projection_store.set_position(
-                SUBSCRIPTION_POSITION_KEY,
-                self._last_position,
-            )
-            self._last_position_save = datetime.now(UTC)
-            logger.debug(
-                "Saved subscription position",
-                extra={"position": self._last_position},
-            )
-        except Exception as e:
-            logger.error(
-                "Failed to save subscription position",
-                extra={"error": str(e), "position": self._last_position},
-            )
+        await self._checkpoint.save(self._last_position)
+        self._last_position_save = self._checkpoint.last_save_time
 
     async def _subscription_loop(self) -> None:
         """Main subscription loop with automatic reconnection.

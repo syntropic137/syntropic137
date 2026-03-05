@@ -13,11 +13,13 @@ from syn_adapters.subscriptions.coordinator_service import (
     RealTimeProjectionAdapter,
     create_coordinator_service,
 )
+from syn_adapters.subscriptions.position_checkpoint import PositionCheckpoint
 from syn_adapters.subscriptions.service import EventSubscriptionService
 
 __all__ = [
     "CoordinatorSubscriptionService",
     "EventSubscriptionService",
+    "PositionCheckpoint",
     "RealTimeProjectionAdapter",
     "create_coordinator_service",
 ]

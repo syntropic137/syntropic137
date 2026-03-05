@@ -12,6 +12,8 @@ from rich.table import Table
 
 from syn_cli._output import console, format_cost, format_tokens, print_error
 from syn_cli.client import get_client
+from syn_cli.commands._workflow_models import ExecutionRunResponse, WorkflowDetail
+from syn_cli.commands._workflow_resolver import WorkflowResolver
 
 app = typer.Typer(
     name="workflow",
@@ -161,28 +163,8 @@ def show_workflow(
     """Show details of a specific workflow."""
     try:
         with get_client() as client:
-            # Get all workflows for partial ID matching
-            list_resp = client.get("/workflows")
-            if list_resp.status_code != 200:
-                print_error("Failed to list workflows")
-                raise typer.Exit(1)
-
-            workflows = list_resp.json().get("workflows", [])
-            matching = [w for w in workflows if w["id"].startswith(workflow_id)]
-
-            if not matching:
-                print_error(f"No workflow found matching: {workflow_id}")
-                raise typer.Exit(1)
-
-            if len(matching) > 1:
-                console.print(f"[yellow]Multiple workflows match '{workflow_id}':[/yellow]")
-                for w in matching[:5]:
-                    console.print(f"  {w['id'][:12]}... - {w['name']}")
-                console.print("[dim]Please provide a more specific ID[/dim]")
-                raise typer.Exit(1)
-
-            full_id = matching[0]["id"]
-            resp = client.get(f"/workflows/{full_id}")
+            wf = WorkflowResolver(client).resolve(workflow_id)
+            resp = client.get(f"/workflows/{wf.id}")
     except typer.Exit:
         raise
     except Exception:
@@ -193,16 +175,15 @@ def show_workflow(
         print_error(f"Workflow not found: {resp.json().get('detail', '')}")
         raise typer.Exit(1)
 
-    detail = resp.json()
+    detail = WorkflowDetail(**resp.json())
     console.print("\n[bold]Workflow Details[/bold]")
-    console.print(f"  [dim]ID:[/dim] {detail['id']}")
-    console.print(f"  [dim]Name:[/dim] [cyan]{detail['name']}[/cyan]")
-    console.print(f"  [dim]Type:[/dim] {detail['workflow_type']}")
-    console.print(f"  [dim]Classification:[/dim] {detail.get('classification', '')}")
-    phases = detail.get("phases", [])
-    if phases:
-        console.print(f"\n  [bold]Phases ({len(phases)}):[/bold]")
-        for phase in phases:
+    console.print(f"  [dim]ID:[/dim] {detail.id}")
+    console.print(f"  [dim]Name:[/dim] [cyan]{detail.name}[/cyan]")
+    console.print(f"  [dim]Type:[/dim] {detail.workflow_type}")
+    console.print(f"  [dim]Classification:[/dim] {detail.classification}")
+    if detail.phases:
+        console.print(f"\n  [bold]Phases ({len(detail.phases)}):[/bold]")
+        for phase in detail.phases:
             console.print(f"    - {phase.get('name', 'unnamed')}")
     else:
         console.print("\n  [dim]No phases defined[/dim]")
@@ -269,30 +250,10 @@ def run_workflow(
 
     try:
         with get_client() as client:
-            # Resolve partial ID
-            list_resp = client.get("/workflows")
-            if list_resp.status_code != 200:
-                print_error("Failed to list workflows")
-                raise typer.Exit(1)
-
-            workflows = list_resp.json().get("workflows", [])
-            matching = [w for w in workflows if w["id"].startswith(workflow_id)]
-
-            if not matching:
-                print_error(f"No workflow found matching: {workflow_id}")
-                console.print("[dim]Use 'syn workflow list' to see available workflows[/dim]")
-                raise typer.Exit(1)
-
-            if len(matching) > 1:
-                console.print(f"[yellow]Multiple workflows match '{workflow_id}':[/yellow]")
-                for w in matching[:5]:
-                    console.print(f"  {w['id'][:12]}... - {w['name']}")
-                console.print("[dim]Please provide a more specific ID[/dim]")
-                raise typer.Exit(1)
-
-            full_workflow_id = matching[0]["id"]
-            workflow_name = matching[0]["name"]
-            phase_count = matching[0].get("phase_count", 0)
+            wf = WorkflowResolver(client).resolve(workflow_id)
+            full_workflow_id = wf.id
+            workflow_name = wf.name
+            phase_count = wf.phase_count
 
             if not quiet:
                 console.print()
@@ -333,13 +294,12 @@ def run_workflow(
         print_error(exec_resp.json().get("detail", f"HTTP {exec_resp.status_code}"))
         raise typer.Exit(1)
 
-    result = exec_resp.json()
-    status = result.get("status", "unknown")
-    if status == "started":
+    result = ExecutionRunResponse(**exec_resp.json())
+    if result.status == "started":
         console.print("\n[bold green]Workflow execution started[/bold green]")
-        console.print(f"  Execution ID: {result.get('execution_id', 'unknown')}")
+        console.print(f"  Execution ID: {result.execution_id}")
     else:
-        console.print(f"\n[yellow]Status: {status}[/yellow]")
+        console.print(f"\n[yellow]Status: {result.status}[/yellow]")
 
 
 @app.command("status")
@@ -352,31 +312,17 @@ def workflow_status(
     """Show execution history for a workflow."""
     try:
         with get_client() as client:
-            # Resolve partial ID
-            list_resp = client.get("/workflows")
-            if list_resp.status_code != 200:
-                print_error("Failed to list workflows")
-                raise typer.Exit(1)
-
-            workflows = list_resp.json().get("workflows", [])
-            matching = [w for w in workflows if w["id"].startswith(workflow_id)]
-
-            if not matching:
-                print_error(f"No workflow found matching: {workflow_id}")
-                raise typer.Exit(1)
-
-            full_id = matching[0]["id"]
-            workflow_name = matching[0]["name"]
+            wf = WorkflowResolver(client).resolve(workflow_id)
 
             console.print(
                 Panel(
-                    f"[bold]{workflow_name}[/bold]\n[dim]ID: {full_id}[/dim]",
+                    f"[bold]{wf.name}[/bold]\n[dim]ID: {wf.id}[/dim]",
                     title="[cyan]Workflow Status[/cyan]",
                     border_style="cyan",
                 )
             )
 
-            exec_resp = client.get(f"/workflows/{full_id}/runs")
+            exec_resp = client.get(f"/workflows/{wf.id}/runs")
     except typer.Exit:
         raise
     except Exception:
