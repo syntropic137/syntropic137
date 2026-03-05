@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class SubagentEvent:
+class SubagentLifecycleRecord:
     """Represents a subagent lifecycle event."""
 
     agent_name: str
@@ -49,7 +49,7 @@ class SubagentTracker:
         """Resolve tool_use_id to tool_name. Returns 'unknown' if not cached."""
         return self._tool_names_cache.get(tool_use_id, "unknown")
 
-    def on_task_started(self, tool_use_id: str, input_data: dict[str, Any]) -> SubagentEvent:
+    def on_task_started(self, tool_use_id: str, input_data: dict[str, Any]) -> SubagentLifecycleRecord:
         """Record a Task tool starting (subagent spawn).
 
         Args:
@@ -57,19 +57,19 @@ class SubagentTracker:
             input_data: Parsed input data (may contain subagent_type or description)
 
         Returns:
-            SubagentEvent with event_type="started"
+            SubagentLifecycleRecord with event_type="started"
         """
         agent_name = str(input_data.get("subagent_type", input_data.get("description", "unknown")))[
             :50
         ]
         self._active[tool_use_id] = (agent_name, datetime.now(UTC), {})
-        return SubagentEvent(
+        return SubagentLifecycleRecord(
             agent_name=agent_name,
             tool_use_id=tool_use_id,
             event_type="started",
         )
 
-    def on_task_started_from_hook(self, tool_use_id: str, input_preview: str) -> SubagentEvent:
+    def on_task_started_from_hook(self, tool_use_id: str, input_preview: str) -> SubagentLifecycleRecord:
         """Record a Task tool starting from hook event format.
 
         Args:
@@ -77,7 +77,7 @@ class SubagentTracker:
             input_preview: JSON string of the input preview
 
         Returns:
-            SubagentEvent with event_type="started"
+            SubagentLifecycleRecord with event_type="started"
         """
         agent_name = "unknown"
         if input_preview:
@@ -89,13 +89,13 @@ class SubagentTracker:
             except (json.JSONDecodeError, TypeError):
                 pass
         self._active[tool_use_id] = (agent_name, datetime.now(UTC), {})
-        return SubagentEvent(
+        return SubagentLifecycleRecord(
             agent_name=agent_name,
             tool_use_id=tool_use_id,
             event_type="started",
         )
 
-    def on_task_completed(self, tool_use_id: str, success: bool) -> SubagentEvent | None:
+    def on_task_completed(self, tool_use_id: str, success: bool) -> SubagentLifecycleRecord | None:
         """Record a Task tool completing (subagent stop).
 
         Args:
@@ -103,13 +103,13 @@ class SubagentTracker:
             success: Whether the task completed successfully
 
         Returns:
-            SubagentEvent with event_type="stopped", or None if no matching active subagent
+            SubagentLifecycleRecord with event_type="stopped", or None if no matching active subagent
         """
         if tool_use_id not in self._active:
             return None
         agent_name, started_at, tools_used = self._active.pop(tool_use_id)
         duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
-        return SubagentEvent(
+        return SubagentLifecycleRecord(
             agent_name=agent_name,
             tool_use_id=tool_use_id,
             event_type="stopped",
