@@ -200,7 +200,7 @@ syntropic137/
 | Pattern | Implementation |
 |---------|---------------|
 | Event Sourcing | Commands → Aggregates → Events |
-| CQRS | Commands (17) → Events (35) → Projections (17) |
+| CQRS | Commands (26) → Events (44) → Projections (20) |
 | Event Processing | Processor/Todo pattern (no complex sagas) |
 | Architecture | Vertical Slice Architecture (VSA) |
 | Logging | Centralized DI logger, structured, detailed |

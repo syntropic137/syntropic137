@@ -1,8 +1,229 @@
 {
   "version": "0.8.0",
   "schema_version": "2.3.0",
-  "generated_at": "2026-03-03T05:37:30.645753+00:00",
+  "generated_at": "2026-03-05T02:34:38.383431+00:00",
   "bounded_contexts": [
+    {
+      "name": "organization",
+      "path": "./packages/syn-domain/src/syn_domain/contexts/organization",
+      "features": [
+        {
+          "name": "slices",
+          "path": "slices",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "manage_organization",
+          "path": "slices/manage_organization",
+          "files": [
+            "test_manage_organization.py",
+            "ManageOrganizationHandler.py",
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "create_organization",
+          "path": "slices/create_organization",
+          "files": [
+            "__init__.py",
+            "test_create_organization.py",
+            "CreateOrganizationHandler.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "create_system",
+          "path": "slices/create_system",
+          "files": [
+            "CreateSystemHandler.py",
+            "__init__.py",
+            "test_create_system.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "manage_system",
+          "path": "slices/manage_system",
+          "files": [
+            "test_manage_system.py",
+            "__init__.py",
+            "ManageSystemHandler.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "list_systems",
+          "path": "slices/list_systems",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "list_repos",
+          "path": "slices/list_repos",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "register_repo",
+          "path": "slices/register_repo",
+          "files": [
+            "__init__.py",
+            "RegisterRepoHandler.py",
+            "test_register_repo.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "list_organizations",
+          "path": "slices/list_organizations",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py",
+            "projection.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "manage_repo",
+          "path": "slices/manage_repo",
+          "files": [
+            "__init__.py",
+            "ManageRepoHandler.py",
+            "test_manage_repo.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "get_organization",
+          "path": "slices/get_organization",
+          "files": [
+            "handler.py",
+            "slice.yaml",
+            "__init__.py"
+          ],
+          "slice_type": "query"
+        },
+        {
+          "name": "domain",
+          "path": "domain",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregates",
+          "path": "domain/aggregates",
+          "files": [
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "queries",
+          "path": "domain/queries",
+          "files": [
+            "list_systems.py",
+            "get_repo.py",
+            "list_organizations.py",
+            "list_repos.py",
+            "__init__.py",
+            "get_system.py",
+            "get_organization.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_organization",
+          "path": "domain/aggregate_organization",
+          "files": [
+            "OrganizationAggregate.py",
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "aggregate_repo",
+          "path": "domain/aggregate_repo",
+          "files": [
+            "RepoAggregate.py",
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "commands",
+          "path": "domain/commands",
+          "files": [
+            "UpdateSystemCommand.py",
+            "DeleteOrganizationCommand.py",
+            "AssignRepoToSystemCommand.py",
+            "__init__.py",
+            "DeleteSystemCommand.py",
+            "CreateSystemCommand.py",
+            "UnassignRepoFromSystemCommand.py",
+            "RegisterRepoCommand.py",
+            "CreateOrganizationCommand.py",
+            "UpdateOrganizationCommand.py"
+          ],
+          "slice_type": "command"
+        },
+        {
+          "name": "aggregate_system",
+          "path": "domain/aggregate_system",
+          "files": [
+            "SystemAggregate.py",
+            "__init__.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "events",
+          "path": "domain/events",
+          "files": [
+            "SystemCreatedEvent.py",
+            "SystemDeletedEvent.py",
+            "__init__.py",
+            "SystemUpdatedEvent.py",
+            "RepoUnassignedFromSystemEvent.py",
+            "RepoAssignedToSystemEvent.py",
+            "RepoRegisteredEvent.py",
+            "OrganizationUpdatedEvent.py",
+            "OrganizationCreatedEvent.py",
+            "OrganizationDeletedEvent.py"
+          ],
+          "slice_type": "unknown"
+        },
+        {
+          "name": "read_models",
+          "path": "domain/read_models",
+          "files": [
+            "repo_summary.py",
+            "__init__.py",
+            "organization_summary.py",
+            "system_summary.py"
+          ],
+          "slice_type": "unknown"
+        }
+      ],
+      "context_type": "bounded_context",
+      "aggregate_count": 3
+    },
     {
       "name": "artifacts",
       "path": "./packages/syn-domain/src/syn_domain/contexts/artifacts",
@@ -823,6 +1044,33 @@
   "domain": {
     "aggregates": [
       {
+        "name": "OrganizationAggregate",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/aggregate_organization/OrganizationAggregate.py",
+        "line_count": 161,
+        "command_handlers": [],
+        "event_handlers": [],
+        "folder_name": "aggregate_organization"
+      },
+      {
+        "name": "RepoAggregate",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/aggregate_repo/RepoAggregate.py",
+        "line_count": 198,
+        "command_handlers": [],
+        "event_handlers": [],
+        "folder_name": "aggregate_repo"
+      },
+      {
+        "name": "SystemAggregate",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/aggregate_system/SystemAggregate.py",
+        "line_count": 169,
+        "command_handlers": [],
+        "event_handlers": [],
+        "folder_name": "aggregate_system"
+      },
+      {
         "name": "ArtifactAggregate",
         "context": "artifacts",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/artifacts/domain/aggregate_artifact/ArtifactAggregate.py",
@@ -954,6 +1202,69 @@
     ],
     "commands": [
       {
+        "name": "UpdateSystemCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/UpdateSystemCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "DeleteOrganizationCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/DeleteOrganizationCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "AssignRepoToSystemCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/AssignRepoToSystemCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "DeleteSystemCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/DeleteSystemCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "CreateSystemCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/CreateSystemCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "UnassignRepoFromSystemCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/UnassignRepoFromSystemCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "RegisterRepoCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/RegisterRepoCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "CreateOrganizationCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/CreateOrganizationCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
+        "name": "UpdateOrganizationCommand",
+        "context": "organization",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/commands/UpdateOrganizationCommand.py",
+        "has_aggregate_id": true,
+        "fields": []
+      },
+      {
         "name": "CreateArtifactCommand",
         "context": "artifacts",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/artifacts/domain/commands/CreateArtifactCommand.py",
@@ -1074,6 +1385,105 @@
       }
     ],
     "events": [
+      {
+        "name": "SystemCreatedEvent",
+        "context": "organization",
+        "event_type": "SystemCreated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/SystemCreatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "SystemDeletedEvent",
+        "context": "organization",
+        "event_type": "SystemDeleted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/SystemDeletedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "SystemUpdatedEvent",
+        "context": "organization",
+        "event_type": "SystemUpdated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/SystemUpdatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "RepoUnassignedFromSystemEvent",
+        "context": "organization",
+        "event_type": "RepoUnassignedFromSystem",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/RepoUnassignedFromSystemEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "RepoAssignedToSystemEvent",
+        "context": "organization",
+        "event_type": "RepoAssignedToSystem",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/RepoAssignedToSystemEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "RepoRegisteredEvent",
+        "context": "organization",
+        "event_type": "RepoRegistered",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/RepoRegisteredEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "OrganizationUpdatedEvent",
+        "context": "organization",
+        "event_type": "OrganizationUpdated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/OrganizationUpdatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "OrganizationCreatedEvent",
+        "context": "organization",
+        "event_type": "OrganizationCreated",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/OrganizationCreatedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
+      {
+        "name": "OrganizationDeletedEvent",
+        "context": "organization",
+        "event_type": "OrganizationDeleted",
+        "version": {
+          "Simple": "v1"
+        },
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/domain/events/OrganizationDeletedEvent.py",
+        "fields": [],
+        "decorator_present": false
+      },
       {
         "name": "ArtifactUploadedEvent",
         "context": "artifacts",
@@ -1463,6 +1873,38 @@
     "queries": [],
     "projections": [
       {
+        "name": "SystemProjection",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/slices/list_systems/projection.py",
+        "subscribed_events": [
+          "system_created",
+          "system_deleted",
+          "system_updated"
+        ],
+        "read_model": null,
+        "context": "organization",
+        "line_count": 101
+      },
+      {
+        "name": "RepoProjection",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/slices/list_repos/projection.py",
+        "subscribed_events": [
+          "repo_assigned_to_system",
+          "repo_registered",
+          "repo_unassigned_from_system"
+        ],
+        "read_model": null,
+        "context": "organization",
+        "line_count": 108
+      },
+      {
+        "name": "Projection",
+        "file_path": "./packages/syn-domain/src/syn_domain/contexts/organization/slices/list_organizations/projection.py",
+        "subscribed_events": [],
+        "read_model": null,
+        "context": "organization",
+        "line_count": 13
+      },
+      {
         "name": "ArtifactListProjection",
         "file_path": "./packages/syn-domain/src/syn_domain/contexts/artifacts/slices/list_artifacts/projection.py",
         "subscribed_events": [
@@ -1680,36 +2122,101 @@
       "aggregate_to_events": {},
       "event_to_handlers": {},
       "event_to_projections": {
-        "tool_execution_started": [
-          "ToolTimelineProjection"
-        ],
-        "workspace_creating": [
-          "WorkspaceMetricsProjection"
-        ],
-        "subagent_started": [
-          "SessionListProjection"
-        ],
-        "workflow_completed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
+        "session_started": [
+          "SessionListProjection",
           "DashboardMetricsProjection"
         ],
-        "trigger_fired": [
-          "TriggerHistoryProjection",
-          "TriggerRuleProjection"
+        "system_updated": [
+          "SystemProjection"
         ],
-        "app_installed": [
-          "InstallationProjection"
+        "workspace_created": [
+          "WorkspaceMetricsProjection"
         ],
         "session_cost_finalized": [
           "SessionCostProjection",
           "ExecutionCostProjection"
         ],
+        "operation_recorded": [
+          "SessionListProjection"
+        ],
+        "trigger_registered": [
+          "TriggerRuleProjection"
+        ],
         "installation_revoked": [
           "InstallationProjection"
         ],
+        "token_refreshed": [
+          "InstallationProjection"
+        ],
+        "subagent_stopped": [
+          "SessionListProjection"
+        ],
+        "workflow_failed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "tool_execution_started": [
+          "ToolTimelineProjection"
+        ],
+        "repo_unassigned_from_system": [
+          "RepoProjection"
+        ],
+        "workspace_command_executed": [
+          "WorkspaceMetricsProjection"
+        ],
+        "workflow_template_created": [
+          "WorkflowDetailProjection",
+          "WorkflowListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workflow_interrupted": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "trigger_deleted": [
+          "TriggerRuleProjection"
+        ],
+        "trigger_paused": [
+          "TriggerRuleProjection"
+        ],
+        "tool_blocked": [
+          "ToolTimelineProjection"
+        ],
+        "system_deleted": [
+          "SystemProjection"
+        ],
+        "artifact_created": [
+          "ArtifactListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "app_installed": [
+          "InstallationProjection"
+        ],
+        "session_summary": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "agent_observation": [
+          "SessionCostProjection",
+          "ExecutionCostProjection"
+        ],
+        "trigger_fired": [
+          "TriggerHistoryProjection",
+          "TriggerRuleProjection"
+        ],
+        "session_completed": [
+          "SessionListProjection",
+          "DashboardMetricsProjection"
+        ],
+        "workspace_destroyed": [
+          "WorkspaceMetricsProjection"
+        ],
         "tool_execution_completed": [
           "ToolTimelineProjection"
+        ],
+        "workspace_error": [
+          "WorkspaceMetricsProjection"
         ],
         "workflow_execution_started": [
           "WorkflowExecutionDetailProjection",
@@ -1718,103 +2225,56 @@
           "WorkflowListProjection",
           "DashboardMetricsProjection"
         ],
-        "session_summary": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "artifact_created": [
-          "ArtifactListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "workflow_template_created": [
-          "WorkflowDetailProjection",
-          "WorkflowListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "token_refreshed": [
-          "InstallationProjection"
-        ],
-        "trigger_paused": [
-          "TriggerRuleProjection"
-        ],
-        "session_started": [
-          "SessionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "agent_observation": [
-          "SessionCostProjection",
-          "ExecutionCostProjection"
-        ],
-        "workspace_command_executed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workspace_error": [
-          "WorkspaceMetricsProjection"
-        ],
-        "tool_blocked": [
-          "ToolTimelineProjection"
-        ],
-        "trigger_deleted": [
-          "TriggerRuleProjection"
-        ],
-        "workspace_destroyed": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workspace_destroying": [
-          "WorkspaceMetricsProjection"
-        ],
-        "workflow_interrupted": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "trigger_registered": [
-          "TriggerRuleProjection"
-        ],
-        "workspace_created": [
-          "WorkspaceMetricsProjection"
-        ],
-        "subagent_stopped": [
-          "SessionListProjection"
-        ],
-        "execution_cancelled": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection"
-        ],
-        "installation_suspended": [
-          "InstallationProjection"
-        ],
         "phase_started": [
           "WorkflowExecutionDetailProjection",
           "WorkflowPhaseMetricsProjection",
           "DashboardMetricsProjection"
         ],
-        "workflow_failed": [
-          "WorkflowExecutionDetailProjection",
-          "WorkflowExecutionListProjection",
-          "DashboardMetricsProjection"
-        ],
-        "session_completed": [
-          "SessionListProjection",
-          "DashboardMetricsProjection"
-        ],
         "trigger_resumed": [
           "TriggerRuleProjection"
+        ],
+        "token_usage": [
+          "TokenMetricsProjection"
+        ],
+        "system_created": [
+          "SystemProjection"
+        ],
+        "installation_suspended": [
+          "InstallationProjection"
+        ],
+        "workspace_destroying": [
+          "WorkspaceMetricsProjection"
+        ],
+        "subagent_started": [
+          "SessionListProjection"
+        ],
+        "repo_registered": [
+          "RepoProjection"
+        ],
+        "execution_cancelled": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection"
+        ],
+        "workspace_creating": [
+          "WorkspaceMetricsProjection"
+        ],
+        "repo_assigned_to_system": [
+          "RepoProjection"
         ],
         "phase_completed": [
           "WorkflowExecutionDetailProjection",
           "WorkflowExecutionListProjection",
           "WorkflowPhaseMetricsProjection"
         ],
-        "token_usage": [
-          "TokenMetricsProjection"
-        ],
-        "operation_recorded": [
-          "SessionListProjection"
+        "workflow_completed": [
+          "WorkflowExecutionDetailProjection",
+          "WorkflowExecutionListProjection",
+          "DashboardMetricsProjection"
         ]
       },
       "projection_to_read_model": {
-        "WorkflowDetailProjection": "WorkflowDetail",
-        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail"
+        "WorkflowExecutionDetailProjection": "WorkflowExecutionDetail",
+        "WorkflowDetailProjection": "WorkflowDetail"
       }
     }
   }
