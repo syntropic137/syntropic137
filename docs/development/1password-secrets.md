@@ -12,12 +12,12 @@ silently skipped and the system behaves exactly as it does with plaintext `.env`
 
 ## Quick Start (Path A — No 1Password)
 
-This is the default path. Run `just setup` and follow the prompts — the wizard
+This is the default path. Run `just onboard` and follow the prompts — the wizard
 handles secret generation, GitHub App creation, and `.env` configuration
 automatically.
 
 ```bash
-just setup
+just onboard
 ```
 
 The wizard will:
@@ -202,7 +202,7 @@ This stores the token in macOS Keychain (see [Storing the Service Account Token]
 #### 5. Run the setup wizard
 
 ```bash
-just setup
+just onboard
 ```
 
 The wizard creates the GitHub App and writes credentials to `infra/.env`.
@@ -281,8 +281,8 @@ The resolver looks for the token in this order (highest priority first):
 
 | Priority | Source | Example | Used by |
 |----------|--------|---------|---------|
-| 1 | **Vault-specific env var** (shell or `.env`) | `OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=ops_eyJ...` | `just dev`, `just setup`, runtime |
-| 2 | **macOS Keychain** | Stored via `just secrets-store-token` | `just setup`, `just selfhost-*` |
+| 1 | **Vault-specific env var** (shell or `.env`) | `OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=ops_eyJ...` | `just dev`, `just onboard`, runtime |
+| 2 | **macOS Keychain** | Stored via `just secrets-store-token` | `just onboard`, `just selfhost-*` |
 | 3 | **Generic env var** (shell or `.env`) | `OP_SERVICE_ACCOUNT_TOKEN=ops_eyJ...` | All (fallback) |
 
 The vault-specific env var **always wins**, even if the generic
@@ -297,7 +297,7 @@ The simplest option for day-to-day development. Add to your root `.env`:
 OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=ops_eyJ...
 ```
 
-This is picked up by `just dev`, `just setup`, and the runtime resolver
+This is picked up by `just dev`, `just onboard`, and the runtime resolver
 without any Keychain prompts or extra steps.
 
 ### macOS — Keychain

@@ -23,7 +23,7 @@ permissions, events, and credentials are configured automatically.
 
 ```bash
 # During full setup (includes GitHub App creation):
-just setup
+just onboard
 
 # Or run only the GitHub App stage:
 python infra/scripts/setup.py --stage configure_github_app
@@ -59,7 +59,7 @@ manual field entry required.
 ## Manual Setup
 
 If you prefer to create the GitHub App manually (or need to configure an
-existing app), choose **"existing"** during `just setup` and follow the
+existing app), choose **"existing"** during `just onboard` and follow the
 steps below.
 
 ### Step 1: Create the GitHub App
@@ -231,7 +231,7 @@ SYN_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 #### For Docker Self-Host
 
 The private key is base64-encoded and stored in `infra/.env` (or resolved
-from 1Password). The `just setup` wizard handles this automatically.
+from 1Password). The `just onboard` wizard handles this automatically.
 
 To encode manually:
 

@@ -150,8 +150,8 @@ def create_smee_channel() -> str:
     Stdlib-only — no API key required.
     """
     req = urllib.request.Request("https://smee.io/new", method="HEAD")
-    resp = urllib.request.urlopen(req)  # noqa: S310
-    return resp.url
+    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        return resp.url
 
 
 def normalize_domain(raw: str) -> str:

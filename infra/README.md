@@ -137,7 +137,7 @@ openssl rand -hex 32 > infra/docker/secrets/redis-password.txt
 Or use the interactive wizard which handles this automatically:
 
 ```bash
-just setup
+just onboard
 ```
 
 ### Step 4: Start the stack
@@ -357,7 +357,7 @@ When using a Cloudflare Tunnel, you can add a Cloudflare Access policy for addit
 The resolution chain runs when you execute any `just selfhost-*` recipe:
 
 ```
-APP_ENVIRONMENT (from infra/.env)
+APP_ENVIRONMENT (from .env)
   -> derive vault name (e.g. development → syn137-dev)
   -> macOS Keychain (service account token)
     -> infra/scripts/selfhost-env.sh (sources .env, loads token)
@@ -532,7 +532,7 @@ All recipes are run from the repository root using `just`.
 
 | Recipe | Description |
 |--------|-------------|
-| `just setup` | Interactive wizard: checks prerequisites, generates secrets, configures GitHub App |
+| `just onboard` | Interactive wizard: checks prerequisites, generates secrets, configures GitHub App |
 | `just secrets-generate` | Generate deployment secrets (non-interactive) |
 | `just secrets-check` | Verify secrets exist |
 | `just secrets-rotate` | Rotate secrets (requires service restart) |
@@ -557,7 +557,7 @@ sudo usermod -aG docker $USER
 ### Missing `infra/.env`
 
 ```
-❌ infra/.env not found. Run 'just setup' or copy from infra/.env.example
+❌ infra/.env not found. Run 'just onboard' or copy from infra/.env.example
 ```
 
 ```bash
