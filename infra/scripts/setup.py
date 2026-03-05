@@ -2128,14 +2128,33 @@ def _print_op_summary(ctx: SetupContext) -> None:
         f"#   3. The vault \"{vault}\" must exist. Create it in the\n"
         f"#      1Password app or: op vault create \"{vault}\"\n"
         f"#\n"
-        f"# AFTER RUNNING\n"
-        f"#   1. Remove secret VALUES from .env (keep keys with empty values):\n"
-        f"#      SYN_GITHUB_PRIVATE_KEY, SYN_GITHUB_WEBHOOK_SECRET,\n"
-        f"#      ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN\n"
-        f"#   2. Keep OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV in .env (resolver needs it)\n"
-        f"#   3. Non-secret config (APP_ID, APP_NAME) can stay in .env\n"
-        f"#   4. On next startup, 1Password auto-injects secrets\n"
-        f"#   5. New machine? just onboard-dev --1password picks everything up.\n"
+        f"# The script automatically clears secret values from .env after saving.\n"
+        f"# Non-secret config (APP_ID, APP_NAME) and OP_SERVICE_ACCOUNT_TOKEN are kept.\n"
+        f"# On next startup, 1Password auto-injects the cleared secrets.\n"
+        f"# New machine? just onboard-dev --1password picks everything up.\n"
+    )
+
+    cleanup = (
+        "\n"
+        "echo ''\n"
+        "echo '✅ Secrets saved to 1Password.'\n"
+        "\n"
+        "# --- Clean secret values from .env (keep keys with empty values) ---\n"
+        "echo '🧹 Cleaning secret values from .env...'\n"
+        "_SECRETS_TO_CLEAR=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET"
+        " ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN)\n"
+        'for _KEY in "${_SECRETS_TO_CLEAR[@]}"; do\n'
+        '  if grep -q "^${_KEY}=" .env 2>/dev/null; then\n'
+        "    sed -i '' \"s|^${_KEY}=.*|${_KEY}=|\" .env\n"
+        '    echo "   cleared: ${_KEY}"\n'
+        "  fi\n"
+        "done\n"
+        "echo ''\n"
+        "echo '   Non-secret config (APP_ID, APP_NAME) left intact.'\n"
+        "echo '   OP_SERVICE_ACCOUNT_TOKEN_* left intact (resolver needs it).'\n"
+        "echo '   On next startup, 1Password auto-injects the cleared secrets.'\n"
+        "echo ''\n"
+        f"echo '🗑️  Now delete this script: rm {script_name}'\n"
     )
 
     script_path.write_text(
@@ -2149,12 +2168,7 @@ def _print_op_summary(ctx: SetupContext) -> None:
         f"# Try edit first; if item doesn't exist, create it\n"
         f"{edit_cmd} 2>/dev/null \\\n"
         f"|| {create_cmd}\n"
-        f"\n"
-        f"echo ''\n"
-        f"echo '✅ Secrets saved to 1Password.'\n"
-        f"echo '   Now clean up:'\n"
-        f"echo '   1. Remove secret values from .env (keep keys empty)'\n"
-        f"echo '   2. Delete this script: rm {script_name}'\n",
+        f"{cleanup}",
     )
     script_path.chmod(0o600)
 
