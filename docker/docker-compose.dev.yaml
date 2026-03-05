@@ -38,6 +38,10 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+    # Run as root so entrypoint can match Docker socket GID, then drop to 'syn' via gosu.
+    user: root
+    entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
+    command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000}"]
     env_file:
       - ../.env # Load environment variables from root .env file
     environment:
@@ -57,6 +61,7 @@ services:
       # This should be absolute path on the host machine
       SYN_WORKSPACE_HOST_DIR: ${PWD}/workspaces
     volumes:
+      - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
       # Mount Docker socket to create workspace containers
       - /var/run/docker.sock:/var/run/docker.sock
       # Mount workspace directory for container file sharing
