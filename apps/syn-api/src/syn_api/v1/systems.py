@@ -152,6 +152,10 @@ async def update_system(
     if result is None:
         return Err(SystemError.NOT_FOUND, message=f"System {system_id} not found")
 
+    if not result.success:
+        error_enum = _classify_sys_error(result.error)
+        return Err(error_enum, message=result.error)
+
     await sync_published_events_to_projections()
     return Ok(None)
 
@@ -185,9 +189,21 @@ async def delete_system(
     result = await handler.delete(command)
 
     if result is None:
-        return Err(
-            SystemError.NOT_FOUND, message=f"System {system_id} not found or already deleted"
-        )
+        return Err(SystemError.NOT_FOUND, message=f"System {system_id} not found")
+
+    if not result.success:
+        error_enum = _classify_sys_error(result.error)
+        return Err(error_enum, message=result.error)
 
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+def _classify_sys_error(error_msg: str) -> SystemError:
+    """Map a domain ValueError message to a specific SystemError."""
+    lower = error_msg.lower()
+    if "already deleted" in lower:
+        return SystemError.ALREADY_DELETED
+    if "has repos" in lower:
+        return SystemError.HAS_REPOS
+    return SystemError.INVALID_INPUT

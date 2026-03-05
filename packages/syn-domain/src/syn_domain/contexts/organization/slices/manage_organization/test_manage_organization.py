@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.organization.domain import HandlerResult
 from syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate import (
     OrganizationAggregate,
 )
@@ -52,7 +53,7 @@ class TestManageOrganizationHandler:
         result = await handler.update(
             UpdateOrganizationCommand(organization_id=agg.organization_id, name="New Name")
         )
-        assert result is True
+        assert result == HandlerResult(success=True)
 
         updated = await repo.get_by_id(agg.organization_id)
         assert updated.name == "New Name"
@@ -74,7 +75,7 @@ class TestManageOrganizationHandler:
         result = await handler.delete(
             DeleteOrganizationCommand(organization_id=agg.organization_id, deleted_by="test")
         )
-        assert result is True
+        assert result == HandlerResult(success=True)
 
         deleted = await repo.get_by_id(agg.organization_id)
         assert deleted.is_deleted
@@ -91,4 +92,6 @@ class TestManageOrganizationHandler:
         result = await handler.delete(
             DeleteOrganizationCommand(organization_id=agg.organization_id, deleted_by="test")
         )
-        assert result is None
+        assert result is not None
+        assert result.success is False
+        assert "already deleted" in result.error.lower()

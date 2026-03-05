@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 import syn_api.v1.systems as sys_ops
-from syn_api.types import Err
+from syn_api.types import Err, SystemError
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ async def update_system(system_id: str, body: dict[str, Any]) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
-        status = 404 if result.error.value == "not_found" else 400
+        status = 404 if result.error == SystemError.NOT_FOUND else 400
         raise HTTPException(status_code=status, detail=result.message)
 
     return {"system_id": system_id, "status": "updated"}
@@ -87,7 +87,7 @@ async def delete_system(system_id: str) -> dict[str, Any]:
     )
 
     if isinstance(result, Err):
-        status = 404 if result.error.value == "not_found" else 409
+        status = 404 if result.error == SystemError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
     return {"system_id": system_id, "status": "deleted"}

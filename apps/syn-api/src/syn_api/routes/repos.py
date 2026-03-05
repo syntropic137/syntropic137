@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 import syn_api.v1.repos as repo_ops
-from syn_api.types import Err
+from syn_api.types import Err, RepoError
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ async def assign_repo_to_system(repo_id: str, body: dict[str, Any]) -> dict[str,
         raise HTTPException(status_code=400, detail=str(e)) from e
 
     if isinstance(result, Err):
-        status = 404 if result.error.value == "not_found" else 409
+        status = 404 if result.error == RepoError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
     return {"repo_id": repo_id, "system_id": body["system_id"], "status": "assigned"}
@@ -98,7 +98,7 @@ async def unassign_repo_from_system(repo_id: str) -> dict[str, Any]:
     result = await repo_ops.unassign_repo_from_system(repo_id=repo_id)
 
     if isinstance(result, Err):
-        status = 404 if result.error.value == "not_found" else 409
+        status = 404 if result.error == RepoError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
 
     return {"repo_id": repo_id, "status": "unassigned"}

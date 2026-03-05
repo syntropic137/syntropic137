@@ -174,7 +174,11 @@ async def assign_repo_to_system(
     result = await handler.assign_to_system(command)
 
     if result is None:
-        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found or already assigned")
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
+    if not result.success:
+        error_enum = _classify_repo_error(result.error)
+        return Err(error_enum, message=result.error)
 
     await sync_published_events_to_projections()
     return Ok(None)
@@ -205,7 +209,21 @@ async def unassign_repo_from_system(
     result = await handler.unassign_from_system(command)
 
     if result is None:
-        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found or not assigned")
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
+    if not result.success:
+        error_enum = _classify_repo_error(result.error)
+        return Err(error_enum, message=result.error)
 
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+def _classify_repo_error(error_msg: str) -> RepoError:
+    """Map a domain ValueError message to a specific RepoError."""
+    lower = error_msg.lower()
+    if "already assigned" in lower:
+        return RepoError.ALREADY_ASSIGNED
+    if "not assigned" in lower:
+        return RepoError.NOT_ASSIGNED
+    return RepoError.INVALID_INPUT

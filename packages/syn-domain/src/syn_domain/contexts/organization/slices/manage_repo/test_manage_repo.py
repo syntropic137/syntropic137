@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.organization.domain import HandlerResult
 from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import (
     RepoAggregate,
 )
@@ -58,7 +59,7 @@ class TestManageRepoHandler:
         result = await handler.assign_to_system(
             AssignRepoToSystemCommand(repo_id=agg.repo_id, system_id="sys-12345678")
         )
-        assert result is True
+        assert result == HandlerResult(success=True)
 
         updated = await repo.get_by_id(agg.repo_id)
         assert updated.system_id == "sys-12345678"
@@ -75,7 +76,9 @@ class TestManageRepoHandler:
         result = await handler.assign_to_system(
             AssignRepoToSystemCommand(repo_id=agg.repo_id, system_id="sys-other")
         )
-        assert result is None
+        assert result is not None
+        assert result.success is False
+        assert "already assigned" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_unassign_from_system(self) -> None:
@@ -89,7 +92,7 @@ class TestManageRepoHandler:
         result = await handler.unassign_from_system(
             UnassignRepoFromSystemCommand(repo_id=agg.repo_id)
         )
-        assert result is True
+        assert result == HandlerResult(success=True)
 
         updated = await repo.get_by_id(agg.repo_id)
         assert updated.system_id == ""
@@ -103,7 +106,9 @@ class TestManageRepoHandler:
         result = await handler.unassign_from_system(
             UnassignRepoFromSystemCommand(repo_id=agg.repo_id)
         )
-        assert result is None
+        assert result is not None
+        assert result.success is False
+        assert "not assigned" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_assign_not_found(self) -> None:

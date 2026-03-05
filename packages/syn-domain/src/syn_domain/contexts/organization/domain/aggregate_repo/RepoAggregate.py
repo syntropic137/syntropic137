@@ -105,7 +105,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
             msg = "Repo already registered"
             raise ValueError(msg)
 
-        repo_id = f"repo-{uuid4().hex[:8]}"
+        repo_id = command.aggregate_id if command.aggregate_id else f"repo-{uuid4().hex[:8]}"
         self._initialize(repo_id)
 
         event = RepoRegisteredEvent(

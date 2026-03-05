@@ -149,6 +149,10 @@ async def update_organization(
     if result is None:
         return Err(OrganizationError.NOT_FOUND, message=f"Organization {organization_id} not found")
 
+    if not result.success:
+        error_enum = _classify_org_error(result.error)
+        return Err(error_enum, message=result.error)
+
     await sync_published_events_to_projections()
     return Ok(None)
 
@@ -184,8 +188,24 @@ async def delete_organization(
     if result is None:
         return Err(
             OrganizationError.NOT_FOUND,
-            message=f"Organization {organization_id} not found or already deleted",
+            message=f"Organization {organization_id} not found",
         )
+
+    if not result.success:
+        error_enum = _classify_org_error(result.error)
+        return Err(error_enum, message=result.error)
 
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+def _classify_org_error(error_msg: str) -> OrganizationError:
+    """Map a domain ValueError message to a specific OrganizationError."""
+    lower = error_msg.lower()
+    if "already deleted" in lower:
+        return OrganizationError.ALREADY_DELETED
+    if "has systems" in lower:
+        return OrganizationError.HAS_SYSTEMS
+    if "has repos" in lower:
+        return OrganizationError.HAS_REPOS
+    return OrganizationError.INVALID_INPUT

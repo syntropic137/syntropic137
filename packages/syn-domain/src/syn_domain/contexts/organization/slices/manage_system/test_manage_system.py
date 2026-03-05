@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.organization.domain import HandlerResult
 from syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate import (
     SystemAggregate,
 )
@@ -55,7 +56,7 @@ class TestManageSystemHandler:
         handler = ManageSystemHandler(repository=repo)
 
         result = await handler.update(UpdateSystemCommand(system_id=agg.system_id, name="New Name"))
-        assert result is True
+        assert result == HandlerResult(success=True)
 
         updated = await repo.get_by_id(agg.system_id)
         assert updated.name == "New Name"
@@ -75,7 +76,7 @@ class TestManageSystemHandler:
         result = await handler.delete(
             DeleteSystemCommand(system_id=agg.system_id, deleted_by="test")
         )
-        assert result is True
+        assert result == HandlerResult(success=True)
 
         deleted = await repo.get_by_id(agg.system_id)
         assert deleted.is_deleted
@@ -90,4 +91,6 @@ class TestManageSystemHandler:
         result = await handler.delete(
             DeleteSystemCommand(system_id=agg.system_id, deleted_by="test")
         )
-        assert result is None
+        assert result is not None
+        assert result.success is False
+        assert "already deleted" in result.error.lower()
