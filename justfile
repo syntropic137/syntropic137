@@ -130,6 +130,13 @@ onboard-dev *flags:
         uv run python infra/scripts/setup.py --stage configure_1password
     fi
 
+    # 7b. Resolve 1Password secrets into env (so step 8 sees them)
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+    case "${APP_ENVIRONMENT:-development}" in
+        development|production|beta|staging)
+            _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true ;;
+    esac
+
     # 8. GitHub App setup (runs by default — skip with --skip-github)
     #    Required for agent workflows to push code.
     #    Now runs AFTER webhook URL is available.
