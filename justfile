@@ -168,9 +168,10 @@ onboard-dev *flags:
     # 10. 1Password summary
     echo ""
     if echo "{{flags}}" | grep -q -- "--1password"; then
-        # Re-source to pick up any values written during setup
+        # Re-source to pick up any values written during setup + resolve 1Password
         if [ -f .env ]; then set -a && source .env && set +a; fi
         if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
+        _op_exports=$(uv run python scripts/op_env_export.py 2>/dev/null) && eval "$_op_exports" || true
         # Derive vault name
         case "${APP_ENVIRONMENT:-development}" in
             development) _VAULT="syn137-dev" ;;
