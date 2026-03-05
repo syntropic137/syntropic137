@@ -162,7 +162,7 @@ def create_smee_channel() -> str:
     Stdlib-only — no API key required.
     """
     req = urllib.request.Request("https://smee.io/new", method="HEAD")
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=10) as resp:
         return resp.url
 
 

@@ -511,8 +511,8 @@ def run_manifest_flow(
     print(f"  GitHub App '{slug}' created successfully!")
     print()
     print(f"  💡 Add a logo: {html_url} → Display information → Upload a logo")
-    print(f"     Use: public/assets/pfp_syntropic137-github_gray.png (dev/staging)")
-    print(f"          public/assets/pfp_syntropic137-github_color.png (production)")
+    print("     Use: public/assets/pfp_syntropic137-github_gray.png (dev/staging)")
+    print("          public/assets/pfp_syntropic137-github_color.png (production)")
 
     # Open the installation page and wait for the post-install redirect.
     print()

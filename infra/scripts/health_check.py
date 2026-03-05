@@ -23,7 +23,6 @@ Examples:
 
 import argparse
 import json
-import os
 import socket
 import subprocess
 import sys
@@ -32,7 +31,6 @@ import urllib.request
 from dataclasses import asdict, dataclass
 
 from shared import (
-    DEFAULT_PROJECT_NAME,
     PORT_API,
     PORT_COLLECTOR,
     PORT_EVENT_STORE,

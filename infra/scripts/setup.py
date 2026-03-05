@@ -2185,7 +2185,7 @@ def _print_op_summary(ctx: SetupContext) -> None:
     script_path.chmod(0o600)
 
     print(f"  📄 1Password save script: {_BOLD}{script_name}{_RST}")
-    print(f"     Prerequisites + next steps are inside the script.")
+    print("     Prerequisites + next steps are inside the script.")
     print(f"     Run:  bash {script_name}")
     print(f"     Then: rm {script_name}")
     print()

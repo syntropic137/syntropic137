@@ -43,12 +43,12 @@ from syn_shared.settings.config import (
     get_settings,
     reset_settings,
 )
-from syn_shared.settings.infra import InfraSettings
 from syn_shared.settings.github import (
     GitHubAppSettings,
     get_github_settings,
     reset_github_settings,
 )
+from syn_shared.settings.infra import InfraSettings
 from syn_shared.settings.storage import (
     StorageProvider,
     StorageSettings,
@@ -67,13 +67,13 @@ from syn_shared.settings.workspace import (
 
 __all__ = [
     "AppEnvironment",
-    "InfraSettings",
     "CloudProvider",
     "ContainerLoggingSettings",
     "GitCredentialType",
     "GitHubAppSettings",
     "GitIdentityResolver",
     "GitIdentitySettings",
+    "InfraSettings",
     "IsolationBackend",
     "Settings",
     "StorageProvider",
