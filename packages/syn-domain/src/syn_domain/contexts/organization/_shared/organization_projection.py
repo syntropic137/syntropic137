@@ -32,9 +32,7 @@ class OrganizationProjection:
     def __init__(self) -> None:
         self._orgs: dict[str, OrganizationSummary] = {}
 
-    def handle_organization_created(
-        self, event: OrganizationCreatedEvent
-    ) -> OrganizationSummary:
+    def handle_organization_created(self, event: OrganizationCreatedEvent) -> OrganizationSummary:
         summary = OrganizationSummary(
             organization_id=event.organization_id,
             name=event.name,
@@ -43,9 +41,7 @@ class OrganizationProjection:
             created_at=datetime.now(UTC),
         )
         self._orgs[event.organization_id] = summary
-        logger.info(
-            f"Projected OrganizationCreated: {event.organization_id} ({event.name})"
-        )
+        logger.info(f"Projected OrganizationCreated: {event.organization_id} ({event.name})")
         return summary
 
     def handle_organization_updated(
@@ -53,9 +49,7 @@ class OrganizationProjection:
     ) -> OrganizationSummary | None:
         org = self._orgs.get(event.organization_id)
         if org is None:
-            logger.warning(
-                f"OrganizationUpdated for unknown org: {event.organization_id}"
-            )
+            logger.warning(f"OrganizationUpdated for unknown org: {event.organization_id}")
             return None
         if event.name is not None:
             org.name = event.name
@@ -69,9 +63,7 @@ class OrganizationProjection:
     ) -> OrganizationSummary | None:
         org = self._orgs.get(event.organization_id)
         if org is None:
-            logger.warning(
-                f"OrganizationDeleted for unknown org: {event.organization_id}"
-            )
+            logger.warning(f"OrganizationDeleted for unknown org: {event.organization_id}")
             return None
         org.is_deleted = True
         logger.info(f"Projected OrganizationDeleted: {event.organization_id}")
