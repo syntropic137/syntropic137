@@ -10,7 +10,6 @@ Key requirements:
 
 from __future__ import annotations
 
-import json
 import logging
 import shlex
 from collections.abc import Callable
@@ -20,14 +19,9 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
-# ADR-029: Simplified Event System - use agentic_events from agentic-primitives
-from agentic_events import enrich_event, parse_jsonl_line
-from agentic_events.types import ClaudeToolName, EventType
-
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
-from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -43,10 +37,27 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
     StartPhaseCommand,
     WorkflowExecutionAggregate,
 )
+from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+    ArtifactCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
+    ConversationRecorder,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+    EventStreamProcessor,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
+    PhaseResultBuilder,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
+    SubagentTracker,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
     SYN_WORKSPACE_PROMPT,
 )
-from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
     from syn_adapters.agents.protocol import AgentProtocol as InstrumentedAgent  # Alias for compat
@@ -715,11 +726,14 @@ class WorkflowExecutionEngine:
 
             # Create artifact linked to this execution run
             artifact_id = str(uuid4())
-            await self._create_artifact(
+            artifact_collector = ArtifactCollector(
+                self._artifacts, self._artifact_content_storage, self._artifact_query
+            )
+            await artifact_collector._create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,
-                execution_id=ctx.execution_id,  # Link to execution run for retrieval
+                execution_id=ctx.execution_id,
                 session_id=session_id,
                 artifact_type=phase.output_artifact_type,
                 content=response.content,
@@ -906,151 +920,24 @@ class WorkflowExecutionEngine:
 
         return prompt
 
-    async def _create_artifact(
-        self,
-        artifact_id: str,
-        workflow_id: str,
-        phase_id: str,
-        execution_id: str,
-        session_id: str,
-        artifact_type: str,
-        content: str,
-        title: str,
-    ) -> None:
-        """Create and save an artifact.
-
-        Two-tier storage (ADR-012):
-        1. Content → Object storage (MinIO/S3) if configured
-        2. Metadata + storage_uri → Event store
-
-        Args:
-            artifact_id: Unique artifact identifier
-            workflow_id: Parent workflow ID
-            phase_id: Phase that produced this artifact
-            execution_id: Execution run ID (links to WorkflowExecution aggregate)
-            session_id: Agent session ID
-            artifact_type: Type of artifact (string, mapped to enum)
-            content: Artifact content
-            title: Human-readable title
-        """
-        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
-            ArtifactAggregate,
-        )
-        from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
-            CreateArtifactCommand,
-        )
-
-        # Map string type to ArtifactType enum
-        artifact_type_enum = self._map_artifact_type(artifact_type)
-
-        # Upload content to object storage if configured (ADR-012)
-        storage_uri: str | None = None
-        if self._artifact_content_storage is not None:
-            try:
-                result = await self._artifact_content_storage.upload(
-                    artifact_id=artifact_id,
-                    content=content.encode("utf-8"),
-                    workflow_id=workflow_id,
-                    phase_id=phase_id,
-                    execution_id=execution_id,
-                    content_type="text/markdown",
-                    metadata={
-                        "session_id": session_id,
-                        "artifact_type": artifact_type,
-                        "title": title,
-                    },
-                )
-                storage_uri = result.storage_uri
-                logger.info(
-                    "Artifact content uploaded to object storage",
-                    extra={
-                        "artifact_id": artifact_id,
-                        "storage_uri": storage_uri,
-                        "size_bytes": result.size_bytes,
-                    },
-                )
-            except Exception as e:
-                # Log error but continue - content will still be in event store
-                logger.warning(
-                    "Failed to upload artifact to object storage, "
-                    "content will be stored in event store only",
-                    extra={"artifact_id": artifact_id, "error": str(e)},
-                )
-
-        aggregate = ArtifactAggregate()
-        command = CreateArtifactCommand(
-            aggregate_id=artifact_id,
-            workflow_id=workflow_id,
-            phase_id=phase_id,
-            execution_id=execution_id,  # Links artifact to specific execution run
-            session_id=session_id,
-            artifact_type=artifact_type_enum,
-            content=content,
-            title=title,
-            storage_uri=storage_uri,  # NEW: Reference to object storage
-        )
-        aggregate._handle_command(command)
-        await self._artifacts.save(aggregate)
-
-    def _map_artifact_type(self, type_str: str) -> ArtifactType:
-        """Map string artifact type to enum."""
-        type_mapping = {
-            "text": ArtifactType.TEXT,
-            "markdown": ArtifactType.MARKDOWN,
-            "code": ArtifactType.CODE,
-            "json": ArtifactType.JSON,
-            "yaml": ArtifactType.YAML,
-            "research_summary": ArtifactType.RESEARCH_SUMMARY,
-            "plan": ArtifactType.PLAN,
-            "execution_report": ArtifactType.EXECUTION_REPORT,
-            "documentation": ArtifactType.DOCUMENTATION,
-            "analysis_report": ArtifactType.ANALYSIS_REPORT,
-            "requirements": ArtifactType.REQUIREMENTS,
-            "design_doc": ArtifactType.DESIGN_DOC,
-            "configuration": ArtifactType.CONFIGURATION,
-            "script": ArtifactType.SCRIPT,
-        }
-        return type_mapping.get(type_str.lower(), ArtifactType.OTHER)
-
     async def _execute_phase_in_container(
         self,
         phase: ExecutablePhase,
         ctx: ExecutionContext,
         aggregate: WorkflowExecutionAggregate,
-        tenant_id: str | None = None,
+        tenant_id: str | None = None,  # noqa: ARG002 — reserved for multi-tenant routing
     ) -> PhaseResult:
         """Execute a phase inside an isolated container with sidecar proxy.
 
-        This implements the full agent-in-container pattern per ADR-023:
-
-        1. Create isolated workspace with sidecar via WorkspaceService
-        2. Inject input artifacts from previous phases
-        3. Write task.json with phase configuration
-        4. Execute Claude CLI via workspace.stream() (ADR-029)
-        5. Parse JSONL events and emit to aggregate
-        6. Collect output artifacts
-        7. Destroy workspace (stateless)
+        This implements the full agent-in-container pattern per ADR-023.
 
         Contract:
-            This method RETURNS the PhaseResult - it does NOT append to ctx.
-            The caller is responsible for:
-            - ctx.phase_results.append(result)
-            - ctx.completed_phase_ids.append(phase.phase_id)
-            - ctx.artifact_ids.append(result.artifact_id) if applicable
-
-            This follows the pattern: helper methods RETURN results, callers append.
-
-        Args:
-            phase: The phase to execute
-            ctx: Execution context
-            aggregate: Workflow execution aggregate for events
-            tenant_id: Optional tenant ID for multi-tenancy
-
-        Returns:
-            PhaseResult with execution metrics
-
-        Raises:
-            WorkflowExecutionError: If phase execution fails
+            On success: RETURNS PhaseResult. Caller appends to ctx.phase_results,
+            ctx.completed_phase_ids, and ctx.artifact_ids.
+            On failure: Appends failure PhaseResult to ctx.phase_results, then raises
+            WorkflowExecutionError. Caller should NOT append again.
+            On interrupt: Extends ctx.artifact_ids with partial artifacts, then raises
+            WorkflowInterruptedError.
         """
         from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
         from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
@@ -1086,7 +973,6 @@ class WorkflowExecutionEngine:
         )
 
         # Create session aggregate for detailed observability
-        # This tracks the session at a more granular level than the workflow aggregate
         session: AgentSessionAggregate | None = None
         if self._sessions is not None:
             session = AgentSessionAggregate()
@@ -1102,29 +988,29 @@ class WorkflowExecutionEngine:
             await self._sessions.save(session)
             logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
 
-        # ADR-035: Initialize conversation tracking variables before try block
-        # This ensures we can store partial conversation logs even on early failures
-        conversation_lines: list[str] = []
-        total_input_tokens = 0
-        total_output_tokens = 0
+        # Create collaborators
+        tokens = TokenAccumulator()
+        subagents = SubagentTracker()
+        recorder = ConversationRecorder(self._conversation_storage)
+        artifacts = ArtifactCollector(
+            self._artifacts, self._artifact_content_storage, self._artifact_query
+        )
+
+        # Track conversation lines for failure handling (stream_result may not exist
+        # if exception occurs before stream processing)
+        _conversation_lines: list[str] = []
 
         try:
-            # Create isolated workspace using WorkspaceService
-            # Setup phase secrets pattern (ADR-024): secrets available during
-            # setup phase, cleared before agent runs
             async with self._workspace_service.create_workspace(
                 execution_id=ctx.execution_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,
-                with_sidecar=False,  # Sidecar not needed with setup phase pattern
-                inject_tokens=False,  # Handled by setup phase
+                with_sidecar=False,
+                inject_tokens=False,
             ) as workspace:
                 # Run setup phase with secrets (ADR-024)
-                # Uses GitHub App to generate installation token if configured
                 from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
-                # Parse "https://github.com/owner/repo" → "owner/repo"
-                # Skip sentinel/placeholder URLs used for workflows with no repo configured.
                 _SKIP_URLS = {
                     "https://github.com/placeholder/not-configured",
                     "https://github.com/example/repo",
@@ -1149,112 +1035,14 @@ class WorkflowExecutionEngine:
                     )
                 logger.info("Setup phase completed, secrets cleared")
 
-                # Inject input artifacts from previous phases
-                # ADR-036: Write to artifacts/input/ (not inputs/)
-                if ctx.completed_phase_ids:
-                    # Use in-memory cache first (avoids eventual consistency issues)
-                    # Fall back to projection query for phases not in cache
-                    phase_outputs: dict[str, str] = {}
+                # Inject input artifacts from previous phases (ADR-036)
+                await artifacts.inject_from_previous_phases(workspace, ctx)
 
-                    # 1. Get from in-memory cache (immediate, no eventual consistency)
-                    for pid in ctx.completed_phase_ids:
-                        if pid in ctx.phase_outputs:
-                            phase_outputs[pid] = ctx.phase_outputs[pid]
-
-                    # 2. Query projection for any missing phases
-                    missing_phases = [
-                        pid for pid in ctx.completed_phase_ids if pid not in phase_outputs
-                    ]
-                    if missing_phases and self._artifact_query:
-                        projection_outputs = await self._artifact_query.get_for_phase_injection(
-                            execution_id=ctx.execution_id,
-                            completed_phase_ids=missing_phases,
-                        )
-                        phase_outputs.update(projection_outputs)
-
-                    # Write artifacts to /workspace/artifacts/input/
-                    files_to_inject = [
-                        (f"artifacts/input/{prev_phase_id}.md", content.encode())
-                        for prev_phase_id, content in phase_outputs.items()
-                    ]
-                    if files_to_inject:
-                        await workspace.inject_files(files_to_inject)
-                        logger.info(
-                            "Injected %d artifact(s) from previous phases: %s",
-                            len(files_to_inject),
-                            list(phase_outputs.keys()),
-                        )
-                    elif ctx.completed_phase_ids:
-                        logger.warning(
-                            "No artifacts found for completed phases: %s",
-                            ctx.completed_phase_ids,
-                        )
-
-                # Build task.json (kept for future use with task file injection)
+                # Build prompt and CLI command
                 prompt = await self._build_prompt(phase, ctx)
-                _task_data = {
-                    "phase": phase.phase_id,
-                    "prompt": prompt,
-                    "execution_id": ctx.execution_id,
-                    "tenant_id": tenant_id or "default",
-                    "inputs": ctx.inputs,
-                    "artifacts": [f"{pid}.md" for pid in ctx.completed_phase_ids],
-                    "config": {
-                        "model": phase.agent_config.model,
-                        "max_tokens": phase.agent_config.max_tokens,
-                        "timeout_seconds": phase.timeout_seconds,
-                    },
-                }
+                claude_cmd = self._build_claude_command(phase, prompt)
 
-                # ADR-029: Run Claude CLI directly (no syn-agent-runner wrapper)
-                # Build the Claude CLI command
-                # ADR-012: Append system prompt for artifact output instructions
-                claude_args = [
-                    "claude",
-                    "--print",  # Non-interactive mode
-                    "--verbose",  # Required for stream-json output format
-                    "--append-system-prompt",
-                    SYN_WORKSPACE_PROMPT,  # Workspace contract from agentic-primitives
-                    prompt,
-                    "--output-format",
-                    "stream-json",  # Stream JSON for real-time events
-                    "--dangerously-skip-permissions",  # Agent runs autonomously
-                ]
-
-                # Add allowed tools if specified
-                if phase.agent_config.allowed_tools:
-                    claude_args.extend(
-                        [
-                            "--allowedTools",
-                            ",".join(phase.agent_config.allowed_tools),
-                        ]
-                    )
-
-                # Wrap in sh -c to dynamically discover and load plugins from the container.
-                # We can't use $AGENTIC_PLUGIN_FLAGS (set by entrypoint.sh) because docker exec
-                # spawns a new process that doesn't inherit shell-exported vars from entrypoint.
-                # Instead, we inline the same discovery logic as entrypoint.sh:
-                #   scan /opt/agentic/plugins/ for dirs with .claude-plugin/plugin.json
-                # This loads observability hooks (git events, security events, etc.)
-                _quoted_args = " ".join(shlex.quote(a) for a in claude_args)
-                _plugin_scan = (
-                    'PLUGIN_FLAGS=""; '
-                    'PLUGINS_DIR="${AGENTIC_PLUGINS_DIR:-/opt/agentic/plugins}"; '
-                    'if [ -d "$PLUGINS_DIR" ]; then '
-                    '  for d in "$PLUGINS_DIR"/*/; do '
-                    '    if [ -f "${d}.claude-plugin/plugin.json" ]; then '
-                    '      PLUGIN_FLAGS="$PLUGIN_FLAGS --plugin-dir ${d%/}"; '
-                    "    fi; "
-                    "  done; "
-                    "fi; "
-                    f"exec {_quoted_args} $PLUGIN_FLAGS"
-                )
-                claude_cmd = ["sh", "-c", _plugin_scan]
-
-                # Execute Claude CLI and stream events
-                # Claude auth is passed to agent (needed for Claude calls)
-                # CLAUDE_CODE_OAUTH_TOKEN takes priority over ANTHROPIC_API_KEY
-                # GitHub auth uses cached credentials from setup phase (ADR-024)
+                # Validate Claude authentication
                 if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
                     raise WorkflowExecutionError(
                         message=(
@@ -1265,627 +1053,39 @@ class WorkflowExecutionEngine:
                         phase_id=phase.phase_id,
                     )
 
-                agent_env = {
-                    "CLAUDE_SESSION_ID": session_id,  # For hook event correlation
+                agent_env: dict[str, str] = {
+                    "CLAUDE_SESSION_ID": session_id,
                 }
                 if secrets.claude_code_oauth_token:
                     agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
                 if secrets.anthropic_api_key:
                     agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
 
-                total_input_tokens = 0
-                total_output_tokens = 0
-
-                # Variables for observation events
-                execution_id = ctx.execution_id
-                workspace_id = getattr(workspace, "id", None)
-                agent_model = phase.agent_config.model
-
-                # Cache tool_use_id → tool_name for enriching tool_result events
-                # Claude CLI's tool_result only has tool_use_id, not tool_name
-                tool_names_cache: dict[str, str] = {}
-
-                # ADR-037: Track active subagents (Task tool) for observability
-                # tool_use_id → (agent_name, started_at, tools_used)
-                active_subagents: dict[str, tuple[str, datetime, dict[str, int]]] = {}
-
-                def _attribute_tool_to_latest_subagent(
-                    tool: str, subagents: dict[str, tuple[str, datetime, dict[str, int]]]
-                ) -> None:
-                    """Attribute a tool call to the most recently started subagent."""
-                    if not subagents or not tool:
-                        return
-                    latest_subagent_id = max(
-                        subagents.keys(),
-                        key=lambda k: subagents[k][1],  # Sort by started_at
-                    )
-                    _, _, tools_dict = subagents[latest_subagent_id]
-                    tools_dict[tool] = tools_dict.get(tool, 0) + 1
-
-                # ADR-035: Collect all JSONL lines for conversation storage
-                # (conversation_lines initialized before try block for failure handling)
-                conversation_lines.clear()
-
-                # Structured task result parsed from final `result` event text.
-                # Agents emit: TASK_RESULT: {"success": bool, "comments": "..."}
-                agent_task_result: dict | None = None
-
-                line_count = 0
-                _interrupt_requested = False
-                _interrupt_reason: str | None = None
-                # Dedup set: same hook event appears as both raw stderr and
-                # inside a hook_response envelope (stderr=STDOUT in container).
-                _seen_hook_fingerprints: set[tuple[str, ...]] = set()
-                async for line in workspace.stream(
-                    claude_cmd,
-                    timeout_seconds=phase.timeout_seconds or 300,
-                    environment=agent_env,
-                ):
-                    line_count += 1
-                    logger.debug("Received line %d: %s", line_count, line[:100])
-
-                    # Poll for CANCEL signal every 10 lines (low overhead, fast response)
-                    if line_count % 10 == 0 and self._controller is not None:
-                        from syn_adapters.control.commands import ControlSignalType
-
-                        signal = await self._controller.check_signal(ctx.execution_id)
-                        if signal and signal.signal_type == ControlSignalType.CANCEL:
-                            logger.info(
-                                "CANCEL signal received for execution %s at line %d — sending SIGINT",
-                                ctx.execution_id,
-                                line_count,
-                            )
-                            _interrupt_requested = True
-                            _interrupt_reason = signal.reason
-                            await workspace.interrupt()
-                            break
-
-                    # ADR-035: Collect line for conversation storage
-                    if line.strip():
-                        conversation_lines.append(line)
-
-                    # ADR-029 / ADR-043: Parse hook events from the stream.
-                    #
-                    # Two sources of hook JSONL exist:
-                    #
-                    # SOURCE A — Claude Code hooks (observe.py via PreToolUse/PostToolUse):
-                    #   These appear as stream-json {"type":"system","subtype":"hook_response"}
-                    #   lines, with JSONL embedded in the "output"/"stderr" fields.
-                    #   Handled below in the hook_response branch.
-                    #
-                    # SOURCE B — Git hooks (post-commit, pre-push, etc.):
-                    #   These emit JSONL to their own stderr. The Bash tool inside Claude
-                    #   Code captures that stderr along with stdout, then packages the whole
-                    #   combined output as the tool_result content in a stream-json "user"
-                    #   message. The JSONL is therefore EMBEDDED INSIDE a tool_result, NOT
-                    #   a standalone raw line. Handled below in the tool_result branch.
-                    #
-                    # parse_jsonl_line() on raw stream lines catches SOURCE A's standalone
-                    # output and any direct stderr from the claude process (via stderr=STDOUT).
-                    # SOURCE B is handled separately in the tool_result scan below.
-                    _hook_events: list[dict] = []
-                    _standalone = parse_jsonl_line(line)
-                    if _standalone:
-                        _hook_events.append(_standalone)
-                    else:
-                        try:
-                            _parsed_line = json.loads(line)
-                            _line_type = _parsed_line.get("type", "")
-                            _line_subtype = _parsed_line.get("subtype", "")
-                            if _line_type == "system":
-                                logger.info(
-                                    "System event: subtype=%s keys=%s",
-                                    _line_subtype,
-                                    list(_parsed_line.keys()),
-                                )
-                            if _line_type == "system" and _line_subtype == "hook_response":
-                                _hook_name = _parsed_line.get("hook_name", "?")
-                                _hook_event = _parsed_line.get("hook_event", "?")
-                                # Check all channels: output, stdout, stderr
-                                # (Claude Code uses 'output'+'stderr' but also has 'stdout')
-                                _seen_hook_jsons: set[str] = set()
-                                for _channel in ("output", "stdout", "stderr"):
-                                    _channel_text = _parsed_line.get(_channel, "")
-                                    logger.info(
-                                        "hook_response hook=%s event=%s channel=%s len=%d content=%r",
-                                        _hook_name,
-                                        _hook_event,
-                                        _channel,
-                                        len(_channel_text),
-                                        _channel_text[:300],
-                                    )
-                                    for _hook_line in _channel_text.splitlines():
-                                        _hook_line = _hook_line.strip()
-                                        if _hook_line and _hook_line not in _seen_hook_jsons:
-                                            _evt = parse_jsonl_line(_hook_line)
-                                            if _evt:
-                                                _seen_hook_jsons.add(_hook_line)
-                                                _hook_events.append(_evt)
-                                            else:
-                                                logger.info(
-                                                    "hook_response line not a hook event: %r",
-                                                    _hook_line[:200],
-                                                )
-                        except (json.JSONDecodeError, AttributeError):
-                            pass
-
-                    for hook_event in _hook_events:
-                        # Deduplicate hook events. Two sources of duplicates:
-                        # 1. Same emission appearing as raw stderr AND inside a
-                        #    hook_response envelope (stderr=STDOUT in container).
-                        # 2. Multiple plugins registering the same hook event
-                        #    (e.g. both workspace and observability plugins handle
-                        #    SessionStart, each emitting session_started).
-                        #
-                        # Session-level events (no tool_use_id) are inherently
-                        # once-per-session, so we fingerprint by (event_type, session_id).
-                        # Tool events include tool_use_id + timestamp to distinguish
-                        # legitimately different invocations.
-                        _evt_type = hook_event.get("event_type", "")
-                        _evt_sid = hook_event.get("session_id", "")
-                        _evt_ctx = hook_event.get("context") or {}
-                        _evt_tuid = _evt_ctx.get("tool_use_id", "")
-                        if _evt_tuid:
-                            # Tool event: full fingerprint to avoid false dedup
-                            _fp: tuple[str, ...] = (
-                                _evt_type,
-                                _evt_sid,
-                                str(hook_event.get("timestamp", "")),
-                                _evt_tuid,
-                            )
-                        else:
-                            # Session-level event: dedup by (type, session) only —
-                            # multiple plugins can emit the same event with
-                            # slightly different timestamps
-                            _fp = (_evt_type, _evt_sid)
-
-                        if _fp in _seen_hook_fingerprints:
-                            logger.debug("Skipping duplicate hook event: %s", _fp[0])
-                            continue
-                        _seen_hook_fingerprints.add(_fp)
-
-                        # Validate event_type against VALID_EVENT_TYPES (syn_shared.events)
-                        # An unknown type means producer/consumer are out of sync.
-                        _hook_event_type = hook_event.get("event_type")
-                        if _hook_event_type not in VALID_EVENT_TYPES:
-                            logger.warning(
-                                "Unknown event_type from hook: %s — "
-                                "add it to syn_shared.events or check for a producer/consumer mismatch",
-                                _hook_event_type,
-                            )
-
-                        # Enrich with workflow context
-                        enriched = enrich_event(
-                            hook_event,
-                            execution_id=execution_id,
-                            phase_id=phase.phase_id,
-                        )
-                        logger.debug("Hook event: %s", enriched.get("event_type"))
-
-                        # Store hook events directly via observability writer.
-                        # Merge context + metadata so all rich data (sha, branch, message,
-                        # files_changed, etc.) is stored in the event data column.
-                        if self._observability_writer is not None:
-                            _hook_data = {
-                                **(enriched.get("context") or {}),
-                                **(enriched.get("metadata") or {}),
-                            }
-                            await self._record_observation(
-                                observation_type=enriched.get("event_type", "unknown"),
-                                session_id=session_id,
-                                data=_hook_data,
-                                execution_id=execution_id,
-                                phase_id=phase.phase_id,
-                                workspace_id=workspace_id,
-                            )
-
-                        # ADR-037: Detect subagent lifecycle from Task tool events.
-                        # Hook events use "event_type" (not "type") with values from
-                        # agentic_events.types.EventType (e.g. "tool_execution_started").
-                        hook_event_type = hook_event.get("event_type", "")
-                        ctx_data = enriched.get("context", {})
-                        tool_name = ctx_data.get("tool_name", "")
-                        tool_use_id = ctx_data.get("tool_use_id", "")
-
-                        if (
-                            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-                            and tool_use_id
-                        ):
-                            if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
-                                # Parse agent_name from input_preview JSON
-                                agent_name = "unknown"
-                                input_preview = ctx_data.get("input_preview", "")
-                                if input_preview:
-                                    try:
-                                        input_data = json.loads(input_preview)
-                                        agent_name = str(
-                                            input_data.get(
-                                                "subagent_type",
-                                                input_data.get("description", "unknown"),
-                                            )
-                                        )[:50]
-                                    except (json.JSONDecodeError, TypeError):
-                                        pass
-                                active_subagents[tool_use_id] = (agent_name, datetime.now(UTC), {})
-
-                                if self._observability_writer is not None:
-                                    await self._record_observation(
-                                        observation_type=ObservationType.SUBAGENT_STARTED,
-                                        session_id=session_id,
-                                        data={
-                                            "agent_name": agent_name,
-                                            "subagent_tool_use_id": tool_use_id,
-                                        },
-                                        execution_id=execution_id,
-                                        phase_id=phase.phase_id,
-                                        workspace_id=workspace_id,
-                                    )
-                                    logger.info(
-                                        "Subagent started: %s (id=%s)",
-                                        agent_name,
-                                        tool_use_id,
-                                    )
-
-                            elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
-                                if tool_use_id in active_subagents:
-                                    agent_name, started_at, tools_used = active_subagents.pop(
-                                        tool_use_id
-                                    )
-                                    duration_ms = int(
-                                        (datetime.now(UTC) - started_at).total_seconds() * 1000
-                                    )
-                                    success = ctx_data.get("success", True)
-
-                                    if self._observability_writer is not None:
-                                        await self._record_observation(
-                                            observation_type=ObservationType.SUBAGENT_STOPPED,
-                                            session_id=session_id,
-                                            data={
-                                                "agent_name": agent_name,
-                                                "subagent_tool_use_id": tool_use_id,
-                                                "duration_ms": duration_ms,
-                                                "success": success,
-                                                "tools_used": tools_used,
-                                            },
-                                            execution_id=execution_id,
-                                            phase_id=phase.phase_id,
-                                            workspace_id=workspace_id,
-                                        )
-                                        logger.info(
-                                            "Subagent stopped: %s (id=%s, duration=%dms, tools=%s)",
-                                            agent_name,
-                                            tool_use_id,
-                                            duration_ms,
-                                            tools_used,
-                                        )
-                                else:
-                                    # Non-Task tool completed - attribute to active subagent
-                                    _attribute_tool_to_latest_subagent(tool_name, active_subagents)
-
-                    # Skip native CLI event processing if we handled hook events
-                    if _hook_events:
-                        continue
-
-                    # Fall back to Claude CLI native events
-                    try:
-                        cli_event = json.loads(line)
-                        cli_type = cli_event.get("type", "")
-                        logger.debug("CLI event type: %s", cli_type)
-
-                        # Handle result event (session completion)
-                        if cli_type == "result":
-                            # Parse structured task result from agent's final text
-                            result_text = cli_event.get("result", "")
-                            if result_text and "TASK_RESULT:" in result_text:
-                                try:
-                                    marker = "TASK_RESULT:"
-                                    idx = result_text.rfind(marker)
-                                    raw = result_text[idx + len(marker) :].strip()
-                                    # Extract just the JSON object (stop at first newline after })
-                                    brace_end = raw.find("}")
-                                    if brace_end >= 0:
-                                        raw = raw[: brace_end + 1]
-                                    agent_task_result = json.loads(raw)
-                                    logger.info(
-                                        "Agent task result: success=%s comments=%s",
-                                        agent_task_result.get("success"),
-                                        agent_task_result.get("comments", "")[:100],
-                                    )
-                                except (json.JSONDecodeError, ValueError):
-                                    logger.debug("Could not parse TASK_RESULT block")
-
-                            # Extract token usage
-                            usage = cli_event.get("usage", {})
-                            input_tokens = usage.get("input_tokens", 0)
-                            output_tokens = usage.get("output_tokens", 0)
-                            cache_creation = usage.get("cache_creation_input_tokens", 0)
-                            cache_read = usage.get("cache_read_input_tokens", 0)
-
-                            # Only record and accumulate if there's actual usage
-                            if input_tokens > 0 or output_tokens > 0:
-                                total_input_tokens += input_tokens
-                                total_output_tokens += output_tokens
-
-                                if self._observability_writer is not None:
-                                    await self._record_observation(
-                                        observation_type=ObservationType.TOKEN_USAGE,
-                                        session_id=session_id,
-                                        data={
-                                            "input_tokens": input_tokens,
-                                            "output_tokens": output_tokens,
-                                            "cache_creation_tokens": cache_creation,
-                                            "cache_read_tokens": cache_read,
-                                            "model": agent_model,
-                                        },
-                                        execution_id=execution_id,
-                                        phase_id=phase.phase_id,
-                                        workspace_id=workspace_id,
-                                    )
-                                    logger.info(
-                                        "Result token usage: %d in, %d out",
-                                        input_tokens,
-                                        output_tokens,
-                                    )
-
-                        # Extract tool events from assistant messages
-                        # Claude CLI emits tool_use in message.content
-                        if cli_type == "assistant":
-                            message = cli_event.get("message", {})
-                            content = message.get("content", [])
-
-                            # Extract per-turn token usage from assistant messages
-                            # (result event only has cumulative totals at the end)
-                            # Note: Claude CLI streams messages incrementally, and early
-                            # chunks may have empty/zero usage. Only record when we have
-                            # actual token counts.
-                            usage = message.get("usage", {})
-                            if usage:
-                                input_tokens = usage.get("input_tokens", 0)
-                                output_tokens = usage.get("output_tokens", 0)
-                                cache_creation = usage.get("cache_creation_input_tokens", 0)
-                                cache_read = usage.get("cache_read_input_tokens", 0)
-
-                                # Only record if there's actual token usage
-                                # (skip empty streaming chunks)
-                                if input_tokens > 0 or output_tokens > 0:
-                                    total_input_tokens += input_tokens
-                                    total_output_tokens += output_tokens
-
-                                    if self._observability_writer is not None:
-                                        await self._record_observation(
-                                            observation_type=ObservationType.TOKEN_USAGE,
-                                            session_id=session_id,
-                                            data={
-                                                "input_tokens": input_tokens,
-                                                "output_tokens": output_tokens,
-                                                "cache_creation_tokens": cache_creation,
-                                                "cache_read_tokens": cache_read,
-                                                "model": agent_model,
-                                            },
-                                            execution_id=execution_id,
-                                            phase_id=phase.phase_id,
-                                            workspace_id=workspace_id,
-                                        )
-                                        logger.info(
-                                            "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
-                                            input_tokens,
-                                            output_tokens,
-                                            cache_read,
-                                            cache_creation,
-                                        )
-                            for item in content:
-                                if isinstance(item, dict) and item.get("type") == "tool_use":
-                                    tool_name = item.get("name", "unknown")
-                                    tool_use_id = item.get("id", "unknown")
-                                    tool_input = item.get("input", {})
-                                    if isinstance(tool_input, str):
-                                        try:
-                                            tool_input = json.loads(tool_input)
-                                        except (json.JSONDecodeError, ValueError):
-                                            tool_input = {}
-
-                                    # Cache tool_name for enriching tool_result events
-                                    tool_names_cache[tool_use_id] = tool_name
-
-                                    if self._observability_writer is not None:
-                                        await self._record_observation(
-                                            observation_type=ObservationType.TOOL_EXECUTION_STARTED,
-                                            session_id=session_id,
-                                            data={
-                                                "tool_name": tool_name,
-                                                "tool_use_id": tool_use_id,
-                                                "input_preview": json.dumps(tool_input)[:500],
-                                            },
-                                            execution_id=execution_id,
-                                            phase_id=phase.phase_id,
-                                            workspace_id=workspace_id,
-                                        )
-                                        logger.debug("Tool started: %s", tool_name)
-
-                                    # ADR-037: Detect Task tool as subagent start (raw CLI format)
-                                    if (
-                                        tool_name
-                                        in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-                                        and tool_use_id
-                                    ):
-                                        agent_name = str(
-                                            tool_input.get(
-                                                "subagent_type",
-                                                tool_input.get("description", "unknown"),
-                                            )
-                                        )[:50]
-                                        active_subagents[tool_use_id] = (
-                                            agent_name,
-                                            datetime.now(UTC),
-                                            {},  # tools_used dict
-                                        )
-
-                                        if self._observability_writer is not None:
-                                            await self._record_observation(
-                                                observation_type=ObservationType.SUBAGENT_STARTED,
-                                                session_id=session_id,
-                                                data={
-                                                    "agent_name": agent_name,
-                                                    "subagent_tool_use_id": tool_use_id,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                            logger.info(
-                                                "Subagent started (CLI): %s (id=%s)",
-                                                agent_name,
-                                                tool_use_id,
-                                            )
-
-                        # Handle tool results from user messages
-                        if cli_type == "user":
-                            message = cli_event.get("message", {})
-                            content = message.get("content", [])
-                            for item in content:
-                                if isinstance(item, dict) and item.get("type") == "tool_result":
-                                    tool_use_id = item.get("tool_use_id", "unknown")
-                                    is_error = item.get("is_error", False)
-                                    # Extract tool output content
-                                    tool_content = item.get("content", "")
-                                    if isinstance(tool_content, list):
-                                        # Content can be a list of content blocks
-                                        tool_content = " ".join(
-                                            str(c.get("text", c) if isinstance(c, dict) else c)
-                                            for c in tool_content
-                                        )
-                                    output_preview = (
-                                        str(tool_content)[:500] if tool_content else None
-                                    )
-                                    # Look up tool_name from cache
-                                    tool_name = tool_names_cache.get(tool_use_id, "unknown")
-
-                                    # ADR-043: Scan tool output for embedded git hook JSONL.
-                                    #
-                                    # Git hooks (post-commit, pre-push, etc.) emit JSONL to
-                                    # stderr. Because the Bash tool runs inside Claude Code,
-                                    # Claude Code captures the subprocess's stderr along with
-                                    # stdout and packages everything as the tool result content.
-                                    # The JSONL does NOT arrive as a standalone stream line;
-                                    # it's embedded in the tool_result here.
-                                    #
-                                    # We scan every line of tool output for parse_jsonl_line()
-                                    # hits and process them identically to standalone hook events.
-                                    if tool_content and self._observability_writer is not None:
-                                        for _tl in str(tool_content).splitlines():
-                                            _tl = _tl.strip()
-                                            if not _tl:
-                                                continue
-                                            _embedded = parse_jsonl_line(_tl)
-                                            if not _embedded:
-                                                continue
-                                            _et = _embedded.get("event_type")
-                                            if _et not in VALID_EVENT_TYPES:
-                                                logger.debug(
-                                                    "Unknown event_type in tool output: %s", _et
-                                                )
-                                                continue
-                                            _enriched = enrich_event(
-                                                _embedded,
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                            )
-                                            _hd = {
-                                                **(_enriched.get("context") or {}),
-                                                **(_enriched.get("metadata") or {}),
-                                            }
-                                            await self._record_observation(
-                                                observation_type=_et,
-                                                session_id=session_id,
-                                                data=_hd,
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                            logger.info(
-                                                "Git hook event from tool output: %s (tool=%s)",
-                                                _et,
-                                                tool_name,
-                                            )
-
-                                    if self._observability_writer is not None:
-                                        await self._record_observation(
-                                            observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
-                                            session_id=session_id,
-                                            data={
-                                                "tool_name": tool_name,  # Now included!
-                                                "tool_use_id": tool_use_id,
-                                                "success": not is_error,
-                                                "output_preview": output_preview,  # Show why it failed!
-                                            },
-                                            execution_id=execution_id,
-                                            phase_id=phase.phase_id,
-                                            workspace_id=workspace_id,
-                                        )
-                                        logger.debug(
-                                            "Tool completed: %s (%s) success=%s",
-                                            tool_use_id,
-                                            tool_name,
-                                            not is_error,
-                                        )
-
-                                    # ADR-037: Detect Task tool completion as subagent stop (raw CLI format)
-                                    if (
-                                        tool_name
-                                        in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-                                        and tool_use_id in active_subagents
-                                    ):
-                                        agent_name, started_at, tools_used = active_subagents.pop(
-                                            tool_use_id
-                                        )
-                                        duration_ms = int(
-                                            (datetime.now(UTC) - started_at).total_seconds() * 1000
-                                        )
-
-                                        if self._observability_writer is not None:
-                                            await self._record_observation(
-                                                observation_type=ObservationType.SUBAGENT_STOPPED,
-                                                session_id=session_id,
-                                                data={
-                                                    "agent_name": agent_name,
-                                                    "subagent_tool_use_id": tool_use_id,
-                                                    "duration_ms": duration_ms,
-                                                    "success": not is_error,
-                                                    "tools_used": tools_used,
-                                                },
-                                                execution_id=execution_id,
-                                                phase_id=phase.phase_id,
-                                                workspace_id=workspace_id,
-                                            )
-                                            logger.info(
-                                                "Subagent stopped (CLI): %s (id=%s, duration=%dms, tools=%s)",
-                                                agent_name,
-                                                tool_use_id,
-                                                duration_ms,
-                                                tools_used,
-                                            )
-                                    elif tool_name != "Task":
-                                        # Attribute non-Task tool to the most recently started subagent
-                                        _attribute_tool_to_latest_subagent(
-                                            tool_name, active_subagents
-                                        )
-
-                        if cli_type in ("system",):
-                            logger.debug("CLI message: %s", cli_type)
-
-                    except json.JSONDecodeError:
-                        # Not all lines are JSON (could be plain text output)
-                        logger.debug("Non-JSON line: %s", line[:50])
-
-                logger.info(
-                    "Agent runner streaming complete: %d lines, %d input tokens, %d output tokens",
-                    line_count,
-                    total_input_tokens,
-                    total_output_tokens,
+                # Process event stream
+                processor = EventStreamProcessor(
+                    tokens=tokens,
+                    subagents=subagents,
+                    observability=self._observability_writer,
+                    controller=self._controller,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    session_id=session_id,
+                    workspace_id=getattr(workspace, "id", None),
+                    agent_model=phase.agent_config.model,
                 )
 
-                # If CANCEL signal was received, collect partial state and raise interrupt
-                if _interrupt_requested:
+                stream_result = await processor.process_stream(
+                    workspace.stream(
+                        claude_cmd,
+                        timeout_seconds=phase.timeout_seconds or 300,
+                        environment=agent_env,
+                    ),
+                    workspace,
+                )
+                _conversation_lines = stream_result.conversation_lines
+
+                # Handle interrupt
+                if stream_result.interrupt_requested:
                     try:
                         git_sha = await self._get_container_git_sha(workspace)
                     except Exception as git_err:
@@ -1895,73 +1095,41 @@ class WorkflowExecutionEngine:
                             git_err,
                         )
                         git_sha = None
-                    partial_artifact_ids: list[str] = []
-                    try:
-                        partial_artifacts = await workspace.collect_files(
-                            patterns=["artifacts/output/**/*"]
-                        )
-                        for artifact_path, artifact_content in partial_artifacts:
-                            artifact_id = str(uuid4())
-                            content_str = artifact_content.decode("utf-8", errors="replace")
-                            await self._create_artifact(
-                                artifact_id=artifact_id,
-                                workflow_id=ctx.workflow_id,
-                                phase_id=phase.phase_id,
-                                execution_id=ctx.execution_id,
-                                session_id=session_id,
-                                artifact_type=phase.output_artifact_type,
-                                content=content_str,
-                                title=f"{phase.name} (partial): {artifact_path}",
-                            )
-                            partial_artifact_ids.append(artifact_id)
-                            ctx.artifact_ids.append(artifact_id)
-                    except Exception as artifact_err:
-                        logger.warning(
-                            "Failed to collect partial artifacts for %s: %s",
-                            session_id,
-                            artifact_err,
-                        )
 
-                    # Store partial conversation log
-                    if self._conversation_storage is not None and conversation_lines:
-                        try:
-                            from syn_adapters.conversations import SessionContext
+                    partial_artifact_ids = await artifacts.collect_partial(
+                        workspace=workspace,
+                        workflow_id=ctx.workflow_id,
+                        phase_id=phase.phase_id,
+                        execution_id=ctx.execution_id,
+                        session_id=session_id,
+                        phase_name=phase.name,
+                        output_artifact_type=phase.output_artifact_type,
+                    )
+                    ctx.artifact_ids.extend(partial_artifact_ids)
 
-                            conv_context = SessionContext(
-                                execution_id=ctx.execution_id,
-                                phase_id=phase.phase_id,
-                                workflow_id=ctx.workflow_id,
-                                model=phase.agent_config.model,
-                                event_count=len(conversation_lines),
-                                tool_counts={},
-                                total_input_tokens=total_input_tokens,
-                                total_output_tokens=total_output_tokens,
-                                started_at=phase_started_at,
-                                completed_at=datetime.now(UTC),
-                                success=False,
-                            )
-                            await self._conversation_storage.store_session(
-                                session_id=session_id,
-                                lines=conversation_lines,
-                                context=conv_context,
-                            )
-                        except Exception as conv_err:
-                            logger.warning(
-                                "Failed to store partial conversation log for %s: %s",
-                                session_id,
-                                conv_err,
-                            )
+                    await recorder.store(
+                        session_id=session_id,
+                        lines=stream_result.conversation_lines,
+                        execution_id=ctx.execution_id,
+                        phase_id=phase.phase_id,
+                        workflow_id=ctx.workflow_id,
+                        model=phase.agent_config.model,
+                        input_tokens=tokens.input_tokens,
+                        output_tokens=tokens.output_tokens,
+                        started_at=phase_started_at,
+                        success=False,
+                    )
 
                     raise WorkflowInterruptedError(
                         phase_id=phase.phase_id,
-                        reason=_interrupt_reason,
+                        reason=stream_result.interrupt_reason,
                         git_sha=git_sha,
                         partial_artifact_ids=partial_artifact_ids,
-                        partial_input_tokens=total_input_tokens,
-                        partial_output_tokens=total_output_tokens,
+                        partial_input_tokens=tokens.input_tokens,
+                        partial_output_tokens=tokens.output_tokens,
                     )
 
-                # Check process exit code — non-zero means agent failed
+                # Check process exit code
                 exit_code = workspace.last_stream_exit_code
                 if exit_code is not None and exit_code != 0:
                     raise WorkflowExecutionError(
@@ -1973,95 +1141,58 @@ class WorkflowExecutionEngine:
                         phase_id=phase.phase_id,
                     )
 
-                # Check structured task result — agent explicitly reported failure
-                if agent_task_result is not None and not agent_task_result.get("success", True):
-                    comments = agent_task_result.get("comments", "Agent reported task failure")
+                # Check structured task result
+                task_result = stream_result.agent_task_result
+                if task_result is not None and not task_result.get("success", True):
+                    comments = task_result.get("comments", "Agent reported task failure")
                     raise WorkflowExecutionError(
                         message=comments,
                         workflow_id=ctx.workflow_id,
                         phase_id=phase.phase_id,
                     )
 
-                # ADR-035: Store conversation log to MinIO/S3
-                if self._conversation_storage is not None and conversation_lines:
-                    try:
-                        from syn_adapters.conversations import SessionContext
-
-                        conv_context = SessionContext(
-                            execution_id=ctx.execution_id,
-                            phase_id=phase.phase_id,
-                            workflow_id=ctx.workflow_id,
-                            model=phase.agent_config.model,
-                            event_count=len(conversation_lines),
-                            tool_counts={},  # Tool counts tracked separately via observability events
-                            total_input_tokens=total_input_tokens,
-                            total_output_tokens=total_output_tokens,
-                            started_at=phase_started_at,
-                            completed_at=datetime.now(UTC),
-                            success=True,
-                        )
-                        await self._conversation_storage.store_session(
-                            session_id=session_id,
-                            lines=conversation_lines,
-                            context=conv_context,
-                        )
-                        logger.info(
-                            "Conversation log stored: %s (%d lines)",
-                            session_id,
-                            len(conversation_lines),
-                        )
-                    except Exception as conv_err:
-                        # Don't fail the phase if conversation storage fails
-                        logger.warning(
-                            "Failed to store conversation log for %s: %s",
-                            session_id,
-                            conv_err,
-                        )
-
-                # Collect output artifacts
-                # ADR-036: Collect from artifacts/output/ (not artifacts/)
-                artifacts = await workspace.collect_files(
-                    patterns=["artifacts/output/**/*"],
+                # Store conversation log (ADR-035)
+                await recorder.store(
+                    session_id=session_id,
+                    lines=stream_result.conversation_lines,
+                    execution_id=ctx.execution_id,
+                    phase_id=phase.phase_id,
+                    workflow_id=ctx.workflow_id,
+                    model=phase.agent_config.model,
+                    input_tokens=tokens.input_tokens,
+                    output_tokens=tokens.output_tokens,
+                    started_at=phase_started_at,
+                    success=True,
                 )
 
-                # Create artifact records for each output
-                artifact_ids: list[str] = []
-                first_artifact_content: str | None = None
-                for artifact_path, artifact_content in artifacts:
-                    artifact_id = str(uuid4())
-                    content_str = artifact_content.decode("utf-8", errors="replace")
-                    await self._create_artifact(
-                        artifact_id=artifact_id,
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                        execution_id=ctx.execution_id,
-                        session_id=session_id,
-                        artifact_type=phase.output_artifact_type,
-                        content=content_str,
-                        title=f"{phase.name}: {artifact_path}",
-                    )
-                    artifact_ids.append(artifact_id)
-                    ctx.artifact_ids.append(artifact_id)
-                    # Store first artifact for phase-to-phase injection
-                    if first_artifact_content is None:
-                        first_artifact_content = content_str
+                # Collect output artifacts (ADR-036)
+                collected = await artifacts.collect_from_workspace(
+                    workspace=workspace,
+                    workflow_id=ctx.workflow_id,
+                    phase_id=phase.phase_id,
+                    execution_id=ctx.execution_id,
+                    session_id=session_id,
+                    phase_name=phase.name,
+                    output_artifact_type=phase.output_artifact_type,
+                )
+                ctx.artifact_ids.extend(collected.artifact_ids)
 
-                # Store in in-memory cache for immediate use by next phase
-                # This avoids eventual consistency issues with projection queries
-                if first_artifact_content:
-                    ctx.phase_outputs[phase.phase_id] = first_artifact_content
+                # Cache first artifact for phase-to-phase injection
+                if collected.first_content:
+                    ctx.phase_outputs[phase.phase_id] = collected.first_content
                     logger.info(
                         "Phase output cached for injection: %s (%d chars)",
                         phase.phase_id,
-                        len(first_artifact_content),
+                        len(collected.first_content),
                     )
+
+                # Capture values needed after workspace exit
+                _line_count = stream_result.line_count
+                _collected_artifact_ids = collected.artifact_ids
 
             # Workspace destroyed here (context manager exit)
 
-            # Validate agent actually produced output
-            # If line_count == 0 AND no tokens were consumed, the agent failed silently
-            # (e.g., auth failure, crash, missing config)
-            if line_count == 0 and total_input_tokens == 0 and total_output_tokens == 0:
+            if _line_count == 0 and tokens.total_tokens == 0:
                 raise WorkflowExecutionError(
                     message=(
                         "Agent produced no output. Possible causes: "
@@ -2071,58 +1202,50 @@ class WorkflowExecutionEngine:
                     phase_id=phase.phase_id,
                 )
 
-            # Record success
-            phase_completed_at = datetime.now(UTC)
-            duration = (phase_completed_at - phase_started_at).total_seconds()
-
-            result = PhaseResult(
+            # Build success result
+            result = PhaseResultBuilder.success(
                 phase_id=phase.phase_id,
-                status=PhaseStatus.COMPLETED,
                 started_at=phase_started_at,
-                completed_at=phase_completed_at,
-                artifact_id=artifact_ids[0] if artifact_ids else None,
                 session_id=session_id,
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-                total_tokens=total_input_tokens + total_output_tokens,
-                cost_usd=self._estimate_cost(total_input_tokens, total_output_tokens),
+                artifact_ids=_collected_artifact_ids,
+                tokens=tokens,
             )
-            # NOTE: Do NOT append here - caller is responsible for appending
-            # to ctx.phase_results, ctx.completed_phase_ids, and ctx.artifact_ids.
-            # This follows the contract: helper methods RETURN results, callers append.
 
             # Emit phase completed
+            duration = (
+                (result.completed_at - phase_started_at).total_seconds()
+                if result.completed_at
+                else 0.0
+            )
             complete_cmd = CompletePhaseCommand(
                 execution_id=ctx.execution_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,
                 session_id=session_id,
-                artifact_id=artifact_ids[0] if artifact_ids else None,
-                input_tokens=total_input_tokens,
-                output_tokens=total_output_tokens,
-                total_tokens=total_input_tokens + total_output_tokens,
+                artifact_id=_collected_artifact_ids[0] if _collected_artifact_ids else None,
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                total_tokens=tokens.total_tokens,
                 cost_usd=result.cost_usd,
                 duration_seconds=duration,
             )
             aggregate._handle_command(complete_cmd)
 
             # Record token usage on session before completing
-            # This ensures SessionCompleted event contains accumulated tokens
             if session is not None and self._sessions is not None:
-                if total_input_tokens > 0 or total_output_tokens > 0:
+                if tokens.total_tokens > 0:
                     record_op_cmd = RecordOperationCommand(
                         aggregate_id=session_id,
                         operation_type=OperationType.MESSAGE_RESPONSE,
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                        total_tokens=total_input_tokens + total_output_tokens,
+                        input_tokens=tokens.input_tokens,
+                        output_tokens=tokens.output_tokens,
+                        total_tokens=tokens.total_tokens,
                         success=True,
                         duration_seconds=duration,
                         metadata={"phase_id": phase.phase_id, "source": "container_execution"},
                     )
                     session._handle_command(record_op_cmd)
 
-                # Complete session aggregate (success)
                 complete_session_cmd = CompleteSessionCommand(
                     aggregate_id=session_id,
                     success=True,
@@ -2132,13 +1255,13 @@ class WorkflowExecutionEngine:
                 logger.debug(
                     "Session completed: %s (success, tokens: %d)",
                     session_id,
-                    total_input_tokens + total_output_tokens,
+                    tokens.total_tokens,
                 )
 
             logger.info(
                 "Phase completed (container mode): %s (tokens: %d)",
                 phase.phase_id,
-                total_input_tokens + total_output_tokens,
+                tokens.total_tokens,
             )
 
             return result
@@ -2164,58 +1287,31 @@ class WorkflowExecutionEngine:
                     logger.warning(
                         "Failed to complete session %s during cancel: %s", session_id, _sess_err
                     )
-            # Let interrupt propagate to execute() where it's handled correctly
             raise
 
         except Exception as e:
-            # Record failure
-            phase_completed_at = datetime.now(UTC)
-            result = PhaseResult(
+            # Build failure result
+            result = PhaseResultBuilder.failure(
                 phase_id=phase.phase_id,
-                status=PhaseStatus.FAILED,
                 started_at=phase_started_at,
-                completed_at=phase_completed_at,
                 session_id=session_id,
                 error_message=str(e),
             )
             ctx.phase_results.append(result)
 
-            # ADR-035: Store conversation log even on failure
-            # This ensures we capture partial conversation for debugging and analysis
-            if self._conversation_storage is not None and conversation_lines:
-                try:
-                    from syn_adapters.conversations import SessionContext
-
-                    conv_context = SessionContext(
-                        execution_id=ctx.execution_id,
-                        phase_id=phase.phase_id,
-                        workflow_id=ctx.workflow_id,
-                        model=phase.agent_config.model,
-                        event_count=len(conversation_lines),
-                        tool_counts={},
-                        total_input_tokens=total_input_tokens,
-                        total_output_tokens=total_output_tokens,
-                        started_at=phase_started_at,
-                        completed_at=phase_completed_at,
-                        success=False,  # Mark as failed
-                    )
-                    await self._conversation_storage.store_session(
-                        session_id=session_id,
-                        lines=conversation_lines,
-                        context=conv_context,
-                    )
-                    logger.info(
-                        "Conversation log stored (failed phase): %s (%d lines)",
-                        session_id,
-                        len(conversation_lines),
-                    )
-                except Exception as conv_err:
-                    # Don't let conversation storage failure hide the original error
-                    logger.warning(
-                        "Failed to store conversation log for failed phase %s: %s",
-                        session_id,
-                        conv_err,
-                    )
+            # Store conversation log even on failure (ADR-035)
+            await recorder.store(
+                session_id=session_id,
+                lines=_conversation_lines,
+                execution_id=ctx.execution_id,
+                phase_id=phase.phase_id,
+                workflow_id=ctx.workflow_id,
+                model=phase.agent_config.model,
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                started_at=phase_started_at,
+                success=False,
+            )
 
             # Complete session aggregate (failure)
             if session is not None and self._sessions is not None:
@@ -2229,7 +1325,6 @@ class WorkflowExecutionEngine:
                     await self._sessions.save(session)
                     logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
                 except Exception as session_err:
-                    # Don't let session persistence failure hide the original error
                     logger.warning(
                         "Failed to complete session %s: %s",
                         session_id,
@@ -2249,13 +1344,40 @@ class WorkflowExecutionEngine:
                 cause=e,
             ) from e
 
-    def _estimate_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
-        """Estimate cost based on token usage.
+    def _build_claude_command(self, phase: ExecutablePhase, prompt: str) -> list[str]:
+        """Build the Claude CLI command with plugin discovery."""
+        claude_args = [
+            "claude",
+            "--print",
+            "--verbose",
+            "--append-system-prompt",
+            SYN_WORKSPACE_PROMPT,
+            prompt,
+            "--output-format",
+            "stream-json",
+            "--dangerously-skip-permissions",
+        ]
 
-        Uses Claude Sonnet pricing as default.
-        """
-        # Claude Sonnet 4 pricing (per million tokens)
-        input_price = Decimal("3.00") / Decimal("1000000")
-        output_price = Decimal("15.00") / Decimal("1000000")
+        if phase.agent_config.allowed_tools:
+            claude_args.extend(
+                [
+                    "--allowedTools",
+                    ",".join(phase.agent_config.allowed_tools),
+                ]
+            )
 
-        return Decimal(input_tokens) * input_price + Decimal(output_tokens) * output_price
+        # Wrap in sh -c for dynamic plugin discovery
+        _quoted_args = " ".join(shlex.quote(a) for a in claude_args)
+        _plugin_scan = (
+            'PLUGIN_FLAGS=""; '
+            'PLUGINS_DIR="${AGENTIC_PLUGINS_DIR:-/opt/agentic/plugins}"; '
+            'if [ -d "$PLUGINS_DIR" ]; then '
+            '  for d in "$PLUGINS_DIR"/*/; do '
+            '    if [ -f "${d}.claude-plugin/plugin.json" ]; then '
+            '      PLUGIN_FLAGS="$PLUGIN_FLAGS --plugin-dir ${d%/}"; '
+            "    fi; "
+            "  done; "
+            "fi; "
+            f"exec {_quoted_args} $PLUGIN_FLAGS"
+        )
+        return ["sh", "-c", _plugin_scan]
