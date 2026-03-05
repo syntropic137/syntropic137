@@ -157,7 +157,7 @@ class ArtifactCollector:
         for artifact_path, artifact_content in artifacts:
             artifact_id = str(uuid4())
             content_str = artifact_content.decode("utf-8", errors="replace")
-            await self._create_artifact(
+            await self.create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=workflow_id,
                 phase_id=phase_id,
@@ -193,7 +193,7 @@ class ArtifactCollector:
             for artifact_path, artifact_content in partial_artifacts:
                 artifact_id = str(uuid4())
                 content_str = artifact_content.decode("utf-8", errors="replace")
-                await self._create_artifact(
+                await self.create_artifact(
                     artifact_id=artifact_id,
                     workflow_id=workflow_id,
                     phase_id=phase_id,
@@ -213,7 +213,7 @@ class ArtifactCollector:
             )
             return []
 
-    async def _create_artifact(
+    async def create_artifact(
         self,
         artifact_id: str,
         workflow_id: str,

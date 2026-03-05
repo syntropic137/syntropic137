@@ -20,7 +20,7 @@ class SpendAlert:
     execution_id: str
     workflow_type: str
     threshold: str  # "warning" or "critical"
-    metric: str  # "input_tokens", "output_tokens", "cost"
+    metric: str  # "input_tokens", "cost"
     usage_percent: float
     message: str
 

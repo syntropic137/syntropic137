@@ -729,7 +729,7 @@ class WorkflowExecutionEngine:
             artifact_collector = ArtifactCollector(
                 self._artifacts, self._artifact_content_storage, self._artifact_query
             )
-            await artifact_collector._create_artifact(
+            await artifact_collector.create_artifact(
                 artifact_id=artifact_id,
                 workflow_id=ctx.workflow_id,
                 phase_id=phase.phase_id,

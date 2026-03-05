@@ -35,6 +35,7 @@ class TimescaleSessionCostQuery:
                     (data->>'output_tokens')::int as total_output,
                     (data->>'tool_call_count')::int as tool_count,
                     (data->>'total_cost_usd')::numeric as sdk_cost,
+                    data->>'workspace_id' as workspace_id,
                     time as completed_at,
                     execution_id,
                     phase_id
@@ -57,6 +58,7 @@ class TimescaleSessionCostQuery:
                         SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read,
                         MIN(time) as started_at,
                         MAX(time) as last_observation,
+                        MAX(data->>'workspace_id') as workspace_id,
                         execution_id,
                         phase_id
                     FROM agent_events

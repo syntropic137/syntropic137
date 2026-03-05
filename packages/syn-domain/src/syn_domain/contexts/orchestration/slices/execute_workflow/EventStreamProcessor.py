@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class InterruptableWorkspace(Protocol):
+class InterruptibleWorkspace(Protocol):
     """Protocol for workspace interrupt capability needed during stream processing."""
 
     async def interrupt(self) -> bool: ...
@@ -44,10 +44,10 @@ class InterruptableWorkspace(Protocol):
 class ObservabilityRecorder(Protocol):
     """Protocol for recording observations to the observability backend."""
 
-    async def record(
+    async def record_observation(
         self,
-        observation_type: ObservationType | str,
         session_id: str,
+        observation_type: ObservationType | str,
         data: dict[str, Any],
         execution_id: str | None = None,
         phase_id: str | None = None,
@@ -98,7 +98,7 @@ class EventStreamProcessor:
     async def process_stream(
         self,
         stream: AsyncIterator[str],
-        workspace: InterruptableWorkspace,
+        workspace: InterruptibleWorkspace,
     ) -> StreamResult:
         """Process the JSONL event stream from Claude CLI.
 
@@ -249,9 +249,9 @@ class EventStreamProcessor:
                 **(enriched.get("context") or {}),
                 **(enriched.get("metadata") or {}),
             }
-            await self._observability.record(
-                observation_type=enriched.get("event_type", "unknown"),
+            await self._observability.record_observation(
                 session_id=self._session_id,
+                observation_type=enriched.get("event_type", "unknown"),
                 data=hook_data,
                 execution_id=self._execution_id,
                 phase_id=self._phase_id,
@@ -269,9 +269,9 @@ class EventStreamProcessor:
                 input_preview = ctx_data.get("input_preview", "")
                 event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
                 if self._observability is not None:
-                    await self._observability.record(
-                        observation_type=ObservationType.SUBAGENT_STARTED,
+                    await self._observability.record_observation(
                         session_id=self._session_id,
+                        observation_type=ObservationType.SUBAGENT_STARTED,
                         data={
                             "agent_name": event.agent_name,
                             "subagent_tool_use_id": tool_use_id,
@@ -290,9 +290,9 @@ class EventStreamProcessor:
                 success = ctx_data.get("success", True)
                 stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
                 if stopped_event and self._observability is not None:
-                    await self._observability.record(
-                        observation_type=ObservationType.SUBAGENT_STOPPED,
+                    await self._observability.record_observation(
                         session_id=self._session_id,
+                        observation_type=ObservationType.SUBAGENT_STOPPED,
                         data={
                             "agent_name": stopped_event.agent_name,
                             "subagent_tool_use_id": tool_use_id,
@@ -374,9 +374,9 @@ class EventStreamProcessor:
             if self._observability is not None:
                 cache_creation = usage.get("cache_creation_input_tokens", 0)
                 cache_read = usage.get("cache_read_input_tokens", 0)
-                await self._observability.record(
-                    observation_type=ObservationType.TOKEN_USAGE,
+                await self._observability.record_observation(
                     session_id=self._session_id,
+                    observation_type=ObservationType.TOKEN_USAGE,
                     data={
                         "input_tokens": input_tokens,
                         "output_tokens": output_tokens,
@@ -413,9 +413,9 @@ class EventStreamProcessor:
                 if self._observability is not None:
                     cache_creation = usage.get("cache_creation_input_tokens", 0)
                     cache_read = usage.get("cache_read_input_tokens", 0)
-                    await self._observability.record(
-                        observation_type=ObservationType.TOKEN_USAGE,
+                    await self._observability.record_observation(
                         session_id=self._session_id,
+                        observation_type=ObservationType.TOKEN_USAGE,
                         data={
                             "input_tokens": input_tokens,
                             "output_tokens": output_tokens,
@@ -455,9 +455,9 @@ class EventStreamProcessor:
         self._subagents.register_tool_use(tool_use_id, tool_name)
 
         if self._observability is not None:
-            await self._observability.record(
-                observation_type=ObservationType.TOOL_EXECUTION_STARTED,
+            await self._observability.record_observation(
                 session_id=self._session_id,
+                observation_type=ObservationType.TOOL_EXECUTION_STARTED,
                 data={
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
@@ -473,9 +473,9 @@ class EventStreamProcessor:
         if tool_name == "Task" and tool_use_id:
             event = self._subagents.on_task_started(tool_use_id, tool_input)
             if self._observability is not None:
-                await self._observability.record(
-                    observation_type=ObservationType.SUBAGENT_STARTED,
+                await self._observability.record_observation(
                     session_id=self._session_id,
+                    observation_type=ObservationType.SUBAGENT_STARTED,
                     data={
                         "agent_name": event.agent_name,
                         "subagent_tool_use_id": tool_use_id,
@@ -535,9 +535,9 @@ class EventStreamProcessor:
                     **(enriched.get("context") or {}),
                     **(enriched.get("metadata") or {}),
                 }
-                await self._observability.record(
-                    observation_type=et,
+                await self._observability.record_observation(
                     session_id=self._session_id,
+                    observation_type=et,
                     data=hd,
                     execution_id=self._execution_id,
                     phase_id=self._phase_id,
@@ -551,9 +551,9 @@ class EventStreamProcessor:
 
         # Record tool completion
         if self._observability is not None:
-            await self._observability.record(
-                observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
+            await self._observability.record_observation(
                 session_id=self._session_id,
+                observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
                 data={
                     "tool_name": tool_name,
                     "tool_use_id": tool_use_id,
@@ -575,9 +575,9 @@ class EventStreamProcessor:
         if tool_name == "Task":
             event = self._subagents.on_task_completed(tool_use_id, success=not is_error)
             if event and self._observability is not None:
-                await self._observability.record(
-                    observation_type=ObservationType.SUBAGENT_STOPPED,
+                await self._observability.record_observation(
                     session_id=self._session_id,
+                    observation_type=ObservationType.SUBAGENT_STOPPED,
                     data={
                         "agent_name": event.agent_name,
                         "subagent_tool_use_id": tool_use_id,
