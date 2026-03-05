@@ -57,11 +57,11 @@ syn-adapters = { workspace = true }
 syn-shared = { workspace = true }
 syn-perf = { workspace = true }
 syn-tokens = { workspace = true }
-# Submodule dependencies
-event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python" }
-agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging" }
-agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation" }
-agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events" }
+# Submodule dependencies (editable so source changes apply without reinstall)
+event-sourcing-python = { path = "lib/event-sourcing-platform/event-sourcing/python", editable = true }
+agentic-logging = { path = "lib/agentic-primitives/lib/python/agentic_logging", editable = true }
+agentic-isolation = { path = "lib/agentic-primitives/lib/python/agentic_isolation", editable = true }
+agentic-events = { path = "lib/agentic-primitives/lib/python/agentic_events", editable = true }
 
 [tool.ruff]
 target-version = "py312"

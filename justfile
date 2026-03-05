@@ -51,8 +51,9 @@ onboard-dev *flags:
     if [ ! -f .env ]; then
         echo "📝 Creating .env from template with dev defaults..."
         cp .env.example .env
-        sed -i '' 's|^ESP_EVENT_STORE_DB_URL=.*|ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env
-        sed -i '' 's|^SYN_OBSERVABILITY_DB_URL=.*|SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env
+        sed -i.bak 's|^ESP_EVENT_STORE_DB_URL=.*|ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env
+        sed -i.bak 's|^SYN_OBSERVABILITY_DB_URL=.*|SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env
+        rm -f .env.bak
         echo "   → .env created (edit API keys as needed)"
     else
         echo "✅ .env already exists"
@@ -97,7 +98,7 @@ onboard-dev *flags:
         if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
         # Clear Smee if previously set — tunnel replaces it
         if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
-            sed -i '' 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env
+            sed -i.bak 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env && rm -f .env.bak
             unset DEV__SMEE_URL 2>/dev/null || true
         fi
         _DOMAIN="${SYN_DOMAIN:-<domain>}"
@@ -113,7 +114,7 @@ onboard-dev *flags:
         if [ -n "${SMEE_URL:-}" ]; then
             echo "   ✅ Channel: $SMEE_URL"
             if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
-                sed -i '' "s|^DEV__SMEE_URL=.*|DEV__SMEE_URL=$SMEE_URL|" .env
+                sed -i.bak "s|^DEV__SMEE_URL=.*|DEV__SMEE_URL=$SMEE_URL|" .env && rm -f .env.bak
             else
                 echo "DEV__SMEE_URL=$SMEE_URL" >> .env
             fi
@@ -293,14 +294,14 @@ onboard-dev *flags:
                 echo "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN)"
                 echo "for _KEY in \"\${_ROOT_SECRETS[@]}\"; do"
                 echo "  if grep -q \"^\${_KEY}=\" .env 2>/dev/null; then"
-                echo "    sed -i '' \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" .env"
+                echo "    sed -i.bak \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" .env && rm -f .env.bak"
                 echo "    echo \"   cleared: \${_KEY} (.env)\""
                 echo "  fi"
                 echo "done"
                 echo "_INFRA_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN)"
                 echo "for _KEY in \"\${_INFRA_SECRETS[@]}\"; do"
                 echo "  if grep -q \"^\${_KEY}=\" infra/.env 2>/dev/null; then"
-                echo "    sed -i '' \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" infra/.env"
+                echo "    sed -i.bak \"s|^\${_KEY}=.*|# \${_KEY}= # managed by 1Password|\" infra/.env && rm -f infra/.env.bak"
                 echo "    echo \"   cleared: \${_KEY} (infra/.env)\""
                 echo "  fi"
                 echo "done"
@@ -380,8 +381,9 @@ dev: _workspace-check
     echo ""
     echo "6️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
+    sleep 1  # let previous process fully exit
     (cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-dashboard-ui && pnpm run dev &)
+    (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
     just _webhook-start
@@ -440,8 +442,9 @@ dev-fresh: _workspace-check
     echo ""
     echo "9️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
+    sleep 1
     (cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true)
-    (cd apps/syn-dashboard-ui && pnpm run dev &)
+    (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
     just _webhook-start
@@ -1338,7 +1341,7 @@ _webhook-start:
         _DOMAIN="${_DOMAIN%/}"
         echo "5️⃣  Webhooks via Cloudflare tunnel (${_DOMAIN})"
         echo "   Ensure your GitHub App webhook URL is: https://${_DOMAIN}/webhooks/github"
-        echo "   Tunnel must be running: just selfhost-tunnel-start (or cloudflared on host)"
+        echo "   Tunnel must be running: just selfhost-up-tunnel (or cloudflared on host)"
         exit 0
     fi
 
