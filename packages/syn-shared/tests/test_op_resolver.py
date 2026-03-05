@@ -127,7 +127,9 @@ class TestResolveOpSecretsEnvGuard:
         with (
             patch("syn_shared.settings.op_resolver._parse_env_file", return_value={}),
             patch("syn_shared.settings.op_resolver._op_available", return_value=True),
-            patch("syn_shared.settings.op_resolver.subprocess.run", return_value=run_result) as mock_run,
+            patch(
+                "syn_shared.settings.op_resolver.subprocess.run", return_value=run_result
+            ) as mock_run,
             patch.dict(os.environ, env_without, clear=True),
         ):
             resolve_op_secrets.__wrapped__()
@@ -136,11 +138,7 @@ class TestResolveOpSecretsEnvGuard:
     def test_injects_secrets_into_environ(self) -> None:
         """Verify fields from the item are injected into os.environ."""
         patches = self._patch_op("development", _make_op_item("development"))
-        env_without = {
-            k: v
-            for k, v in os.environ.items()
-            if k not in ("SYN_GITHUB_APP_ID",)
-        }
+        env_without = {k: v for k, v in os.environ.items() if k not in ("SYN_GITHUB_APP_ID",)}
         env_without["APP_ENVIRONMENT"] = "development"
         with (
             patches[0],

@@ -513,9 +513,7 @@ def configure_github_app(ctx: SetupContext) -> bool:
     }
     has_all_in_op = gh_keys.issubset(op_fields)
     has_all_in_env = all(
-        os.environ.get(k, "").strip()
-        or root_env_vals.get(k, "").strip()
-        for k in gh_keys
+        os.environ.get(k, "").strip() or root_env_vals.get(k, "").strip() for k in gh_keys
     )
     if has_all_in_op or has_all_in_env:
         source = "1Password" if has_all_in_op else "root .env"
@@ -523,13 +521,11 @@ def configure_github_app(ctx: SetupContext) -> bool:
         if not confirm("Reconfigure GitHub App?", default=False):
             step("Keeping existing GitHub App configuration")
             # Populate ctx from existing values for configure_env
-            ctx.github_app_id = (
-                os.environ.get(ENV_GITHUB_APP_ID, "")
-                or root_env_vals.get(ENV_GITHUB_APP_ID, "")
+            ctx.github_app_id = os.environ.get(ENV_GITHUB_APP_ID, "") or root_env_vals.get(
+                ENV_GITHUB_APP_ID, ""
             )
-            ctx.github_app_name = (
-                os.environ.get(ENV_GITHUB_APP_NAME, "")
-                or root_env_vals.get(ENV_GITHUB_APP_NAME, "")
+            ctx.github_app_name = os.environ.get(ENV_GITHUB_APP_NAME, "") or root_env_vals.get(
+                ENV_GITHUB_APP_NAME, ""
             )
             return True
         print()
@@ -1143,7 +1139,9 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     if ctx.cloudflare_tunnel_token:
         ok("Tunnel token captured")
         # Write immediately so --stage configure_cloudflare persists the value
-        _update_env_file({ENV_CLOUDFLARE_TUNNEL_TOKEN: ctx.cloudflare_tunnel_token}, target=INFRA_ENV_FILE)
+        _update_env_file(
+            {ENV_CLOUDFLARE_TUNNEL_TOKEN: ctx.cloudflare_tunnel_token}, target=INFRA_ENV_FILE
+        )
         # If using 1Password, remind user to store there too for portability
         if ctx.op_vault:
             print()
@@ -1155,7 +1153,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     callout("Step 3: Route traffic (add a public hostname)")
     print()
     step(f"Click {_PURPLE}Next{_RST} at the bottom of the Cloudflare page")
-    step("You should now be on the \"Route Traffic\" page with a hostname form")
+    step('You should now be on the "Route Traffic" page with a hostname form')
     print()
     step(f"Subdomain: {_PURPLE}syn137-{env_suffix}{_RST}  {_DIM}(or pick your own){_RST}")
     step("Domain: select your domain from the dropdown")
@@ -2118,13 +2116,13 @@ def _print_op_summary(ctx: SetupContext) -> None:
         f"#\n"
         f"# PREREQUISITES\n"
         f"#   1. Install: brew install --cask 1password-cli\n"
-        f"#   2. Sign in to the account that owns vault \"{vault}\":\n"
+        f'#   2. Sign in to the account that owns vault "{vault}":\n'
         f"#        op signin                                    # default (last used account)\n"
         f"#        op signin --account my-team.1password.com    # specific account\n"
         f"#\n"
         f"#      The --account flag takes your sign-in address (the domain\n"
         f"#      shown in 1Password app > Settings > Accounts, e.g.\n"
-        f"#      \"my-team.1password.com\" or \"my.1password.com\" for personal).\n"
+        f'#      "my-team.1password.com" or "my.1password.com" for personal).\n'
         f"#\n"
         f"#      Multiple accounts? op uses whichever you last signed into.\n"
         f"#      To check or switch:\n"
@@ -2132,8 +2130,8 @@ def _print_op_summary(ctx: SetupContext) -> None:
         f"#        op signin --account my-team.1password.com     # switch to a specific one\n"
         f"#      Or pin one: export OP_ACCOUNT=my-team.1password.com\n"
         f"#\n"
-        f"#   3. The vault \"{vault}\" must exist. Create it in the\n"
-        f"#      1Password app or: op vault create \"{vault}\"\n"
+        f'#   3. The vault "{vault}" must exist. Create it in the\n'
+        f'#      1Password app or: op vault create "{vault}"\n'
         f"#\n"
         f"# The script automatically clears secret values from .env after saving.\n"
         f"# Non-secret config (APP_ID, APP_NAME) and OP_SERVICE_ACCOUNT_TOKEN are kept.\n"

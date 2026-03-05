@@ -112,8 +112,7 @@ def vault_name_for_env(app_env: str) -> str:
     except KeyError:
         allowed = ", ".join(sorted(_ENV_TO_VAULT))
         raise ValueError(
-            f"No vault mapping for APP_ENVIRONMENT={app_env!r}. "
-            f"Known environments: {allowed}"
+            f"No vault mapping for APP_ENVIRONMENT={app_env!r}. Known environments: {allowed}"
         ) from None
 
 

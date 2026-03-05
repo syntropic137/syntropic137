@@ -1428,7 +1428,8 @@ class WorkflowExecutionEngine:
                         if _evt_tuid:
                             # Tool event: full fingerprint to avoid false dedup
                             _fp: tuple[str, ...] = (
-                                _evt_type, _evt_sid,
+                                _evt_type,
+                                _evt_sid,
                                 str(hook_event.get("timestamp", "")),
                                 _evt_tuid,
                             )
@@ -1486,7 +1487,10 @@ class WorkflowExecutionEngine:
                         tool_name = ctx_data.get("tool_name", "")
                         tool_use_id = ctx_data.get("tool_use_id", "")
 
-                        if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
+                        if (
+                            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+                            and tool_use_id
+                        ):
                             if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
                                 # Parse agent_name from input_preview JSON
                                 agent_name = "unknown"
@@ -1699,7 +1703,11 @@ class WorkflowExecutionEngine:
                                         logger.debug("Tool started: %s", tool_name)
 
                                     # ADR-037: Detect Task tool as subagent start (raw CLI format)
-                                    if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
+                                    if (
+                                        tool_name
+                                        in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+                                        and tool_use_id
+                                    ):
                                         agent_name = str(
                                             tool_input.get(
                                                 "subagent_type",
@@ -1822,7 +1830,11 @@ class WorkflowExecutionEngine:
                                         )
 
                                     # ADR-037: Detect Task tool completion as subagent stop (raw CLI format)
-                                    if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id in active_subagents:
+                                    if (
+                                        tool_name
+                                        in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+                                        and tool_use_id in active_subagents
+                                    ):
                                         agent_name, started_at, tools_used = active_subagents.pop(
                                             tool_use_id
                                         )

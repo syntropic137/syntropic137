@@ -641,7 +641,9 @@ def _generate_and_sync(
             for var in sorted(extra):
                 print(f"   - {var}")
     else:
-        print(f"  {env_path.relative_to(PROJECT_ROOT)} does not exist yet (create with setup wizard)")
+        print(
+            f"  {env_path.relative_to(PROJECT_ROOT)} does not exist yet (create with setup wizard)"
+        )
 
 
 def main() -> None:
