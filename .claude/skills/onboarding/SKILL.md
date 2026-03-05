@@ -28,8 +28,8 @@ Everything an agent needs to get a developer from `git clone` to a running Syntr
 Use these checks to determine what's already configured:
 
 ### Files & Configuration
-- **`.env` exists and has values**: `test -f .env && grep -q '=' .env` — not just a copy of `.env.example`
-- **`infra/.env` exists**: `test -f infra/.env` — needed for selfhost only
+- **`.env` exists and has values**: `test -f .env && grep -q '=' .env` — application config (API keys, GitHub creds, logging)
+- **`infra/.env` exists**: `test -f infra/.env` — infrastructure config only (Compose, resource limits, tunnel). Needed for selfhost only
 - **Git submodules initialized**: `test -d lib/agentic-primitives/.git && test -d lib/event-sourcing-platform/.git`
 - **Python deps installed**: `uv sync --dry-run 2>&1 | grep -q 'Already'` or check `.venv/` exists
 
@@ -55,25 +55,26 @@ For contributors working on Syntropic137 code. Lightweight, fast iteration.
 just onboard-dev
 ```
 
-This handles everything automatically: submodules, `.env` with dev defaults, Python deps, dashboard deps, and starts `just dev`.
+This handles everything: submodules, `.env` with dev defaults, Python deps, dashboard deps, GitHub App setup, workspace image build, and starts `just dev`. The Docker image builds in the background while you configure the GitHub App interactively.
 
-**Optional flags** for additional setup:
+**Flags:**
 ```bash
-just onboard-dev --github          # Also configure GitHub App
-just onboard-dev --tunnel          # Also configure Cloudflare tunnel
-just onboard-dev --github --tunnel # Both
+just onboard-dev --skip-github  # Skip GitHub App setup
+just onboard-dev --tunnel       # Also configure Cloudflare tunnel
+just onboard-dev --1password    # Also configure 1Password service account
 ```
-
-The flags delegate to the setup wizard's individual stages (`configure_github_app`, `configure_cloudflare`), so you get the interactive flow for just those pieces without running the full selfhost wizard.
 
 **What `just onboard-dev` does (step by step):**
 1. Init git submodules (skipped if already done)
 2. Create `.env` from template with dev defaults (skipped if exists)
-3. `uv sync` — install Python dependencies
-4. `just dashboard-install` — install frontend dependencies
-5. *(optional)* `--github` — run GitHub App setup wizard stage
-6. *(optional)* `--tunnel` — run Cloudflare tunnel setup wizard stage
-7. `just dev` — start the full dev stack
+3. `uv sync` — install Python dependencies (skipped if `.venv/` exists)
+4. `just dashboard-install` — install frontend dependencies (skipped if `node_modules/` exists)
+5. Build workspace Docker image in background (skipped if already built)
+6. Webhook URL setup — Cloudflare tunnel (`--tunnel`) or auto-provision smee.io channel (automatic, zero manual steps)
+7. 1Password setup — configure service account token (only with `--1password` flag)
+8. GitHub App setup — interactive wizard stage, now has webhook URL available (skipped if already configured or `--skip-github`)
+9. Wait for workspace image build (if started)
+10. `just dev` — start the full dev stack
 
 **Verify** — see [Post-Setup Verification](#post-setup-verification)
 
@@ -208,9 +209,10 @@ just health-json
 ### Onboarding
 | Recipe | Purpose |
 |--------|---------|
-| `just onboard-dev` | Dev onboarding: submodules, .env, deps, stack |
-| `just onboard-dev --github` | Dev onboarding + GitHub App setup |
+| `just onboard-dev` | Dev onboarding: submodules, .env, deps, GitHub App, stack |
+| `just onboard-dev --skip-github` | Dev onboarding without GitHub App setup |
 | `just onboard-dev --tunnel` | Dev onboarding + Cloudflare tunnel setup |
+| `just onboard-dev --1password` | Dev onboarding + 1Password service account setup |
 | `just onboard` | Full interactive selfhost wizard |
 | `just setup-check` | Check prerequisites only |
 | `just setup-stage <stage>` | Re-run a specific wizard stage |

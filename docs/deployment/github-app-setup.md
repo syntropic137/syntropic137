@@ -81,7 +81,7 @@ If you have an organization (e.g., `syntropic137`), create the app through the o
 Fill in the app details:
 - **GitHub App name**: `syn137-agent` (or your preferred name, e.g., `agentparadise-bot`)
 - **Homepage URL**: Your organization's URL (e.g., `https://github.com/syntropic137`)
-- **Webhook URL**: `https://your-domain.com/webhooks/github` (can leave blank for local dev)
+- **Webhook URL**: Depends on your setup — `just onboard-dev` configures this automatically. For manual setup: `https://<your-domain>/api/v1/webhooks/github` (self-hosted) or leave blank (local dev with smee.io)
 - **Webhook secret**: Generate a strong random secret (e.g., `openssl rand -hex 32`)
 
 #### Repository Permissions

@@ -179,6 +179,62 @@ syntropic137/
 └── docs/                        # Documentation and ADRs
 ```
 
+## Environment Configuration
+
+Two `.env` files with **strict separation** — no variable appears in both.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  .env  (root)                                                   │
+│  Application config — owned by Pydantic Settings                │
+│                                                                 │
+│  APP_ENVIRONMENT          SYN_GITHUB_APP_ID                     │
+│  ANTHROPIC_API_KEY        SYN_GITHUB_APP_NAME                   │
+│  CLAUDE_CODE_OAUTH_TOKEN  SYN_GITHUB_PRIVATE_KEY                │
+│  LOG_LEVEL / LOG_FORMAT   SYN_GITHUB_WEBHOOK_SECRET             │
+│  OP_SERVICE_ACCOUNT_*     DEV__SMEE_URL                         │
+│  ESP_EVENT_STORE_DB_URL   SYN_OBSERVABILITY_DB_URL              │
+│  ... (all Settings fields — see .env.example)                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Read by: Pydantic Settings, op_resolver, just dev,             │
+│           selfhost-env.sh (sourced first)                       │
+│  Template: .env.example (auto-generated from Settings classes)  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  infra/.env                                                     │
+│  Infrastructure config — Docker Compose, deployment tuning      │
+│                                                                 │
+│  COMPOSE_PROJECT_NAME     CLOUDFLARE_TUNNEL_TOKEN               │
+│  POSTGRES_PASSWORD/DB/USER  SYN_DOMAIN                          │
+│  MINIO_ROOT_USER/PASSWORD INCLUDE_OP_CLI                        │
+│  REDIS_PASSWORD           SYN_GATEWAY_PORT                      │
+│  Resource limits (API_MEMORY_LIMIT, etc.)                       │
+│  Backup settings, PG tuning                                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Read by: Docker Compose, selfhost-env.sh (sourced second)      │
+│  Template: infra/.env.example (manually maintained)             │
+└─────────────────────────────────────────────────────────────────┘
+
+        ┌──────────────────────────────┐
+        │  selfhost-env.sh             │
+        │  1. source .env              │
+        │  2. source infra/.env        │
+        │  3. Derive vault from        │
+        │     APP_ENVIRONMENT          │
+        │  4. Load 1Password token     │
+        │  5. Resolve 1Password →      │
+        │     export to env            │
+        └──────────────────────────────┘
+```
+
+| Workflow | Root `.env` | `infra/.env` |
+|----------|------------|-------------|
+| `just onboard-dev` | Created from `.env.example` | Not needed |
+| `just dev` | Read via `env_file` | Not used |
+| `just onboard` (selfhost) | Created, app config | Created, infra config |
+| `just selfhost-up` | Sourced first | Sourced second |
+
 ## Secrets (1Password)
 
 1Password integration is optional. Set `APP_ENVIRONMENT` to auto-derive the vault name:

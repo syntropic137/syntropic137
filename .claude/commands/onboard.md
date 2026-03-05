@@ -47,11 +47,10 @@ Use AskUserQuestion with these options:
 
 **Dev path:**
 
-1. Ask the user if they also want GitHub App and/or Cloudflare tunnel setup:
-   - Use AskUserQuestion with multiSelect options: **GitHub App** (`--github`), **Cloudflare Tunnel** (`--tunnel`), **Neither (just dev stack)**
-2. Build the flags string from their selections
-3. Run `just onboard-dev` (with optional `--github` and/or `--tunnel` flags)
-4. The recipe is idempotent — it skips steps already completed
+1. Ask the user if they also want Cloudflare tunnel setup (GitHub App is included by default):
+   - Use AskUserQuestion with options: **Yes, add Cloudflare tunnel** (`--tunnel`), **No, just dev stack + GitHub App**
+2. Run `just onboard-dev` (add `--tunnel` if selected). GitHub App setup is automatic — it prompts interactively if not already configured, and skips silently if it is.
+3. The recipe is fully idempotent — every step checks before executing
 
 **Selfhost path:**
 
