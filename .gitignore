@@ -109,6 +109,7 @@ workflows/custom/*.yml
 .env.local
 .env.*.local
 !.env.example
+.op-save-secrets.sh
 
 # Temporary files
 *.tmp

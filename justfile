@@ -29,7 +29,10 @@ help:
 onboard *args:
     @uv run python infra/scripts/setup.py {{args}}
 
-# Dev onboarding: submodules → .env → deps → stack (optional: --github --tunnel)
+# Dev onboarding: submodules → .env → deps → webhook URL → GitHub App → stack
+# GitHub App setup runs by default (use --skip-github to skip).
+# Cloudflare tunnel is opt-in (use --tunnel to include).
+# 1Password setup is opt-in (use --1password to include).
 onboard-dev *flags:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -56,28 +59,230 @@ onboard-dev *flags:
     fi
 
     # 3. Python deps
-    echo "📦 Syncing Python dependencies..."
-    uv sync
+    if [ ! -d .venv ]; then
+        echo "📦 Syncing Python dependencies..."
+        uv sync
+    else
+        echo "✅ Python dependencies already installed"
+    fi
 
     # 4. Dashboard deps
-    echo "📦 Installing dashboard frontend dependencies..."
-    just dashboard-install
+    if [ ! -d apps/syn-dashboard-ui/node_modules ]; then
+        echo "📦 Installing dashboard frontend dependencies..."
+        just dashboard-install
+    else
+        echo "✅ Dashboard dependencies already installed"
+    fi
 
-    # 5. Optional: GitHub App
-    if echo "{{flags}}" | grep -q -- "--github"; then
+    # 5. Kick off workspace image build in background (if needed)
+    #    Runs while the user does interactive GitHub App / Cloudflare setup.
+    BUILD_PID=""
+    if ! docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1; then
+        echo "🐳 Building workspace image in background..."
+        just workspace-build > /tmp/syn-workspace-build.log 2>&1 &
+        BUILD_PID=$!
+    else
+        echo "✅ Workspace image already built"
+    fi
+
+    # Source .env so subsequent checks can see existing values
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+
+    # 6. Webhook delivery — tunnel or Smee (mutually exclusive)
+    if echo "{{flags}}" | grep -q -- "--tunnel"; then
         echo ""
-        echo "🔑 Setting up GitHub App..."
+        echo "🌐 Setting up Cloudflare tunnel for webhook delivery..."
+        uv run python infra/scripts/setup.py --stage configure_cloudflare
+        # Re-source to pick up SYN_DOMAIN
+        if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
+        # Clear Smee if previously set — tunnel replaces it
+        if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
+            sed -i '' 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env
+            unset DEV__SMEE_URL 2>/dev/null || true
+        fi
+        echo "   ✅ Webhooks will be delivered via tunnel (${SYN_DOMAIN:-<domain>})"
+        echo "   Set your GitHub App webhook URL to: https://${SYN_DOMAIN:-<domain>}/webhooks/github"
+    elif [ -z "${DEV__SMEE_URL:-}" ]; then
+        echo ""
+        echo "🔗 Setting up webhook proxy (smee.io)..."
+        SMEE_URL=$(uv run python -c "from infra.scripts.shared import create_smee_channel; print(create_smee_channel())" 2>/dev/null) || true
+        if [ -n "${SMEE_URL:-}" ]; then
+            echo "   ✅ Channel: $SMEE_URL"
+            if grep -q '^DEV__SMEE_URL=' .env 2>/dev/null; then
+                sed -i '' "s|^DEV__SMEE_URL=.*|DEV__SMEE_URL=$SMEE_URL|" .env
+            else
+                echo "DEV__SMEE_URL=$SMEE_URL" >> .env
+            fi
+            export DEV__SMEE_URL="$SMEE_URL"
+        else
+            echo "   ⚠️  Could not auto-create smee channel (network issue?)"
+            echo "   💡 Create one manually: https://smee.io/new"
+            echo "      Then add DEV__SMEE_URL=<url> to .env"
+        fi
+    else
+        echo "✅ Webhook proxy configured: ${DEV__SMEE_URL}"
+    fi
+
+    # 7. 1Password setup (opt-in with --1password)
+    if echo "{{flags}}" | grep -q -- "--1password"; then
+        echo ""
+        echo "🔐 Setting up 1Password secret management..."
+        uv run python infra/scripts/setup.py --stage configure_1password
+    fi
+
+    # 8. GitHub App setup (runs by default — skip with --skip-github)
+    #    Required for agent workflows to push code.
+    #    Now runs AFTER webhook URL is available.
+    if echo "{{flags}}" | grep -q -- "--skip-github"; then
+        echo ""
+        echo "⏭️  Skipping GitHub App setup (--skip-github)"
+    elif [ -n "${SYN_GITHUB_APP_ID:-}" ] && [ -n "${SYN_GITHUB_PRIVATE_KEY:-}" ]; then
+        echo "✅ GitHub App already configured"
+    else
+        echo ""
+        echo "🔑 Setting up GitHub App (required for agent workflows to push code)..."
+        echo "   Use --skip-github to skip this step."
+        echo ""
         uv run python infra/scripts/setup.py --stage configure_github_app
     fi
 
-    # 6. Optional: Cloudflare tunnel
-    if echo "{{flags}}" | grep -q -- "--tunnel"; then
+    # 9. Wait for workspace build if it was started
+    if [ -n "$BUILD_PID" ]; then
         echo ""
-        echo "🌐 Setting up Cloudflare tunnel..."
-        uv run python infra/scripts/setup.py --stage configure_cloudflare
+        echo "⏳ Waiting for workspace image build to finish..."
+        if wait "$BUILD_PID"; then
+            echo "✅ Workspace image built"
+        else
+            echo "❌ Workspace image build failed — check /tmp/syn-workspace-build.log"
+            exit 1
+        fi
     fi
 
-    # 7. Start dev stack
+    # 10. 1Password summary
+    echo ""
+    if echo "{{flags}}" | grep -q -- "--1password"; then
+        # Re-source to pick up any values written during setup
+        if [ -f .env ]; then set -a && source .env && set +a; fi
+        if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
+        # Derive vault name
+        case "${APP_ENVIRONMENT:-development}" in
+            development) _VAULT="syn137-dev" ;;
+            production)  _VAULT="syn137-prod" ;;
+            beta)        _VAULT="syn137-beta" ;;
+            staging)     _VAULT="syn137-staging" ;;
+            *)           _VAULT="syn137-dev" ;;
+        esac
+        _ITEM="syntropic137-config"
+        echo "🔐 1Password Secret Summary"
+        echo "   Vault: $_VAULT  |  Item: $_ITEM"
+        echo ""
+
+        # Audit each secret: show status (in .env, missing, needs vault)
+        _HAS_VALUES=""
+        _MISSING=""
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+            _VAL="${!_VAR:-}"
+            if [ -n "$_VAL" ]; then
+                # Show redacted for secrets, full for non-secrets
+                case "$_VAR" in
+                    *KEY*|*SECRET*|*TOKEN*)
+                        _DISPLAY="${_VAL:0:4}****${_VAL: -4}"
+                        ;;
+                    *)
+                        _DISPLAY="$_VAL"
+                        ;;
+                esac
+                echo "   ✅ $_VAR=$_DISPLAY"
+                _HAS_VALUES="$_HAS_VALUES $_VAR"
+            else
+                echo "   ⬚  $_VAR  (not set — add to vault or .env)"
+                _MISSING="$_MISSING $_VAR"
+            fi
+        done
+
+        echo ""
+
+        # Show what's missing
+        if [ -n "$_MISSING" ]; then
+            echo "   ⚠️  Missing secrets (not required, but workflows may need them):"
+            for _VAR in $_MISSING; do
+                case "$_VAR" in
+                    SYN_GITHUB_*)       echo "     $_VAR — needed for agent Git push" ;;
+                    ANTHROPIC_API_KEY)   echo "     $_VAR — needed if not using CLAUDE_CODE_OAUTH_TOKEN" ;;
+                    CLAUDE_CODE_OAUTH_TOKEN) echo "     $_VAR — needed if not using ANTHROPIC_API_KEY" ;;
+                    CLOUDFLARE_TUNNEL_TOKEN) echo "     $_VAR — needed only for selfhost (just selfhost-up-tunnel)" ;;
+                esac
+            done
+            echo ""
+        fi
+
+        # Write op command to a file (never print secrets to console)
+        if [ -n "$_HAS_VALUES" ]; then
+            _OP_SCRIPT=".op-save-secrets.sh"
+            {
+                echo "#!/usr/bin/env bash"
+                echo "# Auto-generated by: just onboard-dev --1password"
+                echo "# Saves your local secrets to 1Password vault."
+                echo "# Run:  bash ${_OP_SCRIPT}"
+                echo "# Then delete this file — it contains secret values."
+                echo ""
+                echo "set -euo pipefail"
+                echo ""
+                echo "# Try edit first; if item doesn't exist, create it"
+                echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+                    _VAL="${!_VAR:-}"
+                    if [ -n "$_VAL" ]; then
+                        echo " \\"
+                        echo -n "  '${_VAR}=${_VAL}'"
+                    fi
+                done
+                echo " 2>/dev/null \\"
+                echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
+                _FIRST=true
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+                    _VAL="${!_VAR:-}"
+                    if [ -n "$_VAL" ]; then
+                        if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
+                        echo -n "  '${_VAR}=${_VAL}'"
+                    fi
+                done
+                echo ""
+            } > "$_OP_SCRIPT"
+            chmod 600 "$_OP_SCRIPT"
+            echo "   📄 1Password save script written to: ${_OP_SCRIPT}"
+            echo "      Run:  bash ${_OP_SCRIPT}"
+            echo "      Then: rm ${_OP_SCRIPT}"
+            echo ""
+            echo "   ⚠️  ${_OP_SCRIPT} contains secret values — do NOT commit it."
+            echo ""
+        fi
+
+        # Security advice
+        echo "   🔒 After secrets are in 1Password:"
+        echo "      1. Remove secret VALUES from .env (keep the keys with empty values)"
+        echo "         Secrets to clear: SYN_GITHUB_PRIVATE_KEY, SYN_GITHUB_WEBHOOK_SECRET,"
+        echo "         ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN"
+        echo "      2. Keep OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV in .env (the resolver needs it)"
+        echo "      3. Non-secret config (APP_ID, APP_NAME) can stay in .env — it's fine"
+        echo "      4. On next startup, 1Password auto-injects secrets into the environment"
+        echo ""
+        echo "   On a new machine: just onboard-dev --1password picks everything up."
+    else
+        echo "💡 Optional: Store secrets in 1Password for portable setup"
+        echo "   Your .env has API keys and GitHub App credentials that only"
+        echo "   exist on this machine. To make setup turnkey on any machine:"
+        echo ""
+        echo "   1. Create a 1Password vault: syn137-dev"
+        echo "   2. Create a service account with access to that vault"
+        echo "   3. Run: just onboard-dev --1password"
+        echo ""
+        echo "   Then on any new machine: just onboard-dev --1password picks them up."
+        echo "   Skip this if you don't use 1Password — everything works without it."
+    fi
+    echo ""
+
+    # 11. Start dev stack
     echo ""
     echo "🚀 Starting dev stack..."
     just dev
@@ -121,7 +326,7 @@ dev: _workspace-check
     @cd apps/syn-dashboard-ui && pnpm run dev &
     @sleep 3
     @echo ""
-    @just _smee-start
+    @just _webhook-start
     @echo ""
     @echo "✅ Full development stack ready!"
     @echo ""
@@ -175,7 +380,7 @@ dev-fresh: _workspace-check
     @cd apps/syn-dashboard-ui && pnpm run dev &
     @sleep 3
     @echo ""
-    @just _smee-start
+    @just _webhook-start
     @echo ""
     @echo "✅ Fresh development environment ready!"
     @echo ""
@@ -191,7 +396,7 @@ dev-fresh: _workspace-check
 # Stop development environment (preserves data)
 dev-stop:
     @echo "🛑 Stopping dev stack..."
-    @just _smee-stop
+    @just _webhook-stop
     @echo "   Stopping frontend (port 5173)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @echo "   Stopping Docker services..."
@@ -201,7 +406,7 @@ dev-stop:
 # Stop and remove dev containers (preserves volumes)
 dev-down:
     @echo "🛑 Shutting down dev stack..."
-    @just _smee-stop
+    @just _webhook-stop
     @echo "   Stopping frontend (port 5173)..."
     @-lsof -ti:5173 | xargs kill 2>/dev/null || true
     @echo "   Removing Docker containers..."
@@ -271,7 +476,7 @@ feedback-install:
 
 # --- Webhooks ---
 
-# Start smee webhook proxy standalone (for use without full dev stack)
+# Start smee webhook proxy standalone (DEVELOPMENT ONLY — not for production)
 dev-webhooks:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
@@ -501,12 +706,18 @@ _selfhost-preflight:
         fi
     fi
 
-    # --- Environment file ---
-    if [ ! -f infra/.env ]; then
-        echo "  ❌ infra/.env not found. Run 'just onboard' or copy from infra/.env.example"
+    # --- Environment files ---
+    if [ ! -f .env ]; then
+        echo "  ❌ .env not found (application config). Run 'just onboard' or copy from .env.example"
         ERRORS=$((ERRORS + 1))
     else
-        echo "  ✅ infra/.env"
+        echo "  ✅ .env (application config)"
+    fi
+    if [ ! -f infra/.env ]; then
+        echo "  ❌ infra/.env not found (infrastructure config). Run 'just onboard' or copy from infra/.env.example"
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "  ✅ infra/.env (infrastructure config)"
     fi
 
     # --- Docker secrets ---
@@ -575,7 +786,7 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     echo "🔒 Tunnel auth reminder:"
     echo "   Ensure your Cloudflare tunnel routes to http://gateway:8081 (not port 80)"
     echo "   Port 8081 requires basic auth when SYN_API_PASSWORD is set."
-    echo "   Update: Zero Trust → Networks → Connectors → [tunnel] → Public Hostname"
+    echo "   Update: Zero Trust → Networks → Connectors → Create a tunnel → Select Cloudflared"
 
 # Stop self-host stack (auto-detects Cloudflare Tunnel)
 selfhost-down:
@@ -714,9 +925,9 @@ secrets-store-token:
         echo "   export OP_SERVICE_ACCOUNT_TOKEN_<VAULT_UPPER>=<token>"
         exit 1
     fi
-    if [ -f infra/.env ]; then
-        set -a && source infra/.env && set +a
-    fi
+    # Source both .env files (APP_ENVIRONMENT lives in root .env)
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # Derive vault from APP_ENVIRONMENT
     case "${APP_ENVIRONMENT:-}" in
         development) _OP_VAULT="syn137-dev" ;;
@@ -724,7 +935,7 @@ secrets-store-token:
         beta)        _OP_VAULT="syn137-beta" ;;
         staging)     _OP_VAULT="syn137-staging" ;;
         *)
-            echo "❌ APP_ENVIRONMENT not set or unknown in infra/.env"
+            echo "❌ APP_ENVIRONMENT not set or unknown in .env"
             echo "   Set it first: APP_ENVIRONMENT=development"
             exit 1 ;;
     esac
@@ -752,9 +963,9 @@ secrets-delete-token:
         echo "❌ This command is macOS-only."
         exit 1
     fi
-    if [ -f infra/.env ]; then
-        set -a && source infra/.env && set +a
-    fi
+    # Source both .env files (APP_ENVIRONMENT lives in root .env)
+    if [ -f .env ]; then set -a && source .env && set +a; fi
+    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # Derive vault from APP_ENVIRONMENT
     case "${APP_ENVIRONMENT:-}" in
         development) _OP_VAULT="syn137-dev" ;;
@@ -762,7 +973,7 @@ secrets-delete-token:
         beta)        _OP_VAULT="syn137-beta" ;;
         staging)     _OP_VAULT="syn137-staging" ;;
         *)
-            echo "❌ APP_ENVIRONMENT not set or unknown in infra/.env"
+            echo "❌ APP_ENVIRONMENT not set or unknown in .env"
             exit 1 ;;
     esac
     _VK="OP_SERVICE_ACCOUNT_TOKEN_$(echo "$_OP_VAULT" | tr '[:lower:]-' '[:upper:]_')"
@@ -974,6 +1185,7 @@ proxy-start:
 _env-check:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
+    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
     # If APP_ENVIRONMENT maps to a known vault, resolve 1Password secrets
     # so the checks below see values stored in 1Password, not just .env.
     case "${APP_ENVIRONMENT:-}" in
@@ -1013,13 +1225,13 @@ _env-check:
 
     # --- Webhook forwarding ---
     if [ -n "${DEV__SMEE_URL:-}" ]; then
-        echo "   ✅ Webhook proxy configured (smee.io)"
+        echo "   ✅ Webhook delivery: smee.io proxy"
+    elif [ -n "${SYN_DOMAIN:-}" ]; then
+        echo "   ✅ Webhook delivery: Cloudflare tunnel (${SYN_DOMAIN})"
     else
-        echo "   ⚠️  WARNING: DEV__SMEE_URL not set — GitHub webhooks will NOT reach your local dashboard!"
-        echo "               Triggers (self-healing, review-fix) will not fire."
-        echo "               Fix: 1) Visit https://smee.io/new"
-        echo "                    2) Add DEV__SMEE_URL=<your-url> to .env"
-        echo "               (Webhook URL is auto-managed by just dev/dev-stop)"
+        echo "   ⚠️  WARNING: No webhook delivery configured"
+        echo "               GitHub webhooks will not reach your local stack."
+        echo "               Fix: just onboard-dev --tunnel  OR  add DEV__SMEE_URL to .env"
         echo ""
         WARNINGS=$((WARNINGS + 1))
     fi
@@ -1055,27 +1267,38 @@ _env-check:
         echo "   ✅ Environment looks good!"
     fi
 
-# Start smee webhook proxy (reads DEV__SMEE_URL from .env, no-op if unset)
-_smee-start:
+# Start webhook delivery — Cloudflare tunnel (if configured) or Smee proxy
+_webhook-start:
     #!/usr/bin/env bash
     if [ -f .env ]; then set -a && source .env && set +a; fi
-    if [ -z "${DEV__SMEE_URL:-}" ]; then
-        echo "   ℹ️  Webhook proxy skipped (DEV__SMEE_URL not set in .env)"
-        echo "   💡 To receive GitHub webhooks locally:"
-        echo "      1. Visit https://smee.io/new"
-        echo "      2. Add DEV__SMEE_URL=<your-url> to .env"
+    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
+
+    # Option 1: Cloudflare tunnel — DEV__SMEE_URL empty but SYN_DOMAIN set
+    if [ -z "${DEV__SMEE_URL:-}" ] && [ -n "${SYN_DOMAIN:-}" ]; then
+        echo "5️⃣  Webhooks via Cloudflare tunnel (${SYN_DOMAIN})"
+        echo "   Ensure your GitHub App webhook URL is: https://${SYN_DOMAIN}/webhooks/github"
+        echo "   Tunnel must be running: just selfhost-tunnel-start (or cloudflared on host)"
         exit 0
     fi
-    # Switch GitHub App webhook URL to Smee for local dev
-    uv run python scripts/manage_webhook_url.py --mode dev || true
-    # Kill any existing smee process
-    pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
-    echo "5️⃣  Starting webhook proxy (smee.io → localhost:8000)..."
-    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
-    echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8000/webhooks/github"
 
-# Stop smee webhook proxy and restore production webhook URL
-_smee-stop:
+    # Option 2: Smee proxy
+    if [ -n "${DEV__SMEE_URL:-}" ]; then
+        uv run python scripts/manage_webhook_url.py --mode dev || true
+        pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
+        echo "5️⃣  Starting webhook proxy (smee.io → localhost:8000)..."
+        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8000/webhooks/github"
+        exit 0
+    fi
+
+    # Neither configured
+    echo "   ⚠️  No webhook delivery configured"
+    echo "   💡 Options:"
+    echo "      • just onboard-dev --tunnel   (Cloudflare tunnel)"
+    echo "      • Add DEV__SMEE_URL=<url> to .env (smee.io proxy)"
+
+# Stop webhook delivery (smee proxy + restore prod webhook URL)
+_webhook-stop:
     @-uv run python scripts/manage_webhook_url.py --mode prod 2>/dev/null || true
     @-pkill -f "smee-client" 2>/dev/null || true
 

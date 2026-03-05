@@ -129,7 +129,8 @@ def build_manifest(
         app_name: Name for the GitHub App (e.g. "syntropic137").
         redirect_url: Local callback URL for the OAuth redirect.
         webhook_url: Optional webhook delivery URL.  When *None* the
-            webhook is created with an inactive hook (no URL required).
+            app is created without events or webhooks (API-only). Configure
+            webhooks later via the GitHub App settings page.
         setup_url: Optional setup URL for post-installation redirect.
             When provided, GitHub redirects here after installation
             with ``installation_id`` as a query parameter.
@@ -140,12 +141,13 @@ def build_manifest(
         "redirect_url": redirect_url,
         "public": False,
         "default_permissions": DEFAULT_PERMISSIONS,
-        "default_events": DEFAULT_EVENTS,
     }
-    # GitHub rejects hook_attributes with a blank URL.  Only include the
-    # key when we actually have a webhook endpoint; otherwise the app is
-    # created with webhooks disabled (can be configured later).
+    # GitHub requires a webhook URL when events are subscribed.  Only include
+    # events + hook_attributes when we have an endpoint; otherwise the app is
+    # created with webhooks disabled (permissions still work for API access).
+    # Webhooks can be configured later via `just github-reconfigure`.
     if webhook_url:
+        manifest["default_events"] = DEFAULT_EVENTS
         manifest["hook_attributes"] = {"url": webhook_url, "active": True}
     if setup_url:
         manifest["setup_url"] = setup_url
@@ -504,15 +506,20 @@ def run_manifest_flow(
     saved = save_credentials(credentials, secrets_dir=secrets_dir)
     credentials["_saved"] = saved
 
-    print(f"  GitHub App '{credentials.get('slug', app_name)}' created successfully!")
+    slug = credentials.get("slug", app_name)
+    html_url = credentials.get("html_url", f"{GITHUB_BASE}/settings/apps/{slug}")
+    print(f"  GitHub App '{slug}' created successfully!")
+    print()
+    print(f"  💡 Add a logo: {html_url} → Display information → Upload a logo")
+    print(f"     Use: public/assets/pfp_syntropic137-github_gray.png (dev/staging)")
+    print(f"          public/assets/pfp_syntropic137-github_color.png (production)")
 
     # Open the installation page and wait for the post-install redirect.
-    slug = credentials.get("slug", app_name)
     print()
     print(f"  Opening installation page for '{slug}'...")
     open_install_page(slug)
 
-    print("  Waiting for installation callback (up to 3 minutes)...")
+    print("  Waiting for GitHub to redirect back (this can take up to a minute)...")
     installation_id = wait_for_installation(timeout=180)
     shutdown_callback_server()
 
