@@ -67,19 +67,8 @@ class ServiceStatus:
 
 
 def _container_prefix() -> str:
-    """Derive container name prefix from COMPOSE_PROJECT_NAME.
-
-    Matches the ``container_name:`` pattern in docker-compose.selfhost.yaml:
-    ``${COMPOSE_PROJECT_NAME:-syntropic137}-<service>``.
-
-    Checks (in order): env var → infra/.env → default.
-    """
-    from shared import ENV_COMPOSE_PROJECT_NAME, ENV_FILE, parse_env_file
-
-    project = os.environ.get(ENV_COMPOSE_PROJECT_NAME, "")
-    if not project:
-        project = parse_env_file(ENV_FILE).get(ENV_COMPOSE_PROJECT_NAME, DEFAULT_PROJECT_NAME)
-    return project + "-"
+    """Container name prefix matching docker-compose.selfhost.yaml."""
+    return "syn137-"
 
 
 def _build_services() -> list[Service]:
