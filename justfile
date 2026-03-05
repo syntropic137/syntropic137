@@ -25,9 +25,62 @@ help:
 
 # --- Onboarding ---
 
-# Run interactive onboarding wizard (git clone → running stack)
+# Run interactive onboarding wizard (selfhost: secrets, tunnel, GitHub App)
 onboard *args:
     @uv run python infra/scripts/setup.py {{args}}
+
+# Dev onboarding: submodules → .env → deps → stack (optional: --github --tunnel)
+onboard-dev *flags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🚀 Syntropic137 dev onboarding"
+    echo ""
+
+    # 1. Submodules
+    if [ ! -d lib/agentic-primitives/.git ] || [ ! -d lib/event-sourcing-platform/.git ]; then
+        echo "📦 Initializing git submodules..."
+        just submodules-init
+    else
+        echo "✅ Submodules already initialized"
+    fi
+
+    # 2. .env
+    if [ ! -f .env ]; then
+        echo "📝 Creating .env from template with dev defaults..."
+        cp .env.example .env
+        sed -i '' 's|^ESP_EVENT_STORE_DB_URL=.*|ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env
+        sed -i '' 's|^SYN_OBSERVABILITY_DB_URL=.*|SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env
+        echo "   → .env created (edit API keys as needed)"
+    else
+        echo "✅ .env already exists"
+    fi
+
+    # 3. Python deps
+    echo "📦 Syncing Python dependencies..."
+    uv sync
+
+    # 4. Dashboard deps
+    echo "📦 Installing dashboard frontend dependencies..."
+    just dashboard-install
+
+    # 5. Optional: GitHub App
+    if echo "{{flags}}" | grep -q -- "--github"; then
+        echo ""
+        echo "🔑 Setting up GitHub App..."
+        uv run python infra/scripts/setup.py --stage configure_github_app
+    fi
+
+    # 6. Optional: Cloudflare tunnel
+    if echo "{{flags}}" | grep -q -- "--tunnel"; then
+        echo ""
+        echo "🌐 Setting up Cloudflare tunnel..."
+        uv run python infra/scripts/setup.py --stage configure_cloudflare
+    fi
+
+    # 7. Start dev stack
+    echo ""
+    echo "🚀 Starting dev stack..."
+    just dev
 
 # Check prerequisites only (no changes)
 setup-check:

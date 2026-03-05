@@ -1,5 +1,5 @@
 ---
-description: Start development environment (smart prereq detection)
+description: Start Syntropic137 development environment (smart prereq detection)
 argument-hint: [fresh]
 model: sonnet
 allowed-tools: Bash, Read, Glob, AskUserQuestion
@@ -40,7 +40,7 @@ Based on scan results:
 - **Submodules missing:** Run `just submodules-init`.
 - **Python deps missing:** Run `uv sync`.
 
-If **3+ things are missing**, suggest running `/onboard dev` instead — it's more thorough.
+If **3+ things are missing**, suggest running `just onboard-dev` (or `/onboard dev`) instead — it handles the full dev setup including optional GitHub App and Cloudflare tunnel.
 
 ### Step 4: Start
 

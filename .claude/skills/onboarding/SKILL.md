@@ -50,39 +50,32 @@ Use these checks to determine what's already configured:
 
 For contributors working on Syntropic137 code. Lightweight, fast iteration.
 
-**Steps (in order):**
+**One command:**
+```bash
+just onboard-dev
+```
 
-1. **Init submodules**
-   ```bash
-   just submodules-init
-   ```
+This handles everything automatically: submodules, `.env` with dev defaults, Python deps, dashboard deps, and starts `just dev`.
 
-2. **Create `.env`** — copy from template, fill required values
-   ```bash
-   cp .env.example .env
-   # Edit .env — at minimum set:
-   #   APP_ENVIRONMENT=development
-   #   ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
-   #   SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
-   ```
+**Optional flags** for additional setup:
+```bash
+just onboard-dev --github          # Also configure GitHub App
+just onboard-dev --tunnel          # Also configure Cloudflare tunnel
+just onboard-dev --github --tunnel # Both
+```
 
-3. **Install Python dependencies**
-   ```bash
-   uv sync
-   ```
+The flags delegate to the setup wizard's individual stages (`configure_github_app`, `configure_cloudflare`), so you get the interactive flow for just those pieces without running the full selfhost wizard.
 
-4. **Install dashboard frontend dependencies**
-   ```bash
-   just dashboard-install
-   ```
+**What `just onboard-dev` does (step by step):**
+1. Init git submodules (skipped if already done)
+2. Create `.env` from template with dev defaults (skipped if exists)
+3. `uv sync` — install Python dependencies
+4. `just dashboard-install` — install frontend dependencies
+5. *(optional)* `--github` — run GitHub App setup wizard stage
+6. *(optional)* `--tunnel` — run Cloudflare tunnel setup wizard stage
+7. `just dev` — start the full dev stack
 
-5. **Start dev stack**
-   ```bash
-   just dev
-   ```
-   This builds images and starts: TimescaleDB, Event Store, API, Dashboard UI, Redis.
-
-6. **Verify** — see [Post-Setup Verification](#post-setup-verification)
+**Verify** — see [Post-Setup Verification](#post-setup-verification)
 
 ### Path 2: Selfhost (Production Deployment)
 
@@ -215,7 +208,10 @@ just health-json
 ### Onboarding
 | Recipe | Purpose |
 |--------|---------|
-| `just onboard` | Full interactive setup wizard |
+| `just onboard-dev` | Dev onboarding: submodules, .env, deps, stack |
+| `just onboard-dev --github` | Dev onboarding + GitHub App setup |
+| `just onboard-dev --tunnel` | Dev onboarding + Cloudflare tunnel setup |
+| `just onboard` | Full interactive selfhost wizard |
 | `just setup-check` | Check prerequisites only |
 | `just setup-stage <stage>` | Re-run a specific wizard stage |
 

@@ -1,5 +1,5 @@
 ---
-description: Zero-friction onboarding — from git clone to running stack
+description: Zero-friction Syntropic137 onboarding — from git clone to running stack
 argument-hint: [dev|selfhost]
 model: sonnet
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
@@ -40,26 +40,21 @@ Report what's done and what's missing before proceeding.
 If MODE is `dev` or `selfhost`, use that. Otherwise, ask the user:
 
 Use AskUserQuestion with these options:
-- **Dev** — Local development (submodules, .env, uv sync, just dev). Best for contributing code.
-- **Selfhost** — Production deployment (setup wizard, secrets, Docker Compose). Best for running your own instance.
+- **Dev** — Local development (`just onboard-dev`). Best for contributing code. Optionally add GitHub App and Cloudflare tunnel.
+- **Selfhost** — Production deployment (`just onboard` wizard). Best for running your own instance.
 
-### Step 4: Execute Missing Steps
+### Step 4: Execute
 
-Follow the selected path from the skill. For each step:
+**Dev path:**
 
-1. **Check first** — skip if already done (idempotent)
-2. **Explain** what you're about to do and why
-3. **Execute** using the appropriate `just` recipe (don't reimplement)
-4. **Verify** the step succeeded before moving on
+1. Ask the user if they also want GitHub App and/or Cloudflare tunnel setup:
+   - Use AskUserQuestion with multiSelect options: **GitHub App** (`--github`), **Cloudflare Tunnel** (`--tunnel`), **Neither (just dev stack)**
+2. Build the flags string from their selections
+3. Run `just onboard-dev` (with optional `--github` and/or `--tunnel` flags)
+4. The recipe is idempotent — it skips steps already completed
 
-**Dev path steps:**
-1. `just submodules-init` (if submodules not initialized)
-2. Create `.env` from `.env.example` with dev defaults (if missing) — ask user about API keys
-3. `uv sync` (if deps not installed)
-4. `just dashboard-install` (if dashboard deps missing)
-5. `just dev` (start the stack)
+**Selfhost path:**
 
-**Selfhost path steps:**
 1. Run `just onboard` (the interactive setup wizard handles everything)
 2. After wizard completes: `just selfhost-up`
 3. Optionally: `just selfhost-seed`
