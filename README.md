@@ -33,7 +33,7 @@ The Syntropic137 provides:
 
 ## 🏗️ Architecture
 
-The system is organized into 4 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
@@ -42,14 +42,14 @@ The system is organized into 4 bounded contexts following Vertical Slice Archite
 
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
-| **Orchestration** | 3 | Workflow execution and workspace management (WorkflowAggregate, WorkspaceAggregate, WorkflowExecutionAggregate) |
-| **Agent Sessions** | 1 | Agent sessions and observability metrics (AgentSessionAggregate) |
-| **GitHub** | 1 | GitHub App integration and token management (InstallationAggregate) |
-| **Artifacts** | 1 | Artifact storage and retrieval (ArtifactAggregate) |
+| **Orchestration** | 3 | Workflow execution and workspace management (WorkflowTemplate, Workspace, WorkflowExecution) |
+| **Organization** | 3 | Organization, system, and repo management (Organization, System, Repo) |
+| **Agent Sessions** | 1 | Agent sessions and observability metrics (AgentSession) |
+| **GitHub** | 2 | GitHub App integration and webhook trigger rules (Installation, TriggerRule) |
+| **Artifacts** | 1 | Artifact storage and retrieval (Artifact) |
 
 **Infrastructure:**
-- TimescaleDB (projections)
-- EventStore (events)
+- PostgreSQL (event store + projections)
 - Redis (cache)
 - MinIO (artifacts)
 
@@ -170,30 +170,32 @@ syn metrics <workflow-id>
 
 ```
 syntropic137/
+├── apps/
+│   ├── syn-api/                  # FastAPI HTTP server
+│   ├── syn-cli/                  # `syn` CLI application
+│   └── syn-dashboard-ui/         # Dashboard frontend (Vite + React)
+│
+├── packages/
+│   ├── syn-domain/               # Core domain + VSA contexts
+│   ├── syn-adapters/             # External integrations
+│   ├── syn-collector/            # Event ingestion API
+│   └── syn-shared/               # Shared settings, configuration
+│
 ├── lib/                          # Git submodules
 │   ├── agentic-primitives/       # Composable agent building blocks
 │   └── event-sourcing-platform/  # Event sourcing infrastructure
 │
-├── apps/
-│   └── cli/                      # `syn` CLI application
-│
-├── packages/
-│   ├── domain/                   # Core domain + VSA contexts
-│   ├── adapters/                 # External integrations
-│   └── shared/                   # Logging, DI, utilities
-│
-├── workflows/                    # Workflow YAML definitions
-├── docker/                       # Docker configurations
-└── docs/                         # Documentation
+├── infra/                        # Docker Compose, setup wizard, secrets
+└── docs/                         # Documentation + ADRs
 ```
 
 ### Bounded Contexts
 
-- **Workflows**: Workflow definitions, phases, and execution lifecycle
-- **Agents**: Agent sessions, token tracking, and execution metrics
+- **Orchestration**: Workflow definitions, execution lifecycle, and workspace management
+- **Organization**: Organization hierarchy — orgs, systems, and repos
+- **Agent Sessions**: Agent sessions, token tracking, and execution metrics
+- **GitHub**: GitHub App integration, installation tokens, and webhook trigger rules
 - **Artifacts**: Artifact storage, metadata, and retrieval
-- **Workspaces**: Isolated workspace lifecycle, performance metrics, and observability
-- **Costs**: Session and execution cost tracking with real-time aggregation
 
 ### Key Patterns
 
