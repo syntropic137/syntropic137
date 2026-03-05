@@ -271,13 +271,13 @@ info "All prerequisites installed. Next steps:"
 echo ""
 echo "  git clone --recursive https://github.com/Syntropic137/syntropic137.git"
 echo "  cd syntropic137"
-echo "  just setup"
+echo "  just onboard"
 echo ""
 
 if [[ "$OS" == "Darwin" ]]; then
     if ! docker info &>/dev/null 2>&1; then
         warn "Docker Desktop is installed but not running."
-        warn "Open Docker Desktop from Applications, then run 'just setup'."
+        warn "Open Docker Desktop from Applications, then run 'just onboard'."
     fi
 fi
 

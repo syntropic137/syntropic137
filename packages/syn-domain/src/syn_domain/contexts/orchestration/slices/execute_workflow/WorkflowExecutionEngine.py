@@ -22,6 +22,7 @@ from uuid import uuid4
 
 # ADR-029: Simplified Event System - use agentic_events from agentic-primitives
 from agentic_events import enrich_event, parse_jsonl_line
+from agentic_events.types import ClaudeToolName, EventType
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
@@ -1312,6 +1313,9 @@ class WorkflowExecutionEngine:
                 line_count = 0
                 _interrupt_requested = False
                 _interrupt_reason: str | None = None
+                # Dedup set: same hook event appears as both raw stderr and
+                # inside a hook_response envelope (stderr=STDOUT in container).
+                _seen_hook_fingerprints: set[tuple[str, ...]] = set()
                 async for line in workspace.stream(
                     claude_cmd,
                     timeout_seconds=phase.timeout_seconds or 300,
@@ -1406,6 +1410,40 @@ class WorkflowExecutionEngine:
                             pass
 
                     for hook_event in _hook_events:
+                        # Deduplicate hook events. Two sources of duplicates:
+                        # 1. Same emission appearing as raw stderr AND inside a
+                        #    hook_response envelope (stderr=STDOUT in container).
+                        # 2. Multiple plugins registering the same hook event
+                        #    (e.g. both workspace and observability plugins handle
+                        #    SessionStart, each emitting session_started).
+                        #
+                        # Session-level events (no tool_use_id) are inherently
+                        # once-per-session, so we fingerprint by (event_type, session_id).
+                        # Tool events include tool_use_id + timestamp to distinguish
+                        # legitimately different invocations.
+                        _evt_type = hook_event.get("event_type", "")
+                        _evt_sid = hook_event.get("session_id", "")
+                        _evt_ctx = hook_event.get("context") or {}
+                        _evt_tuid = _evt_ctx.get("tool_use_id", "")
+                        if _evt_tuid:
+                            # Tool event: full fingerprint to avoid false dedup
+                            _fp: tuple[str, ...] = (
+                                _evt_type,
+                                _evt_sid,
+                                str(hook_event.get("timestamp", "")),
+                                _evt_tuid,
+                            )
+                        else:
+                            # Session-level event: dedup by (type, session) only —
+                            # multiple plugins can emit the same event with
+                            # slightly different timestamps
+                            _fp = (_evt_type, _evt_sid)
+
+                        if _fp in _seen_hook_fingerprints:
+                            logger.debug("Skipping duplicate hook event: %s", _fp[0])
+                            continue
+                        _seen_hook_fingerprints.add(_fp)
+
                         # Validate event_type against VALID_EVENT_TYPES (syn_shared.events)
                         # An unknown type means producer/consumer are out of sync.
                         _hook_event_type = hook_event.get("event_type")
@@ -1441,14 +1479,19 @@ class WorkflowExecutionEngine:
                                 workspace_id=workspace_id,
                             )
 
-                        # ADR-037: Detect subagent lifecycle from Task tool events
-                        hook_type = hook_event.get("type", "")
+                        # ADR-037: Detect subagent lifecycle from Task tool events.
+                        # Hook events use "event_type" (not "type") with values from
+                        # agentic_events.types.EventType (e.g. "tool_execution_started").
+                        hook_event_type = hook_event.get("event_type", "")
                         ctx_data = enriched.get("context", {})
                         tool_name = ctx_data.get("tool_name", "")
                         tool_use_id = ctx_data.get("tool_use_id", "")
 
-                        if tool_name == "Task" and tool_use_id:
-                            if hook_type == "tool_use_started":
+                        if (
+                            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+                            and tool_use_id
+                        ):
+                            if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
                                 # Parse agent_name from input_preview JSON
                                 agent_name = "unknown"
                                 input_preview = ctx_data.get("input_preview", "")
@@ -1483,7 +1526,7 @@ class WorkflowExecutionEngine:
                                         tool_use_id,
                                     )
 
-                            elif hook_type == "tool_use_completed":
+                            elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
                                 if tool_use_id in active_subagents:
                                     agent_name, started_at, tools_used = active_subagents.pop(
                                         tool_use_id
@@ -1660,7 +1703,11 @@ class WorkflowExecutionEngine:
                                         logger.debug("Tool started: %s", tool_name)
 
                                     # ADR-037: Detect Task tool as subagent start (raw CLI format)
-                                    if tool_name == "Task" and tool_use_id:
+                                    if (
+                                        tool_name
+                                        in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+                                        and tool_use_id
+                                    ):
                                         agent_name = str(
                                             tool_input.get(
                                                 "subagent_type",
@@ -1783,7 +1830,11 @@ class WorkflowExecutionEngine:
                                         )
 
                                     # ADR-037: Detect Task tool completion as subagent stop (raw CLI format)
-                                    if tool_name == "Task" and tool_use_id in active_subagents:
+                                    if (
+                                        tool_name
+                                        in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+                                        and tool_use_id in active_subagents
+                                    ):
                                         agent_name, started_at, tools_used = active_subagents.pop(
                                             tool_use_id
                                         )

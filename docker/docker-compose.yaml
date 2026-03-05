@@ -6,7 +6,7 @@
 #
 # See: ADR-034 - Test Infrastructure Architecture
 
-name: ${COMPOSE_PROJECT_NAME:-syntropic137}
+name: syntropic137_${APP_ENVIRONMENT:-development}
 
 services:
   # =============================================================================

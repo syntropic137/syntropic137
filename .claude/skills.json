@@ -7,6 +7,13 @@
       "category": "review",
       "summary": "Prioritize review comments by severity: security > logic > style",
       "version": 1
+    },
+    {
+      "id": "onboarding",
+      "domain": "setup",
+      "category": "onboarding",
+      "summary": "Syntropic137 setup knowledge: prerequisites, env detection, dev/selfhost paths",
+      "version": 1
     }
   ]
 }

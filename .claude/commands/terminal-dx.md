@@ -125,7 +125,7 @@ Always show `just <recipe>` commands in output, never raw `python`, `uv run`, or
 
 Good:
 ```
-print("    just setup --stage configure_github_app")
+print("    just onboard --stage configure_github_app")
 print("    just health-check")
 ```
 

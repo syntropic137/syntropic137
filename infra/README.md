@@ -137,7 +137,7 @@ openssl rand -hex 32 > infra/docker/secrets/redis-password.txt
 Or use the interactive wizard which handles this automatically:
 
 ```bash
-just setup
+just onboard
 ```
 
 ### Step 4: Start the stack
@@ -193,7 +193,6 @@ All configuration lives in `infra/.env`. Copy from `infra/.env.example` to get s
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DEPLOY_ENV` | No | `local` | Deployment target: `local`, `selfhost`, `staging`, `production` |
 | `APP_ENVIRONMENT` | No | `development` | Application environment (poka-yoke vault mismatch guard) |
 | `COMPOSE_PROJECT_NAME` | No | `syntropic137` | Docker Compose project name (prefixes all container names) |
 | `CONTAINER_REGISTRY` | No | *(empty)* | Container registry for pre-built images. Empty = build locally |
@@ -240,7 +239,6 @@ All configuration lives in `infra/.env`. Copy from `infra/.env.example` to get s
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OP_VAULT` | For 1Password | `syn137-dev` | Vault name to resolve from |
 | `OP_SERVICE_ACCOUNT_TOKEN` | For 1Password | — | Service account token (or use Keychain/env var) |
 | `INCLUDE_OP_CLI` | No | `0` | Set to `1` to include 1Password CLI in the dashboard image |
 
@@ -352,17 +350,19 @@ When using a Cloudflare Tunnel, you can add a Cloudflare Access policy for addit
 
 ## 6. 1Password Integration
 
-1Password integration is optional but recommended. It eliminates plain-text secrets in `infra/.env` by resolving them from a 1Password vault at startup.
+1Password integration is optional but recommended. It eliminates plain-text secrets in `infra/.env` by resolving them from a 1Password vault at startup. The vault name is derived automatically from `APP_ENVIRONMENT` (e.g. `development` → `syn137-dev`).
 
 ### How It Works
 
 The resolution chain runs when you execute any `just selfhost-*` recipe:
 
 ```
-macOS Keychain (service account token)
-  -> infra/scripts/selfhost-env.sh (sources .env, loads token)
-    -> scripts/op_env_export.py (fetches secrets from 1Password)
-      -> Environment variables (available to Docker Compose)
+APP_ENVIRONMENT (from root .env — see § Environment Files above)
+  -> derive vault name (e.g. development → syn137-dev)
+  -> macOS Keychain (service account token)
+    -> infra/scripts/selfhost-env.sh (sources .env, loads token)
+      -> scripts/op_env_export.py (fetches secrets from 1Password)
+        -> Environment variables (available to Docker Compose)
 ```
 
 ### Setup
@@ -397,10 +397,10 @@ On Linux/CI, set the environment variable instead:
 export OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=ops_your_token_here
 ```
 
-**4. Set the vault name** in `infra/.env`:
+**4. Set the environment** in `infra/.env` (the vault name is derived automatically):
 
 ```bash
-OP_VAULT=syn137-dev
+APP_ENVIRONMENT=development   # → vault syn137-dev
 ```
 
 **5. Leave secret fields empty** in `infra/.env` — they will be resolved from 1Password:
@@ -532,7 +532,7 @@ All recipes are run from the repository root using `just`.
 
 | Recipe | Description |
 |--------|-------------|
-| `just setup` | Interactive wizard: checks prerequisites, generates secrets, configures GitHub App |
+| `just onboard` | Interactive wizard: checks prerequisites, generates secrets, configures GitHub App |
 | `just secrets-generate` | Generate deployment secrets (non-interactive) |
 | `just secrets-check` | Verify secrets exist |
 | `just secrets-rotate` | Rotate secrets (requires service restart) |
@@ -557,7 +557,7 @@ sudo usermod -aG docker $USER
 ### Missing `infra/.env`
 
 ```
-❌ infra/.env not found. Run 'just setup' or copy from infra/.env.example
+❌ infra/.env not found. Run 'just onboard' or copy from infra/.env.example
 ```
 
 ```bash
