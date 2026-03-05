@@ -100,8 +100,12 @@ onboard-dev *flags:
             sed -i '' 's|^DEV__SMEE_URL=.*|DEV__SMEE_URL=|' .env
             unset DEV__SMEE_URL 2>/dev/null || true
         fi
-        echo "   ✅ Webhooks will be delivered via tunnel (${SYN_DOMAIN:-<domain>})"
-        echo "   Set your GitHub App webhook URL to: https://${SYN_DOMAIN:-<domain>}/webhooks/github"
+        _DOMAIN="${SYN_DOMAIN:-<domain>}"
+        _DOMAIN="${_DOMAIN#https://}"
+        _DOMAIN="${_DOMAIN#http://}"
+        _DOMAIN="${_DOMAIN%/}"
+        echo "   ✅ Webhooks will be delivered via tunnel (${_DOMAIN})"
+        echo "   Set your GitHub App webhook URL to: https://${_DOMAIN}/webhooks/github"
     elif [ -z "${DEV__SMEE_URL:-}" ]; then
         echo ""
         echo "🔗 Setting up webhook proxy (smee.io)..."
@@ -376,8 +380,8 @@ dev: _workspace-check
     echo ""
     echo "6️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
-    cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
-    cd apps/syn-dashboard-ui && pnpm run dev &
+    (cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true)
+    (cd apps/syn-dashboard-ui && pnpm run dev &)
     sleep 3
     echo ""
     just _webhook-start
@@ -436,8 +440,8 @@ dev-fresh: _workspace-check
     echo ""
     echo "9️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
-    cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true
-    cd apps/syn-dashboard-ui && pnpm run dev &
+    (cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true)
+    (cd apps/syn-dashboard-ui && pnpm run dev &)
     sleep 3
     echo ""
     just _webhook-start
@@ -1280,7 +1284,8 @@ _env-check:
     if [ -n "${DEV__SMEE_URL:-}" ]; then
         echo "   ✅ Webhook delivery: smee.io proxy"
     elif [ -n "${SYN_DOMAIN:-}" ]; then
-        echo "   ✅ Webhook delivery: Cloudflare tunnel (${SYN_DOMAIN})"
+        _D="${SYN_DOMAIN#https://}"; _D="${_D#http://}"; _D="${_D%/}"
+        echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
     else
         echo "   ⚠️  WARNING: No webhook delivery configured"
         echo "               GitHub webhooks will not reach your local stack."
@@ -1328,8 +1333,11 @@ _webhook-start:
 
     # Option 1: Cloudflare tunnel — DEV__SMEE_URL empty but SYN_DOMAIN set
     if [ -z "${DEV__SMEE_URL:-}" ] && [ -n "${SYN_DOMAIN:-}" ]; then
-        echo "5️⃣  Webhooks via Cloudflare tunnel (${SYN_DOMAIN})"
-        echo "   Ensure your GitHub App webhook URL is: https://${SYN_DOMAIN}/webhooks/github"
+        _DOMAIN="${SYN_DOMAIN#https://}"
+        _DOMAIN="${_DOMAIN#http://}"
+        _DOMAIN="${_DOMAIN%/}"
+        echo "5️⃣  Webhooks via Cloudflare tunnel (${_DOMAIN})"
+        echo "   Ensure your GitHub App webhook URL is: https://${_DOMAIN}/webhooks/github"
         echo "   Tunnel must be running: just selfhost-tunnel-start (or cloudflared on host)"
         exit 0
     fi

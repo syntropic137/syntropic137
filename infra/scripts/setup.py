@@ -220,7 +220,7 @@ def callout(text: str) -> None:
 
 def _redact(value: str, visible: int = 4) -> str:
     """Return a redacted version of a secret, showing first/last chars."""
-    if len(value) <= visible * 2:
+    if len(value) < 12:
         return "****"
     return f"{value[:visible]}{'*' * 8}{value[-visible:]}"
 
@@ -673,8 +673,9 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
 
     ctx.github_webhook_secret = webhook_secret
     print()
-    print("  Webhook secret (paste into GitHub App settings):")
-    print(f"    {webhook_secret}")
+    print("  Webhook secret generated and saved to .env")
+    print(f"    {_redact(webhook_secret)}")
+    print(f"    {_DIM}Full value in: .env (SYN_GITHUB_WEBHOOK_SECRET){_RST}")
 
     _persist_github_app_to_env(ctx)
 
