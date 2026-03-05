@@ -31,10 +31,10 @@ async def _lines_to_stream(*lines: str) -> AsyncIterator[str]:
 class MockObservability:
     recordings: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
 
-    async def record(
+    async def record_observation(
         self,
-        observation_type: Any,
         session_id: str,
+        observation_type: Any,
         data: dict[str, Any],
         execution_id: str | None = None,
         phase_id: str | None = None,
