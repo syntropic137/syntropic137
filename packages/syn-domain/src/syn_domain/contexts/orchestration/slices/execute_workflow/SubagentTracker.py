@@ -49,7 +49,9 @@ class SubagentTracker:
         """Resolve tool_use_id to tool_name. Returns 'unknown' if not cached."""
         return self._tool_names_cache.get(tool_use_id, "unknown")
 
-    def on_task_started(self, tool_use_id: str, input_data: dict[str, Any]) -> SubagentLifecycleRecord:
+    def on_task_started(
+        self, tool_use_id: str, input_data: dict[str, Any]
+    ) -> SubagentLifecycleRecord:
         """Record a Task tool starting (subagent spawn).
 
         Args:
@@ -69,7 +71,9 @@ class SubagentTracker:
             event_type="started",
         )
 
-    def on_task_started_from_hook(self, tool_use_id: str, input_preview: str) -> SubagentLifecycleRecord:
+    def on_task_started_from_hook(
+        self, tool_use_id: str, input_preview: str
+    ) -> SubagentLifecycleRecord:
         """Record a Task tool starting from hook event format.
 
         Args:
