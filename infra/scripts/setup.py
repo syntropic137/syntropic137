@@ -73,6 +73,7 @@ from shared import (
     ENV_GITHUB_PRIVATE_KEY,
     ENV_GITHUB_WEBHOOK_SECRET,
     ENV_INCLUDE_OP_CLI,
+    ENV_SYN_API_PASSWORD,
     ENV_SYN_DOMAIN,
     GATEWAY_API_PREFIX,
     INFRA_DIR,
@@ -576,15 +577,17 @@ def _configure_github_app_manifest(ctx: SetupContext) -> bool:
     env_suffix = os.environ.get("APP_ENVIRONMENT", "dev")
     app_name = prompt("App name", default=f"syn137-engineer-{env_suffix}")
     org = prompt("GitHub org (leave blank for personal)", default="")
-    webhook_url = ctx.webhook_url or os.environ.get("DEV__SMEE_URL") or None
+    # Cloudflare tunnel takes precedence over smee for webhook delivery
+    webhook_url = ctx.webhook_url or None
     if not webhook_url:
-        # Derive from SYN_DOMAIN if available
         domain = os.environ.get(ENV_SYN_DOMAIN, "")
         if domain:
             domain = domain.rstrip("/")
             if not domain.startswith("http"):
                 domain = f"https://{domain}"
             webhook_url = f"{domain}/webhooks/github"
+    if not webhook_url:
+        webhook_url = os.environ.get("DEV__SMEE_URL") or None
 
     print()
     try:
@@ -963,6 +966,9 @@ def _audit_environment() -> tuple[int, int]:
         if "MINIO_ROOT_PASSWORD=minioadmin" in env_content:
             warn("MINIO_ROOT_PASSWORD is still the default — change for production")
             warnings += 1
+        if "REDIS_PASSWORD=changeme" in env_content:
+            warn("REDIS_PASSWORD is still the default — change for production")
+            warnings += 1
     else:
         step("infra/.env not created yet — skipping credential check")
 
@@ -1171,7 +1177,17 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     else:
         # Selfhost: cloudflared runs inside Docker alongside gateway (nginx)
         step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}gateway:8081{_RST}")
-        hint("Port 8081 enables basic auth on tunnel access (set SYN_API_PASSWORD in .env)")
+        # Auto-generate API password for selfhost if not already set
+        existing_pw = os.environ.get(ENV_SYN_API_PASSWORD, "")
+        if not existing_pw:
+            import secrets as _secrets
+
+            generated_pw = _secrets.token_urlsafe(32)
+            os.environ[ENV_SYN_API_PASSWORD] = generated_pw
+            _update_env_file({ENV_SYN_API_PASSWORD: generated_pw}, target=ENV_FILE)
+            ok(f"Generated SYN_API_PASSWORD (basic auth for tunnel access)")
+        else:
+            ok("SYN_API_PASSWORD already set")
     step(f"Click {_PURPLE}Save tunnel{_RST}")
     print()
 
@@ -2073,6 +2089,12 @@ def _print_op_summary(ctx: SetupContext) -> None:
         fields.append((ENV_GITHUB_WEBHOOK_SECRET, ctx.github_webhook_secret))
     if ctx.cloudflare_tunnel_token:
         fields.append((ENV_CLOUDFLARE_TUNNEL_TOKEN, ctx.cloudflare_tunnel_token))
+    if ctx.syn_domain:
+        fields.append((ENV_SYN_DOMAIN, ctx.syn_domain))
+    # SYN_API_PASSWORD: pick up from environment if set (not part of interactive flow)
+    _api_pw = os.environ.get(ENV_SYN_API_PASSWORD, "")
+    if _api_pw:
+        fields.append((ENV_SYN_API_PASSWORD, _api_pw))
 
     if not fields:
         return
