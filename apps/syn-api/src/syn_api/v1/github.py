@@ -302,10 +302,11 @@ async def _post_trigger_started_comment(
         )
         logger.info("Posted trigger-started comment on %s#%s", repo_full_name, pr_number)
     except Exception:
-        logger.debug(
+        logger.warning(
             "Could not post trigger-started comment on %s#%s (GitHub App may not be configured)",
             repo_full_name,
             pr_number,
+            exc_info=True,
         )
 
 
