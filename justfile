@@ -187,12 +187,12 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
                 case "$_VAR" in
-                    *KEY*|*SECRET*|*TOKEN*)
+                    *KEY*|*SECRET*|*TOKEN*|*PASSWORD*)
                         _DISPLAY="${_VAL:0:4}****${_VAL: -4}"
                         ;;
                     *)
@@ -267,7 +267,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -277,7 +277,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -1148,13 +1148,15 @@ docs-site-build: docs-site-gen
 # --- Utilities ---
 
 # Seed workflows from YAML files
-# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
-seed-workflows:
+seed-workflows: _ensure-env
+    #!/usr/bin/env bash
+    source scripts/resolve_env.sh
     uv run python scripts/seed_workflows.py
 
 # Seed trigger presets (self-healing, review-fix)
-# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
-seed-triggers:
+seed-triggers: _ensure-env
+    #!/usr/bin/env bash
+    source scripts/resolve_env.sh
     uv run python scripts/seed_triggers.py
 
 # Seed all data (workflows + triggers)
@@ -1248,8 +1250,23 @@ proxy-start:
 
 # --- Internal Helpers (hidden from --list) ---
 
+# Create .env files from templates if they don't exist (idempotent)
+# Sets dev defaults so `just dev` works immediately without onboard-dev
+_ensure-env:
+    @if [ ! -f .env ]; then \
+        cp .env.example .env; \
+        sed -i.bak 's|^APP_ENVIRONMENT=.*|APP_ENVIRONMENT=development|' .env && rm -f .env.bak; \
+        sed -i.bak 's|^ESP_EVENT_STORE_DB_URL=.*|ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env && rm -f .env.bak; \
+        sed -i.bak 's|^SYN_OBSERVABILITY_DB_URL=.*|SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env && rm -f .env.bak; \
+        echo "📝 Created .env from .env.example (dev defaults)"; \
+    fi
+    @if [ ! -f infra/.env ] && [ -f infra/.env.example ]; then \
+        cp infra/.env.example infra/.env; \
+        echo "📝 Created infra/.env from infra/.env.example"; \
+    fi
+
 # Check .env for common misconfigurations and warn loudly
-_env-check:
+_env-check: _ensure-env
     #!/usr/bin/env bash
     source scripts/resolve_env.sh
     WARNINGS=0
@@ -1284,11 +1301,15 @@ _env-check:
     fi
 
     # --- Webhook forwarding ---
-    if [ -n "${DEV__SMEE_URL:-}" ]; then
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        _D="${SYN_DOMAIN:-}"; _D="${_D#https://}"; _D="${_D#http://}"; _D="${_D%/}"
+        if [ -n "$_D" ]; then
+            echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
+        else
+            echo "   ✅ Webhook delivery: Cloudflare tunnel"
+        fi
+    elif [ -n "${DEV__SMEE_URL:-}" ]; then
         echo "   ✅ Webhook delivery: smee.io proxy"
-    elif [ -n "${SYN_DOMAIN:-}" ]; then
-        _D="${SYN_DOMAIN#https://}"; _D="${_D#http://}"; _D="${_D%/}"
-        echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
     else
         echo "   ⚠️  WARNING: No webhook delivery configured"
         echo "               GitHub webhooks will not reach your local stack."
@@ -1331,11 +1352,10 @@ _env-check:
 # Start webhook delivery — Cloudflare tunnel (if configured) or Smee proxy
 _webhook-start:
     #!/usr/bin/env bash
-    if [ -f .env ]; then set -a && source .env && set +a; fi
-    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
+    source scripts/resolve_env.sh
 
-    # Option 1: Cloudflare tunnel — DEV__SMEE_URL empty but SYN_DOMAIN set
-    if [ -z "${DEV__SMEE_URL:-}" ] && [ -n "${SYN_DOMAIN:-}" ]; then
+    # Option 1: Cloudflare tunnel — token or domain configured
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_DOMAIN:-}" ]; then
         _DOMAIN="${SYN_DOMAIN#https://}"
         _DOMAIN="${_DOMAIN#http://}"
         _DOMAIN="${_DOMAIN%/}"
