@@ -4,237 +4,256 @@
 
 # Syntropic137
 
-Event-sourced system for tracking AI agent work across workflows, capturing metrics for observability and optimization.
+Orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability.
 
-- [Syntropic137](#syntropic137)
-  - [Overview](#overview)
-  - [🏗️ Architecture](#️-architecture)
-  - [Quick Start](#quick-start)
-    - [Prerequisites](#prerequisites)
-    - [Installation](#installation)
-    - [Configuration](#configuration)
-    - [Development Environment](#development-environment)
-    - [CLI Usage](#cli-usage)
-  - [Project Structure](#project-structure)
-    - [Bounded Contexts](#bounded-contexts)
-    - [Key Patterns](#key-patterns)
-  - [Development Commands](#development-commands)
-  - [License](#license)
+## Quick Start: Dev Mode
 
+For contributors and local hacking. Runs services on your host with hot-reload.
 
-## Overview
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/), [just](https://just.systems/), Docker
 
-The Syntropic137 provides:
+```bash
+git clone --recurse-submodules https://github.com/syntropic137/syntropic137.git
+cd syntropic137
+cp .env.example .env            # fill in ANTHROPIC_API_KEY + GitHub App keys
+just dev                        # syncs deps, builds containers, seeds data, starts everything
+```
 
-- **Composable Workflows**: Define reusable workflow phases with inputs and output artifacts
-- **Event Sourcing**: All state changes captured as immutable events
-- **Metrics & Observability**: Detailed token tracking and execution metrics
-- **Vertical Slice Architecture (VSA)**: Clean bounded contexts for parallel development
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:5173 |
+| API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+| MinIO Console | http://localhost:9001 |
 
-## 🏗️ Architecture
+Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
+
+## Quick Start: Selfhost
+
+For permanent installs on your own hardware. Everything runs behind an nginx gateway on a single port.
+
+```bash
+git clone --recurse-submodules https://github.com/syntropic137/syntropic137.git
+cd syntropic137
+just onboard                    # interactive wizard — creates .env, checks prerequisites
+just selfhost-up                # builds and starts the full stack
+```
+
+Access: http://localhost:8008 (configurable via `SYN_GATEWAY_PORT`)
+
+**With Cloudflare Tunnel** (external access):
+
+```bash
+just selfhost-up-tunnel         # includes cloudflared service
+```
+
+Access: `https://your-domain.com` (configure tunnel route to `http://gateway:80`)
+
+> **Security:** The API has no built-in auth. Protect with Cloudflare Access, nginx basic auth (`SYN_API_PASSWORD`), or a VPN.
+
+| Command | What it does |
+|---------|--------------|
+| `just selfhost-status` | Health check |
+| `just selfhost-logs` | Tail logs |
+| `just selfhost-down` | Stop everything |
+| `just selfhost-update` | Pull latest, rebuild, restart |
+| `just selfhost-reset` | Wipe and start fresh |
+
+## Architecture
 
 The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
 <details>
-<summary>📊 Context Overview</summary>
+<summary>Bounded Contexts</summary>
 
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
-| **Orchestration** | 3 | Workflow execution and workspace management (WorkflowTemplate, Workspace, WorkflowExecution) |
-| **Organization** | 3 | Organization, system, and repo management (Organization, System, Repo) |
-| **Agent Sessions** | 1 | Agent sessions and observability metrics (AgentSession) |
-| **GitHub** | 2 | GitHub App integration and webhook trigger rules (Installation, TriggerRule) |
-| **Artifacts** | 1 | Artifact storage and retrieval (Artifact) |
+| **Orchestration** | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
+| **Organization** | Organization, System, Repo | Organization hierarchy, system and repo management |
+| **Agent Sessions** | AgentSession | Agent sessions and observability metrics |
+| **GitHub** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
+| **Artifacts** | Artifact | Artifact storage and retrieval |
 
-**Infrastructure:**
-- PostgreSQL (event store + projections)
-- Redis (cache)
-- MinIO (artifacts)
+**Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
-**Packages:**
-- `syn-domain` - Core domain logic
-- `syn-adapters` - External integrations
-- `syn-collector` - Event collection
-- `syn-shared` - Shared utilities
-
-**Libraries:**
-- `agentic-primitives` - Composable agent building blocks
-- `event-sourcing-platform` - Event sourcing infrastructure
-
-To regenerate the diagram:
-```bash
-just diagram  # Generates docs/architecture/vsa-overview.svg
-```
+Regenerate diagram: `just diagram`
 
 </details>
 
-## Quick Start
-
-### Prerequisites
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
-- [just](https://just.systems/) (command runner)
-- Docker (for development environment)
-
-### Installation
+## CLI (`syn`)
 
 ```bash
-# Clone with submodules
-git clone --recursive https://github.com/syntropic137/syntropic137.git
-cd syntropic137
-
-# Install dependencies
-just install
-
-# Initialize submodules (if not cloned with --recursive)
-just submodules
+just cli -- <command>           # run via just
+# or install: uv tool install -e apps/syn-cli
 ```
 
-### Configuration
+### Workflows
 
 ```bash
-cp .env.example .env
+syn workflow list
+syn workflow show <id>
+syn workflow run <id> --input key=value
+syn workflow status <id>
+syn workflow validate path/to/workflow.yaml
+syn run <id> -i key=value       # shortcut
 ```
 
-`.env.example` is the primary configuration reference — open it and read the header. It covers both setup paths:
-
-**Option A — 1Password (recommended):** Set `OP_VAULT` to your target vault. The resolver fetches every field from the `syntropic137-config` item and injects them at startup. Put any vars you want in 1Password — secrets, non-sensitive config, or a mix. Anything not in the item falls through to `.env` as plaintext.
+### Execution Control
 
 ```bash
-# .env — minimum to get started
-OP_VAULT=syn137-dev
-OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=<your-service-account-token>
+syn control status <execution-id>
+syn control pause <execution-id> --reason "investigating"
+syn control resume <execution-id>
+syn control cancel <execution-id>
 ```
 
-Vaults: `syn137-dev` (development) · `syn137-beta` (beta) · `syn137-staging` (staging) · `syn137-prod` (production)
-
-> Tip: include `APP_ENVIRONMENT` in the 1Password item (e.g. `development` for `syn137-dev`). The resolver validates it against the vault at boot and refuses to start on a mismatch — e.g. prod secrets in a dev process.
-
-**Option B — Plain values:** Leave `OP_VAULT` blank and fill in secrets directly in `.env`. No tooling required.
-
-**Precedence (highest → lowest):** shell env → 1Password fields → `.env` plaintext. Any source works; they compose cleanly.
-
-> Full 1Password setup guide: [docs/development/1password-secrets.md](docs/development/1password-secrets.md)
-
-### Development Environment
+### Agents
 
 ```bash
-# 🚀 Fresh start: Clean DB, start full stack, and seed workflows
-just dev-fresh
-
-# Or step-by-step:
-just dev              # Start Docker services (PostgreSQL)
-just seed-workflows   # Seed workflow definitions
-
-# Run QA checks
-just qa
-
-# Run tests
-just test
+syn agent list
+syn agent test --provider claude --prompt "Hello"
+syn agent chat --provider claude
 ```
+
+### Trigger Rules
+
+```bash
+syn triggers register --name "self-healing" --event "check_run.completed" --repository owner/repo --workflow <id>
+syn triggers list --repository owner/repo
+syn triggers enable <name> --repository owner/repo
+syn triggers pause <id> --reason "maintenance"
+```
+
+### Config
+
+```bash
+syn config show
+syn config validate
+syn config env
+syn version
+```
+
+## Development Commands
 
 | Command | Description |
 |---------|-------------|
-| `just dev-fresh` | **Recommended** - Clean DB, start full stack, seed workflows |
-| `just dev` | Start Docker services only |
-| `just dev-down` | Stop all Docker services |
-
-After running `just dev-fresh`:
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **API Docs**: http://localhost:8000/docs
-
-### CLI Usage
-
-```bash
-# List available workflows
-syn list
-
-# Run a workflow
-syn run simple-research --topic "AI agents"
-
-# Check workflow status
-syn status <workflow-id>
-
-# View artifacts
-syn artifacts <workflow-id>
-
-# View metrics
-syn metrics <workflow-id>
-```
+| `just dev` | Start full dev stack (deps, containers, seeds, frontend) |
+| `just dev-fresh` | Wipe volumes, rebuild, re-seed — clean slate |
+| `just dev-down` | Stop all services |
+| `just dev-logs` | Tail service logs |
+| `just dev-doctor` | Check environment health |
+| | |
+| `just qa` | Full QA: lint, format, typecheck, test, vsa-validate |
+| `just test` | Run tests with coverage |
+| `just test-unit` | Unit tests only |
+| `just test-integration` | Integration tests (needs test-stack) |
+| `just test-stack` | Spin up ephemeral test infrastructure |
+| `just lint` | Ruff linter |
+| `just format` | Ruff formatter |
+| `just typecheck` | mypy strict |
+| `just vsa-validate` | Validate Vertical Slice Architecture |
+| | |
+| `just submodules-init` | Initialize git submodules |
+| `just submodules-update` | Pull latest submodule commits |
+| `just diagram` | Regenerate architecture SVG |
+| `just seed-workflows` | Seed workflow definitions |
+| `just seed-triggers` | Seed trigger rules |
 
 ## Project Structure
 
 ```
 syntropic137/
 ├── apps/
-│   ├── syn-api/                  # FastAPI HTTP server
-│   ├── syn-cli/                  # `syn` CLI application
-│   └── syn-dashboard-ui/         # Dashboard frontend (Vite + React)
-│
+│   ├── syn-api/                 # FastAPI HTTP server
+│   ├── syn-cli/                 # CLI tool ("syn")
+│   └── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
 ├── packages/
-│   ├── syn-domain/               # Core domain + VSA contexts
-│   ├── syn-adapters/             # External integrations
-│   ├── syn-collector/            # Event ingestion API
-│   └── syn-shared/               # Shared settings, configuration
-│
-├── lib/                          # Git submodules
-│   ├── agentic-primitives/       # Composable agent building blocks
-│   └── event-sourcing-platform/  # Event sourcing infrastructure
-│
-├── infra/                        # Docker Compose, setup wizard, secrets
-└── docs/                         # Documentation + ADRs
+│   ├── syn-domain/              # Domain events, aggregates, ports
+│   ├── syn-adapters/            # Orchestration + observability adapters
+│   ├── syn-collector/           # Event ingestion API
+│   └── syn-shared/              # Settings, configuration
+├── lib/                         # Git submodules (our own projects)
+│   ├── agentic-primitives/      # Agent building blocks, isolation providers
+│   └── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
+├── infra/                       # Docker Compose, setup wizard, secrets
+├── docker/                      # Compose files (base, dev, selfhost, test)
+└── docs/                        # Documentation and ADRs
 ```
 
-### Bounded Contexts
+## Environment Configuration
 
-- **Orchestration**: Workflow definitions, execution lifecycle, and workspace management
-- **Organization**: Organization hierarchy — orgs, systems, and repos
-- **Agent Sessions**: Agent sessions, token tracking, and execution metrics
-- **GitHub**: GitHub App integration, installation tokens, and webhook trigger rules
-- **Artifacts**: Artifact storage, metadata, and retrieval
+Two `.env` files with **strict separation** — no variable appears in both.
 
-### Key Patterns
-
-| Pattern | Implementation |
-|---------|---------------|
-| Event Sourcing | Commands → Aggregates → Events |
-| CQRS | Commands (26) → Events (44) → Projections (20) |
-| Event Processing | Processor/Todo pattern (no complex sagas) |
-| Architecture | Vertical Slice Architecture (VSA) |
-| Logging | Centralized DI logger, structured, detailed |
-
-> **Note:** To regenerate the architecture diagram: `just diagram`
-
-## Development Commands
-
-```bash
-just --list              # Show all commands
-
-# Quality Assurance
-just qa                  # Run full QA pipeline
-just lint                # Run linter
-just format              # Format code
-just typecheck           # Run type checker
-just test                # Run tests with coverage
-
-# Development
-just dev-fresh           # 🚀 Clean DB + start full stack + seed (recommended)
-just dev                 # Start Docker environment only
-just dev-down            # Stop Docker environment
-just seed-workflows      # Seed workflows from YAML
-
-# Dashboard
-just dashboard-backend   # Start backend API server only
-just dashboard-frontend  # Start frontend dev server only
-
-# VSA
-just vsa-validate        # Validate architecture
-just vsa-scaffold ctx slice  # Create new vertical slice
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│  .env  (root)                                                   │
+│  Application config — owned by Pydantic Settings                │
+│                                                                 │
+│  APP_ENVIRONMENT          SYN_GITHUB_APP_ID                     │
+│  ANTHROPIC_API_KEY        SYN_GITHUB_APP_NAME                   │
+│  CLAUDE_CODE_OAUTH_TOKEN  SYN_GITHUB_PRIVATE_KEY                │
+│  LOG_LEVEL / LOG_FORMAT   SYN_GITHUB_WEBHOOK_SECRET             │
+│  OP_SERVICE_ACCOUNT_*     DEV__SMEE_URL                         │
+│  ESP_EVENT_STORE_DB_URL   SYN_OBSERVABILITY_DB_URL              │
+│  ... (all Settings fields — see .env.example)                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Read by: Pydantic Settings, op_resolver, just dev,             │
+│           selfhost-env.sh (sourced first)                       │
+│  Template: .env.example (auto-generated from Settings classes)  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  infra/.env                                                     │
+│  Infrastructure config — Docker Compose, deployment tuning      │
+│                                                                 │
+│  COMPOSE_PROJECT_NAME     CLOUDFLARE_TUNNEL_TOKEN               │
+│  POSTGRES_PASSWORD/DB/USER  SYN_DOMAIN                          │
+│  MINIO_ROOT_USER/PASSWORD INCLUDE_OP_CLI                        │
+│  REDIS_PASSWORD           SYN_GATEWAY_PORT                      │
+│  Resource limits (API_MEMORY_LIMIT, etc.)                       │
+│  Backup settings, PG tuning                                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Read by: Docker Compose, selfhost-env.sh (sourced second)      │
+│  Template: infra/.env.example (manually maintained)             │
+└─────────────────────────────────────────────────────────────────┘
+
+        ┌──────────────────────────────┐
+        │  selfhost-env.sh             │
+        │  1. source .env              │
+        │  2. source infra/.env        │
+        │  3. Derive vault from        │
+        │     APP_ENVIRONMENT          │
+        │  4. Load 1Password token     │
+        │  5. Resolve 1Password →      │
+        │     export to env            │
+        └──────────────────────────────┘
+```
+
+| Workflow | Root `.env` | `infra/.env` |
+|----------|------------|-------------|
+| `just onboard-dev` | Created from `.env.example` | Not needed |
+| `just dev` | Read via `env_file` | Not used |
+| `just onboard` (selfhost) | Created, app config | Created, infra config |
+| `just selfhost-up` | Sourced first | Sourced second |
+
+## Secrets (1Password)
+
+1Password integration is optional. Set `APP_ENVIRONMENT` to auto-derive the vault name:
+
+| `APP_ENVIRONMENT` | Vault |
+|-------------------|-------|
+| `development` | `syn137-dev` |
+| `beta` | `syn137-beta` |
+| `staging` | `syn137-staging` |
+| `production` | `syn137-prod` |
+
+Provide the matching service account token (e.g. `OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV`) and all secrets resolve automatically. Anything not in 1Password falls through to `.env` plaintext.
+
+**Precedence:** shell env > 1Password > `.env` file
+
+Full setup guide: [docs/development/1password-secrets.md](docs/development/1password-secrets.md)
 
 ## License
 

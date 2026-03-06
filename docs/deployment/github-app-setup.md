@@ -23,7 +23,7 @@ permissions, events, and credentials are configured automatically.
 
 ```bash
 # During full setup (includes GitHub App creation):
-just setup
+just onboard
 
 # Or run only the GitHub App stage:
 python infra/scripts/setup.py --stage configure_github_app
@@ -59,7 +59,7 @@ manual field entry required.
 ## Manual Setup
 
 If you prefer to create the GitHub App manually (or need to configure an
-existing app), choose **"existing"** during `just setup` and follow the
+existing app), choose **"existing"** during `just onboard` and follow the
 steps below.
 
 ### Step 1: Create the GitHub App
@@ -81,7 +81,7 @@ If you have an organization (e.g., `syntropic137`), create the app through the o
 Fill in the app details:
 - **GitHub App name**: `syn137-agent` (or your preferred name, e.g., `agentparadise-bot`)
 - **Homepage URL**: Your organization's URL (e.g., `https://github.com/syntropic137`)
-- **Webhook URL**: `https://your-domain.com/webhooks/github` (can leave blank for local dev)
+- **Webhook URL**: Depends on your setup — `just onboard-dev` configures this automatically. For manual setup: `https://<your-domain>/api/v1/webhooks/github` (self-hosted) or leave blank (local dev with smee.io)
 - **Webhook secret**: Generate a strong random secret (e.g., `openssl rand -hex 32`)
 
 #### Repository Permissions
@@ -231,7 +231,7 @@ SYN_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 #### For Docker Self-Host
 
 The private key is base64-encoded and stored in `infra/.env` (or resolved
-from 1Password). The `just setup` wizard handles this automatically.
+from 1Password). The `just onboard` wizard handles this automatically.
 
 To encode manually:
 

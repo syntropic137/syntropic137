@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import re
 import stat
+import urllib.request
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -26,6 +27,14 @@ DOCKER_DIR = PROJECT_ROOT / "docker"
 SECRETS_DIR = INFRA_DIR / "docker" / "secrets"
 ENV_FILE = INFRA_DIR / ".env"
 ENV_EXAMPLE = INFRA_DIR / ".env.example"
+
+# Aliases for clarity: infra/.env is infrastructure config
+INFRA_ENV_FILE = ENV_FILE
+INFRA_ENV_EXAMPLE = ENV_EXAMPLE
+
+# Root .env is application config (canonical for Pydantic Settings)
+ROOT_ENV_FILE = PROJECT_ROOT / ".env"
+ROOT_ENV_EXAMPLE = PROJECT_ROOT / ".env.example"
 
 # ---------------------------------------------------------------------------
 # Secret file names (single source of truth)
@@ -43,20 +52,30 @@ REQUIRED_SECRETS: dict[str, int] = {
 }
 
 # ---------------------------------------------------------------------------
-# .env key constants (match infra/.env and infra/.env.example)
+# .env key constants (used across root .env and infra/.env)
 # ---------------------------------------------------------------------------
 
 ENV_SYN_DOMAIN = "SYN_DOMAIN"
-ENV_OP_VAULT = "OP_VAULT"
 ENV_OP_SERVICE_ACCOUNT_TOKEN = "OP_SERVICE_ACCOUNT_TOKEN"
 ENV_APP_ENVIRONMENT = "APP_ENVIRONMENT"
-ENV_DEPLOY_ENV = "DEPLOY_ENV"
 ENV_INCLUDE_OP_CLI = "INCLUDE_OP_CLI"
 ENV_CLOUDFLARE_TUNNEL_TOKEN = "CLOUDFLARE_TUNNEL_TOKEN"
 ENV_GITHUB_APP_ID = "SYN_GITHUB_APP_ID"
 ENV_GITHUB_APP_NAME = "SYN_GITHUB_APP_NAME"
 ENV_GITHUB_PRIVATE_KEY = "SYN_GITHUB_PRIVATE_KEY"
 ENV_GITHUB_WEBHOOK_SECRET = "SYN_GITHUB_WEBHOOK_SECRET"
+
+# ---------------------------------------------------------------------------
+# API routing constants
+# ---------------------------------------------------------------------------
+
+# The webhook route as registered in the FastAPI app (no gateway prefix).
+# Source of truth: apps/syn-api/src/syn_api/routes/webhooks.py (prefix="/webhooks")
+WEBHOOK_ROUTE = "/webhooks/github"
+
+# Gateway prefix stripped by nginx in selfhost mode.
+# Source of truth: infra/docker/images/gateway/docker-entrypoint.sh
+GATEWAY_API_PREFIX = "/api/v1"
 
 # ---------------------------------------------------------------------------
 # Compose file stacking (single source of truth)
@@ -67,9 +86,8 @@ COMPOSE_SELFHOST = DOCKER_DIR / "docker-compose.selfhost.yaml"
 COMPOSE_CLOUDFLARE = DOCKER_DIR / "docker-compose.cloudflare.yaml"
 COMPOSE_DEV = DOCKER_DIR / "docker-compose.dev.yaml"
 
-# Default project name — must match docker-compose.yaml `name:` field
+# Default project name prefix — environment is appended at runtime
 DEFAULT_PROJECT_NAME = "syntropic137"
-ENV_COMPOSE_PROJECT_NAME = "COMPOSE_PROJECT_NAME"
 
 # ---------------------------------------------------------------------------
 # Service ports (single source of truth)
@@ -132,6 +150,20 @@ def set_secure_permissions(path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Domain / URL helpers
 # ---------------------------------------------------------------------------
+
+
+def create_smee_channel() -> str:
+    """Auto-create a smee.io channel. Returns the channel URL.
+
+    **DEVELOPMENT ONLY** — smee.io is a public proxy and must not be used
+    in production. For production, use a Cloudflare tunnel or direct URL.
+
+    smee.io/new returns a 302 redirect to a unique channel URL.
+    Stdlib-only — no API key required.
+    """
+    req = urllib.request.Request("https://smee.io/new", method="HEAD")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return resp.url
 
 
 def normalize_domain(raw: str) -> str:

@@ -1,8 +1,9 @@
 """Resolve 1Password secrets and print KEY='VALUE' export lines for _env-check.
 
-Called by `just _env-check` when OP_VAULT is set. Outputs shell-safe
-KEY='VALUE' lines that can be eval'd into the bash environment so the
-env check sees values stored in 1Password, not just .env plain text.
+Called by ``just _env-check`` when ``APP_ENVIRONMENT`` maps to a known vault.
+Outputs shell-safe KEY='VALUE' lines that can be eval'd into the bash
+environment so the env check sees values stored in 1Password, not just .env
+plain text.
 
 Unlike op_resolver.py, this script does NOT skip keys already present in
 os.environ — its job is to report what is actually in the vault.
@@ -19,6 +20,15 @@ from pathlib import Path
 
 _OP_ITEM_TITLE = "syntropic137-config"
 _OP_SAT_PREFIX = "OP_SERVICE_ACCOUNT_TOKEN_"
+
+# Canonical env→vault mapping (mirrored from op_resolver.py — this script is
+# standalone and cannot import from syn_shared).
+_ENV_TO_VAULT: dict[str, str] = {
+    "development": "syn137-dev",
+    "beta": "syn137-beta",
+    "staging": "syn137-staging",
+    "production": "syn137-prod",
+}
 
 _KEYS = {
     "SYN_GITHUB_APP_ID",
@@ -55,14 +65,15 @@ def main() -> None:
     candidates = _parse_env_file(env_file)
     candidates.update(os.environ)
 
-    op_vault = candidates.get("OP_VAULT", "").strip()
+    app_env = candidates.get("APP_ENVIRONMENT", "").strip().lower()
+    op_vault = _ENV_TO_VAULT.get(app_env, "")
     if not op_vault:
         sys.exit(0)
 
-    # Inject vault-specific service account token if needed
+    # Vault-specific token always takes precedence over the generic one
     vault_sat_key = _OP_SAT_PREFIX + op_vault.upper().replace("-", "_")
     vault_sat = candidates.get(vault_sat_key, "").strip()
-    if vault_sat and not os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
+    if vault_sat:
         os.environ["OP_SERVICE_ACCOUNT_TOKEN"] = vault_sat
 
     if not shutil.which("op"):

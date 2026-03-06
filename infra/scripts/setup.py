@@ -9,7 +9,7 @@ Design Philosophy — Superconducting Onboarding
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Syn137 is a powerful system, but power means nothing if nobody can get it
 running.  Every manual step, missing file, or unclear prompt is friction
-that kills adoption.  This wizard exists to make ``just setup`` a true
+that kills adoption.  This wizard exists to make ``just onboard`` a true
 turnkey experience:
 
   - **One command, answer prompts, running stack.**  No README scavenger
@@ -29,16 +29,16 @@ The lower the friction, the more adoption.  Optimise for the first-run
 experience above all else.
 
 Usage:
-    just setup                    # Full interactive setup
-    just setup --skip-github      # Skip GitHub App config
-    just setup --non-interactive  # Read from env / .env
-    just setup --stage <name>     # Re-run a single stage
+    just onboard                    # Full interactive setup
+    just onboard --skip-github      # Skip GitHub App config
+    just onboard --non-interactive  # Read from env / .env
+    just onboard --stage <name>     # Re-run a single stage
 
 Stages:
-    check_prerequisites, init_submodules, generate_secrets,
-    configure_1password, validate_environment, configure_cloudflare,
-    configure_smee, configure_github_app, configure_env,
-    security_audit, build_and_start, wait_for_health,
+    detect_environment, check_prerequisites, init_submodules,
+    generate_secrets, configure_1password, validate_environment,
+    configure_cloudflare, configure_smee, configure_github_app,
+    configure_env, security_audit, build_and_start, wait_for_health,
     seed_workflows, print_summary
 """
 
@@ -66,7 +66,6 @@ from shared import (
     COMPOSE_SELFHOST,
     ENV_APP_ENVIRONMENT,
     ENV_CLOUDFLARE_TUNNEL_TOKEN,
-    ENV_DEPLOY_ENV,
     ENV_EXAMPLE,
     ENV_FILE,
     ENV_GITHUB_APP_ID,
@@ -74,13 +73,17 @@ from shared import (
     ENV_GITHUB_PRIVATE_KEY,
     ENV_GITHUB_WEBHOOK_SECRET,
     ENV_INCLUDE_OP_CLI,
-    ENV_OP_VAULT,
     ENV_SYN_DOMAIN,
+    GATEWAY_API_PREFIX,
     INFRA_DIR,
+    INFRA_ENV_FILE,
     PORT_UI,
     PROJECT_ROOT,
+    ROOT_ENV_EXAMPLE,
+    ROOT_ENV_FILE,
     SCRIPTS_DIR,
     SECRETS_DIR,
+    WEBHOOK_ROUTE,
     compose_file_args,
     format_access_urls,
     parse_env_file,
@@ -105,6 +108,7 @@ class SetupContext:
     Producers and consumers:
       skip_github            — main() → configure_github_app
       non_interactive        — main() → all stages
+      app_environment        — detect_environment → configure_1password, configure_env
       github_app_id          — configure_github_app → configure_env
       github_app_name        — configure_github_app → configure_env
       github_private_key_b64 — configure_github_app → configure_env
@@ -120,6 +124,7 @@ class SetupContext:
 
     skip_github: bool = False
     non_interactive: bool = False
+    app_environment: str = ""
     github_app_id: str = ""
     github_app_name: str = ""
     github_private_key_b64: str = ""
@@ -134,14 +139,17 @@ class SetupContext:
 
 
 # Stage order matters:
+#   0. detect_environment — sets APP_ENVIRONMENT before anything else.
 #   1. 1Password first — so vault creds are available to later stages.
+#      Vault default derives from APP_ENVIRONMENT.
 #   2. Cloudflare + smee — so webhook_url exists for the GitHub App manifest.
 #   3. GitHub App — needs both vault creds and webhook_url.
-#   4. configure_env — writes defaults (APP_ENVIRONMENT, DEPLOY_ENV) and acts
-#      as a safety net.  Collection stages write their own values to .env
-#      immediately via _update_env_file() so --stage X works in isolation.
+#   4. configure_env — writes remaining defaults and acts as a safety net.
+#      Collection stages write their own values to .env immediately via
+#      _update_env_file() so --stage X works in isolation.
 #   5. Security audit — reads .env, so runs after configure_env.
 STAGES = [
+    "detect_environment",
     "check_prerequisites",
     "init_submodules",
     "generate_secrets",
@@ -212,6 +220,13 @@ def callout(text: str) -> None:
     print(f"  {_PURPLE}{_BOLD}>{_RST} {_PURPLE}{text}{_RST}")
 
 
+def _redact(value: str, visible: int = 4) -> str:
+    """Return a redacted version of a secret, showing first/last chars."""
+    if len(value) < 12:
+        return "****"
+    return f"{value[:visible]}{'*' * 8}{value[-visible:]}"
+
+
 def prompt(text: str, default: str = "") -> str:
     """Prompt user for input with an optional default."""
     suffix = f" [{default}]" if default else ""
@@ -277,6 +292,67 @@ def port_in_use(port: int) -> bool:
 # ---------------------------------------------------------------------------
 # Stages
 # ---------------------------------------------------------------------------
+
+
+def detect_environment(ctx: SetupContext) -> bool:
+    """Detect or prompt for the target environment (development / production).
+
+    Runs as the very first stage so the environment banner prints immediately
+    after the ASCII art and later stages can derive defaults from it.
+    """
+    banner("Stage: Detect Environment")
+
+    root_env_vals = parse_env_file(ROOT_ENV_FILE)
+    existing = (
+        os.environ.get(ENV_APP_ENVIRONMENT, "").strip()
+        or root_env_vals.get(ENV_APP_ENVIRONMENT, "").strip()
+    )
+
+    if ctx.non_interactive:
+        chosen = existing or "development"
+    elif existing:
+        step(f"Current environment: {_BOLD}{existing}{_RST}")
+        if confirm(f"Keep {existing}?", default=True):
+            chosen = existing
+        else:
+            chosen = _prompt_environment_choice()
+    else:
+        chosen = _prompt_environment_choice()
+
+    ctx.app_environment = chosen
+    _update_env_file({ENV_APP_ENVIRONMENT: chosen}, target=ROOT_ENV_FILE)
+
+    # Print a clear banner so the user knows what they're configuring
+    label = f"  Environment: {chosen}"
+    box_width = max(len(label) + 2, 50)
+    print()
+    print(f"  {_CYAN}┌{'─' * box_width}┐{_RST}")
+    print(f"  {_CYAN}│{_RST}{_BOLD}{label.ljust(box_width)}{_RST}{_CYAN}│{_RST}")
+    print(f"  {_CYAN}└{'─' * box_width}┘{_RST}")
+    print()
+
+    ok(f"Environment set to {chosen}")
+    return True
+
+
+def _prompt_environment_choice() -> str:
+    """Present a numbered menu and return the chosen environment string."""
+    choices = ["development", "beta", "staging", "production"]
+    print()
+    for i, name in enumerate(choices, 1):
+        print(f"    {_BOLD}{i}{_RST}) {name}")
+    print()
+    while True:
+        raw = input("  Select environment [1]: ").strip()
+        if not raw:
+            return choices[0]
+        # Accept number input
+        if raw.isdigit() and 1 <= int(raw) <= len(choices):
+            return choices[int(raw) - 1]
+        # Allow typing the name directly
+        if raw.lower() in choices:
+            return raw.lower()
+        warn(f"Please enter 1-{len(choices)} or a name")
 
 
 def check_prerequisites(ctx: SetupContext) -> bool:  # noqa: ARG001
@@ -426,9 +502,9 @@ def configure_github_app(ctx: SetupContext) -> bool:
         warn("GitHub App env vars not fully set — skipping")
         return True
 
-    # Check if GitHub App is already fully configured (1Password or .env)
+    # Check if GitHub App is already fully configured (1Password or root .env)
     op_fields = _get_op_fields(ctx)
-    env_vals = parse_env_file(ENV_FILE)
+    root_env_vals = parse_env_file(ROOT_ENV_FILE)
     gh_keys = {
         ENV_GITHUB_APP_ID,
         ENV_GITHUB_APP_NAME,
@@ -437,18 +513,18 @@ def configure_github_app(ctx: SetupContext) -> bool:
     }
     has_all_in_op = gh_keys.issubset(op_fields)
     has_all_in_env = all(
-        os.environ.get(k, "").strip() or env_vals.get(k, "").strip() for k in gh_keys
+        os.environ.get(k, "").strip() or root_env_vals.get(k, "").strip() for k in gh_keys
     )
     if has_all_in_op or has_all_in_env:
-        source = "1Password" if has_all_in_op else ".env"
+        source = "1Password" if has_all_in_op else "root .env"
         ok(f"GitHub App already fully configured ({source})")
         if not confirm("Reconfigure GitHub App?", default=False):
             step("Keeping existing GitHub App configuration")
             # Populate ctx from existing values for configure_env
-            ctx.github_app_id = os.environ.get(ENV_GITHUB_APP_ID, "") or env_vals.get(
+            ctx.github_app_id = os.environ.get(ENV_GITHUB_APP_ID, "") or root_env_vals.get(
                 ENV_GITHUB_APP_ID, ""
             )
-            ctx.github_app_name = os.environ.get(ENV_GITHUB_APP_NAME, "") or env_vals.get(
+            ctx.github_app_name = os.environ.get(ENV_GITHUB_APP_NAME, "") or root_env_vals.get(
                 ENV_GITHUB_APP_NAME, ""
             )
             return True
@@ -477,7 +553,10 @@ def configure_github_app(ctx: SetupContext) -> bool:
 
 
 def _persist_github_app_to_env(ctx: SetupContext) -> None:
-    """Write GitHub App credentials from ctx to .env immediately."""
+    """Write GitHub App credentials from ctx to root .env immediately.
+
+    GitHub creds are application config — they live exclusively in root .env.
+    """
     env_updates: dict[str, str] = {}
     if ctx.github_app_id:
         env_updates[ENV_GITHUB_APP_ID] = ctx.github_app_id
@@ -487,16 +566,25 @@ def _persist_github_app_to_env(ctx: SetupContext) -> None:
         env_updates[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_b64
     if ctx.github_webhook_secret:
         env_updates[ENV_GITHUB_WEBHOOK_SECRET] = ctx.github_webhook_secret
-    _update_env_file(env_updates)
+    _update_env_file(env_updates, target=ROOT_ENV_FILE)
 
 
 def _configure_github_app_manifest(ctx: SetupContext) -> bool:
     """Create a new GitHub App using the manifest flow."""
     from github_manifest import run_manifest_flow
 
-    app_name = prompt("App name", default="syntropic137")
+    env_suffix = os.environ.get("APP_ENVIRONMENT", "dev")
+    app_name = prompt("App name", default=f"syn137-engineer-{env_suffix}")
     org = prompt("GitHub org (leave blank for personal)", default="")
-    webhook_url = ctx.webhook_url or None
+    webhook_url = ctx.webhook_url or os.environ.get("DEV__SMEE_URL") or None
+    if not webhook_url:
+        # Derive from SYN_DOMAIN if available
+        domain = os.environ.get(ENV_SYN_DOMAIN, "")
+        if domain:
+            domain = domain.rstrip("/")
+            if not domain.startswith("http"):
+                domain = f"https://{domain}"
+            webhook_url = f"{domain}/webhooks/github"
 
     print()
     try:
@@ -510,7 +598,7 @@ def _configure_github_app_manifest(ctx: SetupContext) -> bool:
         fail(str(exc))
         print()
         print("  You can retry this stage with:")
-        print("    just setup --stage configure_github_app")
+        print("    just onboard --stage configure_github_app")
         return False
     except (urllib.error.HTTPError, urllib.error.URLError, OSError, RuntimeError) as exc:
         fail(f"Manifest flow failed: {exc}")
@@ -584,8 +672,9 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
 
     ctx.github_webhook_secret = webhook_secret
     print()
-    print("  Webhook secret (paste into GitHub App settings):")
-    print(f"    {webhook_secret}")
+    print("  Webhook secret generated and saved to .env")
+    print(f"    {_redact(webhook_secret)}")
+    print(f"    {_DIM}Full value in: .env (SYN_GITHUB_WEBHOOK_SECRET){_RST}")
 
     _persist_github_app_to_env(ctx)
 
@@ -606,55 +695,57 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
 
 
 def configure_env(ctx: SetupContext) -> bool:
-    """Ensure .env exists and write any remaining defaults / ctx values.
+    """Ensure .env files exist and write any remaining defaults / ctx values.
 
     Collection stages (configure_cloudflare, configure_github_app, etc.)
     already write their values to .env immediately via _update_env_file().
     This stage handles:
-      1. Creating .env from template if it doesn't exist yet.
-      2. Writing non-secret defaults (APP_ENVIRONMENT, DEPLOY_ENV, OP_VAULT).
+      1. Creating .env files from templates if they don't exist yet.
+      2. Writing non-secret defaults (APP_ENVIRONMENT).
       3. Writing any ctx values that earlier stages might have collected but
          not yet persisted (belt-and-suspenders).
+
+    Strict separation: no variable appears in both files.
+      - Root .env: app config (Pydantic Settings, API keys, GitHub creds, logging)
+      - infra/.env: infra config (Compose, resource limits, tunnel, INCLUDE_OP_CLI)
     """
     banner("Stage: Configure Environment")
 
-    # Build substitutions — collection stages already wrote secrets to .env,
-    # but we include ctx values here as a safety net for full-wizard runs.
-    substitutions: dict[str, str] = {}
+    # --- Ensure both .env files exist ---
+    if not ROOT_ENV_FILE.exists() and ROOT_ENV_EXAMPLE.exists():
+        step("Creating root .env from .env.example...")
+        ROOT_ENV_FILE.write_text(ROOT_ENV_EXAMPLE.read_text())
+        ok("Root .env created")
+    if not INFRA_ENV_FILE.exists() and ENV_EXAMPLE.exists():
+        step("Creating infra/.env from infra/.env.example...")
+        INFRA_ENV_FILE.write_text(ENV_EXAMPLE.read_text())
+        ok("infra/.env created")
+
+    # --- Root .env: application config ---
+    root_subs: dict[str, str] = {}
     if ctx.github_app_id:
-        substitutions[ENV_GITHUB_APP_ID] = ctx.github_app_id
+        root_subs[ENV_GITHUB_APP_ID] = ctx.github_app_id
     if ctx.github_app_name:
-        substitutions[ENV_GITHUB_APP_NAME] = ctx.github_app_name
+        root_subs[ENV_GITHUB_APP_NAME] = ctx.github_app_name
     if ctx.github_private_key_b64:
-        substitutions[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_b64
+        root_subs[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_b64
     if ctx.github_webhook_secret:
-        substitutions[ENV_GITHUB_WEBHOOK_SECRET] = ctx.github_webhook_secret
+        root_subs[ENV_GITHUB_WEBHOOK_SECRET] = ctx.github_webhook_secret
+    root_subs.setdefault(ENV_APP_ENVIRONMENT, ctx.app_environment or "development")
+    _update_env_file(root_subs, target=ROOT_ENV_FILE)
+
+    # --- infra/.env: infrastructure config ---
+    infra_subs: dict[str, str] = {}
     if ctx.cloudflare_tunnel_token:
-        substitutions[ENV_CLOUDFLARE_TUNNEL_TOKEN] = ctx.cloudflare_tunnel_token
+        infra_subs[ENV_CLOUDFLARE_TUNNEL_TOKEN] = ctx.cloudflare_tunnel_token
     if ctx.syn_domain:
-        substitutions[ENV_SYN_DOMAIN] = ctx.syn_domain
-
-    # Infer DEPLOY_ENV from what was configured — if the user set up a
-    # Cloudflare tunnel, they're doing selfhost, not local dev.
-    env_vals = parse_env_file(ENV_FILE) if ENV_FILE.exists() else {}
-    has_tunnel = (
-        ctx.cloudflare_tunnel_token or env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
-    )
-    if has_tunnel:
-        substitutions[ENV_DEPLOY_ENV] = "selfhost"
-
-    # APP_ENVIRONMENT feeds the poka-yoke vault/environment mismatch guard.
-    substitutions.setdefault(ENV_APP_ENVIRONMENT, "development")
-
-    # 1Password settings from the configure_1password stage
-    if ctx.op_vault:
-        substitutions[ENV_OP_VAULT] = ctx.op_vault
+        infra_subs[ENV_SYN_DOMAIN] = ctx.syn_domain
     if ctx.include_op_cli:
-        substitutions[ENV_INCLUDE_OP_CLI] = ctx.include_op_cli
+        infra_subs[ENV_INCLUDE_OP_CLI] = ctx.include_op_cli
+    if infra_subs:
+        _update_env_file(infra_subs, target=INFRA_ENV_FILE)
 
-    _update_env_file(substitutions)
     ok("Environment configured")
-
     return True
 
 
@@ -684,11 +775,11 @@ def _audit_file_security() -> tuple[int, int]:
     else:
         step("Private key not yet created — skipping permission check")
 
-    # Webhook secret (now env var, check .env or environment)
-    env_vals = parse_env_file(ENV_FILE)
+    # Webhook secret (now env var, check root .env or environment)
+    root_vals = parse_env_file(ROOT_ENV_FILE)
     webhook_secret = (
         os.environ.get(ENV_GITHUB_WEBHOOK_SECRET, "").strip()
-        or env_vals.get(ENV_GITHUB_WEBHOOK_SECRET, "").strip()
+        or root_vals.get(ENV_GITHUB_WEBHOOK_SECRET, "").strip()
     )
     if webhook_secret:
         if len(webhook_secret) < 32:
@@ -778,10 +869,10 @@ def _audit_github_app(ctx: SetupContext) -> tuple[int, int]:
     import base64 as _b64
 
     op_fields = _get_op_fields(ctx)
-    env_vals = parse_env_file(ENV_FILE)
+    root_vals = parse_env_file(ROOT_ENV_FILE)
     pem_b64 = (
         os.environ.get(ENV_GITHUB_PRIVATE_KEY, "").strip()
-        or env_vals.get(ENV_GITHUB_PRIVATE_KEY, "").strip()
+        or root_vals.get(ENV_GITHUB_PRIVATE_KEY, "").strip()
     )
     pem_path = SECRETS_DIR / "github-private-key.pem"
 
@@ -844,27 +935,28 @@ def _audit_environment() -> tuple[int, int]:
     """Check environment configuration. Returns (warnings, info)."""
     warnings = 0
 
-    # .env not tracked by git
-    if ENV_FILE.exists():
-        try:
-            result = subprocess.run(
-                ["git", "ls-files", "--error-unmatch", str(ENV_FILE)],
-                capture_output=True,
-                text=True,
-                check=False,
-                cwd=PROJECT_ROOT,
-            )
-            if result.returncode == 0:
-                warn(".env is tracked by git — add to .gitignore")
-                warnings += 1
-            else:
-                ok(".env is not tracked by git")
-        except FileNotFoundError:
-            pass  # git not available
+    # .env files not tracked by git
+    for env_path, label in [(ROOT_ENV_FILE, "root .env"), (INFRA_ENV_FILE, "infra/.env")]:
+        if env_path.exists():
+            try:
+                result = subprocess.run(
+                    ["git", "ls-files", "--error-unmatch", str(env_path)],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    cwd=PROJECT_ROOT,
+                )
+                if result.returncode == 0:
+                    warn(f"{label} is tracked by git — add to .gitignore")
+                    warnings += 1
+                else:
+                    ok(f"{label} is not tracked by git")
+            except FileNotFoundError:
+                pass  # git not available
 
-    # Default credential checks
-    if ENV_FILE.exists():
-        env_content = ENV_FILE.read_text()
+    # Default credential checks (infra/.env has database passwords)
+    if INFRA_ENV_FILE.exists():
+        env_content = INFRA_ENV_FILE.read_text()
         if "POSTGRES_PASSWORD=syn_dev_password" in env_content:
             warn("POSTGRES_PASSWORD is still the default — change for production")
             warnings += 1
@@ -872,7 +964,7 @@ def _audit_environment() -> tuple[int, int]:
             warn("MINIO_ROOT_PASSWORD is still the default — change for production")
             warnings += 1
     else:
-        step(".env not created yet — skipping credential check")
+        step("infra/.env not created yet — skipping credential check")
 
     return warnings, 0
 
@@ -955,16 +1047,17 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
 
     # Re-run safety: if the token file already exists and .env has a domain,
     # offer to keep the existing config instead of redoing everything.
-    # Re-run safety: check 1Password, .env, env var
+    # Re-run safety: check 1Password, infra/.env, env var
     op_fields = _get_op_fields(ctx)
     existing_token = (
         os.environ.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
-        or parse_env_file(ENV_FILE).get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
+        or parse_env_file(INFRA_ENV_FILE).get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip()
     )
     token_in_op = ENV_CLOUDFLARE_TUNNEL_TOKEN in op_fields
     existing_domain = ctx.syn_domain or os.environ.get(ENV_SYN_DOMAIN, "")
+    reconfiguring = False
     if existing_token or token_in_op:
-        source = "1Password" if token_in_op else ".env"
+        source = "1Password" if token_in_op else "infra/.env"
         ok(f"Tunnel token already configured ({source})")
         if existing_domain:
             ok(f"Domain: {existing_domain}")
@@ -975,38 +1068,32 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
             if existing_domain:
                 ctx.syn_domain = existing_domain
             return True
+        reconfiguring = True
         print()
 
-    # Lead with the "why" — users need to understand the purpose, not
-    # just the mechanism.  The tunnel exists so GitHub can reach us.
-    callout("GitHub needs to reach your machine to trigger agent jobs.")
-    print()
-    hint("Cloudflare Tunnel creates a secure public URL for webhooks —")
-    hint("no port forwarding, no firewall changes, no static IP needed.")
-    hint("Free tier is all you need. No credit card required.")
-    print()
-    # Be upfront about what's needed so there are no surprises after
-    # they say yes.  If they don't have a domain, point them to smee.
-    callout("What you'll need:")
-    step(f"{_GREEN}FREE{_RST}  Cloudflare account")
-    step(f"{_GREEN}~$10{_RST}  A domain on Cloudflare (or bring your own)")
-    print()
-    hint("Don't have a domain on Cloudflare yet? Here's how:")
-    hint(f"  1. Go to {_BOLD}Account Home{_RST} on dash.cloudflare.com")
-    hint(
-        f"  2. {_BOLD}Buy a domain{_RST} (right there) or {_BOLD}+ Onboard a domain{_RST} you already own"
-    )
-    hint("  3. Point your registrar's nameservers to the ones Cloudflare gives you")
-    hint("     (takes 5-30 min to propagate)")
-    print()
-    hint("No domain? No problem — choose 'n' and we'll use smee.io instead.")
-    print()
+    if not reconfiguring:
+        # Lead with the "why" — users need to understand the purpose, not
+        # just the mechanism.  The tunnel exists so GitHub can reach us.
+        callout("GitHub needs to reach your machine to trigger agent jobs.")
+        print()
+        hint("Cloudflare Tunnel creates a secure public URL for webhooks —")
+        hint("no port forwarding, no firewall changes, no static IP needed.")
+        hint("Free tier is all you need. No credit card required.")
+        print()
+        # Be upfront about what's needed so there are no surprises after
+        # they say yes.  If they don't have a domain, point them to smee.
+        callout("What you'll need:")
+        step(f"{_GREEN}FREE{_RST}  Cloudflare account")
+        step(f"{_GREEN}~$10{_RST}  A domain on Cloudflare (or bring your own)")
+        print()
+        hint("No domain? No problem — choose 'n' and we'll use smee.io instead.")
+        print()
 
-    # Default=True because this is the recommended path for selfhost.
-    # The old default=False contradicted the "(Recommended)" label.
-    if not confirm("Configure Cloudflare Tunnel?", default=True):
-        step("Skipping Cloudflare configuration")
-        return True
+        # Default=True because this is the recommended path for selfhost.
+        # The old default=False contradicted the "(Recommended)" label.
+        if not confirm("Configure Cloudflare Tunnel?", default=True):
+            step("Skipping Cloudflare configuration")
+            return True
 
     # One flow: open dashboard, user creates tunnel + adds route in the
     # same Cloudflare wizard, then comes back with the token and hostname.
@@ -1025,28 +1112,36 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
 
     env_suffix = os.environ.get(ENV_APP_ENVIRONMENT, "dev")
 
-    # Step-by-step with callout() for actions (bold, visible) and
-    # step() for details.  No hint() for critical instructions —
-    # grey/dim text was too easy to miss.
-    callout("Step 1: Create the tunnel")
+    # Step-by-step matching the Cloudflare wizard breadcrumb:
+    #   Select tunnel type > Name your tunnel > Install and run connectors > Route tunnel
+    # callout() for actions (bold, visible), step() for details.
+    # No hint() for critical instructions — grey/dim was too easy to miss.
+
+    callout("Step 1: Create and name the tunnel")
     print()
     step(f"In the Zero Trust dashboard ({_BOLD}{zt_url}{_RST}):")
-    step(f"Networks  >  Connectors  >  {_PURPLE}+ Create a tunnel{_RST}")
-    step(f"Type: {_PURPLE}Cloudflared{_RST}")
+    step(f"Networks  >  Connectors  >  {_PURPLE}Create a tunnel{_RST}")
+    step(f"Select {_PURPLE}Cloudflared{_RST}")
     step(f"Name: {_PURPLE}syn137-{env_suffix}{_RST}  {_DIM}(or whatever you like){_RST}")
+    step(f"Click {_PURPLE}Save tunnel{_RST}")
     print()
 
     callout("Step 2: Copy the install command")
     print()
+    step("Cloudflare shows an install command with your token — copy it.")
     # Buttery onboarding: Cloudflare shows a full shell command, not
     # a bare token.  We accept whatever they paste and extract it.
     raw = getpass("  Paste the install command or token (hidden): ")
+    if raw:
+        step(f"Received: {_redact(raw)}")
     ctx.cloudflare_tunnel_token = extract_token(raw)
 
     if ctx.cloudflare_tunnel_token:
         ok("Tunnel token captured")
         # Write immediately so --stage configure_cloudflare persists the value
-        _update_env_file({ENV_CLOUDFLARE_TUNNEL_TOKEN: ctx.cloudflare_tunnel_token})
+        _update_env_file(
+            {ENV_CLOUDFLARE_TUNNEL_TOKEN: ctx.cloudflare_tunnel_token}, target=INFRA_ENV_FILE
+        )
         # If using 1Password, remind user to store there too for portability
         if ctx.op_vault:
             print()
@@ -1055,32 +1150,51 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
             hint("so it resolves automatically on future deployments.")
     print()
 
-    callout("Step 3: Add a published application route")
+    callout("Step 3: Route traffic (add a public hostname)")
     print()
-    step(f"Click the {_PURPLE}Published application routes{_RST} tab at the top")
-    step(f"Click {_PURPLE}Add a published application route{_RST}")
-    # cloudflared runs inside Docker on the same network as gateway (nginx),
-    # which reverse-proxies to api:8000 with rate limiting, security
-    # headers, WebSocket support, and SPA routing.  Always route through
-    # nginx — never expose the raw API directly.
-    step("Subdomain: pick yours  Domain: select from dropdown")
-    step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}gateway:8081{_RST}")
-    hint("Port 8081 enables basic auth on tunnel access (set SYN_API_PASSWORD in .env)")
-    step(f"Click {_PURPLE}Save{_RST}")
+    step(f"Click {_PURPLE}Next{_RST} at the bottom of the Cloudflare page")
+    step('You should now be on the "Route Traffic" page with a hostname form')
+    print()
+    step(f"Subdomain: {_PURPLE}syn137-{env_suffix}{_RST}  {_DIM}(or pick your own){_RST}")
+    step("Domain: select your domain from the dropdown")
+    hint("The dropdown shows domains you've added to Cloudflare.")
+    hint("No domains listed? You need to add one first:")
+    hint(f"  1. Go to {_BOLD}dash.cloudflare.com{_RST}  >  {_BOLD}Account Home{_RST}")
+    hint(f"  2. {_BOLD}Buy a domain{_RST} or {_BOLD}+ Onboard a domain{_RST} you already own")
+    hint("  3. Point your registrar's nameservers to the ones Cloudflare gives you")
+    hint("  4. Wait for it to become active, then come back here")
+    print()
+    is_dev = env_suffix in ("dev", "development")
+    if is_dev:
+        # Dev mode: cloudflared runs on the host, point to local API
+        step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}localhost:8000{_RST}")
+    else:
+        # Selfhost: cloudflared runs inside Docker alongside gateway (nginx)
+        step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}gateway:8081{_RST}")
+        hint("Port 8081 enables basic auth on tunnel access (set SYN_API_PASSWORD in .env)")
+    step(f"Click {_PURPLE}Save tunnel{_RST}")
     print()
 
     input("  Press Enter when done...")
     print()
 
-    # Just grab the final hostname they configured.  One input.
-    ctx.syn_domain = prompt(
-        "What's the full hostname you set up? (e.g., syn137-dev.yourdomain.com, or blank)",
-        default="",
-    )
+    # They just configured this in Cloudflare — just need them to paste it back.
+    step("Copy the full public hostname from the Cloudflare page")
+    hint(f"e.g., syn137-{env_suffix}.yourdomain.com")
+    ctx.syn_domain = prompt("Hostname", default="")
 
     if ctx.syn_domain:
         ok(f"Domain: {ctx.syn_domain}")
-        _update_env_file({ENV_SYN_DOMAIN: ctx.syn_domain})
+        _update_env_file({ENV_SYN_DOMAIN: ctx.syn_domain}, target=INFRA_ENV_FILE)
+        # Derive webhook URL from domain
+        domain = ctx.syn_domain.rstrip("/")
+        if not domain.startswith("http"):
+            domain = f"https://{domain}"
+        # Dev tunnel goes direct to API; selfhost routes through nginx
+        # which strips the /api/v1 prefix before proxying.
+        webhook_path = WEBHOOK_ROUTE if is_dev else f"{GATEWAY_API_PREFIX}{WEBHOOK_ROUTE}"
+        ctx.webhook_url = f"{domain}{webhook_path}"
+        ok(f"Webhook URL: {ctx.webhook_url}")
     else:
         ctx.needs_smee_fallback = True
         step("No domain — we'll set up smee.io for webhooks next.")
@@ -1107,13 +1221,13 @@ def configure_smee(ctx: SetupContext) -> bool:
     # If Cloudflare tunnel is configured with a domain, skip smee entirely.
     # smee is a dev tool — no reason to prompt for it when production
     # webhook delivery is already set up.
-    env_vals = parse_env_file(ENV_FILE)
+    infra_env_vals = parse_env_file(INFRA_ENV_FILE)
     has_tunnel = (
         bool(ctx.cloudflare_tunnel_token)
-        or bool(env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip())
+        or bool(infra_env_vals.get(ENV_CLOUDFLARE_TUNNEL_TOKEN, "").strip())
         or ENV_CLOUDFLARE_TUNNEL_TOKEN in _get_op_fields(ctx)
     )
-    has_domain = bool(ctx.syn_domain) or bool(env_vals.get(ENV_SYN_DOMAIN, "").strip())
+    has_domain = bool(ctx.syn_domain) or bool(infra_env_vals.get(ENV_SYN_DOMAIN, "").strip())
     if has_tunnel and has_domain:
         banner("Stage: Configure Webhook Proxy (Skipped)")
         step("Cloudflare Tunnel is configured — smee.io not needed")
@@ -1147,7 +1261,7 @@ def configure_smee(ctx: SetupContext) -> bool:
         # Be honest: smee is a bridge, not a destination.
         warn("smee.io is great for getting started but can be fragile.")
         hint("For reliable automation, set up a Cloudflare domain later:")
-        hint("  just setup --stage configure_cloudflare")
+        hint("  just onboard --stage configure_cloudflare")
     else:
         hint("smee.io forwards GitHub webhooks to your local machine.")
         hint("Useful for development or as a backup webhook path.")
@@ -1162,33 +1276,76 @@ def configure_smee(ctx: SetupContext) -> bool:
             print()
             warn("Without a domain or smee, GitHub webhooks can't reach you.")
             warn("Automated workflows won't trigger. You can re-run this with:")
-            step("just setup --stage configure_smee")
+            step("just onboard --stage configure_smee")
         else:
             step("Skipping smee configuration")
         return True
 
-    if confirm("Open smee.io/new in your browser to create a channel?", default=True):
-        webbrowser.open("https://smee.io/new")
-        ok("Opened smee.io — copy the URL from the page")
-        print()
+    # Try auto-creating a smee channel (zero manual steps)
+    smee_url = ""
+    try:
+        from shared import create_smee_channel
 
-    smee_url = prompt("Paste the smee.io URL")
+        step("Auto-creating smee.io channel...")
+        smee_url = create_smee_channel()
+        ok(f"Channel created: {smee_url}")
+    except Exception:
+        # Network failure — fall back to manual browser flow
+        if confirm("Open smee.io/new in your browser to create a channel?", default=True):
+            webbrowser.open("https://smee.io/new")
+            ok("Opened smee.io — copy the URL from the page")
+            print()
+        smee_url = prompt("Paste the smee.io URL")
+
     if smee_url:
+        ctx.webhook_url = smee_url
+        warn("Smee is for DEVELOPMENT ONLY — do not use in production.")
+        hint("For production, use a Cloudflare tunnel or direct webhook URL.")
         # Write to root .env for `just dev` integration
         _update_env_file(
             {"DEV__SMEE_URL": smee_url},
-            target=PROJECT_ROOT / ".env",
+            target=ROOT_ENV_FILE,
         )
 
     return True
 
 
-def _prompt_keychain_token(vault: str) -> None:
-    """Ensure a 1Password SA token is stored in macOS Keychain for *vault*.
+def _prompt_keychain_token(vault: str, *, app_environment: str = "") -> None:
+    """Ensure a 1Password SA token is stored for *vault*.
 
-    On macOS: checks Keychain, prompts if missing, offers replacement if present.
-    On Linux: prints the env var the user needs to export.
+    Dev environment: stores in root .env (avoids Keychain prompts that break
+    automated agent workflows). .env is gitignored so this is safe for local dev.
+
+    Non-dev (production/staging/beta):
+      macOS: stores in Keychain (OS-native credential store).
+      Linux: prints the env var the user needs to export.
     """
+    is_dev = app_environment in ("development", "")
+
+    if is_dev:
+        # Dev path: store in root .env for non-interactive access
+        vk = vault.upper().replace("-", "_")
+        env_key = f"OP_SERVICE_ACCOUNT_TOKEN_{vk}"
+        existing = parse_env_file(ROOT_ENV_FILE).get(env_key, "").strip()
+        if existing:
+            ok(f"Token already in root .env ({env_key})")
+            if confirm("Replace token?", default=False):
+                token = getpass("  Paste new service account token (hidden): ")
+                if token:
+                    step(f"Received: {_redact(token)}")
+                    _update_env_file({env_key: token}, target=ROOT_ENV_FILE)
+                    ok(f"Token updated in root .env as {env_key}")
+            return
+        token = getpass("  Paste service account token (hidden): ")
+        if token:
+            step(f"Received: {_redact(token)}")
+            _update_env_file({env_key: token}, target=ROOT_ENV_FILE)
+            ok(f"Token stored in root .env as {env_key}")
+        else:
+            warn("No token provided — you can add it later to .env")
+        return
+
+    # Non-dev: use Keychain (macOS) or env var (Linux)
     if platform.system() != "Darwin":
         svc = _keychain_service_name(vault)
         step("On Linux, set the vault-specific env var:")
@@ -1202,16 +1359,35 @@ def _prompt_keychain_token(vault: str) -> None:
         ok(f"Token already in Keychain ({svc})")
         if confirm("Replace token?", default=False):
             token = getpass("  Paste new service account token (hidden): ")
+            if token:
+                step(f"Received: {_redact(token)}")
             if token and _keychain_write(vault, token):
                 ok(f"Token updated in Keychain as {svc}")
         return
 
     # No existing token — prompt for one
     token = getpass("  Paste service account token (hidden): ")
+    if token:
+        step(f"Received: {_redact(token)}")
     if token and _keychain_write(vault, token):
         ok(f"Token stored in Keychain as {svc}")
     else:
         warn("No token provided — you can add it later via Keychain")
+
+
+# Canonical env→vault mapping (mirrored from op_resolver.py — this script is
+# stdlib-only and cannot import from syn_shared).
+_ENV_TO_VAULT: dict[str, str] = {
+    "development": "syn137-dev",
+    "beta": "syn137-beta",
+    "staging": "syn137-staging",
+    "production": "syn137-prod",
+}
+
+
+def _vault_name_for_env(app_env: str) -> str:
+    """Derive the 1Password vault name from the environment."""
+    return _ENV_TO_VAULT.get(app_env, f"syn137-{app_env}")
 
 
 def configure_1password(ctx: SetupContext) -> bool:
@@ -1228,36 +1404,47 @@ def configure_1password(ctx: SetupContext) -> bool:
     """
     banner("Stage: Configure 1Password (Optional)")
 
+    # Derive vault name from APP_ENVIRONMENT (no user prompt needed)
+    vault = _vault_name_for_env(ctx.app_environment) if ctx.app_environment else "syn137-dev"
+
+    is_dev = (ctx.app_environment or "development") in ("development",)
+
+    # Check for existing token (dev: root .env, non-dev: Keychain)
+    def _has_existing_token() -> bool:
+        if is_dev:
+            vk = vault.upper().replace("-", "_")
+            env_key = f"OP_SERVICE_ACCOUNT_TOKEN_{vk}"
+            return bool(parse_env_file(ROOT_ENV_FILE).get(env_key, "").strip())
+        return bool(_keychain_read(vault))
+
     if ctx.non_interactive:
-        op_vault = os.environ.get(ENV_OP_VAULT, "")
-        if op_vault:
-            ctx.op_vault = op_vault
+        if _has_existing_token() or os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
+            ctx.op_vault = vault
             ctx.include_op_cli = "1"
-            ok("1Password config read from environment")
+            ok(f"1Password config detected (vault: {vault})")
         else:
-            step("No 1Password config in environment — skipping")
+            step("No 1Password token found — skipping")
         return True
 
-    # Detect existing configuration
-    env_vals = parse_env_file(ENV_FILE)
-    existing_vault = env_vals.get(ENV_OP_VAULT, "").strip()
-    has_keychain_token = bool(existing_vault and _keychain_read(existing_vault))
+    has_token = _has_existing_token()
 
-    # Already fully configured — offer to keep or reconfigure
-    if has_keychain_token:
-        ok(f"1Password already configured (vault: {existing_vault}, token in Keychain)")
+    # Already fully configured — auto-skip
+    if has_token:
+        storage = "root .env" if is_dev else "Keychain"
+        ok(f"1Password already configured (vault: {vault}, token in {storage})")
         if not confirm("Reconfigure 1Password?", default=False):
-            ctx.op_vault = existing_vault
+            ctx.op_vault = vault
             ctx.include_op_cli = "1"
+            _update_env_file({ENV_INCLUDE_OP_CLI: "1"}, target=INFRA_ENV_FILE)
             step("Keeping existing 1Password configuration")
             return True
-        # Reconfigure — prompt for vault then token
+        # Reconfigure — re-prompt for token only
         print()
-        vault = prompt("1Password vault name", default=existing_vault)
+        step(f"Vault: {vault} (derived from APP_ENVIRONMENT={ctx.app_environment})")
+        _prompt_keychain_token(vault, app_environment=ctx.app_environment)
         ctx.op_vault = vault
-        _prompt_keychain_token(vault)
         ctx.include_op_cli = "1"
-        _update_env_file({ENV_OP_VAULT: vault, ENV_INCLUDE_OP_CLI: "1"})
+        _update_env_file({ENV_INCLUDE_OP_CLI: "1"}, target=INFRA_ENV_FILE)
         ok("1Password reconfigured")
         return True
 
@@ -1266,11 +1453,11 @@ def configure_1password(ctx: SetupContext) -> bool:
         step("Skipping 1Password — using .env for secrets")
         return True
 
-    vault = prompt("1Password vault name", default=existing_vault or "syn137-dev")
+    step(f"Vault: {vault} (derived from APP_ENVIRONMENT={ctx.app_environment})")
     ctx.op_vault = vault
-    _prompt_keychain_token(vault)
+    _prompt_keychain_token(vault, app_environment=ctx.app_environment)
     ctx.include_op_cli = "1"
-    _update_env_file({ENV_OP_VAULT: vault, ENV_INCLUDE_OP_CLI: "1"})
+    _update_env_file({ENV_INCLUDE_OP_CLI: "1"}, target=INFRA_ENV_FILE)
     ok("1Password configured")
     return True
 
@@ -1407,7 +1594,7 @@ def _keychain_service_name(vault: str) -> str:
     """Derive the macOS Keychain service name for a 1Password vault.
 
     Must match selfhost-env.sh:
-      ``SYN_OP_SERVICE_ACCOUNT_TOKEN_$(echo "$OP_VAULT" | tr '[:lower:]-' '[:upper:]_')``
+      ``SYN_OP_SERVICE_ACCOUNT_TOKEN_$(echo "$_OP_VAULT" | tr '[:lower:]-' '[:upper:]_')``
     """
     vk = vault.upper().replace("-", "_")
     return f"SYN_OP_SERVICE_ACCOUNT_TOKEN_{vk}"
@@ -1466,24 +1653,62 @@ def _keychain_write(vault: str, token: str) -> bool:
     return True
 
 
+def _keychain_delete(vault: str) -> bool:
+    """Remove the 1Password SA token from macOS Keychain. Returns success."""
+    if platform.system() != "Darwin":
+        return False
+    svc = _keychain_service_name(vault)
+    result = subprocess.run(
+        [
+            "security",
+            "delete-generic-password",
+            "-a",
+            os.environ.get("USER", "unknown"),
+            "-s",
+            svc,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        warn(f"Keychain delete failed: {result.stderr.strip() or 'not found'}")
+        return False
+    return True
+
+
 def _ensure_op_token(vault: str) -> None:
-    """Load the service account token from macOS Keychain if not already set.
+    """Load the service account token from macOS Keychain or vault-specific env var.
 
     Mirrors the justfile's Keychain lookup so ``op`` works even when the
     setup script is invoked outside of ``just``.
+
+    Precedence (highest first):
+    1. Vault-specific env var (OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV)
+    2. macOS Keychain
+    3. Generic OP_SERVICE_ACCOUNT_TOKEN (already in env — no action needed)
     """
-    if os.environ.get("OP_SERVICE_ACCOUNT_TOKEN"):
-        return  # already set — nothing to do
+    # Vault-specific env var always wins
+    vault_key = f"OP_SERVICE_ACCOUNT_TOKEN_{vault.upper().replace('-', '_')}"
+    vault_token = os.environ.get(vault_key, "").strip()
+    if vault_token:
+        os.environ["OP_SERVICE_ACCOUNT_TOKEN"] = vault_token
+        return
+
+    # Keychain is next
     token = _keychain_read(vault)
     if token:
         os.environ["OP_SERVICE_ACCOUNT_TOKEN"] = token
+        return
+
+    # Generic OP_SERVICE_ACCOUNT_TOKEN already in env — nothing to do
 
 
 def _get_op_fields(ctx: SetupContext) -> set[str]:
     """Get 1Password fields, fetching lazily if not yet cached in *ctx*."""
     if ctx.op_fields is not None:
         return ctx.op_fields
-    vault = ctx.op_vault or parse_env_file(ENV_FILE).get(ENV_OP_VAULT, "")
+    vault = ctx.op_vault or _vault_name_for_env(ctx.app_environment or "development")
     fields = _fetch_op_fields(vault) if vault else set()
     ctx.op_fields = fields
     return fields
@@ -1556,9 +1781,8 @@ def validate_environment(ctx: SetupContext) -> bool:
     """
     banner("Stage: Environment Audit")
 
-    # Determine vault name from ctx or .env
-    env_vals = parse_env_file(ENV_FILE)
-    vault = ctx.op_vault or env_vals.get(ENV_OP_VAULT, "")
+    # Derive vault name from APP_ENVIRONMENT
+    vault = ctx.op_vault or _vault_name_for_env(ctx.app_environment or "development")
 
     env_label = vault or "local"
     width = 60
@@ -1584,6 +1808,11 @@ def validate_environment(ctx: SetupContext) -> bool:
 
     # Stash op_fields in ctx so downstream stages can check 1Password
     ctx.op_fields = op_fields
+
+    # Merge both .env files for the audit (root has app config, infra has infra config)
+    env_vals: dict[str, str] = {}
+    env_vals.update(parse_env_file(ROOT_ENV_FILE))
+    env_vals.update(parse_env_file(INFRA_ENV_FILE))
 
     for group_label, variables in ENV_AUDIT_GROUPS:
         print(f"  {_BOLD}{group_label}{_RST}")
@@ -1672,9 +1901,11 @@ def build_and_start(ctx: SetupContext) -> bool:
         step("Using selfhost compose (local mode)")
 
     env = os.environ.copy()
-    if ENV_FILE.exists():
-        # Load .env for docker compose
-        env.update(parse_env_file(ENV_FILE))
+    # Load both .env files for docker compose (root first, then infra)
+    if ROOT_ENV_FILE.exists():
+        env.update(parse_env_file(ROOT_ENV_FILE))
+    if INFRA_ENV_FILE.exists():
+        env.update(parse_env_file(INFRA_ENV_FILE))
 
     result = subprocess.run(
         ["docker", "compose", *compose_files, "up", "-d", "--build"],
@@ -1725,8 +1956,10 @@ def seed_workflows(ctx: SetupContext) -> bool:
     compose_files = compose_file_args(cloudflare=use_cloudflare)
 
     env = os.environ.copy()
-    if ENV_FILE.exists():
-        env.update(parse_env_file(ENV_FILE))
+    if ROOT_ENV_FILE.exists():
+        env.update(parse_env_file(ROOT_ENV_FILE))
+    if INFRA_ENV_FILE.exists():
+        env.update(parse_env_file(INFRA_ENV_FILE))
 
     def _run_in_api(
         script_path: str, extra_args: list[str] | None = None
@@ -1786,8 +2019,8 @@ def print_summary(ctx: SetupContext) -> bool:
     """Print access URLs and next steps."""
     banner("Setup Complete!")
 
-    # Fall back to .env if ctx doesn't have the domain (e.g. re-run that kept existing config)
-    domain = ctx.syn_domain or parse_env_file(ENV_FILE).get(ENV_SYN_DOMAIN, "")
+    # Fall back to infra/.env if ctx doesn't have the domain (infra config)
+    domain = ctx.syn_domain or parse_env_file(INFRA_ENV_FILE).get(ENV_SYN_DOMAIN, "")
     urls = format_access_urls(domain)
     print(f"  UI:            {urls['ui']}")
     print(f"  API:           {urls['api']}")
@@ -1799,7 +2032,7 @@ def print_summary(ctx: SetupContext) -> bool:
     print("    PostgreSQL, EventStoreDB, Redis, MinIO, Collector")
     print()
     print("  Security: Tier 1 (single-tenant) — no API auth, Docker network isolation.")
-    print("  Run 'just setup --stage security_audit' to re-check security posture.")
+    print("  Run 'just onboard --stage security_audit' to re-check security posture.")
 
     print()
     callout("Next step: start the stack")
@@ -1819,7 +2052,145 @@ def print_summary(ctx: SetupContext) -> bool:
         print("    just onboard --stage configure_github_app")
         print()
 
+    # -- 1Password: show what to copy back into the vault item --
+    if ctx.op_vault:
+        _print_op_summary(ctx)
+
     return True
+
+
+def _print_op_summary(ctx: SetupContext) -> None:
+    """Write a script to save secrets to 1Password (never print raw values)."""
+    # Collect fields that were actually populated during setup.
+    fields: list[tuple[str, str]] = []
+    if ctx.github_app_id:
+        fields.append((ENV_GITHUB_APP_ID, ctx.github_app_id))
+    if ctx.github_app_name:
+        fields.append((ENV_GITHUB_APP_NAME, ctx.github_app_name))
+    if ctx.github_private_key_b64:
+        fields.append((ENV_GITHUB_PRIVATE_KEY, ctx.github_private_key_b64))
+    if ctx.github_webhook_secret:
+        fields.append((ENV_GITHUB_WEBHOOK_SECRET, ctx.github_webhook_secret))
+    if ctx.cloudflare_tunnel_token:
+        fields.append((ENV_CLOUDFLARE_TUNNEL_TOKEN, ctx.cloudflare_tunnel_token))
+
+    if not fields:
+        return
+
+    vault = ctx.op_vault
+    item = "syntropic137-config"
+
+    # Show redacted summary (no raw values)
+    print(f"  {_BOLD}1Password: secrets ready to save{_RST}")
+    print(f"  Vault: {_BOLD}{vault}{_RST}  |  Item: {_BOLD}{item}{_RST}")
+    print()
+    for label, value in fields:
+        if any(k in label for k in ("KEY", "SECRET", "TOKEN")):
+            display = value[:4] + "****" + value[-4:] if len(value) > 8 else "****"
+        else:
+            display = value
+        print(f"    ✅ {label}={display}")
+    print()
+
+    # Write op command + instructions to a script file (secrets stay out of terminal)
+    script_path = PROJECT_ROOT / ".op-save-secrets.sh"
+    edit_parts = [f'op item edit "{item}" --vault "{vault}"']
+    for label, value in fields:
+        edit_parts.append(f"  '{label}={value}'")
+    edit_cmd = " \\\n".join(edit_parts)
+
+    create_parts = [f'op item create --category=login --title="{item}" --vault="{vault}"']
+    for label, value in fields:
+        create_parts.append(f"  '{label}={value}'")
+    create_cmd = " \\\n".join(create_parts)
+
+    script_name = script_path.name
+    header = (
+        f"#!/usr/bin/env bash\n"
+        f"# Auto-generated by: just onboard (1Password stage)\n"
+        f"# Saves your local secrets to 1Password vault: {vault}\n"
+        f"#\n"
+        f"# USAGE\n"
+        f"#   bash {script_name}\n"
+        f"#   rm {script_name}        # delete after — contains secrets\n"
+        f"#\n"
+        f"# PREREQUISITES\n"
+        f"#   1. Install: brew install --cask 1password-cli\n"
+        f'#   2. Sign in to the account that owns vault "{vault}":\n'
+        f"#        op signin                                    # default (last used account)\n"
+        f"#        op signin --account my-team.1password.com    # specific account\n"
+        f"#\n"
+        f"#      The --account flag takes your sign-in address (the domain\n"
+        f"#      shown in 1Password app > Settings > Accounts, e.g.\n"
+        f'#      "my-team.1password.com" or "my.1password.com" for personal).\n'
+        f"#\n"
+        f"#      Multiple accounts? op uses whichever you last signed into.\n"
+        f"#      To check or switch:\n"
+        f"#        op account list                               # see all accounts + sign-in addresses\n"
+        f"#        op signin --account my-team.1password.com     # switch to a specific one\n"
+        f"#      Or pin one: export OP_ACCOUNT=my-team.1password.com\n"
+        f"#\n"
+        f'#   3. The vault "{vault}" must exist. Create it in the\n'
+        f'#      1Password app or: op vault create "{vault}"\n'
+        f"#\n"
+        f"# The script automatically clears secret values from .env after saving.\n"
+        f"# Non-secret config (APP_ID, APP_NAME) and OP_SERVICE_ACCOUNT_TOKEN are kept.\n"
+        f"# On next startup, 1Password auto-injects the cleared secrets.\n"
+        f"# New machine? just onboard-dev --1password picks everything up.\n"
+    )
+
+    cleanup = (
+        "\n"
+        "echo ''\n"
+        "echo '✅ Secrets saved to 1Password.'\n"
+        "\n"
+        "# --- Clean secret values from .env files (keep keys with empty values) ---\n"
+        "echo '🧹 Cleaning secret values from .env files...'\n"
+        "_ROOT_SECRETS=(SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET"
+        " ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN)\n"
+        'for _KEY in "${_ROOT_SECRETS[@]}"; do\n'
+        '  if grep -q "^${_KEY}=" .env 2>/dev/null; then\n'
+        "    sed -i '' \"s|^${_KEY}=.*|# ${_KEY}= # managed by 1Password|\" .env\n"
+        '    echo "   cleared: ${_KEY} (.env)"\n'
+        "  fi\n"
+        "done\n"
+        "_INFRA_SECRETS=(CLOUDFLARE_TUNNEL_TOKEN)\n"
+        'for _KEY in "${_INFRA_SECRETS[@]}"; do\n'
+        '  if grep -q "^${_KEY}=" infra/.env 2>/dev/null; then\n'
+        "    sed -i '' \"s|^${_KEY}=.*|# ${_KEY}= # managed by 1Password|\" infra/.env\n"
+        '    echo "   cleared: ${_KEY} (infra/.env)"\n'
+        "  fi\n"
+        "done\n"
+        "echo ''\n"
+        "echo '   Non-secret config (APP_ID, APP_NAME) left intact.'\n"
+        "echo '   OP_SERVICE_ACCOUNT_TOKEN_* left intact (resolver needs it).'\n"
+        "echo '   On next startup, 1Password auto-injects the cleared secrets.'\n"
+        "echo ''\n"
+        f"echo '🗑️  Now delete this script: rm {script_name}'\n"
+    )
+
+    script_path.write_text(
+        f"{header}\n"
+        f"set -euo pipefail\n"
+        f"\n"
+        f"echo '🔐 Saving secrets to 1Password vault: {vault}'\n"
+        f"echo '   Item: {item}'\n"
+        f"echo ''\n"
+        f"\n"
+        f"# Try edit first; if item doesn't exist, create it\n"
+        f"{edit_cmd} 2>/dev/null \\\n"
+        f"|| {create_cmd}\n"
+        f"{cleanup}",
+    )
+    script_path.chmod(0o600)
+
+    print(f"  📄 1Password save script: {_BOLD}{script_name}{_RST}")
+    print("     Prerequisites + next steps are inside the script.")
+    print(f"     Run:  bash {script_name}")
+    print(f"     Then: rm {script_name}")
+    print()
+    print(f"  {_DIM}⚠️  {script_name} contains secret values — do NOT commit it.{_RST}")
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -1827,6 +2198,7 @@ def print_summary(ctx: SetupContext) -> bool:
 # ---------------------------------------------------------------------------
 
 STAGE_FUNCS: dict[str, callable] = {
+    "detect_environment": detect_environment,
     "check_prerequisites": check_prerequisites,
     "init_submodules": init_submodules,
     "generate_secrets": generate_secrets,
@@ -1878,11 +2250,11 @@ def main() -> None:
     )
 
     print()
-    print(f"{_CYAN}{_BOLD}  ___  ___ ___   ___      _")
-    print(" / _ \\| __| __| / __| ___| |_ _  _ _ __")
-    print("| (_| | _|| _|  \\__ \\/ -_)  _| || | '_ \\")
-    print(" \\__,_|___|_|   |___/\\___|\\__|\\__,_| .__/")
-    print(f"                                   |_|{_RST}")
+    print(f"{_CYAN}{_BOLD}  ___              _ ___ _____")
+    print(" / __|_  _ _ _   / |__ /___  |")
+    print(" \\__ \\ || | ' \\  | ||_ \\  / /")
+    print(f" |___/\\_, |_||_| |_|___/ /_/{_RST}")
+    print("      |__/")
     print()
     print(f"  {_BOLD}Syntropic137{_RST} {_DIM}— Turnkey Setup{_RST}")
     print()
@@ -1900,7 +2272,7 @@ def main() -> None:
         if not success:
             print()
             fail(f"Stage '{stage_name}' failed. Fix the issue and re-run:")
-            print(f"    just setup --stage {stage_name}")
+            print(f"    just onboard --stage {stage_name}")
             sys.exit(1)
 
     sys.exit(0)

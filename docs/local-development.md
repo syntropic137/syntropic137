@@ -8,27 +8,36 @@ This guide explains how to set up and run the Syntropic137 locally.
 
 ## Quick Start
 
+The fastest path from clone to running stack:
+
 ```bash
 # 1. Clone the repository
 git clone --recursive https://github.com/syntropic137/syntropic137.git
 cd syntropic137
 
-# 2. Install dependencies
-uv sync
-
-# 3. Start Docker services (PostgreSQL)
-just dev
-
-# 4. Copy and configure environment
-cp .env.example .env
-# Edit .env with your settings
-
-# 5. Seed example workflows
-just cli workflow seed
-
-# 6. Verify setup
-just cli workflow list
+# 2. One-command setup (env, deps, GitHub App, webhook proxy, dev stack)
+just onboard-dev
 ```
+
+This handles submodules, `.env` creation, Python deps, GitHub App registration,
+webhook proxy (smee.io), and starts the full dev stack.
+
+**Options:**
+- `just onboard-dev --tunnel` — use Cloudflare tunnel instead of smee.io for webhooks
+- `just onboard-dev --skip-github` — skip GitHub App setup
+- `just onboard-dev --1password` — integrate with 1Password for portable secrets
+
+**Manual setup** (if you prefer step-by-step):
+
+```bash
+cp .env.example .env
+# Edit .env with your API keys
+just dev
+```
+
+> **Note:** Trigger-based workflows (GitHub webhook events) require GitHub App
+> configuration and webhook delivery. Run `just onboard-dev` to set this up
+> automatically, or see the [GitHub App Setup Guide](deployment/github-app-setup.md).
 
 ## Development Environment
 

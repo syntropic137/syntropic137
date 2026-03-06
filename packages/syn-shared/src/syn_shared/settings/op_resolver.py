@@ -1,15 +1,16 @@
 """Transparent 1Password secret resolution via a single vault item.
 
-At startup, fetches all fields from the `syntropic137-config` item in the
-vault specified by `OP_VAULT` and injects them into os.environ before pydantic
-reads them. One `op item get` call — no per-field round trips.
+At startup, derives the vault name from ``APP_ENVIRONMENT`` (no separate
+``OP_VAULT`` variable needed), fetches all fields from the
+``syntropic137-config`` item and injects them into os.environ before pydantic
+reads them. One ``op item get`` call — no per-field round trips.
 
 Usage:
     resolve_op_secrets()  # call before Settings() is constructed
 
 Requirements:
-    - `op` CLI in PATH
-    - OP_VAULT set in .env or shell (e.g. syn137-dev, syn137-beta, syn137-prod)
+    - ``op`` CLI in PATH
+    - ``APP_ENVIRONMENT`` set in .env or shell (development, beta, staging, production)
     - One of: OP_SERVICE_ACCOUNT_TOKEN, OP_SESSION, or interactive sign-in
 """
 
@@ -28,25 +29,23 @@ logger = logging.getLogger(__name__)
 # Name of the 1Password item that holds all secrets (one per vault).
 _OP_ITEM_TITLE = "syntropic137-config"
 
-# Env var that selects which vault to read from.
-_OP_VAULT_ENV_KEY = "OP_VAULT"
-
-# Maps known vault names to the APP_ENVIRONMENT value they should contain.
-# Used for boot-time sanity check: prevents prod secrets running in dev and vice versa.
-_VAULT_EXPECTED_ENV: dict[str, str] = {
-    "syn137-dev": "development",
-    "syn137-beta": "beta",
-    "syn137-staging": "staging",
-    "syn137-prod": "production",
+# Canonical mapping: APP_ENVIRONMENT → vault name.
+# The vault name is deterministically derived from the environment — no separate
+# OP_VAULT variable needed. This eliminates an entire class of mismatch errors.
+_ENV_TO_VAULT: dict[str, str] = {
+    "development": "syn137-dev",
+    "beta": "syn137-beta",
+    "staging": "syn137-staging",
+    "production": "syn137-prod",
 }
+
+# Environments that skip 1Password resolution entirely (no vault exists).
+_SKIP_ENVIRONMENTS: frozenset[str] = frozenset({"test", "offline"})
 
 # Prefix for per-vault service account token env vars.
 # e.g. syn137-dev  → OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV
 # e.g. syn137-prod → OP_SERVICE_ACCOUNT_TOKEN_SYN137_PROD
 _OP_SAT_PREFIX = "OP_SERVICE_ACCOUNT_TOKEN_"
-
-# Environments that bypass the vault/env mismatch check (test runs, offline dev).
-_SKIP_ENV_VALIDATION: frozenset[str] = frozenset({"test", "offline"})
 
 
 def _op_available() -> bool:
@@ -96,6 +95,27 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return result
 
 
+def vault_name_for_env(app_env: str) -> str:
+    """Return the 1Password vault name for a given APP_ENVIRONMENT value.
+
+    Args:
+        app_env: The environment string (e.g. "development", "production").
+
+    Returns:
+        The vault name (e.g. "syn137-dev", "syn137-prod").
+
+    Raises:
+        ValueError: If *app_env* has no known vault mapping.
+    """
+    try:
+        return _ENV_TO_VAULT[app_env]
+    except KeyError:
+        allowed = ", ".join(sorted(_ENV_TO_VAULT))
+        raise ValueError(
+            f"No vault mapping for APP_ENVIRONMENT={app_env!r}. Known environments: {allowed}"
+        ) from None
+
+
 @lru_cache(maxsize=1)
 def resolve_op_secrets(env_file: str = ".env") -> None:
     """Fetch all fields from the syntropic137-config item and inject into os.environ.
@@ -103,29 +123,40 @@ def resolve_op_secrets(env_file: str = ".env") -> None:
     Runs exactly once per process (lru_cache). Safe to call multiple times.
 
     Steps:
-    1. Read OP_VAULT from .env / os.environ
-    2. Fetch the entire item via `op item get --format json` (one call)
-    3. Inject each field label→value into os.environ
-    4. Existing env vars are never overwritten
+    1. Read APP_ENVIRONMENT from .env / os.environ
+    2. Derive vault name via ``vault_name_for_env()``
+    3. Fetch the entire item via ``op item get --format json`` (one call)
+    4. Inject each field label→value into os.environ
+    5. Existing env vars are never overwritten
 
     Args:
-        env_file: Path to the .env file to read OP_VAULT from (default ".env").
+        env_file: Path to the .env file to read APP_ENVIRONMENT from (default ".env").
     """
-    # Resolve OP_VAULT — os.environ wins over .env file
     candidates = _parse_env_file(Path(env_file))
     candidates.update(os.environ)
 
-    op_vault = candidates.get(_OP_VAULT_ENV_KEY, "").strip()
-    if not op_vault:
-        logger.debug("OP_VAULT not set — skipping 1Password resolution")
+    app_env = candidates.get("APP_ENVIRONMENT", "").strip().lower()
+    if not app_env:
+        logger.debug("APP_ENVIRONMENT not set — skipping 1Password resolution")
         return
 
+    if app_env in _SKIP_ENVIRONMENTS:
+        logger.debug("APP_ENVIRONMENT=%s — skipping 1Password resolution", app_env)
+        return
+
+    if app_env not in _ENV_TO_VAULT:
+        logger.debug("APP_ENVIRONMENT=%s has no vault mapping — skipping", app_env)
+        return
+
+    op_vault = _ENV_TO_VAULT[app_env]
+
     # Inject vault-specific service account token before checking op availability.
-    # OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV takes precedence over the generic token
-    # only when the generic token is not already set in the shell environment.
+    # OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV always takes precedence over the generic
+    # OP_SERVICE_ACCOUNT_TOKEN — prevents a stale generic token from shadowing the
+    # correct vault-specific one.
     vault_sat_key = _OP_SAT_PREFIX + op_vault.upper().replace("-", "_")
     vault_sat = candidates.get(vault_sat_key, "").strip()
-    if vault_sat and "OP_SERVICE_ACCOUNT_TOKEN" not in os.environ:
+    if vault_sat:
         os.environ["OP_SERVICE_ACCOUNT_TOKEN"] = vault_sat
         logger.debug("Using vault-specific service account token (%s)", vault_sat_key)
 
@@ -172,42 +203,6 @@ def resolve_op_secrets(env_file: str = ".env") -> None:
             injected += 1
 
     logger.debug("Injected %d secret(s) from 1Password", injected)
-    _validate_environment_match(op_vault)
-
-
-def _validate_environment_match(op_vault: str) -> None:
-    """Fail fast if APP_ENVIRONMENT doesn't match the selected vault.
-
-    Guards against accidentally running production workloads with dev secrets,
-    or injecting production secrets into a dev/staging process.
-
-    The check is skipped when:
-    - The vault name is not one of the known vaults (custom/fork vaults)
-    - APP_ENVIRONMENT is not set in the environment
-    - APP_ENVIRONMENT is 'test' or 'offline' (CI and local-only runs)
-
-    Args:
-        op_vault: The vault name that was used to fetch secrets.
-
-    Raises:
-        EnvironmentError: If APP_ENVIRONMENT contradicts the vault's expected environment.
-    """
-    expected = _VAULT_EXPECTED_ENV.get(op_vault)
-    if expected is None:
-        return  # Unknown vault — skip check (custom deployments, forks)
-
-    actual = os.environ.get("APP_ENVIRONMENT", "").strip().lower()
-    if not actual or actual in _SKIP_ENV_VALIDATION:
-        return
-
-    if actual != expected:
-        raise OSError(
-            f"Environment mismatch — refusing to start.\n"
-            f"  OP_VAULT='{op_vault}' expects APP_ENVIRONMENT='{expected}'\n"
-            f"  but APP_ENVIRONMENT='{actual}'.\n"
-            f"  Fix: set OP_VAULT to match your environment, "
-            f"or correct APP_ENVIRONMENT in your .env file."
-        )
 
 
 def reset_op_resolver() -> None:

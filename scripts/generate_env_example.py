@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "packages" / "syn-shared" / "src"))
 from syn_shared.settings.config import Settings  # noqa: E402
 from syn_shared.settings.dev_tooling import DevToolingSettings  # noqa: E402
 from syn_shared.settings.github import GitHubAppSettings  # noqa: E402
+from syn_shared.settings.infra import InfraSettings  # noqa: E402
 from syn_shared.settings.workspace import (  # noqa: E402
     ContainerLoggingSettings,
     GitIdentitySettings,
@@ -54,6 +55,10 @@ def get_default_value(field_info: FieldInfo) -> str:
 
     if default is None or default is PydanticUndefined:
         return ""
+
+    # Handle SecretStr (extract plain value for .env.example defaults)
+    if isinstance(default, SecretStr):
+        return default.get_secret_value()
 
     # Handle enums
     if hasattr(default, "value"):
@@ -221,36 +226,28 @@ def generate_env_example() -> str:
             "# " + "=" * 76,
             "# SECRETS MANAGEMENT (1PASSWORD)",
             "# " + "=" * 76,
-            "# Set OP_VAULT to auto-inject secrets from 1Password at startup.",
+            "# The vault name is derived automatically from APP_ENVIRONMENT:",
+            "#   development → syn137-dev",
+            "#   beta        → syn137-beta",
+            "#   staging     → syn137-staging",
+            "#   production  → syn137-prod",
+            "#",
+            "# No separate OP_VAULT variable is needed — set APP_ENVIRONMENT and the",
+            "# resolver figures out which vault to use. If APP_ENVIRONMENT is 'test',",
+            "# 'offline', or unset, 1Password resolution is skipped entirely.",
+            "#",
             "# The resolver fetches every field from the 'syntropic137-config' item",
-            "# in the selected vault and injects them into the environment.",
-            "#",
-            "# You can put ANY vars into the 1Password item — secrets, non-sensitive",
-            "# config, or a mix. Anything not in the item falls through to the",
-            "# plaintext values in this file. There is no required list.",
-            "#",
-            "# Recommended: include APP_ENVIRONMENT in the 1Password item. The",
-            "# resolver validates it against the vault at boot and refuses to start",
-            "# on a mismatch (e.g. prod secrets injected into a dev process).",
-            "# NOTE: APP_ENVIRONMENT must come from 1Password or the shell to trigger",
-            "# the guard — values in this file are loaded after the resolver runs.",
-            "#",
-            "# Vault names map to environments:",
-            "#   syn137-dev     → development",
-            "#   syn137-beta    → beta",
-            "#   syn137-staging → staging",
-            "#   syn137-prod    → production",
+            "# in the derived vault and injects them into the environment.",
+            "# Existing env vars are never overwritten.",
             "#",
             "# Precedence (highest → lowest): shell → 1Password → this file.",
             "#",
             "# Full setup guide: docs/development/1password-secrets.md",
             "",
-            "OP_VAULT=",
-            "",
             "# Per-vault service account tokens (one per vault, scoped to that vault only).",
-            "# When OP_VAULT is set, the resolver injects the matching token below as",
-            "# OP_SERVICE_ACCOUNT_TOKEN before calling the op CLI. Shell env always wins:",
-            "# if OP_SERVICE_ACCOUNT_TOKEN is already set in your shell it takes priority.",
+            "# The resolver injects the matching token as OP_SERVICE_ACCOUNT_TOKEN before",
+            "# calling the op CLI. Shell env always wins: if OP_SERVICE_ACCOUNT_TOKEN is",
+            "# already set in your shell it takes priority.",
             "# Leave all blank to set OP_SERVICE_ACCOUNT_TOKEN directly in your shell.",
             "",
             "OP_SERVICE_ACCOUNT_TOKEN_SYN137_DEV=",
@@ -516,44 +513,160 @@ def sync_env_file(example_path: Path, env_path: Path) -> tuple[int, int, int, li
     return existing_count, new_count, total_count, extra_vars
 
 
-def main() -> None:
-    """Generate .env.example and sync .env idempotently."""
-    content = generate_env_example()
+def generate_infra_env_example() -> str:
+    """Generate infra/.env.example from InfraSettings fields."""
+    lines: list[str] = []
 
-    example_path = PROJECT_ROOT / ".env.example"
-    env_path = PROJECT_ROOT / ".env"
+    # Header
+    lines.extend(
+        [
+            "# " + "=" * 76,
+            "# SYN137 INFRASTRUCTURE / DEPLOYMENT CONFIGURATION",
+            "# " + "=" * 76,
+            "#",
+            "# This file is AUTO-GENERATED from InfraSettings.",
+            "# Do not edit manually - run: just gen-env",
+            "#",
+            "# Infrastructure config ONLY.",
+            "# Application config (API keys, GitHub creds, logging) lives in root .env.",
+            "# See root .env.example (auto-generated from Settings classes).",
+            "#",
+            "# Copy this file to infra/.env and fill in your values.",
+            "# " + "=" * 76,
+            "",
+        ]
+    )
 
-    # Write .env.example
+    # Group fields by their section (parsed from the class source comments)
+    # We use generate_settings_section with the InfraSettings class directly,
+    # but we need to split by section. InfraSettings uses no prefix.
+    section_map: dict[str, list[str]] = {
+        "DEPLOYMENT": ["container_registry", "image_tag"],
+        "DATABASE (PostgreSQL)": ["postgres_password", "postgres_db", "postgres_user"],
+        "CLOUDFLARE TUNNEL (Self-Host Only)": [
+            "cloudflare_account_id",
+            "cloudflare_api_token",
+            "cloudflare_zone_id",
+            "syn_domain",
+            "cloudflare_tunnel_name",
+            "cloudflare_tunnel_token",
+        ],
+        "1PASSWORD - Docker Build Arg": ["include_op_cli"],
+        "MINIO (Object Storage)": ["minio_root_user", "minio_root_password"],
+        "REDIS": ["redis_password"],
+        "RESOURCE LIMITS": [
+            "api_memory_limit",
+            "api_cpu_limit",
+            "ui_memory_limit",
+            "ui_cpu_limit",
+            "postgres_memory_limit",
+            "postgres_cpu_limit",
+            "event_store_memory_limit",
+            "collector_memory_limit",
+            "collector_cpu_limit",
+            "minio_memory_limit",
+            "minio_cpu_limit",
+            "redis_memory_limit",
+            "redis_cpu_limit",
+        ],
+        "SELF-HOST-SPECIFIC (Optional)": [
+            "syn_gateway_port",
+            "syn_api_password",
+            "syn_api_user",
+            "restart_policy",
+            "pg_shared_buffers",
+            "pg_work_mem",
+            "es_batch_size",
+            "backup_schedule",
+            "backup_retention_days",
+            "backup_dir",
+        ],
+    }
+
+    for section_name, field_names in section_map.items():
+        lines.extend(
+            [
+                "# " + "=" * 76,
+                f"# {section_name}",
+                "# " + "=" * 76,
+                "",
+            ]
+        )
+
+        for field_name in field_names:
+            if field_name not in InfraSettings.model_fields:
+                continue
+            field_info = InfraSettings.model_fields[field_name]
+
+            env_name = field_name.upper()
+            default = get_default_value(field_info)
+            description = field_info.description
+
+            if description:
+                desc_lines = format_description(description)
+                lines.extend(desc_lines)
+
+            lines.append(f"{env_name}={default}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def _generate_and_sync(
+    label: str,
+    content: str,
+    example_path: Path,
+    env_path: Path,
+) -> None:
+    """Generate an .env.example and sync the corresponding .env."""
     example_path.write_text(content)
-    print(f"✅ Generated {example_path}")
+    print(f"  Generated {example_path.relative_to(PROJECT_ROOT)}")
 
-    # Count total env vars (rough count from lines with = that aren't comments)
     total_vars = sum(
         1 for line in content.split("\n") if "=" in line and not line.strip().startswith("#")
     )
     print(f"   {total_vars} environment variables documented")
 
-    # Sync .env idempotently
     if env_path.exists():
         existing, new, _total, extra = sync_env_file(example_path, env_path)
         if new > 0:
-            print(f"✅ Synced {env_path}")
+            print(f"  Synced {env_path.relative_to(PROJECT_ROOT)}")
             print(f"   {existing} existing values preserved")
             print(f"   {new} new variables added")
         else:
-            print(f"✅ {env_path} is up to date ({existing} variables)")
+            print(f"  {env_path.relative_to(PROJECT_ROOT)} is up to date ({existing} variables)")
 
-        # Warn about external/unknown variables
         if extra:
-            print(f"⚠️  {len(extra)} external variables found (not in Syn137 settings):")
+            print(f"  {len(extra)} external variables in {label}:")
             for var in sorted(extra):
                 print(f"   - {var}")
-            print("   These are preserved in 'EXTERNAL / UNKNOWN VARIABLES' section.")
     else:
-        # Create .env from .env.example
-        env_path.write_text(content)
-        print(f"✅ Created {env_path} from template")
-        print("   ⚠️  Fill in secret values (API keys, private keys, etc.)")
+        print(
+            f"  {env_path.relative_to(PROJECT_ROOT)} does not exist yet (create with setup wizard)"
+        )
+
+
+def main() -> None:
+    """Generate .env.example files and sync .env idempotently."""
+    # --- Root .env ---
+    print("Root .env (application config):")
+    _generate_and_sync(
+        label="root .env",
+        content=generate_env_example(),
+        example_path=PROJECT_ROOT / ".env.example",
+        env_path=PROJECT_ROOT / ".env",
+    )
+
+    print()
+
+    # --- infra/.env ---
+    print("infra/.env (infrastructure config):")
+    _generate_and_sync(
+        label="infra/.env",
+        content=generate_infra_env_example(),
+        example_path=PROJECT_ROOT / "infra" / ".env.example",
+        env_path=PROJECT_ROOT / "infra" / ".env",
+    )
 
 
 if __name__ == "__main__":

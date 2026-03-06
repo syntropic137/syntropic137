@@ -16,7 +16,7 @@ services:
   # See: infra/cloudflare/README.md for setup instructions.
   cloudflared:
     image: cloudflare/cloudflared:2026.2.0
-    container_name: ${COMPOSE_PROJECT_NAME:-syntropic137}-cloudflared
+    container_name: syn137-cloudflared
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}

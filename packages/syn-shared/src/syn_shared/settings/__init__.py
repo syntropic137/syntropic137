@@ -48,6 +48,7 @@ from syn_shared.settings.github import (
     get_github_settings,
     reset_github_settings,
 )
+from syn_shared.settings.infra import InfraSettings
 from syn_shared.settings.storage import (
     StorageProvider,
     StorageSettings,
@@ -72,6 +73,7 @@ __all__ = [
     "GitHubAppSettings",
     "GitIdentityResolver",
     "GitIdentitySettings",
+    "InfraSettings",
     "IsolationBackend",
     "Settings",
     "StorageProvider",

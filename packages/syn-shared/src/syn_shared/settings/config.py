@@ -7,12 +7,11 @@ Each variable has a description explaining its purpose and where to get it.
 
 from __future__ import annotations
 
-import os
 from enum import Enum
 from functools import lru_cache
-from typing import TYPE_CHECKING, Annotated, Self
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import Field, PostgresDsn, SecretStr, field_validator, model_validator
+from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
@@ -205,49 +204,6 @@ class Settings(BaseSettings):
         if v == "":
             return None
         return v
-
-    # =========================================================================
-    # POKA-YOKE: Vault ↔ Environment Mismatch Guard
-    # =========================================================================
-
-    # Maps vault names → expected APP_ENVIRONMENT. Prevents prod secrets in dev.
-    _VAULT_EXPECTED_ENV: dict[str, str] = {
-        "syn137-dev": "development",
-        "syn137-beta": "beta",
-        "syn137-staging": "staging",
-        "syn137-prod": "production",
-    }
-
-    @model_validator(mode="after")
-    def validate_vault_environment_match(self) -> Self:
-        """Fail fast if APP_ENVIRONMENT contradicts OP_VAULT.
-
-        This guard fires on every startup, regardless of whether secrets
-        come from 1Password, Docker secret files, or plaintext .env.
-
-        Skipped when OP_VAULT is not set or for test/offline environments.
-        """
-        op_vault = os.environ.get("OP_VAULT", "").strip()
-        if not op_vault:
-            return self
-
-        if self.app_environment in (AppEnvironment.TEST, AppEnvironment.OFFLINE):
-            return self
-
-        expected = self._VAULT_EXPECTED_ENV.get(op_vault)
-        if expected is None:
-            return self  # Unknown vault — skip check (custom deployments, forks)
-
-        if self.app_environment.value != expected:
-            raise ValueError(
-                f"Environment mismatch — refusing to start.\n"
-                f"  OP_VAULT='{op_vault}' expects APP_ENVIRONMENT='{expected}'\n"
-                f"  but APP_ENVIRONMENT='{self.app_environment.value}'.\n"
-                f"  Fix: set OP_VAULT to match your environment, "
-                f"or correct APP_ENVIRONMENT in your .env file."
-            )
-
-        return self
 
     # =========================================================================
     # LOGGING
