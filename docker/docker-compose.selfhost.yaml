@@ -132,7 +132,6 @@ services:
       - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
       - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
       # 1Password (optional)
-      - OP_VAULT=${OP_VAULT:-}
       - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
       # MinIO (artifact storage)
       - SYN_STORAGE_PROVIDER=minio

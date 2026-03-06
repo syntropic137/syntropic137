@@ -47,7 +47,7 @@ Access: http://localhost:8008 (configurable via `SYN_GATEWAY_PORT`)
 just selfhost-up-tunnel         # includes cloudflared service
 ```
 
-Access: `https://your-domain.com` (configure tunnel route to `http://gateway:80`)
+Access: `https://your-domain.com` (configure tunnel route to `http://gateway:8081`)
 
 > **Security:** The API has no built-in auth. Protect with Cloudflare Access, nginx basic auth (`SYN_API_PASSWORD`), or a VPN.
 
