@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
 from agentic_events import enrich_event, parse_jsonl_line
+from agentic_events.types import ClaudeToolName, EventType
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
@@ -114,6 +115,9 @@ class EventStreamProcessor:
         interrupt_requested = False
         interrupt_reason: str | None = None
         agent_task_result: dict[str, Any] | None = None
+        # Dedup set: same hook event appears as both raw stderr and
+        # inside a hook_response envelope (stderr=STDOUT in container).
+        seen_hook_fingerprints: set[tuple[str, ...]] = set()
 
         async for line in stream:
             line_count += 1
@@ -143,6 +147,26 @@ class EventStreamProcessor:
             hook_events = self._parse_hook_events(line)
 
             for hook_event in hook_events:
+                # Deduplicate: same event can appear as raw stderr AND inside
+                # hook_response envelope, or from multiple plugins.
+                evt_type = hook_event.get("event_type", "")
+                evt_sid = hook_event.get("session_id", "")
+                evt_ctx = hook_event.get("context") or {}
+                evt_tuid = evt_ctx.get("tool_use_id", "")
+                if evt_tuid:
+                    fp: tuple[str, ...] = (
+                        evt_type,
+                        evt_sid,
+                        str(hook_event.get("timestamp", "")),
+                        evt_tuid,
+                    )
+                else:
+                    fp = (evt_type, evt_sid)
+                if fp in seen_hook_fingerprints:
+                    logger.debug("Skipping duplicate hook event: %s", fp[0])
+                    continue
+                seen_hook_fingerprints.add(fp)
+
                 await self._process_hook_event(hook_event)
 
             # Skip native CLI event processing if we handled hook events
@@ -258,14 +282,19 @@ class EventStreamProcessor:
                 workspace_id=self._workspace_id,
             )
 
-        # Track subagent lifecycle from Task tool events (ADR-037)
-        hook_type = hook_event.get("type", "")
+        # ADR-037: Detect subagent lifecycle from Task tool events.
+        # Hook events use "event_type" (not "type") with values from
+        # agentic_events.types.EventType (e.g. "tool_execution_started").
+        hook_event_type = hook_event.get("event_type", "")
         ctx_data = enriched.get("context", {})
         tool_name = ctx_data.get("tool_name", "")
         tool_use_id = ctx_data.get("tool_use_id", "")
 
-        if tool_name == "Task" and tool_use_id:
-            if hook_type == "tool_use_started":
+        if (
+            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+            and tool_use_id
+        ):
+            if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
                 input_preview = ctx_data.get("input_preview", "")
                 event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
                 if self._observability is not None:
@@ -286,7 +315,7 @@ class EventStreamProcessor:
                         tool_use_id,
                     )
 
-            elif hook_type == "tool_use_completed":
+            elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
                 success = ctx_data.get("success", True)
                 stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
                 if stopped_event and self._observability is not None:
@@ -469,8 +498,11 @@ class EventStreamProcessor:
             )
             logger.debug("Tool started: %s", tool_name)
 
-        # Detect Task tool as subagent start (ADR-037)
-        if tool_name == "Task" and tool_use_id:
+        # ADR-037: Detect Task/Agent tool as subagent start (raw CLI format)
+        if (
+            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+            and tool_use_id
+        ):
             event = self._subagents.on_task_started(tool_use_id, tool_input)
             if self._observability is not None:
                 await self._observability.record_observation(
@@ -571,8 +603,9 @@ class EventStreamProcessor:
                 not is_error,
             )
 
-        # Detect Task tool completion as subagent stop (ADR-037)
-        if tool_name == "Task":
+        # ADR-037: Detect Task/Agent tool completion as subagent stop (raw CLI format)
+        _is_subagent = tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+        if _is_subagent:
             event = self._subagents.on_task_completed(tool_use_id, success=not is_error)
             if event and self._observability is not None:
                 await self._observability.record_observation(
@@ -596,6 +629,6 @@ class EventStreamProcessor:
                     event.duration_ms or 0,
                     event.tools_used,
                 )
-        elif tool_name != "Task":
-            # Attribute non-Task tool to the most recently started subagent
+        elif not _is_subagent:
+            # Attribute non-subagent tool to the most recently started subagent
             self._subagents.attribute_tool(tool_name)
