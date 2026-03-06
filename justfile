@@ -9,6 +9,7 @@ compose_dev := compose + " -f docker/docker-compose.dev.yaml"
 compose_test := compose + " -f docker/docker-compose.test.yaml"
 compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
 compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
+compose_dev_cf := compose_dev + " -f docker/docker-compose.dev-cloudflare.yaml"
 
 # Platform detection
 _os := `uname -s`
@@ -367,8 +368,15 @@ dev: _workspace-check
     echo "1️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
+
+    # Auto-detect Cloudflare tunnel
+    _COMPOSE=$(just _dev-compose-cmd)
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        echo "   🔒 Cloudflare tunnel detected — cloudflared will start automatically"
+    fi
+
     echo "2️⃣ Building and starting Docker services..."
-    {{compose_dev}} up -d --build
+    ${_COMPOSE} up -d --build
     echo ""
     echo "3️⃣ Waiting for services to be healthy..."
     sleep 5
@@ -425,8 +433,15 @@ dev-fresh: _workspace-check
     echo "3️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
+
+    # Auto-detect Cloudflare tunnel
+    _COMPOSE=$(just _dev-compose-cmd)
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        echo "   🔒 Cloudflare tunnel detected — cloudflared will start automatically"
+    fi
+
     echo "4️⃣ Building and starting Docker services..."
-    {{compose_dev}} up -d --build
+    ${_COMPOSE} up -d --build
     echo ""
     echo "5️⃣ Waiting for services to be healthy..."
     sleep 8
@@ -462,23 +477,25 @@ dev-fresh: _workspace-check
 
 # Stop development environment (preserves data)
 dev-stop:
-    @echo "🛑 Stopping dev stack..."
-    @just _webhook-stop
-    @echo "   Stopping frontend (port 5173)..."
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @echo "   Stopping Docker services..."
-    @{{compose_dev}} stop
-    @echo "✅ Dev stack stopped (data preserved)"
+    #!/usr/bin/env bash
+    echo "🛑 Stopping dev stack..."
+    just _webhook-stop
+    echo "   Stopping frontend (port 5173)..."
+    lsof -ti:5173 | xargs kill 2>/dev/null || true
+    echo "   Stopping Docker services..."
+    $(just _dev-compose-cmd) stop
+    echo "✅ Dev stack stopped (data preserved)"
 
 # Stop and remove dev containers (preserves volumes)
 dev-down:
-    @echo "🛑 Shutting down dev stack..."
-    @just _webhook-stop
-    @echo "   Stopping frontend (port 5173)..."
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @echo "   Removing Docker containers..."
-    @{{compose_dev}} down
-    @echo "✅ Dev stack shut down (volumes preserved)"
+    #!/usr/bin/env bash
+    echo "🛑 Shutting down dev stack..."
+    just _webhook-stop
+    echo "   Stopping frontend (port 5173)..."
+    lsof -ti:5173 | xargs kill 2>/dev/null || true
+    echo "   Removing Docker containers..."
+    $(just _dev-compose-cmd) down
+    echo "✅ Dev stack shut down (volumes preserved)"
 
 # View development logs
 dev-logs:
@@ -1250,6 +1267,16 @@ proxy-start:
 
 # --- Internal Helpers (hidden from --list) ---
 
+# Build the dev compose command, auto-including cloudflare overlay when tunnel token is set.
+# Usage in bash: _COMPOSE=$(_dev_compose_cmd)
+# Must be called AFTER `source scripts/resolve_env.sh`.
+_dev-compose-cmd:
+    @if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then \
+        echo "{{compose_dev_cf}}"; \
+    else \
+        echo "{{compose_dev}}"; \
+    fi
+
 # Create .env files from templates if they don't exist (idempotent)
 # Sets dev defaults so `just dev` works immediately without onboard-dev
 _ensure-env:
@@ -1359,9 +1386,15 @@ _webhook-start:
         _DOMAIN="${SYN_DOMAIN#https://}"
         _DOMAIN="${_DOMAIN#http://}"
         _DOMAIN="${_DOMAIN%/}"
-        echo "5️⃣  Webhooks via Cloudflare tunnel (${_DOMAIN})"
-        echo "   Ensure your GitHub App webhook URL is: https://${_DOMAIN}/webhooks/github"
-        echo "   Tunnel must be running: just selfhost-up-tunnel (or cloudflared on host)"
+        # Verify tunnel container is running
+        if docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -q 'cloudflared'; then
+            echo "5️⃣  Webhooks via Cloudflare tunnel ✅ (${_DOMAIN})"
+        else
+            echo "5️⃣  ⚠️  Cloudflare tunnel not running — starting it..."
+            $(just _dev-compose-cmd) up -d cloudflared
+        fi
+        echo "   🔗 Webhook URL: https://${_DOMAIN}/webhooks/github"
+        echo "   💡 Tunnel service URL must be: http://api:8000 (dev) or http://gateway:8081 (selfhost)"
         exit 0
     fi
 

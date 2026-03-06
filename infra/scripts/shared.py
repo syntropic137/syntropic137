@@ -86,6 +86,7 @@ COMPOSE_BASE = DOCKER_DIR / "docker-compose.yaml"
 COMPOSE_SELFHOST = DOCKER_DIR / "docker-compose.selfhost.yaml"
 COMPOSE_CLOUDFLARE = DOCKER_DIR / "docker-compose.cloudflare.yaml"
 COMPOSE_DEV = DOCKER_DIR / "docker-compose.dev.yaml"
+COMPOSE_DEV_CLOUDFLARE = DOCKER_DIR / "docker-compose.dev-cloudflare.yaml"
 
 # Default project name prefix — environment is appended at runtime
 DEFAULT_PROJECT_NAME = "syntropic137"

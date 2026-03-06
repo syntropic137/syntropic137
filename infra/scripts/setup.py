@@ -1172,11 +1172,13 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
     print()
     is_dev = env_suffix in ("dev", "development")
     if is_dev:
-        # Dev mode: cloudflared runs on the host, point to local API
-        step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}localhost:8000{_RST}")
+        # Dev mode: cloudflared routes directly to the API container (no gateway)
+        step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}api:8000{_RST}")
+        hint("Dev mode — no gateway/nginx. Cloudflared routes directly to the API.")
     else:
         # Selfhost: cloudflared runs inside Docker alongside gateway (nginx)
         step(f"Service type: {_PURPLE}HTTP{_RST}  URL: {_PURPLE}gateway:8081{_RST}")
+        hint("Port 8081 requires basic auth when SYN_API_PASSWORD is set.")
         # Auto-generate API password for selfhost if not already set
         existing_pw = os.environ.get(ENV_SYN_API_PASSWORD, "")
         if not existing_pw:
