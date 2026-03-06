@@ -157,43 +157,6 @@ class TestSafetyGuards:
     """Tests for safety guards."""
 
     @pytest.mark.asyncio
-    async def test_bot_sender_blocked(self) -> None:
-        """Test that bot senders are blocked."""
-        store = InMemoryTriggerQueryStore()
-        cmd = RegisterTriggerCommand(
-            name="test",
-            event="check_run.completed",
-            repository="org/repo",
-            workflow_id="wf",
-        )
-        agg = TriggerRuleAggregate()
-        agg.register(cmd)
-        await _index_aggregate(store, agg)
-
-        guards = SafetyGuards()
-        result = await guards.check_all(agg, {"sender": {"login": "syn-engineer-beta[bot]"}}, store)
-        assert result.passed is False
-        assert "bot" in result.reason.lower()
-
-    @pytest.mark.asyncio
-    async def test_human_sender_allowed(self) -> None:
-        """Test that human senders pass the bot check."""
-        store = InMemoryTriggerQueryStore()
-        cmd = RegisterTriggerCommand(
-            name="test",
-            event="check_run.completed",
-            repository="org/repo",
-            workflow_id="wf",
-        )
-        agg = TriggerRuleAggregate()
-        agg.register(cmd)
-        await _index_aggregate(store, agg)
-
-        guards = SafetyGuards()
-        result = await guards.check_all(agg, {"sender": {"login": "human-user"}}, store)
-        assert result.passed is True
-
-    @pytest.mark.asyncio
     async def test_max_attempts_reached(self) -> None:
         """Test that max attempts blocks the trigger."""
         store = InMemoryTriggerQueryStore()
@@ -349,8 +312,8 @@ class TestEvaluateWebhookHandler:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_bot_sender_blocked_by_guard(self) -> None:
-        """Test that bot senders are blocked by safety guard."""
+    async def test_bot_sender_allowed(self) -> None:
+        """Test that bot senders are allowed through (no blanket bot filter)."""
         store = InMemoryTriggerQueryStore()
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -376,7 +339,7 @@ class TestEvaluateWebhookHandler:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
 
 
 # --- Debounce and retry tests ---
@@ -398,6 +361,7 @@ def _make_payload(pr_number: int = 1, delivery_id: str = "del-1") -> dict:
 async def _register_trigger(
     store: InMemoryTriggerQueryStore,
     *,
+    max_attempts: int = 3,
     debounce_seconds: int = 0,
     cooldown_seconds: int = 300,
 ) -> None:
@@ -409,6 +373,7 @@ async def _register_trigger(
         repository="org/repo",
         workflow_id="ci-fix-workflow",
         config=(
+            ("max_attempts", max_attempts),
             ("debounce_seconds", debounce_seconds),
             ("cooldown_seconds", cooldown_seconds),
         ),
@@ -493,16 +458,19 @@ class TestDebounceAndRetry:
 
     @pytest.mark.asyncio
     async def test_permanent_guard_does_not_retry(self) -> None:
-        """Bot guard blocks → no retry scheduled, pending_count == 0."""
+        """Max-attempts guard blocks → no retry scheduled, pending_count == 0."""
         store = InMemoryTriggerQueryStore()
         debouncer = TriggerDebouncer()
-        await _register_trigger(store)
+        await _register_trigger(store, max_attempts=1)
+
+        rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
+        rule = rules[0]
+        await store.record_fire(rule.trigger_id, 1, "exec-old")
 
         handler = EvaluateWebhookHandler(
             store=store, repository=NullRepository(), debouncer=debouncer
         )
         payload = _make_payload()
-        payload["sender"] = {"login": "syn-engineer[bot]"}
 
         results = await handler.evaluate(
             event="check_run.completed",
@@ -552,23 +520,6 @@ class TestDebounceAndRetry:
         assert result.passed is False
         assert result.retryable is True
         assert result.retry_after_seconds > 0
-
-    @pytest.mark.asyncio
-    async def test_bot_guard_is_not_retryable(self) -> None:
-        """GuardResult from bot guard has retryable=False (default)."""
-        store = InMemoryTriggerQueryStore()
-        await _register_trigger(store)
-
-        rules = await store.list_by_event_and_repo("check_run.completed", "org/repo")
-        rule = rules[0]
-
-        guards = SafetyGuards()
-        payload = _make_payload()
-        payload["sender"] = {"login": "syn-engineer[bot]"}
-        result = await guards.check_all(rule, payload, store)
-        assert result.passed is False
-        assert result.retryable is False
-        assert result.retry_after_seconds == 0
 
     @pytest.mark.asyncio
     async def test_on_fire_callback_invoked_on_immediate_fire(self) -> None:

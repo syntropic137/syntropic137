@@ -172,8 +172,8 @@ class TestE2ESafetyGuards:
     """E2E: Safety guards prevent infinite loops and duplicates."""
 
     @pytest.mark.asyncio
-    async def test_bot_sender_prevented(self) -> None:
-        """Verify that bot senders don't trigger workflows."""
+    async def test_bot_sender_allowed(self) -> None:
+        """Verify that bot senders can trigger workflows (no blanket bot filter)."""
         store = InMemoryTriggerQueryStore()
         cmd = RegisterTriggerCommand(
             name="ci-heal",
@@ -196,7 +196,7 @@ class TestE2ESafetyGuards:
             payload=payload,
         )
 
-        assert results == []
+        assert len(results) == 1
 
     @pytest.mark.asyncio
     async def test_max_attempts_prevents_infinite_loop(self) -> None:
