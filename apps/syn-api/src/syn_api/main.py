@@ -19,6 +19,7 @@ from syn_api.routes import (
     events_router,
     execution_router,
     executions_router,
+    insights_router,
     metrics_router,
     observability_router,
     organizations_router,
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(organizations_router)
     app.include_router(systems_router)
     app.include_router(repos_router)
+    app.include_router(insights_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:

@@ -1,0 +1,8 @@
+id: system-activity
+name: System Activity
+description: >
+  System-wide execution timeline. Lazy handler that queries
+  workflow executions filtered by system repo membership.
+type: query
+context: organization
+returns: RepoActivityEntry

@@ -78,6 +78,7 @@ Treat Python like TypeScript. Strict type safety everywhere.
 | `agent_sessions` | AgentSession | Agent sessions and observability |
 | `github` | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | `artifacts` | Artifact | Artifact storage |
+| `organization` | Organization, System, Repo | Organization hierarchy, system/repo management, insights |
 
 ### TODO/FIXME Standard
 

@@ -1,0 +1,8 @@
+id: global-overview
+name: Global Overview
+description: >
+  Global overview of all systems and repos. Lazy handler that aggregates
+  system-level health and cost from in-memory projections and stores.
+type: query
+context: organization
+returns: GlobalOverview

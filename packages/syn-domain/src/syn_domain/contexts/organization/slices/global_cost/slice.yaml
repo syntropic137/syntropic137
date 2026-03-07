@@ -1,0 +1,8 @@
+id: global-cost
+name: Global Cost
+description: >
+  Global cost breakdown across all repos and systems. Lazy handler
+  that aggregates per-repo cost snapshots from the repo_cost store.
+type: query
+context: organization
+returns: SystemCost

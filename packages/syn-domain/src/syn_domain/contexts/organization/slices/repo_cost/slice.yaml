@@ -1,0 +1,13 @@
+id: repo-cost
+name: Repo Cost
+description: >
+  Per-repo cost breakdown by workflow and model.
+  Eagerly updated from WorkflowCompleted and WorkflowFailed events,
+  correlated to repos via RepoCorrelationProjection.
+type: query
+context: organization
+projection: RepoCostProjection
+subscribes_to:
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+returns: RepoCost

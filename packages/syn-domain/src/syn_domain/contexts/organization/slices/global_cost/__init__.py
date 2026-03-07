@@ -1,0 +1,1 @@
+"""Global cost handler slice."""

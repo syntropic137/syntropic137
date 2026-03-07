@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_api._wiring import (
     ensure_connected,
@@ -217,6 +217,95 @@ async def unassign_repo_from_system(
 
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+# ---------------------------------------------------------------------------
+# Insight queries — repo-level health, cost, activity, failures, sessions
+# ---------------------------------------------------------------------------
+
+
+async def get_repo_health(repo_id: str) -> dict[str, Any]:
+    """Get health snapshot for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_domain.contexts.organization.domain.queries.get_repo_health import (
+        GetRepoHealthQuery,
+    )
+    from syn_domain.contexts.organization.slices.repo_health.handler import (
+        GetRepoHealthHandler,
+    )
+
+    await ensure_connected()
+    mgr = get_projection_mgr()
+    handler = GetRepoHealthHandler(projection=mgr.repo_health)
+    result = await handler.handle(GetRepoHealthQuery(repo_id=repo_id))
+    return dict(result.to_dict())
+
+
+async def get_repo_cost(repo_id: str) -> dict[str, Any]:
+    """Get cost breakdown for a repo."""
+    from syn_api._wiring import get_projection_mgr
+    from syn_domain.contexts.organization.domain.queries.get_repo_cost import (
+        GetRepoCostQuery,
+    )
+    from syn_domain.contexts.organization.slices.repo_cost.handler import (
+        GetRepoCostHandler,
+    )
+
+    await ensure_connected()
+    mgr = get_projection_mgr()
+    handler = GetRepoCostHandler(projection=mgr.repo_cost)
+    result = await handler.handle(GetRepoCostQuery(repo_id=repo_id))
+    return dict(result.to_dict())
+
+
+async def get_repo_activity(repo_id: str, offset: int = 0, limit: int = 50) -> list[dict[str, Any]]:
+    """Get execution timeline for a repo."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
+        GetRepoActivityQuery,
+    )
+    from syn_domain.contexts.organization.slices.repo_activity.handler import (
+        GetRepoActivityHandler,
+    )
+
+    await ensure_connected()
+    handler = GetRepoActivityHandler(store=get_projection_store())
+    entries = await handler.handle(
+        GetRepoActivityQuery(repo_id=repo_id, offset=offset, limit=limit)
+    )
+    return [e.to_dict() for e in entries]
+
+
+async def get_repo_failures(repo_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Get recent failures for a repo."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
+        GetRepoFailuresQuery,
+    )
+    from syn_domain.contexts.organization.slices.repo_failures.handler import (
+        GetRepoFailuresHandler,
+    )
+
+    await ensure_connected()
+    handler = GetRepoFailuresHandler(store=get_projection_store())
+    entries = await handler.handle(GetRepoFailuresQuery(repo_id=repo_id, limit=limit))
+    return [e.to_dict() for e in entries]
+
+
+async def get_repo_sessions(repo_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """Get agent sessions for a repo."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
+        GetRepoSessionsQuery,
+    )
+    from syn_domain.contexts.organization.slices.repo_sessions.handler import (
+        GetRepoSessionsHandler,
+    )
+
+    await ensure_connected()
+    handler = GetRepoSessionsHandler(store=get_projection_store())
+    results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
+    return list(results)
 
 
 def _classify_repo_error(error_msg: str) -> RepoError:

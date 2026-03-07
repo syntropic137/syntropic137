@@ -1,0 +1,8 @@
+id: repo-activity
+name: Repo Activity
+description: >
+  Per-repo execution timeline. Lazy handler that queries the
+  WorkflowExecutionList projection filtered by repo correlation.
+type: query
+context: organization
+returns: RepoActivityEntry
