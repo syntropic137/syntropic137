@@ -1,0 +1,116 @@
+"""Tests for GetGlobalOverviewHandler."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+
+from syn_domain.contexts.organization.domain.queries.get_global_overview import (
+    GetGlobalOverviewQuery,
+)
+from syn_domain.contexts.organization.slices.global_overview.handler import (
+    GetGlobalOverviewHandler,
+)
+from syn_domain.contexts.organization.slices.system_status.test_system_status import (
+    FakeProjectionStore,
+)
+
+
+def _setup_projections():  # type: ignore[no-untyped-def]
+    """Create projections with two systems and some repos."""
+    from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
+        RepoAssignedToSystemEvent,
+    )
+    from syn_domain.contexts.organization.domain.events.RepoRegisteredEvent import (
+        RepoRegisteredEvent,
+    )
+    from syn_domain.contexts.organization.domain.events.SystemCreatedEvent import (
+        SystemCreatedEvent,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        RepoProjection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        SystemProjection,
+    )
+
+    sys_proj = SystemProjection()
+    repo_proj = RepoProjection()
+
+    sys_proj.handle_system_created(
+        SystemCreatedEvent(
+            system_id="sys-1", organization_id="org-1",
+            name="Backend", description="", created_by="test",
+        )
+    )
+    sys_proj.handle_system_created(
+        SystemCreatedEvent(
+            system_id="sys-2", organization_id="org-1",
+            name="Frontend", description="", created_by="test",
+        )
+    )
+
+    # Register repos
+    repo_proj.handle_repo_registered(
+        RepoRegisteredEvent(
+            repo_id="r-1", organization_id="org-1", provider="github",
+            provider_repo_id="", full_name="acme/api", owner="acme",
+            default_branch="main", installation_id="", is_private=False,
+            created_by="test",
+        )
+    )
+    repo_proj.handle_repo_assigned_to_system(
+        RepoAssignedToSystemEvent(repo_id="r-1", system_id="sys-1")
+    )
+
+    # Unassigned repo
+    repo_proj.handle_repo_registered(
+        RepoRegisteredEvent(
+            repo_id="r-2", organization_id="org-1", provider="github",
+            provider_repo_id="", full_name="acme/orphan", owner="acme",
+            default_branch="main", installation_id="", is_private=False,
+            created_by="test",
+        )
+    )
+
+    return sys_proj, repo_proj
+
+
+@pytest.mark.unit
+class TestGetGlobalOverviewHandler:
+    @pytest.mark.asyncio
+    async def test_aggregates_systems_and_repos(self) -> None:
+        store = FakeProjectionStore()
+        sys_proj, repo_proj = _setup_projections()
+        handler = GetGlobalOverviewHandler(store, sys_proj, repo_proj)
+
+        await store.save("repo_cost", "acme/api", {
+            "total_cost_usd": "10.00", "total_tokens": 500,
+        })
+
+        result = await handler.handle(GetGlobalOverviewQuery())
+
+        assert result.total_systems == 2
+        assert result.total_repos == 2
+        assert result.unassigned_repos == 1
+        assert result.total_cost_usd == Decimal("10.00")
+        assert len(result.systems) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_when_no_systems(self) -> None:
+        from syn_domain.contexts.organization.slices.list_repos.projection import (
+            RepoProjection,
+        )
+        from syn_domain.contexts.organization.slices.list_systems.projection import (
+            SystemProjection,
+        )
+
+        store = FakeProjectionStore()
+        handler = GetGlobalOverviewHandler(store, SystemProjection(), RepoProjection())
+
+        result = await handler.handle(GetGlobalOverviewQuery())
+
+        assert result.total_systems == 0
+        assert result.total_repos == 0
+        assert result.total_cost_usd == Decimal("0")

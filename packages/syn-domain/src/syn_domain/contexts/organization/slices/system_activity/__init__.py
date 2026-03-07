@@ -1,0 +1,1 @@
+"""System activity handler slice."""

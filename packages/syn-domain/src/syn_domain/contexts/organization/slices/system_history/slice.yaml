@@ -1,0 +1,8 @@
+id: system-history
+name: System History
+description: >
+  Historical execution timeline for a system. Lazy handler that queries
+  workflow executions filtered by system repo membership, sorted chronologically.
+type: query
+context: organization
+returns: RepoActivityEntry

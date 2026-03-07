@@ -1,0 +1,8 @@
+id: system-patterns
+name: System Patterns
+description: >
+  Recurring failure and cost patterns within a system. Lazy handler
+  that analyzes workflow executions and repo costs for outliers.
+type: query
+context: organization
+returns: SystemPatterns
