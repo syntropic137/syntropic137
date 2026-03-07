@@ -21,7 +21,7 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
     """Get an agent instance.
 
     If no provider is specified, returns the first available agent
-    with preference: Claude > OpenAI > Mock (test only).
+    with preference: Claude > Mock (test only).
 
     Args:
         provider: Specific provider to use, or None for auto-select.
@@ -51,19 +51,7 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
             raise AgentError(msg, AgentProvider.CLAUDE)
         return claude
 
-    if provider == AgentProvider.OPENAI:
-        from syn_adapters.agents.openai import OpenAIAgent
-
-        openai = OpenAIAgent()
-        if not openai.is_available:
-            msg = (
-                "OpenAI agent not available. Set OPENAI_API_KEY in environment. "
-                "Get key from: https://platform.openai.com/api-keys"
-            )
-            raise AgentError(msg, AgentProvider.OPENAI)
-        return openai
-
-    # Auto-select: try Claude first, then OpenAI
+    # Auto-select: try Claude first
     if provider is None:
         # Check Claude (OAuth token or API key)
         if settings.claude_code_oauth_token or settings.anthropic_api_key:
@@ -74,15 +62,6 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
                 logger.debug("auto_selected_agent", provider="claude")
                 return claude_agent
 
-        # Check OpenAI
-        if settings.openai_api_key:
-            from syn_adapters.agents.openai import OpenAIAgent
-
-            openai_agent = OpenAIAgent()
-            if openai_agent.is_available:
-                logger.debug("auto_selected_agent", provider="openai")
-                return openai_agent
-
         # Use mock in test mode
         if settings.is_test:
             from syn_adapters.agents.mock import MockAgent
@@ -92,7 +71,7 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
 
         msg = (
             "No agent provider configured. Set one of: "
-            "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude), OPENAI_API_KEY (OpenAI)"
+            "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude)"
         )
         raise AgentError(msg, AgentProvider.MOCK)
 
@@ -111,9 +90,6 @@ def get_available_agents() -> list[AgentProvider]:
 
     if settings.claude_code_oauth_token or settings.anthropic_api_key:
         available.append(AgentProvider.CLAUDE)
-
-    if settings.openai_api_key:
-        available.append(AgentProvider.OPENAI)
 
     # Mock is always available in test mode
     if settings.is_test:

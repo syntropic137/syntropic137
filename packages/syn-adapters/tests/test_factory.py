@@ -31,7 +31,6 @@ def _reset_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Clear any existing API keys / tokens from env
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("APP_ENVIRONMENT", "test")
     reset_settings()
 
@@ -58,21 +57,10 @@ class TestGetAgent:
         assert "CLAUDE_CODE_OAUTH_TOKEN" in str(exc_info.value)
         assert "ANTHROPIC_API_KEY" in str(exc_info.value)
 
-    def test_get_openai_without_key_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test OpenAI agent raises without API key."""
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        reset_settings()
-
-        with pytest.raises(AgentError) as exc_info:
-            get_agent(AgentProvider.OPENAI)
-
-        assert "OPENAI_API_KEY" in str(exc_info.value)
-
     def test_auto_select_mock_in_test_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test auto-selection falls back to mock in test mode."""
         monkeypatch.setenv("APP_ENVIRONMENT", "test")
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         reset_settings()
 
         agent = get_agent(None)
@@ -112,18 +100,6 @@ class TestGetAgent:
         assert isinstance(agent, ClaudeAgent)
         assert agent.is_available
 
-    def test_auto_select_openai_when_no_claude(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test auto-selection uses OpenAI when Claude unavailable."""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        reset_settings()
-
-        from syn_adapters.agents.openai import OpenAIAgent
-
-        agent = get_agent(None)
-        assert isinstance(agent, OpenAIAgent)
-
-
 class TestGetAvailableAgents:
     """Tests for get_available_agents function."""
 
@@ -142,14 +118,6 @@ class TestGetAvailableAgents:
 
         available = get_available_agents()
         assert AgentProvider.CLAUDE in available
-
-    def test_includes_openai_when_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test OpenAI included when API key set."""
-        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-        reset_settings()
-
-        available = get_available_agents()
-        assert AgentProvider.OPENAI in available
 
     def test_includes_mock_in_test_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test Mock included in test mode."""
