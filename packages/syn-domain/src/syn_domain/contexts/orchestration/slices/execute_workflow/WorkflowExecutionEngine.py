@@ -998,7 +998,7 @@ class WorkflowExecutionEngine:
 
         # Track conversation lines for failure handling (stream_result may not exist
         # if exception occurs before stream processing)
-        _conversation_lines: list[str] = []
+        _conversation_lines: list[str] = []  # default for error path if process_stream() raises
 
         try:
             async with self._workspace_service.create_workspace(

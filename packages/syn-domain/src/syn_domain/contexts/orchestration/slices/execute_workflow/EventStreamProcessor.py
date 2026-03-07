@@ -290,10 +290,15 @@ class EventStreamProcessor:
         tool_name = ctx_data.get("tool_name", "")
         tool_use_id = ctx_data.get("tool_use_id", "")
 
+        # Attribute non-Task tool calls to the active subagent (if any)
         if (
-            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-            and tool_use_id
+            tool_name
+            and tool_name not in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
+            and self._subagents.has_active
         ):
+            self._subagents.attribute_tool(tool_name)
+
+        if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
             if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
                 input_preview = ctx_data.get("input_preview", "")
                 event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
@@ -499,10 +504,7 @@ class EventStreamProcessor:
             logger.debug("Tool started: %s", tool_name)
 
         # ADR-037: Detect Task/Agent tool as subagent start (raw CLI format)
-        if (
-            tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-            and tool_use_id
-        ):
+        if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
             event = self._subagents.on_task_started(tool_use_id, tool_input)
             if self._observability is not None:
                 await self._observability.record_observation(

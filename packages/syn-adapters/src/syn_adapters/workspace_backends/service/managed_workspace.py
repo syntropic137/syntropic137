@@ -347,7 +347,7 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
                 container_id,
                 "sh",
                 "-c",
-                "kill -INT $(pgrep -n claude) 2>/dev/null || true",
+                "PID=$(pgrep -n claude) && kill -INT $PID",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -357,7 +357,7 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
                 logger.info("interrupt(): SIGINT delivered to claude process in %s", container_id)
             else:
                 logger.warning(
-                    "interrupt(): SIGINT failed (exit=%d) for container %s",
+                    "interrupt(): no claude process found or SIGINT failed (exit=%d) for container %s",
                     proc.returncode,
                     container_id,
                 )
