@@ -22,9 +22,9 @@ class SystemCost:
         total_tokens: Total tokens used.
         total_input_tokens: Total input tokens.
         total_output_tokens: Total output tokens.
-        cost_by_repo: Cost breakdown by repo full name.
-        cost_by_workflow: Cost breakdown by workflow ID.
-        cost_by_model: Cost breakdown by model name.
+        cost_by_repo: Cost breakdown by repo full name (Decimal values).
+        cost_by_workflow: Cost breakdown by workflow ID (Decimal values).
+        cost_by_model: Cost breakdown by model name (Decimal values).
         execution_count: Total executions across all repos.
     """
 
@@ -35,9 +35,9 @@ class SystemCost:
     total_tokens: int = 0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    cost_by_repo: dict[str, str] = field(default_factory=dict)
-    cost_by_workflow: dict[str, str] = field(default_factory=dict)
-    cost_by_model: dict[str, str] = field(default_factory=dict)
+    cost_by_repo: dict[str, Decimal] = field(default_factory=dict)
+    cost_by_workflow: dict[str, Decimal] = field(default_factory=dict)
+    cost_by_model: dict[str, Decimal] = field(default_factory=dict)
     execution_count: int = 0
 
     @classmethod
@@ -51,9 +51,15 @@ class SystemCost:
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
-            cost_by_repo=data.get("cost_by_repo", {}),
-            cost_by_workflow=data.get("cost_by_workflow", {}),
-            cost_by_model=data.get("cost_by_model", {}),
+            cost_by_repo={
+                k: Decimal(str(v)) for k, v in data.get("cost_by_repo", {}).items()
+            },
+            cost_by_workflow={
+                k: Decimal(str(v)) for k, v in data.get("cost_by_workflow", {}).items()
+            },
+            cost_by_model={
+                k: Decimal(str(v)) for k, v in data.get("cost_by_model", {}).items()
+            },
             execution_count=data.get("execution_count", 0),
         )
 
@@ -67,8 +73,8 @@ class SystemCost:
             "total_tokens": self.total_tokens,
             "total_input_tokens": self.total_input_tokens,
             "total_output_tokens": self.total_output_tokens,
-            "cost_by_repo": dict(self.cost_by_repo),
-            "cost_by_workflow": dict(self.cost_by_workflow),
-            "cost_by_model": dict(self.cost_by_model),
+            "cost_by_repo": {k: str(v) for k, v in self.cost_by_repo.items()},
+            "cost_by_workflow": {k: str(v) for k, v in self.cost_by_workflow.items()},
+            "cost_by_model": {k: str(v) for k, v in self.cost_by_model.items()},
             "execution_count": self.execution_count,
         }

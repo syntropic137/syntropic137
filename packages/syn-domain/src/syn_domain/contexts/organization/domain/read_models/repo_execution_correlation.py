@@ -8,7 +8,6 @@ rather than requiring repo_id on execution events.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 
@@ -23,7 +22,7 @@ class RepoExecutionCorrelation:
         workflow_id: Workflow template ID.
         correlation_source: How the correlation was established
             ("trigger", "template", or "manual").
-        correlated_at: When the correlation was created.
+        correlated_at: ISO timestamp of when the correlation was created.
     """
 
     repo_full_name: str
@@ -31,7 +30,7 @@ class RepoExecutionCorrelation:
     execution_id: str
     workflow_id: str
     correlation_source: str
-    correlated_at: datetime | str
+    correlated_at: str
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RepoExecutionCorrelation:
@@ -47,14 +46,11 @@ class RepoExecutionCorrelation:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
-        correlated_at = self.correlated_at
-        if isinstance(correlated_at, datetime):
-            correlated_at = correlated_at.isoformat()
         return {
             "repo_full_name": self.repo_full_name,
             "repo_id": self.repo_id,
             "execution_id": self.execution_id,
             "workflow_id": self.workflow_id,
             "correlation_source": self.correlation_source,
-            "correlated_at": correlated_at,
+            "correlated_at": self.correlated_at,
         }

@@ -19,8 +19,6 @@ from syn_domain.contexts.organization.domain.read_models.repo_execution_correlat
 
 logger = logging.getLogger(__name__)
 
-_SNAPSHOT_INTERVAL = 100
-
 
 class RepoCorrelationProjection(AutoDispatchProjection):
     """Maps repos ↔ executions from trigger and execution events.
@@ -39,7 +37,6 @@ class RepoCorrelationProjection(AutoDispatchProjection):
             store: A ProjectionStoreProtocol implementation.
         """
         self._store = store
-        self._events_since_snapshot = 0
 
     def get_name(self) -> str:
         """Unique projection name for checkpoint tracking."""
@@ -58,14 +55,6 @@ class RepoCorrelationProjection(AutoDispatchProjection):
         """Save a correlation record, keyed by execution_id:repo_full_name."""
         key = f"{correlation.execution_id}:{correlation.repo_full_name}"
         await self._store.save(self.PROJECTION_NAME, key, correlation.to_dict())
-        self._events_since_snapshot += 1
-        if self._events_since_snapshot >= _SNAPSHOT_INTERVAL:
-            await self._snapshot_position()
-
-    async def _snapshot_position(self) -> None:
-        """Save position snapshot for fast recovery."""
-        self._events_since_snapshot = 0
-        logger.debug("Repo correlation snapshot saved after %d events", _SNAPSHOT_INTERVAL)
 
     # --- Event handlers ---
 

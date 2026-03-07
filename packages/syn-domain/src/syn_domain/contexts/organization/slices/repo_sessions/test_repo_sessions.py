@@ -35,11 +35,11 @@ class TestGetRepoSessionsHandler:
         await store.save("repo_correlation", "exec-1:acme/api", {
             "repo_full_name": "acme/api", "execution_id": "exec-1",
         })
-        await store.save("agent_sessions", "sess-1", {
+        await store.save("session_summaries", "sess-1", {
             "id": "sess-1", "execution_id": "exec-1",
             "status": "completed", "started_at": "2026-03-06T10:00:00",
         })
-        await store.save("agent_sessions", "sess-2", {
+        await store.save("session_summaries", "sess-2", {
             "id": "sess-2", "execution_id": "exec-99",
             "status": "completed", "started_at": "2026-03-06T11:00:00",
         })

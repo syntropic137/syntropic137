@@ -96,8 +96,8 @@ class TestReadModelRoundTrip:
             total_tokens=200000,
             total_input_tokens=150000,
             total_output_tokens=50000,
-            cost_by_workflow={"wf-1": "30.00", "wf-2": "15.67"},
-            cost_by_model={"claude-opus-4-6": "45.67"},
+            cost_by_workflow={"wf-1": Decimal("30.00"), "wf-2": Decimal("15.67")},
+            cost_by_model={"claude-opus-4-6": Decimal("45.67")},
             execution_count=10,
         )
         assert RepoCost.from_dict(model.to_dict()) == model
@@ -134,9 +134,9 @@ class TestReadModelRoundTrip:
             total_tokens=500000,
             total_input_tokens=400000,
             total_output_tokens=100000,
-            cost_by_repo={"acme/api": "60.00", "acme/web": "40.00"},
-            cost_by_workflow={"wf-1": "100.00"},
-            cost_by_model={"claude-opus-4-6": "100.00"},
+            cost_by_repo={"acme/api": Decimal("60.00"), "acme/web": Decimal("40.00")},
+            cost_by_workflow={"wf-1": Decimal("100.00")},
+            cost_by_model={"claude-opus-4-6": Decimal("100.00")},
             execution_count=25,
         )
         assert SystemCost.from_dict(model.to_dict()) == model

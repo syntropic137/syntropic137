@@ -111,8 +111,8 @@ class TestRepoCostProjection:
         await proj.on_workflow_completed({"execution_id": "exec-2", "workflow_id": "wf-test", "total_cost_usd": "2.00", "total_tokens": 0, "total_input_tokens": 0, "total_output_tokens": 0})
 
         cost = await proj.get_cost("acme/api")
-        assert cost.cost_by_workflow["wf-deploy"] == "5.00"
-        assert cost.cost_by_workflow["wf-test"] == "2.00"
+        assert cost.cost_by_workflow["wf-deploy"] == Decimal("5.00")
+        assert cost.cost_by_workflow["wf-test"] == Decimal("2.00")
 
     @pytest.mark.asyncio
     async def test_uncorrelated_execution_ignored(self) -> None:

@@ -37,7 +37,7 @@ class GetRepoSessionsHandler:
         if not execution_ids:
             return []
 
-        all_sessions = await self._store.get_all("agent_sessions")
+        all_sessions = await self._store.get_all("session_summaries")
 
         sessions = [
             s for s in all_sessions
