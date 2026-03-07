@@ -7,6 +7,7 @@ from syn_api.routes.costs import router as costs_router
 from syn_api.routes.events import router as events_router
 from syn_api.routes.execution import router as execution_router
 from syn_api.routes.executions import router as executions_router
+from syn_api.routes.insights import router as insights_router
 from syn_api.routes.metrics import router as metrics_router
 from syn_api.routes.observability import router as observability_router
 from syn_api.routes.organizations import router as organizations_router
@@ -26,6 +27,7 @@ __all__ = [
     "events_router",
     "execution_router",
     "executions_router",
+    "insights_router",
     "metrics_router",
     "observability_router",
     "organizations_router",

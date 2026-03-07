@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_api._wiring import (
     ensure_connected,
@@ -197,6 +197,172 @@ async def delete_system(
 
     await sync_published_events_to_projections()
     return Ok(None)
+
+
+# ---------------------------------------------------------------------------
+# Insight queries — system-level status, cost, activity, patterns, history
+# ---------------------------------------------------------------------------
+
+
+async def get_system_status(system_id: str) -> Result[dict[str, Any], SystemErrorCode]:
+    """Get cross-repo health overview for a system."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_system_status import (
+        GetSystemStatusQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        get_system_projection,
+    )
+    from syn_domain.contexts.organization.slices.system_status.handler import (
+        GetSystemStatusHandler,
+    )
+
+    await ensure_connected()
+
+    sys_proj = get_system_projection()
+    if sys_proj.get(system_id) is None:
+        return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
+
+    handler = GetSystemStatusHandler(
+        store=get_projection_store(),
+        system_projection=sys_proj,
+        repo_projection=get_repo_projection(),
+    )
+    result = await handler.handle(GetSystemStatusQuery(system_id=system_id))
+    return Ok(result.to_dict())
+
+
+async def get_system_cost(system_id: str) -> Result[dict[str, Any], SystemErrorCode]:
+    """Get cost breakdown for a system."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_system_cost import (
+        GetSystemCostQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        get_system_projection,
+    )
+    from syn_domain.contexts.organization.slices.system_cost.handler import (
+        GetSystemCostHandler,
+    )
+
+    await ensure_connected()
+
+    sys_proj = get_system_projection()
+    if sys_proj.get(system_id) is None:
+        return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
+
+    handler = GetSystemCostHandler(
+        store=get_projection_store(),
+        system_projection=sys_proj,
+        repo_projection=get_repo_projection(),
+    )
+    result = await handler.handle(GetSystemCostQuery(system_id=system_id))
+    return Ok(result.to_dict())
+
+
+async def get_system_activity(
+    system_id: str, offset: int = 0, limit: int = 50
+) -> Result[list[dict[str, Any]], SystemErrorCode]:
+    """Get execution timeline for a system."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_system_activity import (
+        GetSystemActivityQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        get_system_projection,
+    )
+    from syn_domain.contexts.organization.slices.system_activity.handler import (
+        GetSystemActivityHandler,
+    )
+
+    await ensure_connected()
+
+    if get_system_projection().get(system_id) is None:
+        return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
+
+    handler = GetSystemActivityHandler(
+        store=get_projection_store(),
+        repo_projection=get_repo_projection(),
+    )
+    entries = await handler.handle(
+        GetSystemActivityQuery(system_id=system_id, offset=offset, limit=limit)
+    )
+    return Ok([e.to_dict() for e in entries])
+
+
+async def get_system_patterns(
+    system_id: str,
+) -> Result[dict[str, Any], SystemErrorCode]:
+    """Get recurring failure and cost patterns for a system."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
+        GetSystemPatternsQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        get_system_projection,
+    )
+    from syn_domain.contexts.organization.slices.system_patterns.handler import (
+        GetSystemPatternsHandler,
+    )
+
+    await ensure_connected()
+
+    sys_proj = get_system_projection()
+    if sys_proj.get(system_id) is None:
+        return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
+
+    handler = GetSystemPatternsHandler(
+        store=get_projection_store(),
+        system_projection=sys_proj,
+        repo_projection=get_repo_projection(),
+    )
+    result = await handler.handle(GetSystemPatternsQuery(system_id=system_id))
+    return Ok(result.to_dict())
+
+
+async def get_system_history(
+    system_id: str, limit: int = 50
+) -> Result[list[dict[str, Any]], SystemErrorCode]:
+    """Get historical execution timeline for a system."""
+    from syn_adapters.projection_stores import get_projection_store
+    from syn_domain.contexts.organization.domain.queries.get_system_history import (
+        GetSystemHistoryQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        get_repo_projection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        get_system_projection,
+    )
+    from syn_domain.contexts.organization.slices.system_history.handler import (
+        GetSystemHistoryHandler,
+    )
+
+    await ensure_connected()
+
+    if get_system_projection().get(system_id) is None:
+        return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
+
+    handler = GetSystemHistoryHandler(
+        store=get_projection_store(),
+        repo_projection=get_repo_projection(),
+    )
+    entries = await handler.handle(
+        GetSystemHistoryQuery(system_id=system_id, limit=limit)
+    )
+    return Ok([e.to_dict() for e in entries])
 
 
 def _classify_sys_error(error_msg: str) -> SystemErrorCode:

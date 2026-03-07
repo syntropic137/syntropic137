@@ -102,3 +102,43 @@ async def unassign_repo_from_system(repo_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=status, detail=result.message)
 
     return {"repo_id": repo_id, "status": "unassigned"}
+
+
+# ---------------------------------------------------------------------------
+# Insight endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{repo_id}/health")
+async def get_repo_health(repo_id: str) -> dict[str, Any]:
+    """Get health snapshot for a repo."""
+    return await repo_ops.get_repo_health(repo_id)
+
+
+@router.get("/{repo_id}/cost")
+async def get_repo_cost(repo_id: str) -> dict[str, Any]:
+    """Get cost breakdown for a repo."""
+    return await repo_ops.get_repo_cost(repo_id)
+
+
+@router.get("/{repo_id}/activity")
+async def get_repo_activity(
+    repo_id: str, offset: int = 0, limit: int = 50
+) -> dict[str, Any]:
+    """Get execution timeline for a repo."""
+    entries = await repo_ops.get_repo_activity(repo_id, offset=offset, limit=limit)
+    return {"entries": entries, "total": len(entries)}
+
+
+@router.get("/{repo_id}/failures")
+async def get_repo_failures(repo_id: str, limit: int = 50) -> dict[str, Any]:
+    """Get recent failures for a repo."""
+    entries = await repo_ops.get_repo_failures(repo_id, limit=limit)
+    return {"failures": entries, "total": len(entries)}
+
+
+@router.get("/{repo_id}/sessions")
+async def get_repo_sessions(repo_id: str, limit: int = 50) -> dict[str, Any]:
+    """Get agent sessions for a repo."""
+    sessions = await repo_ops.get_repo_sessions(repo_id, limit=limit)
+    return {"sessions": sessions, "total": len(sessions)}
