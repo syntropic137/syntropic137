@@ -630,39 +630,23 @@ class WorkflowExecutionEngine:
         5. Emit phase completed via aggregate
         6. Track session with token data
         """
-        # Import session classes
-        from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
-        from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-            AgentSessionAggregate,
-        )
-        from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
-            CompleteSessionCommand,
-        )
-        from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
-            RecordOperationCommand,
-        )
-        from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
-            StartSessionCommand,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+            SessionLifecycleManager,
         )
 
         phase_started_at = datetime.now(UTC)
         session_id = str(uuid4())
-        session: AgentSessionAggregate | None = None
 
-        # Create and start session aggregate
-        if self._sessions is not None:
-            session = AgentSessionAggregate()
-            start_session_cmd = StartSessionCommand(
-                aggregate_id=session_id,
-                workflow_id=ctx.workflow_id,
-                execution_id=ctx.execution_id,
-                phase_id=phase.phase_id,
-                agent_provider=phase.agent_config.provider,
-                agent_model=phase.agent_config.model,
-            )
-            session._handle_command(start_session_cmd)
-            await self._sessions.save(session)
-            logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
+        session_mgr = SessionLifecycleManager(
+            repository=self._sessions,
+            session_id=session_id,
+            workflow_id=ctx.workflow_id,
+            execution_id=ctx.execution_id,
+            phase_id=phase.phase_id,
+            agent_provider=phase.agent_config.provider,
+            agent_model=phase.agent_config.model,
+        )
+        await session_mgr.start()
 
         # Emit phase started via aggregate
         start_phase_cmd = StartPhaseCommand(
@@ -788,31 +772,13 @@ class WorkflowExecutionEngine:
             aggregate._handle_command(complete_phase_cmd)
 
             # Record token usage and complete session
-            if session is not None and self._sessions is not None:
-                # Record operation with tokens
-                if response.input_tokens > 0 or response.output_tokens > 0:
-                    record_op_cmd = RecordOperationCommand(
-                        aggregate_id=session_id,
-                        operation_type=OperationType.MESSAGE_RESPONSE,
-                        input_tokens=response.input_tokens,
-                        output_tokens=response.output_tokens,
-                        total_tokens=response.total_tokens,
-                        success=True,
-                        duration_seconds=duration,
-                        metadata={"phase_id": phase.phase_id, "source": "direct_execution"},
-                    )
-                    session._handle_command(record_op_cmd)
-
-                # Complete session
-                complete_session_cmd = CompleteSessionCommand(
-                    aggregate_id=session_id,
-                    success=True,
-                )
-                session._handle_command(complete_session_cmd)
-                await self._sessions.save(session)
-                logger.debug(
-                    "Session completed: %s (success, tokens: %d)", session_id, response.total_tokens
-                )
+            await session_mgr.complete_success(
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                total_tokens=response.total_tokens,
+                duration_seconds=duration,
+                source="direct_execution",
+            )
 
             logger.info(
                 "Phase completed: %s (success: True, tokens: %d)",
@@ -836,18 +802,7 @@ class WorkflowExecutionEngine:
             ctx.phase_results.append(result)
 
             # Complete session with failure
-            if session is not None and self._sessions is not None:
-                try:
-                    complete_session_cmd = CompleteSessionCommand(
-                        aggregate_id=session_id,
-                        success=False,
-                        error_message=str(e),
-                    )
-                    session._handle_command(complete_session_cmd)
-                    await self._sessions.save(session)
-                    logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
-                except Exception as session_err:
-                    logger.warning("Failed to complete session %s: %s", session_id, session_err)
+            await session_mgr.complete_failure(error_message=str(e))
 
             # Note: We don't emit PhaseCompleted for failures
             # The FailExecutionCommand in execute() will capture the failure
@@ -939,18 +894,8 @@ class WorkflowExecutionEngine:
             On interrupt: Extends ctx.artifact_ids with partial artifacts, then raises
             WorkflowInterruptedError.
         """
-        from syn_domain.contexts.agent_sessions._shared.value_objects import OperationType
-        from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
-            AgentSessionAggregate,
-        )
-        from syn_domain.contexts.agent_sessions.domain.commands.CompleteSessionCommand import (
-            CompleteSessionCommand,
-        )
-        from syn_domain.contexts.agent_sessions.domain.commands.RecordOperationCommand import (
-            RecordOperationCommand,
-        )
-        from syn_domain.contexts.agent_sessions.domain.commands.StartSessionCommand import (
-            StartSessionCommand,
+        from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+            SessionLifecycleManager,
         )
 
         phase_started_at = datetime.now(UTC)
@@ -973,20 +918,16 @@ class WorkflowExecutionEngine:
         )
 
         # Create session aggregate for detailed observability
-        session: AgentSessionAggregate | None = None
-        if self._sessions is not None:
-            session = AgentSessionAggregate()
-            start_session_cmd = StartSessionCommand(
-                aggregate_id=session_id,
-                workflow_id=ctx.workflow_id,
-                execution_id=ctx.execution_id,
-                phase_id=phase.phase_id,
-                agent_provider=phase.agent_config.provider,
-                agent_model=phase.agent_config.model,
-            )
-            session._handle_command(start_session_cmd)
-            await self._sessions.save(session)
-            logger.debug("Session started: %s (phase: %s)", session_id, phase.phase_id)
+        session_mgr = SessionLifecycleManager(
+            repository=self._sessions,
+            session_id=session_id,
+            workflow_id=ctx.workflow_id,
+            execution_id=ctx.execution_id,
+            phase_id=phase.phase_id,
+            agent_provider=phase.agent_config.provider,
+            agent_model=phase.agent_config.model,
+        )
+        await session_mgr.start()
 
         # Create collaborators
         tokens = TokenAccumulator()
@@ -1008,58 +949,14 @@ class WorkflowExecutionEngine:
                 with_sidecar=False,
                 inject_tokens=False,
             ) as workspace:
-                # Run setup phase with secrets (ADR-024)
-                from syn_adapters.workspace_backends.service import SetupPhaseSecrets
-
-                _SKIP_URLS = {
-                    "https://github.com/placeholder/not-configured",
-                    "https://github.com/example/repo",
-                }
-                _repo: str | None = None
-                if ctx.repo_url and ctx.repo_url not in _SKIP_URLS:
-                    _parts = ctx.repo_url.rstrip("/").split("/")
-                    if len(_parts) >= 2:
-                        _repo = f"{_parts[-2]}/{_parts[-1]}"
-
-                secrets = await SetupPhaseSecrets.create(
-                    repository=_repo,
-                    require_github=_repo is not None,
+                # Run setup, inject artifacts, build command, validate auth
+                agent_env, claude_cmd = await self._setup_workspace_for_phase(
+                    workspace=workspace,
+                    phase=phase,
+                    ctx=ctx,
+                    session_id=session_id,
+                    artifacts=artifacts,
                 )
-
-                setup_result = await workspace.run_setup_phase(secrets)
-                if setup_result.exit_code != 0:
-                    raise WorkflowExecutionError(
-                        message=f"Setup phase failed: {setup_result.stderr}",
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    )
-                logger.info("Setup phase completed, secrets cleared")
-
-                # Inject input artifacts from previous phases (ADR-036)
-                await artifacts.inject_from_previous_phases(workspace, ctx)
-
-                # Build prompt and CLI command
-                prompt = await self._build_prompt(phase, ctx)
-                claude_cmd = self._build_claude_command(phase, prompt)
-
-                # Validate Claude authentication
-                if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
-                    raise WorkflowExecutionError(
-                        message=(
-                            "No Claude authentication configured. "
-                            "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
-                        ),
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    )
-
-                agent_env: dict[str, str] = {
-                    "CLAUDE_SESSION_ID": session_id,
-                }
-                if secrets.claude_code_oauth_token:
-                    agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
-                if secrets.anthropic_api_key:
-                    agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
 
                 # Process event stream
                 processor = EventStreamProcessor(
@@ -1084,72 +981,24 @@ class WorkflowExecutionEngine:
                 )
                 _conversation_lines = stream_result.conversation_lines
 
-                # Handle interrupt
+                # Handle interrupt (raises WorkflowInterruptedError)
                 if stream_result.interrupt_requested:
-                    try:
-                        git_sha = await self._get_container_git_sha(workspace)
-                    except Exception as git_err:
-                        logger.warning(
-                            "Failed to collect git SHA during interrupt for %s: %s",
-                            session_id,
-                            git_err,
-                        )
-                        git_sha = None
-
-                    partial_artifact_ids = await artifacts.collect_partial(
+                    await self._handle_stream_interrupt(
                         workspace=workspace,
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                        execution_id=ctx.execution_id,
+                        stream_result=stream_result,
+                        phase=phase,
+                        ctx=ctx,
                         session_id=session_id,
-                        phase_name=phase.name,
-                        output_artifact_type=phase.output_artifact_type,
-                    )
-                    ctx.artifact_ids.extend(partial_artifact_ids)
-
-                    await recorder.store(
-                        session_id=session_id,
-                        lines=stream_result.conversation_lines,
-                        execution_id=ctx.execution_id,
-                        phase_id=phase.phase_id,
-                        workflow_id=ctx.workflow_id,
-                        model=phase.agent_config.model,
-                        input_tokens=tokens.input_tokens,
-                        output_tokens=tokens.output_tokens,
-                        started_at=phase_started_at,
-                        success=False,
+                        tokens=tokens,
+                        artifacts=artifacts,
+                        recorder=recorder,
+                        phase_started_at=phase_started_at,
                     )
 
-                    raise WorkflowInterruptedError(
-                        phase_id=phase.phase_id,
-                        reason=stream_result.interrupt_reason,
-                        git_sha=git_sha,
-                        partial_artifact_ids=partial_artifact_ids,
-                        partial_input_tokens=tokens.input_tokens,
-                        partial_output_tokens=tokens.output_tokens,
-                    )
-
-                # Check process exit code
-                exit_code = workspace.last_stream_exit_code
-                if exit_code is not None and exit_code != 0:
-                    raise WorkflowExecutionError(
-                        message=(
-                            f"Agent process exited with code {exit_code}. "
-                            "Check agent logs for details."
-                        ),
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    )
-
-                # Check structured task result
-                task_result = stream_result.agent_task_result
-                if task_result is not None and not task_result.get("success", True):
-                    comments = task_result.get("comments", "Agent reported task failure")
-                    raise WorkflowExecutionError(
-                        message=comments,
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    )
+                # Validate stream outcome (raises WorkflowExecutionError)
+                self._validate_stream_result(
+                    stream_result, workspace, ctx.workflow_id, phase.phase_id
+                )
 
                 # Store conversation log (ADR-035)
                 await recorder.store(
@@ -1231,32 +1080,14 @@ class WorkflowExecutionEngine:
             )
             aggregate._handle_command(complete_cmd)
 
-            # Record token usage on session before completing
-            if session is not None and self._sessions is not None:
-                if tokens.total_tokens > 0:
-                    record_op_cmd = RecordOperationCommand(
-                        aggregate_id=session_id,
-                        operation_type=OperationType.MESSAGE_RESPONSE,
-                        input_tokens=tokens.input_tokens,
-                        output_tokens=tokens.output_tokens,
-                        total_tokens=tokens.total_tokens,
-                        success=True,
-                        duration_seconds=duration,
-                        metadata={"phase_id": phase.phase_id, "source": "container_execution"},
-                    )
-                    session._handle_command(record_op_cmd)
-
-                complete_session_cmd = CompleteSessionCommand(
-                    aggregate_id=session_id,
-                    success=True,
-                )
-                session._handle_command(complete_session_cmd)
-                await self._sessions.save(session)
-                logger.debug(
-                    "Session completed: %s (success, tokens: %d)",
-                    session_id,
-                    tokens.total_tokens,
-                )
+            # Record token usage and complete session
+            await session_mgr.complete_success(
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                total_tokens=tokens.total_tokens,
+                duration_seconds=duration,
+                source="container_execution",
+            )
 
             logger.info(
                 "Phase completed (container mode): %s (tokens: %d)",
@@ -1268,25 +1099,9 @@ class WorkflowExecutionEngine:
 
         except WorkflowInterruptedError as _interrupted_err:
             # Complete the session as cancelled before propagating
-            if session is not None and self._sessions is not None:
-                try:
-                    from syn_domain.contexts.agent_sessions._shared.value_objects import (
-                        SessionStatus,
-                    )
-
-                    complete_session_cmd = CompleteSessionCommand(
-                        aggregate_id=session_id,
-                        success=False,
-                        final_status=SessionStatus.CANCELLED,
-                        error_message=_interrupted_err.reason or "Interrupted by user",
-                    )
-                    session._handle_command(complete_session_cmd)
-                    await self._sessions.save(session)
-                    logger.debug("Session completed (cancelled): %s", session_id)
-                except Exception as _sess_err:
-                    logger.warning(
-                        "Failed to complete session %s during cancel: %s", session_id, _sess_err
-                    )
+            await session_mgr.complete_cancelled(
+                reason=_interrupted_err.reason or "Interrupted by user",
+            )
             raise
 
         except Exception as e:
@@ -1314,22 +1129,7 @@ class WorkflowExecutionEngine:
             )
 
             # Complete session aggregate (failure)
-            if session is not None and self._sessions is not None:
-                try:
-                    complete_session_cmd = CompleteSessionCommand(
-                        aggregate_id=session_id,
-                        success=False,
-                        error_message=str(e),
-                    )
-                    session._handle_command(complete_session_cmd)
-                    await self._sessions.save(session)
-                    logger.debug("Session completed: %s (failed: %s)", session_id, str(e))
-                except Exception as session_err:
-                    logger.warning(
-                        "Failed to complete session %s: %s",
-                        session_id,
-                        session_err,
-                    )
+            await session_mgr.complete_failure(error_message=str(e))
 
             logger.error(
                 "Phase failed (container mode): %s (error: %s)",
@@ -1343,6 +1143,164 @@ class WorkflowExecutionEngine:
                 phase_id=phase.phase_id,
                 cause=e,
             ) from e
+
+    async def _setup_workspace_for_phase(
+        self,
+        workspace: Any,
+        phase: ExecutablePhase,
+        ctx: ExecutionContext,
+        session_id: str,
+        artifacts: ArtifactCollector,
+    ) -> tuple[dict[str, str], list[str]]:
+        """Set up workspace for phase execution (ADR-024).
+
+        Handles: secrets creation, setup phase, artifact injection,
+        prompt building, auth validation, and environment construction.
+
+        Returns:
+            Tuple of (agent_env, claude_cmd).
+        """
+        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
+
+        _SKIP_URLS = {
+            "https://github.com/placeholder/not-configured",
+            "https://github.com/example/repo",
+        }
+        _repo: str | None = None
+        if ctx.repo_url:
+            _normalized = ctx.repo_url.rstrip("/")
+            if _normalized not in _SKIP_URLS:
+                _parts = _normalized.split("/")
+                if len(_parts) >= 2:
+                    _repo = f"{_parts[-2]}/{_parts[-1]}"
+
+        secrets = await SetupPhaseSecrets.create(
+            repository=_repo,
+            require_github=_repo is not None,
+        )
+
+        setup_result = await workspace.run_setup_phase(secrets)
+        if setup_result.exit_code != 0:
+            raise WorkflowExecutionError(
+                message=f"Setup phase failed: {setup_result.stderr}",
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+            )
+        logger.info("Setup phase completed, secrets cleared")
+
+        # Inject input artifacts from previous phases (ADR-036)
+        await artifacts.inject_from_previous_phases(workspace, ctx)
+
+        # Build prompt and CLI command
+        prompt = await self._build_prompt(phase, ctx)
+        claude_cmd = self._build_claude_command(phase, prompt)
+
+        # Validate Claude authentication
+        if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
+            raise WorkflowExecutionError(
+                message=(
+                    "No Claude authentication configured. "
+                    "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+                ),
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+            )
+
+        agent_env: dict[str, str] = {
+            "CLAUDE_SESSION_ID": session_id,
+        }
+        if secrets.claude_code_oauth_token:
+            agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
+        if secrets.anthropic_api_key:
+            agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+
+        return agent_env, claude_cmd
+
+    async def _handle_stream_interrupt(
+        self,
+        workspace: Any,
+        stream_result: Any,
+        phase: ExecutablePhase,
+        ctx: ExecutionContext,
+        session_id: str,
+        tokens: TokenAccumulator,
+        artifacts: ArtifactCollector,
+        recorder: ConversationRecorder,
+        phase_started_at: datetime,
+    ) -> None:
+        """Handle an interrupted stream by collecting partial state and raising.
+
+        Always raises WorkflowInterruptedError.
+        """
+        try:
+            git_sha = await self._get_container_git_sha(workspace)
+        except Exception as git_err:
+            logger.warning(
+                "Failed to collect git SHA during interrupt for %s: %s",
+                session_id,
+                git_err,
+            )
+            git_sha = None
+
+        partial_artifact_ids = await artifacts.collect_partial(
+            workspace=workspace,
+            workflow_id=ctx.workflow_id,
+            phase_id=phase.phase_id,
+            execution_id=ctx.execution_id,
+            session_id=session_id,
+            phase_name=phase.name,
+            output_artifact_type=phase.output_artifact_type,
+        )
+        ctx.artifact_ids.extend(partial_artifact_ids)
+
+        await recorder.store(
+            session_id=session_id,
+            lines=stream_result.conversation_lines,
+            execution_id=ctx.execution_id,
+            phase_id=phase.phase_id,
+            workflow_id=ctx.workflow_id,
+            model=phase.agent_config.model,
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            started_at=phase_started_at,
+            success=False,
+        )
+
+        raise WorkflowInterruptedError(
+            phase_id=phase.phase_id,
+            reason=stream_result.interrupt_reason,
+            git_sha=git_sha,
+            partial_artifact_ids=partial_artifact_ids,
+            partial_input_tokens=tokens.input_tokens,
+            partial_output_tokens=tokens.output_tokens,
+        )
+
+    @staticmethod
+    def _validate_stream_result(
+        stream_result: Any,
+        workspace: Any,
+        workflow_id: str,
+        phase_id: str,
+    ) -> None:
+        """Validate stream completed successfully. Raises WorkflowExecutionError on failure."""
+        exit_code = workspace.last_stream_exit_code
+        if exit_code is not None and exit_code != 0:
+            raise WorkflowExecutionError(
+                message=(
+                    f"Agent process exited with code {exit_code}. Check agent logs for details."
+                ),
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+            )
+
+        task_result = stream_result.agent_task_result
+        if task_result is not None and not task_result.get("success", True):
+            comments = task_result.get("comments", "Agent reported task failure")
+            raise WorkflowExecutionError(
+                message=comments,
+                workflow_id=workflow_id,
+                phase_id=phase_id,
+            )
 
     def _build_claude_command(self, phase: ExecutablePhase, prompt: str) -> list[str]:
         """Build the Claude CLI command with plugin discovery."""
