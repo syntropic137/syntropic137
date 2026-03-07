@@ -31,13 +31,13 @@ Commands and queries are strictly separated. Commands modify state through aggre
 
 **Events (31):** Every command produces one or more events: `WorkflowCreated`, `ExecutionStarted`, `ExecutionPaused`, `ExecutionResumed`, `ExecutionCompleted`, `TriggerRegistered`, etc.
 
-**Projections (13):** Pre-computed read models updated by event processors, cached in Redis for sub-millisecond query response times.
+**Projections (14):** Pre-computed read models updated by event processors, cached in Redis or PostgreSQL for sub-millisecond query response times. Includes a `repo_correlation` projection that maps repositories to workflow executions for cross-context insight queries.
 
 <CQRSFlow />
 
 ## Domain Model
 
-Syntropic137 is organized into four bounded contexts with six aggregates:
+Syntropic137 is organized into five bounded contexts with nine aggregates:
 
 <DomainModelFlow />
 

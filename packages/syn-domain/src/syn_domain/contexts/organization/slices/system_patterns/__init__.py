@@ -1,0 +1,1 @@
+"""System patterns handler slice."""

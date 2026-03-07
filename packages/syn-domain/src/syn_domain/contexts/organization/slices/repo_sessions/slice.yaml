@@ -1,0 +1,9 @@
+id: repo-sessions
+name: Repo Sessions
+description: >
+  Per-repo agent sessions. Lazy handler that queries the
+  SessionList projection filtered by repo correlation
+  (execution_id on sessions matches correlated executions).
+type: query
+context: organization
+returns: SessionSummary

@@ -1,0 +1,8 @@
+id: system-status
+name: System Status
+description: >
+  Cross-repo health overview for a system. Lazy handler that aggregates
+  repo health snapshots and in-memory system/repo projections.
+type: query
+context: organization
+returns: SystemStatus

@@ -1,0 +1,13 @@
+id: repo-correlation
+name: Repo Execution Correlation
+description: >
+  Maps repositories to workflow executions (many-to-many).
+  Correlates via TriggerFired and WorkflowExecutionStarted events
+  without requiring repo_id on execution events.
+type: query
+context: organization
+projection: RepoCorrelationProjection
+subscribes_to:
+  - github.TriggerFired
+  - WorkflowExecutionStartedEvent
+returns: RepoExecutionCorrelation

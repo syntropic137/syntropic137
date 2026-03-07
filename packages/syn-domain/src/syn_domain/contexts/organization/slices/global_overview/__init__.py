@@ -1,0 +1,1 @@
+"""Global overview handler slice."""

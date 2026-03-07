@@ -1,0 +1,9 @@
+id: repo-failures
+name: Repo Failures
+description: >
+  Per-repo failure list. Lazy handler that queries the
+  WorkflowExecutionList projection for failed executions
+  filtered by repo correlation.
+type: query
+context: organization
+returns: RepoFailure

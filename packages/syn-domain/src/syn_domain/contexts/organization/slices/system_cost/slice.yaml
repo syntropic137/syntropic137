@@ -1,0 +1,8 @@
+id: system-cost
+name: System Cost
+description: >
+  System-wide cost breakdown. Lazy handler that aggregates per-repo
+  cost snapshots from the repo_cost store.
+type: query
+context: organization
+returns: SystemCost
