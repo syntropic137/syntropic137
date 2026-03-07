@@ -1,0 +1,13 @@
+id: repo-health
+name: Repo Health
+description: >
+  Per-repo health snapshot with success rate, trend, and windowed costs/tokens.
+  Eagerly updated from WorkflowCompleted and WorkflowFailed events,
+  correlated to repos via RepoCorrelationProjection.
+type: query
+context: organization
+projection: RepoHealthProjection
+subscribes_to:
+  - WorkflowCompletedEvent
+  - WorkflowFailedEvent
+returns: RepoHealth

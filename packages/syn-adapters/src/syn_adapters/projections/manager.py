@@ -36,6 +36,8 @@ from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
 from syn_domain.contexts.organization.slices.repo_correlation import (
     RepoCorrelationProjection,
 )
+from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
+from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 from syn_shared.events import (
     SESSION_SUMMARY,
     TOKEN_USAGE,
@@ -158,12 +160,16 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_execution_list", "on_workflow_completed"),
         ("workflow_execution_detail", "on_workflow_completed"),
         ("dashboard_metrics", "on_workflow_completed"),
+        ("repo_health", "on_workflow_completed"),  # Per-repo health tracking
+        ("repo_cost", "on_workflow_completed"),  # Per-repo cost tracking
         ("realtime", "on_workflow_completed"),  # Real-time UI push
     ],
     "WorkflowFailed": [
         ("workflow_execution_list", "on_workflow_failed"),
         ("workflow_execution_detail", "on_workflow_failed"),
         ("dashboard_metrics", "on_workflow_failed"),
+        ("repo_health", "on_workflow_failed"),  # Per-repo health tracking
+        ("repo_cost", "on_workflow_failed"),  # Per-repo cost tracking
         ("realtime", "on_workflow_failed"),  # Real-time UI push
     ],
     # Control plane events
@@ -282,8 +288,10 @@ class ProjectionManager:
             "execution_cost": ExecutionCostProjection(self._store),
             # TimescaleDB-backed observability projections (CQRS pattern)
             "session_tools": self._create_session_tools_projection(),
-            # Organization projections (cross-context correlation)
+            # Organization projections
             "repo_correlation": RepoCorrelationProjection(self._store),
+            "repo_health": RepoHealthProjection(self._store),
+            "repo_cost": RepoCostProjection(self._store),
             # Real-time projection for WebSocket push (doesn't use store)
             "realtime": get_realtime_projection(),
         }
@@ -510,6 +518,18 @@ class ProjectionManager:
         """Get the repo-execution correlation projection."""
         self._ensure_initialized()
         return self._projections["repo_correlation"]
+
+    @property
+    def repo_health(self) -> RepoHealthProjection:
+        """Get the repo health projection."""
+        self._ensure_initialized()
+        return self._projections["repo_health"]
+
+    @property
+    def repo_cost(self) -> RepoCostProjection:
+        """Get the repo cost projection."""
+        self._ensure_initialized()
+        return self._projections["repo_cost"]
 
     # Cost tracking projections
     @property
