@@ -61,14 +61,11 @@ async def get_organization(organization_id: str) -> dict[str, Any]:
 @router.put("/{organization_id}")
 async def update_organization(organization_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """Update an organization."""
-    try:
-        result = await orgs.update_organization(
-            organization_id=organization_id,
-            name=body.get("name"),
-            slug=body.get("slug"),
-        )
-    except (KeyError, ValueError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    result = await orgs.update_organization(
+        organization_id=organization_id,
+        name=body.get("name"),
+        slug=body.get("slug"),
+    )
 
     if isinstance(result, Err):
         status = 404 if result.error == OrganizationError.NOT_FOUND else 400

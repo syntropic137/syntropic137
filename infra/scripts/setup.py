@@ -1187,7 +1187,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
             generated_pw = _secrets.token_urlsafe(32)
             os.environ[ENV_SYN_API_PASSWORD] = generated_pw
             _update_env_file({ENV_SYN_API_PASSWORD: generated_pw}, target=ENV_FILE)
-            ok(f"Generated SYN_API_PASSWORD (basic auth for tunnel access)")
+            ok("Generated SYN_API_PASSWORD (basic auth for tunnel access)")
         else:
             ok("SYN_API_PASSWORD already set")
     step(f"Click {_PURPLE}Save tunnel{_RST}")

@@ -297,7 +297,11 @@ class HookWatcher(BaseWatcher):
             return generate_user_prompt_event_id(session_id, timestamp, prompt_hash)
 
         # Stop/start events (agent/subagent)
-        elif event_type in (EventType.AGENT_STOPPED, EventType.SUBAGENT_STARTED, EventType.SUBAGENT_STOPPED):
+        elif event_type in (
+            EventType.AGENT_STOPPED,
+            EventType.SUBAGENT_STARTED,
+            EventType.SUBAGENT_STOPPED,
+        ):
             return generate_stop_event_id(session_id, timestamp, event_type.value)
 
         # Notification events

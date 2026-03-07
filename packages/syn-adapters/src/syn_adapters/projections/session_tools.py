@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from agentic_events.types import ClaudeToolName
+
 from syn_shared.events import (
     COST_RECORDED,
     GIT_BRANCH_CHANGED,

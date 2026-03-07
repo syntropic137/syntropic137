@@ -106,8 +106,8 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
 
         event = OrganizationUpdatedEvent(
             organization_id=self.organization_id,
-            name=command.name if command.name != self._name else None,
-            slug=command.slug if command.slug != self._slug else None,
+            name=command.name if command.name is not None and command.name != self._name else None,
+            slug=command.slug if command.slug is not None and command.slug != self._slug else None,
         )
         self._apply(event)  # type: ignore[arg-type]
 

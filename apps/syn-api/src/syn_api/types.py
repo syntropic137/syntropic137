@@ -138,7 +138,7 @@ class OrganizationError(str, Enum):
     HAS_REPOS = "has_repos"
 
 
-class SystemError(str, Enum):
+class SystemErrorCode(str, Enum):
     """Errors returned by system operations."""
 
     NOT_FOUND = "not_found"

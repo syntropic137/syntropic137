@@ -112,8 +112,10 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
 
         event = SystemUpdatedEvent(
             system_id=self.system_id,
-            name=command.name if command.name != self._name else None,
-            description=command.description if command.description != self._description else None,
+            name=command.name if command.name is not None and command.name != self._name else None,
+            description=command.description
+            if command.description is not None and command.description != self._description
+            else None,
         )
         self._apply(event)  # type: ignore[arg-type]
 
