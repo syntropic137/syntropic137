@@ -69,9 +69,6 @@ const operationIcons: Record<string, typeof Activity> = {
 // Event type constants for filtering
 const TOOL_EVENT_TYPES = ['tool_execution_started', 'tool_execution_completed'] as const
 
-// Claude CLI tool names that indicate subagent invocations
-const SUBAGENT_TOOL_NAMES = new Set(['Agent', 'Task'])
-
 // Colors for operation types
 const operationColors: Record<string, string> = {
   // Current SYN event types (from agent_events table)
@@ -653,19 +650,10 @@ export function SessionDetail() {
               {/* Operations - sorted newest first */}
               <div className="space-y-0">
                 {[...session.operations].reverse().map((op, idx) => {
-                  const isSubagent = SUBAGENT_TOOL_NAMES.has(op.tool_name ?? '')
-                  const Icon = isSubagent
-                    ? Users
-                    : (operationIcons[op.operation_type] ?? Activity)
-                  const color = isSubagent
-                    ? 'text-violet-400 bg-violet-500/10'
-                    : (operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]')
+                  const Icon = operationIcons[op.operation_type] ?? Activity
+                  const color = operationColors[op.operation_type] ?? 'text-[var(--color-text-secondary)] bg-[var(--color-surface-elevated)]'
                   const [textColor, bgColor] = color.split(' ')
-
-                  // Extract subagent description from tool_input
-                  const subagentType = isSubagent
-                    ? (op.tool_input?.subagent_type as string) ?? (op.tool_input?.description as string) ?? null
-                    : null
+                  const isSubagent = op.operation_type === 'subagent_started' || op.operation_type === 'subagent_stopped'
 
                   return (
                     <div
@@ -682,11 +670,9 @@ export function SessionDetail() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-3">
                           <span className="text-sm font-medium text-[var(--color-text-primary)]">
-                            {isSubagent
-                              ? (op.operation_type === 'tool_execution_started' ? 'Subagent Started' : 'Subagent Completed')
-                              : op.operation_type.startsWith('git_') && op.tool_name
-                                ? `Git ${op.tool_name.charAt(0).toUpperCase()}${op.tool_name.slice(1)}`
-                                : op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                            {op.operation_type.startsWith('git_') && op.tool_name
+                              ? `Git ${op.tool_name.charAt(0).toUpperCase()}${op.tool_name.slice(1)}`
+                              : op.operation_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
                           </span>
                           {op.success ? (
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -703,7 +689,7 @@ export function SessionDetail() {
                           {op.tool_name && !op.operation_type.startsWith('git_') && (
                             <span className="flex items-center gap-1">
                               {isSubagent ? <Users className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
-                              {isSubagent && subagentType ? subagentType : op.tool_name}
+                              {op.tool_name}
                             </span>
                           )}
                           {op.git_message && (

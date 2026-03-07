@@ -17,12 +17,12 @@ Two guards:
 """
 
 import inspect
+import re
 
 import pytest
 from event_sourcing import AutoDispatchProjection, CheckpointedProjection
-from event_sourcing.core.checkpoint import _camel_to_snake, _snake_to_camel
+from event_sourcing.core.checkpoint import _snake_to_camel
 
-# --- Import all projections so subclass discovery works ---
 import syn_domain.contexts.agent_sessions.slices.list_sessions.projection
 import syn_domain.contexts.artifacts.slices.list_artifacts.projection
 import syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection
@@ -34,6 +34,11 @@ import syn_domain.contexts.orchestration.slices.list_executions.projection
 import syn_domain.contexts.orchestration.slices.list_workflows.projection
 import syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection
 import syn_domain.contexts.orchestration.slices.workspace_metrics.projection  # noqa: F401
+
+
+def _camel_to_snake(name: str) -> str:
+    """Convert CamelCase to snake_case (test-only helper for round-trip checks)."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 def _all_subclasses(cls: type) -> list[type]:

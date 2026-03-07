@@ -127,6 +127,40 @@ class TriggerError(str, Enum):
     WORKFLOW_NOT_FOUND = "workflow_not_found"
 
 
+class OrganizationError(str, Enum):
+    """Errors returned by organization operations."""
+
+    NOT_FOUND = "not_found"
+    ALREADY_EXISTS = "already_exists"
+    ALREADY_DELETED = "already_deleted"
+    INVALID_INPUT = "invalid_input"
+    HAS_SYSTEMS = "has_systems"
+    HAS_REPOS = "has_repos"
+
+
+class SystemErrorCode(str, Enum):
+    """Errors returned by system operations."""
+
+    NOT_FOUND = "not_found"
+    ALREADY_EXISTS = "already_exists"
+    ALREADY_DELETED = "already_deleted"
+    INVALID_INPUT = "invalid_input"
+    ORGANIZATION_NOT_FOUND = "organization_not_found"
+    HAS_REPOS = "has_repos"
+
+
+class RepoError(str, Enum):
+    """Errors returned by repo operations."""
+
+    NOT_FOUND = "not_found"
+    ALREADY_EXISTS = "already_exists"
+    INVALID_INPUT = "invalid_input"
+    ORGANIZATION_NOT_FOUND = "organization_not_found"
+    SYSTEM_NOT_FOUND = "system_not_found"
+    ALREADY_ASSIGNED = "already_assigned"
+    NOT_ASSIGNED = "not_assigned"
+
+
 class AgentError(str, Enum):
     """Errors returned by agent operations."""
 
@@ -251,6 +285,57 @@ class ArtifactSummary(BaseModel):
     artifact_type: str = ""
     title: str | None = None
     size_bytes: int = 0
+    created_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# Organization models
+# ---------------------------------------------------------------------------
+
+
+class OrganizationSummaryResponse(BaseModel):
+    """Summary of an organization for list views."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    organization_id: str
+    name: str
+    slug: str
+    created_by: str = ""
+    created_at: datetime | None = None
+    system_count: int = 0
+    repo_count: int = 0
+
+
+class SystemSummaryResponse(BaseModel):
+    """Summary of a system for list views."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    system_id: str
+    organization_id: str
+    name: str
+    description: str = ""
+    created_by: str = ""
+    created_at: datetime | None = None
+    repo_count: int = 0
+
+
+class RepoSummaryResponse(BaseModel):
+    """Summary of a repo for list views."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    repo_id: str
+    organization_id: str
+    system_id: str = ""
+    provider: str = "github"
+    full_name: str = ""
+    owner: str = ""
+    default_branch: str = "main"
+    installation_id: str = ""
+    is_private: bool = False
+    created_by: str = ""
     created_at: datetime | None = None
 
 

@@ -18,7 +18,6 @@ class TriggerConfig:
         daily_limit: Max triggers per day for this rule.
         debounce_seconds: Wait before evaluating (batch rapid events).
         cooldown_seconds: Min time between fires for same PR.
-        skip_if_sender_is_bot: Prevent infinite loops from bot actions.
     """
 
     max_attempts: int = 3
@@ -26,7 +25,6 @@ class TriggerConfig:
     daily_limit: int = 20
     debounce_seconds: int = 0
     cooldown_seconds: int = 300
-    skip_if_sender_is_bot: bool = True
 
     def __post_init__(self) -> None:
         """Validate the configuration."""

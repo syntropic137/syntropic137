@@ -85,6 +85,18 @@
         "matcher": "*"
       }
     ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/handlers/subagent-start.py",
+            "timeout": 5,
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [

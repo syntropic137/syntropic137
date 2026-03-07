@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from agentic_events.types import ClaudeToolName
+
 from syn_shared.events import (
     COST_RECORDED,
     GIT_BRANCH_CHANGED,
@@ -43,6 +45,7 @@ logger = logging.getLogger(__name__)
 # appear automatically without requiring changes here.
 _TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 
+_SUBAGENT_TOOL_NAMES = {str(ClaudeToolName.SUBAGENT), str(ClaudeToolName.SUBAGENT_LEGACY)}
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 _GIT_EVENT_TYPES = (
     GIT_COMMIT,
@@ -188,7 +191,7 @@ class SessionToolsProjection:
                 )
 
                 logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
-                return [self._row_to_operation(row) for row in rows]
+                return [op for row in rows if (op := self._row_to_operation(row)) is not None]
         except Exception as e:
             logger.error("Failed to query tool operations for %s: %s", session_id, e)
             return []
@@ -252,19 +255,19 @@ class SessionToolsProjection:
         try:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(query, *params)
-                return [self._row_to_operation(row) for row in rows]
+                return [op for row in rows if (op := self._row_to_operation(row)) is not None]
         except Exception as e:
             logger.error("Failed to query tool operations: %s", e)
             return []
 
-    def _row_to_operation(self, row: Any) -> ToolOperation:
+    def _row_to_operation(self, row: Any) -> ToolOperation | None:
         """Convert a database row to a ToolOperation.
 
         Args:
             row: Database row with event data
 
         Returns:
-            ToolOperation read model
+            ToolOperation read model, or None if the row should be skipped
         """
         # Parse JSON data field
         data = row["data"]
@@ -272,24 +275,51 @@ class SessionToolsProjection:
             data = json.loads(data)
 
         event_type = row["event_type"]
-        is_completed = event_type == TOOL_EXECUTION_COMPLETED
-        is_subagent = event_type in _SUBAGENT_EVENT_TYPES
 
-        if is_subagent:
-            # Subagent events use agent_name as the display name
-            tool_use_id = data.get("subagent_tool_use_id", "")
-            obs_id = f"subagent-{event_type}-{tool_use_id}-{row['time'].isoformat()}"
-            return ToolOperation(
-                observation_id=obs_id,
-                tool_name=data.get("agent_name", "subagent"),
-                tool_use_id=tool_use_id or None,
-                operation_type=event_type,
-                timestamp=row["time"],
-                success=data.get("success") if event_type == SUBAGENT_STOPPED else None,
-                input_preview=None,
-                output_preview=None,
-                duration_ms=data.get("duration_ms") if event_type == SUBAGENT_STOPPED else None,
-            )
+        # TODO(#175): Flip dedup direction when Claude Code's SubagentStart hook
+        # includes prompt/description data. Currently native subagent events are
+        # sparse (no prompt), so we drop them and relabel Agent/Task tool events
+        # as subagent operations instead. This matches what event_parser.py does
+        # in the Docker pipeline. When the hook is enriched, prefer native events
+        # and drop the tool events.
+        if event_type in _SUBAGENT_EVENT_TYPES:
+            return None
+
+        # Relabel Agent/Task tool events as subagent operations so the prompt
+        # is visible in the expandable details.
+        if event_type in (TOOL_EXECUTION_STARTED, TOOL_EXECUTION_COMPLETED):
+            tool_name = data.get("tool_name") or (data.get("context") or {}).get("tool_name", "")
+            if tool_name in _SUBAGENT_TOOL_NAMES:
+                tool_use_id = data.get("tool_use_id", "")
+                is_started = event_type == TOOL_EXECUTION_STARTED
+                subagent_op = SUBAGENT_STARTED if is_started else SUBAGENT_STOPPED
+                # Extract a display name from the tool input
+                tool_input = data.get("input_preview") or data.get("tool_input")
+                if isinstance(tool_input, str):
+                    try:
+                        tool_input = json.loads(tool_input)
+                    except (json.JSONDecodeError, TypeError):
+                        tool_input = None
+                if isinstance(tool_input, dict):
+                    agent_label = (
+                        tool_input.get("description")
+                        or tool_input.get("subagent_type")
+                        or tool_name
+                    )
+                else:
+                    agent_label = tool_name
+                obs_id = f"subagent-{subagent_op}-{tool_use_id}-{row['time'].isoformat()}"
+                return ToolOperation(
+                    observation_id=obs_id,
+                    tool_name=str(agent_label),
+                    tool_use_id=tool_use_id or None,
+                    operation_type=subagent_op,
+                    timestamp=row["time"],
+                    success=data.get("success") if not is_started else None,
+                    input_preview=data.get("input_preview") or json.dumps(data),
+                    output_preview=data.get("output_preview") if not is_started else None,
+                    duration_ms=data.get("duration_ms") if not is_started else None,
+                )
 
         is_git = event_type in _GIT_EVENT_TYPES
         if is_git:
@@ -331,6 +361,7 @@ class SessionToolsProjection:
             )
 
         # Generate a unique ID from the row data
+        is_completed = event_type == TOOL_EXECUTION_COMPLETED
         tool_use_id = data.get("tool_use_id", "")
         obs_id = data.get("observation_id") or f"{tool_use_id}-{row['time'].isoformat()}"
 

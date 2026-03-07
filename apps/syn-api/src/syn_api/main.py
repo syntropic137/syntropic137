@@ -21,7 +21,10 @@ from syn_api.routes import (
     executions_router,
     metrics_router,
     observability_router,
+    organizations_router,
+    repos_router,
     sessions_router,
+    systems_router,
     triggers_router,
     webhooks_router,
     websocket_router,
@@ -125,6 +128,9 @@ def create_app() -> FastAPI:
     app.include_router(triggers_router)
     app.include_router(webhooks_router)
     app.include_router(websocket_router)
+    app.include_router(organizations_router)
+    app.include_router(systems_router)
+    app.include_router(repos_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:
