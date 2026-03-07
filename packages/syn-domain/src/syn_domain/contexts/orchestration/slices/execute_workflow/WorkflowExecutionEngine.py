@@ -1167,10 +1167,12 @@ class WorkflowExecutionEngine:
             "https://github.com/example/repo",
         }
         _repo: str | None = None
-        if ctx.repo_url and ctx.repo_url not in _SKIP_URLS:
-            _parts = ctx.repo_url.rstrip("/").split("/")
-            if len(_parts) >= 2:
-                _repo = f"{_parts[-2]}/{_parts[-1]}"
+        if ctx.repo_url:
+            _normalized = ctx.repo_url.rstrip("/")
+            if _normalized not in _SKIP_URLS:
+                _parts = _normalized.split("/")
+                if len(_parts) >= 2:
+                    _repo = f"{_parts[-2]}/{_parts[-1]}"
 
         secrets = await SetupPhaseSecrets.create(
             repository=_repo,
