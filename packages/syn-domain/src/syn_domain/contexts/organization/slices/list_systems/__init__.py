@@ -1,0 +1,1 @@
+"""List systems query slice."""

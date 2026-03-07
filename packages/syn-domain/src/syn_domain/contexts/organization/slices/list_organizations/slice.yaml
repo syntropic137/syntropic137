@@ -1,0 +1,5 @@
+id: list-organizations
+name: List Organizations
+description: Query slice to list organizations with optional filters.
+type: query
+context: organization

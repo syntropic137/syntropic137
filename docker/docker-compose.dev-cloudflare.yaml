@@ -1,0 +1,20 @@
+# Dev Cloudflare Tunnel - Routes webhooks directly to API (no gateway/nginx)
+# Auto-included by `just dev` when CLOUDFLARE_TUNNEL_TOKEN is set.
+#
+# In Cloudflare Zero Trust dashboard, set the tunnel's public hostname
+# service URL to:  http://api:8000
+#
+# This is the dev-mode equivalent of docker-compose.cloudflare.yaml,
+# which routes through the selfhost gateway instead.
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.2.0
+    container_name: syn-cloudflared
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy

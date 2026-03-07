@@ -9,6 +9,7 @@ compose_dev := compose + " -f docker/docker-compose.dev.yaml"
 compose_test := compose + " -f docker/docker-compose.test.yaml"
 compose_selfhost := compose + " -f docker/docker-compose.selfhost.yaml"
 compose_selfhost_cf := compose_selfhost + " -f docker/docker-compose.cloudflare.yaml"
+compose_dev_cf := compose_dev + " -f docker/docker-compose.dev-cloudflare.yaml"
 
 # Platform detection
 _os := `uname -s`
@@ -187,12 +188,12 @@ onboard-dev *flags:
         # Audit each secret: show status (in .env, missing, needs vault)
         _HAS_VALUES=""
         _MISSING=""
-        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+        for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
             _VAL="${!_VAR:-}"
             if [ -n "$_VAL" ]; then
                 # Show redacted for secrets, full for non-secrets
                 case "$_VAR" in
-                    *KEY*|*SECRET*|*TOKEN*)
+                    *KEY*|*SECRET*|*TOKEN*|*PASSWORD*)
                         _DISPLAY="${_VAL:0:4}****${_VAL: -4}"
                         ;;
                     *)
@@ -267,7 +268,7 @@ onboard-dev *flags:
                 echo ""
                 echo "# Try edit first; if item doesn't exist, create it"
                 echo -n "op item edit \"$_ITEM\" --vault \"$_VAULT\""
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         echo " \\"
@@ -277,7 +278,7 @@ onboard-dev *flags:
                 echo " 2>/dev/null \\"
                 echo "|| op item create --category=login --title=\"$_ITEM\" --vault=\"$_VAULT\" \\"
                 _FIRST=true
-                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN; do
+                for _VAR in SYN_GITHUB_APP_ID SYN_GITHUB_APP_NAME SYN_GITHUB_PRIVATE_KEY SYN_GITHUB_WEBHOOK_SECRET ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN CLOUDFLARE_TUNNEL_TOKEN SYN_DOMAIN SYN_API_PASSWORD; do
                     _VAL="${!_VAR:-}"
                     if [ -n "$_VAL" ]; then
                         if [ "$_FIRST" = true ]; then _FIRST=false; else echo " \\"; fi
@@ -367,8 +368,15 @@ dev: _workspace-check
     echo "1️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
+
+    # Auto-detect Cloudflare tunnel
+    _COMPOSE=$(just _dev-compose-cmd)
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        echo "   🔒 Cloudflare tunnel detected — cloudflared will start automatically"
+    fi
+
     echo "2️⃣ Building and starting Docker services..."
-    {{compose_dev}} up -d --build
+    ${_COMPOSE} up -d --build
     echo ""
     echo "3️⃣ Waiting for services to be healthy..."
     sleep 5
@@ -425,8 +433,15 @@ dev-fresh: _workspace-check
     echo "3️⃣ Syncing Python dependencies..."
     uv sync
     echo ""
+
+    # Auto-detect Cloudflare tunnel
+    _COMPOSE=$(just _dev-compose-cmd)
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        echo "   🔒 Cloudflare tunnel detected — cloudflared will start automatically"
+    fi
+
     echo "4️⃣ Building and starting Docker services..."
-    {{compose_dev}} up -d --build
+    ${_COMPOSE} up -d --build
     echo ""
     echo "5️⃣ Waiting for services to be healthy..."
     sleep 8
@@ -462,23 +477,25 @@ dev-fresh: _workspace-check
 
 # Stop development environment (preserves data)
 dev-stop:
-    @echo "🛑 Stopping dev stack..."
-    @just _webhook-stop
-    @echo "   Stopping frontend (port 5173)..."
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @echo "   Stopping Docker services..."
-    @{{compose_dev}} stop
-    @echo "✅ Dev stack stopped (data preserved)"
+    #!/usr/bin/env bash
+    echo "🛑 Stopping dev stack..."
+    just _webhook-stop
+    echo "   Stopping frontend (port 5173)..."
+    lsof -ti:5173 | xargs kill 2>/dev/null || true
+    echo "   Stopping Docker services..."
+    $(just _dev-compose-cmd) stop
+    echo "✅ Dev stack stopped (data preserved)"
 
 # Stop and remove dev containers (preserves volumes)
 dev-down:
-    @echo "🛑 Shutting down dev stack..."
-    @just _webhook-stop
-    @echo "   Stopping frontend (port 5173)..."
-    @-lsof -ti:5173 | xargs kill 2>/dev/null || true
-    @echo "   Removing Docker containers..."
-    @{{compose_dev}} down
-    @echo "✅ Dev stack shut down (volumes preserved)"
+    #!/usr/bin/env bash
+    echo "🛑 Shutting down dev stack..."
+    just _webhook-stop
+    echo "   Stopping frontend (port 5173)..."
+    lsof -ti:5173 | xargs kill 2>/dev/null || true
+    echo "   Removing Docker containers..."
+    $(just _dev-compose-cmd) down
+    echo "✅ Dev stack shut down (volumes preserved)"
 
 # View development logs
 dev-logs:
@@ -1148,13 +1165,15 @@ docs-site-build: docs-site-gen
 # --- Utilities ---
 
 # Seed workflows from YAML files
-# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
-seed-workflows:
+seed-workflows: _ensure-env
+    #!/usr/bin/env bash
+    source scripts/resolve_env.sh
     uv run python scripts/seed_workflows.py
 
 # Seed trigger presets (self-healing, review-fix)
-# Uses host execution (requires SYN_OBSERVABILITY_DB_URL in .env or environment)
-seed-triggers:
+seed-triggers: _ensure-env
+    #!/usr/bin/env bash
+    source scripts/resolve_env.sh
     uv run python scripts/seed_triggers.py
 
 # Seed all data (workflows + triggers)
@@ -1248,8 +1267,33 @@ proxy-start:
 
 # --- Internal Helpers (hidden from --list) ---
 
+# Build the dev compose command, auto-including cloudflare overlay when tunnel token is set.
+# Usage in bash: _COMPOSE=$(_dev_compose_cmd)
+# Must be called AFTER `source scripts/resolve_env.sh`.
+_dev-compose-cmd:
+    @if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then \
+        echo "{{compose_dev_cf}}"; \
+    else \
+        echo "{{compose_dev}}"; \
+    fi
+
+# Create .env files from templates if they don't exist (idempotent)
+# Sets dev defaults so `just dev` works immediately without onboard-dev
+_ensure-env:
+    @if [ ! -f .env ]; then \
+        cp .env.example .env; \
+        sed -i.bak 's|^APP_ENVIRONMENT=.*|APP_ENVIRONMENT=development|' .env && rm -f .env.bak; \
+        sed -i.bak 's|^ESP_EVENT_STORE_DB_URL=.*|ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env && rm -f .env.bak; \
+        sed -i.bak 's|^SYN_OBSERVABILITY_DB_URL=.*|SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn|' .env && rm -f .env.bak; \
+        echo "📝 Created .env from .env.example (dev defaults)"; \
+    fi
+    @if [ ! -f infra/.env ] && [ -f infra/.env.example ]; then \
+        cp infra/.env.example infra/.env; \
+        echo "📝 Created infra/.env from infra/.env.example"; \
+    fi
+
 # Check .env for common misconfigurations and warn loudly
-_env-check:
+_env-check: _ensure-env
     #!/usr/bin/env bash
     source scripts/resolve_env.sh
     WARNINGS=0
@@ -1284,11 +1328,15 @@ _env-check:
     fi
 
     # --- Webhook forwarding ---
-    if [ -n "${DEV__SMEE_URL:-}" ]; then
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+        _D="${SYN_DOMAIN:-}"; _D="${_D#https://}"; _D="${_D#http://}"; _D="${_D%/}"
+        if [ -n "$_D" ]; then
+            echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
+        else
+            echo "   ✅ Webhook delivery: Cloudflare tunnel"
+        fi
+    elif [ -n "${DEV__SMEE_URL:-}" ]; then
         echo "   ✅ Webhook delivery: smee.io proxy"
-    elif [ -n "${SYN_DOMAIN:-}" ]; then
-        _D="${SYN_DOMAIN#https://}"; _D="${_D#http://}"; _D="${_D%/}"
-        echo "   ✅ Webhook delivery: Cloudflare tunnel (${_D})"
     else
         echo "   ⚠️  WARNING: No webhook delivery configured"
         echo "               GitHub webhooks will not reach your local stack."
@@ -1331,17 +1379,22 @@ _env-check:
 # Start webhook delivery — Cloudflare tunnel (if configured) or Smee proxy
 _webhook-start:
     #!/usr/bin/env bash
-    if [ -f .env ]; then set -a && source .env && set +a; fi
-    if [ -f infra/.env ]; then set -a && source infra/.env && set +a; fi
+    source scripts/resolve_env.sh
 
-    # Option 1: Cloudflare tunnel — DEV__SMEE_URL empty but SYN_DOMAIN set
-    if [ -z "${DEV__SMEE_URL:-}" ] && [ -n "${SYN_DOMAIN:-}" ]; then
+    # Option 1: Cloudflare tunnel — token or domain configured
+    if [ -n "${CLOUDFLARE_TUNNEL_TOKEN:-}" ] || [ -n "${SYN_DOMAIN:-}" ]; then
         _DOMAIN="${SYN_DOMAIN#https://}"
         _DOMAIN="${_DOMAIN#http://}"
         _DOMAIN="${_DOMAIN%/}"
-        echo "5️⃣  Webhooks via Cloudflare tunnel (${_DOMAIN})"
-        echo "   Ensure your GitHub App webhook URL is: https://${_DOMAIN}/webhooks/github"
-        echo "   Tunnel must be running: just selfhost-up-tunnel (or cloudflared on host)"
+        # Verify tunnel container is running
+        if docker ps --format '{{"{{"}}.Names{{"}}"}}' 2>/dev/null | grep -q 'cloudflared'; then
+            echo "5️⃣  Webhooks via Cloudflare tunnel ✅ (${_DOMAIN})"
+        else
+            echo "5️⃣  ⚠️  Cloudflare tunnel not running — starting it..."
+            $(just _dev-compose-cmd) up -d cloudflared
+        fi
+        echo "   🔗 Webhook URL: https://${_DOMAIN}/webhooks/github"
+        echo "   💡 Tunnel service URL must be: http://api:8000 (dev) or http://gateway:8081 (selfhost)"
         exit 0
     fi
 

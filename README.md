@@ -47,7 +47,7 @@ Access: http://localhost:8008 (configurable via `SYN_GATEWAY_PORT`)
 just selfhost-up-tunnel         # includes cloudflared service
 ```
 
-Access: `https://your-domain.com` (configure tunnel route to `http://gateway:80`)
+Access: `https://your-domain.com` (configure tunnel route to `http://gateway:8081`)
 
 > **Security:** The API has no built-in auth. Protect with Cloudflare Access, nginx basic auth (`SYN_API_PASSWORD`), or a VPN.
 
@@ -61,6 +61,8 @@ Access: `https://your-domain.com` (configure tunnel route to `http://gateway:80`
 
 ## Architecture
 
+The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
 <details>
@@ -69,11 +71,12 @@ Access: `https://your-domain.com` (configure tunnel route to `http://gateway:80`
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
 | **Orchestration** | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
+| **Organization** | Organization, System, Repo | Organization hierarchy, system and repo management |
 | **Agent Sessions** | AgentSession | Agent sessions and observability metrics |
 | **GitHub** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
 | **Artifacts** | Artifact | Artifact storage and retrieval |
 
-**Infrastructure:** TimescaleDB · EventStore (Rust gRPC) · Redis · MinIO
+**Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
 Regenerate diagram: `just diagram`
 

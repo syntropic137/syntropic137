@@ -1,0 +1,1 @@
+"""List organizations query slice."""

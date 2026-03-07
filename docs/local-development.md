@@ -80,10 +80,11 @@ When Docker is running, PostgreSQL is available at:
 postgresql://syn:syn_dev_password@localhost:5432/syn
 ```
 
-Add this to your `.env` file:
+Add these to your `.env` file:
 
 ```bash
-DATABASE_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
+ESP_EVENT_STORE_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
+SYN_OBSERVABILITY_DB_URL=postgresql://syn:syn_dev_password@localhost:5432/syn
 ```
 
 ### Running the CLI
