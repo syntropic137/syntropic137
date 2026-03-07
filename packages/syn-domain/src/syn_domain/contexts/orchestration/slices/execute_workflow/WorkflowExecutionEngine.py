@@ -875,7 +875,7 @@ class WorkflowExecutionEngine:
 
         return prompt
 
-    async def _execute_phase_in_container(
+    async def _execute_phase_in_container(  # noqa: C901 — TODO(#138): refactor complexity
         self,
         phase: ExecutablePhase,
         ctx: ExecutionContext,
