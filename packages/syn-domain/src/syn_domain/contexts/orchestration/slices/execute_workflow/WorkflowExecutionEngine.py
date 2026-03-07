@@ -949,58 +949,14 @@ class WorkflowExecutionEngine:
                 with_sidecar=False,
                 inject_tokens=False,
             ) as workspace:
-                # Run setup phase with secrets (ADR-024)
-                from syn_adapters.workspace_backends.service import SetupPhaseSecrets
-
-                _SKIP_URLS = {
-                    "https://github.com/placeholder/not-configured",
-                    "https://github.com/example/repo",
-                }
-                _repo: str | None = None
-                if ctx.repo_url and ctx.repo_url not in _SKIP_URLS:
-                    _parts = ctx.repo_url.rstrip("/").split("/")
-                    if len(_parts) >= 2:
-                        _repo = f"{_parts[-2]}/{_parts[-1]}"
-
-                secrets = await SetupPhaseSecrets.create(
-                    repository=_repo,
-                    require_github=_repo is not None,
+                # Run setup, inject artifacts, build command, validate auth
+                agent_env, claude_cmd = await self._setup_workspace_for_phase(
+                    workspace=workspace,
+                    phase=phase,
+                    ctx=ctx,
+                    session_id=session_id,
+                    artifacts=artifacts,
                 )
-
-                setup_result = await workspace.run_setup_phase(secrets)
-                if setup_result.exit_code != 0:
-                    raise WorkflowExecutionError(
-                        message=f"Setup phase failed: {setup_result.stderr}",
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    )
-                logger.info("Setup phase completed, secrets cleared")
-
-                # Inject input artifacts from previous phases (ADR-036)
-                await artifacts.inject_from_previous_phases(workspace, ctx)
-
-                # Build prompt and CLI command
-                prompt = await self._build_prompt(phase, ctx)
-                claude_cmd = self._build_claude_command(phase, prompt)
-
-                # Validate Claude authentication
-                if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
-                    raise WorkflowExecutionError(
-                        message=(
-                            "No Claude authentication configured. "
-                            "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
-                        ),
-                        workflow_id=ctx.workflow_id,
-                        phase_id=phase.phase_id,
-                    )
-
-                agent_env: dict[str, str] = {
-                    "CLAUDE_SESSION_ID": session_id,
-                }
-                if secrets.claude_code_oauth_token:
-                    agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
-                if secrets.anthropic_api_key:
-                    agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
 
                 # Process event stream
                 processor = EventStreamProcessor(
@@ -1187,6 +1143,76 @@ class WorkflowExecutionEngine:
                 phase_id=phase.phase_id,
                 cause=e,
             ) from e
+
+    async def _setup_workspace_for_phase(
+        self,
+        workspace: Any,
+        phase: ExecutablePhase,
+        ctx: ExecutionContext,
+        session_id: str,
+        artifacts: ArtifactCollector,
+    ) -> tuple[dict[str, str], list[str]]:
+        """Set up workspace for phase execution (ADR-024).
+
+        Handles: secrets creation, setup phase, artifact injection,
+        prompt building, auth validation, and environment construction.
+
+        Returns:
+            Tuple of (agent_env, claude_cmd).
+        """
+        from syn_adapters.workspace_backends.service import SetupPhaseSecrets
+
+        _SKIP_URLS = {
+            "https://github.com/placeholder/not-configured",
+            "https://github.com/example/repo",
+        }
+        _repo: str | None = None
+        if ctx.repo_url and ctx.repo_url not in _SKIP_URLS:
+            _parts = ctx.repo_url.rstrip("/").split("/")
+            if len(_parts) >= 2:
+                _repo = f"{_parts[-2]}/{_parts[-1]}"
+
+        secrets = await SetupPhaseSecrets.create(
+            repository=_repo,
+            require_github=_repo is not None,
+        )
+
+        setup_result = await workspace.run_setup_phase(secrets)
+        if setup_result.exit_code != 0:
+            raise WorkflowExecutionError(
+                message=f"Setup phase failed: {setup_result.stderr}",
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+            )
+        logger.info("Setup phase completed, secrets cleared")
+
+        # Inject input artifacts from previous phases (ADR-036)
+        await artifacts.inject_from_previous_phases(workspace, ctx)
+
+        # Build prompt and CLI command
+        prompt = await self._build_prompt(phase, ctx)
+        claude_cmd = self._build_claude_command(phase, prompt)
+
+        # Validate Claude authentication
+        if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
+            raise WorkflowExecutionError(
+                message=(
+                    "No Claude authentication configured. "
+                    "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+                ),
+                workflow_id=ctx.workflow_id,
+                phase_id=phase.phase_id,
+            )
+
+        agent_env: dict[str, str] = {
+            "CLAUDE_SESSION_ID": session_id,
+        }
+        if secrets.claude_code_oauth_token:
+            agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
+        if secrets.anthropic_api_key:
+            agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+
+        return agent_env, claude_cmd
 
     async def _handle_stream_interrupt(
         self,
