@@ -5,13 +5,16 @@ from the repo_cost store.
 """
 
 from decimal import Decimal
-from typing import Any
 
+from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization.domain.queries.get_global_cost import (
     GetGlobalCostQuery,
 )
 from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCost
 from syn_domain.contexts.organization.domain.read_models.system_cost import SystemCost
+from syn_domain.contexts.organization.slices.list_repos.projection import (
+    RepoProjection,
+)
 
 
 class GetGlobalCostHandler:
@@ -19,8 +22,8 @@ class GetGlobalCostHandler:
 
     def __init__(
         self,
-        store: Any,
-        repo_projection: Any,
+        store: ProjectionStoreProtocol,
+        repo_projection: RepoProjection,
     ) -> None:
         self._store = store
         self._repo_projection = repo_projection

@@ -114,9 +114,7 @@ async def get_system_cost(system_id: str) -> dict[str, Any]:
 
 
 @router.get("/{system_id}/activity")
-async def get_system_activity(
-    system_id: str, offset: int = 0, limit: int = 50
-) -> dict[str, Any]:
+async def get_system_activity(system_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
     """Get execution timeline for a system."""
     result = await sys_ops.get_system_activity(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
@@ -134,9 +132,9 @@ async def get_system_patterns(system_id: str) -> dict[str, Any]:
 
 
 @router.get("/{system_id}/history")
-async def get_system_history(system_id: str, limit: int = 50) -> dict[str, Any]:
+async def get_system_history(system_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
     """Get historical execution timeline for a system."""
-    result = await sys_ops.get_system_history(system_id, limit=limit)
+    result = await sys_ops.get_system_history(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
     return {"entries": result.value, "total": len(result.value)}

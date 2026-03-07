@@ -9,14 +9,12 @@ import pytest
 from syn_domain.contexts.organization.domain.queries.get_global_cost import (
     GetGlobalCostQuery,
 )
+from syn_domain.contexts.organization.slices.conftest import FakeProjectionStore
 from syn_domain.contexts.organization.slices.global_cost.handler import (
     GetGlobalCostHandler,
 )
 from syn_domain.contexts.organization.slices.global_overview.test_global_overview import (
     _setup_projections,
-)
-from syn_domain.contexts.organization.slices.system_status.test_system_status import (
-    FakeProjectionStore,
 )
 
 
@@ -28,20 +26,32 @@ class TestGetGlobalCostHandler:
         _, repo_proj = _setup_projections()
         handler = GetGlobalCostHandler(store, repo_proj)
 
-        await store.save("repo_cost", "acme/api", {
-            "total_cost_usd": "5.00", "total_tokens": 1000,
-            "total_input_tokens": 600, "total_output_tokens": 400,
-            "execution_count": 2,
-            "cost_by_workflow": {"wf-deploy": "5.00"},
-            "cost_by_model": {"claude-3": "5.00"},
-        })
-        await store.save("repo_cost", "acme/orphan", {
-            "total_cost_usd": "3.00", "total_tokens": 500,
-            "total_input_tokens": 300, "total_output_tokens": 200,
-            "execution_count": 1,
-            "cost_by_workflow": {"wf-test": "3.00"},
-            "cost_by_model": {"claude-3": "3.00"},
-        })
+        await store.save(
+            "repo_cost",
+            "acme/api",
+            {
+                "total_cost_usd": "5.00",
+                "total_tokens": 1000,
+                "total_input_tokens": 600,
+                "total_output_tokens": 400,
+                "execution_count": 2,
+                "cost_by_workflow": {"wf-deploy": "5.00"},
+                "cost_by_model": {"claude-3": "5.00"},
+            },
+        )
+        await store.save(
+            "repo_cost",
+            "acme/orphan",
+            {
+                "total_cost_usd": "3.00",
+                "total_tokens": 500,
+                "total_input_tokens": 300,
+                "total_output_tokens": 200,
+                "execution_count": 1,
+                "cost_by_workflow": {"wf-test": "3.00"},
+                "cost_by_model": {"claude-3": "3.00"},
+            },
+        )
 
         result = await handler.handle(GetGlobalCostQuery())
 

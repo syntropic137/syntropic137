@@ -4,8 +4,7 @@ Lazy handler: aggregates repo health snapshots from the repo_health
 store, using in-memory projections for system→repo membership.
 """
 
-from typing import Any
-
+from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization.domain.queries.get_system_status import (
     GetSystemStatusQuery,
 )
@@ -13,6 +12,12 @@ from syn_domain.contexts.organization.domain.read_models.repo_health import Repo
 from syn_domain.contexts.organization.domain.read_models.system_status import (
     RepoStatusEntry,
     SystemStatus,
+)
+from syn_domain.contexts.organization.slices.list_repos.projection import (
+    RepoProjection,
+)
+from syn_domain.contexts.organization.slices.list_systems.projection import (
+    SystemProjection,
 )
 
 
@@ -32,9 +37,9 @@ class GetSystemStatusHandler:
 
     def __init__(
         self,
-        store: Any,
-        system_projection: Any,
-        repo_projection: Any,
+        store: ProjectionStoreProtocol,
+        system_projection: SystemProjection,
+        repo_projection: RepoProjection,
     ) -> None:
         self._store = store
         self._system_projection = system_projection
@@ -48,14 +53,21 @@ class GetSystemStatusHandler:
 
         repos = self._repo_projection.list_all(system_id=query.system_id)
 
+        # Batch-load all health data — avoid N+1
+        all_health_data = await self._store.get_all("repo_health")
+        health_by_repo: dict[str, RepoHealth] = {}
+        for hd in all_health_data:
+            name = hd.get("repo_full_name", "")
+            if name:
+                health_by_repo[name] = RepoHealth.from_dict(hd)
+
         repo_entries: list[RepoStatusEntry] = []
         healthy = 0
         degraded = 0
         failing = 0
 
         for repo in repos:
-            health_data = await self._store.get("repo_health", repo.full_name)
-            health = RepoHealth.from_dict(health_data) if health_data else RepoHealth()
+            health = health_by_repo.get(repo.full_name, RepoHealth())
             status = _repo_status(health)
 
             if status == "healthy":

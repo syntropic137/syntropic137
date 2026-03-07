@@ -8,6 +8,7 @@ from decimal import Decimal
 from statistics import median
 from typing import Any
 
+from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
 )
@@ -17,6 +18,12 @@ from syn_domain.contexts.organization.domain.read_models.system_patterns import 
     FailurePattern,
     SystemPatterns,
 )
+from syn_domain.contexts.organization.slices.list_repos.projection import (
+    RepoProjection,
+)
+from syn_domain.contexts.organization.slices.list_systems.projection import (
+    SystemProjection,
+)
 
 
 class GetSystemPatternsHandler:
@@ -24,9 +31,9 @@ class GetSystemPatternsHandler:
 
     def __init__(
         self,
-        store: Any,
-        system_projection: Any,
-        repo_projection: Any,
+        store: ProjectionStoreProtocol,
+        system_projection: SystemProjection,
+        repo_projection: RepoProjection,
     ) -> None:
         self._store = store
         self._system_projection = system_projection
@@ -44,9 +51,7 @@ class GetSystemPatternsHandler:
             if c.get("repo_full_name") in repo_names
         }
 
-    async def _find_failure_patterns(
-        self, exec_to_repo: dict[str, str]
-    ) -> list[FailurePattern]:
+    async def _find_failure_patterns(self, exec_to_repo: dict[str, str]) -> list[FailurePattern]:
         """Group failed executions by error type + message."""
         if not exec_to_repo:
             return []
@@ -137,6 +142,7 @@ class GetSystemPatternsHandler:
 
     async def handle(self, query: GetSystemPatternsQuery) -> SystemPatterns:
         """Handle GetSystemPatternsQuery."""
+        # TODO(#176): Implement time-window filtering
         system = self._system_projection.get(query.system_id)
         system_name = system.name if system else ""
 

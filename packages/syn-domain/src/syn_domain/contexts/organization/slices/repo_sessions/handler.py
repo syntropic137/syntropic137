@@ -6,6 +6,7 @@ whose execution_id matches executions correlated with a repo.
 
 from typing import Any
 
+from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
     GetRepoSessionsQuery,
 )
@@ -14,18 +15,14 @@ from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
 class GetRepoSessionsHandler:
     """Query handler: get agent sessions for a repo."""
 
-    def __init__(self, store: Any) -> None:
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         """Initialize with the shared ProjectionStore."""
         self._store = store
 
     async def _get_execution_ids_for_repo(self, repo_id: str) -> set[str]:
         """Look up execution IDs correlated with a repo."""
         correlations = await self._store.get_all("repo_correlation")
-        return {
-            c["execution_id"]
-            for c in correlations
-            if c.get("repo_full_name") == repo_id
-        }
+        return {c["execution_id"] for c in correlations if c.get("repo_full_name") == repo_id}
 
     async def handle(self, query: GetRepoSessionsQuery) -> list[dict[str, Any]]:
         """Handle GetRepoSessionsQuery.
@@ -39,10 +36,7 @@ class GetRepoSessionsHandler:
 
         all_sessions = await self._store.get_all("session_summaries")
 
-        sessions = [
-            s for s in all_sessions
-            if s.get("execution_id") in execution_ids
-        ]
+        sessions = [s for s in all_sessions if s.get("execution_id") in execution_ids]
 
         # Sort by started_at descending, apply pagination
         sessions.sort(key=lambda s: str(s.get("started_at", "")), reverse=True)

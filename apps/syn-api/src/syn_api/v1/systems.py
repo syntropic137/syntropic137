@@ -333,7 +333,7 @@ async def get_system_patterns(
 
 
 async def get_system_history(
-    system_id: str, limit: int = 50
+    system_id: str, offset: int = 0, limit: int = 50
 ) -> Result[list[dict[str, Any]], SystemErrorCode]:
     """Get historical execution timeline for a system."""
     from syn_adapters.projection_stores import get_projection_store
@@ -360,7 +360,7 @@ async def get_system_history(
         repo_projection=get_repo_projection(),
     )
     entries = await handler.handle(
-        GetSystemHistoryQuery(system_id=system_id, limit=limit)
+        GetSystemHistoryQuery(system_id=system_id, offset=offset, limit=limit)
     )
     return Ok([e.to_dict() for e in entries])
 

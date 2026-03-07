@@ -23,6 +23,7 @@ class GetSystemHistoryQuery:
     system_id: str
     window_hours: int = 168
     limit: int = 50
+    offset: int = 0
     query_id: str = field(default_factory=lambda: str(uuid4()))
 
     def __post_init__(self) -> None:
