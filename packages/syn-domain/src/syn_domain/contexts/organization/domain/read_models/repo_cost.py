@@ -49,9 +49,7 @@ class RepoCost:
             cost_by_workflow={
                 k: Decimal(str(v)) for k, v in data.get("cost_by_workflow", {}).items()
             },
-            cost_by_model={
-                k: Decimal(str(v)) for k, v in data.get("cost_by_model", {}).items()
-            },
+            cost_by_model={k: Decimal(str(v)) for k, v in data.get("cost_by_model", {}).items()},
             execution_count=data.get("execution_count", 0),
         )
 

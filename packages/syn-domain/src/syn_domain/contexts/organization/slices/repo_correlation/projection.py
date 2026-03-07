@@ -65,9 +65,7 @@ class RepoCorrelationProjection(AutoDispatchProjection):
         workflow_id = event_data.get("workflow_id", "")
 
         if not repository or not execution_id:
-            logger.debug(
-                "TriggerFired missing repository or execution_id, skipping correlation"
-            )
+            logger.debug("TriggerFired missing repository or execution_id, skipping correlation")
             return
 
         correlation = RepoExecutionCorrelation(
@@ -122,9 +120,7 @@ class RepoCorrelationProjection(AutoDispatchProjection):
             if r.get("execution_id") == execution_id
         ]
 
-    async def get_executions_for_repo(
-        self, repo_full_name: str
-    ) -> list[RepoExecutionCorrelation]:
+    async def get_executions_for_repo(self, repo_full_name: str) -> list[RepoExecutionCorrelation]:
         """Get all executions correlated with a repo."""
         all_records = await self._store.get_all(self.PROJECTION_NAME)
         return [

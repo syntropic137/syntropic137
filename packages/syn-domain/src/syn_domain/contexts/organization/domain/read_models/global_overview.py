@@ -91,9 +91,7 @@ class GlobalOverview:
             unassigned_repos=data.get("unassigned_repos", 0),
             total_active_executions=data.get("total_active_executions", 0),
             total_cost_usd=Decimal(str(data.get("total_cost_usd", 0))),
-            systems=[
-                SystemOverviewEntry.from_dict(s) for s in data.get("systems", [])
-            ],
+            systems=[SystemOverviewEntry.from_dict(s) for s in data.get("systems", [])],
         )
 
     def to_dict(self) -> dict[str, Any]:

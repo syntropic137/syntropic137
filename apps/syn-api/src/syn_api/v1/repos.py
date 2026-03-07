@@ -258,9 +258,7 @@ async def get_repo_cost(repo_id: str) -> dict[str, Any]:
     return dict(result.to_dict())
 
 
-async def get_repo_activity(
-    repo_id: str, offset: int = 0, limit: int = 50
-) -> list[dict[str, Any]]:
+async def get_repo_activity(repo_id: str, offset: int = 0, limit: int = 50) -> list[dict[str, Any]]:
     """Get execution timeline for a repo."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
@@ -278,9 +276,7 @@ async def get_repo_activity(
     return [e.to_dict() for e in entries]
 
 
-async def get_repo_failures(
-    repo_id: str, limit: int = 50
-) -> list[dict[str, Any]]:
+async def get_repo_failures(repo_id: str, limit: int = 50) -> list[dict[str, Any]]:
     """Get recent failures for a repo."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
@@ -292,15 +288,11 @@ async def get_repo_failures(
 
     await ensure_connected()
     handler = GetRepoFailuresHandler(store=get_projection_store())
-    entries = await handler.handle(
-        GetRepoFailuresQuery(repo_id=repo_id, limit=limit)
-    )
+    entries = await handler.handle(GetRepoFailuresQuery(repo_id=repo_id, limit=limit))
     return [e.to_dict() for e in entries]
 
 
-async def get_repo_sessions(
-    repo_id: str, limit: int = 50
-) -> list[dict[str, Any]]:
+async def get_repo_sessions(repo_id: str, limit: int = 50) -> list[dict[str, Any]]:
     """Get agent sessions for a repo."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
@@ -312,9 +304,7 @@ async def get_repo_sessions(
 
     await ensure_connected()
     handler = GetRepoSessionsHandler(store=get_projection_store())
-    results = await handler.handle(
-        GetRepoSessionsQuery(repo_id=repo_id, limit=limit)
-    )
+    results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
     return list(results)
 
 

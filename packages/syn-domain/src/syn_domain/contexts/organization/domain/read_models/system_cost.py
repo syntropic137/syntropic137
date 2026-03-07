@@ -51,15 +51,11 @@ class SystemCost:
             total_tokens=data.get("total_tokens", 0),
             total_input_tokens=data.get("total_input_tokens", 0),
             total_output_tokens=data.get("total_output_tokens", 0),
-            cost_by_repo={
-                k: Decimal(str(v)) for k, v in data.get("cost_by_repo", {}).items()
-            },
+            cost_by_repo={k: Decimal(str(v)) for k, v in data.get("cost_by_repo", {}).items()},
             cost_by_workflow={
                 k: Decimal(str(v)) for k, v in data.get("cost_by_workflow", {}).items()
             },
-            cost_by_model={
-                k: Decimal(str(v)) for k, v in data.get("cost_by_model", {}).items()
-            },
+            cost_by_model={k: Decimal(str(v)) for k, v in data.get("cost_by_model", {}).items()},
             execution_count=data.get("execution_count", 0),
         )
 

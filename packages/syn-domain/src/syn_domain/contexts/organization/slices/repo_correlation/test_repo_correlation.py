@@ -41,11 +41,13 @@ class TestRepoCorrelationProjection:
         store = FakeProjectionStore()
         proj = RepoCorrelationProjection(store)
 
-        await proj.on_trigger_fired({
-            "repository": "acme/backend",
-            "execution_id": "exec-1",
-            "workflow_id": "wf-1",
-        })
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/backend",
+                "execution_id": "exec-1",
+                "workflow_id": "wf-1",
+            }
+        )
 
         correlations = await proj.get_repos_for_execution("exec-1")
         assert len(correlations) == 1
@@ -58,11 +60,13 @@ class TestRepoCorrelationProjection:
         store = FakeProjectionStore()
         proj = RepoCorrelationProjection(store)
 
-        await proj.on_workflow_execution_started({
-            "execution_id": "exec-2",
-            "workflow_id": "wf-2",
-            "inputs": {"repository_url": "https://github.com/acme/frontend"},
-        })
+        await proj.on_workflow_execution_started(
+            {
+                "execution_id": "exec-2",
+                "workflow_id": "wf-2",
+                "inputs": {"repository_url": "https://github.com/acme/frontend"},
+            }
+        )
 
         correlations = await proj.get_repos_for_execution("exec-2")
         assert len(correlations) == 1
@@ -74,10 +78,12 @@ class TestRepoCorrelationProjection:
         store = FakeProjectionStore()
         proj = RepoCorrelationProjection(store)
 
-        await proj.on_trigger_fired({
-            "repository": "",
-            "execution_id": "exec-3",
-        })
+        await proj.on_trigger_fired(
+            {
+                "repository": "",
+                "execution_id": "exec-3",
+            }
+        )
 
         correlations = await proj.get_repos_for_execution("exec-3")
         assert len(correlations) == 0
@@ -87,16 +93,20 @@ class TestRepoCorrelationProjection:
         store = FakeProjectionStore()
         proj = RepoCorrelationProjection(store)
 
-        await proj.on_trigger_fired({
-            "repository": "acme/repo-a",
-            "execution_id": "exec-4",
-            "workflow_id": "wf-4",
-        })
-        await proj.on_trigger_fired({
-            "repository": "acme/repo-b",
-            "execution_id": "exec-4",
-            "workflow_id": "wf-4",
-        })
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/repo-a",
+                "execution_id": "exec-4",
+                "workflow_id": "wf-4",
+            }
+        )
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/repo-b",
+                "execution_id": "exec-4",
+                "workflow_id": "wf-4",
+            }
+        )
 
         correlations = await proj.get_repos_for_execution("exec-4")
         assert len(correlations) == 2
@@ -108,16 +118,20 @@ class TestRepoCorrelationProjection:
         store = FakeProjectionStore()
         proj = RepoCorrelationProjection(store)
 
-        await proj.on_trigger_fired({
-            "repository": "acme/shared",
-            "execution_id": "exec-5",
-            "workflow_id": "wf-5",
-        })
-        await proj.on_trigger_fired({
-            "repository": "acme/shared",
-            "execution_id": "exec-6",
-            "workflow_id": "wf-6",
-        })
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/shared",
+                "execution_id": "exec-5",
+                "workflow_id": "wf-5",
+            }
+        )
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/shared",
+                "execution_id": "exec-6",
+                "workflow_id": "wf-6",
+            }
+        )
 
         correlations = await proj.get_executions_for_repo("acme/shared")
         assert len(correlations) == 2
@@ -130,17 +144,21 @@ class TestRepoCorrelationProjection:
         proj = RepoCorrelationProjection(store)
 
         # First from trigger
-        await proj.on_trigger_fired({
-            "repository": "acme/api",
-            "execution_id": "exec-7",
-            "workflow_id": "wf-7",
-        })
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/api",
+                "execution_id": "exec-7",
+                "workflow_id": "wf-7",
+            }
+        )
         # Then from execution started (should be deduped)
-        await proj.on_workflow_execution_started({
-            "execution_id": "exec-7",
-            "workflow_id": "wf-7",
-            "inputs": {"repository": "acme/api"},
-        })
+        await proj.on_workflow_execution_started(
+            {
+                "execution_id": "exec-7",
+                "workflow_id": "wf-7",
+                "inputs": {"repository": "acme/api"},
+            }
+        )
 
         correlations = await proj.get_repos_for_execution("exec-7")
         assert len(correlations) == 1
@@ -152,11 +170,13 @@ class TestRepoCorrelationProjection:
         store = FakeProjectionStore()
         proj = RepoCorrelationProjection(store)
 
-        await proj.on_trigger_fired({
-            "repository": "acme/check",
-            "execution_id": "exec-8",
-            "workflow_id": "wf-8",
-        })
+        await proj.on_trigger_fired(
+            {
+                "repository": "acme/check",
+                "execution_id": "exec-8",
+                "workflow_id": "wf-8",
+            }
+        )
 
         # Data should be in the store
         key = "exec-8:acme/check"

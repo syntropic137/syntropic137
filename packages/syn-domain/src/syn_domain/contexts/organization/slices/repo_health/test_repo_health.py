@@ -33,13 +33,17 @@ class FakeProjectionStore:
 async def _seed_correlation(store: FakeProjectionStore, repo: str, exec_id: str) -> None:
     """Seed a repo-execution correlation in the store."""
     key = f"{exec_id}:{repo}"
-    await store.save("repo_correlation", key, {
-        "repo_full_name": repo,
-        "execution_id": exec_id,
-        "workflow_id": "wf-1",
-        "correlation_source": "trigger",
-        "correlated_at": "2026-03-06T10:00:00",
-    })
+    await store.save(
+        "repo_correlation",
+        key,
+        {
+            "repo_full_name": repo,
+            "execution_id": exec_id,
+            "workflow_id": "wf-1",
+            "correlation_source": "trigger",
+            "correlated_at": "2026-03-06T10:00:00",
+        },
+    )
 
 
 @pytest.mark.unit
@@ -50,12 +54,14 @@ class TestRepoHealthProjection:
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-1")
 
-        await proj.on_workflow_completed({
-            "execution_id": "exec-1",
-            "total_cost_usd": "1.50",
-            "total_tokens": 5000,
-            "completed_at": "2026-03-06T10:05:00",
-        })
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-1",
+                "total_cost_usd": "1.50",
+                "total_tokens": 5000,
+                "completed_at": "2026-03-06T10:05:00",
+            }
+        )
 
         health = await proj.get_health("acme/api")
         assert health.total_executions == 1
@@ -69,12 +75,14 @@ class TestRepoHealthProjection:
         proj = RepoHealthProjection(store)
         await _seed_correlation(store, "acme/api", "exec-2")
 
-        await proj.on_workflow_failed({
-            "execution_id": "exec-2",
-            "total_cost_usd": "0.50",
-            "total_tokens": 1000,
-            "failed_at": "2026-03-06T10:05:00",
-        })
+        await proj.on_workflow_failed(
+            {
+                "execution_id": "exec-2",
+                "total_cost_usd": "0.50",
+                "total_tokens": 1000,
+                "failed_at": "2026-03-06T10:05:00",
+            }
+        )
 
         health = await proj.get_health("acme/api")
         assert health.total_executions == 1
@@ -90,9 +98,25 @@ class TestRepoHealthProjection:
         await _seed_correlation(store, "acme/api", "exec-2")
         await _seed_correlation(store, "acme/api", "exec-3")
 
-        await proj.on_workflow_completed({"execution_id": "exec-1", "total_cost_usd": "1", "total_tokens": 100, "completed_at": ""})
-        await proj.on_workflow_completed({"execution_id": "exec-2", "total_cost_usd": "1", "total_tokens": 100, "completed_at": ""})
-        await proj.on_workflow_failed({"execution_id": "exec-3", "total_cost_usd": "1", "total_tokens": 100, "failed_at": ""})
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-1",
+                "total_cost_usd": "1",
+                "total_tokens": 100,
+                "completed_at": "",
+            }
+        )
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-2",
+                "total_cost_usd": "1",
+                "total_tokens": 100,
+                "completed_at": "",
+            }
+        )
+        await proj.on_workflow_failed(
+            {"execution_id": "exec-3", "total_cost_usd": "1", "total_tokens": 100, "failed_at": ""}
+        )
 
         health = await proj.get_health("acme/api")
         assert health.total_executions == 3
@@ -106,7 +130,14 @@ class TestRepoHealthProjection:
         proj = RepoHealthProjection(store)
         # No correlation seeded
 
-        await proj.on_workflow_completed({"execution_id": "exec-99", "total_cost_usd": "1", "total_tokens": 100, "completed_at": ""})
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-99",
+                "total_cost_usd": "1",
+                "total_tokens": 100,
+                "completed_at": "",
+            }
+        )
 
         all_health = await proj.get_all_health()
         assert len(all_health) == 0
@@ -118,8 +149,22 @@ class TestRepoHealthProjection:
         await _seed_correlation(store, "acme/api", "exec-1")
         await _seed_correlation(store, "acme/api", "exec-2")
 
-        await proj.on_workflow_completed({"execution_id": "exec-1", "total_cost_usd": "2.50", "total_tokens": 1000, "completed_at": ""})
-        await proj.on_workflow_completed({"execution_id": "exec-2", "total_cost_usd": "3.50", "total_tokens": 2000, "completed_at": ""})
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-1",
+                "total_cost_usd": "2.50",
+                "total_tokens": 1000,
+                "completed_at": "",
+            }
+        )
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-2",
+                "total_cost_usd": "3.50",
+                "total_tokens": 2000,
+                "completed_at": "",
+            }
+        )
 
         health = await proj.get_health("acme/api")
         assert str(health.window_cost_usd) == "6.00"
@@ -132,7 +177,14 @@ class TestRepoHealthProjection:
         await _seed_correlation(store, "acme/api", "exec-1")
         await _seed_correlation(store, "acme/web", "exec-1")
 
-        await proj.on_workflow_completed({"execution_id": "exec-1", "total_cost_usd": "1", "total_tokens": 100, "completed_at": ""})
+        await proj.on_workflow_completed(
+            {
+                "execution_id": "exec-1",
+                "total_cost_usd": "1",
+                "total_tokens": 100,
+                "completed_at": "",
+            }
+        )
 
         api_health = await proj.get_health("acme/api")
         web_health = await proj.get_health("acme/web")
