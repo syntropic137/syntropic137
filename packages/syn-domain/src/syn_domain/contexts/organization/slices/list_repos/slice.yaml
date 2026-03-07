@@ -1,0 +1,5 @@
+id: list-repos
+name: List Repos
+description: Query slice to list repos with optional filters.
+type: query
+context: organization

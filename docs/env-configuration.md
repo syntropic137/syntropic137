@@ -125,7 +125,7 @@ For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup 
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OP_VAULT` | No | None | 1Password vault name (triggers vault/environment mismatch guard) |
+| *(vault)* | — | — | Vault name is auto-derived from `APP_ENVIRONMENT` (e.g. `development` -> `syn137-dev`). No manual override needed. |
 | `OP_SERVICE_ACCOUNT_TOKEN` | For 1Password | None | Service account token for headless secret resolution |
 
 ## Example .env File

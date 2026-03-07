@@ -55,6 +55,8 @@ services:
       SYN_STORAGE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       SYN_STORAGE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       # 1Password-managed secrets: shell env (from resolve_env.sh) overrides env_file
+      SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
+      SYN_GITHUB_APP_NAME: ${SYN_GITHUB_APP_NAME:-}
       SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
       SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

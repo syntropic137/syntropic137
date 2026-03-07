@@ -64,6 +64,7 @@ ENV_GITHUB_APP_ID = "SYN_GITHUB_APP_ID"
 ENV_GITHUB_APP_NAME = "SYN_GITHUB_APP_NAME"
 ENV_GITHUB_PRIVATE_KEY = "SYN_GITHUB_PRIVATE_KEY"
 ENV_GITHUB_WEBHOOK_SECRET = "SYN_GITHUB_WEBHOOK_SECRET"
+ENV_SYN_API_PASSWORD = "SYN_API_PASSWORD"
 
 # ---------------------------------------------------------------------------
 # API routing constants
@@ -85,6 +86,7 @@ COMPOSE_BASE = DOCKER_DIR / "docker-compose.yaml"
 COMPOSE_SELFHOST = DOCKER_DIR / "docker-compose.selfhost.yaml"
 COMPOSE_CLOUDFLARE = DOCKER_DIR / "docker-compose.cloudflare.yaml"
 COMPOSE_DEV = DOCKER_DIR / "docker-compose.dev.yaml"
+COMPOSE_DEV_CLOUDFLARE = DOCKER_DIR / "docker-compose.dev-cloudflare.yaml"
 
 # Default project name prefix — environment is appended at runtime
 DEFAULT_PROJECT_NAME = "syntropic137"

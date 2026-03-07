@@ -61,6 +61,7 @@ class EventType(str, Enum):
     SESSION_STARTED = "session_started"
     SESSION_ENDED = "session_ended"
     AGENT_STOPPED = "agent_stopped"
+    SUBAGENT_STARTED = "subagent_started"
     SUBAGENT_STOPPED = "subagent_stopped"
 
     # Tool execution

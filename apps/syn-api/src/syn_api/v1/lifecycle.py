@@ -192,8 +192,11 @@ def validate_credentials(
 
     # Export Anthropic API key if available (needed for agent execution, not dashboard)
     api_key = settings.anthropic_api_key
+    has_oauth = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"))
     if api_key:
         os.environ["ANTHROPIC_API_KEY"] = api_key.get_secret_value()
+    elif has_oauth:
+        logger.info("Using CLAUDE_CODE_OAUTH_TOKEN for agent execution (no ANTHROPIC_API_KEY)")
     elif not settings.is_test:
         logger.warning(
             "ANTHROPIC_API_KEY not configured — agent execution disabled. "

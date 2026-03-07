@@ -249,7 +249,6 @@ class TestTriggerValueObjects:
         assert config.budget_per_trigger_usd == 5.00
         assert config.daily_limit == 20
         assert config.cooldown_seconds == 300
-        assert config.skip_if_sender_is_bot is True
 
     def test_trigger_config_validation(self) -> None:
         """Test TriggerConfig validation."""

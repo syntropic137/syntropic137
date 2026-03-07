@@ -34,6 +34,7 @@ HOOK_EVENT_MAP: dict[str, EventType] = {
     "session_started": EventType.SESSION_STARTED,
     "session_ended": EventType.SESSION_ENDED,
     "agent_stopped": EventType.AGENT_STOPPED,
+    "subagent_started": EventType.SUBAGENT_STARTED,
     "subagent_stopped": EventType.SUBAGENT_STOPPED,
     # Tool execution events
     "tool_execution_started": EventType.TOOL_EXECUTION_STARTED,
@@ -59,6 +60,7 @@ HOOK_EVENT_MAP: dict[str, EventType] = {
     "session-end": EventType.SESSION_ENDED,
     "user-prompt": EventType.USER_PROMPT_SUBMITTED,
     "stop": EventType.AGENT_STOPPED,
+    "subagent-start": EventType.SUBAGENT_STARTED,
     "subagent-stop": EventType.SUBAGENT_STOPPED,
     "notification": EventType.NOTIFICATION_SENT,
 }
@@ -294,8 +296,12 @@ class HookWatcher(BaseWatcher):
             prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
             return generate_user_prompt_event_id(session_id, timestamp, prompt_hash)
 
-        # Stop events (agent/subagent)
-        elif event_type in (EventType.AGENT_STOPPED, EventType.SUBAGENT_STOPPED):
+        # Stop/start events (agent/subagent)
+        elif event_type in (
+            EventType.AGENT_STOPPED,
+            EventType.SUBAGENT_STARTED,
+            EventType.SUBAGENT_STOPPED,
+        ):
             return generate_stop_event_id(session_id, timestamp, event_type.value)
 
         # Notification events

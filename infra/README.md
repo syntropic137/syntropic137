@@ -91,7 +91,7 @@ docker-compose.yaml              # Base: images, env, health checks, dependencie
 ### Step 1: Clone with submodules
 
 ```bash
-git clone --recurse-submodules https://github.com/agentparadise/syntropic137.git
+git clone --recurse-submodules https://github.com/syntropic137/syntropic137.git
 cd syntropic137
 ```
 
@@ -448,7 +448,7 @@ The `docker-compose.cloudflare.yaml` overlay:
 
 | Public hostname | Service | Description |
 |----------------|---------|-------------|
-| `syn.yourdomain.com` | `http://gateway:80` | Dashboard UI + API |
+| `syn.yourdomain.com` | `http://gateway:8081` | Dashboard UI + API |
 
 **3. Set environment variables** in `infra/.env`:
 
@@ -592,7 +592,7 @@ If secrets are not being resolved from 1Password:
    echo $SYN_GITHUB_APP_ID  # Should show the value from 1Password
    ```
 
-3. Verify the 1Password item name is exactly `syntropic137-config` in the vault specified by `OP_VAULT`.
+3. Verify the 1Password item name is exactly `syntropic137-config` in the vault derived from `APP_ENVIRONMENT` (e.g., `development` -> `syn137-dev`).
 
 ### Services Unhealthy After Startup
 

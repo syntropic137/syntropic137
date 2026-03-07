@@ -34,7 +34,6 @@ SELF_HEALING_PRESET = {
         ("budget_per_trigger_usd", 5.00),
         ("daily_limit", 20),
         ("cooldown_seconds", 300),
-        ("skip_if_sender_is_bot", True),
     ),
 }
 
@@ -61,7 +60,6 @@ REVIEW_FIX_PRESET = {
         ("daily_limit", 10),
         ("debounce_seconds", 60),
         ("cooldown_seconds", 600),
-        ("skip_if_sender_is_bot", True),
     ),
 }
 
@@ -90,7 +88,6 @@ COMMENT_COMMAND_PRESET = {
         ("budget_per_trigger_usd", 10.00),
         ("daily_limit", 30),
         ("cooldown_seconds", 60),
-        ("skip_if_sender_is_bot", True),
     ),
 }
 

@@ -62,6 +62,8 @@ contexts:
     description: "Artifact storage, metadata, and retrieval"
   github:
     description: "GitHub App integration, installation tokens, and secure credential management"
+  organization:
+    description: "Organization, system, and repo management"
   # DEPRECATED: These contexts are being phased out (see ADR-020)
   # workflows:
   #   description: "DEPRECATED - Use orchestration"
