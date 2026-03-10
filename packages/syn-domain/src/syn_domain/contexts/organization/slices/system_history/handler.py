@@ -55,7 +55,7 @@ class GetSystemHistoryHandler:
 
     async def handle(self, query: GetSystemHistoryQuery) -> list[RepoActivityEntry]:
         """Handle GetSystemHistoryQuery."""
-        # TODO(#176): Implement time-window filtering
+        # TODO(#200): Implement time-window filtering
         execution_ids = await self._get_execution_ids_for_system(query.system_id)
         if not execution_ids:
             return []

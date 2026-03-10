@@ -146,7 +146,7 @@ class GetSystemPatternsHandler:
 
     async def handle(self, query: GetSystemPatternsQuery) -> SystemPatterns:
         """Handle GetSystemPatternsQuery."""
-        # TODO(#176): Implement time-window filtering
+        # TODO(#200): Implement time-window filtering
         system = self._system_projection.get(query.system_id)
         system_name = system.name if system else ""
 

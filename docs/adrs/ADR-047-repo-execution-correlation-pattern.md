@@ -80,7 +80,7 @@ These are the foundation for all repo-level insight queries in ADR-046.
 ### Negative
 
 - Executions that are not triggered by GitHub and do not include a `repository_url` in template inputs will have no repo correlation (acceptable -- these are repo-agnostic by definition)
-- Query methods currently scan all records; indexing by execution_id and repo_full_name is a future optimization -- TODO(#176)
+- Query methods currently scan all records; indexing by execution_id and repo_full_name is a future optimization -- TODO(#200)
 
 ### Neutral
 

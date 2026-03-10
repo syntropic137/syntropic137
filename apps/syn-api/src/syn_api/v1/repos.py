@@ -242,7 +242,9 @@ async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
 
     mgr = get_projection_mgr()
     handler = GetRepoHealthHandler(projection=mgr.repo_health)
-    result = await handler.handle(GetRepoHealthQuery(repo_id=repo_id))
+    result = await handler.handle(
+        GetRepoHealthQuery(repo_id=repo_id, repo_full_name=repo_result.value.full_name)
+    )
     return Ok(dict(result.to_dict()))
 
 
@@ -264,7 +266,9 @@ async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
 
     mgr = get_projection_mgr()
     handler = GetRepoCostHandler(projection=mgr.repo_cost)
-    result = await handler.handle(GetRepoCostQuery(repo_id=repo_id))
+    result = await handler.handle(
+        GetRepoCostQuery(repo_id=repo_id, repo_full_name=repo_result.value.full_name)
+    )
     return Ok(dict(result.to_dict()))
 
 
