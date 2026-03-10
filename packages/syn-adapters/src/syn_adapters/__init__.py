@@ -1,7 +1,7 @@
 """External integrations for Syntropic137.
 
 This package provides adapters for:
-- AI Agents (Claude, OpenAI) - see `syn_adapters.agents`
+- AI Agents (Claude) - see `syn_adapters.agents`
 - Storage (PostgreSQL, In-Memory) - see `syn_adapters.storage`
 - Object Storage (Local, MinIO, Supabase) - see `syn_adapters.object_storage`
 - Events (Event storage and buffering) - see `syn_adapters.events`

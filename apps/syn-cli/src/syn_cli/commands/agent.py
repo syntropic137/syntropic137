@@ -64,7 +64,7 @@ def list_providers() -> None:
 def test_agent(
     provider: Annotated[
         str,
-        typer.Option("--provider", "-p", help="Agent provider (claude, openai, mock)"),
+        typer.Option("--provider", "-p", help="Agent provider (claude, mock)"),
     ] = "claude",
     prompt: Annotated[
         str,

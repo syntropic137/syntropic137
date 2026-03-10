@@ -112,31 +112,46 @@ async def unassign_repo_from_system(repo_id: str) -> dict[str, Any]:
 @router.get("/{repo_id}/health")
 async def get_repo_health(repo_id: str) -> dict[str, Any]:
     """Get health snapshot for a repo."""
-    return await repo_ops.get_repo_health(repo_id)
+    result = await repo_ops.get_repo_health(repo_id)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=result.message)
+    return result.value
 
 
 @router.get("/{repo_id}/cost")
 async def get_repo_cost(repo_id: str) -> dict[str, Any]:
     """Get cost breakdown for a repo."""
-    return await repo_ops.get_repo_cost(repo_id)
+    result = await repo_ops.get_repo_cost(repo_id)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=result.message)
+    return result.value
 
 
 @router.get("/{repo_id}/activity")
 async def get_repo_activity(repo_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
     """Get execution timeline for a repo."""
-    entries = await repo_ops.get_repo_activity(repo_id, offset=offset, limit=limit)
+    result = await repo_ops.get_repo_activity(repo_id, offset=offset, limit=limit)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=result.message)
+    entries = result.value
     return {"entries": entries, "total": len(entries)}
 
 
 @router.get("/{repo_id}/failures")
 async def get_repo_failures(repo_id: str, limit: int = 50) -> dict[str, Any]:
     """Get recent failures for a repo."""
-    entries = await repo_ops.get_repo_failures(repo_id, limit=limit)
+    result = await repo_ops.get_repo_failures(repo_id, limit=limit)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=result.message)
+    entries = result.value
     return {"failures": entries, "total": len(entries)}
 
 
 @router.get("/{repo_id}/sessions")
 async def get_repo_sessions(repo_id: str, limit: int = 50) -> dict[str, Any]:
     """Get agent sessions for a repo."""
-    sessions = await repo_ops.get_repo_sessions(repo_id, limit=limit)
+    result = await repo_ops.get_repo_sessions(repo_id, limit=limit)
+    if isinstance(result, Err):
+        raise HTTPException(status_code=404, detail=result.message)
+    sessions = result.value
     return {"sessions": sessions, "total": len(sessions)}

@@ -16,5 +16,5 @@ class GetRepoCostHandler:
 
     async def handle(self, query: GetRepoCostQuery) -> RepoCost:
         """Handle GetRepoCostQuery."""
-        # TODO(#176): Look up repo_full_name from repo_id via RepoProjection
-        return await self.projection.get_cost(query.repo_id)
+        key = query.repo_full_name or query.repo_id
+        return await self.projection.get_cost(key)

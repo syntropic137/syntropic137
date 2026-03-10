@@ -39,7 +39,6 @@ SYN_OBSERVABILITY_DB_URL=           # Observability database URL
 
 # Agent API Keys
 ANTHROPIC_API_KEY=                   # Required for Claude provider
-OPENAI_API_KEY=                      # Required for OpenAI provider
 
 # Workspace
 SYN_WORKSPACE_CONTAINER_DIR=        # Container workspace directory
@@ -116,7 +115,6 @@ async def get_config(
         "anthropic_api_key": _mask(settings.anthropic_api_key)
         if settings.anthropic_api_key
         else "",
-        "openai_api_key": _mask(settings.openai_api_key) if settings.openai_api_key else "",
         "default_agent_timeout_seconds": settings.default_agent_timeout_seconds,
         "default_max_tokens": settings.default_max_tokens,
     }
@@ -162,15 +160,6 @@ async def validate_config(
                 message="ANTHROPIC_API_KEY not set — Claude provider unavailable",
             )
         )
-    if not settings.openai_api_key:
-        issues.append(
-            ConfigIssue(
-                level="info",
-                category="agents",
-                message="OPENAI_API_KEY not set — OpenAI provider unavailable",
-            )
-        )
-
     # Check database
     if not settings.esp_event_store_db_url:
         issues.append(

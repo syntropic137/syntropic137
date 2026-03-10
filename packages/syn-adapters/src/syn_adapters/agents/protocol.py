@@ -1,6 +1,6 @@
 """Agent protocol - defines the interface for AI agent adapters.
 
-All agent adapters (Claude, OpenAI, etc.) must implement this protocol.
+All agent adapters (Claude, etc.) must implement this protocol.
 This enables dependency injection and easy testing with mock agents.
 """
 
@@ -26,7 +26,6 @@ class AgentProvider(str, Enum):
     """Supported AI agent providers."""
 
     CLAUDE = "claude"
-    OPENAI = "openai"
     MOCK = "mock"  # For testing
 
 
