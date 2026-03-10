@@ -213,6 +213,7 @@ markers = [
     "integration: Integration tests (may use Docker services)",
     "e2e: End-to-end tests (full system)",
     "regression: Regression tests for known bugs",
+    "architecture: Architectural fitness functions (CI-enforced structural checks)",
 ]
 
 [tool.coverage.run]

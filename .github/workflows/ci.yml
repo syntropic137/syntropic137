@@ -62,6 +62,9 @@ jobs:
       - name: Check test debt
         run: uv run python scripts/check_test_debt.py
 
+      - name: Architectural fitness functions
+        run: uv run pytest ci/fitness/ -v --tb=short -m architecture
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################
