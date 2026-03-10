@@ -717,12 +717,12 @@ import-check:
     @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck test dashboard-qa test-debt vsa-validate docs-sync
+qa: lint format typecheck test dashboard-qa test-debt vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate docs-sync
+qa-full: lint format typecheck test-cov dashboard-qa vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
@@ -747,6 +747,41 @@ vsa-validate:
     @echo "🔍 Running VSA validation..."
     vsa validate
     @echo "✅ VSA validation passed"
+
+# --- Topology (APS Code Topology Standard) ---
+
+# Path to APS CLI binary
+_aps_bin := "lib/agent-paradise-standards-system/target/release/aps"
+
+# Build APS CLI (cached — only rebuilds when source changes)
+aps-build:
+    @if [ ! -f {{_aps_bin}} ] || [ lib/agent-paradise-standards-system/Cargo.lock -nt {{_aps_bin}} ]; then \
+        echo "🔨 Building APS CLI..."; \
+        cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli; \
+    else \
+        echo "✅ APS CLI already built"; \
+    fi
+
+# Regenerate .topology/ artifacts from current codebase
+topology-analyze: aps-build
+    @echo "🔍 Analyzing codebase topology..."
+    {{_aps_bin}} run topology analyze . --output .topology --seed 42
+    @echo "✅ Topology artifacts generated"
+
+# Generate CodeCity and 3D visualizations
+topology-viz: aps-build
+    @echo "🎨 Generating topology visualizations..."
+    {{_aps_bin}} run topology viz .topology --type all --output .topology/viz/
+    @echo "✅ Visualizations generated in .topology/viz/"
+
+# Full topology regeneration (analyze + visualize)
+topology: topology-analyze topology-viz
+
+# Check if .topology/ is up-to-date (fast: manifest timestamp check)
+topology-check: aps-build
+    @echo "🔍 Checking topology freshness..."
+    {{_aps_bin}} run topology validate .topology
+    @echo "✅ Topology artifacts valid"
 
 # Pre-merge validation (all checks before opening PR)
 validate-pre-merge quick="":
