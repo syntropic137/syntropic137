@@ -130,6 +130,53 @@ class ArtifactCollector:
                 ctx.completed_phase_ids,
             )
 
+    async def inject_from_previous_phases_explicit(
+        self,
+        workspace: ArtifactWorkspace,
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+    ) -> None:
+        """Inject artifacts using explicit parameters (ISS-196).
+
+        Same logic as inject_from_previous_phases but without ExecutionContext.
+        Used by WorkspaceProvisionHandler in the Processor To-Do List pattern.
+        """
+        if not completed_phase_ids:
+            return
+
+        outputs: dict[str, str] = {}
+
+        # 1. Get from in-memory cache
+        for pid in completed_phase_ids:
+            if pid in phase_outputs:
+                outputs[pid] = phase_outputs[pid]
+
+        # 2. Query projection for missing
+        missing = [pid for pid in completed_phase_ids if pid not in outputs]
+        if missing and self._query_service:
+            projection_outputs = await self._query_service.get_for_phase_injection(
+                execution_id="",  # Not available in explicit mode
+                completed_phase_ids=missing,
+            )
+            outputs.update(projection_outputs)
+
+        files_to_inject = [
+            (f"artifacts/input/{prev_id}.md", content.encode())
+            for prev_id, content in outputs.items()
+        ]
+        if files_to_inject:
+            await workspace.inject_files(files_to_inject)
+            logger.info(
+                "Injected %d artifact(s) from previous phases: %s",
+                len(files_to_inject),
+                list(outputs.keys()),
+            )
+        elif completed_phase_ids:
+            logger.warning(
+                "No artifacts found for completed phases: %s",
+                completed_phase_ids,
+            )
+
     async def collect_from_workspace(
         self,
         workspace: ArtifactWorkspace,

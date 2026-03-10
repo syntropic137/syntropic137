@@ -28,3 +28,7 @@ class WorkflowExecutionStartedEvent(DomainEvent):
     # Expected completion time (for stale detection)
     # Calculated as: started_at + sum of all phase timeouts + buffer
     expected_completion_at: datetime | None = None
+
+    # Phase definitions for aggregate-level sequencing (ISS-196)
+    # Optional for backward compatibility — when absent, aggregate does not sequence.
+    phase_definitions: list[dict[str, Any]] | None = None

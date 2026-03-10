@@ -1,9 +1,10 @@
 """Event stream processor for workflow execution.
 
 Processes Claude CLI JSONL output stream, dispatching events to
-TokenAccumulator, SubagentTracker, and observability writer.
+TokenAccumulator, SubagentTracker, and ObservabilityCollector.
 
 Extracted from WorkflowExecutionEngine._execute_phase_in_container().
+Refactored in ISS-196 to delegate telemetry to ObservabilityCollector (Lane 2).
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+        ObservabilityCollector,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
         SubagentTracker,
     )
@@ -71,7 +75,7 @@ class EventStreamProcessor:
     """Processes Claude CLI JSONL event stream.
 
     Dispatches events to TokenAccumulator and SubagentTracker,
-    records observations, and accumulates conversation lines.
+    delegates telemetry recording to ObservabilityCollector (Lane 2).
     """
 
     def __init__(
@@ -85,16 +89,33 @@ class EventStreamProcessor:
         session_id: str,
         workspace_id: str | None,
         agent_model: str,
+        collector: ObservabilityCollector | None = None,
     ) -> None:
         self._tokens = tokens
         self._subagents = subagents
-        self._observability = observability
         self._controller = controller
         self._execution_id = execution_id
         self._phase_id = phase_id
         self._session_id = session_id
         self._workspace_id = workspace_id
         self._agent_model = agent_model
+
+        # ISS-196: Use collector if provided, else create one from raw writer
+        if collector is not None:
+            self._collector = collector
+        else:
+            from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+                ObservabilityCollector as OC,
+            )
+
+            self._collector = OC(
+                writer=observability,
+                session_id=session_id,
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+                agent_model=agent_model,
+            )
 
     async def process_stream(
         self,
@@ -267,24 +288,10 @@ class EventStreamProcessor:
         )
         logger.debug("Hook event: %s", enriched.get("event_type"))
 
-        # Store via observability writer
-        if self._observability is not None:
-            hook_data = {
-                **(enriched.get("context") or {}),
-                **(enriched.get("metadata") or {}),
-            }
-            await self._observability.record_observation(
-                session_id=self._session_id,
-                observation_type=enriched.get("event_type", "unknown"),
-                data=hook_data,
-                execution_id=self._execution_id,
-                phase_id=self._phase_id,
-                workspace_id=self._workspace_id,
-            )
+        # Lane 2: Record via collector
+        await self._collector.record_hook_event(enriched)
 
         # ADR-037: Detect subagent lifecycle from Task tool events.
-        # Hook events use "event_type" (not "type") with values from
-        # agentic_events.types.EventType (e.g. "tool_execution_started").
         hook_event_type = hook_event.get("event_type", "")
         ctx_data = enriched.get("context", {})
         tool_name = ctx_data.get("tool_name", "")
@@ -302,48 +309,18 @@ class EventStreamProcessor:
             if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
                 input_preview = ctx_data.get("input_preview", "")
                 event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
-                if self._observability is not None:
-                    await self._observability.record_observation(
-                        session_id=self._session_id,
-                        observation_type=ObservationType.SUBAGENT_STARTED,
-                        data={
-                            "agent_name": event.agent_name,
-                            "subagent_tool_use_id": tool_use_id,
-                        },
-                        execution_id=self._execution_id,
-                        phase_id=self._phase_id,
-                        workspace_id=self._workspace_id,
-                    )
-                    logger.info(
-                        "Subagent started: %s (id=%s)",
-                        event.agent_name,
-                        tool_use_id,
-                    )
+                await self._collector.record_subagent_started(event.agent_name, tool_use_id)
 
             elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
                 success = ctx_data.get("success", True)
                 stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
-                if stopped_event and self._observability is not None:
-                    await self._observability.record_observation(
-                        session_id=self._session_id,
-                        observation_type=ObservationType.SUBAGENT_STOPPED,
-                        data={
-                            "agent_name": stopped_event.agent_name,
-                            "subagent_tool_use_id": tool_use_id,
-                            "duration_ms": stopped_event.duration_ms,
-                            "success": stopped_event.success,
-                            "tools_used": stopped_event.tools_used,
-                        },
-                        execution_id=self._execution_id,
-                        phase_id=self._phase_id,
-                        workspace_id=self._workspace_id,
-                    )
-                    logger.info(
-                        "Subagent stopped: %s (id=%s, duration=%dms, tools=%s)",
-                        stopped_event.agent_name,
-                        tool_use_id,
-                        stopped_event.duration_ms or 0,
-                        stopped_event.tools_used,
+                if stopped_event:
+                    await self._collector.record_subagent_stopped(
+                        agent_name=stopped_event.agent_name,
+                        tool_use_id=tool_use_id,
+                        duration_ms=stopped_event.duration_ms,
+                        success=stopped_event.success,
+                        tools_used=stopped_event.tools_used,
                     )
 
     async def _process_cli_event(self, line: str) -> dict[str, Any] | None:
@@ -405,28 +382,12 @@ class EventStreamProcessor:
         if input_tokens > 0 or output_tokens > 0:
             self._tokens.record(input_tokens, output_tokens)
 
-            if self._observability is not None:
-                cache_creation = usage.get("cache_creation_input_tokens", 0)
-                cache_read = usage.get("cache_read_input_tokens", 0)
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=ObservationType.TOKEN_USAGE,
-                    data={
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "cache_creation_tokens": cache_creation,
-                        "cache_read_tokens": cache_read,
-                        "model": self._agent_model,
-                    },
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Result token usage: %d in, %d out",
-                    input_tokens,
-                    output_tokens,
-                )
+            cache_creation = usage.get("cache_creation_input_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            await self._collector.record_token_usage(
+                input_tokens, output_tokens, cache_creation, cache_read,
+            )
+            logger.info("Result token usage: %d in, %d out", input_tokens, output_tokens)
 
         return task_result
 
@@ -444,30 +405,18 @@ class EventStreamProcessor:
             if input_tokens > 0 or output_tokens > 0:
                 self._tokens.record(input_tokens, output_tokens)
 
-                if self._observability is not None:
-                    cache_creation = usage.get("cache_creation_input_tokens", 0)
-                    cache_read = usage.get("cache_read_input_tokens", 0)
-                    await self._observability.record_observation(
-                        session_id=self._session_id,
-                        observation_type=ObservationType.TOKEN_USAGE,
-                        data={
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                            "cache_creation_tokens": cache_creation,
-                            "cache_read_tokens": cache_read,
-                            "model": self._agent_model,
-                        },
-                        execution_id=self._execution_id,
-                        phase_id=self._phase_id,
-                        workspace_id=self._workspace_id,
-                    )
-                    logger.info(
-                        "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
-                        input_tokens,
-                        output_tokens,
-                        cache_read,
-                        cache_creation,
-                    )
+                cache_creation = usage.get("cache_creation_input_tokens", 0)
+                cache_read = usage.get("cache_read_input_tokens", 0)
+                await self._collector.record_token_usage(
+                    input_tokens, output_tokens, cache_creation, cache_read,
+                )
+                logger.info(
+                    "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
+                    input_tokens,
+                    output_tokens,
+                    cache_read,
+                    cache_creation,
+                )
 
         # Process tool_use items
         for item in content:
@@ -488,41 +437,17 @@ class EventStreamProcessor:
         # Cache tool_name for enriching tool_result events
         self._subagents.register_tool_use(tool_use_id, tool_name)
 
-        if self._observability is not None:
-            await self._observability.record_observation(
-                session_id=self._session_id,
-                observation_type=ObservationType.TOOL_EXECUTION_STARTED,
-                data={
-                    "tool_name": tool_name,
-                    "tool_use_id": tool_use_id,
-                    "input_preview": json.dumps(tool_input)[:500],
-                },
-                execution_id=self._execution_id,
-                phase_id=self._phase_id,
-                workspace_id=self._workspace_id,
-            )
-            logger.debug("Tool started: %s", tool_name)
+        await self._collector.record_tool_started(
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            input_preview=json.dumps(tool_input)[:500],
+        )
+        logger.debug("Tool started: %s", tool_name)
 
         # ADR-037: Detect Task/Agent tool as subagent start (raw CLI format)
         if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
             event = self._subagents.on_task_started(tool_use_id, tool_input)
-            if self._observability is not None:
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=ObservationType.SUBAGENT_STARTED,
-                    data={
-                        "agent_name": event.agent_name,
-                        "subagent_tool_use_id": tool_use_id,
-                    },
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Subagent started (CLI): %s (id=%s)",
-                    event.agent_name,
-                    tool_use_id,
-                )
+            await self._collector.record_subagent_started(event.agent_name, tool_use_id)
 
     async def _handle_user_event(self, cli_event: dict[str, Any]) -> None:
         """Handle user event — process tool results."""
@@ -548,7 +473,7 @@ class EventStreamProcessor:
         tool_name = self._subagents.resolve_tool_name(tool_use_id)
 
         # Scan tool output for embedded git hook JSONL (ADR-043)
-        if tool_content and self._observability is not None:
+        if tool_content:
             for tl in str(tool_content).splitlines():
                 tl = tl.strip()
                 if not tl:
@@ -565,18 +490,7 @@ class EventStreamProcessor:
                     execution_id=self._execution_id,
                     phase_id=self._phase_id,
                 )
-                hd = {
-                    **(enriched.get("context") or {}),
-                    **(enriched.get("metadata") or {}),
-                }
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=et,
-                    data=hd,
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
+                await self._collector.record_embedded_event(et, enriched)
                 logger.info(
                     "Git hook event from tool output: %s (tool=%s)",
                     et,
@@ -584,52 +498,25 @@ class EventStreamProcessor:
                 )
 
         # Record tool completion
-        if self._observability is not None:
-            await self._observability.record_observation(
-                session_id=self._session_id,
-                observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
-                data={
-                    "tool_name": tool_name,
-                    "tool_use_id": tool_use_id,
-                    "success": not is_error,
-                    "output_preview": output_preview,
-                },
-                execution_id=self._execution_id,
-                phase_id=self._phase_id,
-                workspace_id=self._workspace_id,
-            )
-            logger.debug(
-                "Tool completed: %s (%s) success=%s",
-                tool_use_id,
-                tool_name,
-                not is_error,
-            )
+        await self._collector.record_tool_completed(
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            success=not is_error,
+            output_preview=output_preview,
+        )
+        logger.debug("Tool completed: %s (%s) success=%s", tool_use_id, tool_name, not is_error)
 
         # ADR-037: Detect Task/Agent tool completion as subagent stop (raw CLI format)
         _is_subagent = tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
         if _is_subagent:
             event = self._subagents.on_task_completed(tool_use_id, success=not is_error)
-            if event and self._observability is not None:
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=ObservationType.SUBAGENT_STOPPED,
-                    data={
-                        "agent_name": event.agent_name,
-                        "subagent_tool_use_id": tool_use_id,
-                        "duration_ms": event.duration_ms,
-                        "success": event.success,
-                        "tools_used": event.tools_used,
-                    },
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Subagent stopped (CLI): %s (id=%s, duration=%dms, tools=%s)",
-                    event.agent_name,
-                    tool_use_id,
-                    event.duration_ms or 0,
-                    event.tools_used,
+            if event:
+                await self._collector.record_subagent_stopped(
+                    agent_name=event.agent_name,
+                    tool_use_id=tool_use_id,
+                    duration_ms=event.duration_ms,
+                    success=event.success,
+                    tools_used=event.tools_used,
                 )
         elif not _is_subagent:
             # Attribute non-subagent tool to the most recently started subagent
