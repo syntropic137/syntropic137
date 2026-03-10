@@ -7,6 +7,7 @@ membership, sorted chronologically (oldest first).
 from datetime import UTC
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.queries.get_system_history import (
     GetSystemHistoryQuery,
 )
@@ -49,7 +50,7 @@ class GetSystemHistoryHandler:
         repos = self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
-        correlations = await self._store.get_all("repo_correlation")
+        correlations = await self._store.get_all(REPO_CORRELATION)
         return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
 
     async def handle(self, query: GetSystemHistoryQuery) -> list[RepoActivityEntry]:

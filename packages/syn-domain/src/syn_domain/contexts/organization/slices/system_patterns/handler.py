@@ -9,6 +9,10 @@ from statistics import median
 from typing import Any
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_CORRELATION,
+    REPO_COST,
+)
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
 )
@@ -44,7 +48,7 @@ class GetSystemPatternsHandler:
         repos = self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
-        correlations = await self._store.get_all("repo_correlation")
+        correlations = await self._store.get_all(REPO_CORRELATION)
         return {
             c["execution_id"]: c["repo_full_name"]
             for c in correlations
@@ -110,7 +114,7 @@ class GetSystemPatternsHandler:
         costs: list[tuple[str, Decimal]] = []
 
         for repo in repos:
-            cost_data = await self._store.get("repo_cost", repo.full_name)
+            cost_data = await self._store.get(REPO_COST, repo.full_name)
             if not cost_data:
                 continue
             rc = RepoCost.from_dict(cost_data)

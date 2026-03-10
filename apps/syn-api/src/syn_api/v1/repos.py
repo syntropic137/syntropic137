@@ -336,7 +336,7 @@ async def get_repo_sessions(
 
     handler = GetRepoSessionsHandler(store=get_projection_store())
     results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
-    return Ok(list(results))
+    return Ok([r.to_dict() for r in results])
 
 
 def _classify_repo_error(error_msg: str) -> RepoError:

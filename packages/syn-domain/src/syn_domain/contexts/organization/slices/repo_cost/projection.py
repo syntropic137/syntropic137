@@ -13,6 +13,10 @@ from typing import Any
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_CORRELATION,
+    REPO_COST,
+)
 from syn_domain.contexts.organization.domain.read_models.repo_cost import RepoCost
 
 logger = logging.getLogger(__name__)
@@ -27,7 +31,7 @@ class RepoCostProjection(AutoDispatchProjection):
     repo-execution correlation from the shared ProjectionStore.
     """
 
-    PROJECTION_NAME = "repo_cost"
+    PROJECTION_NAME = REPO_COST
     VERSION = 1
 
     def __init__(self, store: Any) -> None:
@@ -47,7 +51,7 @@ class RepoCostProjection(AutoDispatchProjection):
     async def _get_correlated_repos(self, execution_id: str) -> list[str]:
         """Look up repos for an execution from the correlation store."""
         correlations = await self._store.query(
-            "repo_correlation", filters={"execution_id": execution_id}
+            REPO_CORRELATION, filters={"execution_id": execution_id}
         )
         return [c["repo_full_name"] for c in correlations]
 
@@ -91,7 +95,7 @@ class RepoCostProjection(AutoDispatchProjection):
         by_wf[workflow_id] = str(wf_cost + Decimal(cost_usd))
         data["cost_by_workflow"] = by_wf
 
-        # TODO(#176): cost_by_model requires per-model token/cost breakdowns from
+        # TODO(#199): cost_by_model requires per-model token/cost breakdowns from
         # workflow events, which are not yet available. This field will remain empty
         # until events carry model-level granularity.
 

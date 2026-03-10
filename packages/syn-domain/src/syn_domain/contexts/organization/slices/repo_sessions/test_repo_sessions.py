@@ -51,7 +51,10 @@ class TestGetRepoSessionsHandler:
 
         result = await handler.handle(GetRepoSessionsQuery(repo_id="acme/api"))
         assert len(result) == 1
-        assert result[0]["id"] == "sess-1"
+        assert result[0].id == "sess-1"
+        assert result[0].execution_id == "exec-1"
+        assert result[0].status == "completed"
+        assert result[0].started_at == "2026-03-06T10:00:00"
 
     @pytest.mark.asyncio
     async def test_empty_for_unknown_repo(self) -> None:
