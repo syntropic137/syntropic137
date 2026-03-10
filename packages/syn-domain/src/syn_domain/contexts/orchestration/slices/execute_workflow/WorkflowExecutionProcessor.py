@@ -11,10 +11,11 @@ See AGENTS.md "Projection Consistency in Processor Loops".
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -34,9 +35,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
-    ConversationRecorder,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
 )
@@ -52,11 +50,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityColl
 from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
     PhaseResultBuilder,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
-    TokenAccumulator,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
     SessionLifecycleManager,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
 )
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
@@ -67,9 +65,12 @@ from syn_domain.contexts.orchestration.slices.execution_todo.value_objects impor
 )
 
 if TYPE_CHECKING:
+    from contextlib import AbstractAsyncContextManager
+
     from syn_adapters.control import ExecutionController
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.service import WorkspaceService
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
@@ -89,11 +90,36 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class WorkflowExecutionRepository:
-    """Protocol for WorkflowExecution aggregate repository."""
+# -- Protocols for dependency injection --
+
+PromptBuilder = Callable[
+    [ExecutablePhase, str, str, str | None, dict[str, str]],
+    Awaitable[str],
+]
+"""async (phase, execution_id, workflow_id, repo_url, phase_outputs) -> prompt str"""
+
+CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
+"""(phase, prompt) -> claude CLI command list"""
+
+
+class ExecutionRepository(Protocol):
+    """Repository protocol for WorkflowExecution aggregates."""
 
     async def save(self, aggregate: WorkflowExecutionAggregate) -> None: ...
     async def get_by_id(self, execution_id: str) -> WorkflowExecutionAggregate | None: ...
+
+
+class SessionRepository(Protocol):
+    """Repository protocol for AgentSession aggregates."""
+
+    async def save(self, aggregate: AgentSessionAggregate) -> None: ...
+
+
+class ArtifactRepository(Protocol):
+    """Repository protocol for Artifact aggregates."""
+
+    async def save(self, aggregate: ArtifactAggregate) -> None: ...
+    async def get_by_id(self, artifact_id: str) -> ArtifactAggregate | None: ...
 
 
 @dataclass(frozen=True)
@@ -121,17 +147,17 @@ class WorkflowExecutionProcessor:
 
     def __init__(
         self,
-        execution_repository: Any,
-        session_repository: Any,
+        execution_repository: ExecutionRepository,
+        session_repository: SessionRepository,
         workspace_service: WorkspaceService,
-        artifact_repository: Any,
+        artifact_repository: ArtifactRepository,
         artifact_content_storage: ArtifactContentStoragePort | None,
         artifact_query: ArtifactQueryServiceProtocol | None,
         conversation_storage: ConversationStoragePort | None,
         observability_writer: ObservabilityRecorder | None,
         controller: ExecutionController | None,
-        prompt_builder: Any,
-        command_builder: Any,
+        prompt_builder: PromptBuilder,
+        command_builder: CommandBuilder,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -149,9 +175,10 @@ class WorkflowExecutionProcessor:
         self._todo_projection = ExecutionTodoProjection()
 
         # Infrastructure state (not domain state — ephemeral)
-        self._active_workspaces: dict[str, Any] = {}  # phase_id → workspace
-        self._active_envs: dict[str, dict[str, str]] = {}  # phase_id → env
-        self._active_cmds: dict[str, list[str]] = {}  # phase_id → cmd
+        self._active_workspaces: dict[str, ManagedWorkspace] = {}
+        self._active_workspace_cms: dict[str, AbstractAsyncContextManager[ManagedWorkspace]] = {}
+        self._active_envs: dict[str, dict[str, str]] = {}
+        self._active_cmds: dict[str, list[str]] = {}
 
     async def run(
         self,
@@ -300,20 +327,29 @@ class WorkflowExecutionProcessor:
         phase = phase_map[todo.phase_id]
 
         if todo.action == TodoAction.PROVISION_WORKSPACE:
-            await self._handle_provision(todo, phase, aggregate, repo_url,
-                                         completed_phase_ids, phase_outputs)
+            await self._handle_provision(
+                todo, phase, aggregate, repo_url, completed_phase_ids, phase_outputs
+            )
 
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate)
 
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
             await self._handle_collect_artifacts(
-                todo, phase, aggregate, all_artifact_ids, phase_outputs,
+                todo,
+                phase,
+                aggregate,
+                all_artifact_ids,
+                phase_outputs,
             )
 
         elif todo.action == TodoAction.COMPLETE_PHASE:
             await self._handle_complete_phase(
-                todo, phase, aggregate, phase_results, completed_phase_ids,
+                todo,
+                phase,
+                aggregate,
+                phase_results,
+                completed_phase_ids,
             )
 
         elif todo.action == TodoAction.COMPLETE_EXECUTION:
@@ -357,7 +393,9 @@ class WorkflowExecutionProcessor:
 
         # Create provision handler and run
         artifacts = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query,
+            self._artifact_repo,
+            self._artifact_content_storage,
+            self._artifact_query,
         )
         provision_handler = WorkspaceProvisionHandler(
             workspace_service=self._workspace_service,
@@ -378,6 +416,7 @@ class WorkflowExecutionProcessor:
 
         # Store infrastructure state
         self._active_workspaces[todo.phase_id] = result.workspace
+        self._active_workspace_cms[todo.phase_id] = result.workspace_cm
         self._active_envs[todo.phase_id] = result.agent_env
         self._active_cmds[todo.phase_id] = result.claude_cmd
 
@@ -436,7 +475,9 @@ class WorkflowExecutionProcessor:
         workspace = self._active_workspaces[todo.phase_id]
 
         artifacts = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query,
+            self._artifact_repo,
+            self._artifact_content_storage,
+            self._artifact_query,
         )
         collection_handler = ArtifactCollectionHandler(artifact_collector=artifacts)
         result = await collection_handler.handle(
@@ -459,7 +500,7 @@ class WorkflowExecutionProcessor:
     async def _handle_complete_phase(
         self,
         todo: TodoItem,
-        phase: ExecutablePhase,
+        phase: ExecutablePhase,  # noqa: ARG002
         aggregate: WorkflowExecutionAggregate,
         phase_results: list[PhaseResult],
         completed_phase_ids: list[str],
@@ -499,6 +540,11 @@ class WorkflowExecutionProcessor:
         self._active_workspaces.pop(todo.phase_id, None)
         self._active_envs.pop(todo.phase_id, None)
         self._active_cmds.pop(todo.phase_id, None)
+
+        # Exit workspace context manager (destroys container)
+        workspace_cm = self._active_workspace_cms.pop(todo.phase_id, None)
+        if workspace_cm is not None:
+            await workspace_cm.__aexit__(None, None, None)
 
     async def _save_and_sync(self, aggregate: WorkflowExecutionAggregate) -> None:
         """Save aggregate and synchronously update local projection.

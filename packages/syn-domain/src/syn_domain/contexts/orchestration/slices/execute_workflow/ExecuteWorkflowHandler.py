@@ -1,43 +1,60 @@
-"""ExecuteWorkflow command handler - VSA compliance wrapper.
+"""ExecuteWorkflow command handler — VSA compliance wrapper.
 
-This handler satisfies VSA architectural requirements by providing a
-standalone handler class. The actual business logic lives in the
-WorkflowExecutionEngine.
+Delegates to WorkflowExecutionProcessor (ISS-196 Processor To-Do List pattern).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Protocol
+
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutablePhase,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    WorkflowNotFoundError,
+)
 
 if TYPE_CHECKING:
-    from .ExecuteWorkflowCommand import ExecuteWorkflowCommand
-    from .WorkflowExecutionEngine import WorkflowExecutionEngine, WorkflowExecutionResult
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
+    )
+    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+        ExecuteWorkflowCommand,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+        WorkflowExecutionProcessor,
+        WorkflowExecutionResult,
+    )
+
+logger = logging.getLogger(__name__)
+
+
+class WorkflowRepository(Protocol):
+    """Repository protocol for Workflow aggregates."""
+
+    async def get_by_id(self, workflow_id: str) -> WorkflowTemplateAggregate | None: ...
 
 
 class ExecuteWorkflowHandler:
     """Handler for ExecuteWorkflow command (VSA compliance).
 
-    This is a thin wrapper that delegates to the WorkflowExecutionEngine.
-    VSA requires this standalone handler class for architectural consistency.
-
-    The engine handles the actual orchestration:
-    - Workflow validation and loading
-    - Phase execution sequencing
-    - Agent coordination
-    - Artifact creation
-    - Metrics aggregation
-    - Event persistence
+    Loads the workflow template, extracts phases, and delegates
+    to WorkflowExecutionProcessor for event-driven execution.
     """
 
-    def __init__(self, execution_engine: WorkflowExecutionEngine) -> None:
-        """Initialize handler with execution engine.
+    def __init__(
+        self,
+        processor: WorkflowExecutionProcessor,
+        workflow_repository: WorkflowRepository,
+    ) -> None:
+        self._processor = processor
+        self._workflow_repo = workflow_repository
 
-        Args:
-            execution_engine: WorkflowExecutionEngine for orchestrating execution
-        """
-        self.execution_engine = execution_engine
-
-    async def handle(self, command: ExecuteWorkflowCommand) -> WorkflowExecutionResult:
+    async def handle(
+        self,
+        command: ExecuteWorkflowCommand,
+    ) -> WorkflowExecutionResult:
         """Handle ExecuteWorkflow command.
 
         Args:
@@ -48,13 +65,42 @@ class ExecuteWorkflowHandler:
 
         Raises:
             WorkflowNotFoundError: If workflow doesn't exist
-            ValidationError: If inputs are invalid
         """
-        # Delegate to execution engine
-        result = await self.execution_engine.execute(
+        workflow = await self._workflow_repo.get_by_id(command.aggregate_id)
+        if workflow is None:
+            raise WorkflowNotFoundError(command.aggregate_id)
+
+        phases = self._get_executable_phases(workflow)
+
+        result = await self._processor.run(
             workflow_id=command.aggregate_id,
+            workflow_name=workflow.name or "",
+            phases=phases,
             inputs=command.inputs,
-            execution_id=command.execution_id,
+            execution_id=command.execution_id or "",
+            repo_url=getattr(workflow, "_repository_url", None),
         )
 
         return result
+
+    @staticmethod
+    def _get_executable_phases(
+        workflow: WorkflowTemplateAggregate,
+    ) -> list[ExecutablePhase]:
+        """Convert workflow template phases to executable phases."""
+        executable_phases = []
+        for phase in workflow.phases:
+            executable_phases.append(
+                ExecutablePhase(
+                    phase_id=phase.phase_id,
+                    name=phase.name,
+                    order=phase.order,
+                    description=phase.description,
+                    prompt_template=phase.prompt_template or "",
+                    output_artifact_type=(
+                        phase.output_artifact_types[0] if phase.output_artifact_types else "text"
+                    ),
+                    timeout_seconds=phase.timeout_seconds,
+                )
+            )
+        return executable_phases

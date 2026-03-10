@@ -9,16 +9,21 @@ Reports ProvisionWorkspaceCompletedCommand to the aggregate.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Protocol
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING
 
+from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    ExecutablePhase,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     ProvisionWorkspaceCompletedCommand,
 )
 
 if TYPE_CHECKING:
-    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-        ExecutablePhase,
-    )
+    from contextlib import AbstractAsyncContextManager
+
+    from syn_adapters.workspace_backends.service import WorkspaceService
+    from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
     )
@@ -35,33 +40,29 @@ _SKIP_URLS = frozenset(
     }
 )
 
-
-class WorkspaceServiceProtocol(Protocol):
-    """Protocol for workspace creation."""
-
-    def create_workspace(
-        self,
-        execution_id: str,
-        workflow_id: str,
-        phase_id: str,
-        with_sidecar: bool = False,
-        inject_tokens: bool = False,
-    ) -> Any: ...
+# Callable types for dependency injection
+PromptBuilder = Callable[
+    [ExecutablePhase, str, str, str | None, dict[str, str]],
+    Awaitable[str],
+]
+CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
 class ProvisionResult:
     """Result of workspace provisioning."""
 
-    __slots__ = ("workspace", "agent_env", "claude_cmd", "command")
+    __slots__ = ("agent_env", "claude_cmd", "command", "workspace", "workspace_cm")
 
     def __init__(
         self,
-        workspace: Any,
+        workspace: ManagedWorkspace,
+        workspace_cm: AbstractAsyncContextManager[ManagedWorkspace],
         agent_env: dict[str, str],
         claude_cmd: list[str],
         command: ProvisionWorkspaceCompletedCommand,
     ) -> None:
         self.workspace = workspace
+        self.workspace_cm = workspace_cm  # async context manager for cleanup
         self.agent_env = agent_env
         self.claude_cmd = claude_cmd
         self.command = command
@@ -75,9 +76,9 @@ class WorkspaceProvisionHandler:
 
     def __init__(
         self,
-        workspace_service: WorkspaceServiceProtocol,
-        prompt_builder: Any,
-        command_builder: Any,
+        workspace_service: WorkspaceService,
+        prompt_builder: PromptBuilder,
+        command_builder: CommandBuilder,
     ) -> None:
         self._workspace_service = workspace_service
         self._prompt_builder = prompt_builder
@@ -113,13 +114,16 @@ class WorkspaceProvisionHandler:
 
         assert todo.phase_id is not None
 
-        workspace = await self._workspace_service.create_workspace(
+        workspace_cm = self._workspace_service.create_workspace(
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
             with_sidecar=False,
             inject_tokens=False,
         )
+
+        # Enter the async context manager
+        workspace = await workspace_cm.__aenter__()
 
         # Parse repo for secrets
         _repo = self._parse_repo(repo_url)
@@ -137,11 +141,15 @@ class WorkspaceProvisionHandler:
 
         # Inject artifacts from previous phases
         await artifacts.inject_from_previous_phases_explicit(
-            workspace, completed_phase_ids, phase_outputs,
+            workspace,
+            completed_phase_ids,
+            phase_outputs,
         )
 
         # Build prompt and CLI command
-        prompt = await self._prompt_builder(phase, todo.execution_id, workflow_id, repo_url, phase_outputs)
+        prompt = await self._prompt_builder(
+            phase, todo.execution_id, workflow_id, repo_url, phase_outputs
+        )
         claude_cmd = self._command_builder(phase, prompt)
 
         # Validate authentication
@@ -170,6 +178,7 @@ class WorkspaceProvisionHandler:
 
         return ProvisionResult(
             workspace=workspace,
+            workspace_cm=workspace_cm,
             agent_env=agent_env,
             claude_cmd=claude_cmd,
             command=command,

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 class AgentExecutionResult:
     """Result of agent execution."""
 
-    __slots__ = ("stream_result", "tokens", "subagents", "command")
+    __slots__ = ("command", "stream_result", "subagents", "tokens")
 
     def __init__(
         self,

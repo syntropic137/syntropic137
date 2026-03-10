@@ -60,9 +60,6 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEven
 from syn_domain.contexts.orchestration.domain.events.WorkspaceCommandExecutedEvent import (
     WorkspaceCommandExecutedEvent,
 )
-from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
-    WorkspaceProvisionedForPhaseEvent,
-)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceCreatedEvent import (
     WorkspaceCreatedEvent,
 )
@@ -78,36 +75,37 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceDestroyingEvent im
 from syn_domain.contexts.orchestration.domain.events.WorkspaceErrorEvent import (
     WorkspaceErrorEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent import (
     WorkspaceTerminatedEvent,
 )
 
 __all__ = [
-    # Workflow execution events
     "AgentExecutionCompletedEvent",
     "ArtifactsCollectedForPhaseEvent",
+    "CommandExecutedEvent",
+    "CommandFailedEvent",
     "ExecutionCancelledEvent",
     "ExecutionPausedEvent",
     "ExecutionResumedEvent",
+    "IsolationStartedEvent",
     "NextPhaseReadyEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
+    "TokensInjectedEvent",
     "WorkflowCompletedEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
     "WorkflowInterruptedEvent",
     "WorkflowTemplateCreatedEvent",
-    "WorkspaceProvisionedForPhaseEvent",
-    # Workspace events
-    "CommandExecutedEvent",
-    "CommandFailedEvent",
-    "IsolationStartedEvent",
-    "TokensInjectedEvent",
     "WorkspaceCommandExecutedEvent",
     "WorkspaceCreatedEvent",
     "WorkspaceCreatingEvent",
     "WorkspaceDestroyedEvent",
     "WorkspaceDestroyingEvent",
     "WorkspaceErrorEvent",
+    "WorkspaceProvisionedForPhaseEvent",
     "WorkspaceTerminatedEvent",
 ]

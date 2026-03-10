@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 class ArtifactCollectionResult:
     """Result of artifact collection."""
 
-    __slots__ = ("artifact_ids", "first_content", "command")
+    __slots__ = ("artifact_ids", "command", "first_content")
 
     def __init__(
         self,
@@ -88,7 +88,9 @@ class ArtifactCollectionHandler:
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             artifact_ids=collected.artifact_ids,
-            first_content_preview=collected.first_content[:500] if collected.first_content else None,
+            first_content_preview=collected.first_content[:500]
+            if collected.first_content
+            else None,
         )
 
         return ArtifactCollectionResult(

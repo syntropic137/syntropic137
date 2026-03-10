@@ -28,7 +28,6 @@ from syn_domain.contexts.orchestration.slices.execution_todo.value_objects impor
     TodoItem,
 )
 
-
 # =========================================================================
 # AgentExecutionHandler
 # =========================================================================

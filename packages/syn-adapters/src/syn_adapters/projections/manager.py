@@ -17,11 +17,11 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import Se
 from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from syn_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
-from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-    ExecutionTodoProjection,
-)
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
+)
+from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+    ExecutionTodoProjection,
 )
 from syn_domain.contexts.orchestration.slices.get_execution_detail import (
     WorkflowExecutionDetailProjection,

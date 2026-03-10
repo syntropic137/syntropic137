@@ -18,15 +18,15 @@ from typing import TYPE_CHECKING, Any, Protocol
 from agentic_events import enrich_event, parse_jsonl_line
 from agentic_events.types import ClaudeToolName, EventType
 
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
-    ObservationType,
-)
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
     )
@@ -385,7 +385,10 @@ class EventStreamProcessor:
             cache_creation = usage.get("cache_creation_input_tokens", 0)
             cache_read = usage.get("cache_read_input_tokens", 0)
             await self._collector.record_token_usage(
-                input_tokens, output_tokens, cache_creation, cache_read,
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
             )
             logger.info("Result token usage: %d in, %d out", input_tokens, output_tokens)
 
@@ -408,7 +411,10 @@ class EventStreamProcessor:
                 cache_creation = usage.get("cache_creation_input_tokens", 0)
                 cache_read = usage.get("cache_read_input_tokens", 0)
                 await self._collector.record_token_usage(
-                    input_tokens, output_tokens, cache_creation, cache_read,
+                    input_tokens,
+                    output_tokens,
+                    cache_creation,
+                    cache_read,
                 )
                 logger.info(
                     "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",

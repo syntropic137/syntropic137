@@ -6,11 +6,11 @@ Handlers do infrastructure work and report results back via aggregate commands.
 
 from __future__ import annotations
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
-    ArtifactCollectionHandler,
-)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
+    ArtifactCollectionHandler,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     WorkspaceProvisionHandler,

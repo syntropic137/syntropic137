@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 from syn_api._wiring import (
     ensure_connected,
     get_controller,
-    get_execution_engine,
+    get_execution_processor,
     get_projection_mgr,
 )
 from syn_api.types import (
@@ -45,7 +45,6 @@ async def execute(
     workflow_id: str,
     inputs: dict[str, str] | None = None,
     execution_id: str | None = None,
-    use_container: bool = True,  # noqa: ARG001
     tenant_id: str | None = None,  # noqa: ARG001
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionSummary, WorkflowError]:
@@ -55,15 +54,20 @@ async def execute(
         workflow_id: ID of the workflow template to execute.
         inputs: Input variables for the workflow.
         execution_id: Optional execution ID (auto-generated if omitted).
-        use_container: Whether to use container isolation (default True).
         tenant_id: Optional tenant ID for multi-tenant deployments.
         auth: Optional authentication context.
 
     Returns:
         Ok(ExecutionSummary) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
+    from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+        ExecuteWorkflowCommand,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
         WorkflowNotFoundError,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
     )
 
     await ensure_connected()
@@ -72,14 +76,21 @@ async def execute(
     detail = await manager.workflow_detail.get_by_id(workflow_id)
     workflow_name = detail.name if detail else ""
 
-    engine = await get_execution_engine()
+    from syn_api._wiring import get_workflow_repo
+
+    processor = await get_execution_processor()
+    handler = ExecuteWorkflowHandler(
+        processor=processor,
+        workflow_repository=get_workflow_repo(),
+    )
 
     try:
-        result = await engine.execute(
-            workflow_id=workflow_id,
+        cmd = ExecuteWorkflowCommand(
+            aggregate_id=workflow_id,
             inputs=inputs or {},
             execution_id=execution_id,
         )
+        result = await handler.handle(cmd)
     except WorkflowNotFoundError:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
     except Exception as e:
@@ -90,7 +101,7 @@ async def execute(
             workflow_execution_id=result.execution_id,
             workflow_id=workflow_id,
             workflow_name=workflow_name,
-            status=result.status.value,
+            status=result.status,
             completed_phases=result.metrics.completed_phases,
             total_phases=result.metrics.total_phases,
             total_tokens=result.metrics.total_tokens,

@@ -16,16 +16,36 @@ from uuid import uuid4
 from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
-        ArtifactRepository,
-        ExecutionContext,
-    )
+
+
+class ArtifactRepository(Protocol):
+    """Repository protocol for Artifact aggregates."""
+
+    async def save(self, aggregate: ArtifactAggregate) -> None: ...
+    async def get_by_id(self, artifact_id: str) -> ArtifactAggregate | None: ...
+
+
+class ExecutionContext(Protocol):
+    """Protocol for execution context needed by inject_from_previous_phases."""
+
+    @property
+    def execution_id(self) -> str: ...
+
+    @property
+    def completed_phase_ids(self) -> list[str]: ...
+
+    @property
+    def phase_outputs(self) -> dict[str, str]: ...
+
 
 logger = logging.getLogger(__name__)
 

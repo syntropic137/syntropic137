@@ -34,7 +34,6 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhas
     WorkspaceProvisionedForPhaseEvent,
 )
 
-
 # =========================================================================
 # Helpers
 # =========================================================================
@@ -308,9 +307,7 @@ class TestArtifactsCollected:
             )
         )
         agg._handle_command(
-            ArtifactsCollectedCommand(
-                execution_id="exec-1", phase_id="p-2", artifact_ids=["art-3"]
-            )
+            ArtifactsCollectedCommand(execution_id="exec-1", phase_id="p-2", artifact_ids=["art-3"])
         )
 
         assert agg._artifact_ids == ["art-1", "art-2", "art-3"]
@@ -345,9 +342,7 @@ class TestArtifactsCollected:
 
         with pytest.raises(ValueError, match="Cannot collect artifacts"):
             agg._handle_command(
-                ArtifactsCollectedCommand(
-                    execution_id="exec-1", phase_id="p-1", artifact_ids=[]
-                )
+                ArtifactsCollectedCommand(execution_id="exec-1", phase_id="p-1", artifact_ids=[])
             )
 
 

@@ -90,9 +90,7 @@ class TestFullLifecycle:
         assert todos[0].action == TodoAction.COMPLETE_PHASE
 
         # 5. Phase completed → cleared
-        await proj.on_phase_completed(
-            {"execution_id": "exec-1", "phase_id": "p-1"}
-        )
+        await proj.on_phase_completed({"execution_id": "exec-1", "phase_id": "p-1"})
         todos = proj.get_pending("exec-1")
         assert len(todos) == 0
 
@@ -115,9 +113,7 @@ class TestFullLifecycle:
         await proj.on_artifacts_collected_for_phase(
             {"execution_id": "exec-1", "phase_id": "p-2", "artifact_ids": ["art-2"]}
         )
-        await proj.on_phase_completed(
-            {"execution_id": "exec-1", "phase_id": "p-2"}
-        )
+        await proj.on_phase_completed({"execution_id": "exec-1", "phase_id": "p-2"})
         todos = proj.get_pending("exec-1")
         assert len(todos) == 0
 
