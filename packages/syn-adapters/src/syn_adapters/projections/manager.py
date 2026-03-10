@@ -17,6 +17,9 @@ from syn_domain.contexts.agent_sessions.slices.session_cost.projection import Se
 from syn_domain.contexts.agent_sessions.slices.tool_timeline import ToolTimelineProjection
 from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
 from syn_domain.contexts.orchestration.slices.dashboard_metrics import DashboardMetricsProjection
+from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+    ExecutionTodoProjection,
+)
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
 )
@@ -143,6 +146,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("dashboard_metrics", "on_workflow_execution_started"),
         ("repo_correlation", "on_workflow_execution_started"),  # Repo ↔ execution mapping
         ("realtime", "on_workflow_execution_started"),  # Real-time UI push
+        ("execution_todo", "on_workflow_execution_started"),  # To-do list (ISS-196)
     ],
     # Execution events - go to EXECUTION projections only
     "PhaseStarted": [
@@ -155,6 +159,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_execution_detail", "on_phase_completed"),
         ("workflow_phase_metrics", "on_phase_completed"),
         ("realtime", "on_phase_completed"),  # Real-time UI push
+        ("execution_todo", "on_phase_completed"),  # To-do list (ISS-196)
     ],
     "WorkflowCompleted": [
         ("workflow_execution_list", "on_workflow_completed"),
@@ -163,6 +168,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("repo_health", "on_workflow_completed"),  # Per-repo health tracking
         ("repo_cost", "on_workflow_completed"),  # Per-repo cost tracking
         ("realtime", "on_workflow_completed"),  # Real-time UI push
+        ("execution_todo", "on_workflow_completed"),  # To-do list (ISS-196)
     ],
     "WorkflowFailed": [
         ("workflow_execution_list", "on_workflow_failed"),
@@ -171,6 +177,20 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("repo_health", "on_workflow_failed"),  # Per-repo health tracking
         ("repo_cost", "on_workflow_failed"),  # Per-repo cost tracking
         ("realtime", "on_workflow_failed"),  # Real-time UI push
+        ("execution_todo", "on_workflow_failed"),  # To-do list (ISS-196)
+    ],
+    # Processor To-Do List events (ISS-196)
+    "WorkspaceProvisionedForPhase": [
+        ("execution_todo", "on_workspace_provisioned_for_phase"),
+    ],
+    "AgentExecutionCompleted": [
+        ("execution_todo", "on_agent_execution_completed"),
+    ],
+    "ArtifactsCollectedForPhase": [
+        ("execution_todo", "on_artifacts_collected_for_phase"),
+    ],
+    "NextPhaseReady": [
+        ("execution_todo", "on_next_phase_ready"),
     ],
     # Control plane events
     "ExecutionPaused": [
@@ -184,6 +204,7 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "ExecutionCancelled": [
         ("workflow_execution_list", "on_execution_cancelled"),
         ("workflow_execution_detail", "on_execution_cancelled"),
+        ("execution_todo", "on_execution_cancelled"),
     ],
     # Session events
     "SessionStarted": [
@@ -292,6 +313,8 @@ class ProjectionManager:
             "repo_correlation": RepoCorrelationProjection(self._store),
             "repo_health": RepoHealthProjection(self._store),
             "repo_cost": RepoCostProjection(self._store),
+            # Processor to-do list (ISS-196) — in-memory, no persistent store needed
+            "execution_todo": ExecutionTodoProjection(),
             # Real-time projection for WebSocket push (doesn't use store)
             "realtime": get_realtime_projection(),
         }

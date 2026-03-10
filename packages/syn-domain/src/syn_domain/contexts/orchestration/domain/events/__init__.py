@@ -6,6 +6,12 @@ Events represent facts - things that have happened.
 
 # Workflow execution events
 # Workspace events
+from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+    AgentExecutionCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
+    ArtifactsCollectedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
     CommandExecutedEvent,
 )
@@ -23,6 +29,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 )
 from syn_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
     IsolationStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
     PhaseCompletedEvent,
@@ -51,6 +60,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEven
 from syn_domain.contexts.orchestration.domain.events.WorkspaceCommandExecutedEvent import (
     WorkspaceCommandExecutedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceCreatedEvent import (
     WorkspaceCreatedEvent,
 )
@@ -71,22 +83,26 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent im
 )
 
 __all__ = [
-    # Workspace events
-    "CommandExecutedEvent",
-    "CommandFailedEvent",
     # Workflow execution events
+    "AgentExecutionCompletedEvent",
+    "ArtifactsCollectedForPhaseEvent",
     "ExecutionCancelledEvent",
     "ExecutionPausedEvent",
     "ExecutionResumedEvent",
-    "IsolationStartedEvent",
+    "NextPhaseReadyEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
-    "TokensInjectedEvent",
     "WorkflowCompletedEvent",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
     "WorkflowInterruptedEvent",
     "WorkflowTemplateCreatedEvent",
+    "WorkspaceProvisionedForPhaseEvent",
+    # Workspace events
+    "CommandExecutedEvent",
+    "CommandFailedEvent",
+    "IsolationStartedEvent",
+    "TokensInjectedEvent",
     "WorkspaceCommandExecutedEvent",
     "WorkspaceCreatedEvent",
     "WorkspaceCreatingEvent",
