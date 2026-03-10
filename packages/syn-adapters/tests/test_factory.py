@@ -100,6 +100,7 @@ class TestGetAgent:
         assert isinstance(agent, ClaudeAgent)
         assert agent.is_available
 
+
 class TestGetAvailableAgents:
     """Tests for get_available_agents function."""
 

@@ -325,4 +325,3 @@ class TestAgentFactory:
         reset_settings()
 
         assert is_agent_available(AgentProvider.CLAUDE) is False
-
