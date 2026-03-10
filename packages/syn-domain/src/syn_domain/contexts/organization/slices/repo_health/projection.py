@@ -13,6 +13,10 @@ from typing import Any
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_CORRELATION,
+    REPO_HEALTH,
+)
 from syn_domain.contexts.organization.domain.read_models.repo_health import RepoHealth
 
 logger = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ class RepoHealthProjection(AutoDispatchProjection):
     which repos an execution belongs to.
     """
 
-    PROJECTION_NAME = "repo_health"
+    PROJECTION_NAME = REPO_HEALTH
     VERSION = 1
 
     def __init__(self, store: Any) -> None:
@@ -48,10 +52,10 @@ class RepoHealthProjection(AutoDispatchProjection):
 
     async def _get_correlated_repos(self, execution_id: str) -> list[str]:
         """Look up repos for an execution from the correlation store."""
-        all_correlations = await self._store.get_all("repo_correlation")
-        return [
-            c["repo_full_name"] for c in all_correlations if c.get("execution_id") == execution_id
-        ]
+        correlations = await self._store.query(
+            REPO_CORRELATION, filters={"execution_id": execution_id}
+        )
+        return [c["repo_full_name"] for c in correlations]
 
     async def _get_or_create(self, repo_full_name: str) -> dict[str, Any]:
         """Get existing health data or create empty."""

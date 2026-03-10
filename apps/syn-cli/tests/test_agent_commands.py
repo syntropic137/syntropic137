@@ -55,19 +55,12 @@ class TestAgentList:
                 "available": True,
                 "default_model": "claude-sonnet-4-5-20250929",
             },
-            {
-                "provider": "openai",
-                "display_name": "OpenAI GPT",
-                "available": False,
-                "default_model": "gpt-4o",
-            },
         ]
         client = _mock_client(_mock_response(200, providers))
         with patch("syn_cli.commands.agent.get_client", return_value=client):
             result = runner.invoke(app, ["agent", "list"])
         assert result.exit_code == 0
         assert "Claude" in result.stdout
-        assert "OpenAI" in result.stdout
 
 
 @pytest.mark.unit

@@ -20,6 +20,7 @@ class GetRepoHealthQuery:
     """
 
     repo_id: str
+    repo_full_name: str = ""
     window_hours: int = 168
     query_id: str = field(default_factory=lambda: str(uuid4()))
 

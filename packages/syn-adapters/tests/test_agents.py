@@ -325,12 +325,3 @@ class TestAgentFactory:
         reset_settings()
 
         assert is_agent_available(AgentProvider.CLAUDE) is False
-
-    def test_openai_not_available_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test OpenAI is not available without API key."""
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        from syn_shared.settings import reset_settings
-
-        reset_settings()
-
-        assert is_agent_available(AgentProvider.OPENAI) is False

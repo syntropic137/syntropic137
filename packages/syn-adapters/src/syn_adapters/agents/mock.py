@@ -1,7 +1,7 @@
 """Mock agent adapter for TESTING ONLY.
 
 WARNING: MockAgent is for unit/integration tests only.
-For local development and production, use real agent adapters (Claude, OpenAI).
+For local development and production, use real agent adapters (Claude).
 
 The MockAgent:
 - Does NOT call real AI APIs

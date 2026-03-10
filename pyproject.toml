@@ -81,6 +81,7 @@ select = [
     "I",      # isort
     "B",      # flake8-bugbear (includes B009: ban getattr with constant attr — see #116)
     "C4",     # flake8-comprehensions
+    "C901",   # mccabe complexity (#190)
     "UP",     # pyupgrade
     "ARG",    # flake8-unused-arguments
     "SIM",    # flake8-simplify
@@ -96,6 +97,9 @@ ignore = [
     # see test_no_getattr_in_api_layer in apps/syn-api/tests/test_lint_rules.py.
     # Both checks together enforce: use direct attribute access, not getattr. (#116)
 ]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 22
 
 [tool.ruff.lint.per-file-ignores]
 # Test files often have unused args in mocks implementing interfaces
@@ -163,8 +167,6 @@ ignore_missing_imports = true
 module = [
     "anthropic",
     "anthropic.*",
-    "openai",
-    "openai.*",
     "asyncpg",
     "asyncpg.*",
     "agentic_logging",
@@ -234,7 +236,6 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "*/agents/claude.py",  # Requires Anthropic API
-    "*/agents/openai.py",  # Requires OpenAI API
     "*/storage/postgres.py",  # Requires running PostgreSQL
     "*/workspace_backends/*",  # Requires Docker runtime
     "*/stale_execution_cleaner.py",  # Background cleanup - integration tested
