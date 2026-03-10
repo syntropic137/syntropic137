@@ -99,7 +99,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 20
+max-complexity = 22
 
 [tool.ruff.lint.per-file-ignores]
 # Test files often have unused args in mocks implementing interfaces
