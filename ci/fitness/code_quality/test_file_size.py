@@ -13,8 +13,8 @@ from ci.fitness.conftest import load_exceptions, production_files, rel_path, rep
 DEFAULT_MAX_LOC_PER_FILE = 500
 
 
-def _get_file_params() -> list[tuple[str, int]]:
-    """Discover production files and return (rel_path, loc) pairs."""
+def _get_file_params() -> list[tuple[str, int, int]]:
+    """Discover production files and return (rel_path, loc, max_loc) triples."""
     root = repo_root()
     exceptions = load_exceptions(root).get("file_size", {})
     results = []

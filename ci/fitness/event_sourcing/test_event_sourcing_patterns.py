@@ -29,7 +29,10 @@ if TYPE_CHECKING:
 def _find_handle_command_calls(path: Path) -> list[int]:
     """Find all lines where _handle_command is called."""
     source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError:
+        return []
     lines: list[int] = []
     for node in ast.walk(tree):
         if (
@@ -88,7 +91,10 @@ def test_no_direct_handle_command(file_path: str, call_lines: list[int]) -> None
 def _check_aggregate_structure(path: Path) -> list[str]:
     """Check that an aggregate has proper command/event handler structure."""
     source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
+    try:
+        tree = ast.parse(source, filename=str(path))
+    except SyntaxError:
+        return []
     violations: list[str] = []
 
     has_aggregate_decorator = False

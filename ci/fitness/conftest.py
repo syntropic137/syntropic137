@@ -16,7 +16,7 @@ def repo_root() -> Path:
 
 
 _PRODUCTION_DIRS = ["apps/*/src", "packages/*/src"]
-_EXCLUDED_NAMES = {"test_*.py", "conftest.py", "__init__.py"}
+_EXCLUDED_NAMES = {"conftest.py", "__init__.py"}
 
 
 def production_files(root: Path | None = None) -> list[Path]:
