@@ -48,10 +48,10 @@ class RepoHealthProjection(AutoDispatchProjection):
 
     async def _get_correlated_repos(self, execution_id: str) -> list[str]:
         """Look up repos for an execution from the correlation store."""
-        all_correlations = await self._store.get_all("repo_correlation")
-        return [
-            c["repo_full_name"] for c in all_correlations if c.get("execution_id") == execution_id
-        ]
+        correlations = await self._store.query(
+            "repo_correlation", filters={"execution_id": execution_id}
+        )
+        return [c["repo_full_name"] for c in correlations]
 
     async def _get_or_create(self, repo_full_name: str) -> dict[str, Any]:
         """Get existing health data or create empty."""

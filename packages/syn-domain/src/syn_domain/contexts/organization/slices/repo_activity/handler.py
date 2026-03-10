@@ -4,8 +4,6 @@ Lazy handler: queries the WorkflowExecutionList projection
 filtered by repo-execution correlation. No eager projection needed.
 """
 
-from datetime import UTC
-
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
     GetRepoActivityQuery,
@@ -22,9 +20,8 @@ def _compute_duration(started_at: str, completed_at: str) -> float:
     try:
         from datetime import datetime
 
-        fmt = "%Y-%m-%dT%H:%M:%S"
-        start = datetime.strptime(started_at[:19], fmt).replace(tzinfo=UTC)
-        end = datetime.strptime(completed_at[:19], fmt).replace(tzinfo=UTC)
+        start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
         return max(0.0, (end - start).total_seconds())
     except (ValueError, TypeError):
         return 0.0

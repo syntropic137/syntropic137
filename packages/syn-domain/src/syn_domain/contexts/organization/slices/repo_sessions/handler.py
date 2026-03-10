@@ -11,6 +11,9 @@ from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
     GetRepoSessionsQuery,
 )
 
+# TODO(#176): Replace with a typed read model once session projection schema stabilizes
+SessionRecord = dict[str, Any]
+
 
 class GetRepoSessionsHandler:
     """Query handler: get agent sessions for a repo."""
@@ -24,10 +27,10 @@ class GetRepoSessionsHandler:
         correlations = await self._store.get_all("repo_correlation")
         return {c["execution_id"] for c in correlations if c.get("repo_full_name") == repo_id}
 
-    async def handle(self, query: GetRepoSessionsQuery) -> list[dict[str, Any]]:
+    async def handle(self, query: GetRepoSessionsQuery) -> list[SessionRecord]:
         """Handle GetRepoSessionsQuery.
 
-        Returns session dicts from the session_list projection,
+        Returns session records from the session_list projection,
         filtered to sessions whose execution_id is correlated with the repo.
         """
         execution_ids = await self._get_execution_ids_for_repo(query.repo_id)
@@ -36,8 +39,8 @@ class GetRepoSessionsHandler:
 
         all_sessions = await self._store.get_all("session_summaries")
 
-        sessions = [s for s in all_sessions if s.get("execution_id") in execution_ids]
+        matched = [s for s in all_sessions if s.get("execution_id") in execution_ids]
 
         # Sort by started_at descending, apply pagination
-        sessions.sort(key=lambda s: str(s.get("started_at", "")), reverse=True)
-        return sessions[query.offset : query.offset + query.limit]
+        matched.sort(key=lambda s: str(s.get("started_at", "")), reverse=True)
+        return matched[query.offset : query.offset + query.limit]

@@ -46,10 +46,10 @@ class RepoCostProjection(AutoDispatchProjection):
 
     async def _get_correlated_repos(self, execution_id: str) -> list[str]:
         """Look up repos for an execution from the correlation store."""
-        all_correlations = await self._store.get_all("repo_correlation")
-        return [
-            c["repo_full_name"] for c in all_correlations if c.get("execution_id") == execution_id
-        ]
+        correlations = await self._store.query(
+            "repo_correlation", filters={"execution_id": execution_id}
+        )
+        return [c["repo_full_name"] for c in correlations]
 
     async def _get_or_create(self, repo_full_name: str) -> dict[str, Any]:
         existing: dict[str, Any] | None = await self._store.get(
@@ -90,6 +90,10 @@ class RepoCostProjection(AutoDispatchProjection):
         wf_cost = Decimal(by_wf.get(workflow_id, "0"))
         by_wf[workflow_id] = str(wf_cost + Decimal(cost_usd))
         data["cost_by_workflow"] = by_wf
+
+        # TODO(#176): cost_by_model requires per-model token/cost breakdowns from
+        # workflow events, which are not yet available. This field will remain empty
+        # until events carry model-level granularity.
 
         await self._save(repo_full_name, data)
 

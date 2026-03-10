@@ -224,7 +224,7 @@ async def unassign_repo_from_system(
 # ---------------------------------------------------------------------------
 
 
-async def get_repo_health(repo_id: str) -> dict[str, Any]:
+async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
     """Get health snapshot for a repo."""
     from syn_api._wiring import get_projection_mgr
     from syn_domain.contexts.organization.domain.queries.get_repo_health import (
@@ -235,13 +235,18 @@ async def get_repo_health(repo_id: str) -> dict[str, Any]:
     )
 
     await ensure_connected()
+
+    repo_result = await get_repo(repo_id)
+    if not repo_result.ok:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
     mgr = get_projection_mgr()
     handler = GetRepoHealthHandler(projection=mgr.repo_health)
     result = await handler.handle(GetRepoHealthQuery(repo_id=repo_id))
-    return dict(result.to_dict())
+    return Ok(dict(result.to_dict()))
 
 
-async def get_repo_cost(repo_id: str) -> dict[str, Any]:
+async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
     """Get cost breakdown for a repo."""
     from syn_api._wiring import get_projection_mgr
     from syn_domain.contexts.organization.domain.queries.get_repo_cost import (
@@ -252,13 +257,20 @@ async def get_repo_cost(repo_id: str) -> dict[str, Any]:
     )
 
     await ensure_connected()
+
+    repo_result = await get_repo(repo_id)
+    if not repo_result.ok:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
     mgr = get_projection_mgr()
     handler = GetRepoCostHandler(projection=mgr.repo_cost)
     result = await handler.handle(GetRepoCostQuery(repo_id=repo_id))
-    return dict(result.to_dict())
+    return Ok(dict(result.to_dict()))
 
 
-async def get_repo_activity(repo_id: str, offset: int = 0, limit: int = 50) -> list[dict[str, Any]]:
+async def get_repo_activity(
+    repo_id: str, offset: int = 0, limit: int = 50
+) -> Result[list[dict[str, Any]], RepoError]:
     """Get execution timeline for a repo."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
@@ -269,14 +281,21 @@ async def get_repo_activity(repo_id: str, offset: int = 0, limit: int = 50) -> l
     )
 
     await ensure_connected()
+
+    repo_result = await get_repo(repo_id)
+    if not repo_result.ok:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
     handler = GetRepoActivityHandler(store=get_projection_store())
     entries = await handler.handle(
         GetRepoActivityQuery(repo_id=repo_id, offset=offset, limit=limit)
     )
-    return [e.to_dict() for e in entries]
+    return Ok([e.to_dict() for e in entries])
 
 
-async def get_repo_failures(repo_id: str, limit: int = 50) -> list[dict[str, Any]]:
+async def get_repo_failures(
+    repo_id: str, limit: int = 50
+) -> Result[list[dict[str, Any]], RepoError]:
     """Get recent failures for a repo."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
@@ -287,12 +306,19 @@ async def get_repo_failures(repo_id: str, limit: int = 50) -> list[dict[str, Any
     )
 
     await ensure_connected()
+
+    repo_result = await get_repo(repo_id)
+    if not repo_result.ok:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
     handler = GetRepoFailuresHandler(store=get_projection_store())
     entries = await handler.handle(GetRepoFailuresQuery(repo_id=repo_id, limit=limit))
-    return [e.to_dict() for e in entries]
+    return Ok([e.to_dict() for e in entries])
 
 
-async def get_repo_sessions(repo_id: str, limit: int = 50) -> list[dict[str, Any]]:
+async def get_repo_sessions(
+    repo_id: str, limit: int = 50
+) -> Result[list[dict[str, Any]], RepoError]:
     """Get agent sessions for a repo."""
     from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
@@ -303,9 +329,14 @@ async def get_repo_sessions(repo_id: str, limit: int = 50) -> list[dict[str, Any
     )
 
     await ensure_connected()
+
+    repo_result = await get_repo(repo_id)
+    if not repo_result.ok:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
     handler = GetRepoSessionsHandler(store=get_projection_store())
     results = await handler.handle(GetRepoSessionsQuery(repo_id=repo_id, limit=limit))
-    return list(results)
+    return Ok(list(results))
 
 
 def _classify_repo_error(error_msg: str) -> RepoError:
