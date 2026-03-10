@@ -237,7 +237,7 @@ async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
     await ensure_connected()
 
     repo_result = await get_repo(repo_id)
-    if not repo_result.ok:
+    if not isinstance(repo_result, Ok):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     mgr = get_projection_mgr()
@@ -261,7 +261,7 @@ async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
     await ensure_connected()
 
     repo_result = await get_repo(repo_id)
-    if not repo_result.ok:
+    if not isinstance(repo_result, Ok):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     mgr = get_projection_mgr()
@@ -287,7 +287,7 @@ async def get_repo_activity(
     await ensure_connected()
 
     repo_result = await get_repo(repo_id)
-    if not repo_result.ok:
+    if not isinstance(repo_result, Ok):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     handler = GetRepoActivityHandler(store=get_projection_store())
@@ -312,7 +312,7 @@ async def get_repo_failures(
     await ensure_connected()
 
     repo_result = await get_repo(repo_id)
-    if not repo_result.ok:
+    if not isinstance(repo_result, Ok):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     handler = GetRepoFailuresHandler(store=get_projection_store())
@@ -335,7 +335,7 @@ async def get_repo_sessions(
     await ensure_connected()
 
     repo_result = await get_repo(repo_id)
-    if not repo_result.ok:
+    if not isinstance(repo_result, Ok):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
     handler = GetRepoSessionsHandler(store=get_projection_store())
