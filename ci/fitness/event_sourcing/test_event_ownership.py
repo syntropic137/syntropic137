@@ -22,10 +22,7 @@ if TYPE_CHECKING:
 
 def _is_in_aggregate_dir(path: Path) -> bool:
     """Check if a file is inside a domain/aggregate_*/ directory."""
-    for part in path.parts:
-        if part.startswith("aggregate_"):
-            return True
-    return False
+    return any(part.startswith("aggregate_") for part in path.parts)
 
 
 def _is_in_events_dir(path: Path) -> bool:
@@ -62,9 +59,12 @@ def _find_event_constructions_outside_aggregates() -> list[tuple[str, list[int]]
 
         construction_lines: list[int] = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in event_names:
-                    construction_lines.append(node.lineno)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in event_names
+            ):
+                construction_lines.append(node.lineno)
 
         if not construction_lines:
             continue
