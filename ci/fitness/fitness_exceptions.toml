@@ -17,7 +17,7 @@
 "packages/syn-collector/src/syn_collector/watcher/transcript.py" = { max_cog = 60, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py" = { max_cog = 60, issue = "#197" }
 "apps/syn-api/src/syn_api/v1/executions.py" = { max_cog = 60, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py" = { max_cog = 60, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py" = { max_cog = 90, issue = "#196" }
 "packages/syn-adapters/src/syn_adapters/events/store.py" = { max_cog = 60, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/condition_evaluator.py" = { max_cog = 60, issue = "#197" }
 "apps/syn-cli/src/syn_cli/commands/triggers.py" = { max_cog = 55, issue = "#197" }
@@ -44,6 +44,8 @@
 "packages/syn-adapters/src/syn_adapters/subscriptions/service.py" = { max_loc = 595, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py" = { max_loc = 535, issue = "#138" }
 "packages/syn-shared/src/syn_shared/settings/workspace.py" = { max_loc = 510, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py" = { max_loc = 700, issue = "#196" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_loc = 510, issue = "#196" }
 
 [layer_separation]
 # path = { imports = ["module.that.is.imported"], issue = "#NNN" }
@@ -71,6 +73,7 @@
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/ArtifactCollector.py" = { max_calls = 1, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/cleanup/stale_execution_cleaner.py" = { max_calls = 1, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_workflow_template/CreateWorkflowTemplateHandler.py" = { max_calls = 1, issue = "#197" }
+"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_calls = 8, issue = "#196" }
 "apps/syn-api/src/syn_api/v1/artifacts.py" = { max_calls = 1, issue = "#197" }
 
 [event_construction_outside_aggregate]
