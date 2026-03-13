@@ -18,6 +18,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 from agentic_events import enrich_event, parse_jsonl_line
 from agentic_events.types import ClaudeToolName, EventType
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
+    HookEventParser,
+)
 from syn_shared.events import VALID_EVENT_TYPES
 
 if TYPE_CHECKING:
@@ -117,6 +120,9 @@ class EventStreamProcessor:
                 agent_model=agent_model,
             )
 
+        # ISS-196: Collaborator for hook event parsing + dedup
+        self._hook_parser = HookEventParser()
+
     async def process_stream(
         self,
         stream: AsyncIterator[str],
@@ -136,9 +142,6 @@ class EventStreamProcessor:
         interrupt_requested = False
         interrupt_reason: str | None = None
         agent_task_result: dict[str, Any] | None = None
-        # Dedup set: same hook event appears as both raw stderr and
-        # inside a hook_response envelope (stderr=STDOUT in container).
-        seen_hook_fingerprints: set[tuple[str, ...]] = set()
 
         async for line in stream:
             line_count += 1
@@ -164,30 +167,9 @@ class EventStreamProcessor:
             if line.strip():
                 conversation_lines.append(line)
 
-            # Parse hook events from the stream
-            hook_events = self._parse_hook_events(line)
-
+            # Parse hook events from the stream (parsing + dedup in HookEventParser)
+            hook_events = self._hook_parser.parse(line)
             for hook_event in hook_events:
-                # Deduplicate: same event can appear as raw stderr AND inside
-                # hook_response envelope, or from multiple plugins.
-                evt_type = hook_event.get("event_type", "")
-                evt_sid = hook_event.get("session_id", "")
-                evt_ctx = hook_event.get("context") or {}
-                evt_tuid = evt_ctx.get("tool_use_id", "")
-                if evt_tuid:
-                    fp: tuple[str, ...] = (
-                        evt_type,
-                        evt_sid,
-                        str(hook_event.get("timestamp", "")),
-                        evt_tuid,
-                    )
-                else:
-                    fp = (evt_type, evt_sid)
-                if fp in seen_hook_fingerprints:
-                    logger.debug("Skipping duplicate hook event: %s", fp[0])
-                    continue
-                seen_hook_fingerprints.add(fp)
-
                 await self._process_hook_event(hook_event)
 
             # Skip native CLI event processing if we handled hook events
@@ -213,63 +195,6 @@ class EventStreamProcessor:
             agent_task_result=agent_task_result,
             conversation_lines=conversation_lines,
         )
-
-    def _parse_hook_events(self, line: str) -> list[dict[str, Any]]:
-        """Parse hook events from a stream line.
-
-        Two sources:
-        - SOURCE A: Standalone JSONL from Claude Code hooks
-        - SOURCE B: hook_response system events with embedded JSONL
-        """
-        hook_events: list[dict[str, Any]] = []
-
-        standalone = parse_jsonl_line(line)
-        if standalone:
-            hook_events.append(standalone)
-        else:
-            try:
-                parsed = json.loads(line)
-                line_type = parsed.get("type", "")
-                line_subtype = parsed.get("subtype", "")
-
-                if line_type == "system":
-                    logger.info(
-                        "System event: subtype=%s keys=%s",
-                        line_subtype,
-                        list(parsed.keys()),
-                    )
-
-                if line_type == "system" and line_subtype == "hook_response":
-                    hook_name = parsed.get("hook_name", "?")
-                    hook_event = parsed.get("hook_event", "?")
-                    seen: set[str] = set()
-
-                    for channel in ("output", "stdout", "stderr"):
-                        channel_text = parsed.get(channel, "")
-                        logger.info(
-                            "hook_response hook=%s event=%s channel=%s len=%d content=%r",
-                            hook_name,
-                            hook_event,
-                            channel,
-                            len(channel_text),
-                            channel_text[:300],
-                        )
-                        for hook_line in channel_text.splitlines():
-                            hook_line = hook_line.strip()
-                            if hook_line and hook_line not in seen:
-                                evt = parse_jsonl_line(hook_line)
-                                if evt:
-                                    seen.add(hook_line)
-                                    hook_events.append(evt)
-                                else:
-                                    logger.info(
-                                        "hook_response line not a hook event: %r",
-                                        hook_line[:200],
-                                    )
-            except (json.JSONDecodeError, AttributeError):
-                pass
-
-        return hook_events
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
