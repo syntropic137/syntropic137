@@ -32,6 +32,20 @@ class PhaseStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class PhaseDefinition:
+    """Immutable definition of a phase for aggregate-level sequencing.
+
+    Used by the aggregate to know phase ordering and decide "what's next"
+    after artifacts are collected. The aggregate owns sequencing decisions.
+    """
+
+    phase_id: str
+    name: str
+    order: int
+    timeout_seconds: int = 300
+
+
+@dataclass(frozen=True)
 class AgentConfiguration:
     """Agent configuration for executing a phase.
 

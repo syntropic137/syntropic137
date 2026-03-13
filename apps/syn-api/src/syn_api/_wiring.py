@@ -9,9 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from syn_adapters.agents import AgentProvider, get_agent
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+        ExecutablePhase,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
 from syn_adapters.conversations import get_conversation_storage
 from syn_adapters.events import get_event_store
 from syn_adapters.projections.manager import ProjectionManager, get_projection_manager
@@ -32,7 +39,7 @@ from syn_adapters.storage.repositories import (
 from syn_adapters.workspace_backends.service import WorkspaceService
 from syn_domain.contexts.artifacts import ArtifactQueryService
 from syn_domain.contexts.orchestration.slices.execute_workflow import (
-    WorkflowExecutionEngine,
+    WorkflowExecutionProcessor,
 )
 
 
@@ -51,20 +58,12 @@ def get_projection_mgr() -> ProjectionManager:
     return get_projection_manager()
 
 
-async def get_execution_engine() -> WorkflowExecutionEngine:
-    """Wire up WorkflowExecutionEngine with all dependencies.
+async def get_execution_processor() -> WorkflowExecutionProcessor:
+    """Wire up WorkflowExecutionProcessor with all dependencies (ISS-196).
 
-    Consolidation of ExecutionService._create_execution_engine()
-    and CLI's inline _execute() wiring.
+    Replaces the old get_execution_engine() — uses the Processor To-Do List
+    pattern instead of the imperative WorkflowExecutionEngine.
     """
-
-    def agent_factory(provider: str) -> Any:
-        try:
-            provider_enum = AgentProvider(provider.lower())
-        except ValueError:
-            provider_enum = AgentProvider.CLAUDE
-        return get_agent(provider_enum)
-
     event_store = get_event_store()
     await event_store.initialize()
 
@@ -74,19 +73,69 @@ async def get_execution_engine() -> WorkflowExecutionEngine:
     manager = get_projection_manager()
     artifact_query = ArtifactQueryService(manager.artifact_list)
 
-    return WorkflowExecutionEngine(
-        workflow_repository=get_workflow_repository(),
+    return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
-        workspace_service=WorkspaceService.create(),
         session_repository=get_session_repository(),
+        workspace_service=WorkspaceService.create(),
         artifact_repository=get_artifact_repository(),
-        agent_factory=agent_factory,
-        observability_writer=event_store,
-        artifact_query_service=artifact_query,
         artifact_content_storage=artifact_storage,
+        artifact_query=artifact_query,
         conversation_storage=conversation_storage,
+        observability_writer=event_store,
         controller=get_controller(),
+        prompt_builder=_build_workspace_prompt,
+        command_builder=_build_claude_command,
     )
+
+
+def _build_claude_command(
+    phase: ExecutablePhase,
+    prompt: str,
+) -> list[str]:
+    """Build the Claude CLI command for agent execution."""
+    model = phase.agent_config.model
+    cmd = [
+        "claude",
+        "--model",
+        model,
+        "--output-format",
+        "stream-json",
+        "-p",
+        prompt,
+    ]
+    return cmd
+
+
+async def _build_workspace_prompt(
+    phase: ExecutablePhase,
+    execution_id: str,  # noqa: ARG001
+    workflow_id: str,  # noqa: ARG001
+    repo_url: str | None,  # noqa: ARG001
+    phase_outputs: dict[str, str],
+) -> str:
+    """Build the workspace prompt for a phase."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
+        SYN_WORKSPACE_PROMPT,
+    )
+
+    # Start with the base workspace prompt
+    prompt_parts = [SYN_WORKSPACE_PROMPT]
+
+    # Add the phase-specific prompt with input substitution
+    phase_prompt = phase.prompt_template
+    for phase_input in phase.inputs:
+        if phase_input.value is not None:
+            phase_prompt = phase_prompt.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
+
+    prompt_parts.append(f"\n## Task\n{phase_prompt}")
+
+    # Add context from previous phases
+    if phase_outputs:
+        prompt_parts.append("\n## Context from Previous Phases")
+        for pid, content in phase_outputs.items():
+            prompt_parts.append(f"\n### Phase {pid}\n{content[:2000]}")
+
+    return "\n".join(prompt_parts)
 
 
 def get_workflow_repo():
@@ -245,18 +294,20 @@ logger = logging.getLogger(__name__)
 
 
 class BackgroundWorkflowDispatcher:
-    """Bridges WorkflowDispatchProjection → WorkflowExecutionEngine.
+    """Bridges WorkflowDispatchProjection → ExecuteWorkflowHandler.
 
-    - run_workflow() → execute() method name bridge
+    - run_workflow() → handler.handle() bridge
     - Fire-and-forget via asyncio.Task (never blocks projection loop)
     - Tracks tasks for graceful shutdown
     """
 
-    def __init__(self, engine: WorkflowExecutionEngine) -> None:
-        self._engine = engine
-        self._tasks: set[asyncio.Task] = set()
+    def __init__(self, handler: ExecuteWorkflowHandler) -> None:
+        self._handler = handler
+        self._tasks: set[asyncio.Task[None]] = set()
 
-    async def run_workflow(self, workflow_id: str, inputs: dict, execution_id: str = "") -> None:
+    async def run_workflow(
+        self, workflow_id: str, inputs: dict[str, str], execution_id: str = ""
+    ) -> None:
         task = asyncio.create_task(
             self._run(workflow_id, inputs, execution_id),
             name=f"workflow-exec-{execution_id or workflow_id}",
@@ -265,12 +316,17 @@ class BackgroundWorkflowDispatcher:
         task.add_done_callback(self._tasks.discard)
 
     async def _run(self, workflow_id: str, inputs: dict, execution_id: str) -> None:
+        from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
+            ExecuteWorkflowCommand,
+        )
+
         try:
-            await self._engine.execute(
-                workflow_id=workflow_id,
-                inputs=inputs,
+            cmd = ExecuteWorkflowCommand(
+                aggregate_id=workflow_id,
+                inputs=inputs or {},
                 execution_id=execution_id or None,
             )
+            await self._handler.handle(cmd)
         except Exception:
             logger.exception(
                 "Background workflow failed",
@@ -285,9 +341,17 @@ class BackgroundWorkflowDispatcher:
 
 
 async def get_workflow_dispatcher() -> BackgroundWorkflowDispatcher:
-    """Create a BackgroundWorkflowDispatcher backed by the execution engine."""
-    engine = await get_execution_engine()
-    return BackgroundWorkflowDispatcher(engine)
+    """Create a BackgroundWorkflowDispatcher backed by the processor."""
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler import (
+        ExecuteWorkflowHandler,
+    )
+
+    processor = await get_execution_processor()
+    handler = ExecuteWorkflowHandler(
+        processor=processor,
+        workflow_repository=get_workflow_repository(),
+    )
+    return BackgroundWorkflowDispatcher(handler)
 
 
 class _NullSignalQueueAdapter:

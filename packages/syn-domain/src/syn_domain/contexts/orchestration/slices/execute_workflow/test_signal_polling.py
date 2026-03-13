@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
     WorkflowInterruptedError,
 )
 

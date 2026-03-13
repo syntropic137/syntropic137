@@ -6,6 +6,12 @@ Events represent facts - things that have happened.
 
 # Workflow execution events
 # Workspace events
+from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+    AgentExecutionCompletedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
+    ArtifactsCollectedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
     CommandExecutedEvent,
 )
@@ -23,6 +29,9 @@ from syn_domain.contexts.orchestration.domain.events.ExecutionResumedEvent impor
 )
 from syn_domain.contexts.orchestration.domain.events.IsolationStartedEvent import (
     IsolationStartedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+    NextPhaseReadyEvent,
 )
 from syn_domain.contexts.orchestration.domain.events.PhaseCompletedEvent import (
     PhaseCompletedEvent,
@@ -66,19 +75,23 @@ from syn_domain.contexts.orchestration.domain.events.WorkspaceDestroyingEvent im
 from syn_domain.contexts.orchestration.domain.events.WorkspaceErrorEvent import (
     WorkspaceErrorEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+    WorkspaceProvisionedForPhaseEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent import (
     WorkspaceTerminatedEvent,
 )
 
 __all__ = [
-    # Workspace events
+    "AgentExecutionCompletedEvent",
+    "ArtifactsCollectedForPhaseEvent",
     "CommandExecutedEvent",
     "CommandFailedEvent",
-    # Workflow execution events
     "ExecutionCancelledEvent",
     "ExecutionPausedEvent",
     "ExecutionResumedEvent",
     "IsolationStartedEvent",
+    "NextPhaseReadyEvent",
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
     "TokensInjectedEvent",
@@ -93,5 +106,6 @@ __all__ = [
     "WorkspaceDestroyedEvent",
     "WorkspaceDestroyingEvent",
     "WorkspaceErrorEvent",
+    "WorkspaceProvisionedForPhaseEvent",
     "WorkspaceTerminatedEvent",
 ]

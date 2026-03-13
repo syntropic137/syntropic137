@@ -16,16 +16,36 @@ from uuid import uuid4
 from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+        ArtifactAggregate,
+    )
     from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
         ArtifactContentStoragePort,
     )
     from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
         ArtifactQueryServiceProtocol,
     )
-    from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
-        ArtifactRepository,
-        ExecutionContext,
-    )
+
+
+class ArtifactRepository(Protocol):
+    """Repository protocol for Artifact aggregates."""
+
+    async def save(self, aggregate: ArtifactAggregate) -> None: ...
+    async def get_by_id(self, artifact_id: str) -> ArtifactAggregate | None: ...
+
+
+class ExecutionContext(Protocol):
+    """Protocol for execution context needed by inject_from_previous_phases."""
+
+    @property
+    def execution_id(self) -> str: ...
+
+    @property
+    def completed_phase_ids(self) -> list[str]: ...
+
+    @property
+    def phase_outputs(self) -> dict[str, str]: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +148,54 @@ class ArtifactCollector:
             logger.warning(
                 "No artifacts found for completed phases: %s",
                 ctx.completed_phase_ids,
+            )
+
+    async def inject_from_previous_phases_explicit(
+        self,
+        workspace: ArtifactWorkspace,
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        execution_id: str = "",
+    ) -> None:
+        """Inject artifacts using explicit parameters (ISS-196).
+
+        Same logic as inject_from_previous_phases but without ExecutionContext.
+        Used by WorkspaceProvisionHandler in the Processor To-Do List pattern.
+        """
+        if not completed_phase_ids:
+            return
+
+        outputs: dict[str, str] = {}
+
+        # 1. Get from in-memory cache
+        for pid in completed_phase_ids:
+            if pid in phase_outputs:
+                outputs[pid] = phase_outputs[pid]
+
+        # 2. Query projection for missing
+        missing = [pid for pid in completed_phase_ids if pid not in outputs]
+        if missing and self._query_service:
+            projection_outputs = await self._query_service.get_for_phase_injection(
+                execution_id=execution_id,
+                completed_phase_ids=missing,
+            )
+            outputs.update(projection_outputs)
+
+        files_to_inject = [
+            (f"artifacts/input/{prev_id}.md", content.encode())
+            for prev_id, content in outputs.items()
+        ]
+        if files_to_inject:
+            await workspace.inject_files(files_to_inject)
+            logger.info(
+                "Injected %d artifact(s) from previous phases: %s",
+                len(files_to_inject),
+                list(outputs.keys()),
+            )
+        elif completed_phase_ids:
+            logger.warning(
+                "No artifacts found for completed phases: %s",
+                completed_phase_ids,
             )
 
     async def collect_from_workspace(
