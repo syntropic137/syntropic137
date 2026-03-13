@@ -5,6 +5,7 @@ store, using in-memory projections for system→repo membership.
 """
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from syn_domain.contexts.organization._shared.projection_names import REPO_HEALTH
 from syn_domain.contexts.organization.domain.queries.get_system_status import (
     GetSystemStatusQuery,
 )
@@ -54,7 +55,7 @@ class GetSystemStatusHandler:
         repos = self._repo_projection.list_all(system_id=query.system_id)
 
         # Batch-load all health data — avoid N+1
-        all_health_data = await self._store.get_all("repo_health")
+        all_health_data = await self._store.get_all(REPO_HEALTH)
         health_by_repo: dict[str, RepoHealth] = {}
         for hd in all_health_data:
             name = hd.get("repo_full_name", "")

@@ -6,3 +6,7 @@
 	path = lib/event-sourcing-platform
 	url = https://github.com/NeuralEmpowerment/event-sourcing-platform.git
 	branch = main
+[submodule "lib/agent-paradise-standards-system"]
+	path = lib/agent-paradise-standards-system
+	url = https://github.com/AgentParadise/agent-paradise-standards-system.git
+	branch = main

@@ -7,6 +7,10 @@ in-memory projections and projection stores.
 from decimal import Decimal
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_COST,
+    REPO_HEALTH,
+)
 from syn_domain.contexts.organization.domain.queries.get_global_overview import (
     GetGlobalOverviewQuery,
 )
@@ -44,8 +48,8 @@ class GetGlobalOverviewHandler:
         unassigned = self._repo_projection.list_all(unassigned=True)
 
         # Batch-load all cost and health data — avoid N+1
-        all_cost_data = await self._store.get_all("repo_cost")
-        all_health_data = await self._store.get_all("repo_health")
+        all_cost_data = await self._store.get_all(REPO_COST)
+        all_health_data = await self._store.get_all(REPO_HEALTH)
 
         cost_by_repo: dict[str, RepoCost] = {}
         for cd in all_cost_data:

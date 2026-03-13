@@ -26,6 +26,14 @@ class FakeProjectionStore:
     async def get_all(self, projection: str) -> list[dict[str, Any]]:
         return list(self._data.get(projection, {}).values())
 
+    async def query(
+        self, projection: str, filters: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
+        records = list(self._data.get(projection, {}).values())
+        if filters:
+            records = [r for r in records if all(r.get(k) == v for k, v in filters.items())]
+        return records
+
     async def delete_all(self, projection: str) -> None:
         self._data.pop(projection, None)
 

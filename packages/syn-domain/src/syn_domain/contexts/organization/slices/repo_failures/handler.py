@@ -5,6 +5,7 @@ executions filtered by repo-execution correlation.
 """
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
     GetRepoFailuresQuery,
 )
@@ -22,7 +23,7 @@ class GetRepoFailuresHandler:
 
     async def _get_execution_ids_for_repo(self, repo_id: str) -> set[str]:
         """Look up execution IDs correlated with a repo."""
-        correlations = await self._store.get_all("repo_correlation")
+        correlations = await self._store.get_all(REPO_CORRELATION)
         return {c["execution_id"] for c in correlations if c.get("repo_full_name") == repo_id}
 
     async def handle(self, query: GetRepoFailuresQuery) -> list[RepoFailure]:

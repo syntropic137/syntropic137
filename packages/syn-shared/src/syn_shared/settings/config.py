@@ -247,15 +247,6 @@ class Settings(BaseSettings):
         ),
     )
 
-    openai_api_key: SecretStr | None = Field(
-        default=None,
-        description=(
-            "OpenAI API key for GPT models. "
-            "Get from: https://platform.openai.com/api-keys "
-            "Required when using OpenAI agent adapter."
-        ),
-    )
-
     default_agent_timeout_seconds: int = Field(
         default=300,
         ge=10,

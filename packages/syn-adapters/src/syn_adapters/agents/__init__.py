@@ -1,6 +1,6 @@
 """Agent adapters - integrations with AI providers.
 
-This module provides adapters for AI agent providers (Claude, OpenAI).
+This module provides adapters for AI agent providers (Claude).
 
 ## Chat Completion
 

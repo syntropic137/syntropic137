@@ -20,6 +20,5 @@ class GetRepoHealthHandler:
         Uses the repo_id to find the repo's full_name via the repo
         projection, then queries the health projection.
         """
-        # TODO(#176): Look up repo_full_name from repo_id via RepoProjection
-        # For now, accept repo_id as repo_full_name
-        return await self.projection.get_health(query.repo_id)
+        key = query.repo_full_name or query.repo_id
+        return await self.projection.get_health(key)

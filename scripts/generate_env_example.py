@@ -114,7 +114,6 @@ def get_section_from_field_name(field_name: str) -> str:
         "event_store_": "EVENT STORE",
         "log_": "LOGGING",
         "anthropic_": "AGENT CONFIGURATION",
-        "openai_": "AGENT CONFIGURATION",
         "default_agent_": "AGENT CONFIGURATION",
         "default_max_": "AGENT CONFIGURATION",
         "artifact_": "STORAGE",

@@ -20,6 +20,7 @@ class GetRepoCostQuery:
     """
 
     repo_id: str
+    repo_full_name: str = ""
     window_hours: int = 720
     query_id: str = field(default_factory=lambda: str(uuid4()))
 

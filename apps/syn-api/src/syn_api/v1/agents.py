@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 # Provider display names and default models
 _PROVIDER_META: dict[str, tuple[str, str]] = {
     "claude": ("Claude (Anthropic)", "claude-sonnet-4-20250514"),
-    "openai": ("OpenAI", "gpt-4o"),
     "mock": ("Mock (test only)", "mock-v1"),
 }
 
@@ -70,7 +69,7 @@ async def test_agent(
     """Test an agent provider with a simple prompt.
 
     Args:
-        provider: Provider name (e.g. "claude", "openai").
+        provider: Provider name (e.g. "claude").
         prompt: Test prompt to send.
         model: Optional model override.
         auth: Optional authentication context.
@@ -138,7 +137,7 @@ async def chat(
     """Send a stateless chat completion request.
 
     Args:
-        provider: Provider name (e.g. "claude", "openai").
+        provider: Provider name (e.g. "claude").
         messages: List of message dicts with "role" and "content" keys.
         model: Optional model override.
         auth: Optional authentication context.

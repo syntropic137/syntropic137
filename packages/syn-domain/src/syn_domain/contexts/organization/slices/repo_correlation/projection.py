@@ -13,6 +13,7 @@ from typing import Any
 
 from event_sourcing import AutoDispatchProjection
 
+from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
 from syn_domain.contexts.organization.domain.read_models.repo_execution_correlation import (
     RepoExecutionCorrelation,
 )
@@ -27,7 +28,7 @@ class RepoCorrelationProjection(AutoDispatchProjection):
     subscribe and handle events — no separate subscription set needed.
     """
 
-    PROJECTION_NAME = "repo_correlation"
+    PROJECTION_NAME = REPO_CORRELATION
     VERSION = 1
 
     def __init__(self, store: Any) -> None:

@@ -930,25 +930,6 @@ wheels = [
 ]
 
 [[package]]
-name = "openai"
-version = "2.9.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-    { name = "distro" },
-    { name = "httpx" },
-    { name = "jiter" },
-    { name = "pydantic" },
-    { name = "sniffio" },
-    { name = "tqdm" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/09/48/516290f38745cc1e72856f50e8afed4a7f9ac396a5a18f39e892ab89dfc2/openai-2.9.0.tar.gz", hash = "sha256:b52ec65727fc8f1eed2fbc86c8eac0998900c7ef63aa2eb5c24b69717c56fa5f", size = 608202, upload-time = "2025-12-04T18:15:09.01Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/fd/ae2da789cd923dd033c99b8d544071a827c92046b150db01cfa5cea5b3fd/openai-2.9.0-py3-none-any.whl", hash = "sha256:0d168a490fbb45630ad508a6f3022013c155a68fd708069b6a1a01a5e8f0ffad", size = 1030836, upload-time = "2025-12-04T18:15:07.063Z" },
-]
-
-[[package]]
 name = "packaging"
 version = "25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1526,22 +1507,17 @@ dependencies = [
 [package.optional-dependencies]
 agents = [
     { name = "anthropic" },
-    { name = "openai" },
 ]
 all = [
     { name = "anthropic" },
     { name = "asyncpg" },
     { name = "minio" },
-    { name = "openai" },
 ]
 claude = [
     { name = "anthropic" },
 ]
 minio = [
     { name = "minio" },
-]
-openai = [
-    { name = "openai" },
 ]
 postgres = [
     { name = "asyncpg" },
@@ -1562,9 +1538,6 @@ requires-dist = [
     { name = "event-sourcing-python", extras = ["grpc"], editable = "lib/event-sourcing-platform/event-sourcing/python" },
     { name = "minio", marker = "extra == 'all'", specifier = ">=7.2.0" },
     { name = "minio", marker = "extra == 'minio'", specifier = ">=7.2.0" },
-    { name = "openai", marker = "extra == 'agents'", specifier = ">=1.59.0" },
-    { name = "openai", marker = "extra == 'all'", specifier = ">=1.59.0" },
-    { name = "openai", marker = "extra == 'openai'", specifier = ">=1.59.0" },
     { name = "pyjwt", specifier = ">=2.10.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "redis", specifier = ">=5.0.0" },
@@ -1572,7 +1545,7 @@ requires-dist = [
     { name = "syn-shared", editable = "packages/syn-shared" },
     { name = "syn-tokens", editable = "packages/syn-tokens" },
 ]
-provides-extras = ["postgres", "claude", "openai", "agents", "minio", "all"]
+provides-extras = ["postgres", "claude", "agents", "minio", "all"]
 
 [[package]]
 name = "syn-api"
@@ -1819,18 +1792,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fc/b3/c272537f3ea2f312555efeb86398cc382cd07b740d5f3c730918c36e64e1/testcontainers-4.13.3.tar.gz", hash = "sha256:9d82a7052c9a53c58b69e1dc31da8e7a715e8b3ec1c4df5027561b47e2efe646", size = 79064, upload-time = "2025-11-14T05:08:47.584Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/27/c2f24b19dafa197c514abe70eda69bc031c5152c6b1f1e5b20099e2ceedd/testcontainers-4.13.3-py3-none-any.whl", hash = "sha256:063278c4805ffa6dd85e56648a9da3036939e6c0ac1001e851c9276b19b05970", size = 124784, upload-time = "2025-11-14T05:08:46.053Z" },
-]
-
-[[package]]
-name = "tqdm"
-version = "4.67.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737, upload-time = "2024-11-24T20:12:22.481Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2", size = 78540, upload-time = "2024-11-24T20:12:19.698Z" },
 ]
 
 [[package]]
