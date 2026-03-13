@@ -44,6 +44,9 @@ from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
+
+    from agentic_events import Recording
 
     from syn_adapters.workspace_backends.tokens.token_injection_adapter import (
         SidecarTokenInjectionAdapter,
@@ -76,17 +79,24 @@ class WorkspaceBackend(Enum):
         LOCAL: Local filesystem for integration testing without Docker.
                TEST ENVIRONMENT ONLY - will fail if APP_ENVIRONMENT != "test".
 
+        RECORDING: Replay pre-recorded sessions for offline integration testing.
+                   TEST ENVIRONMENT ONLY - no API calls.
+
     Usage:
         # Production (default)
         service = WorkspaceService.create(backend=WorkspaceBackend.DOCKER)
 
         # Testing
         service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
+
+        # Recording replay
+        service = WorkspaceService.create_recording(Recording.SIMPLE_BASH)
     """
 
     DOCKER = "docker"
     MEMORY = "memory"
     LOCAL = "local"
+    RECORDING = "recording"
 
 
 @dataclass
@@ -350,6 +360,65 @@ class WorkspaceService:
         # For now, fall back to memory
         logger.warning("LOCAL backend not fully implemented, using MEMORY")
         return cls._create_memory_impl(config=config)
+
+    @classmethod
+    def create_recording(
+        cls,
+        recording: Recording | str | Path,
+        *,
+        config: WorkspaceServiceConfig | None = None,
+    ) -> WorkspaceService:
+        """Create WorkspaceService that replays a pre-recorded session.
+
+        ⚠️ TEST ENVIRONMENT ONLY ⚠️
+
+        Uses RecordingEventStreamAdapter for the event stream while keeping
+        all other adapters as in-memory mocks.
+
+        Args:
+            recording: Recording enum, task name string, or path to recording.
+            config: Optional service configuration.
+
+        Returns:
+            Configured WorkspaceService with recording-backed event stream.
+
+        Examples:
+            from agentic_events import Recording
+            service = WorkspaceService.create_recording(Recording.SIMPLE_BASH)
+
+            async with service.create_workspace(execution_id="test") as ws:
+                async for line in ws.stream(["claude", "-p", "test"]):
+                    process_event(line)
+        """
+        from syn_adapters.workspace_backends.memory import (
+            MemoryIsolationAdapter,
+            MemorySidecarAdapter,
+        )
+        from syn_adapters.workspace_backends.recording import RecordingEventStreamAdapter
+        from syn_adapters.workspace_backends.tokens import (
+            SidecarTokenInjectionAdapter,
+            TokenVendingServiceAdapter,
+        )
+        from syn_tokens.vending import InMemoryTokenStore, TokenVendingService
+
+        cfg = config or WorkspaceServiceConfig()
+
+        isolation = MemoryIsolationAdapter()
+        sidecar = MemorySidecarAdapter()
+        event_stream = RecordingEventStreamAdapter(recording)
+
+        store = InMemoryTokenStore()
+        tvs = TokenVendingService(store)
+        vending = TokenVendingServiceAdapter(tvs)
+        token_injection = SidecarTokenInjectionAdapter(vending, sidecar)
+
+        return cls(
+            isolation=isolation,
+            sidecar=sidecar,
+            token_injection=token_injection,
+            event_stream=event_stream,  # type: ignore[arg-type]
+            config=cfg,
+        )
 
     @asynccontextmanager
     async def create_workspace(
