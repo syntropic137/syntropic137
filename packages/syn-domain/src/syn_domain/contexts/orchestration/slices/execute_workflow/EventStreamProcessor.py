@@ -1,9 +1,10 @@
 """Event stream processor for workflow execution.
 
 Processes Claude CLI JSONL output stream, dispatching events to
-TokenAccumulator, SubagentTracker, and observability writer.
+TokenAccumulator, SubagentTracker, and ObservabilityCollector.
 
 Extracted from WorkflowExecutionEngine._execute_phase_in_container().
+Refactored in ISS-196 to delegate telemetry to ObservabilityCollector (Lane 2).
 """
 
 from __future__ import annotations
@@ -14,11 +15,16 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
-from agentic_events import enrich_event, parse_jsonl_line
 from agentic_events.types import ClaudeToolName, EventType
 
-from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
-    ObservationType,
+from syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller import (
+    CancelSignalPoller,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
+    EmbeddedEventScanner,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
+    HookEventParser,
 )
 from syn_shared.events import VALID_EVENT_TYPES
 
@@ -26,6 +32,12 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from syn_adapters.control import ExecutionController
+    from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
+        ObservationType,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+        ObservabilityCollector,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker import (
         SubagentTracker,
     )
@@ -67,11 +79,14 @@ class StreamResult:
     conversation_lines: list[str] = field(default_factory=list)
 
 
+_SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
+
+
 class EventStreamProcessor:
     """Processes Claude CLI JSONL event stream.
 
     Dispatches events to TokenAccumulator and SubagentTracker,
-    records observations, and accumulates conversation lines.
+    delegates telemetry recording to ObservabilityCollector (Lane 2).
     """
 
     def __init__(
@@ -85,16 +100,44 @@ class EventStreamProcessor:
         session_id: str,
         workspace_id: str | None,
         agent_model: str,
+        collector: ObservabilityCollector | None = None,
     ) -> None:
         self._tokens = tokens
         self._subagents = subagents
-        self._observability = observability
-        self._controller = controller
         self._execution_id = execution_id
         self._phase_id = phase_id
         self._session_id = session_id
         self._workspace_id = workspace_id
         self._agent_model = agent_model
+
+        # ISS-196: Use collector if provided, else create one from raw writer
+        if collector is not None:
+            self._collector = collector
+        else:
+            from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+                ObservabilityCollector as OC,
+            )
+
+            self._collector = OC(
+                writer=observability,
+                session_id=session_id,
+                execution_id=execution_id,
+                phase_id=phase_id,
+                workspace_id=workspace_id,
+                agent_model=agent_model,
+            )
+
+        # Collaborators extracted for CC reduction (ISS-196)
+        self._hook_parser = HookEventParser()
+        self._embedded_scanner = EmbeddedEventScanner(
+            collector=self._collector,
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
+        self._cancel_poller = CancelSignalPoller(
+            controller=controller,
+            execution_id=execution_id,
+        )
 
     async def process_stream(
         self,
@@ -115,58 +158,26 @@ class EventStreamProcessor:
         interrupt_requested = False
         interrupt_reason: str | None = None
         agent_task_result: dict[str, Any] | None = None
-        # Dedup set: same hook event appears as both raw stderr and
-        # inside a hook_response envelope (stderr=STDOUT in container).
-        seen_hook_fingerprints: set[tuple[str, ...]] = set()
 
         async for line in stream:
             line_count += 1
             logger.debug("Received line %d: %s", line_count, line[:100])
 
-            # Poll for CANCEL signal every 10 lines
-            if line_count % 10 == 0 and self._controller is not None:
-                from syn_adapters.control.commands import ControlSignalType
-
-                signal = await self._controller.check_signal(self._execution_id)
-                if signal and signal.signal_type == ControlSignalType.CANCEL:
-                    logger.info(
-                        "CANCEL signal received for execution %s at line %d — sending SIGINT",
-                        self._execution_id,
-                        line_count,
-                    )
-                    interrupt_requested = True
-                    interrupt_reason = signal.reason
-                    await workspace.interrupt()
-                    break
+            # Poll for CANCEL signal
+            poll = await self._cancel_poller.check(line_count)
+            if poll.should_interrupt:
+                interrupt_requested = True
+                interrupt_reason = poll.reason
+                await workspace.interrupt()
+                break
 
             # Collect line for conversation storage (ADR-035)
             if line.strip():
                 conversation_lines.append(line)
 
             # Parse hook events from the stream
-            hook_events = self._parse_hook_events(line)
-
+            hook_events = self._hook_parser.parse(line)
             for hook_event in hook_events:
-                # Deduplicate: same event can appear as raw stderr AND inside
-                # hook_response envelope, or from multiple plugins.
-                evt_type = hook_event.get("event_type", "")
-                evt_sid = hook_event.get("session_id", "")
-                evt_ctx = hook_event.get("context") or {}
-                evt_tuid = evt_ctx.get("tool_use_id", "")
-                if evt_tuid:
-                    fp: tuple[str, ...] = (
-                        evt_type,
-                        evt_sid,
-                        str(hook_event.get("timestamp", "")),
-                        evt_tuid,
-                    )
-                else:
-                    fp = (evt_type, evt_sid)
-                if fp in seen_hook_fingerprints:
-                    logger.debug("Skipping duplicate hook event: %s", fp[0])
-                    continue
-                seen_hook_fingerprints.add(fp)
-
                 await self._process_hook_event(hook_event)
 
             # Skip native CLI event processing if we handled hook events
@@ -193,65 +204,10 @@ class EventStreamProcessor:
             conversation_lines=conversation_lines,
         )
 
-    def _parse_hook_events(self, line: str) -> list[dict[str, Any]]:
-        """Parse hook events from a stream line.
-
-        Two sources:
-        - SOURCE A: Standalone JSONL from Claude Code hooks
-        - SOURCE B: hook_response system events with embedded JSONL
-        """
-        hook_events: list[dict[str, Any]] = []
-
-        standalone = parse_jsonl_line(line)
-        if standalone:
-            hook_events.append(standalone)
-        else:
-            try:
-                parsed = json.loads(line)
-                line_type = parsed.get("type", "")
-                line_subtype = parsed.get("subtype", "")
-
-                if line_type == "system":
-                    logger.info(
-                        "System event: subtype=%s keys=%s",
-                        line_subtype,
-                        list(parsed.keys()),
-                    )
-
-                if line_type == "system" and line_subtype == "hook_response":
-                    hook_name = parsed.get("hook_name", "?")
-                    hook_event = parsed.get("hook_event", "?")
-                    seen: set[str] = set()
-
-                    for channel in ("output", "stdout", "stderr"):
-                        channel_text = parsed.get(channel, "")
-                        logger.info(
-                            "hook_response hook=%s event=%s channel=%s len=%d content=%r",
-                            hook_name,
-                            hook_event,
-                            channel,
-                            len(channel_text),
-                            channel_text[:300],
-                        )
-                        for hook_line in channel_text.splitlines():
-                            hook_line = hook_line.strip()
-                            if hook_line and hook_line not in seen:
-                                evt = parse_jsonl_line(hook_line)
-                                if evt:
-                                    seen.add(hook_line)
-                                    hook_events.append(evt)
-                                else:
-                                    logger.info(
-                                        "hook_response line not a hook event: %r",
-                                        hook_line[:200],
-                                    )
-            except (json.JSONDecodeError, AttributeError):
-                pass
-
-        return hook_events
-
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
+        from agentic_events import enrich_event
+
         event_type = hook_event.get("event_type")
         if event_type not in VALID_EVENT_TYPES:
             logger.warning(
@@ -267,84 +223,48 @@ class EventStreamProcessor:
         )
         logger.debug("Hook event: %s", enriched.get("event_type"))
 
-        # Store via observability writer
-        if self._observability is not None:
-            hook_data = {
-                **(enriched.get("context") or {}),
-                **(enriched.get("metadata") or {}),
-            }
-            await self._observability.record_observation(
-                session_id=self._session_id,
-                observation_type=enriched.get("event_type", "unknown"),
-                data=hook_data,
-                execution_id=self._execution_id,
-                phase_id=self._phase_id,
-                workspace_id=self._workspace_id,
-            )
+        # Lane 2: Record via collector
+        await self._collector.record_hook_event(enriched)
 
-        # ADR-037: Detect subagent lifecycle from Task tool events.
-        # Hook events use "event_type" (not "type") with values from
-        # agentic_events.types.EventType (e.g. "tool_execution_started").
-        hook_event_type = hook_event.get("event_type", "")
+        # ADR-037: Track subagent lifecycle from hook events
+        await self._track_subagent_from_hook(hook_event, enriched)
+
+    async def _track_subagent_from_hook(
+        self, hook_event: dict[str, Any], enriched: dict[str, Any]
+    ) -> None:
+        """ADR-037: Detect subagent lifecycle from Task tool hook events."""
         ctx_data = enriched.get("context", {})
         tool_name = ctx_data.get("tool_name", "")
         tool_use_id = ctx_data.get("tool_use_id", "")
+        is_subagent = tool_name in _SUBAGENT_TOOL_NAMES
 
-        # Attribute non-Task tool calls to the active subagent (if any)
-        if (
-            tool_name
-            and tool_name not in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-            and self._subagents.has_active
-        ):
-            self._subagents.attribute_tool(tool_name)
+        if not is_subagent:
+            # Attribute non-Task tool calls to the active subagent (if any)
+            if tool_name and self._subagents.has_active:
+                self._subagents.attribute_tool(tool_name)
+            return
 
-        if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
-            if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
-                input_preview = ctx_data.get("input_preview", "")
-                event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
-                if self._observability is not None:
-                    await self._observability.record_observation(
-                        session_id=self._session_id,
-                        observation_type=ObservationType.SUBAGENT_STARTED,
-                        data={
-                            "agent_name": event.agent_name,
-                            "subagent_tool_use_id": tool_use_id,
-                        },
-                        execution_id=self._execution_id,
-                        phase_id=self._phase_id,
-                        workspace_id=self._workspace_id,
-                    )
-                    logger.info(
-                        "Subagent started: %s (id=%s)",
-                        event.agent_name,
-                        tool_use_id,
-                    )
+        if not tool_use_id:
+            return
 
-            elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
-                success = ctx_data.get("success", True)
-                stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
-                if stopped_event and self._observability is not None:
-                    await self._observability.record_observation(
-                        session_id=self._session_id,
-                        observation_type=ObservationType.SUBAGENT_STOPPED,
-                        data={
-                            "agent_name": stopped_event.agent_name,
-                            "subagent_tool_use_id": tool_use_id,
-                            "duration_ms": stopped_event.duration_ms,
-                            "success": stopped_event.success,
-                            "tools_used": stopped_event.tools_used,
-                        },
-                        execution_id=self._execution_id,
-                        phase_id=self._phase_id,
-                        workspace_id=self._workspace_id,
-                    )
-                    logger.info(
-                        "Subagent stopped: %s (id=%s, duration=%dms, tools=%s)",
-                        stopped_event.agent_name,
-                        tool_use_id,
-                        stopped_event.duration_ms or 0,
-                        stopped_event.tools_used,
-                    )
+        hook_event_type = hook_event.get("event_type", "")
+
+        if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
+            input_preview = ctx_data.get("input_preview", "")
+            event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
+            await self._collector.record_subagent_started(event.agent_name, tool_use_id)
+
+        elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
+            success = ctx_data.get("success", True)
+            stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
+            if stopped_event:
+                await self._collector.record_subagent_stopped(
+                    agent_name=stopped_event.agent_name,
+                    tool_use_id=tool_use_id,
+                    duration_ms=stopped_event.duration_ms,
+                    success=stopped_event.success,
+                    tools_used=stopped_event.tools_used,
+                )
 
     async def _process_cli_event(self, line: str) -> dict[str, Any] | None:
         """Process a Claude CLI native event. Returns task result if found."""
@@ -405,28 +325,15 @@ class EventStreamProcessor:
         if input_tokens > 0 or output_tokens > 0:
             self._tokens.record(input_tokens, output_tokens)
 
-            if self._observability is not None:
-                cache_creation = usage.get("cache_creation_input_tokens", 0)
-                cache_read = usage.get("cache_read_input_tokens", 0)
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=ObservationType.TOKEN_USAGE,
-                    data={
-                        "input_tokens": input_tokens,
-                        "output_tokens": output_tokens,
-                        "cache_creation_tokens": cache_creation,
-                        "cache_read_tokens": cache_read,
-                        "model": self._agent_model,
-                    },
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Result token usage: %d in, %d out",
-                    input_tokens,
-                    output_tokens,
-                )
+            cache_creation = usage.get("cache_creation_input_tokens", 0)
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            await self._collector.record_token_usage(
+                input_tokens,
+                output_tokens,
+                cache_creation,
+                cache_read,
+            )
+            logger.info("Result token usage: %d in, %d out", input_tokens, output_tokens)
 
         return task_result
 
@@ -444,30 +351,21 @@ class EventStreamProcessor:
             if input_tokens > 0 or output_tokens > 0:
                 self._tokens.record(input_tokens, output_tokens)
 
-                if self._observability is not None:
-                    cache_creation = usage.get("cache_creation_input_tokens", 0)
-                    cache_read = usage.get("cache_read_input_tokens", 0)
-                    await self._observability.record_observation(
-                        session_id=self._session_id,
-                        observation_type=ObservationType.TOKEN_USAGE,
-                        data={
-                            "input_tokens": input_tokens,
-                            "output_tokens": output_tokens,
-                            "cache_creation_tokens": cache_creation,
-                            "cache_read_tokens": cache_read,
-                            "model": self._agent_model,
-                        },
-                        execution_id=self._execution_id,
-                        phase_id=self._phase_id,
-                        workspace_id=self._workspace_id,
-                    )
-                    logger.info(
-                        "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
-                        input_tokens,
-                        output_tokens,
-                        cache_read,
-                        cache_creation,
-                    )
+                cache_creation = usage.get("cache_creation_input_tokens", 0)
+                cache_read = usage.get("cache_read_input_tokens", 0)
+                await self._collector.record_token_usage(
+                    input_tokens,
+                    output_tokens,
+                    cache_creation,
+                    cache_read,
+                )
+                logger.info(
+                    "Per-turn token usage: %d in, %d out (cache: %d read, %d create)",
+                    input_tokens,
+                    output_tokens,
+                    cache_read,
+                    cache_creation,
+                )
 
         # Process tool_use items
         for item in content:
@@ -488,41 +386,17 @@ class EventStreamProcessor:
         # Cache tool_name for enriching tool_result events
         self._subagents.register_tool_use(tool_use_id, tool_name)
 
-        if self._observability is not None:
-            await self._observability.record_observation(
-                session_id=self._session_id,
-                observation_type=ObservationType.TOOL_EXECUTION_STARTED,
-                data={
-                    "tool_name": tool_name,
-                    "tool_use_id": tool_use_id,
-                    "input_preview": json.dumps(tool_input)[:500],
-                },
-                execution_id=self._execution_id,
-                phase_id=self._phase_id,
-                workspace_id=self._workspace_id,
-            )
-            logger.debug("Tool started: %s", tool_name)
+        await self._collector.record_tool_started(
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            input_preview=json.dumps(tool_input)[:500],
+        )
+        logger.debug("Tool started: %s", tool_name)
 
         # ADR-037: Detect Task/Agent tool as subagent start (raw CLI format)
-        if tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY) and tool_use_id:
+        if tool_name in _SUBAGENT_TOOL_NAMES and tool_use_id:
             event = self._subagents.on_task_started(tool_use_id, tool_input)
-            if self._observability is not None:
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=ObservationType.SUBAGENT_STARTED,
-                    data={
-                        "agent_name": event.agent_name,
-                        "subagent_tool_use_id": tool_use_id,
-                    },
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Subagent started (CLI): %s (id=%s)",
-                    event.agent_name,
-                    tool_use_id,
-                )
+            await self._collector.record_subagent_started(event.agent_name, tool_use_id)
 
     async def _handle_user_event(self, cli_event: dict[str, Any]) -> None:
         """Handle user event — process tool results."""
@@ -548,89 +422,33 @@ class EventStreamProcessor:
         tool_name = self._subagents.resolve_tool_name(tool_use_id)
 
         # Scan tool output for embedded git hook JSONL (ADR-043)
-        if tool_content and self._observability is not None:
-            for tl in str(tool_content).splitlines():
-                tl = tl.strip()
-                if not tl:
-                    continue
-                embedded = parse_jsonl_line(tl)
-                if not embedded:
-                    continue
-                et = embedded.get("event_type")
-                if et not in VALID_EVENT_TYPES:
-                    logger.debug("Unknown event_type in tool output: %s", et)
-                    continue
-                enriched = enrich_event(
-                    embedded,
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                )
-                hd = {
-                    **(enriched.get("context") or {}),
-                    **(enriched.get("metadata") or {}),
-                }
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=et,
-                    data=hd,
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Git hook event from tool output: %s (tool=%s)",
-                    et,
-                    tool_name,
-                )
+        if tool_content:
+            await self._embedded_scanner.scan_and_record(str(tool_content), tool_name)
 
         # Record tool completion
-        if self._observability is not None:
-            await self._observability.record_observation(
-                session_id=self._session_id,
-                observation_type=ObservationType.TOOL_EXECUTION_COMPLETED,
-                data={
-                    "tool_name": tool_name,
-                    "tool_use_id": tool_use_id,
-                    "success": not is_error,
-                    "output_preview": output_preview,
-                },
-                execution_id=self._execution_id,
-                phase_id=self._phase_id,
-                workspace_id=self._workspace_id,
-            )
-            logger.debug(
-                "Tool completed: %s (%s) success=%s",
-                tool_use_id,
-                tool_name,
-                not is_error,
-            )
+        await self._collector.record_tool_completed(
+            tool_name=tool_name,
+            tool_use_id=tool_use_id,
+            success=not is_error,
+            output_preview=output_preview,
+        )
+        logger.debug("Tool completed: %s (%s) success=%s", tool_use_id, tool_name, not is_error)
 
         # ADR-037: Detect Task/Agent tool completion as subagent stop (raw CLI format)
-        _is_subagent = tool_name in (ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY)
-        if _is_subagent:
-            event = self._subagents.on_task_completed(tool_use_id, success=not is_error)
-            if event and self._observability is not None:
-                await self._observability.record_observation(
-                    session_id=self._session_id,
-                    observation_type=ObservationType.SUBAGENT_STOPPED,
-                    data={
-                        "agent_name": event.agent_name,
-                        "subagent_tool_use_id": tool_use_id,
-                        "duration_ms": event.duration_ms,
-                        "success": event.success,
-                        "tools_used": event.tools_used,
-                    },
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                    workspace_id=self._workspace_id,
-                )
-                logger.info(
-                    "Subagent stopped (CLI): %s (id=%s, duration=%dms, tools=%s)",
-                    event.agent_name,
-                    tool_use_id,
-                    event.duration_ms or 0,
-                    event.tools_used,
-                )
-        elif not _is_subagent:
+        if tool_name in _SUBAGENT_TOOL_NAMES:
+            await self._record_subagent_completion(tool_use_id, is_error)
+        else:
             # Attribute non-subagent tool to the most recently started subagent
             self._subagents.attribute_tool(tool_name)
+
+    async def _record_subagent_completion(self, tool_use_id: str, is_error: bool) -> None:
+        """Record subagent completion from raw CLI tool_result."""
+        event = self._subagents.on_task_completed(tool_use_id, success=not is_error)
+        if event:
+            await self._collector.record_subagent_stopped(
+                agent_name=event.agent_name,
+                tool_use_id=tool_use_id,
+                duration_ms=event.duration_ms,
+                success=event.success,
+                tools_used=event.tools_used,
+            )

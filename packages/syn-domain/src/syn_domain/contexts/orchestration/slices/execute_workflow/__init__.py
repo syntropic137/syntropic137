@@ -17,8 +17,13 @@ from syn_domain.contexts.orchestration.domain.events import (
     WorkflowExecutionStartedEvent,
     WorkflowFailedEvent,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionEngine import (
-    WorkflowExecutionEngine,
+from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
+    WorkflowExecutionError,
+    WorkflowInterruptedError,
+    WorkflowNotFoundError,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
+    WorkflowExecutionProcessor,
     WorkflowExecutionResult,
 )
 
@@ -30,8 +35,11 @@ __all__ = [
     "PhaseCompletedEvent",
     "PhaseStartedEvent",
     "WorkflowCompletedEvent",
-    "WorkflowExecutionEngine",
+    "WorkflowExecutionError",
+    "WorkflowExecutionProcessor",
     "WorkflowExecutionResult",
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
+    "WorkflowInterruptedError",
+    "WorkflowNotFoundError",
 ]

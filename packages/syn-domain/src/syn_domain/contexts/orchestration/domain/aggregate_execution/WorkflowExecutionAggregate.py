@@ -18,6 +18,7 @@ from event_sourcing import AggregateRoot, aggregate, command_handler, event_sour
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutionStatus,
+    PhaseDefinition,
 )
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ class StartExecutionCommand:
         total_phases: int,
         inputs: dict[str, Any],
         expected_completion_at: datetime | None = None,
+        phase_definitions: list[PhaseDefinition] | None = None,
     ) -> None:
         """Initialize command.
 
@@ -59,6 +61,9 @@ class StartExecutionCommand:
             total_phases: Number of phases to execute
             inputs: Input parameters for the workflow
             expected_completion_at: When we expect this to complete (for stale detection)
+            phase_definitions: Ordered phase definitions for aggregate sequencing.
+                Optional for backward compatibility — when absent, the aggregate
+                does not make sequencing decisions (legacy engine mode).
         """
         self.aggregate_id = execution_id
         self.workflow_id = workflow_id
@@ -66,6 +71,7 @@ class StartExecutionCommand:
         self.total_phases = total_phases
         self.inputs = inputs
         self.expected_completion_at = expected_completion_at
+        self.phase_definitions = phase_definitions
 
 
 class CompleteExecutionCommand:
@@ -235,6 +241,61 @@ class InterruptExecutionCommand:
         self.partial_output_tokens = partial_output_tokens
 
 
+class ProvisionWorkspaceCompletedCommand:
+    """Command reported by WorkspaceProvisionHandler after workspace is ready."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        workspace_id: str,
+        session_id: str = "",
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.workspace_id = workspace_id
+        self.session_id = session_id
+
+
+class AgentExecutionCompletedCommand:
+    """Command reported by AgentExecutionHandler after agent finishes."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        session_id: str | None,
+        exit_code: int = 0,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.session_id = session_id
+        self.exit_code = exit_code
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class ArtifactsCollectedCommand:
+    """Command reported by ArtifactCollectionHandler after outputs stored."""
+
+    def __init__(
+        self,
+        execution_id: str,
+        phase_id: str,
+        artifact_ids: list[str],
+        first_content_preview: str | None = None,
+    ) -> None:
+        """Initialize command."""
+        self.aggregate_id = execution_id
+        self.phase_id = phase_id
+        self.artifact_ids = artifact_ids
+        self.first_content_preview = first_content_preview
+
+
 # =============================================================================
 # Aggregate
 # =============================================================================
@@ -270,6 +331,10 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._total_tokens: int = 0
         self._artifact_ids: list[str] = []
         self._error: str | None = None
+        # Phase intelligence (Processor To-Do List pattern, ISS-196)
+        self._phase_definitions: list[PhaseDefinition] = []
+        self._phase_order_map: dict[str, int] = {}  # phase_id → order index
+        self._current_phase_workspace_id: str | None = None
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -302,6 +367,19 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
 
         self._initialize(command.aggregate_id)
 
+        # Serialize phase definitions for event storage
+        phase_defs_data: list[dict[str, Any]] | None = None
+        if command.phase_definitions:
+            phase_defs_data = [
+                {
+                    "phase_id": pd.phase_id,
+                    "name": pd.name,
+                    "order": pd.order,
+                    "timeout_seconds": pd.timeout_seconds,
+                }
+                for pd in command.phase_definitions
+            ]
+
         event = WorkflowExecutionStartedEvent(
             workflow_id=command.workflow_id,
             execution_id=command.aggregate_id,
@@ -310,6 +388,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             total_phases=command.total_phases,
             inputs=command.inputs,
             expected_completion_at=command.expected_completion_at,
+            phase_definitions=phase_defs_data,
         )
         self._apply(event)
 
@@ -414,6 +493,101 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         self._apply(event)  # type: ignore[arg-type]
 
     # =========================================================================
+    # PROCESSOR TO-DO LIST COMMAND HANDLERS (ISS-196)
+    # =========================================================================
+
+    @command_handler("ProvisionWorkspaceCompletedCommand")
+    def provision_workspace_completed(self, command: ProvisionWorkspaceCompletedCommand) -> None:
+        """Handle workspace provisioned for a phase."""
+        from syn_domain.contexts.orchestration.domain.events.WorkspaceProvisionedForPhaseEvent import (
+            WorkspaceProvisionedForPhaseEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot provision workspace in status {self._status}"
+            raise ValueError(msg)
+
+        event = WorkspaceProvisionedForPhaseEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            workspace_id=command.workspace_id,
+            session_id=command.session_id,
+            provisioned_at=datetime.now(UTC),
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
+    @command_handler("AgentExecutionCompletedCommand")
+    def agent_execution_completed(self, command: AgentExecutionCompletedCommand) -> None:
+        """Handle agent finished executing in workspace."""
+        from syn_domain.contexts.orchestration.domain.events.AgentExecutionCompletedEvent import (
+            AgentExecutionCompletedEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot complete agent execution in status {self._status}"
+            raise ValueError(msg)
+
+        event = AgentExecutionCompletedEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            session_id=command.session_id,
+            completed_at=datetime.now(UTC),
+            exit_code=command.exit_code,
+            input_tokens=command.input_tokens,
+            output_tokens=command.output_tokens,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
+    @command_handler("ArtifactsCollectedCommand")
+    def artifacts_collected(self, command: ArtifactsCollectedCommand) -> None:
+        """Handle artifacts collected — aggregate decides if more phases exist."""
+        from syn_domain.contexts.orchestration.domain.events.ArtifactsCollectedForPhaseEvent import (
+            ArtifactsCollectedForPhaseEvent,
+        )
+        from syn_domain.contexts.orchestration.domain.events.NextPhaseReadyEvent import (
+            NextPhaseReadyEvent,
+        )
+
+        if self._status != ExecutionStatus.RUNNING:
+            msg = f"Cannot collect artifacts in status {self._status}"
+            raise ValueError(msg)
+
+        event = ArtifactsCollectedForPhaseEvent(
+            workflow_id=self._workflow_id or "",
+            execution_id=command.aggregate_id,
+            phase_id=command.phase_id,
+            artifact_ids=command.artifact_ids,
+            collected_at=datetime.now(UTC),
+            first_content_preview=command.first_content_preview,
+        )
+        self._apply(event)  # type: ignore[arg-type]
+
+        # Aggregate decides: is there a next phase?
+        if self._phase_definitions:
+            current_order = self._phase_order_map.get(command.phase_id)
+            if current_order is not None:
+                next_phase = self._find_next_phase(current_order)
+                if next_phase is not None:
+                    next_event = NextPhaseReadyEvent(
+                        workflow_id=self._workflow_id or "",
+                        execution_id=command.aggregate_id,
+                        completed_phase_id=command.phase_id,
+                        next_phase_id=next_phase.phase_id,
+                        next_phase_order=next_phase.order,
+                        decided_at=datetime.now(UTC),
+                    )
+                    self._apply(next_event)  # type: ignore[arg-type]
+
+    def _find_next_phase(self, current_order: int) -> PhaseDefinition | None:
+        """Find the next phase after the given order, or None if this was the last."""
+        for phase_def in self._phase_definitions:
+            if phase_def.order > current_order:
+                return phase_def
+        return None
+
+    # =========================================================================
     # EVENT SOURCING HANDLERS
     # =========================================================================
 
@@ -426,6 +600,21 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._started_at = event.started_at
             self._total_phases = event.total_phases
             self._expected_completion_at = getattr(event, "expected_completion_at", None)
+            # Phase definitions for aggregate sequencing (ISS-196)
+            raw_defs: list[dict[str, Any]] = getattr(event, "phase_definitions", []) or []
+            self._phase_definitions = sorted(
+                [
+                    PhaseDefinition(
+                        phase_id=d["phase_id"],
+                        name=d["name"],
+                        order=d["order"],
+                        timeout_seconds=d.get("timeout_seconds", 300),
+                    )
+                    for d in raw_defs
+                ],
+                key=lambda p: p.order,
+            )
+            self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
         else:
             # Dict-based event from gRPC
             data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
@@ -434,6 +623,20 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             self._started_at = data.get("started_at")
             self._total_phases = data.get("total_phases", 0)
             self._expected_completion_at = data.get("expected_completion_at")
+            raw_defs = data.get("phase_definitions", []) or []
+            self._phase_definitions = sorted(
+                [
+                    PhaseDefinition(
+                        phase_id=d["phase_id"],
+                        name=d["name"],
+                        order=d["order"],
+                        timeout_seconds=d.get("timeout_seconds", 300),
+                    )
+                    for d in raw_defs
+                ],
+                key=lambda p: p.order,
+            )
+            self._phase_order_map = {p.phase_id: p.order for p in self._phase_definitions}
 
         self._status = ExecutionStatus.RUNNING
 
@@ -483,6 +686,35 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
         # Increment completed phases count
         # Note: We don't use event data here - just counting phases
         self._completed_phases += 1
+
+    @event_sourcing_handler("WorkspaceProvisionedForPhase")
+    def on_workspace_provisioned_for_phase(self, event: Any) -> None:
+        """Apply WorkspaceProvisionedForPhaseEvent — track current workspace."""
+        if hasattr(event, "workspace_id"):
+            self._current_phase_workspace_id = event.workspace_id
+        else:
+            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._current_phase_workspace_id = data.get("workspace_id")
+
+    @event_sourcing_handler("AgentExecutionCompleted")
+    def on_agent_execution_completed(self, _event: Any) -> None:
+        """Apply AgentExecutionCompletedEvent — no state change needed."""
+
+    @event_sourcing_handler("ArtifactsCollectedForPhase")
+    def on_artifacts_collected_for_phase(self, event: Any) -> None:
+        """Apply ArtifactsCollectedForPhaseEvent — track artifact IDs."""
+        if hasattr(event, "artifact_ids"):
+            self._artifact_ids.extend(event.artifact_ids)
+        else:
+            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            self._artifact_ids.extend(data.get("artifact_ids", []))
+
+    @event_sourcing_handler("NextPhaseReady")
+    def on_next_phase_ready(self, _event: Any) -> None:
+        """Apply NextPhaseReadyEvent — no additional state change needed.
+
+        The to-do list projection reacts to this event, not the aggregate.
+        """
 
     # =========================================================================
     # CONTROL PLANE COMMAND HANDLERS

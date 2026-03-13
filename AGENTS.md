@@ -111,6 +111,101 @@ Goal: manual testing finds zero bugs — everything caught by automated tests.
 
 Test fixtures auto-detect infrastructure: env vars > test-stack (port 15432) > testcontainers.
 
+## Event Sourcing Architecture
+
+### Two-Lane Architecture
+
+All state and telemetry flows through two strictly separated lanes:
+
+1. **Lane 1: Event Sourcing (Domain Truth)** — Aggregates are the sole decision-makers for state transitions. Commands go in, events come out. The aggregate owns the rules. Infrastructure handlers react to events, do work, and report results back via new commands.
+
+2. **Lane 2: Observability (Telemetry)** — Token counts, tool traces, timing, stream chunks. Append-only, never replayed for state. Writes to observability recorder, NOT the event store. No interaction with aggregates.
+
+### Long-Running Process Orchestration
+
+When orchestrating multi-step processes (e.g., workflow execution with multiple phases):
+
+**Do NOT** use imperative async/await orchestration:
+```python
+# WRONG — imperative orchestrator
+async def execute(workflow):
+    for phase in workflow.phases:
+        workspace = await provision_workspace(phase)
+        result = await run_agent(workspace)
+        await collect_artifacts(result)
+```
+
+**DO** use the Processor To-Do List pattern:
+- **Aggregate** handles commands and emits events, enforces rules, decides "what's next"
+- **To-Do List Projection** (read model) builds a list of pending work from events
+- **Processor** reads the to-do list and dispatches commands — zero business logic
+- **Infrastructure Handlers** react to commands, do async work, emit result events
+
+Flow: `Event → Projection updates to-do list → Processor reads list → Dispatches command → Handler does work → Emits event → cycle repeats`
+
+Key properties:
+- Crash-resilient: to-do list persists, processor restarts and picks up where it left off
+- All business logic in aggregates and projections, never in the processor
+- Each handler is single-responsibility, <200 LOC, independently testable
+
+### When to Use Which Pattern
+
+| Scenario | Pattern | Example |
+|----------|---------|---------|
+| Multi-step process with infrastructure work | Processor To-Do List | Workflow execution (provision → run → collect → next phase) |
+| Simple command → event → done | Direct aggregate command | Creating a workspace, pausing an execution |
+| Querying derived state | Projection (read model) | Dashboard metrics, execution list, session tools |
+| Time-based triggers (timeouts, SLA deadlines) | Passage of Time (clock events) | Stale execution detection, phase timeout enforcement |
+
+### Projection Consistency in Processor Loops
+
+When a processor needs immediate feedback from its own commands (e.g., "I just completed phase 1, what's the next todo?"), the event subscription pipeline introduces eventual consistency delays. Two strategies:
+
+- **In-process synchronous projection:** The processor maintains a local projection instance. After each `repository.save(aggregate)`, it reads the aggregate's uncommitted events and applies them directly to the local projection. The persistent projection catches up asynchronously for external consumers (dashboard, API). This is the preferred approach for process-local to-do lists.
+- **Never** poll the persistent projection waiting for it to catch up — this creates fragile timing dependencies.
+
+### Crash Recovery and Restart Guarantees
+
+The Processor To-Do List pattern is crash-resilient by design:
+- **Domain state** is in the event store — fully recoverable by replaying events onto the aggregate
+- **To-Do list** is a projection — rebuilt from the event stream on restart (catch-up subscription)
+- **Infrastructure state** (active Docker containers, open connections) is ephemeral and NOT in the event stream. On crash, infrastructure is assumed lost. The processor re-provisions from the last completed domain event.
+- **Key invariant:** If the processor crashes between "handler did work" and "command reported to aggregate," the to-do item still shows as pending. On restart, the handler re-executes. Handlers MUST be idempotent — re-provisioning a workspace or re-collecting artifacts should be safe.
+
+### Handler Idempotency Rule
+
+Infrastructure handlers MUST be idempotent. If called twice with the same todo item:
+- `WorkspaceProvisionHandler`: Creates a new workspace (old one is gone after crash) — safe
+- `AgentExecutionHandler`: Re-runs the agent from scratch — safe (stateless container)
+- `ArtifactCollectionHandler`: Re-collects from workspace — safe (idempotent writes)
+
+The aggregate enforces ordering via command guards (e.g., reject `CompletePhaseCommand` if phase not in RUNNING state).
+
+### What Goes in the Event Store vs. What Doesn't
+
+| In Event Store (Lane 1) | NOT in Event Store |
+|---|---|
+| Phase started/completed | Docker container IDs |
+| Workspace provisioned (fact that it happened) | Active workspace handles |
+| Agent execution completed (tokens, cost, duration) | JSONL stream bytes |
+| Artifacts collected (artifact IDs) | Temporary file paths |
+| Workflow completed/failed | In-memory caches |
+
+Rule: If you need it after a restart, it must be an event. If it's only needed during the current process lifecycle, hold it in the processor.
+
+### Rules
+
+- Aggregates MUST be the decision-makers — never let an engine/service decide "what's next"
+- State MUST be derived from events — no mutable in-memory state (no `ExecutionContext` pattern)
+- Observability MUST be separate from domain — telemetry never flows through aggregates
+- Long-running processes MUST use Processor To-Do List — no imperative async loops
+
+### References
+
+- Martin Dilger, *Understanding Event Sourcing* — Ch. 37: Processor To-Do List pattern
+- Event Modeling specification: https://eventmodeling.org/posts/what-is-event-modeling/
+- To-Do List + Passage of Time patterns: https://event-driven.io/en/to_do_list_and_passage_of_time_patterns_combined/
+
 ## Tooling
 
 - **uv** for Python package management (workspaces)
