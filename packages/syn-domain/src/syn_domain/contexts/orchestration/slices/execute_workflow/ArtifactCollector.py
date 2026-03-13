@@ -155,6 +155,7 @@ class ArtifactCollector:
         workspace: ArtifactWorkspace,
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
+        execution_id: str = "",
     ) -> None:
         """Inject artifacts using explicit parameters (ISS-196).
 
@@ -175,7 +176,7 @@ class ArtifactCollector:
         missing = [pid for pid in completed_phase_ids if pid not in outputs]
         if missing and self._query_service:
             projection_outputs = await self._query_service.get_for_phase_injection(
-                execution_id="",  # Not available in explicit mode
+                execution_id=execution_id,
                 completed_phase_ids=missing,
             )
             outputs.update(projection_outputs)

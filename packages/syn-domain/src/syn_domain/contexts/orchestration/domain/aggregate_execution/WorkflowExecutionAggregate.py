@@ -249,11 +249,13 @@ class ProvisionWorkspaceCompletedCommand:
         execution_id: str,
         phase_id: str,
         workspace_id: str,
+        session_id: str = "",
     ) -> None:
         """Initialize command."""
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.workspace_id = workspace_id
+        self.session_id = session_id
 
 
 class AgentExecutionCompletedCommand:
@@ -510,6 +512,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             execution_id=command.aggregate_id,
             phase_id=command.phase_id,
             workspace_id=command.workspace_id,
+            session_id=command.session_id,
             provisioned_at=datetime.now(UTC),
         )
         self._apply(event)  # type: ignore[arg-type]

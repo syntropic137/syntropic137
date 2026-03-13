@@ -100,6 +100,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 action=TodoAction.RUN_AGENT,
                 phase_id=event_data.get("phase_id"),
                 workspace_id=event_data.get("workspace_id"),
+                session_id=event_data.get("session_id"),
             ),
         )
 
@@ -135,27 +136,44 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         )
 
     async def on_phase_completed(self, event_data: dict) -> None:
-        """Phase completed → remove to-do (next phase decided by aggregate)."""
+        """Phase completed → remove COMPLETE_PHASE to-do for this phase only.
+
+        Other pending todos (e.g., PROVISION_WORKSPACE from NextPhaseReady)
+        must be preserved.
+        """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
 
-        # Clear current to-do — NextPhaseReady or COMPLETE_EXECUTION comes next
-        self._todos.pop(execution_id, None)
+        phase_id = event_data.get("phase_id")
+        current = self._todos.get(execution_id, [])
+        self._todos[execution_id] = [
+            t
+            for t in current
+            if not (t.action == TodoAction.COMPLETE_PHASE and t.phase_id == phase_id)
+        ]
 
     async def on_next_phase_ready(self, event_data: dict) -> None:
-        """Aggregate decided next phase → provision workspace for it."""
+        """Aggregate decided next phase → append PROVISION_WORKSPACE to-do.
+
+        Uses append (not replace) because ArtifactsCollectedForPhase and
+        NextPhaseReady are emitted in the same save. The projection sees
+        them sequentially: on_artifacts_collected sets COMPLETE_PHASE, then
+        on_next_phase_ready must ADD (not overwrite) PROVISION_WORKSPACE.
+        """
         execution_id = event_data.get("execution_id", "")
         if not execution_id:
             return
 
-        self._todos[execution_id] = [
+        if execution_id not in self._todos:
+            self._todos[execution_id] = []
+        self._todos[execution_id].append(
             TodoItem(
                 execution_id=execution_id,
                 action=TodoAction.PROVISION_WORKSPACE,
                 phase_id=event_data.get("next_phase_id"),
             ),
-        ]
+        )
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Workflow completed → clear all todos."""

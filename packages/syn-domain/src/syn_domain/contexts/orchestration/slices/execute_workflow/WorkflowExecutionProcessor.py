@@ -14,7 +14,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
@@ -180,6 +179,14 @@ class WorkflowExecutionProcessor:
         self._active_envs: dict[str, dict[str, str]] = {}
         self._active_cmds: dict[str, list[str]] = {}
 
+        # Session lifecycle tracking (Fix #4)
+        self._session_managers: dict[str, SessionLifecycleManager] = {}
+
+        # Per-phase metrics tracking (Fix #5)
+        self._phase_tokens: dict[str, TokenAccumulator] = {}
+        self._phase_artifact_ids: dict[str, list[str]] = {}
+        self._phase_started_at: dict[str, datetime] = {}
+
     async def run(
         self,
         workflow_id: str,
@@ -284,6 +291,11 @@ class WorkflowExecutionProcessor:
             )
 
         except Exception as e:
+            # Complete any open sessions as failed (Fix #4)
+            for _phase_id, mgr in list(self._session_managers.items()):
+                await mgr.complete_failure(error_message=str(e))
+            self._session_managers.clear()
+
             # Fail execution
             fail_cmd = FailExecutionCommand(
                 execution_id=execution_id,
@@ -390,6 +402,8 @@ class WorkflowExecutionProcessor:
             agent_model=phase.agent_config.model,
         )
         await session_mgr.start()
+        self._session_managers[todo.phase_id] = session_mgr
+        self._phase_started_at[todo.phase_id] = datetime.now(UTC)
 
         # Create provision handler and run
         artifacts = ArtifactCollector(
@@ -458,6 +472,9 @@ class WorkflowExecutionProcessor:
             collector=collector,
         )
 
+        # Store tokens for phase result (Fix #5)
+        self._phase_tokens[todo.phase_id] = result.tokens
+
         # Report to aggregate
         aggregate._handle_command(result.command)
         await self._save_and_sync(aggregate)
@@ -490,6 +507,7 @@ class WorkflowExecutionProcessor:
         )
 
         all_artifact_ids.extend(result.artifact_ids)
+        self._phase_artifact_ids[todo.phase_id] = result.artifact_ids
         if result.first_content:
             phase_outputs[todo.phase_id] = result.first_content
 
@@ -508,33 +526,50 @@ class WorkflowExecutionProcessor:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
 
-        # Build phase result
-        # TODO(#196): Track started_at and tokens from aggregate events
+        # Retrieve tracked per-phase data
+        tokens = self._phase_tokens.pop(todo.phase_id, TokenAccumulator())
+        artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
+        started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
+
+        # Build phase result with real data
         result = PhaseResultBuilder.success(
             phase_id=todo.phase_id,
-            started_at=datetime.now(UTC),
+            started_at=started_at,
             session_id=todo.session_id or "",
-            artifact_ids=[],
-            tokens=TokenAccumulator(),
+            artifact_ids=artifact_ids,
+            tokens=tokens,
         )
         phase_results.append(result)
         completed_phase_ids.append(todo.phase_id)
 
-        # Emit CompletePhaseCommand
+        duration = (datetime.now(UTC) - started_at).total_seconds()
+
+        # Emit CompletePhaseCommand with real metrics
         complete_cmd = CompletePhaseCommand(
             execution_id=todo.execution_id,
             workflow_id=aggregate.workflow_id or "",
             phase_id=todo.phase_id,
             session_id=todo.session_id,
-            artifact_id=None,
-            input_tokens=0,
-            output_tokens=0,
-            total_tokens=0,
-            cost_usd=Decimal("0"),
-            duration_seconds=0.0,
+            artifact_id=artifact_ids[0] if artifact_ids else None,
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            total_tokens=tokens.total_tokens,
+            cost_usd=tokens.estimate_cost(),
+            duration_seconds=duration,
         )
         aggregate._handle_command(complete_cmd)
         await self._save_and_sync(aggregate)
+
+        # Complete session lifecycle (Fix #4)
+        session_mgr = self._session_managers.pop(todo.phase_id, None)
+        if session_mgr is not None:
+            await session_mgr.complete_success(
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                total_tokens=tokens.total_tokens,
+                duration_seconds=duration,
+                source="processor",
+            )
 
         # Clean up infrastructure state
         self._active_workspaces.pop(todo.phase_id, None)
@@ -563,7 +598,12 @@ class WorkflowExecutionProcessor:
             event = envelope.event
             event_type = getattr(event, "event_type", type(event).__name__)
             # Convert to dict for projection handler
-            event_data = event.model_dump() if hasattr(event, "model_dump") else {}
+            if hasattr(event, "model_dump"):
+                event_data = event.model_dump()
+            elif hasattr(event, "to_dict"):
+                event_data = event.to_dict()
+            else:
+                event_data = vars(event)
             # Use auto-dispatch — the projection has on_<snake_case> methods
             handler_name = self._event_type_to_handler(event_type)
             handler = getattr(self._todo_projection, handler_name, None)

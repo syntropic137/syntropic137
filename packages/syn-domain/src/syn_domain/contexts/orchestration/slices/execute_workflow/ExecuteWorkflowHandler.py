@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Protocol
+from uuid import uuid4
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -77,7 +78,7 @@ class ExecuteWorkflowHandler:
             workflow_name=workflow.name or "",
             phases=phases,
             inputs=command.inputs,
-            execution_id=command.execution_id or "",
+            execution_id=command.execution_id or str(uuid4()),
             repo_url=getattr(workflow, "_repository_url", None),
         )
 

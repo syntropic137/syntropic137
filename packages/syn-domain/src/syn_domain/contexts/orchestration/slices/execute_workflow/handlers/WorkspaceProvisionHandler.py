@@ -144,6 +144,7 @@ class WorkspaceProvisionHandler:
             workspace,
             completed_phase_ids,
             phase_outputs,
+            execution_id=todo.execution_id,
         )
 
         # Build prompt and CLI command
@@ -174,6 +175,7 @@ class WorkspaceProvisionHandler:
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             workspace_id=str(workspace_id),
+            session_id=session_id,
         )
 
         return ProvisionResult(

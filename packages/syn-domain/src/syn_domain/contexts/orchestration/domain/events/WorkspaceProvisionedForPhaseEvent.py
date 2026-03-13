@@ -19,4 +19,5 @@ class WorkspaceProvisionedForPhaseEvent(DomainEvent):
     execution_id: str
     phase_id: str
     workspace_id: str
+    session_id: str
     provisioned_at: datetime
