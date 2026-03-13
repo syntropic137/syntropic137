@@ -698,6 +698,9 @@ check:
     @echo "4️⃣ Type checking..."
     @uv run pyright
     @echo ""
+    @echo "5️⃣ Architectural fitness..."
+    @just fitness
+    @echo ""
     @echo "✅ Static checks passed!"
 
 # Static checks with auto-fix
@@ -717,7 +720,7 @@ import-check:
     @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck test dashboard-qa test-debt vsa-validate topology-check docs-sync
+qa: lint format typecheck fitness test dashboard-qa test-debt vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ All QA checks passed!"
 
@@ -741,6 +744,16 @@ format-check:
 # Run type checker (strict mode)
 typecheck:
     uv run mypy apps packages
+
+# Run architectural fitness functions
+fitness:
+    @echo "Running architectural fitness functions..."
+    uv run pytest ci/fitness/ -v --tb=short -m architecture
+
+# Run fitness with verbose output
+fitness-report:
+    @echo "Architectural fitness report..."
+    uv run pytest ci/fitness/ -v --tb=long -s
 
 # Run VSA validation (requires event-sourcing-platform submodule)
 vsa-validate:
