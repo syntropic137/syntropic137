@@ -186,9 +186,9 @@ class TestRecordingReplay:
 
         # Should see a Write tool
         tool_names = {r[2].get("tool_name") for r in tool_started}
-        assert any(
-            "Write" in name or "write" in name for name in tool_names if name
-        ), f"Expected Write tool, got {tool_names}"
+        assert any("Write" in name or "write" in name for name in tool_names if name), (
+            f"Expected Write tool, got {tool_names}"
+        )
 
     @pytest.mark.asyncio
     async def test_subagent_concurrent_lifecycle(self) -> None:
