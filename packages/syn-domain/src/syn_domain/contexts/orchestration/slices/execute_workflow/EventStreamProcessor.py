@@ -15,9 +15,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
-from agentic_events import enrich_event, parse_jsonl_line
+from agentic_events import enrich_event
 from agentic_events.types import ClaudeToolName, EventType
 
+from syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner import (
+    EmbeddedEventScanner,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser import (
     HookEventParser,
 )
@@ -120,8 +123,13 @@ class EventStreamProcessor:
                 agent_model=agent_model,
             )
 
-        # ISS-196: Collaborator for hook event parsing + dedup
+        # ISS-196: Collaborators extracted for CC reduction
         self._hook_parser = HookEventParser()
+        self._embedded_scanner = EmbeddedEventScanner(
+            collector=self._collector,
+            execution_id=execution_id,
+            phase_id=phase_id,
+        )
 
     async def process_stream(
         self,
@@ -405,28 +413,7 @@ class EventStreamProcessor:
 
         # Scan tool output for embedded git hook JSONL (ADR-043)
         if tool_content:
-            for tl in str(tool_content).splitlines():
-                tl = tl.strip()
-                if not tl:
-                    continue
-                embedded = parse_jsonl_line(tl)
-                if not embedded:
-                    continue
-                et = embedded.get("event_type")
-                if et not in VALID_EVENT_TYPES:
-                    logger.debug("Unknown event_type in tool output: %s", et)
-                    continue
-                enriched = enrich_event(
-                    embedded,
-                    execution_id=self._execution_id,
-                    phase_id=self._phase_id,
-                )
-                await self._collector.record_embedded_event(et, enriched)
-                logger.info(
-                    "Git hook event from tool output: %s (tool=%s)",
-                    et,
-                    tool_name,
-                )
+            await self._embedded_scanner.scan_and_record(str(tool_content), tool_name)
 
         # Record tool completion
         await self._collector.record_tool_completed(
