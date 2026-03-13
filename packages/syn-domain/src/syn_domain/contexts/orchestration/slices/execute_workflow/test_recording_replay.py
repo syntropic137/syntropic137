@@ -15,8 +15,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-
 from agentic_events import Recording
+
 from syn_adapters.workspace_backends.recording import RecordingEventStreamAdapter
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     IsolationHandle,

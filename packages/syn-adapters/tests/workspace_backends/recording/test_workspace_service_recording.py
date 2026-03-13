@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from agentic_events import Recording
+
 from syn_adapters.workspace_backends.service import WorkspaceService
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
