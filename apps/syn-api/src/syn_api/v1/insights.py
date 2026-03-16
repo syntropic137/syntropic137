@@ -13,7 +13,7 @@ async def get_global_overview() -> dict[str, Any]:
     from syn_domain.contexts.organization.domain.queries.get_global_overview import (
         GetGlobalOverviewQuery,
     )
-    from syn_domain.contexts.organization.slices.global_overview.handler import (
+    from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
         GetGlobalOverviewHandler,
     )
     from syn_domain.contexts.organization.slices.list_repos.projection import (
@@ -40,7 +40,7 @@ async def get_global_cost() -> dict[str, Any]:
     from syn_domain.contexts.organization.domain.queries.get_global_cost import (
         GetGlobalCostQuery,
     )
-    from syn_domain.contexts.organization.slices.global_cost.handler import (
+    from syn_domain.contexts.organization.slices.global_cost.GetGlobalCostHandler import (
         GetGlobalCostHandler,
     )
     from syn_domain.contexts.organization.slices.list_repos.projection import (

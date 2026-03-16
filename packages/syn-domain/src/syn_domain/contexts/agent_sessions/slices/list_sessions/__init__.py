@@ -1,6 +1,6 @@
 """List sessions query slice."""
 
-from .handler import ListSessionsHandler
+from .ListSessionsHandler import ListSessionsHandler
 from .projection import SessionListProjection
 
 __all__ = [

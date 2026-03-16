@@ -1,6 +1,6 @@
 """List artifacts query slice."""
 
-from .handler import ListArtifactsHandler
+from .ListArtifactsHandler import ListArtifactsHandler
 from .projection import ArtifactListProjection
 
 __all__ = [
