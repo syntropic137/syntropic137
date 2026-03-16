@@ -12,7 +12,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.queries.get_dashboard_metrics import (
     GetDashboardMetricsQuery,
 )
-from syn_domain.contexts.orchestration.slices.dashboard_metrics.handler import (
+from syn_domain.contexts.orchestration.slices.dashboard_metrics.GetDashboardMetricsHandler import (
     GetDashboardMetricsHandler,
 )
 from syn_domain.contexts.orchestration.slices.dashboard_metrics.projection import (

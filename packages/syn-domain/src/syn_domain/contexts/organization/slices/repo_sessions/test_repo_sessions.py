@@ -8,7 +8,7 @@ from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
     GetRepoSessionsQuery,
 )
 from syn_domain.contexts.organization.slices.conftest import FakeProjectionStore
-from syn_domain.contexts.organization.slices.repo_sessions.handler import (
+from syn_domain.contexts.organization.slices.repo_sessions.GetRepoSessionsHandler import (
     GetRepoSessionsHandler,
 )
 

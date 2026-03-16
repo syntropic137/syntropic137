@@ -10,7 +10,7 @@ from syn_domain.contexts.organization.domain.queries.get_global_overview import 
     GetGlobalOverviewQuery,
 )
 from syn_domain.contexts.organization.slices.conftest import FakeProjectionStore
-from syn_domain.contexts.organization.slices.global_overview.handler import (
+from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
     GetGlobalOverviewHandler,
 )
 

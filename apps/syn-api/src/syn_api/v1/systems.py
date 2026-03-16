@@ -216,7 +216,7 @@ async def get_system_status(system_id: str) -> Result[dict[str, Any], SystemErro
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         get_system_projection,
     )
-    from syn_domain.contexts.organization.slices.system_status.handler import (
+    from syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler import (
         GetSystemStatusHandler,
     )
 
@@ -247,7 +247,7 @@ async def get_system_cost(system_id: str) -> Result[dict[str, Any], SystemErrorC
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         get_system_projection,
     )
-    from syn_domain.contexts.organization.slices.system_cost.handler import (
+    from syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler import (
         GetSystemCostHandler,
     )
 
@@ -280,7 +280,7 @@ async def get_system_activity(
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         get_system_projection,
     )
-    from syn_domain.contexts.organization.slices.system_activity.handler import (
+    from syn_domain.contexts.organization.slices.system_activity.GetSystemActivityHandler import (
         GetSystemActivityHandler,
     )
 
@@ -313,7 +313,7 @@ async def get_system_patterns(
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         get_system_projection,
     )
-    from syn_domain.contexts.organization.slices.system_patterns.handler import (
+    from syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler import (
         GetSystemPatternsHandler,
     )
 
@@ -346,7 +346,7 @@ async def get_system_history(
     from syn_domain.contexts.organization.slices.list_systems.projection import (
         get_system_projection,
     )
-    from syn_domain.contexts.organization.slices.system_history.handler import (
+    from syn_domain.contexts.organization.slices.system_history.GetSystemHistoryHandler import (
         GetSystemHistoryHandler,
     )
 

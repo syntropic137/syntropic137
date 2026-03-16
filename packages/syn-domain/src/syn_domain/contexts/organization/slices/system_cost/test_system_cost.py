@@ -13,7 +13,7 @@ from syn_domain.contexts.organization.slices.conftest import (
     FakeProjectionStore,
     _make_projections,
 )
-from syn_domain.contexts.organization.slices.system_cost.handler import (
+from syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler import (
     GetSystemCostHandler,
 )
 
