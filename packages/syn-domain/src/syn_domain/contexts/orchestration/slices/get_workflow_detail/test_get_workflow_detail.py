@@ -18,7 +18,7 @@ from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.domain.queries.get_workflow_detail import (
     GetWorkflowDetailQuery,
 )
-from syn_domain.contexts.orchestration.slices.get_workflow_detail.handler import (
+from syn_domain.contexts.orchestration.slices.get_workflow_detail.GetWorkflowDetailHandler import (
     GetWorkflowDetailHandler,
 )
 from syn_domain.contexts.orchestration.slices.get_workflow_detail.projection import (

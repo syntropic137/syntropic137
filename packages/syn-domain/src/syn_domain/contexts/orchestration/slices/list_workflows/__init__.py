@@ -8,7 +8,7 @@ It includes:
 This slice is self-contained and can be developed/tested independently.
 """
 
-from .handler import ListWorkflowsHandler
+from .ListWorkflowsHandler import ListWorkflowsHandler
 from .projection import WorkflowListProjection
 
 __all__ = [

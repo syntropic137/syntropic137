@@ -11,7 +11,7 @@ from syn_domain.contexts.organization.slices.conftest import (
     FakeProjectionStore,
     _make_projections,
 )
-from syn_domain.contexts.organization.slices.system_activity.handler import (
+from syn_domain.contexts.organization.slices.system_activity.GetSystemActivityHandler import (
     GetSystemActivityHandler,
 )
 

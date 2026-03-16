@@ -308,7 +308,7 @@ def get_trigger_history(
     from syn_domain.contexts.github.domain.queries.get_trigger_history import (
         GetTriggerHistoryQuery,
     )
-    from syn_domain.contexts.github.slices.trigger_history.handler import (
+    from syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler import (
         get_trigger_history_handler,
     )
 
