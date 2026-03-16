@@ -230,7 +230,7 @@ async def get_repo_health(repo_id: str) -> Result[dict[str, Any], RepoError]:
     from syn_domain.contexts.organization.domain.queries.get_repo_health import (
         GetRepoHealthQuery,
     )
-    from syn_domain.contexts.organization.slices.repo_health.handler import (
+    from syn_domain.contexts.organization.slices.repo_health.GetRepoHealthHandler import (
         GetRepoHealthHandler,
     )
 
@@ -254,7 +254,7 @@ async def get_repo_cost(repo_id: str) -> Result[dict[str, Any], RepoError]:
     from syn_domain.contexts.organization.domain.queries.get_repo_cost import (
         GetRepoCostQuery,
     )
-    from syn_domain.contexts.organization.slices.repo_cost.handler import (
+    from syn_domain.contexts.organization.slices.repo_cost.GetRepoCostHandler import (
         GetRepoCostHandler,
     )
 
@@ -280,7 +280,7 @@ async def get_repo_activity(
     from syn_domain.contexts.organization.domain.queries.get_repo_activity import (
         GetRepoActivityQuery,
     )
-    from syn_domain.contexts.organization.slices.repo_activity.handler import (
+    from syn_domain.contexts.organization.slices.repo_activity.GetRepoActivityHandler import (
         GetRepoActivityHandler,
     )
 
@@ -305,7 +305,7 @@ async def get_repo_failures(
     from syn_domain.contexts.organization.domain.queries.get_repo_failures import (
         GetRepoFailuresQuery,
     )
-    from syn_domain.contexts.organization.slices.repo_failures.handler import (
+    from syn_domain.contexts.organization.slices.repo_failures.GetRepoFailuresHandler import (
         GetRepoFailuresHandler,
     )
 
@@ -328,7 +328,7 @@ async def get_repo_sessions(
     from syn_domain.contexts.organization.domain.queries.get_repo_sessions import (
         GetRepoSessionsQuery,
     )
-    from syn_domain.contexts.organization.slices.repo_sessions.handler import (
+    from syn_domain.contexts.organization.slices.repo_sessions.GetRepoSessionsHandler import (
         GetRepoSessionsHandler,
     )
 

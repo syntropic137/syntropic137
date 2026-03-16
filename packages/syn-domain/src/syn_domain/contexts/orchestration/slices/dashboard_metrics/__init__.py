@@ -1,6 +1,6 @@
 """Get metrics query slice."""
 
-from .handler import GetDashboardMetricsHandler
+from .GetDashboardMetricsHandler import GetDashboardMetricsHandler
 from .projection import DashboardMetricsProjection
 
 __all__ = [

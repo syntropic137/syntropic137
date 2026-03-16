@@ -25,6 +25,12 @@ validation:
   require_integration_events_in_shared: true
   max_nesting_depth: 3
   allow_nested_features: true
+  # Shared read-model projections consumed by sibling slices (not cross-slice violations)
+  exclude_from_isolation:
+    - "list_repos"
+    - "list_systems"
+  # Commands live at domain/commands/ with handlers in slices/ (DDD convention per ADR-020)
+  domain_level_commands: true
 
 # Pattern definitions (Python conventions)
 patterns:

@@ -1,6 +1,6 @@
 """Get workflow detail query slice."""
 
-from .handler import GetWorkflowDetailHandler
+from .GetWorkflowDetailHandler import GetWorkflowDetailHandler
 from .projection import WorkflowDetailProjection
 
 __all__ = [
