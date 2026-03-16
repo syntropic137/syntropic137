@@ -745,12 +745,22 @@ format-check:
 typecheck:
     uv run mypy apps packages
 
-# Run architectural fitness functions
-fitness:
-    @echo "Running architectural fitness functions..."
-    uv run pytest ci/fitness/ -v --tb=short -m architecture
+# Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
+fitness-check: aps-build
+    @echo "Checking architecture fitness thresholds..."
+    {{_aps_bin}} run fitness validate .
+    @echo "✅ Fitness threshold checks passed"
 
-# Run fitness with verbose output
+# Check structural & ES invariants (pytest-based, AST analysis)
+fitness-invariants:
+    @echo "Checking structural & ES invariants..."
+    uv run pytest ci/fitness/ -v --tb=short -m architecture
+    @echo "✅ Invariant checks passed"
+
+# All fitness checks
+fitness: fitness-check fitness-invariants
+
+# Run fitness with verbose output (invariant tests only)
 fitness-report:
     @echo "Architectural fitness report..."
     uv run pytest ci/fitness/ -v --tb=long -s

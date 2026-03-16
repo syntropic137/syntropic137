@@ -88,11 +88,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Code quality checks
-        run: uv run pytest ci/fitness/code_quality/ -v --tb=short -m architecture
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Event sourcing checks
-        run: uv run pytest ci/fitness/event_sourcing/ -v --tb=short -m architecture
+      - name: Build APS CLI
+        run: cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+
+      - name: Code quality thresholds (APSS)
+        run: lib/agent-paradise-standards-system/target/release/aps run fitness validate .
+
+      - name: Structural & ES invariants
+        run: uv run pytest ci/fitness/ -v --tb=short -m architecture
 
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push

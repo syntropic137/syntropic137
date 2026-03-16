@@ -1,51 +1,9 @@
-# Grandfathered violations. Every entry MUST reference a GitHub issue.
-# This file should SHRINK over time — each entry is tech debt.
+# Grandfathered violations for REMAINING Python-based fitness checks.
+# Cognitive complexity and file size checks migrated to APSS fitness.toml.
+# This file only tracks structural & ES invariant exceptions.
 #
 # Budgets are set to current value rounded up to nearest 5.
 # Adding new code that exceeds these budgets will fail CI.
-
-[cognitive_complexity]
-# path = { max_cog = N, issue = "#NNN" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py" = { max_cog = 140, issue = "#138" }
-"packages/syn-adapters/src/syn_adapters/subscriptions/service.py" = { max_cog = 85, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionEngine.py" = { max_cog = 85, issue = "#138" }
-"packages/syn-adapters/src/syn_adapters/events/models.py" = { max_cog = 70, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/projections/session_tools.py" = { max_cog = 70, issue = "#197" }
-"apps/syn-cli/src/syn_cli/commands/workflow.py" = { max_cog = 70, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/object_storage/supabase.py" = { max_cog = 65, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py" = { max_cog = 60, issue = "#197" }
-"packages/syn-collector/src/syn_collector/watcher/transcript.py" = { max_cog = 60, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/projection.py" = { max_cog = 60, issue = "#197" }
-"apps/syn-api/src/syn_api/v1/executions.py" = { max_cog = 60, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py" = { max_cog = 90, issue = "#196" }
-"packages/syn-adapters/src/syn_adapters/events/store.py" = { max_cog = 60, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/condition_evaluator.py" = { max_cog = 60, issue = "#197" }
-"apps/syn-cli/src/syn_cli/commands/triggers.py" = { max_cog = 55, issue = "#197" }
-"apps/syn-api/src/syn_api/v1/github.py" = { max_cog = 55, issue = "#197" }
-
-[cognitive_complexity_function]
-# "path::function" = { max_cog = N, issue = "#NNN" }
-"packages/syn-adapters/src/syn_adapters/events/models.py::from_dict" = { max_cog = 65, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/projections/session_tools.py::_row_to_operation" = { max_cog = 55, issue = "#197" }
-"apps/syn-api/src/syn_api/v1/executions.py::get_detail" = { max_cog = 35, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/agent_sessions/slices/session_cost/timescale_query.py::calculate" = { max_cog = 35, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/github/slices/evaluate_webhook/condition_evaluator.py::evaluate_conditions" = { max_cog = 35, issue = "#197" }
-"apps/syn-api/src/syn_api/routes/workflows.py::get_workflow" = { max_cog = 30, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/workspace_backends/agentic/adapter.py::stream" = { max_cog = 30, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py::_parse_hook_events" = { max_cog = 30, issue = "#197" }
-"packages/syn-adapters/src/syn_adapters/agents/models.py::_load_models" = { max_cog = 30, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_workflow_template/WorkflowTemplateAggregate.py::on_workflow_created" = { max_cog = 30, issue = "#197" }
-"apps/syn-api/src/syn_api/v1/github.py::verify_and_process_webhook" = { max_cog = 30, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py::_handle_tool_result" = { max_cog = 30, issue = "#197" }
-
-[file_size]
-# path = { max_loc = N, issue = "#NNN" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionEngine.py" = { max_loc = 1095, issue = "#138" }
-"packages/syn-adapters/src/syn_adapters/subscriptions/service.py" = { max_loc = 595, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/EventStreamProcessor.py" = { max_loc = 535, issue = "#138" }
-"packages/syn-shared/src/syn_shared/settings/workspace.py" = { max_loc = 510, issue = "#197" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/domain/aggregate_execution/WorkflowExecutionAggregate.py" = { max_loc = 700, issue = "#196" }
-"packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_loc = 510, issue = "#196" }
 
 [layer_separation]
 # path = { imports = ["module.that.is.imported"], issue = "#NNN" }
