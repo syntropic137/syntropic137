@@ -91,14 +91,14 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build APS CLI
-        run: cargo build --release --manifest-path lib/agent-paradise-standards-system/Cargo.toml -p aps-cli
+      - name: Install just
+        uses: extractions/setup-just@v2
 
       - name: Code quality thresholds (APSS)
-        run: lib/agent-paradise-standards-system/target/release/aps run fitness validate .
+        run: just fitness-check
 
       - name: Structural & ES invariants
-        run: uv run pytest ci/fitness/ -v --tb=short -m architecture
+        run: just fitness-invariants
 
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
