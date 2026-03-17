@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
@@ -24,11 +24,11 @@ if TYPE_CHECKING:
 
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+        TodoItem,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
-    )
-    from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
-        TodoItem,
     )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ _SKIP_URLS = frozenset(
 
 # Callable types for dependency injection
 PromptBuilder = Callable[
-    [ExecutablePhase, str, str, str | None, dict[str, str]],
+    [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, Any]],
     Awaitable[str],
 ]
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
@@ -94,6 +94,7 @@ class WorkspaceProvisionHandler:
         artifacts: ArtifactCollector,
         completed_phase_ids: list[str],
         phase_outputs: dict[str, str],
+        inputs: dict[str, Any] | None = None,
     ) -> ProvisionResult:
         """Provision workspace for a phase.
 
@@ -149,7 +150,7 @@ class WorkspaceProvisionHandler:
 
         # Build prompt and CLI command
         prompt = await self._prompt_builder(
-            phase, todo.execution_id, workflow_id, repo_url, phase_outputs
+            phase, todo.execution_id, workflow_id, repo_url, phase_outputs, inputs or {}
         )
         claude_cmd = self._command_builder(phase, prompt)
 

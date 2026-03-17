@@ -157,7 +157,8 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         if found:
             _, phase = found
             phase["status"] = "completed"
-            phase["session_id"] = event_data.get("session_id")
+            if event_data.get("session_id"):
+                phase["session_id"] = event_data["session_id"]
             phase["artifact_id"] = event_data.get("artifact_id")
             phase["input_tokens"] = event_data.get("input_tokens", 0)
             phase["output_tokens"] = event_data.get("output_tokens", 0)

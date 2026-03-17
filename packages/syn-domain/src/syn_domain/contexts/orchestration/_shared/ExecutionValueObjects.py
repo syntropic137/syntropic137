@@ -39,15 +39,15 @@ class AgentConfiguration:
     NOTE: 'mock' provider is ONLY valid in test environments (APP_ENVIRONMENT=test).
     Production/development MUST use 'claude' or 'openai' with valid API keys.
 
-    Model Aliases (recommended):
-        - "claude-sonnet" -> latest Claude Sonnet
-        - "claude-opus" -> latest Claude Opus
-        - "claude-haiku" -> latest Claude Haiku
+    Model Aliases (CLI-compatible, recommended):
+        - "sonnet" -> latest Claude Sonnet
+        - "opus" -> latest Claude Opus
+        - "haiku" -> latest Claude Haiku
     """
 
     provider: str = "claude"  # claude, openai (mock only in tests)
     # NOTE: Temporarily using Haiku to reduce costs during testing
-    model: str = "claude-haiku"  # Use alias - auto-resolves to latest version
+    model: str = "haiku"  # CLI alias - auto-resolves to latest version
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 300

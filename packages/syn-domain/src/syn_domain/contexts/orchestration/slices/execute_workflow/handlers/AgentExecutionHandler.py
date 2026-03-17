@@ -27,11 +27,11 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator 
 
 if TYPE_CHECKING:
     from syn_adapters.control import ExecutionController
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+        TodoItem,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
         ObservabilityCollector,
-    )
-    from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
-        TodoItem,
     )
 
 logger = logging.getLogger(__name__)
@@ -120,11 +120,32 @@ class AgentExecutionHandler:
             workspace,
         )
 
+        # Detect agent failure: CLI exited with non-zero, or produced no output
+        stream_exit_code = workspace.last_stream_exit_code
+        if stream_result.interrupt_requested:
+            exit_code = 1
+        elif stream_exit_code is not None and stream_exit_code != 0:
+            logger.error(
+                "Agent CLI exited with code %d (phase=%s, lines=%d)",
+                stream_exit_code,
+                todo.phase_id,
+                stream_result.line_count,
+            )
+            exit_code = stream_exit_code
+        else:
+            exit_code = 0
+            if tokens.input_tokens == 0 and tokens.output_tokens == 0:
+                logger.warning(
+                    "Agent produced 0 tokens (phase=%s, lines=%d) — CLI may have failed to start",
+                    todo.phase_id,
+                    stream_result.line_count,
+                )
+
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             session_id=session_id,
-            exit_code=0 if not stream_result.interrupt_requested else 1,
+            exit_code=exit_code,
             input_tokens=tokens.input_tokens,
             output_tokens=tokens.output_tokens,
         )
