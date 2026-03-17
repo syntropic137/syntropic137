@@ -162,15 +162,33 @@ services:
       retries: 5
 
   # =============================================================================
-  # SIDECAR PROXY - Agent Container Network Proxy (Optional)
+  # ENVOY PROXY - Shared Credential Injection Proxy (ISS-43)
   # =============================================================================
-  # Example sidecar proxy for agent containers
-  # This is a template - actual sidecars are deployed per-execution
-  sidecar-proxy:
+  # Shared Envoy proxy that injects API credentials into outbound requests.
+  # Agent containers route HTTP traffic through this proxy via ANTHROPIC_BASE_URL
+  # and HTTP_PROXY env vars. Agents never see API keys.
+  #
+  # Architecture:
+  #   Agent (agent-net only) → envoy-proxy (agent-net + default) → external APIs
+  envoy-proxy:
     build:
       context: ./sidecar-proxy
       dockerfile: Dockerfile
     environment:
-      SYN_EXECUTION_ID: "dev-local"
-    profiles:
-      - sidecar # Only start with: docker compose --profile sidecar up
+      SYN_EXECUTION_ID: "shared"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+    networks:
+      - default
+      - agent-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9901/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  agent-net:
+    internal: true  # No external egress — agents can only reach the proxy

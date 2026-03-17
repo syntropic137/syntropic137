@@ -119,8 +119,8 @@ class WorkspaceProvisionHandler:
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
-            with_sidecar=False,
-            inject_tokens=False,
+            with_sidecar=True,
+            inject_tokens=True,
         )
 
         # Enter the async context manager
@@ -154,21 +154,26 @@ class WorkspaceProvisionHandler:
         )
         claude_cmd = self._command_builder(phase, prompt)
 
-        # Validate authentication
-        if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
+        # Validate proxy is available — credentials live on the proxy container,
+        # not in agent env vars (ISS-43: API key security).
+        proxy_url = getattr(workspace, "proxy_url", None)
+        if not proxy_url:
             msg = (
-                "No Claude authentication configured. "
-                "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+                "Shared Envoy proxy not available. "
+                "Ensure envoy-proxy service is running and sidecar is enabled."
             )
             raise RuntimeError(msg)
 
         agent_env: dict[str, str] = {
             "CLAUDE_SESSION_ID": session_id,
+            "ANTHROPIC_BASE_URL": proxy_url,
+            "HTTP_PROXY": proxy_url,
+            "HTTPS_PROXY": proxy_url,
+            "NO_PROXY": "localhost,127.0.0.1",
         }
-        if secrets.claude_code_oauth_token:
-            agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
-        if secrets.anthropic_api_key:
-            agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+        # NOTE: ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN are intentionally
+        # NOT injected. Credentials are injected by the shared Envoy proxy via
+        # ext_authz (ISS-43).
 
         workspace_id = getattr(workspace, "id", todo.phase_id)
 

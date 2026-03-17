@@ -10,6 +10,7 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
@@ -109,6 +110,10 @@ class AgenticIsolationAdapter:
         )
 
         # Map Syn137 config to agentic_isolation config
+        # ISS-43: Attach workspace containers to the internal agent-net network.
+        # This ensures agents can reach the shared Envoy proxy (which bridges
+        # agent-net and default) but cannot reach the internet directly.
+        agent_network = os.environ.get("SYN_AGENT_NETWORK", "agent-net")
         ws_config = WorkspaceConfig(
             provider="docker",
             image=config.image or self._default_image,
@@ -119,6 +124,7 @@ class AgenticIsolationAdapter:
                 "syn.workspace_id": config.workspace_id,
             },
             security=self._security,
+            network=agent_network,
         )
 
         # Create workspace via provider

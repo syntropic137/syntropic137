@@ -38,13 +38,14 @@ The selfhost stack runs as Docker Compose services on an internal bridge network
 | **redis** | Pub/sub + caching (AOF persistence) | `redis:7-alpine` | 6379 |
 | **minio** | S3-compatible object storage (artifacts, conversations) | `minio/minio` | 9000 |
 | **cloudflared** | Cloudflare Tunnel for external access (optional) | `cloudflare/cloudflared` | — |
-| **workspace-*** | Dynamically spawned agent containers (Claude CLI inside Docker) | `agentic-workspace-claude-cli` | — |
+| **envoy-proxy** | Shared Envoy proxy — injects API credentials into agent requests (ISS-43) | Custom (Envoy + token injector) | 8081 |
+| **workspace-*** | Dynamically spawned agent containers (Claude CLI inside Docker, on `agent-net`) | `agentic-workspace-claude-cli` | — |
 
 ### Data Flow
 
 1. **GitHub webhook** hits `gateway` at `/api/v1/webhooks/github` (auth-exempt, HMAC-verified).
 2. **gateway** proxies to **api**, which matches the event against trigger rules.
-3. **api** spawns a **workspace container** via the Docker socket. The container runs Claude CLI inside an isolated environment with a cloned repo.
+3. **api** spawns a **workspace container** on the internal `agent-net` network via the Docker socket. The container runs Claude CLI inside an isolated environment with a cloned repo. API credentials are injected by the shared **envoy-proxy** — agent containers have no API keys in their environment (ISS-43).
 4. Agent JSONL stdout flows to the **collector**, which batches events and writes directly to **timescaledb** via `AgentEventStore` (COPY-based batch inserts).
 5. Domain events (workflow state, aggregates) flow through the **event-store** (Rust gRPC) to **timescaledb**.
 6. The **api** reads events back for the SPA frontend via REST and WebSocket/SSE connections.
@@ -219,10 +220,20 @@ All configuration lives in `infra/.env`. Copy from `infra/.env.example` to get s
 
 ### Agent Credentials
 
+These credentials are loaded by the shared Envoy proxy (`envoy-proxy` service) and injected into outbound API requests. Agent containers never see these values directly (ISS-43).
+
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | **One required** | — | Claude Code OAuth token (preferred, supports all features) |
-| `ANTHROPIC_API_KEY` | **One required** | — | Anthropic API key (fallback, direct API access) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | **One required** | — | Claude Code OAuth token (preferred, supports all features). Injected as `Authorization: Bearer` by the proxy. |
+| `ANTHROPIC_API_KEY` | **One required** | — | Anthropic API key (fallback). Injected as `x-api-key` by the proxy. |
+
+### Proxy Configuration (ISS-43)
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SYN_PROXY_URL` | No | `http://syn-envoy-proxy:8081` | URL of the shared Envoy proxy for credential injection |
+| `SYN_AGENT_NETWORK` | No | `agent-net` | Docker network for agent containers (internal, no external egress) |
+| `SYN_PROXY_EXTRA_SERVICES` | No | — | JSON array of additional services for credential injection (e.g., Firecrawl) |
 
 ### Cloudflare Tunnel
 

@@ -10,7 +10,7 @@
 admin:
   address:
     socket_address:
-      address: 127.0.0.1
+      address: 0.0.0.0
       port_value: 9901
 
 static_resources:
@@ -85,6 +85,44 @@ static_resources:
                             cluster: github_raw
                             timeout: 30s
 
+                    # GitHub HTTPS (git clone goes through proxy) - ISS-43
+                    - name: github_https
+                      domains:
+                        - "github.com"
+                        - "github.com:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: github_https
+                            timeout: 120s
+
+                    # PyPI - passthrough (no credential injection)
+                    - name: pypi
+                      domains:
+                        - "pypi.org"
+                        - "pypi.org:443"
+                        - "files.pythonhosted.org"
+                        - "files.pythonhosted.org:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: pypi
+                            timeout: 60s
+
+                    # npm registry - passthrough (no credential injection)
+                    - name: npmjs
+                      domains:
+                        - "registry.npmjs.org"
+                        - "registry.npmjs.org:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: npmjs
+                            timeout: 60s
+
                     # Block all other hosts
                     - name: blocked
                       domains:
@@ -95,7 +133,7 @@ static_resources:
                           direct_response:
                             status: 403
                             body:
-                              inline_string: '{"error": "Host not allowed", "message": "Only api.anthropic.com, api.github.com, and raw.githubusercontent.com are allowed"}'
+                              inline_string: '{"error": "Host not allowed", "message": "Only approved hosts are allowed through the proxy"}'
 
                 http_filters:
                   # External authorization for token injection
@@ -198,6 +236,75 @@ static_resources:
         typed_config:
           "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
           sni: raw.githubusercontent.com
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # GitHub HTTPS cluster (git clone) - ISS-43
+    - name: github_https
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: github_https
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: github.com
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: github.com
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # PyPI cluster (passthrough, no credential injection) - ISS-43
+    - name: pypi
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: pypi
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: pypi.org
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: pypi.org
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # npm registry cluster (passthrough) - ISS-43
+    - name: npmjs
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: npmjs
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: registry.npmjs.org
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: registry.npmjs.org
           common_tls_context:
             validation_context:
               trusted_ca:
