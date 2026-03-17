@@ -164,30 +164,45 @@ services:
   # =============================================================================
   # ENVOY PROXY - Shared Credential Injection Proxy (ISS-43)
   # =============================================================================
-  # Shared Envoy proxy that injects API credentials into outbound requests.
-  # Agent containers route HTTP traffic through this proxy via ANTHROPIC_BASE_URL
-  # and HTTP_PROXY env vars. Agents never see API keys.
+  # Shared Envoy proxy that routes agent traffic. Credential injection is
+  # handled by the token-injector service via ext_authz (port 9002).
+  # Agents never see real API keys — only "proxy-managed" placeholder.
   #
   # Architecture:
-  #   Agent (agent-net only) → envoy-proxy (agent-net + default) → external APIs
+  #   Agent (agent-net only) → envoy-proxy → token-injector (ext_authz) → external APIs
   envoy-proxy:
     build:
       context: ./sidecar-proxy
       dockerfile: Dockerfile
-    environment:
-      SYN_EXECUTION_ID: "shared"
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
     networks:
       - default
       - agent-net
+    depends_on:
+      token-injector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9901/ready"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 5s
+
+  # =============================================================================
+  # TOKEN INJECTOR - ext_authz gRPC service (ISS-43)
+  # =============================================================================
+  # Implements Envoy's ext_authz protocol. Receives auth check requests from
+  # Envoy, looks up credentials from its own environment, and returns the real
+  # headers to inject. Credentials live ONLY here — not in agent containers.
+  token-injector:
+    build:
+      context: ./token-injector
+      dockerfile: Dockerfile
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+    networks:
+      - default
 
 networks:
   agent-net:

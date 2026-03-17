@@ -166,14 +166,19 @@ class WorkspaceProvisionHandler:
 
         agent_env: dict[str, str] = {
             "CLAUDE_SESSION_ID": session_id,
+            # Route Anthropic SDK calls directly to the Envoy proxy.
+            # Do NOT set HTTP_PROXY/HTTPS_PROXY — those cause Node.js to use
+            # CONNECT tunneling which Envoy's forward proxy doesn't support.
+            # ANTHROPIC_BASE_URL alone redirects the SDK without tunneling (ISS-43).
             "ANTHROPIC_BASE_URL": proxy_url,
-            "HTTP_PROXY": proxy_url,
-            "HTTPS_PROXY": proxy_url,
-            "NO_PROXY": "localhost,127.0.0.1",
+            # Placeholder so Claude Code will attempt API calls via OAuth Bearer auth.
+            # ANTHROPIC_API_KEY must NOT be set here — if it is, Claude Code uses
+            # x-api-key auth and the injected Authorization header is ignored by Anthropic.
+            # With only CLAUDE_CODE_OAUTH_TOKEN set, Claude Code sends
+            # "Authorization: Bearer proxy-managed", which the Envoy proxy (ext_authz)
+            # overwrites with the real token before the request reaches api.anthropic.com (ISS-43).
+            "CLAUDE_CODE_OAUTH_TOKEN": "proxy-managed",
         }
-        # NOTE: ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN are intentionally
-        # NOT injected. Credentials are injected by the shared Envoy proxy via
-        # ext_authz (ISS-43).
 
         workspace_id = getattr(workspace, "id", todo.phase_id)
 

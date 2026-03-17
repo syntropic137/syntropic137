@@ -129,6 +129,9 @@ class TokenInjectorService(auth_grpc.AuthorizationServicer):
         header = ok_response.headers.add()
         header.header.key = entry.header_name
         header.header.value = entry.header_value
+        # OVERWRITE_IF_EXISTS_OR_ADD (2): replaces the placeholder "proxy-managed"
+        # key that Claude Code sends with the real credential (ISS-43).
+        header.append_action = 2
 
         # Add execution ID header for tracing
         exec_header = ok_response.headers.add()

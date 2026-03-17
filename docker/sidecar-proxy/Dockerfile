@@ -1,8 +1,7 @@
-# Syn137 Sidecar Proxy
-# Envoy-based proxy for secure token injection and observability
+# Syn137 Envoy Proxy
+# Pure Envoy — credential injection handled by the token-injector service (ext_authz)
 #
-# Build: docker build -t syn-sidecar:latest .
-# Run: docker run -e SYN_EXECUTION_ID=exec-123 -p 8081:8081 syn-sidecar:latest
+# Build: docker build -t syn-envoy-proxy:latest .
 
 FROM envoyproxy/envoy:v1.31-latest
 
