@@ -117,8 +117,6 @@ def get_service_registry() -> dict[str, ServiceCredentialConfig]:
                 for host in svc.hosts:
                     registry[host] = svc
         except (json.JSONDecodeError, KeyError, TypeError):
-            logger.warning(
-                "Failed to parse SYN_PROXY_EXTRA_SERVICES — ignoring extra services"
-            )
+            logger.warning("Failed to parse SYN_PROXY_EXTRA_SERVICES — ignoring extra services")
 
     return registry
