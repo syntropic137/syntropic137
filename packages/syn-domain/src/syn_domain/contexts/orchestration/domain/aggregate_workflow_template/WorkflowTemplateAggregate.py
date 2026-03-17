@@ -6,7 +6,7 @@ Location: orchestration/domain/aggregate_workflow_template/ (per ADR-020)
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
@@ -145,6 +145,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         )
 
         # Handle both typed events and GenericDomainEvent (dict-based)
+        workflow_type: Any
+        classification: Any
         if hasattr(event, "model_dump"):
             # It's a typed event, use attributes directly
             self._name = event.name
@@ -155,8 +157,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             # It's a GenericDomainEvent or dict-like object
             event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
             self._name = event_data.get("name")
-            workflow_type = event_data.get("workflow_type")  # type: ignore[assignment]
-            classification = event_data.get("classification")  # type: ignore[assignment]
+            workflow_type = event_data.get("workflow_type")
+            classification = event_data.get("classification")
             phases_raw = event_data.get("phases", [])
 
         # Convert workflow_type to enum if it's a string

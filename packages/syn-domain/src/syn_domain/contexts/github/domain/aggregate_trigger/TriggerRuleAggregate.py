@@ -165,7 +165,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
             paused_by=command.paused_by,
             reason=command.reason,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("ResumeTriggerCommand")
     def resume(self, command: Any) -> None:
@@ -181,7 +181,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
             trigger_id=self.trigger_id,
             resumed_by=command.resumed_by,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("DeleteTriggerCommand")
     def delete(self, command: Any) -> None:
@@ -197,7 +197,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
             trigger_id=self.trigger_id,
             deleted_by=command.deleted_by,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("RecordTriggerFiredCommand")
     def record_fired(self, command: RecordTriggerFiredCommand) -> None:
@@ -216,7 +216,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
             workflow_id=command.workflow_id,
             workflow_inputs=command.workflow_inputs or {},
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     def can_fire(self) -> bool:
         """Check if this trigger is in a state that allows firing."""

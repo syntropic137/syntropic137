@@ -790,7 +790,7 @@ format-check:
 
 # Run type checker (strict mode)
 typecheck:
-    uv run mypy apps packages
+    uv run pyright
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
 fitness-check: aps-build

@@ -204,7 +204,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             metadata=command.metadata or {},
         )
 
-        self._apply(event)  # type: ignore[arg-type]  # Aggregate applies multiple event types
+        self._apply(event)
 
     @command_handler("CompleteSessionCommand")
     def complete_session(self, command: CompleteSessionCommand) -> None:
@@ -240,7 +240,7 @@ class AgentSessionAggregate(AggregateRoot["SessionStartedEvent"]):
             error_message=command.error_message,
         )
 
-        self._apply(event)  # type: ignore[arg-type]  # Aggregate applies multiple event types
+        self._apply(event)
 
     # =========================================================================
     # EVENT SOURCING HANDLERS

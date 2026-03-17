@@ -50,7 +50,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Type check
-        run: uv run mypy apps packages
+        run: uv run pyright
 
       - name: Validate domain events
         run: uv run python scripts/validate_domain_events.py

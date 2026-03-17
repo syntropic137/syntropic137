@@ -113,7 +113,7 @@ class AgenticIsolationAdapter:
             provider="docker",
             image=config.image or self._default_image,
             working_dir="/workspace",
-            environment=config.environment or {},
+            environment=config.environment or {},  # type: ignore[arg-type]  # Mapping[str, str] vs dict[str, str] adapter boundary
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,
@@ -125,7 +125,7 @@ class AgenticIsolationAdapter:
         workspace_obj = await self._provider.create(ws_config)
 
         # Store for later operations
-        self._workspaces[workspace_obj.id] = workspace_obj
+        self._workspaces[workspace_obj.id] = workspace_obj  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
         logger.info(
             "Created workspace (id=%s, execution=%s)",
@@ -153,7 +153,7 @@ class AgenticIsolationAdapter:
             return
 
         logger.info("Destroying workspace (id=%s)", handle.isolation_id)
-        await self._provider.destroy(workspace)
+        await self._provider.destroy(workspace)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
     async def execute(
         self,
@@ -193,7 +193,7 @@ class AgenticIsolationAdapter:
         cmd_str = " ".join(command)
 
         result = await self._provider.execute(
-            workspace,
+            workspace,  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
             cmd_str,
             timeout=float(timeout_seconds) if timeout_seconds else None,
             cwd=working_directory,
@@ -240,7 +240,7 @@ class AgenticIsolationAdapter:
         # Docker provider writes to mounted workspace_dir, paths are relative
         for path, content in files:
             relative_path = path.lstrip("/")
-            await self._provider.write_file(workspace, relative_path, content)
+            await self._provider.write_file(workspace, relative_path, content)  # type: ignore[arg-type]  # Workspace vs AgenticWorkspace adapter boundary
 
     async def copy_from(
         self,

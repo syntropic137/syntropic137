@@ -51,7 +51,7 @@ Both are our own projects — we dogfood them. If something needs fixing, push t
 
 Treat Python like TypeScript. Strict type safety everywhere.
 
-- **mypy strict mode** — all code must pass
+- **pyright strict mode** — all code must pass
 - **No `Any`** without explicit justification
 - **No `dict` for structured state** — use `@dataclass` or Pydantic `BaseModel`
 - **No string-keyed lookups** when attribute access is possible

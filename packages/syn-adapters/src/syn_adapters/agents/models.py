@@ -113,14 +113,15 @@ class ModelRegistry:
                 # - "claude-sonnet" -> latest sonnet API name
                 # - "opus" -> latest opus API name
                 # - "claude-opus" -> latest opus API name
-                if provider_id == "anthropic":
-                    # Short alias (e.g., "sonnet")
-                    self._aliases[model_type] = api_name
-                    # Claude-prefixed alias (e.g., "claude-sonnet")
-                    self._aliases[f"claude-{model_type}"] = api_name
-                else:
-                    # Other providers: use provider/type format
-                    self._aliases[f"{provider_id}/{model_type}"] = api_name
+                if api_name is not None and model_type is not None:
+                    if provider_id == "anthropic":
+                        # Short alias (e.g., "sonnet")
+                        self._aliases[str(model_type)] = str(api_name)
+                        # Claude-prefixed alias (e.g., "claude-sonnet")
+                        self._aliases[f"claude-{model_type}"] = str(api_name)
+                    else:
+                        # Other providers: use provider/type format
+                        self._aliases[f"{provider_id}/{model_type}"] = str(api_name)
 
         logger.debug(
             "models_loaded",
