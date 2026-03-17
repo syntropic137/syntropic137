@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Query
+from starlette.responses import JSONResponse
 
 import syn_api.v1.insights as insight_ops
 
@@ -37,11 +38,14 @@ async def get_contribution_heatmap(
     metric: str = Query("sessions"),
 ) -> dict[str, Any]:
     """Get daily contribution heatmap data."""
-    return await insight_ops.get_contribution_heatmap(
-        organization_id=organization_id,
-        system_id=system_id,
-        repo_id=repo_id,
-        start_date=start_date,
-        end_date=end_date,
-        metric=metric,
-    )
+    try:
+        return await insight_ops.get_contribution_heatmap(
+            organization_id=organization_id,
+            system_id=system_id,
+            repo_id=repo_id,
+            start_date=start_date,
+            end_date=end_date,
+            metric=metric,
+        )
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})

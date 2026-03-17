@@ -6,6 +6,7 @@ then queries TimescaleDB for daily activity buckets.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
@@ -86,14 +87,33 @@ class GetContributionHeatmapHandler:
         elif query.organization_id:
             execution_ids = await self._get_execution_ids_for_organization(query.organization_id)
 
-        # If a filter was applied but resolved to zero executions, return empty
+        # If a filter was applied but resolved to zero executions, return zero-filled buckets
         if execution_ids is not None and not execution_ids:
+            days: list[HeatmapDayBucket] = []
+            current = query.start_date
+            while current <= query.end_date:
+                days.append(HeatmapDayBucket(
+                    date=current.isoformat(),
+                    count=0.0,
+                    breakdown={
+                        "sessions": 0.0,
+                        "executions": 0.0,
+                        "commits": 0.0,
+                        "cost_usd": 0.0,
+                        "tokens": 0.0,
+                        "input_tokens": 0.0,
+                        "output_tokens": 0.0,
+                        "cache_creation_tokens": 0.0,
+                        "cache_read_tokens": 0.0,
+                    },
+                ))
+                current += timedelta(days=1)
             return ContributionHeatmapResult(
                 metric=query.metric,
                 start_date=query.start_date.isoformat(),
                 end_date=query.end_date.isoformat(),
                 total=0.0,
-                days=[],
+                days=days,
                 filter=self._build_filter(query),
             )
 

@@ -132,7 +132,8 @@ class TestGetContributionHeatmapHandler:
         ))
 
         assert result.total == 0.0
-        assert result.days == []
+        assert len(result.days) == 5  # zero-filled for Mar 1-5
+        assert all(d.count == 0.0 for d in result.days)
 
     @pytest.mark.asyncio
     async def test_metric_selection_sets_count(self) -> None:

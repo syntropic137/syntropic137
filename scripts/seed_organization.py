@@ -1,7 +1,9 @@
 """Seed a default organization, system, and repos via the HTTP API.
 
 Creates the Syntropic137 organization with its core repos grouped
-into a system.  Idempotent — skips entities that already exist.
+into a system.  Attempts to skip entities that already exist, but
+idempotency depends on persistent projections (see #222) — duplicates
+may be created on restart if projections have not caught up.
 
 Requires the API server to be running (just dev or just api-backend).
 Called by `just seed-organization`.
@@ -14,9 +16,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import sys
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 # --- Seed data -----------------------------------------------------------
@@ -152,8 +157,15 @@ async def _seed(api_url: str, dry_run: bool) -> int:
                     })
                     if resp.status_code == 200:
                         print(f"  ✓ Assigned '{full_name}' → system '{SYSTEM['name']}'")
+                    elif resp.status_code == 409:
+                        print(f"  ○ '{full_name}' → system (already assigned)")
                     else:
-                        print(f"  ○ '{full_name}' → system (already assigned or error)")
+                        logger.warning(
+                            "Unexpected status %d assigning repo '%s' to system: %s",
+                            resp.status_code,
+                            full_name,
+                            resp.text,
+                        )
         elif dry_run:
             for repo_def in REPOS:
                 print(f"  ⊘ Assign '{repo_def['full_name']}' → system (dry run)")

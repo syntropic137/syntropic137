@@ -112,7 +112,7 @@ class TimescaleHeatmapQuery:
             output_tokens = int(row["output_tokens"])
             cache_creation = int(row["cache_creation_tokens"])
             cache_read = int(row["cache_read_tokens"])
-            total_tokens = input_tokens + output_tokens
+            total_tokens = input_tokens + output_tokens + cache_creation + cache_read
 
             cost = self._cost_calculator.calculate_token_cost(
                 input_tokens=input_tokens,

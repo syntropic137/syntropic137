@@ -16,7 +16,7 @@ interface YearRange {
 
 function buildYearRanges(days: HeatmapDayBucket[]): YearRange[] {
   if (days.length === 0) return []
-  const dates = days.map((d) => new Date(d.date))
+  const dates = days.map((d) => new Date(d.date + 'T00:00:00'))
   const minYear = Math.min(...dates.map((d) => d.getFullYear()))
   const maxYear = Math.max(...dates.map((d) => d.getFullYear()))
   const ranges: YearRange[] = []
