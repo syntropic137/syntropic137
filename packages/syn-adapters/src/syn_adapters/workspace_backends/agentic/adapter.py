@@ -113,7 +113,7 @@ class AgenticIsolationAdapter:
             provider="docker",
             image=config.image or self._default_image,
             working_dir="/workspace",
-            environment=config.environment or {},  # type: ignore[arg-type]  # Mapping[str, str] vs dict[str, str] adapter boundary
+            environment=dict(config.environment) if config.environment else {},
             labels={
                 "syn.execution_id": config.execution_id,
                 "syn.workspace_id": config.workspace_id,
