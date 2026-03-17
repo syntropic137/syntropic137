@@ -29,9 +29,18 @@ class PhaseResultBuilder:
         session_id: str,
         artifact_ids: list[str],
         tokens: TokenAccumulator,
+        warnings: list[str] | None = None,
     ) -> PhaseResult:
-        """Build a successful PhaseResult."""
+        """Build a successful PhaseResult.
+
+        Args:
+            warnings: Optional health signals (e.g. "zero_tokens", "no_artifacts").
+                      Stored in metadata["warnings"] for dashboard display.
+        """
         completed_at = datetime.now(UTC)
+        metadata: dict[str, object] = {}
+        if warnings:
+            metadata["warnings"] = warnings
         return PhaseResult(
             phase_id=phase_id,
             status=PhaseStatus.COMPLETED,
@@ -43,6 +52,7 @@ class PhaseResultBuilder:
             output_tokens=tokens.output_tokens,
             total_tokens=tokens.total_tokens,
             cost_usd=tokens.estimate_cost(),
+            metadata=metadata,
         )
 
     @staticmethod

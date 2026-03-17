@@ -6,6 +6,9 @@ Handlers do infrastructure work and report results back via aggregate commands.
 
 from __future__ import annotations
 
+from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+    TodoAction,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
 )
@@ -14,9 +17,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.Artifact
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
     WorkspaceProvisionHandler,
-)
-from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
-    TodoAction,
 )
 
 HANDLER_REGISTRY: dict[TodoAction, type] = {

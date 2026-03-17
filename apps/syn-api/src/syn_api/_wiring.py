@@ -73,6 +73,10 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     manager = get_projection_manager()
     artifact_query = ArtifactQueryService(manager.artifact_list)
 
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
+    )
+
     return WorkflowExecutionProcessor(
         execution_repository=get_workflow_execution_repository(),
         session_repository=get_session_repository(),
@@ -85,6 +89,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         controller=get_controller(),
         prompt_builder=_build_workspace_prompt,
         command_builder=_build_claude_command,
+        todo_projection=ExecutionTodoProjection(),
     )
 
 
@@ -98,22 +103,36 @@ def _build_claude_command(
         "claude",
         "--model",
         model,
+        "--verbose",
         "--output-format",
         "stream-json",
+        "--dangerously-skip-permissions",
         "-p",
         prompt,
     ]
+
+    if phase.agent_config.allowed_tools:
+        for tool in phase.agent_config.allowed_tools:
+            cmd.extend(["--allowedTools", tool])
+
     return cmd
 
 
 async def _build_workspace_prompt(
     phase: ExecutablePhase,
-    execution_id: str,  # noqa: ARG001
-    workflow_id: str,  # noqa: ARG001
-    repo_url: str | None,  # noqa: ARG001
+    execution_id: str,
+    workflow_id: str,
+    repo_url: str | None,
     phase_outputs: dict[str, str],
+    inputs: dict[str, Any] | None = None,
 ) -> str:
-    """Build the workspace prompt for a phase."""
+    """Build the workspace prompt for a phase.
+
+    Three-layer substitution:
+    1. Built-in variables: {{execution_id}}, {{workflow_id}}, {{repo_url}}
+    2. Workflow inputs: iterate inputs.items(), substitute {{key}} → value
+    3. Phase outputs (from previous phases)
+    """
     from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
         SYN_WORKSPACE_PROMPT,
     )
@@ -123,13 +142,25 @@ async def _build_workspace_prompt(
 
     # Add the phase-specific prompt with input substitution
     phase_prompt = phase.prompt_template
+
+    # Layer 1: Built-in variables
+    phase_prompt = phase_prompt.replace("{{execution_id}}", execution_id)
+    phase_prompt = phase_prompt.replace("{{workflow_id}}", workflow_id)
+    phase_prompt = phase_prompt.replace("{{repo_url}}", repo_url or "")
+
+    # Layer 2: Workflow inputs
+    if inputs:
+        for key, value in inputs.items():
+            phase_prompt = phase_prompt.replace(f"{{{{{key}}}}}", str(value))
+
+    # Layer 2b: Phase-level inputs (static values from workflow definition)
     for phase_input in phase.inputs:
         if phase_input.value is not None:
             phase_prompt = phase_prompt.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
 
     prompt_parts.append(f"\n## Task\n{phase_prompt}")
 
-    # Add context from previous phases
+    # Layer 3: Context from previous phases
     if phase_outputs:
         prompt_parts.append("\n## Context from Previous Phases")
         for pid, content in phase_outputs.items():

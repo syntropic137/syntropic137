@@ -132,6 +132,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
                 execution_id=execution_id,
                 action=TodoAction.COMPLETE_PHASE,
                 phase_id=event_data.get("phase_id"),
+                session_id=event_data.get("session_id"),
             ),
         )
 

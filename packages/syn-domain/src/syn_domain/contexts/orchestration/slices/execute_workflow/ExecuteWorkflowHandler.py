@@ -73,13 +73,19 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
 
+        # Resolve placeholders in repo_url from inputs (e.g., {{repository}} → owner/repo)
+        repo_url = getattr(workflow, "_repository_url", None)
+        if repo_url and command.inputs:
+            for key, value in command.inputs.items():
+                repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+
         result = await self._processor.run(
             workflow_id=command.aggregate_id,
             workflow_name=workflow.name or "",
             phases=phases,
             inputs=command.inputs,
             execution_id=command.execution_id or str(uuid4()),
-            repo_url=getattr(workflow, "_repository_url", None),
+            repo_url=repo_url,
         )
 
         return result

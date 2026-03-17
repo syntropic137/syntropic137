@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+    TodoAction,
+    TodoItem,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
@@ -22,10 +26,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExe
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
     ArtifactCollectionHandler,
-)
-from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
-    TodoAction,
-    TodoItem,
 )
 
 # =========================================================================
@@ -44,6 +44,7 @@ class TestAgentExecutionHandler:
 
         # Mock workspace
         workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
 
         async def _fake_stream() -> None:
             return  # yields nothing
@@ -92,6 +93,7 @@ class TestAgentExecutionHandler:
         """Interrupted execution sets exit_code to 1."""
         handler = AgentExecutionHandler(controller=None)
         workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
 
         mock_stream_result = StreamResult(
             line_count=5,

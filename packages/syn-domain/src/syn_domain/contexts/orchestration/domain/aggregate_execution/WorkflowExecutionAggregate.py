@@ -288,12 +288,14 @@ class ArtifactsCollectedCommand:
         phase_id: str,
         artifact_ids: list[str],
         first_content_preview: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         """Initialize command."""
         self.aggregate_id = execution_id
         self.phase_id = phase_id
         self.artifact_ids = artifact_ids
         self.first_content_preview = first_content_preview
+        self.session_id = session_id
 
 
 # =============================================================================
@@ -561,6 +563,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             artifact_ids=command.artifact_ids,
             collected_at=datetime.now(UTC),
             first_content_preview=command.first_content_preview,
+            session_id=command.session_id,
         )
         self._apply(event)  # type: ignore[arg-type]
 
