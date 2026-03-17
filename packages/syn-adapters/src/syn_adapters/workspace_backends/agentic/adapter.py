@@ -466,6 +466,9 @@ class AgenticEventStreamAdapter:
             *exec_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # Increase StreamReader line limit to 10 MB. Default is 64 KB, which
+            # is exceeded by large tool results (e.g. WebSearch responses in JSONL).
+            limit=10 * 1024 * 1024,
         )
 
         try:
