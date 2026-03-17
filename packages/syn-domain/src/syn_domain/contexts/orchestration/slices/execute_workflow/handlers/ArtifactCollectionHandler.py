@@ -15,11 +15,11 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 
 if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+        TodoItem,
+    )
     from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
         ArtifactCollector,
-    )
-    from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
-        TodoItem,
     )
 
 logger = logging.getLogger(__name__)
@@ -91,6 +91,7 @@ class ArtifactCollectionHandler:
             first_content_preview=collected.first_content[:500]
             if collected.first_content
             else None,
+            session_id=session_id,
         )
 
         return ArtifactCollectionResult(

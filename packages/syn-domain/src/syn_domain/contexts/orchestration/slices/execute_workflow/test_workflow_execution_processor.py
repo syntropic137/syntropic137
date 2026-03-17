@@ -16,6 +16,10 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecution
 
 def _make_processor() -> WorkflowExecutionProcessor:
     """Create a processor with mocked dependencies."""
+    from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
+        ExecutionTodoProjection,
+    )
+
     return WorkflowExecutionProcessor(
         execution_repository=AsyncMock(),
         session_repository=AsyncMock(),
@@ -28,6 +32,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         controller=None,
         prompt_builder=AsyncMock(return_value="test prompt"),
         command_builder=MagicMock(return_value=["claude", "--model", "haiku"]),
+        todo_projection=ExecutionTodoProjection(),
     )
 
 

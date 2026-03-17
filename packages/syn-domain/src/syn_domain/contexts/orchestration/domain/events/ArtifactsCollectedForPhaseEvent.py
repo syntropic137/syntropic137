@@ -21,3 +21,4 @@ class ArtifactsCollectedForPhaseEvent(DomainEvent):
     artifact_ids: list[str]
     collected_at: datetime
     first_content_preview: str | None = None
+    session_id: str | None = None

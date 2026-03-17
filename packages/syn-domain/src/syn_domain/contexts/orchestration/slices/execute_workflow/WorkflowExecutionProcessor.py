@@ -17,6 +17,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
+from syn_domain.contexts.orchestration._shared.TodoValueObjects import (
+    TodoAction,
+    TodoItem,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -33,6 +37,9 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecut
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
     ArtifactCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
+    ConversationRecorder,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
     AgentExecutionHandler,
@@ -54,13 +61,6 @@ from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleM
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
     TokenAccumulator,
-)
-from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
-    ExecutionTodoProjection,
-)
-from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
-    TodoAction,
-    TodoItem,
 )
 
 if TYPE_CHECKING:
@@ -92,13 +92,19 @@ logger = logging.getLogger(__name__)
 # -- Protocols for dependency injection --
 
 PromptBuilder = Callable[
-    [ExecutablePhase, str, str, str | None, dict[str, str]],
+    [ExecutablePhase, str, str, str | None, dict[str, str], dict[str, Any]],
     Awaitable[str],
 ]
-"""async (phase, execution_id, workflow_id, repo_url, phase_outputs) -> prompt str"""
+"""async (phase, execution_id, workflow_id, repo_url, phase_outputs, inputs) -> prompt str"""
 
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 """(phase, prompt) -> claude CLI command list"""
+
+
+class TodoProjection(Protocol):
+    """Protocol for the to-do list projection used by the processor."""
+
+    def get_pending(self, execution_id: str) -> list[TodoItem]: ...
 
 
 class ExecutionRepository(Protocol):
@@ -157,6 +163,7 @@ class WorkflowExecutionProcessor:
         controller: ExecutionController | None,
         prompt_builder: PromptBuilder,
         command_builder: CommandBuilder,
+        todo_projection: TodoProjection | None = None,
     ) -> None:
         self._execution_repo = execution_repository
         self._session_repo = session_repository
@@ -171,7 +178,9 @@ class WorkflowExecutionProcessor:
         self._command_builder = command_builder
 
         # In-process synchronous projection — immediate feedback
-        self._todo_projection = ExecutionTodoProjection()
+        # Injected to avoid cross-slice import (VSA compliance)
+        assert todo_projection is not None, "todo_projection is required"
+        self._todo_projection: TodoProjection = todo_projection
 
         # Infrastructure state (not domain state — ephemeral)
         self._active_workspaces: dict[str, ManagedWorkspace] = {}
@@ -212,6 +221,7 @@ class WorkflowExecutionProcessor:
             WorkflowExecutionResult with final state
         """
         started_at = datetime.now(UTC)
+        self._inputs = inputs
         aggregate = WorkflowExecutionAggregate()
 
         # Build phase definitions for aggregate intelligence
@@ -426,6 +436,7 @@ class WorkflowExecutionProcessor:
             artifacts=artifacts,
             completed_phase_ids=completed_phase_ids,
             phase_outputs=phase_outputs,
+            inputs=self._inputs,
         )
 
         # Store infrastructure state
@@ -472,8 +483,33 @@ class WorkflowExecutionProcessor:
             collector=collector,
         )
 
+        # Store conversation log
+        recorder = ConversationRecorder(self._conversation_storage)
+        await recorder.store(
+            session_id=todo.session_id or "",
+            lines=result.stream_result.conversation_lines,
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            workflow_id=aggregate.workflow_id or "",
+            model=phase.agent_config.model,
+            input_tokens=result.tokens.input_tokens,
+            output_tokens=result.tokens.output_tokens,
+            started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
+            success=result.command.exit_code == 0,
+        )
+
         # Store tokens for phase result (Fix #5)
         self._phase_tokens[todo.phase_id] = result.tokens
+
+        # Fail fast if agent CLI didn't run successfully
+        if result.command.exit_code != 0:
+            msg = (
+                f"Agent execution failed for phase {todo.phase_id} "
+                f"(exit_code={result.command.exit_code}, "
+                f"tokens={result.tokens.input_tokens}+{result.tokens.output_tokens})"
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         # Report to aggregate
         aggregate._handle_command(result.command)
@@ -532,12 +568,19 @@ class WorkflowExecutionProcessor:
         started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
 
         # Build phase result with real data
+        warnings: list[str] = []
+        if tokens.input_tokens == 0 and tokens.output_tokens == 0:
+            warnings.append("zero_tokens")
+        if not artifact_ids:
+            warnings.append("no_artifacts")
+
         result = PhaseResultBuilder.success(
             phase_id=todo.phase_id,
             started_at=started_at,
             session_id=todo.session_id or "",
             artifact_ids=artifact_ids,
             tokens=tokens,
+            warnings=warnings,
         )
         phase_results.append(result)
         completed_phase_ids.append(todo.phase_id)
