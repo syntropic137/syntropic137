@@ -1,0 +1,8 @@
+id: contribution-heatmap
+name: Contribution Heatmap
+description: >
+  Daily activity bucketing for GitHub-style contribution heatmaps.
+  On-the-fly TimescaleDB aggregation with org/system/repo filtering.
+type: query
+context: organization
+returns: ContributionHeatmapResult
