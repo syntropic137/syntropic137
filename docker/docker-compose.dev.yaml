@@ -95,8 +95,8 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-  sidecar-proxy:
-    container_name: syn-sidecar-example
+  envoy-proxy:
+    container_name: syn-envoy-proxy
     ports:
       - "8081:8081"
       - "9901:9901" # Envoy admin
