@@ -1,5 +1,5 @@
 {
-  "name": "syn-dashboard-ui",
+  "name": "syn-pulse-ui",
   "private": true,
   "version": "0.11.0",
   "type": "module",
@@ -11,21 +11,16 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@nivo/calendar": "^0.88.0",
+    "@nivo/core": "^0.88.0",
     "clsx": "^2.1.1",
-    "html2canvas": "^1.4.1",
     "lucide-react": "^0.555.0",
-    "mermaid": "^11.12.2",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "react-markdown": "^10.1.0",
-    "react-router-dom": "^7.9.6",
-    "recharts": "^3.5.1",
-    "remark-gfm": "^4.0.1"
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@tailwindcss/vite": "^4.1.17",
-    "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
