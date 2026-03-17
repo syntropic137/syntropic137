@@ -46,7 +46,7 @@ build-backend = "uv_build"
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
-exclude = ["apps/syn-dashboard-ui", "apps/syn-docs"]
+exclude = ["apps/syn-dashboard-ui", "apps/syn-docs", "packages/openclaw-plugin"]
 
 [tool.uv.sources]
 syn-api = { workspace = true }

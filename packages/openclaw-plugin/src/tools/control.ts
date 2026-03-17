@@ -6,7 +6,14 @@ import type { ControlResponse } from "../types.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
+const PAST_TENSE: Record<string, string> = {
+  pause: "paused",
+  resume: "resumed",
+  cancel: "cancelled",
+};
+
 function formatControl(action: string, data: ControlResponse): { content: string; isError?: true } {
+  const past = PAST_TENSE[action] ?? `${action}ed`;
   if (!data.success) {
     return {
       content: `Failed to ${action} execution ${data.execution_id}: ${data.error ?? "unknown error"}`,
@@ -14,7 +21,7 @@ function formatControl(action: string, data: ControlResponse): { content: string
     };
   }
   return {
-    content: `Execution ${data.execution_id} ${action}d successfully. State: **${data.state}**${data.message ? ` — ${data.message}` : ""}`,
+    content: `Execution ${data.execution_id} ${past} successfully. State: **${data.state}**${data.message ? ` — ${data.message}` : ""}`,
   };
 }
 
