@@ -387,6 +387,9 @@ dev: _workspace-check
     echo "5️⃣ Seeding triggers..."
     just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
     echo ""
+    echo "5½ Seeding organization..."
+    just seed-organization || echo "   ⚠️ Seed skipped (organization may already exist)"
+    echo ""
     echo "6️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
     sleep 1  # let previous process fully exit
@@ -394,11 +397,19 @@ dev: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
+    echo "7️⃣ Starting Pulse metrics frontend..."
+    lsof -ti:5174 | xargs kill 2>/dev/null || true
+    sleep 1
+    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
+    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
+    sleep 3
+    echo ""
     just _webhook-start
     echo ""
     echo "✅ Full development stack ready!"
     echo ""
-    echo "   🌐 Frontend:     http://localhost:5173"
+    echo "   🌐 Dashboard:    http://localhost:5173"
+    echo "   📈 Pulse:        http://localhost:5174"
     echo "   🚀 Backend API:  http://localhost:8000"
     echo "   📊 API Docs:     http://localhost:8000/docs"
     echo "   💾 Database:     localhost:5432"
@@ -426,6 +437,7 @@ dev-fresh: _workspace-check
 
     echo "1️⃣ Stopping any existing processes..."
     lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+    lsof -ti:5174 | xargs kill -9 2>/dev/null || true
     echo ""
     echo "2️⃣ Tearing down Docker services and volumes..."
     {{compose_dev}} down -v --remove-orphans
@@ -455,6 +467,9 @@ dev-fresh: _workspace-check
     echo "8️⃣ Seeding triggers..."
     just seed-triggers
     echo ""
+    echo "8½ Seeding organization..."
+    just seed-organization
+    echo ""
     echo "9️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
     sleep 1
@@ -462,11 +477,19 @@ dev-fresh: _workspace-check
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
+    echo "🔟 Starting Pulse metrics frontend..."
+    lsof -ti:5174 | xargs kill 2>/dev/null || true
+    sleep 1
+    (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
+    (cd apps/syn-pulse-ui && pnpm run dev > /tmp/syn-pulse.log 2>&1 &)
+    sleep 3
+    echo ""
     just _webhook-start
     echo ""
     echo "✅ Fresh development environment ready!"
     echo ""
-    echo "   🌐 Frontend:     http://localhost:5173"
+    echo "   🌐 Dashboard:    http://localhost:5173"
+    echo "   📈 Pulse:        http://localhost:5174"
     echo "   🚀 Backend API:  http://localhost:8000"
     echo "   📊 API Docs:     http://localhost:8000/docs"
     echo "   💾 Database:     localhost:5432"
@@ -480,8 +503,9 @@ dev-stop:
     #!/usr/bin/env bash
     echo "🛑 Stopping dev stack..."
     just _webhook-stop
-    echo "   Stopping frontend (port 5173)..."
+    echo "   Stopping frontends (ports 5173, 5174)..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
+    lsof -ti:5174 | xargs kill 2>/dev/null || true
     echo "   Stopping Docker services..."
     $(just _dev-compose-cmd) stop
     echo "✅ Dev stack stopped (data preserved)"
@@ -491,8 +515,9 @@ dev-down:
     #!/usr/bin/env bash
     echo "🛑 Shutting down dev stack..."
     just _webhook-stop
-    echo "   Stopping frontend (port 5173)..."
+    echo "   Stopping frontends (ports 5173, 5174)..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
+    lsof -ti:5174 | xargs kill 2>/dev/null || true
     echo "   Removing Docker containers..."
     $(just _dev-compose-cmd) down
     echo "✅ Dev stack shut down (volumes preserved)"
@@ -538,6 +563,28 @@ dashboard-lint:
 # Full dashboard QA (lint + build)
 dashboard-qa: dashboard-lint dashboard-build
     @echo "✅ Dashboard UI checks passed!"
+
+# --- Pulse UI ---
+
+# Start the Pulse metrics frontend (Vite dev server)
+pulse-frontend:
+    cd apps/syn-pulse-ui && pnpm run dev
+
+# Install Pulse frontend dependencies
+pulse-install:
+    cd apps/syn-pulse-ui && pnpm install
+
+# Build Pulse frontend for production
+pulse-build:
+    cd apps/syn-pulse-ui && pnpm run build
+
+# Lint Pulse frontend
+pulse-lint:
+    cd apps/syn-pulse-ui && pnpm run lint
+
+# Full Pulse QA (lint + build)
+pulse-qa: pulse-lint pulse-build
+    @echo "✅ Pulse UI checks passed!"
 
 # --- Feedback ---
 
@@ -1234,8 +1281,14 @@ seed-triggers: _ensure-env
     source scripts/resolve_env.sh
     uv run python scripts/seed_triggers.py
 
-# Seed all data (workflows + triggers)
-seed-all: seed-workflows seed-triggers
+# Seed organization, system, and repos
+seed-organization: _ensure-env
+    #!/usr/bin/env bash
+    source scripts/resolve_env.sh
+    uv run python scripts/seed_organization.py
+
+# Seed all data (workflows + triggers + organization)
+seed-all: seed-workflows seed-triggers seed-organization
 
 # Initialize git submodules
 submodules-init:

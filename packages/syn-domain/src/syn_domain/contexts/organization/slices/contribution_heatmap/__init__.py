@@ -1,0 +1,1 @@
+"""Contribution heatmap handler slice."""
