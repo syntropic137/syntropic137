@@ -46,7 +46,7 @@ def run_shortcut(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
 ) -> None:
     """Execute a workflow (shortcut for 'syn workflow run')."""
-    workflow.run_workflow(workflow_id, inputs, dry_run, quiet)
+    workflow.run_workflow(workflow_id, inputs=inputs, dry_run=dry_run, quiet=quiet)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+    InputDeclaration,
     PhaseDefinition,
     PhaseExecutionType,
     WorkflowClassification,
@@ -26,6 +27,29 @@ class RepositoryConfig(BaseModel):
 
     url: str = Field(..., min_length=1)
     ref: str = Field(default="main")
+
+
+class InputYamlDefinition(BaseModel):
+    """Input declaration as parsed from YAML.
+
+    Maps to domain InputDeclaration.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(..., min_length=1)
+    description: str | None = None
+    required: bool = True
+    default: str | None = None
+
+    def to_domain(self) -> InputDeclaration:
+        """Convert to domain InputDeclaration."""
+        return InputDeclaration(
+            name=self.name,
+            description=self.description,
+            required=self.required,
+            default=self.default,
+        )
 
 
 class PhaseYamlDefinition(BaseModel):
@@ -51,6 +75,10 @@ class PhaseYamlDefinition(BaseModel):
     max_tokens: int | None = None
     timeout_seconds: int | None = None
 
+    # Claude Code command extensions (ISS-211)
+    argument_hint: str | None = None
+    model: str | None = None
+
     def to_domain(self) -> PhaseDefinition:
         """Convert to domain PhaseDefinition."""
         return PhaseDefinition(
@@ -64,6 +92,8 @@ class PhaseYamlDefinition(BaseModel):
             prompt_template=self.prompt_template,
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
+            argument_hint=self.argument_hint,
+            model=self.model,
         )
 
 
@@ -89,6 +119,9 @@ class WorkflowDefinition(BaseModel):
 
     # Project association
     project_name: str | None = None
+
+    # Input declarations (ISS-211)
+    inputs: list[InputYamlDefinition] = Field(default_factory=list)
 
     # Phases
     phases: list[PhaseYamlDefinition] = Field(..., min_length=1)
@@ -124,6 +157,10 @@ class WorkflowDefinition(BaseModel):
     def get_domain_phases(self) -> list[PhaseDefinition]:
         """Convert all phases to domain PhaseDefinition objects."""
         return [p.to_domain() for p in self.phases]
+
+    def get_domain_input_declarations(self) -> list[InputDeclaration]:
+        """Convert all input declarations to domain InputDeclaration objects."""
+        return [i.to_domain() for i in self.inputs]
 
 
 def load_workflow_definitions(directory: Path) -> list[WorkflowDefinition]:

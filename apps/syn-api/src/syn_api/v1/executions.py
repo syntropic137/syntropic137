@@ -45,6 +45,7 @@ async def execute(
     workflow_id: str,
     inputs: dict[str, str] | None = None,
     execution_id: str | None = None,
+    task: str | None = None,
     tenant_id: str | None = None,  # noqa: ARG001
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionSummary, WorkflowError]:
@@ -89,6 +90,7 @@ async def execute(
             aggregate_id=workflow_id,
             inputs=inputs or {},
             execution_id=execution_id,
+            task=task,
         )
         result = await handler.handle(cmd)
     except WorkflowNotFoundError:

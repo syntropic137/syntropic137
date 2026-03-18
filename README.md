@@ -94,10 +94,13 @@ just cli -- <command>           # run via just
 ```bash
 syn workflow list
 syn workflow show <id>
-syn workflow run <id> --input key=value
+syn workflow run <id> --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml
-syn run <id> -i key=value       # shortcut
+
+# Examples
+syn workflow run research-workflow-v2 --task "$(gh issue view 211 --json body -q .body)"
+syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
 ```
 
 ### Execution Control

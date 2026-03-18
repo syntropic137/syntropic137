@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from datetime import date
+from datetime import date  # noqa: TC003 — needed at runtime for FastAPI Query params
+from typing import Any
 
 from fastapi import APIRouter, Query
 from starlette.responses import JSONResponse

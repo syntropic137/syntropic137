@@ -91,7 +91,7 @@ async def get_workflow(
     if detail is None:
         return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
     # Convert domain phase objects to PhaseDefinitionResponse-compatible dicts
-    from syn_api.types import PhaseDefinitionResponse
+    from syn_api.types import InputDeclarationResponse, PhaseDefinitionResponse
 
     phases: list[PhaseDefinitionResponse] = []
     for p in detail.phases or []:
@@ -106,6 +106,8 @@ async def get_workflow(
                     prompt_template=p.get("prompt_template"),
                     timeout_seconds=p.get("timeout_seconds", 300),
                     allowed_tools=p.get("allowed_tools", []),
+                    argument_hint=p.get("argument_hint"),
+                    model=p.get("model"),
                 )
             )
         else:
@@ -119,6 +121,23 @@ async def get_workflow(
                     prompt_template=p.prompt_template,
                     timeout_seconds=p.timeout_seconds or 300,
                     allowed_tools=list(p.allowed_tools or []),
+                    argument_hint=p.argument_hint if hasattr(p, "argument_hint") else None,
+                    model=p.model if hasattr(p, "model") else None,
+                )
+            )
+
+    # Map input declarations
+    input_decls: list[InputDeclarationResponse] = []
+    for d in detail.input_declarations or []:
+        if isinstance(d, dict):
+            input_decls.append(InputDeclarationResponse(**d))
+        else:
+            input_decls.append(
+                InputDeclarationResponse(
+                    name=d.name,
+                    description=d.description if hasattr(d, "description") else None,
+                    required=d.required if hasattr(d, "required") else True,
+                    default=d.default if hasattr(d, "default") else None,
                 )
             )
 
@@ -130,6 +149,7 @@ async def get_workflow(
             workflow_type=detail.workflow_type,
             classification=detail.classification,
             phases=phases,
+            input_declarations=input_decls,
             created_at=detail.created_at,
             runs_count=detail.runs_count,
         )
