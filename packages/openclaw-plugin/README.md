@@ -18,7 +18,7 @@ openclaw plugins install @syntropic137/openclaw-plugin
 
 ### Configure
 
-The plugin works out of the box with a local Syntropic137 instance on `http://localhost:8000`. For remote deployments, configure via OpenClaw plugin settings:
+The plugin works out of the box with a local Syntropic137 instance on `http://localhost:8137`. For remote deployments, configure via OpenClaw plugin settings:
 
 ```json
 {
@@ -34,7 +34,7 @@ export SYNTROPIC_URL="https://your-syntropic-instance.example.com"
 export SYNTROPIC_API_KEY="your-api-key"
 ```
 
-**Resolution order:** plugin config → environment variables → defaults (`http://localhost:8000`, no auth).
+**Resolution order:** plugin config → environment variables → defaults (`http://localhost:8137`, no auth).
 
 ## What You Can Do
 
@@ -100,7 +100,7 @@ The agent uses 15 tools under the hood — you don't need to know their names.
 | Setup | apiUrl | apiKey |
 |-------|--------|--------|
 | Same Docker network | `http://syn-api:8000` | Not needed |
-| Same VPS / localhost | `http://localhost:8000` | Not needed |
+| Same VPS / localhost | `http://localhost:8137` | Not needed |
 | Remote API | `https://api.example.com` | Required |
 
 ## Development

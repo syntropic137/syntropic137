@@ -49,26 +49,26 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8137',
         changeOrigin: true,
         rewrite: (p: string) => p.replace(/^\/api\/v1/, ''),  // Strip /api/v1/ — mirrors nginx behavior
         configure: (proxy) => quietProxy(proxy, 'api'),
       },
       // Only proxy our app WebSocket paths — avoid intercepting Vite's HMR socket
       '/ws/executions': {
-        target: 'ws://localhost:8000',
+        target: 'ws://localhost:8137',
         ws: true,
         changeOrigin: true,
         configure: (proxy) => quietProxy(proxy, 'ws'),
       },
       '/ws/activity': {
-        target: 'ws://localhost:8000',
+        target: 'ws://localhost:8137',
         ws: true,
         changeOrigin: true,
         configure: (proxy) => quietProxy(proxy, 'ws'),
       },
       '/ws/health': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:8137',
         changeOrigin: true,
         configure: (proxy) => quietProxy(proxy, 'ws'),
       },

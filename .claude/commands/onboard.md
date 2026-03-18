@@ -67,8 +67,8 @@ After setup completes, provide a summary:
 1. **What was done** — list each step executed (and skipped)
 2. **Access URLs:**
    - Dashboard UI: http://localhost:5173
-   - Dashboard API: http://localhost:8000/docs
-   - API Health: http://localhost:8000/health
+   - Dashboard API: http://localhost:8137/docs
+   - API Health: http://localhost:8137/health
 3. **Next commands:**
    - `just dev-logs` — tail service logs
    - `just dev-stop` — stop services

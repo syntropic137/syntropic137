@@ -31,12 +31,12 @@ describe("SyntropicClient", () => {
   it("GET request sends correct URL and headers", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000", apiKey: "test-key" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137", apiKey: "test-key" });
     await client.get("/workflows");
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, init] = mockFetch.mock.calls[0]!;
-    expect(url).toBe("http://localhost:8000/workflows");
+    expect(url).toBe("http://localhost:8137/workflows");
     expect((init as RequestInit).method).toBe("GET");
     expect((init as RequestInit).headers).toMatchObject({
       Authorization: "Bearer test-key",
@@ -46,7 +46,7 @@ describe("SyntropicClient", () => {
   it("GET with query params", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ ok: true }));
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137" });
     await client.get("/workflows", { workflow_type: "issue", page: "2" });
 
     const [url] = mockFetch.mock.calls[0]!;
@@ -58,7 +58,7 @@ describe("SyntropicClient", () => {
   it("POST sends JSON body", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ execution_id: "e1" }));
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137" });
     await client.post("/workflows/wf-1/execute", { inputs: { url: "https://example.com" } });
 
     const [, init] = mockFetch.mock.calls[0]!;
@@ -71,7 +71,7 @@ describe("SyntropicClient", () => {
   it("returns ok: true on success", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({ value: 42 }));
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137" });
     const result = await client.get<{ value: number }>("/test");
 
     expect(result.ok).toBe(true);
@@ -83,7 +83,7 @@ describe("SyntropicClient", () => {
       new Response(JSON.stringify({ detail: "Not found" }), { status: 404, statusText: "Not Found" }),
     );
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137" });
     const result = await client.get("/missing");
 
     expect(result.ok).toBe(false);
@@ -96,7 +96,7 @@ describe("SyntropicClient", () => {
   it("returns ok: false on network error", async () => {
     mockFetch.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137" });
     const result = await client.get("/test");
 
     expect(result.ok).toBe(false);
@@ -109,11 +109,11 @@ describe("SyntropicClient", () => {
   it("strips trailing slash from apiUrl", async () => {
     mockFetch.mockResolvedValueOnce(jsonResponse({}));
 
-    const client = new SyntropicClient({ apiUrl: "http://localhost:8000/" });
+    const client = new SyntropicClient({ apiUrl: "http://localhost:8137/" });
     await client.get("/workflows");
 
     const [url] = mockFetch.mock.calls[0]!;
-    expect(url).toBe("http://localhost:8000/workflows");
+    expect(url).toBe("http://localhost:8137/workflows");
   });
 });
 
@@ -141,12 +141,12 @@ describe("resolveConfig", () => {
     }
   });
 
-  it("defaults to localhost:8000", () => {
+  it("defaults to localhost:8137", () => {
     const origUrl = process.env["SYNTROPIC_URL"];
     try {
       delete process.env["SYNTROPIC_URL"];
       const config = resolveConfig();
-      expect(config.apiUrl).toBe("http://localhost:8000");
+      expect(config.apiUrl).toBe("http://localhost:8137");
       expect(config.apiKey).toBeUndefined();
     } finally {
       if (origUrl !== undefined) process.env["SYNTROPIC_URL"] = origUrl;
