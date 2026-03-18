@@ -162,15 +162,52 @@ services:
       retries: 5
 
   # =============================================================================
-  # SIDECAR PROXY - Agent Container Network Proxy (Optional)
+  # ENVOY PROXY - Shared Credential Injection Proxy (ISS-43)
   # =============================================================================
-  # Example sidecar proxy for agent containers
-  # This is a template - actual sidecars are deployed per-execution
-  sidecar-proxy:
+  # Shared Envoy proxy that routes agent traffic. Credential injection is
+  # handled by the token-injector service via ext_authz (port 9002).
+  # Agents never see real API keys — only "proxy-managed" placeholder.
+  #
+  # Architecture:
+  #   Agent (agent-net only) → envoy-proxy → token-injector (ext_authz) → external APIs
+  envoy-proxy:
     build:
       context: ./sidecar-proxy
       dockerfile: Dockerfile
+    networks:
+      - default
+      - agent-net
+    depends_on:
+      token-injector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9901/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # =============================================================================
+  # TOKEN INJECTOR - ext_authz gRPC service (ISS-43)
+  # =============================================================================
+  # Implements Envoy's ext_authz protocol. Receives auth check requests from
+  # Envoy, looks up credentials from its own environment, and returns the real
+  # headers to inject. Credentials live ONLY here — not in agent containers.
+  token-injector:
+    build:
+      context: ./token-injector
+      dockerfile: Dockerfile
     environment:
-      SYN_EXECUTION_ID: "dev-local"
-    profiles:
-      - sidecar # Only start with: docker compose --profile sidecar up
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+    networks:
+      - default
+
+networks:
+  agent-net:
+    # Not internal: agents need egress for git operations (clone/push to github.com).
+    # API key security is enforced via ANTHROPIC_BASE_URL routing to the proxy —
+    # agents only hold a "proxy-managed" placeholder, so direct api.anthropic.com
+    # calls fail. Full network isolation (internal: true) deferred to Phase 2
+    # when git traffic is also routed through the proxy via CONNECT tunneling.
