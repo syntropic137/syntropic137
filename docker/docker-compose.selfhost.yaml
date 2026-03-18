@@ -147,7 +147,7 @@ services:
         max-size: "5m"
         max-file: "3"
     networks:
-      - syn-internal
+      - syn-proxy
 
   # ===========================================================================
   # API
@@ -217,6 +217,7 @@ services:
         max-file: "3"
     networks:
       - syn-internal
+      - syn-proxy
 
   # ===========================================================================
   # FRONTEND (nginx)
@@ -371,3 +372,7 @@ networks:
   syn-internal:
     name: syn137_internal
     driver: bridge
+  syn-proxy:
+    name: syn137_proxy
+    driver: bridge
+    internal: true  # no external routing — proxy ↔ api only
