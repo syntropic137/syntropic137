@@ -1,5 +1,6 @@
 # Implementation Workflow
 # A workflow for implementing features following RIPER-5 methodology.
+# Uses Claude Code command pattern: $ARGUMENTS for the primary task.
 
 id: implementation-workflow-v1
 name: Implementation Workflow
@@ -14,11 +15,21 @@ repository:
   url: https://github.com/example/repo
   ref: main
 
+# Input declarations (ISS-211: CC command inputs)
+inputs:
+  - name: task
+    description: "Feature request or issue body to implement"
+    required: true
+  - name: repository
+    description: "Repository URL override (owner/repo or full URL)"
+    required: false
+
 phases:
   - id: research
     name: Research
     order: 1
     execution_type: sequential
+    argument_hint: "[feature-request]"
     description: |
       Information gathering phase. Read files, understand existing code,
       identify patterns and dependencies. NO changes made.
@@ -30,11 +41,28 @@ phases:
       - existing_patterns
     max_tokens: 8192
     timeout_seconds: 600
+    prompt_template: |
+      You are a software engineer in the RESEARCH phase. Your job is to
+      understand the codebase before making any changes.
+
+      ## Feature Request
+      $ARGUMENTS
+
+      ## How to Approach This
+      1. Read relevant files to understand the current architecture
+      2. Identify patterns and conventions used in the codebase
+      3. Map dependencies that will be affected
+      4. Note any potential risks or conflicts
+
+      **CRITICAL: Do NOT make any changes. Read-only investigation.**
+
+      Output a codebase analysis with dependency map and existing patterns.
 
   - id: innovate
     name: Innovate
     order: 2
     execution_type: sequential
+    argument_hint: "[feature-request]"
     description: |
       Brainstorm potential approaches. Discuss ideas, advantages,
       and disadvantages. NO concrete planning yet.
@@ -46,11 +74,30 @@ phases:
       - trade_off_analysis
     max_tokens: 4096
     timeout_seconds: 300
+    prompt_template: |
+      You are a software architect brainstorming implementation approaches.
+
+      ## Feature Request
+      $ARGUMENTS
+
+      ## Codebase Analysis
+      {{research}}
+
+      ## How to Approach This
+      1. Propose 2-3 different implementation approaches
+      2. For each approach, list advantages and disadvantages
+      3. Consider maintainability, performance, and testing implications
+      4. Recommend the best approach with justification
+
+      **CRITICAL: No concrete planning yet — just ideas and trade-offs.**
+
+      Output approach options with a trade-off analysis.
 
   - id: plan
     name: Plan
     order: 3
     execution_type: human_in_loop
+    argument_hint: "[feature-request]"
     description: |
       Create detailed technical specification. Define file paths,
       changes, and implementation order. Requires human approval.
@@ -63,11 +110,28 @@ phases:
       - test_plan
     max_tokens: 8192
     timeout_seconds: 600
+    prompt_template: |
+      You are a software architect creating a detailed implementation plan.
+
+      ## Feature Request
+      $ARGUMENTS
+
+      ## Selected Approach
+      {{innovate}}
+
+      ## How to Approach This
+      1. Define the exact files to create/modify with paths
+      2. Specify the changes for each file in order
+      3. Write a test plan covering the changes
+      4. Define success criteria
+
+      Output an implementation plan, file change list, and test plan.
 
   - id: execute
     name: Execute
     order: 4
     execution_type: sequential
+    argument_hint: "[feature-request]"
     description: |
       Implement the approved plan exactly. Make code changes,
       run tests after each milestone. NO deviations from plan.
@@ -80,11 +144,31 @@ phases:
       - qa_report
     max_tokens: 16384
     timeout_seconds: 1800
+    prompt_template: |
+      You are a software engineer executing an approved implementation plan.
+
+      ## Feature Request
+      $ARGUMENTS
+
+      ## Implementation Plan
+      {{plan}}
+
+      ## How to Approach This
+      1. Follow the plan exactly — no deviations
+      2. Implement changes in the specified order
+      3. Run tests after each milestone
+      4. Document any issues encountered
+
+      **CRITICAL: Follow the plan. If something doesn't work, document
+      the issue rather than improvising a different approach.**
+
+      Output code changes, test results, and a QA report.
 
   - id: review
     name: Review
     order: 5
     execution_type: sequential
+    argument_hint: "[feature-request]"
     description: |
       Validate implementation against plan. Line-by-line comparison.
       Flag any deviations detected.
@@ -97,4 +181,22 @@ phases:
       - approval_status
     max_tokens: 4096
     timeout_seconds: 300
+    prompt_template: |
+      You are a code reviewer validating implementation against the plan.
 
+      ## Original Feature Request
+      $ARGUMENTS
+
+      ## Implementation Plan
+      {{plan}}
+
+      ## Actual Changes
+      {{execute}}
+
+      ## How to Approach This
+      1. Compare each planned change against actual implementation
+      2. Flag any deviations from the plan
+      3. Verify tests cover the changes
+      4. Provide an approval/rejection recommendation
+
+      Output a review report, deviation list, and approval status.

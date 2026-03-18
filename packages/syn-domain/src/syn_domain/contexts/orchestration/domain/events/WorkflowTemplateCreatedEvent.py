@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from event_sourcing import DomainEvent, event
+from pydantic import Field  # noqa: TC002 — needed at runtime for default_factory
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
+    InputDeclaration,
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
@@ -44,3 +46,6 @@ class WorkflowTemplateCreatedEvent(DomainEvent):
     # Optional context
     project_name: str | None = None
     description: str | None = None
+
+    # Input declarations (ISS-211)
+    input_declarations: list[InputDeclaration] = Field(default_factory=list)

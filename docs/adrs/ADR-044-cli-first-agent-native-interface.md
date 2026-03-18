@@ -99,8 +99,9 @@ Every CLI design decision is evaluated against this canonical agent workflow:
 # 1. Discover
 WORKFLOWS=$(syn workflow list --output json)
 
-# 2. Execute (non-blocking by default when --output json)
+# 2. Execute with a task (ISS-211: --task flag for $ARGUMENTS substitution)
 RESULT=$(syn workflow run github-pr \
+  --task "Add retry logic to webhook handler" \
   --input repo=user/repo \
   --idempotency-key "task-$(uuidgen)" \
   --output json)
@@ -165,3 +166,4 @@ See GitHub issue #136 for the implementation scope of:
 - ADR-011: Structured logging standard
 - ADR-029: TimescaleDB for agent events
 - ADR-034: Test infrastructure isolation
+- ADR-048: Workflows as Claude Code Commands — extends `syn workflow run` with `--task` flag
