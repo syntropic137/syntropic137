@@ -540,3 +540,47 @@ The fix requires implementing this shared Envoy architecture. See issue #43 for 
 - [Anthropic Secure Deployment Guide](https://console.anthropic.com/docs/en/agent-sdk/secure-deployment)
 - [sandbox-runtime (Anthropic's reference)](https://github.com/anthropic-experimental/sandbox-runtime)
 - Issue #43: Implementation tracking
+
+---
+
+## 2026-03-17 Update: Phase 1 Implemented (ISS-43)
+
+### What Shipped
+
+Phase 1 of the shared Envoy proxy is now implemented. Agent containers no longer receive `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` as environment variables.
+
+**Architecture (single shared proxy for Mac Mini / single-tenant):**
+
+```
+Agent Container (agent-net only)
+  ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081
+  HTTP_PROXY=http://syn-envoy-proxy:8081
+  NO API KEYS
+    │
+    ▼
+Shared Envoy Proxy (agent-net + default)
+  ext_authz → Token Injector (reads credentials from proxy's own env)
+    │
+    ▼
+  External APIs (TLS)
+```
+
+### Key Changes
+
+| Component | Change |
+|-----------|--------|
+| `WorkspaceProvisionHandler` | `with_sidecar=True`, `inject_tokens=True`. Agent env has `ANTHROPIC_BASE_URL`, `HTTP_PROXY`, `HTTPS_PROXY` — no raw API keys. |
+| `WorkspaceService` | Factory uses `SharedEnvoyAdapter` instead of `DockerSidecarAdapter`. |
+| `AgenticIsolationAdapter` | Workspace containers attach to `agent-net` (internal, no external egress). |
+| `docker-compose.yaml` | Always-on `envoy-proxy` service with API keys. `agent-net` internal network. |
+| `token_injector.py` | Refactored to service registry pattern with passthrough support (pypi, npm). |
+| `envoy.yaml` | Added github.com, pypi.org, npmjs.org virtual hosts and clusters. |
+
+### What's Deferred to Phase 2
+
+- Per-execution credentials (Redis credential store, source IP routing)
+- `--network none` + Unix socket (maximum isolation on Linux)
+- Fernet encryption for credentials at rest in Redis
+- Workflow YAML `required_hosts` (per-workflow domain allowlist)
+- Spend budget enforcement in the token injector
+- E2B adapter using native `egressTransform`

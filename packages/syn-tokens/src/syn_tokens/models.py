@@ -18,6 +18,9 @@ class TokenType(str, Enum):
     ANTHROPIC = "anthropic"
     GITHUB = "github"
     INTERNAL = "internal"
+    OPENAI = "openai"
+    FIRECRAWL = "firecrawl"
+    CUSTOM = "custom"
 
 
 class WorkflowType(str, Enum):
