@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from syn_perf.benchmarks.base import BaseBenchmark
-from syn_perf.metrics import BenchmarkResult
+from syn_perf.metrics import BenchmarkResult, WorkspaceTiming
 
 
 class ParallelBenchmark(BaseBenchmark):
@@ -62,8 +62,6 @@ class ParallelBenchmark(BaseBenchmark):
         for timing in timings:
             if isinstance(timing, Exception):
                 # Handle exceptions from gather
-                from syn_perf.metrics import WorkspaceTiming
-
                 result.add_timing(
                     WorkspaceTiming(
                         workspace_id="unknown",

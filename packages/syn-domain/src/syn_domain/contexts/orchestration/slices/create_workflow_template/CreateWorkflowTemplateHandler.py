@@ -70,7 +70,7 @@ class CreateWorkflowTemplateHandler:
 
         # Publish events for integration with other bounded contexts
         events = aggregate.get_uncommitted_events()
-        await self._event_publisher.publish(events)
+        await self._event_publisher.publish(events)  # type: ignore[arg-type]  # generic covariance: list[EventEnvelope[DomainEvent]] compatible with specific event list
 
         # Clear events after publishing
         aggregate.mark_events_as_committed()

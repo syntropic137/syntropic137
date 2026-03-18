@@ -109,7 +109,7 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
             name=command.name if command.name is not None and command.name != self._name else None,
             slug=command.slug if command.slug is not None and command.slug != self._slug else None,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("DeleteOrganizationCommand")
     def delete(self, command: Any) -> None:
@@ -125,7 +125,7 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
             organization_id=self.organization_id,
             deleted_by=command.deleted_by,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # --- Event sourcing handlers ---
 

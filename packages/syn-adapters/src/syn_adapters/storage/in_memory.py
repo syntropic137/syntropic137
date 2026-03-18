@@ -204,7 +204,7 @@ class InMemoryWorkflowRepository:
                 envelopes.append(envelope)
 
         # Use SDK's rehydrate method for proper event sourcing replay
-        aggregate.rehydrate(envelopes)
+        aggregate.rehydrate(envelopes)  # type: ignore[arg-type]  # generic covariance: list[EventEnvelope[SpecificEvent]] is compatible with list[EventEnvelope[DomainEvent]]
 
         return aggregate
 

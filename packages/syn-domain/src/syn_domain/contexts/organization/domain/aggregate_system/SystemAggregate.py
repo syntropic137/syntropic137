@@ -117,7 +117,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
             if command.description is not None and command.description != self._description
             else None,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("DeleteSystemCommand")
     def delete(self, command: Any) -> None:
@@ -133,7 +133,7 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
             system_id=self.system_id,
             deleted_by=command.deleted_by,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # --- Event sourcing handlers ---
 

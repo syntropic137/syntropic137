@@ -29,6 +29,7 @@ Usage:
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -294,9 +295,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             created_at=datetime.now(UTC),
             create_duration_ms=0.0,  # Updated by IsolationStartedEvent
             workspace_path=command.working_directory,
-            security_settings=command.security_policy.model_dump()
-            if hasattr(command.security_policy, "model_dump")
-            else {},
+            security_settings=dataclasses.asdict(command.security_policy),
         )
 
         self._apply(event)
@@ -339,7 +338,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             injected_at=datetime.now(UTC),
         )
 
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("ExecuteCommandCommand")
     def execute_command(self, command: ExecuteCommandCommand) -> None:
@@ -396,7 +395,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
                 failed_at=datetime.now(UTC),
             )
 
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("TerminateWorkspaceCommand")
     def terminate_workspace(self, command: TerminateWorkspaceCommand) -> None:
@@ -426,7 +425,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             terminated_at=datetime.now(UTC),
         )
 
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # =========================================================================
     # NON-COMMAND METHODS (for recording events without commands)
@@ -459,7 +458,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             started_at=started_at or datetime.now(UTC),
         )
 
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     def record_error(
         self,
@@ -493,7 +492,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             occurred_at=datetime.now(UTC),
         )
 
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # =========================================================================
     # EVENT SOURCING HANDLERS

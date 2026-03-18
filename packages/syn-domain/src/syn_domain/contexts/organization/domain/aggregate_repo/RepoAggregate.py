@@ -139,7 +139,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
             repo_id=self.repo_id,
             system_id=command.system_id,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("UnassignRepoFromSystemCommand")
     def unassign_from_system(self, command: Any) -> None:  # noqa: ARG002
@@ -158,7 +158,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
             repo_id=self.repo_id,
             previous_system_id=self._system_id,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # --- Event sourcing handlers ---
 

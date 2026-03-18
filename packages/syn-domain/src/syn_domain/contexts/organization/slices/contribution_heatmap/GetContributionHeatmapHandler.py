@@ -7,13 +7,9 @@ then queries TimescaleDB for daily activity buckets.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
-from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
-    GetContributionHeatmapQuery,
-)
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     ContributionHeatmapResult,
     HeatmapDayBucket,
@@ -21,9 +17,15 @@ from syn_domain.contexts.organization.domain.read_models.contribution_heatmap im
 from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
     TimescaleHeatmapQuery,
 )
-from syn_domain.contexts.organization.slices.list_repos.projection import (
-    RepoProjection,
-)
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
+        GetContributionHeatmapQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        RepoProjection,
+    )
 
 
 class GetContributionHeatmapHandler:
@@ -47,9 +49,7 @@ class GetContributionHeatmapHandler:
 
         correlations = await self._store.get_all(REPO_CORRELATION)
         return {
-            c["execution_id"]
-            for c in correlations
-            if c.get("repo_full_name") == repo.full_name
+            c["execution_id"] for c in correlations if c.get("repo_full_name") == repo.full_name
         }
 
     async def _get_execution_ids_for_system(self, system_id: str) -> set[str]:
@@ -58,11 +58,7 @@ class GetContributionHeatmapHandler:
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)
-        return {
-            c["execution_id"]
-            for c in correlations
-            if c.get("repo_full_name") in repo_names
-        }
+        return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
 
     async def _get_execution_ids_for_organization(self, organization_id: str) -> set[str]:
         """Resolve execution IDs for all repos in an organization."""
@@ -70,11 +66,7 @@ class GetContributionHeatmapHandler:
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)
-        return {
-            c["execution_id"]
-            for c in correlations
-            if c.get("repo_full_name") in repo_names
-        }
+        return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
 
     async def handle(self, query: GetContributionHeatmapQuery) -> ContributionHeatmapResult:
         """Handle GetContributionHeatmapQuery."""
@@ -92,21 +84,23 @@ class GetContributionHeatmapHandler:
             days: list[HeatmapDayBucket] = []
             current = query.start_date
             while current <= query.end_date:
-                days.append(HeatmapDayBucket(
-                    date=current.isoformat(),
-                    count=0.0,
-                    breakdown={
-                        "sessions": 0.0,
-                        "executions": 0.0,
-                        "commits": 0.0,
-                        "cost_usd": 0.0,
-                        "tokens": 0.0,
-                        "input_tokens": 0.0,
-                        "output_tokens": 0.0,
-                        "cache_creation_tokens": 0.0,
-                        "cache_read_tokens": 0.0,
-                    },
-                ))
+                days.append(
+                    HeatmapDayBucket(
+                        date=current.isoformat(),
+                        count=0.0,
+                        breakdown={
+                            "sessions": 0.0,
+                            "executions": 0.0,
+                            "commits": 0.0,
+                            "cost_usd": 0.0,
+                            "tokens": 0.0,
+                            "input_tokens": 0.0,
+                            "output_tokens": 0.0,
+                            "cache_creation_tokens": 0.0,
+                            "cache_read_tokens": 0.0,
+                        },
+                    )
+                )
                 current += timedelta(days=1)
             return ContributionHeatmapResult(
                 metric=query.metric,

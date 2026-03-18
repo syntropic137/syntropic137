@@ -49,7 +49,7 @@ def evaluate_conditions(
                 if resolved in (value or []):
                     return False
             case "contains":
-                if value not in (resolved or ""):
+                if value not in (resolved or ""):  # type: ignore[operator]  # resolved is Any from payload dict traversal
                     return False
             case _:
                 raise ValueError(f"Unknown operator: {operator}")

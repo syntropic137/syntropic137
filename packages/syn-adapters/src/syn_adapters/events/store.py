@@ -82,7 +82,7 @@ class AgentEventStore:
         )
 
         async with self.pool.acquire() as conn:
-            await self._schema.ensure_schema(conn)
+            await self._schema.ensure_schema(conn)  # type: ignore[arg-type]  # asyncpg PoolConnectionProxy is compatible with Connection
 
         self._initialized = True
         logger.info("AgentEventStore initialized")

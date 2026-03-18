@@ -1,15 +1,39 @@
 {
   "include": [
     "apps/syn-api/src",
-    "apps/syn-cli/src"
+    "apps/syn-cli/src",
+    "packages/syn-domain/src",
+    "packages/syn-adapters/src",
+    "packages/syn-shared/src",
+    "packages/syn-collector/src",
+    "packages/syn-tokens/src",
+    "packages/syn-perf/src"
   ],
   "exclude": [
     "**/__pycache__",
     "archive",
     "scripts",
-    "**/tests"
+    "**/tests",
+    "**/test_*.py",
+    "lib/"
+  ],
+  "extraPaths": [
+    "apps/syn-api/src",
+    "apps/syn-cli/src",
+    "packages/syn-domain/src",
+    "packages/syn-adapters/src",
+    "packages/syn-shared/src",
+    "packages/syn-collector/src",
+    "packages/syn-tokens/src",
+    "packages/syn-perf/src",
+    "lib/event-sourcing-platform/event-sourcing/python/src",
+    "lib/agentic-primitives/lib/python/agentic_events",
+    "lib/agentic-primitives/lib/python/agentic_isolation",
+    "lib/agentic-primitives/lib/python/agentic_logging"
   ],
   "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
   "typeCheckingMode": "standard",
   "reportMissingImports": "warning",
   "reportAttributeAccessIssue": "error",
