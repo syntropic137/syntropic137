@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from event_sourcing import DomainEvent, event
-from pydantic import Field  # noqa: TC002 — needed at runtime for default_factory
+from pydantic import Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
