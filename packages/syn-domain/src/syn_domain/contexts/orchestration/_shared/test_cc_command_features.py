@@ -275,6 +275,27 @@ class TestAggregateInputDeclarations:
         assert len(aggregate.input_declarations) == 1
         assert aggregate.input_declarations[0].name == "task"
 
+    def test_defaults_applied_to_merged_inputs(self) -> None:
+        """Input declaration defaults are applied when inputs are missing."""
+        aggregate = WorkflowTemplateAggregate()
+        command = CreateWorkflowTemplateCommand(
+            name="Test",
+            workflow_type=WorkflowType.RESEARCH,
+            classification=WorkflowClassification.SIMPLE,
+            repository_url="https://github.com/test/repo",
+            phases=[PhaseDefinition(phase_id="p1", name="Phase 1", order=1)],
+            input_declarations=[
+                InputDeclaration(name="repository", default="https://github.com/default/repo"),
+                InputDeclaration(name="task", required=True),
+            ],
+        )
+        aggregate._handle_command(command)
+
+        # Verify defaults are stored
+        decls = aggregate.input_declarations
+        repo_decl = next(d for d in decls if d.name == "repository")
+        assert repo_decl.default == "https://github.com/default/repo"
+
     def test_create_without_input_declarations(self) -> None:
         """Backward compat: no input_declarations defaults to empty list."""
         aggregate = WorkflowTemplateAggregate()

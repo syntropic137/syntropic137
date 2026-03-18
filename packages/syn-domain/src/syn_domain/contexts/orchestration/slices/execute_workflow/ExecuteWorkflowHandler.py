@@ -91,6 +91,17 @@ class ExecuteWorkflowHandler:
             for key, value in merged_inputs.items():
                 repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
 
+        # Guard: fail fast if repo_url still contains unresolved placeholders
+        if repo_url and "{{" in repo_url:
+            import re
+
+            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+            msg = (
+                f"Repository URL contains unresolved placeholders: {unresolved}. "
+                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
+            )
+            raise ValueError(msg)
+
         result = await self._processor.run(
             workflow_id=command.aggregate_id,
             workflow_name=workflow.name or "",
