@@ -30,6 +30,36 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: syn-docker-socket-proxy
+    environment:
+      # Container lifecycle (docker run, inspect, stop, rm)
+      CONTAINERS: 1
+      CONTAINERS_CREATE: 1
+      CONTAINERS_START: 1
+      CONTAINERS_STOP: 1
+      CONTAINERS_DELETE: 1
+      # Exec (docker exec for claude CLI streaming + SIGINT)
+      EXEC: 1
+      POST: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    tmpfs:
+      - /tmp
+    networks:
+      - default
+
   api:
     container_name: syn-api
     build:
@@ -38,8 +68,6 @@ services:
     ports:
       - "8137:8000"
     restart: unless-stopped
-    # Run as root so entrypoint can match Docker socket GID, then drop to 'syn' via gosu.
-    user: root
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $${SYN_API_HOST:-0.0.0.0} --port $${SYN_API_PORT:-8000}"]
     env_file:
@@ -72,10 +100,13 @@ services:
       # Each compose stack gets its own prefix, preventing cross-stack container leakage.
       # Production override: SYN_AGENT_NETWORK=syntropic137_agent-net (or whatever that stack's prefix is)
       SYN_AGENT_NETWORK: syn-dev_agent-net
+      # Docker socket proxy (ISS-164)
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
-      # Mount Docker socket to create workspace containers
-      - /var/run/docker.sock:/var/run/docker.sock
       # Mount workspace directory for container file sharing
       # Host path (${PWD}/workspaces) -> Container path (/workspaces)
       - ../workspaces:/workspaces
