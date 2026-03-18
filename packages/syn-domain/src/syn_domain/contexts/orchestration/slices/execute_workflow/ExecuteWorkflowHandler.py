@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
     ExecutablePhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
@@ -73,10 +74,11 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
 
-        # Merge task into inputs so $ARGUMENTS and {{task}} both work
+        # Merge task into inputs so $ARGUMENTS and {{task}} both work.
+        # Explicit task field wins over inputs["task"] for $ARGUMENTS.
         merged_inputs = dict(command.inputs)
-        if command.task:
-            merged_inputs.setdefault("task", command.task)
+        if command.task is not None:
+            merged_inputs["task"] = command.task
 
         # Resolve placeholders in repo_url from inputs (e.g., {{repository}} → owner/repo)
         repo_url = getattr(workflow, "_repository_url", None)
@@ -102,12 +104,19 @@ class ExecuteWorkflowHandler:
         """Convert workflow template phases to executable phases."""
         executable_phases = []
         for phase in workflow.phases:
+            # Build agent config with per-phase model override if specified
+            agent_config = AgentConfiguration()
+            phase_model = getattr(phase, "model", None)
+            if phase_model:
+                agent_config = AgentConfiguration(model=phase_model)
+
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,
                     name=phase.name,
                     order=phase.order,
                     description=phase.description,
+                    agent_config=agent_config,
                     prompt_template=phase.prompt_template or "",
                     output_artifact_type=(
                         phase.output_artifact_types[0] if phase.output_artifact_types else "text"

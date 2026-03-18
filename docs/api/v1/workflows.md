@@ -169,10 +169,10 @@ When a workflow executes, phase prompts are resolved in this order:
 
 1. **Built-in variables:** `{{execution_id}}`, `{{workflow_id}}`, `{{repo_url}}`
 2. **Named inputs:** Each key in `inputs` replaces `{{key}}` in the prompt
-3. **$ARGUMENTS:** The `task` string replaces `$ARGUMENTS` in the prompt (also available as `inputs["task"]`)
-4. **Phase outputs:** Previous phase artifacts replace `{{phase-id}}` placeholders
+3. **Phase outputs:** Previous phase artifacts replace `{{phase-id}}` placeholders inline (e.g., `{{discovery}}` is replaced with the discovery phase's output). Phase outputs are also appended as a separate "Context from Previous Phases" section as a fallback.
+4. **$ARGUMENTS:** The `task` string replaces `$ARGUMENTS` in the prompt (also available as `inputs["task"]`)
 
-The `task` field is merged into `inputs` as `inputs["task"]`, so `$ARGUMENTS` and `{{task}}` are equivalent.
+The `task` field is merged into `inputs` as `inputs["task"]`, so `$ARGUMENTS` and `{{task}}` are equivalent. When both the top-level `task` field and `inputs["task"]` are provided, the top-level `task` wins.
 
 **Example:**
 

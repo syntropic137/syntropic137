@@ -12,7 +12,7 @@ type: implementation
 classification: complex
 
 repository:
-  url: https://github.com/example/repo
+  url: "{{repository}}"
   ref: main
 
 # Input declarations (ISS-211: CC command inputs)
@@ -21,8 +21,9 @@ inputs:
     description: "Feature request or issue body to implement"
     required: true
   - name: repository
-    description: "Repository URL override (owner/repo or full URL)"
+    description: "Repository URL (owner/repo or full URL)"
     required: false
+    default: "https://github.com/example/repo"
 
 phases:
   - id: research
