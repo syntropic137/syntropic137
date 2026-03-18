@@ -139,11 +139,13 @@ class TimescaleHeatmapQuery:
         while current <= end:
             day_str = current.isoformat()
             breakdown = day_data.get(day_str, dict(_EMPTY_BREAKDOWN))
-            buckets.append(HeatmapDayBucket(
-                date=day_str,
-                count=0.0,  # Set by handler based on selected metric
-                breakdown=breakdown,
-            ))
+            buckets.append(
+                HeatmapDayBucket(
+                    date=day_str,
+                    count=0.0,  # Set by handler based on selected metric
+                    breakdown=breakdown,
+                )
+            )
             current += timedelta(days=1)
 
         return buckets

@@ -75,14 +75,19 @@ async def _seed(api_url: str, dry_run: bool) -> int:
         elif dry_run:
             print(f"  ⊘ Organization '{ORGANIZATION['name']}' (dry run — would create)")
         else:
-            resp = await client.post("/organizations", json={
-                "name": ORGANIZATION["name"],
-                "slug": ORGANIZATION["slug"],
-                "created_by": "seed-script",
-            })
+            resp = await client.post(
+                "/organizations",
+                json={
+                    "name": ORGANIZATION["name"],
+                    "slug": ORGANIZATION["slug"],
+                    "created_by": "seed-script",
+                },
+            )
             resp.raise_for_status()
             org_id = resp.json().get("organization_id")
-            print(f"  ✓ Organization '{ORGANIZATION['name']}' created ({org_id[:12] if org_id else '?'}...)")
+            print(
+                f"  ✓ Organization '{ORGANIZATION['name']}' created ({org_id[:12] if org_id else '?'}...)"
+            )
 
         if not org_id and not dry_run:
             print("  ✗ Cannot proceed without organization_id")
@@ -105,24 +110,27 @@ async def _seed(api_url: str, dry_run: bool) -> int:
         elif dry_run:
             print(f"  ⊘ System '{SYSTEM['name']}' (dry run — would create)")
         else:
-            resp = await client.post("/systems", json={
-                "organization_id": org_id,
-                "name": SYSTEM["name"],
-                "description": SYSTEM["description"],
-                "created_by": "seed-script",
-            })
+            resp = await client.post(
+                "/systems",
+                json={
+                    "organization_id": org_id,
+                    "name": SYSTEM["name"],
+                    "description": SYSTEM["description"],
+                    "created_by": "seed-script",
+                },
+            )
             resp.raise_for_status()
             system_id = resp.json().get("system_id")
-            print(f"  ✓ System '{SYSTEM['name']}' created ({system_id[:12] if system_id else '?'}...)")
+            print(
+                f"  ✓ System '{SYSTEM['name']}' created ({system_id[:12] if system_id else '?'}...)"
+            )
 
         # --- Repos ---
         params = {"organization_id": org_id} if org_id else {}
         resp = await client.get("/repos", params=params)
         resp.raise_for_status()
         existing_repos = resp.json().get("repos", [])
-        existing_names: dict[str, str] = {
-            r["full_name"]: r["repo_id"] for r in existing_repos
-        }
+        existing_names: dict[str, str] = {r["full_name"]: r["repo_id"] for r in existing_repos}
 
         for repo_def in REPOS:
             full_name = repo_def["full_name"]
@@ -132,15 +140,18 @@ async def _seed(api_url: str, dry_run: bool) -> int:
             elif dry_run:
                 print(f"  ⊘ Repo '{full_name}' (dry run — would register)")
             else:
-                resp = await client.post("/repos", json={
-                    "organization_id": org_id,
-                    "full_name": full_name,
-                    "provider": "github",
-                    "owner": repo_def.get("owner", ""),
-                    "default_branch": repo_def.get("default_branch", "main"),
-                    "is_private": repo_def.get("is_private", False),
-                    "created_by": "seed-script",
-                })
+                resp = await client.post(
+                    "/repos",
+                    json={
+                        "organization_id": org_id,
+                        "full_name": full_name,
+                        "provider": "github",
+                        "owner": repo_def.get("owner", ""),
+                        "default_branch": repo_def.get("default_branch", "main"),
+                        "is_private": repo_def.get("is_private", False),
+                        "created_by": "seed-script",
+                    },
+                )
                 resp.raise_for_status()
                 rid = resp.json().get("repo_id", "")
                 existing_names[full_name] = rid
@@ -152,9 +163,12 @@ async def _seed(api_url: str, dry_run: bool) -> int:
                 full_name = str(repo_def["full_name"])
                 rid = existing_names.get(full_name)
                 if rid:
-                    resp = await client.post(f"/repos/{rid}/assign", json={
-                        "system_id": system_id,
-                    })
+                    resp = await client.post(
+                        f"/repos/{rid}/assign",
+                        json={
+                            "system_id": system_id,
+                        },
+                    )
                     if resp.status_code == 200:
                         print(f"  ✓ Assigned '{full_name}' → system '{SYSTEM['name']}'")
                     elif resp.status_code == 409:
