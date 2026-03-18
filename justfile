@@ -773,12 +773,12 @@ import-check:
     @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck fitness test dashboard-qa test-debt vsa-validate topology-check docs-sync
+qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate topology-check docs-sync
+qa-full: lint format typecheck validate-domain-events test-cov dashboard-qa vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
@@ -797,6 +797,10 @@ format-check:
 # Run type checker (strict mode)
 typecheck:
     uv run pyright
+
+# Validate domain event definitions
+validate-domain-events:
+    uv run python scripts/validate_domain_events.py
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
 fitness-check: aps-build
