@@ -259,6 +259,7 @@ services:
 
   minio-init:
     container_name: syn137-minio-init
+    profiles: ["init"]
     networks:
       - syn-internal
 

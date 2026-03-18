@@ -131,9 +131,13 @@ services:
       timeout: 20s
       retries: 3
 
-  # Create default buckets on startup
+  # Bucket initialisation — run explicitly via `just dev` / `just selfhost-up`, NOT on default up.
+  # profiles: [init] keeps this container out of the default `docker compose up`
+  # set so Docker Desktop does not show a stopped/grey container alongside the
+  # running services.  It is run explicitly (and removed on exit) by `just dev`.
   minio-init:
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    profiles: ["init"]
     depends_on:
       minio:
         condition: service_healthy
