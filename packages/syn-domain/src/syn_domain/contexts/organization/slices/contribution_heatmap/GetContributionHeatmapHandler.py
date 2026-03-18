@@ -7,13 +7,9 @@ then queries TimescaleDB for daily activity buckets.
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
-from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
-    GetContributionHeatmapQuery,
-)
 from syn_domain.contexts.organization.domain.read_models.contribution_heatmap import (
     ContributionHeatmapResult,
     HeatmapDayBucket,
@@ -21,9 +17,15 @@ from syn_domain.contexts.organization.domain.read_models.contribution_heatmap im
 from syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery import (
     TimescaleHeatmapQuery,
 )
-from syn_domain.contexts.organization.slices.list_repos.projection import (
-    RepoProjection,
-)
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.organization.domain.queries.get_contribution_heatmap import (
+        GetContributionHeatmapQuery,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        RepoProjection,
+    )
 
 
 class GetContributionHeatmapHandler:
