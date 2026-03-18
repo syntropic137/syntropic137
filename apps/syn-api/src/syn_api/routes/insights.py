@@ -38,7 +38,7 @@ async def get_contribution_heatmap(
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     metric: str = Query("sessions"),
-) -> dict[str, Any]:
+) -> dict[str, Any] | JSONResponse:
     """Get daily contribution heatmap data."""
     try:
         return await insight_ops.get_contribution_heatmap(
