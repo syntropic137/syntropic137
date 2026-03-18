@@ -30,7 +30,7 @@ async def get_global_cost() -> dict[str, Any]:
     return await insight_ops.get_global_cost()
 
 
-@router.get("/contribution-heatmap")
+@router.get("/contribution-heatmap", response_model=None)
 async def get_contribution_heatmap(
     organization_id: str | None = Query(None),
     system_id: str | None = Query(None),
