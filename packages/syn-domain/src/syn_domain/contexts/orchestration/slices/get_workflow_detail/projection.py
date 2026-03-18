@@ -15,6 +15,7 @@ from syn_domain.contexts.orchestration.domain.constants import (
     PhaseFields,
 )
 from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import (
+    InputDeclarationDetail,
     PhaseDefinitionDetail,
     WorkflowDetail,
 )
@@ -34,7 +35,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_workflow_created
+    VERSION = 3  # Bumped: ISS-211 input_declarations, argument_hint, model
 
     def __init__(self, store: Any):
         """Initialize with a projection store."""
@@ -71,8 +72,22 @@ class WorkflowDetailProjection(AutoDispatchProjection):
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE) or p.get("prompt_template_id"),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
+                argument_hint=p.get("argument_hint"),
+                model=p.get("model"),
             )
             for i, p in enumerate(phases_data)
+        ]
+
+        # Extract input declarations (ISS-211)
+        input_decls_data = event_data.get("input_declarations", [])
+        input_decls = [
+            InputDeclarationDetail(
+                name=d.get("name", ""),
+                description=d.get("description"),
+                required=d.get("required", True),
+                default=d.get("default"),
+            )
+            for d in input_decls_data
         ]
 
         detail = WorkflowDetail(
@@ -82,6 +97,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             classification=event_data.get("classification", ""),
             description=event_data.get("description"),
             phases=phases,
+            input_declarations=input_decls,
             created_at=event_data.get("created_at"),
             runs_count=0,
         )
