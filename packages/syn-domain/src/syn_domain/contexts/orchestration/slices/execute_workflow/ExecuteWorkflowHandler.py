@@ -74,9 +74,14 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
 
+        # Apply defaults from input_declarations for any missing inputs
+        merged_inputs = dict(command.inputs)
+        for decl in workflow.input_declarations:
+            if decl.default is not None and decl.name not in merged_inputs:
+                merged_inputs[decl.name] = decl.default
+
         # Merge task into inputs so $ARGUMENTS and {{task}} both work.
         # Explicit task field wins over inputs["task"] for $ARGUMENTS.
-        merged_inputs = dict(command.inputs)
         if command.task is not None:
             merged_inputs["task"] = command.task
 
