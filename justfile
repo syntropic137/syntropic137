@@ -778,7 +778,7 @@ qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck validate-domain-events test-cov dashboard-qa vsa-validate topology-check docs-sync
+qa-full: lint format typecheck validate-domain-events fitness test-cov dashboard-qa test-debt vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
