@@ -46,6 +46,10 @@ class ExecuteWorkflowRequest(BaseModel):
         default_factory=dict,
         description="Input variables for the workflow.",
     )
+    task: str | None = Field(
+        default=None,
+        description="Primary task description — substituted for $ARGUMENTS in phase prompts.",
+    )
     provider: str = Field(default="claude", description="Agent provider to use")
     max_budget_usd: float | None = Field(default=None, description="Maximum budget in USD")
 
@@ -92,6 +96,7 @@ async def execute_workflow(
             workflow_id=workflow_id,
             inputs=request.inputs,
             execution_id=execution_id,
+            task=request.task,
         )
 
     background_tasks.add_task(_run)

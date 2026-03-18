@@ -142,6 +142,7 @@ async def execute_workflow(
     workflow_id: str,
     inputs: dict[str, str] | None = None,
     execution_id: str | None = None,
+    task: str | None = None,
     auth: AuthContext | None = None,
 ) -> Result[ExecutionSummary, WorkflowError]
 ```
@@ -151,8 +152,9 @@ async def execute_workflow(
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
 | `workflow_id` | `str` | required | Workflow template ID |
-| `inputs` | `dict[str, str] \| None` | `None` | Input variables matching `{{variable}}` placeholders |
+| `inputs` | `dict[str, str] \| None` | `None` | Named input variables — substituted for `{{variable}}` placeholders in prompts |
 | `execution_id` | `str \| None` | `None` | Custom execution ID (auto-generated if omitted) |
+| `task` | `str \| None` | `None` | Primary task description — substituted for `$ARGUMENTS` in prompts (ISS-211) |
 | `auth` | `AuthContext \| None` | `None` | Optional auth context |
 
 **Returns:** `Ok(ExecutionSummary)` on success.
@@ -160,6 +162,42 @@ async def execute_workflow(
 **Errors:**
 - `WorkflowError.NOT_FOUND` if the workflow doesn't exist
 - `WorkflowError.EXECUTION_FAILED` on execution error
+
+### Prompt Substitution
+
+When a workflow executes, phase prompts are resolved in this order:
+
+1. **Built-in variables:** `{{execution_id}}`, `{{workflow_id}}`, `{{repo_url}}`
+2. **Named inputs:** Each key in `inputs` replaces `{{key}}` in the prompt
+3. **$ARGUMENTS:** The `task` string replaces `$ARGUMENTS` in the prompt (also available as `inputs["task"]`)
+4. **Phase outputs:** Previous phase artifacts replace `{{phase-id}}` placeholders
+
+The `task` field is merged into `inputs` as `inputs["task"]`, so `$ARGUMENTS` and `{{task}}` are equivalent.
+
+**Example:**
+
+```python
+# Using task for the primary goal + named inputs for context
+result = await syn_api.v1.executions.execute(
+    workflow_id="research-workflow-v2",
+    task="Investigate how the auth middleware handles token rotation",
+    inputs={"topic": "authentication"},
+)
+
+# Legacy style (still works — task injected via inputs)
+result = await syn_api.v1.executions.execute(
+    workflow_id="research-workflow-v2",
+    inputs={"task": "Investigate auth middleware", "topic": "authentication"},
+)
+```
+
+**HTTP API:**
+
+```bash
+curl -X POST /api/v1/workflows/research-workflow-v2/execute \
+  -H "Content-Type: application/json" \
+  -d '{"task": "Investigate auth middleware", "inputs": {"topic": "authentication"}}'
+```
 
 ---
 

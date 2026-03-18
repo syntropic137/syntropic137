@@ -1,5 +1,6 @@
 # GitHub Pull Request Workflow
 # A workflow that demonstrates agent-driven PR creation using git and gh CLI.
+# Uses Claude Code command pattern: $ARGUMENTS for the primary task.
 #
 # This workflow is the canonical example of a true E2E agentic workflow:
 # 1. Agent runs in isolated Docker container
@@ -26,11 +27,24 @@ repository:
 # Project association (optional)
 project_name: null
 
+# Input declarations (ISS-211: CC command inputs)
+inputs:
+  - name: task
+    description: "What changes to make (issue body, change description, etc.)"
+    required: true
+  - name: change_description
+    description: "Short description for commit message and PR title"
+    required: false
+  - name: repo_url
+    description: "Repository URL override"
+    required: false
+
 phases:
   - id: create-pr
     name: Create Pull Request
     order: 1
     execution_type: sequential
+    argument_hint: "[change-description]"
     description: |
       Clone repository, create a branch, make changes, and open a PR.
       Uses injected GitHub credentials for authentication.
@@ -50,12 +64,10 @@ phases:
       You are a software engineer with access to git and the GitHub CLI (gh).
 
       ## Your Task
-
-      Create a meaningful code change and open a Pull Request for it.
+      $ARGUMENTS
 
       ### Context
       - **Repository:** {{repo_url}}
-      - **Change Description:** {{change_description}}
       - **Execution ID:** {{execution_id}}
 
       ### Instructions
@@ -72,27 +84,26 @@ phases:
          git checkout -b feat/agent-{{execution_id}}
          ```
 
-      3. **Make the requested change:**
-         - Create or modify files based on the change description
+      3. **Make the requested changes:**
+         - Create or modify files based on the task description
          - Write clean, well-documented code
          - Follow existing project conventions
 
       4. **Commit your changes:**
          ```bash
          git add .
-         git commit -m "feat: {{change_description}}"
+         git commit -m "feat: <concise description of changes>"
          ```
 
       5. **Push and create PR:**
          ```bash
          git push origin feat/agent-{{execution_id}}
          gh pr create \
-           --title "Agent: {{change_description}}" \
+           --title "Agent: <concise description>" \
            --body "## Summary
 
          This PR was created by a Syn137 agent.
 
-         **Change:** {{change_description}}
          **Execution ID:** {{execution_id}}
 
          ## Details
@@ -112,27 +123,6 @@ phases:
          - The PR URL from `gh pr create`
          - A brief executive summary
 
-         Example:
-         ```markdown
-         # PR Creation Summary
-
-         ## Changes Made
-         - Added a new greeting function to hello.py
-         - Updated README with usage examples
-
-         ## Commits
-         - `a1b2c3d` feat: add new greeting feature
-
-         ## Pull Request
-         - URL: https://github.com/org/repo/pull/42
-         - Branch: feat/agent-{{execution_id}}
-         - Status: Open
-
-         ## Executive Summary
-         Created a new greeting function that supports multiple languages.
-         PR is ready for review.
-         ```
-
       ### Important Notes
 
       - Git credentials are pre-configured via the setup phase (ADR-024)
@@ -145,6 +135,7 @@ phases:
     name: Verify Pull Request
     order: 2
     execution_type: sequential
+    argument_hint: "[change-description]"
     description: |
       Verify the PR was created successfully and collect metadata.
     input_artifacts:
@@ -159,6 +150,9 @@ phases:
 
     prompt_template: |
       You are verifying that the Pull Request was created successfully.
+
+      ## Original Task
+      $ARGUMENTS
 
       ## Previous Phase Output
 
@@ -190,28 +184,4 @@ phases:
          ```bash
          gh pr view <PR_NUMBER_OR_URL> --json url,number,state,headRefName,files
          ```
-      4. Write a verification report to `/workspace/artifacts/output/deliverable.md`:
-
-         **Include your ACTUAL findings (not placeholders):**
-
-         ```markdown
-         # PR Verification Report
-
-         ## PR Details
-         - URL: https://github.com/org/repo/pull/42
-         - Number: 42
-         - State: open
-         - Branch: feat/agent-xyz
-
-         ## Files Changed
-         - src/hello.py
-         - README.md
-
-         ## Verification Status
-         - [x] PR exists
-         - [x] PR is open
-         - [x] Changes match expectations
-
-         ## Notes
-         PR looks good and is ready for review.
-         ```
+      4. Write a verification report to `/workspace/artifacts/output/deliverable.md`

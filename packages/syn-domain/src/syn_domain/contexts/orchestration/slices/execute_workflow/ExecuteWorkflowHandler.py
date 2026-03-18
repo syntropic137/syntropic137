@@ -73,17 +73,22 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
 
+        # Merge task into inputs so $ARGUMENTS and {{task}} both work
+        merged_inputs = dict(command.inputs)
+        if command.task:
+            merged_inputs.setdefault("task", command.task)
+
         # Resolve placeholders in repo_url from inputs (e.g., {{repository}} → owner/repo)
         repo_url = getattr(workflow, "_repository_url", None)
-        if repo_url and command.inputs:
-            for key, value in command.inputs.items():
+        if repo_url and merged_inputs:
+            for key, value in merged_inputs.items():
                 repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
 
         result = await self._processor.run(
             workflow_id=command.aggregate_id,
             workflow_name=workflow.name or "",
             phases=phases,
-            inputs=command.inputs,
+            inputs=merged_inputs,
             execution_id=command.execution_id or str(uuid4()),
             repo_url=repo_url,
         )
