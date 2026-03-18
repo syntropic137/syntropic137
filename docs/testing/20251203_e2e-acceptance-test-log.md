@@ -192,7 +192,7 @@ Summary: 0 succeeded, 2 failed
 ### F4: Dashboard Backend API (7 tests) ✅ PASS
 
 #### F4.1: Health Endpoint ✅
-- **Command:** `curl http://localhost:8000/health`
+- **Command:** `curl http://localhost:8137/health`
 - **Expected:** `{"status":"healthy"}`
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -201,7 +201,7 @@ Summary: 0 succeeded, 2 failed
 ```
 
 #### F4.2: Workflows API ✅
-- **Command:** `curl http://localhost:8000/api/workflows`
+- **Command:** `curl http://localhost:8137/api/workflows`
 - **Expected:** JSON array of workflows
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -217,7 +217,7 @@ Summary: 0 succeeded, 2 failed
 ```
 
 #### F4.3: Metrics API ✅
-- **Command:** `curl http://localhost:8000/api/metrics`
+- **Command:** `curl http://localhost:8137/api/metrics`
 - **Expected:** Metrics object
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -230,7 +230,7 @@ Summary: 0 succeeded, 2 failed
 ```
 
 #### F4.4: Workflow Detail API ✅
-- **Command:** `curl http://localhost:8000/api/workflows/research-workflow-v1`
+- **Command:** `curl http://localhost:8137/api/workflows/research-workflow-v1`
 - **Expected:** Full workflow with phases
 - **Result:** ✅ PASS
 - **Evidence:**
@@ -293,7 +293,7 @@ Console Errors:
 - **Method:** Browser console inspection
 - **Expected:** API calls proxy to backend
 - **Result:** ❌ FAIL
-- **Fix Required:** Update `vite.config.ts` to proxy `/api` to `http://localhost:8000`
+- **Fix Required:** Update `vite.config.ts` to proxy `/api` to `http://localhost:8137`
 
 #### F5.6-F5.7: Visual Tests ✅
 - **Result:** ✅ PASS - UI renders correctly, styling looks good
@@ -324,7 +324,7 @@ Console Errors:
 ### F7: Error Handling (6 tests) ✅ PASS
 
 #### F7.1: Invalid Workflow ID ✅
-- **Command:** `curl http://localhost:8000/api/workflows/non-existent`
+- **Command:** `curl http://localhost:8137/api/workflows/non-existent`
 - **Expected:** 404 error with message
 - **Result:** ✅ PASS
 

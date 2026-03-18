@@ -353,7 +353,7 @@ just cli workflow status non-existent-id
 
 **Validation Commands:**
 ```bash
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:8137/health | jq
 ```
 
 ### F4.2 Workflow Endpoints
@@ -374,10 +374,10 @@ curl -s http://localhost:8000/health | jq
 
 **Validation Commands:**
 ```bash
-curl -s http://localhost:8000/api/workflows | jq
-curl -s http://localhost:8000/api/workflows?page=1&page_size=5 | jq
-curl -s http://localhost:8000/api/workflows/<workflow-id> | jq
-curl -s http://localhost:8000/api/workflows/invalid-id
+curl -s http://localhost:8137/api/workflows | jq
+curl -s http://localhost:8137/api/workflows?page=1&page_size=5 | jq
+curl -s http://localhost:8137/api/workflows/<workflow-id> | jq
+curl -s http://localhost:8137/api/workflows/invalid-id
 ```
 
 ### F4.3 Session Endpoints
@@ -395,8 +395,8 @@ curl -s http://localhost:8000/api/workflows/invalid-id
 
 **Validation Commands:**
 ```bash
-curl -s http://localhost:8000/api/sessions | jq
-curl -s "http://localhost:8000/api/sessions?workflow_id=<id>" | jq
+curl -s http://localhost:8137/api/sessions | jq
+curl -s "http://localhost:8137/api/sessions?workflow_id=<id>" | jq
 ```
 
 ### F4.4 Artifact Endpoints
@@ -414,8 +414,8 @@ curl -s "http://localhost:8000/api/sessions?workflow_id=<id>" | jq
 
 **Validation Commands:**
 ```bash
-curl -s http://localhost:8000/api/artifacts | jq
-curl -s "http://localhost:8000/api/artifacts?workflow_id=<id>" | jq
+curl -s http://localhost:8137/api/artifacts | jq
+curl -s "http://localhost:8137/api/artifacts?workflow_id=<id>" | jq
 ```
 
 ### F4.5 Metrics Endpoint
@@ -435,8 +435,8 @@ curl -s "http://localhost:8000/api/artifacts?workflow_id=<id>" | jq
 
 **Validation Commands:**
 ```bash
-curl -s http://localhost:8000/api/metrics | jq
-curl -s "http://localhost:8000/api/metrics?workflow_id=<id>" | jq
+curl -s http://localhost:8137/api/metrics | jq
+curl -s "http://localhost:8137/api/metrics?workflow_id=<id>" | jq
 ```
 
 ### F4.6 SSE Events Stream
@@ -453,7 +453,7 @@ curl -s "http://localhost:8000/api/metrics?workflow_id=<id>" | jq
 
 **Validation Commands:**
 ```bash
-curl -N http://localhost:8000/api/events/stream
+curl -N http://localhost:8137/api/events/stream
 ```
 
 ---
@@ -680,7 +680,7 @@ just validate-events
 **Validation Commands:**
 ```bash
 just validate-events
-curl -s http://localhost:8000/api/workflows | jq '.total'
+curl -s http://localhost:8137/api/workflows | jq '.total'
 # Compare counts
 ```
 
@@ -816,7 +816,7 @@ docker exec syn-postgres psql -U syn -d syn -c \
 ```bash
 # Compare event store to API
 EVENT_COUNT=$(docker exec syn-postgres psql -U syn -d syn -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
-API_COUNT=$(curl -s http://localhost:8000/api/sessions?status=completed | jq 'length')
+API_COUNT=$(curl -s http://localhost:8137/api/sessions?status=completed | jq 'length')
 echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 ```
 
@@ -900,7 +900,7 @@ docker exec syn-postgres psql -U syn -d syn -c \
 
 **Validation:**
 ```bash
-curl -s http://localhost:8000/api/workflows/implementation-workflow-v1/runs | jq
+curl -s http://localhost:8137/api/workflows/implementation-workflow-v1/runs | jq
 ```
 
 ### F7.6.2 Execution Detail API
@@ -925,7 +925,7 @@ curl -s http://localhost:8000/api/workflows/implementation-workflow-v1/runs | jq
 
 **Validation:**
 ```bash
-curl -s http://localhost:8000/api/executions/<execution_id> | jq
+curl -s http://localhost:8137/api/executions/<execution_id> | jq
 ```
 
 ### F7.6.3 Session → Execution Link
@@ -942,8 +942,8 @@ curl -s http://localhost:8000/api/executions/<execution_id> | jq
 
 **Validation:**
 ```bash
-curl -s http://localhost:8000/api/sessions/<session_id> | jq '.execution_id'
-curl -s "http://localhost:8000/api/sessions?execution_id=<exec_id>" | jq
+curl -s http://localhost:8137/api/sessions/<session_id> | jq '.execution_id'
+curl -s "http://localhost:8137/api/sessions?execution_id=<exec_id>" | jq
 ```
 
 ### F7.6.4 Workflow Template → Runs Count
@@ -960,7 +960,7 @@ curl -s "http://localhost:8000/api/sessions?execution_id=<exec_id>" | jq
 
 **Validation:**
 ```bash
-curl -s http://localhost:8000/api/workflows/implementation-workflow-v1 | jq '{runs_count, runs_link}'
+curl -s http://localhost:8137/api/workflows/implementation-workflow-v1 | jq '{runs_count, runs_link}'
 ```
 
 ### F7.6.5 UI: Workflow Runs Page
@@ -1471,18 +1471,18 @@ The WebSocket Control Plane enables real-time execution control:
 **Validation Commands:**
 ```bash
 # Get execution state
-curl -s http://localhost:8000/api/executions/<execution_id>/state | jq
+curl -s http://localhost:8137/api/executions/<execution_id>/state | jq
 
 # Pause a running execution
-curl -X POST http://localhost:8000/api/executions/<execution_id>/pause \
+curl -X POST http://localhost:8137/api/executions/<execution_id>/pause \
   -H "Content-Type: application/json" \
   -d '{"reason": "Testing pause"}' | jq
 
 # Resume a paused execution
-curl -X POST http://localhost:8000/api/executions/<execution_id>/resume | jq
+curl -X POST http://localhost:8137/api/executions/<execution_id>/resume | jq
 
 # Cancel an execution
-curl -X POST http://localhost:8000/api/executions/<execution_id>/cancel \
+curl -X POST http://localhost:8137/api/executions/<execution_id>/cancel \
   -H "Content-Type: application/json" \
   -d '{"reason": "User cancelled"}' | jq
 ```
@@ -1506,7 +1506,7 @@ curl -X POST http://localhost:8000/api/executions/<execution_id>/cancel \
 
 **Validation (Browser Console):**
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/api/ws/control/exec-123');
+const ws = new WebSocket('ws://localhost:8137/api/ws/control/exec-123');
 ws.onmessage = (e) => console.log('Received:', JSON.parse(e.data));
 ws.onopen = () => {
   console.log('Connected');
@@ -1583,7 +1583,7 @@ pytest packages/syn-adapters/tests/test_executor_control.py -v
 | 13.5.6 | `syn control status <id>` shows current state | ⬜ |
 | 13.5.7 | Status shows colored output (green/yellow/red) | ⬜ |
 | 13.5.8 | Error messages shown when API unavailable | ⬜ |
-| 13.5.9 | `SYN_DASHBOARD_URL` environment variable supported | ⬜ |
+| 13.5.9 | `SYN_API_URL` environment variable supported | ⬜ |
 | 13.5.10 | `--url` flag overrides default dashboard URL | ⬜ |
 
 **Validation Commands:**
@@ -1601,7 +1601,7 @@ syn control cancel exec-123 --force --reason "Timeout"
 syn control status exec-123
 
 # Use custom dashboard URL
-SYN_DASHBOARD_URL=http://prod:8000 syn control status exec-123
+SYN_API_URL=http://prod:8000 syn control status exec-123
 ```
 
 ### F13.6 End-to-End Control Flow ⭐ CRITICAL
@@ -2078,7 +2078,7 @@ docker compose -f docker/docker-compose.dev.yaml --profile sidecar up -d
 |---|---------------------|--------|
 | 15.6.1 | Start Docker stack with `just dev` | ⬜ |
 | 15.6.2 | Event Store healthy on localhost:50051 | ⬜ |
-| 15.6.3 | Dashboard API healthy on localhost:8000 | ⬜ |
+| 15.6.3 | Dashboard API healthy on localhost:8137 | ⬜ |
 | 15.6.4 | GitHub App configured (SYN_GITHUB_* vars) | ⬜ |
 | 15.6.5 | Execute workflow via CLI or API | ⬜ |
 | 15.6.6 | WorkflowExecutionStarted event in Event Store | ⬜ |
@@ -2105,7 +2105,7 @@ sleep 30  # Wait for services
 
 # Verify all healthy
 docker ps --format "table {{.Names}}\t{{.Status}}"
-curl -s http://localhost:8000/health | jq
+curl -s http://localhost:8137/health | jq
 
 # Run full e2e test
 uv run python scripts/e2e_github_app_test.py
@@ -2309,7 +2309,7 @@ Tests for the "agent-in-container" execution model robustness:
 syn workflow run --container --workflow water-lightyear-calc
 
 # Verify via API
-curl -s http://localhost:8000/api/executions/<exec_id> | jq '{completed_phases, total_phases}'
+curl -s http://localhost:8137/api/executions/<exec_id> | jq '{completed_phases, total_phases}'
 
 # Verify event count in Event Store
 docker exec syn-postgres psql -U syn -d syn -c \
@@ -2334,7 +2334,7 @@ docker exec syn-postgres psql -U syn -d syn -c \
 **Validation Commands:**
 ```bash
 # After workflow completes
-curl -s http://localhost:8000/api/executions/<exec_id>/artifacts | jq
+curl -s http://localhost:8137/api/executions/<exec_id>/artifacts | jq
 
 # Verify path constants
 python -c "from syn_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WORKSPACE_OUTPUT_DIR)"
@@ -2360,7 +2360,7 @@ python -c "from syn_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WO
 **Validation Commands:**
 ```bash
 # After workflow
-curl -s "http://localhost:8000/api/sessions?execution_id=<exec_id>" | jq
+curl -s "http://localhost:8137/api/sessions?execution_id=<exec_id>" | jq
 
 # Event store verification
 docker exec syn-postgres psql -U syn -d syn -c \
@@ -2413,7 +2413,7 @@ docker exec <container_id> cat /workspace/.claude/settings.json | jq '.attributi
 docker exec <container_id> tail -f /workspace/.agentic/analytics/events.jsonl
 
 # Watch SSE stream for analytics events
-curl -N http://localhost:8000/api/events/stream | grep analytics
+curl -N http://localhost:8137/api/events/stream | grep analytics
 ```
 
 ### F17.6 Stale Execution Cleanup ⭐ P2
@@ -2435,7 +2435,7 @@ curl -N http://localhost:8000/api/events/stream | grep analytics
 **Validation Commands:**
 ```bash
 # Run cleanup via API
-curl -X POST http://localhost:8000/api/executions/cleanup \
+curl -X POST http://localhost:8137/api/executions/cleanup \
   -H "Content-Type: application/json" \
   -d '{"threshold_hours": 2}'
 
@@ -2515,7 +2515,7 @@ syn workflow run --container --workflow water-lightyear-calc \
   --input '{"task": "Calculate H2O molecule count in light-year line"}'
 
 # Verify all criteria
-curl -s http://localhost:8000/api/executions/<exec_id> | jq
+curl -s http://localhost:8137/api/executions/<exec_id> | jq
 
 # Check events
 docker exec syn-postgres psql -U syn -d syn -c \

@@ -143,7 +143,7 @@ GROUP BY obs_type;
 
 ```bash
 # Query cost projections
-curl -s http://localhost:8000/api/v1/executions/$EXEC_ID | jq '{
+curl -s http://localhost:8137/api/v1/executions/$EXEC_ID | jq '{
   total_cost: .total_cost,
   input_tokens: .input_tokens,
   output_tokens: .output_tokens,
@@ -181,22 +181,22 @@ curl -s http://localhost:8000/api/v1/executions/$EXEC_ID | jq '{
 
 ```bash
 # 5.1 Execution detail
-curl -s http://localhost:8000/api/v1/executions/$EXEC_ID | jq .
+curl -s http://localhost:8137/api/v1/executions/$EXEC_ID | jq .
 
 # 5.2 Session list (should have 3 sessions for github-pr workflow)
-curl -s http://localhost:8000/api/v1/executions/$EXEC_ID/sessions | jq 'length'
+curl -s http://localhost:8137/api/v1/executions/$EXEC_ID/sessions | jq 'length'
 # Expected: 3
 
 # 5.3 Session detail (check first session)
-export SESSION_ID=$(curl -s http://localhost:8000/api/v1/executions/$EXEC_ID/sessions | jq -r '.[0].session_id')
-curl -s http://localhost:8000/api/v1/sessions/$SESSION_ID | jq '{
+export SESSION_ID=$(curl -s http://localhost:8137/api/v1/executions/$EXEC_ID/sessions | jq -r '.[0].session_id')
+curl -s http://localhost:8137/api/v1/sessions/$SESSION_ID | jq '{
   tool_calls: .tool_calls,
   total_cost: .total_cost,
   model: .model
 }'
 
 # 5.4 Artifacts (should include PR URL)
-curl -s http://localhost:8000/api/v1/executions/$EXEC_ID/artifacts | jq '.[] | select(.name == "pr_url")'
+curl -s http://localhost:8137/api/v1/executions/$EXEC_ID/artifacts | jq '.[] | select(.name == "pr_url")'
 ```
 
 **Validation:**
@@ -252,7 +252,7 @@ open http://localhost:5173/executions/$EXEC_ID
 docker logs <container_name> 2>&1 | grep -i "github"
 
 # 7.2 Verify PR created
-export PR_URL=$(curl -s http://localhost:8000/api/v1/executions/$EXEC_ID/artifacts | jq -r '.[] | select(.name == "pr_url") | .data.url')
+export PR_URL=$(curl -s http://localhost:8137/api/v1/executions/$EXEC_ID/artifacts | jq -r '.[] | select(.name == "pr_url") | .data.url')
 echo "PR URL: $PR_URL"
 
 # 7.3 Open PR in browser

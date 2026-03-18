@@ -9,7 +9,7 @@
     "properties": {
       "apiUrl": {
         "type": "string",
-        "default": "http://localhost:8000",
+        "default": "http://localhost:8137",
         "description": "Syntropic137 API base URL"
       },
       "apiKey": {

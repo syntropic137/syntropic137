@@ -51,6 +51,6 @@ If all prerequisites pass:
 
 After starting, report:
 - Dashboard UI: http://localhost:5173
-- Dashboard API: http://localhost:8000/docs
+- Dashboard API: http://localhost:8137/docs
 - Run `just dev-logs` to see output
 - Run `just dev-stop` when done

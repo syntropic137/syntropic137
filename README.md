@@ -22,8 +22,8 @@ just dev                        # syncs deps, builds containers, seeds data, sta
 | Service | URL |
 |---------|-----|
 | Frontend | http://localhost:5173 |
-| API | http://localhost:8000 |
-| API Docs | http://localhost:8000/docs |
+| API | http://localhost:8137 |
+| API Docs | http://localhost:8137/docs |
 | MinIO Console | http://localhost:9001 |
 
 Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
