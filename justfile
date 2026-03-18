@@ -379,7 +379,7 @@ dev: _workspace-check
     ${_COMPOSE} up -d --build
     echo ""
     echo "3️⃣ Initialising MinIO buckets..."
-    ${_COMPOSE} --profile init run --rm minio-init || echo "   ⚠️ MinIO init skipped (buckets may already exist)"
+    ${_COMPOSE} --profile init run --rm minio-init
     echo ""
     echo "4️⃣ Waiting for services to be healthy..."
     sleep 5
@@ -459,7 +459,7 @@ dev-fresh: _workspace-check
     ${_COMPOSE} up -d --build
     echo ""
     echo "5️⃣ Initialising MinIO buckets..."
-    ${_COMPOSE} --profile init run --rm minio-init || echo "   ⚠️ MinIO init skipped"
+    ${_COMPOSE} --profile init run --rm minio-init
     echo ""
     echo "6️⃣ Waiting for services to be healthy..."
     sleep 8
@@ -954,6 +954,9 @@ selfhost-up: _selfhost-preflight _workspace-check
     echo "🚀 Starting Syn137 self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
+    echo "🪣 Initialising MinIO buckets..."
+    {{compose_selfhost}} --profile init run --rm minio-init
+    echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
@@ -969,6 +972,9 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     source infra/scripts/selfhost-env.sh
     echo "🚀 Starting Syn137 self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
+    echo ""
+    echo "🪣 Initialising MinIO buckets..."
+    {{compose_selfhost_cf}} --profile init run --rm minio-init
     echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
