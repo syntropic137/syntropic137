@@ -115,7 +115,7 @@ services:
   # Restricts api to only the Docker API endpoints it actually uses.
   # The real socket is mounted ONLY here — api talks to this proxy via TCP.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.4.2
+    image: tecnativa/docker-socket-proxy:0.3.0
     container_name: syn137-docker-socket-proxy
     environment:
       CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
@@ -126,7 +126,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: always
-    read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
