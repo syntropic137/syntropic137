@@ -100,7 +100,7 @@ syn workflow validate path/to/workflow.yaml
 
 # Examples
 syn workflow run research-workflow-v2 --task "$(gh issue view 211 --json body -q .body)"
-syn workflow run github-pr --task "Add error handling to webhook handler" -i repo_url=owner/repo
+syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
 ```
 
 ### Execution Control

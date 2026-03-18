@@ -158,13 +158,19 @@ async def _build_workspace_prompt(
         if phase_input.value is not None:
             phase_prompt = phase_prompt.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
 
-    # Layer 2c: $ARGUMENTS substitution (ISS-211 CC command pattern)
+    # Layer 2c: Phase outputs — substitute {{phase-id}} placeholders inline
+    if phase_outputs:
+        for pid, content in phase_outputs.items():
+            phase_prompt = phase_prompt.replace(f"{{{{{pid}}}}}", content[:2000])
+
+    # Layer 2d: $ARGUMENTS substitution (ISS-211 CC command pattern)
     task = (inputs or {}).get("task", "")
     phase_prompt = phase_prompt.replace("$ARGUMENTS", str(task))
 
     prompt_parts.append(f"\n## Task\n{phase_prompt}")
 
-    # Layer 3: Context from previous phases
+    # Layer 3: Context from previous phases (appended as fallback for
+    # any phase output not consumed by {{phase-id}} placeholders above)
     if phase_outputs:
         prompt_parts.append("\n## Context from Previous Phases")
         for pid, content in phase_outputs.items():

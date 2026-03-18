@@ -21,7 +21,7 @@ classification: standard
 
 # Default repository context (should be overridden at runtime)
 repository:
-  url: https://github.com/syntropic137/sandbox_syn-engineer-beta
+  url: "{{repository}}"
   ref: main
 
 # Project association (optional)
@@ -32,12 +32,10 @@ inputs:
   - name: task
     description: "What changes to make (issue body, change description, etc.)"
     required: true
-  - name: change_description
-    description: "Short description for commit message and PR title"
+  - name: repository
+    description: "Repository URL (owner/repo or full GitHub URL)"
     required: false
-  - name: repo_url
-    description: "Repository URL override"
-    required: false
+    default: "https://github.com/syntropic137/sandbox_syn-engineer-beta"
 
 phases:
   - id: create-pr

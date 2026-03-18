@@ -66,17 +66,19 @@ export function WorkflowDetail() {
     return () => { cancelled = true }
   }, [workflowId])
 
-  // Pre-fill defaults from input declarations
+  // Pre-fill defaults from input declarations (only for keys not yet entered)
   useEffect(() => {
     if (!workflow) return
     const declarations: InputDeclaration[] = workflow.input_declarations ?? []
-    const defaults: Record<string, string> = {}
-    for (const decl of declarations) {
-      if (decl.default && decl.name !== 'task') {
-        defaults[decl.name] = decl.default
+    setFormInputs(prev => {
+      const merged = { ...prev }
+      for (const decl of declarations) {
+        if (decl.default && decl.name !== 'task' && !merged[decl.name]) {
+          merged[decl.name] = decl.default
+        }
       }
-    }
-    setFormInputs(defaults)
+      return merged
+    })
   }, [workflow])
 
   // Check if required inputs are satisfied
