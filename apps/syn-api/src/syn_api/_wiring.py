@@ -128,10 +128,13 @@ async def _build_workspace_prompt(
 ) -> str:
     """Build the workspace prompt for a phase.
 
-    Three-layer substitution:
+    Substitution layers (in order):
     1. Built-in variables: {{execution_id}}, {{workflow_id}}, {{repo_url}}
-    2. Workflow inputs: iterate inputs.items(), substitute {{key}} → value
-    3. Phase outputs (from previous phases)
+    2a. Workflow inputs: {{key}} → value from inputs dict
+    2b. Phase-level static inputs: {{name}} → value from phase definition
+    2c. Phase outputs: {{phase-id}} → previous phase artifact content (inline)
+    2d. $ARGUMENTS → task string from inputs["task"]
+    3. Context appendix: previous phase outputs appended as fallback section
     """
     from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
         SYN_WORKSPACE_PROMPT,

@@ -65,8 +65,8 @@ Named inputs (`{{variable}}`) and `$ARGUMENTS` coexist. The substitution order i
 
 1. Built-in variables: `{{execution_id}}`, `{{workflow_id}}`, `{{repo_url}}`
 2. Named inputs: `{{key}}` → value from `inputs` dict
-3. `$ARGUMENTS` → value of `task` field (also available as `inputs["task"]`)
-4. Phase outputs: `{{phase-id}}` → previous phase artifact content
+3. Phase outputs: `{{phase-id}}` → previous phase artifact content (inline replacement). Phase outputs are also appended as a "Context from Previous Phases" section as fallback.
+4. `$ARGUMENTS` → value of `task` field (also available as `inputs["task"]`)
 
 ### 3. Per-Phase Extensions
 
