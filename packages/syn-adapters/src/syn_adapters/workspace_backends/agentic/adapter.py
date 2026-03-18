@@ -10,6 +10,7 @@ See ADR-021: Isolated Workspace Architecture
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
@@ -80,11 +81,16 @@ class AgenticIsolationAdapter:
         self._container_base_dir = container_dir
         self._host_base_dir = host_dir  # May be None if same as container dir
 
+        # ISS-43: Use agent-net so containers can reach the shared Envoy proxy
+        # but cannot reach the internet directly.
+        agent_network = os.environ.get("SYN_AGENT_NETWORK", "agent-net")
+
         self._provider = WorkspaceDockerProvider(
             default_image=default_image,
             security=self._security,
             workspace_base_dir=container_dir,
             workspace_host_dir=host_dir,  # For Docker volume mounts
+            default_network=agent_network,
         )
         self._workspaces: dict[str, AgenticWorkspace] = {}
 
@@ -109,6 +115,9 @@ class AgenticIsolationAdapter:
         )
 
         # Map Syn137 config to agentic_isolation config
+        # ISS-43: Network is set on the provider (default_network in __init__),
+        # not on WorkspaceConfig. Containers join agent-net to reach the shared
+        # Envoy proxy but cannot reach the internet directly.
         ws_config = WorkspaceConfig(
             provider="docker",
             image=config.image or self._default_image,
@@ -457,6 +466,9 @@ class AgenticEventStreamAdapter:
             *exec_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            # Increase StreamReader line limit to 10 MB. Default is 64 KB, which
+            # is exceeded by large tool results (e.g. WebSearch responses in JSONL).
+            limit=10 * 1024 * 1024,
         )
 
         try:

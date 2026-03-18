@@ -18,6 +18,7 @@ See ADR-021, ADR-023, ADR-024.
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -249,7 +250,7 @@ class WorkspaceService:
             AgenticEventStreamAdapter,
             AgenticIsolationAdapter,
         )
-        from syn_adapters.workspace_backends.docker import DockerSidecarAdapter
+        from syn_adapters.workspace_backends.docker import SharedEnvoyAdapter
         from syn_adapters.workspace_backends.tokens import (
             SidecarTokenInjectionAdapter,
             TokenVendingServiceAdapter,
@@ -292,8 +293,10 @@ class WorkspaceService:
         event_stream = AgenticEventStreamAdapter()
         event_stream.set_provider(isolation._provider)
 
-        # Sidecar still uses Docker adapter
-        sidecar = DockerSidecarAdapter()
+        # Shared Envoy proxy for credential injection (ISS-43).
+        # Agents never see API keys — the proxy injects them via ext_authz.
+        proxy_url = os.environ.get("SYN_PROXY_URL", "http://syn-envoy-proxy:8081")
+        sidecar = SharedEnvoyAdapter(proxy_url=proxy_url)
 
         # Token vending
         tvs = token_service or get_token_vending_service()

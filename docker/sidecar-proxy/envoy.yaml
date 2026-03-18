@@ -10,7 +10,7 @@
 admin:
   address:
     socket_address:
-      address: 127.0.0.1
+      address: 0.0.0.0
       port_value: 9901
 
 static_resources:
@@ -46,16 +46,22 @@ static_resources:
                   name: local_route
                   virtual_hosts:
                     # Anthropic API
+                    # Matches both direct api.anthropic.com traffic AND requests routed
+                    # via ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081 (ISS-43).
+                    # host_rewrite_literal ensures upstream sees api.anthropic.com.
                     - name: anthropic
                       domains:
                         - "api.anthropic.com"
                         - "api.anthropic.com:443"
+                        - "syn-envoy-proxy:8081"
+                        - "syn-envoy-proxy"
                       routes:
                         - match:
                             prefix: "/"
                           route:
                             cluster: anthropic_api
                             timeout: 300s # Long timeout for streaming
+                            host_rewrite_literal: "api.anthropic.com"
                           request_headers_to_add:
                             - header:
                                 key: "anthropic-version"
@@ -85,6 +91,44 @@ static_resources:
                             cluster: github_raw
                             timeout: 30s
 
+                    # GitHub HTTPS (git clone goes through proxy) - ISS-43
+                    - name: github_https
+                      domains:
+                        - "github.com"
+                        - "github.com:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: github_https
+                            timeout: 120s
+
+                    # PyPI - passthrough (no credential injection)
+                    - name: pypi
+                      domains:
+                        - "pypi.org"
+                        - "pypi.org:443"
+                        - "files.pythonhosted.org"
+                        - "files.pythonhosted.org:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: pypi
+                            timeout: 60s
+
+                    # npm registry - passthrough (no credential injection)
+                    - name: npmjs
+                      domains:
+                        - "registry.npmjs.org"
+                        - "registry.npmjs.org:443"
+                      routes:
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: npmjs
+                            timeout: 60s
+
                     # Block all other hosts
                     - name: blocked
                       domains:
@@ -95,19 +139,33 @@ static_resources:
                           direct_response:
                             status: 403
                             body:
-                              inline_string: '{"error": "Host not allowed", "message": "Only api.anthropic.com, api.github.com, and raw.githubusercontent.com are allowed"}'
+                              inline_string: '{"error": "Host not allowed", "message": "Only approved hosts are allowed through the proxy"}'
 
                 http_filters:
-                  # External authorization for token injection
+                  # External authorization for token injection (HTTP mode)
+                  # The token-injector service checks the Host header and returns
+                  # credential headers. Envoy OVERWRITES matching upstream headers
+                  # with the values from allowed_upstream_headers.
                   - name: envoy.filters.http.ext_authz
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
-                      grpc_service:
-                        envoy_grpc:
-                          cluster_name: token_injector
-                        timeout: 5s
+                      http_service:
+                        server_uri:
+                          uri: http://token-injector:9002
+                          cluster: token_injector
+                          timeout: 5s
+                        authorization_request:
+                          allowed_headers:
+                            patterns:
+                              - exact: "host"
+                              - exact: "x-forwarded-host"
+                        authorization_response:
+                          allowed_upstream_headers:
+                            patterns:
+                              - exact: "x-api-key"
+                              - exact: "authorization"
+                              - exact: "x-syn-execution-id"
                       failure_mode_allow: false
-                      transport_api_version: V3
 
                   # Rate limiting
                   - name: envoy.filters.http.local_ratelimit
@@ -203,9 +261,78 @@ static_resources:
               trusted_ca:
                 filename: /etc/ssl/certs/ca-certificates.crt
 
-    # Token Injector Service (runs alongside)
+    # GitHub HTTPS cluster (git clone) - ISS-43
+    - name: github_https
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: github_https
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: github.com
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: github.com
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # PyPI cluster (passthrough, no credential injection) - ISS-43
+    - name: pypi
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: pypi
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: pypi.org
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: pypi.org
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # npm registry cluster (passthrough) - ISS-43
+    - name: npmjs
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      load_assignment:
+        cluster_name: npmjs
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: registry.npmjs.org
+                      port_value: 443
+      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          sni: registry.npmjs.org
+          common_tls_context:
+            validation_context:
+              trusted_ca:
+                filename: /etc/ssl/certs/ca-certificates.crt
+
+    # Token Injector Service (separate container on same Docker network)
     - name: token_injector
-      type: STATIC
+      type: STRICT_DNS
       load_assignment:
         cluster_name: token_injector
         endpoints:
@@ -213,10 +340,6 @@ static_resources:
               - endpoint:
                   address:
                     socket_address:
-                      address: 127.0.0.1
+                      address: token-injector
                       port_value: 9002
-      typed_extension_protocol_options:
-        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
-          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
-          explicit_http_config:
-            http2_protocol_options: {}
+      # HTTP/1.1 — token injector is a plain Python HTTP server

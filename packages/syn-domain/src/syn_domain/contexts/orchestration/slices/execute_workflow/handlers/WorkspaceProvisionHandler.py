@@ -119,8 +119,8 @@ class WorkspaceProvisionHandler:
             execution_id=todo.execution_id,
             workflow_id=workflow_id,
             phase_id=todo.phase_id,
-            with_sidecar=False,
-            inject_tokens=False,
+            with_sidecar=True,
+            inject_tokens=True,
         )
 
         # Enter the async context manager
@@ -154,21 +154,31 @@ class WorkspaceProvisionHandler:
         )
         claude_cmd = self._command_builder(phase, prompt)
 
-        # Validate authentication
-        if not secrets.claude_code_oauth_token and not secrets.anthropic_api_key:
+        # Validate proxy is available — credentials live on the proxy container,
+        # not in agent env vars (ISS-43: API key security).
+        proxy_url = getattr(workspace, "proxy_url", None)
+        if not proxy_url:
             msg = (
-                "No Claude authentication configured. "
-                "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+                "Shared Envoy proxy not available. "
+                "Ensure envoy-proxy service is running and sidecar is enabled."
             )
             raise RuntimeError(msg)
 
         agent_env: dict[str, str] = {
             "CLAUDE_SESSION_ID": session_id,
+            # Route Anthropic SDK calls directly to the Envoy proxy.
+            # Do NOT set HTTP_PROXY/HTTPS_PROXY — those cause Node.js to use
+            # CONNECT tunneling which Envoy's forward proxy doesn't support.
+            # ANTHROPIC_BASE_URL alone redirects the SDK without tunneling (ISS-43).
+            "ANTHROPIC_BASE_URL": proxy_url,
+            # Placeholder so Claude Code will attempt API calls via OAuth Bearer auth.
+            # ANTHROPIC_API_KEY must NOT be set here — if it is, Claude Code uses
+            # x-api-key auth and the injected Authorization header is ignored by Anthropic.
+            # With only CLAUDE_CODE_OAUTH_TOKEN set, Claude Code sends
+            # "Authorization: Bearer proxy-managed", which the Envoy proxy (ext_authz)
+            # overwrites with the real token before the request reaches api.anthropic.com (ISS-43).
+            "CLAUDE_CODE_OAUTH_TOKEN": "proxy-managed",
         }
-        if secrets.claude_code_oauth_token:
-            agent_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
-        if secrets.anthropic_api_key:
-            agent_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
 
         workspace_id = getattr(workspace, "id", todo.phase_id)
 
