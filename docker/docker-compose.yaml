@@ -206,4 +206,8 @@ services:
 
 networks:
   agent-net:
-    internal: true  # No external egress — agents can only reach the proxy
+    # Not internal: agents need egress for git operations (clone/push to github.com).
+    # API key security is enforced via ANTHROPIC_BASE_URL routing to the proxy —
+    # agents only hold a "proxy-managed" placeholder, so direct api.anthropic.com
+    # calls fail. Full network isolation (internal: true) deferred to Phase 2
+    # when git traffic is also routed through the proxy via CONNECT tunneling.

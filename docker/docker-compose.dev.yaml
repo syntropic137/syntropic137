@@ -67,7 +67,7 @@ services:
       # Host path that Docker daemon can mount (must match volume mount below).
       # ../workspaces resolves to the repo root workspaces/ dir, which is what
       # the API container has mounted at /workspaces via the volume below.
-      SYN_WORKSPACE_HOST_DIR: ${PWD}/../workspaces
+      SYN_WORKSPACE_HOST_DIR: ${PWD}/workspaces
       # Agent network: matches the compose-prefixed name for this stack (syn-dev_agent-net).
       # Each compose stack gets its own prefix, preventing cross-stack container leakage.
       # Production override: SYN_AGENT_NETWORK=syntropic137_agent-net (or whatever that stack's prefix is)
