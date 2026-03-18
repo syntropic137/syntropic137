@@ -91,6 +91,7 @@ services:
 
   minio-init:
     container_name: syn-minio-init
+    profiles: ["init"]
 
   redis:
     container_name: syn-redis
