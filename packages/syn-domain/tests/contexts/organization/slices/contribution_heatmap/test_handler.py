@@ -39,7 +39,11 @@ def _make_mock_pool(rows: list[dict[str, Any]]) -> MagicMock:
     conn.fetch = AsyncMock(return_value=[_FakeRow(r) for r in rows])
 
     pool = MagicMock()
-    pool.acquire = MagicMock(return_value=AsyncMock(__aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock(return_value=None)))
+    pool.acquire = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=conn), __aexit__=AsyncMock(return_value=None)
+        )
+    )
     return pool
 
 
@@ -71,19 +75,23 @@ class TestGetContributionHeatmapHandler:
     @pytest.mark.asyncio
     async def test_no_filter_returns_all(self) -> None:
         """With no filter, queries all events (execution_ids=None)."""
-        pool = _make_mock_pool([
-            _make_row(date(2026, 3, 1), sessions=3, executions=1),
-            _make_row(date(2026, 3, 2), sessions=1),
-        ])
+        pool = _make_mock_pool(
+            [
+                _make_row(date(2026, 3, 1), sessions=3, executions=1),
+                _make_row(date(2026, 3, 2), sessions=1),
+            ]
+        )
         store = FakeProjectionStore()
         _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
-        result = await handler.handle(GetContributionHeatmapQuery(
-            start_date=date(2026, 3, 1),
-            end_date=date(2026, 3, 2),
-            metric="sessions",
-        ))
+        result = await handler.handle(
+            GetContributionHeatmapQuery(
+                start_date=date(2026, 3, 1),
+                end_date=date(2026, 3, 2),
+                metric="sessions",
+            )
+        )
 
         assert result.metric == "sessions"
         assert result.total == 4.0
@@ -94,24 +102,32 @@ class TestGetContributionHeatmapHandler:
     @pytest.mark.asyncio
     async def test_system_filter_resolves_execution_ids(self) -> None:
         """System filter resolves repos → correlation → execution_ids."""
-        pool = _make_mock_pool([
-            _make_row(date(2026, 3, 1), executions=2),
-        ])
+        pool = _make_mock_pool(
+            [
+                _make_row(date(2026, 3, 1), executions=2),
+            ]
+        )
         store = FakeProjectionStore()
         _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
 
-        await store.save("repo_correlation", "exec-1:acme/api", {
-            "repo_full_name": "acme/api",
-            "execution_id": "exec-1",
-        })
+        await store.save(
+            "repo_correlation",
+            "exec-1:acme/api",
+            {
+                "repo_full_name": "acme/api",
+                "execution_id": "exec-1",
+            },
+        )
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
-        result = await handler.handle(GetContributionHeatmapQuery(
-            system_id="sys-1",
-            start_date=date(2026, 3, 1),
-            end_date=date(2026, 3, 1),
-            metric="executions",
-        ))
+        result = await handler.handle(
+            GetContributionHeatmapQuery(
+                system_id="sys-1",
+                start_date=date(2026, 3, 1),
+                end_date=date(2026, 3, 1),
+                metric="executions",
+            )
+        )
 
         assert result.metric == "executions"
         assert result.filter["system_id"] == "sys-1"
@@ -125,11 +141,13 @@ class TestGetContributionHeatmapHandler:
         # No correlations in store → empty execution_ids
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
-        result = await handler.handle(GetContributionHeatmapQuery(
-            system_id="sys-1",
-            start_date=date(2026, 3, 1),
-            end_date=date(2026, 3, 5),
-        ))
+        result = await handler.handle(
+            GetContributionHeatmapQuery(
+                system_id="sys-1",
+                start_date=date(2026, 3, 1),
+                end_date=date(2026, 3, 5),
+            )
+        )
 
         assert result.total == 0.0
         assert len(result.days) == 5  # zero-filled for Mar 1-5
@@ -138,24 +156,30 @@ class TestGetContributionHeatmapHandler:
     @pytest.mark.asyncio
     async def test_metric_selection_sets_count(self) -> None:
         """The selected metric determines the count field on each bucket."""
-        pool = _make_mock_pool([
-            _make_row(date(2026, 3, 1), sessions=5, input_tokens=1000, output_tokens=500),
-        ])
+        pool = _make_mock_pool(
+            [
+                _make_row(date(2026, 3, 1), sessions=5, input_tokens=1000, output_tokens=500),
+            ]
+        )
         store = FakeProjectionStore()
         _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
 
-        result_sessions = await handler.handle(GetContributionHeatmapQuery(
-            start_date=date(2026, 3, 1),
-            end_date=date(2026, 3, 1),
-            metric="sessions",
-        ))
+        result_sessions = await handler.handle(
+            GetContributionHeatmapQuery(
+                start_date=date(2026, 3, 1),
+                end_date=date(2026, 3, 1),
+                metric="sessions",
+            )
+        )
         assert result_sessions.days[0].count == 5.0
 
-        result_tokens = await handler.handle(GetContributionHeatmapQuery(
-            start_date=date(2026, 3, 1),
-            end_date=date(2026, 3, 1),
-            metric="tokens",
-        ))
+        result_tokens = await handler.handle(
+            GetContributionHeatmapQuery(
+                start_date=date(2026, 3, 1),
+                end_date=date(2026, 3, 1),
+                metric="tokens",
+            )
+        )
         assert result_tokens.days[0].count == 1500.0

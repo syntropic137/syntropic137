@@ -420,7 +420,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             total_duration_seconds=command.duration_seconds,
             artifact_ids=command.artifact_ids,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("FailExecutionCommand")
     def fail_execution(self, command: FailExecutionCommand) -> None:
@@ -443,7 +443,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             completed_phases=command.completed_phases,
             total_phases=command.total_phases,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("StartPhaseCommand")
     def start_phase(self, command: StartPhaseCommand) -> None:
@@ -465,7 +465,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             started_at=datetime.now(UTC),
             session_id=command.session_id,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("CompletePhaseCommand")
     def complete_phase(self, command: CompletePhaseCommand) -> None:
@@ -492,7 +492,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             cost_usd=command.cost_usd,
             duration_seconds=command.duration_seconds,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # =========================================================================
     # PROCESSOR TO-DO LIST COMMAND HANDLERS (ISS-196)
@@ -517,7 +517,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             session_id=command.session_id,
             provisioned_at=datetime.now(UTC),
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("AgentExecutionCompletedCommand")
     def agent_execution_completed(self, command: AgentExecutionCompletedCommand) -> None:
@@ -540,7 +540,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             input_tokens=command.input_tokens,
             output_tokens=command.output_tokens,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("ArtifactsCollectedCommand")
     def artifacts_collected(self, command: ArtifactsCollectedCommand) -> None:
@@ -565,7 +565,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             first_content_preview=command.first_content_preview,
             session_id=command.session_id,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
         # Aggregate decides: is there a next phase?
         if self._phase_definitions:
@@ -581,7 +581,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
                         next_phase_order=next_phase.order,
                         decided_at=datetime.now(UTC),
                     )
-                    self._apply(next_event)  # type: ignore[arg-type]
+                    self._apply(next_event)
 
     def _find_next_phase(self, current_order: int) -> PhaseDefinition | None:
         """Find the next phase after the given order, or None if this was the last."""
@@ -741,7 +741,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             paused_at=datetime.now(UTC),
             reason=command.reason,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("ResumeExecutionCommand")
     def resume_execution(self, command: ResumeExecutionCommand) -> None:
@@ -760,7 +760,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             phase_id=command.phase_id,
             resumed_at=datetime.now(UTC),
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("CancelExecutionCommand")
     def cancel_execution(self, command: CancelExecutionCommand) -> None:
@@ -780,7 +780,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             cancelled_at=datetime.now(UTC),
             reason=command.reason,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     @command_handler("InterruptExecutionCommand")
     def interrupt_execution(self, command: InterruptExecutionCommand) -> None:
@@ -812,7 +812,7 @@ class WorkflowExecutionAggregate(AggregateRoot["WorkflowExecutionStartedEvent"])
             partial_input_tokens=command.partial_input_tokens,
             partial_output_tokens=command.partial_output_tokens,
         )
-        self._apply(event)  # type: ignore[arg-type]
+        self._apply(event)
 
     # =========================================================================
     # CONTROL PLANE EVENT SOURCING HANDLERS

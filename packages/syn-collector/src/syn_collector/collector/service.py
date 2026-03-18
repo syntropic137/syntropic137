@@ -42,12 +42,14 @@ def create_app(
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         """Application lifespan handler."""
         logger.info("Event collector service starting")
-        if hasattr(store, "initialize"):
-            await store.initialize()  # type: ignore[union-attr]
+        _init = getattr(store, "initialize", None)
+        if _init is not None:
+            await _init()
         yield
         logger.info("Event collector service stopping")
-        if hasattr(store, "close"):
-            await store.close()  # type: ignore[union-attr]
+        _close = getattr(store, "close", None)
+        if _close is not None:
+            await _close()
 
     application = FastAPI(
         title="Syn137 Event Collector",

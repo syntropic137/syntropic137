@@ -90,9 +90,9 @@ class SharedEnvoyAdapter:
 
     async def configure_tokens(
         self,
-        handle: SidecarHandle,  # noqa: ARG002
-        tokens: dict[TokenType, str],  # noqa: ARG002
-        ttl_seconds: int,  # noqa: ARG002
+        handle: SidecarHandle,
+        tokens: dict[TokenType, str],
+        ttl_seconds: int,
     ) -> None:
         """No-op for Phase 1 — single shared key loaded from proxy env vars.
 

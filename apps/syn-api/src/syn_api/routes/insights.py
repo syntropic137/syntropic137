@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from datetime import date
 
 from fastapi import APIRouter, Query
 from starlette.responses import JSONResponse
@@ -28,7 +30,7 @@ async def get_global_cost() -> dict[str, Any]:
     return await insight_ops.get_global_cost()
 
 
-@router.get("/contribution-heatmap")
+@router.get("/contribution-heatmap", response_model=None)
 async def get_contribution_heatmap(
     organization_id: str | None = Query(None),
     system_id: str | None = Query(None),
@@ -36,7 +38,7 @@ async def get_contribution_heatmap(
     start_date: date | None = Query(None),
     end_date: date | None = Query(None),
     metric: str = Query("sessions"),
-) -> dict[str, Any]:
+) -> dict[str, Any] | JSONResponse:
     """Get daily contribution heatmap data."""
     try:
         return await insight_ops.get_contribution_heatmap(

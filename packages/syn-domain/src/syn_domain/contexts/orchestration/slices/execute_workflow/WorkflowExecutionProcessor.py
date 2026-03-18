@@ -644,7 +644,7 @@ class WorkflowExecutionProcessor:
             if hasattr(event, "model_dump"):
                 event_data = event.model_dump()
             elif hasattr(event, "to_dict"):
-                event_data = event.to_dict()
+                event_data = event.to_dict()  # type: ignore[attr-defined]  # DomainEvent subclasses provide to_dict via Pydantic
             else:
                 event_data = vars(event)
             # Use auto-dispatch — the projection has on_<snake_case> methods
