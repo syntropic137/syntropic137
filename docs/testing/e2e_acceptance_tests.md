@@ -387,8 +387,8 @@ syn workflow run research-workflow-v2 --task "Test" --input topic=auth --dry-run
 
 **Validation Commands:**
 ```bash
-curl -s http://localhost:8000/api/v1/workflows/research-workflow-v2 | jq '.input_declarations'
-curl -s http://localhost:8000/api/v1/workflows/research-workflow-v2 | jq '.phases[0].argument_hint'
+curl -s http://localhost:8137/api/v1/workflows/research-workflow-v2 | jq '.input_declarations'
+curl -s http://localhost:8137/api/v1/workflows/research-workflow-v2 | jq '.phases[0].argument_hint'
 ```
 
 ### F3b.4 Dashboard Task Input Form
