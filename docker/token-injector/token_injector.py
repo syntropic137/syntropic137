@@ -104,14 +104,14 @@ PASSTHROUGH_HOSTS = {
 class TokenInjectorHandler(BaseHTTPRequestHandler):
     """Handle ext_authz check requests from Envoy."""
 
-    def log_message(self, fmt: str, *args: object) -> None:  # noqa: ANN001
+    def log_message(self, fmt: str, *args: object) -> None:
         # Route access logs through Python logger
         logger.debug(fmt, *args)
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         self._handle_check()
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         self._handle_check()
 
     def _handle_check(self) -> None:

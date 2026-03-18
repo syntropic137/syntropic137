@@ -67,7 +67,6 @@ class AgenticIsolationAdapter:
 
         Uses env vars SYN_WORKSPACE_CONTAINER_DIR and SYN_WORKSPACE_HOST_DIR if not set.
         """
-        import os
 
         self._default_image = default_image
         self._security = security or SecurityConfig.production()
