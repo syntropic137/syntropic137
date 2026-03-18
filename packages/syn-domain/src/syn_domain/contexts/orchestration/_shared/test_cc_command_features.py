@@ -14,6 +14,8 @@ from syn_domain.contexts.orchestration._shared.workflow_definition import (
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
+    WorkflowClassification,
+    WorkflowType,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
     WorkflowTemplateAggregate,
@@ -21,11 +23,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.Workfl
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
     CreateWorkflowTemplateCommand,
 )
-from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-    WorkflowClassification,
-    WorkflowType,
-)
-
 
 # =============================================================================
 # InputDeclaration Tests
