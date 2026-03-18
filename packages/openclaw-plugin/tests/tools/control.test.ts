@@ -18,7 +18,7 @@ let client: SyntropicClient;
 
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch);
-  client = new SyntropicClient({ apiUrl: "http://localhost:8000" });
+  client = new SyntropicClient({ apiUrl: "http://localhost:8137" });
 });
 
 afterEach(() => {

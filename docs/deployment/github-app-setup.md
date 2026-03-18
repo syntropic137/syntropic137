@@ -254,10 +254,10 @@ cd apps/syn-api
 uv run uvicorn syn_api.main:app
 
 # Check health endpoint
-curl http://localhost:8000/health
+curl http://localhost:8137/health
 
 # Trigger a test webhook (if configured)
-curl -X POST http://localhost:8000/webhooks/github \
+curl -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: ping" \
   -d '{"zen": "Test ping"}'

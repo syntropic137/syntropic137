@@ -115,7 +115,7 @@ async def check_prerequisites() -> bool:
 
     try:
         async with httpx.AsyncClient() as http:
-            resp = await http.get("http://localhost:8000/health", timeout=5)
+            resp = await http.get("http://localhost:8137/health", timeout=5)
             if resp.status_code == 200:
                 print("   ✅ Dashboard API healthy")
             else:

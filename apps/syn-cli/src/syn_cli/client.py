@@ -10,9 +10,7 @@ import httpx
 
 def get_api_url() -> str:
     """Get the API server URL from environment."""
-    return os.environ.get(
-        "SYN_API_URL", os.environ.get("SYN_DASHBOARD_URL", "http://localhost:8000")
-    )
+    return os.environ.get("SYN_API_URL", "http://localhost:8137")
 
 
 def get_client(**kwargs: Any) -> httpx.Client:

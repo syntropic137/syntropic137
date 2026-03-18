@@ -32,7 +32,7 @@ ingress:
 
   # Syn137 API (for direct API access)
   - hostname: api.syn.yourdomain.com
-    service: http://localhost:8000
+    service: http://localhost:8137
     originRequest:
       noTLSVerify: true
       connectTimeout: 30s

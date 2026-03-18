@@ -89,7 +89,7 @@ export function resolveConfig(pluginConfig?: Partial<SyntropicClientConfig>): Sy
     apiUrl:
       pluginConfig?.apiUrl ||
       process.env["SYNTROPIC_URL"] ||
-      "http://localhost:8000",
+      "http://localhost:8137",
     apiKey:
       pluginConfig?.apiKey ||
       process.env["SYNTROPIC_API_KEY"] ||

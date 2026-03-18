@@ -10,3 +10,6 @@
 	path = lib/agent-paradise-standards-system
 	url = https://github.com/AgentParadise/agent-paradise-standards-system.git
 	branch = main
+[submodule "lib/syntropic137-claude-plugin"]
+	path = lib/syntropic137-claude-plugin
+	url = https://github.com/syntropic137/syntropic137-claude-plugin.git

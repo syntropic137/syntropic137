@@ -7,7 +7,7 @@
 just dev
 
 # 2. Verify the backend is up
-curl http://localhost:8000/
+curl http://localhost:8137/
 ```
 
 > **Note:** The triggers API is available at `/triggers` on the API server.
@@ -67,7 +67,7 @@ just cli triggers show <trigger-id>
 Set `SYN_ENVIRONMENT=development` in your `.env` to bypass signature verification, then:
 
 ```bash
-curl -s -X POST http://localhost:8000/webhooks/github \
+curl -s -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: check_run" \
   -H "X-GitHub-Delivery: test-delivery-001" \
@@ -111,7 +111,7 @@ just cli triggers show <trigger-id>
 ## Test 6: Safety guard — bot sender blocked
 
 ```bash
-curl -s -X POST http://localhost:8000/webhooks/github \
+curl -s -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: check_run" \
   -H "X-GitHub-Delivery: test-delivery-002" \
@@ -136,7 +136,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
 
 ```bash
 # Re-send same delivery ID from Test 4
-curl -s -X POST http://localhost:8000/webhooks/github \
+curl -s -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: check_run" \
   -H "X-GitHub-Delivery: test-delivery-001" \
@@ -163,7 +163,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
 just cli triggers pause <trigger-id> --reason "Testing pause"
 
 # Verify it doesn't fire when paused
-curl -s -X POST http://localhost:8000/webhooks/github \
+curl -s -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: check_run" \
   -H "X-GitHub-Delivery: test-delivery-003" \
@@ -184,7 +184,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
 just cli triggers resume <trigger-id>
 
 # Now it should fire again
-curl -s -X POST http://localhost:8000/webhooks/github \
+curl -s -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: check_run" \
   -H "X-GitHub-Delivery: test-delivery-004" \
@@ -207,7 +207,7 @@ curl -s -X POST http://localhost:8000/webhooks/github \
 ## Test 9: Conditions not met — no fire
 
 ```bash
-curl -s -X POST http://localhost:8000/webhooks/github \
+curl -s -X POST http://localhost:8137/webhooks/github \
   -H "Content-Type: application/json" \
   -H "X-GitHub-Event: check_run" \
   -H "X-GitHub-Delivery: test-delivery-005" \

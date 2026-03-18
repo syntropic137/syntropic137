@@ -51,7 +51,7 @@ REPOS = [
     },
 ]
 
-DEFAULT_API_URL = "http://localhost:8000"
+DEFAULT_API_URL = "http://localhost:8137"
 
 
 # --- Seed logic -----------------------------------------------------------
