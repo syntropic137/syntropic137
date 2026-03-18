@@ -128,10 +128,13 @@ async def _build_workspace_prompt(
 ) -> str:
     """Build the workspace prompt for a phase.
 
-    Three-layer substitution:
+    Substitution layers (in order):
     1. Built-in variables: {{execution_id}}, {{workflow_id}}, {{repo_url}}
-    2. Workflow inputs: iterate inputs.items(), substitute {{key}} → value
-    3. Phase outputs (from previous phases)
+    2a. Workflow inputs: {{key}} → value from inputs dict
+    2b. Phase-level static inputs: {{name}} → value from phase definition
+    2c. Phase outputs: {{phase-id}} → previous phase artifact content (inline)
+    2d. $ARGUMENTS → task string from inputs["task"]
+    3. Context appendix: previous phase outputs appended as fallback section
     """
     from syn_domain.contexts.orchestration.slices.execute_workflow.workspace_prompt import (
         SYN_WORKSPACE_PROMPT,
@@ -158,9 +161,19 @@ async def _build_workspace_prompt(
         if phase_input.value is not None:
             phase_prompt = phase_prompt.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
 
+    # Layer 2c: Phase outputs — substitute {{phase-id}} placeholders inline
+    if phase_outputs:
+        for pid, content in phase_outputs.items():
+            phase_prompt = phase_prompt.replace(f"{{{{{pid}}}}}", content[:2000])
+
+    # Layer 2d: $ARGUMENTS substitution (ISS-211 CC command pattern)
+    task = (inputs or {}).get("task", "")
+    phase_prompt = phase_prompt.replace("$ARGUMENTS", str(task))
+
     prompt_parts.append(f"\n## Task\n{phase_prompt}")
 
-    # Layer 3: Context from previous phases
+    # Layer 3: Context from previous phases (appended as fallback for
+    # any phase output not consumed by {{phase-id}} placeholders above)
     if phase_outputs:
         prompt_parts.append("\n## Context from Previous Phases")
         for pid, content in phase_outputs.items():
@@ -337,16 +350,26 @@ class BackgroundWorkflowDispatcher:
         self._tasks: set[asyncio.Task[None]] = set()
 
     async def run_workflow(
-        self, workflow_id: str, inputs: dict[str, str], execution_id: str = ""
+        self,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str = "",
+        task: str | None = None,
     ) -> None:
-        task = asyncio.create_task(
-            self._run(workflow_id, inputs, execution_id),
+        asyncio_task = asyncio.create_task(
+            self._run(workflow_id, inputs, execution_id, task=task),
             name=f"workflow-exec-{execution_id or workflow_id}",
         )
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._tasks.add(asyncio_task)
+        asyncio_task.add_done_callback(self._tasks.discard)
 
-    async def _run(self, workflow_id: str, inputs: dict, execution_id: str) -> None:
+    async def _run(
+        self,
+        workflow_id: str,
+        inputs: dict[str, str],
+        execution_id: str,
+        task: str | None = None,
+    ) -> None:
         from syn_domain.contexts.orchestration.domain.commands.ExecuteWorkflowCommand import (
             ExecuteWorkflowCommand,
         )
@@ -356,6 +379,7 @@ class BackgroundWorkflowDispatcher:
                 aggregate_id=workflow_id,
                 inputs=inputs or {},
                 execution_id=execution_id or None,
+                task=task,
             )
             await self._handler.handle(cmd)
         except Exception:

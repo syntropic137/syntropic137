@@ -191,6 +191,7 @@ class WorkflowSeeder:
             phases=definition.get_domain_phases(),
             project_name=definition.project_name,
             description=definition.description,
+            input_declarations=definition.get_domain_input_declarations(),
         )
 
         try:

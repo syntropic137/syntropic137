@@ -20,7 +20,7 @@ import {
 
 import { executeWorkflow, getMetrics, getWorkflow, getWorkflowHistory, listArtifacts, listExecutions } from '../api/client'
 import { Card, CardContent, CardHeader, EmptyState, MetricCard, PageLoader } from '../components'
-import type { ArtifactSummary, ExecutionHistoryResponse, MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../types'
+import type { ArtifactSummary, ExecutionHistoryResponse, InputDeclaration, MetricsResponse, WorkflowExecutionSummary, WorkflowResponse } from '../types'
 
 // Default phase style for template view (no execution status)
 const defaultPhaseStyle = 'border-slate-500/30 bg-slate-500/10'
@@ -37,6 +37,8 @@ export function WorkflowDetail() {
   const [error, setError] = useState<string | null>(null)
   const [isExecuting, setIsExecuting] = useState(false)
   const [executionMessage, setExecutionMessage] = useState<string | null>(null)
+  const [taskInput, setTaskInput] = useState('')
+  const [formInputs, setFormInputs] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!workflowId) return
@@ -64,15 +66,39 @@ export function WorkflowDetail() {
     return () => { cancelled = true }
   }, [workflowId])
 
+  // Pre-fill defaults from input declarations (only for keys not yet entered)
+  useEffect(() => {
+    if (!workflow) return
+    const declarations: InputDeclaration[] = workflow.input_declarations ?? []
+    setFormInputs(prev => {
+      const merged = { ...prev }
+      for (const decl of declarations) {
+        if (decl.default && decl.name !== 'task' && !merged[decl.name]) {
+          merged[decl.name] = decl.default
+        }
+      }
+      return merged
+    })
+  }, [workflow])
+
+  // Check if required inputs are satisfied
+  const declarations: InputDeclaration[] = workflow?.input_declarations ?? []
+  const missingRequired = declarations.some(
+    (d) => d.required && d.name !== 'task' && !formInputs[d.name]
+  )
+  const taskRequired = declarations.some((d) => d.name === 'task' && d.required)
+  const canExecute = !(taskRequired && !taskInput) && !missingRequired
+
   const handleExecute = async () => {
-    if (!workflowId || isExecuting) return
+    if (!workflowId || isExecuting || !canExecute) return
 
     setIsExecuting(true)
     setExecutionMessage(null)
 
     try {
       const response = await executeWorkflow(workflowId, {
-        inputs: { topic: 'AI Agents' }, // Default input for demo
+        inputs: formInputs,
+        task: taskInput || undefined,
         provider: 'claude',
       })
       setExecutionMessage(`Started! Execution ID: ${response.execution_id.slice(0, 8)}...`)
@@ -145,14 +171,47 @@ export function WorkflowDetail() {
             </div>
           </div>
 
-          {/* Run Workflow Button */}
-          <div className="flex flex-col items-end gap-2">
+          {/* Run Workflow Form */}
+          <div className="flex flex-col items-end gap-3 min-w-[320px]">
+            {/* Task input (always shown) */}
+            <div className="w-full">
+              <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                Task {taskRequired && <span className="text-red-400">*</span>}
+              </label>
+              <textarea
+                value={taskInput}
+                onChange={(e) => setTaskInput(e.target.value)}
+                placeholder="Describe what to work on..."
+                rows={2}
+                className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Dynamic input fields from declarations */}
+            {declarations.filter(d => d.name !== 'task').map((decl) => (
+              <div key={decl.name} className="w-full">
+                <label className="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                  {decl.name} {decl.required && <span className="text-red-400">*</span>}
+                  {decl.description && (
+                    <span className="ml-1 font-normal text-[var(--color-text-muted)]">— {decl.description}</span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  value={formInputs[decl.name] ?? ''}
+                  onChange={(e) => setFormInputs(prev => ({ ...prev, [decl.name]: e.target.value }))}
+                  placeholder={decl.default ?? ''}
+                  className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+            ))}
+
             <button
               onClick={handleExecute}
-              disabled={isExecuting}
+              disabled={isExecuting || !canExecute}
               className={clsx(
                 'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-                isExecuting
+                isExecuting || !canExecute
                   ? 'bg-slate-600 text-slate-300 cursor-not-allowed'
                   : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40'
               )}

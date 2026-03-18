@@ -101,9 +101,36 @@ match result:
 | `created_at` | `datetime \| None` | Creation timestamp |
 | `runs_count` | `int` | Number of executions |
 
+### InputDeclarationResponse
+
+Describes an expected workflow input. Used for validation, documentation, and UI form generation.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Input variable name (e.g., `"task"`, `"topic"`) |
+| `description` | `str \| None` | Human-readable description |
+| `required` | `bool` | Whether this input must be provided (default `true`) |
+| `default` | `str \| None` | Default value if not provided |
+
+### PhaseDefinitionResponse
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `phase_id` | `str` | Phase identifier |
+| `name` | `str` | Phase name |
+| `order` | `int` | Execution order |
+| `description` | `str \| None` | Phase description |
+| `prompt_template` | `str \| None` | Prompt template (may contain `$ARGUMENTS` and `{{variable}}` placeholders) |
+| `argument_hint` | `str \| None` | Hint for what `$ARGUMENTS` represents (e.g., `"[task-description]"`) |
+| `model` | `str \| None` | Per-phase model override (e.g., `"sonnet"`, `"opus"`) |
+| `timeout_seconds` | `int` | Phase timeout (default 300) |
+| `allowed_tools` | `list[str]` | Tools allowed during execution |
+
 ### WorkflowDetail
 
-Extends WorkflowSummary with `phases: list[PhaseDefinitionResponse]`.
+Extends WorkflowSummary with:
+- `phases: list[PhaseDefinitionResponse]` — phase definitions
+- `input_declarations: list[InputDeclarationResponse]` — declared workflow inputs (ISS-211)
 
 ### ExecutionSummary
 

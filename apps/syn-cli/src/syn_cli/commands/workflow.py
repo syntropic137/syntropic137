@@ -228,6 +228,10 @@ def run_workflow(
         list[str] | None,
         typer.Option("--input", "-i", help="Input variables as key=value"),
     ] = None,
+    task: Annotated[
+        str | None,
+        typer.Option("--task", "-t", help="Primary task description ($ARGUMENTS)"),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run", "-n", help="Validate without executing"),
@@ -266,6 +270,8 @@ def run_workflow(
                         border_style="cyan",
                     )
                 )
+                if task:
+                    console.print(f"\n[bold]Task:[/bold] [green]{task}[/green]")
                 if parsed_inputs:
                     console.print("\n[bold]Inputs:[/bold]")
                     for key, value in parsed_inputs.items():
@@ -278,9 +284,14 @@ def run_workflow(
 
             # Execute
             with console.status("Executing workflow..."):
+                body: dict[str, object] = {
+                    "inputs": {k: str(v) for k, v in parsed_inputs.items()},
+                }
+                if task:
+                    body["task"] = task
                 exec_resp = client.post(
                     f"/workflows/{full_workflow_id}/execute",
-                    json={"inputs": {k: str(v) for k, v in parsed_inputs.items()}},
+                    json=body,
                     timeout=300.0,
                 )
 

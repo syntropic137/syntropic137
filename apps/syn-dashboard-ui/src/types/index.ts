@@ -12,12 +12,21 @@ export interface WorkflowSummary {
   runs_count: number
 }
 
+export interface InputDeclaration {
+  name: string
+  description: string | null
+  required: boolean
+  default: string | null
+}
+
 export interface PhaseDefinition {
   phase_id: string
   name: string
   order: number
   description: string | null
   agent_type: string
+  argument_hint: string | null
+  model: string | null
 }
 
 export interface WorkflowResponse {
@@ -27,6 +36,7 @@ export interface WorkflowResponse {
   workflow_type: string
   classification: string
   phases: PhaseDefinition[]
+  input_declarations: InputDeclaration[]
   created_at: string | null
   runs_count: number
   runs_link: string | null
