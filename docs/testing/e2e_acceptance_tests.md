@@ -338,6 +338,75 @@ just cli workflow status non-existent-id
 
 ---
 
+## Feature 3b: Workflow Inputs and Task Execution (ISS-211)
+
+### F3b.1 CLI Task Flag
+
+**Given** a workflow with `inputs:` declarations exists (e.g., `research-workflow-v2`)
+**When** I run `syn workflow run research-workflow-v2 --task "Research topic"`
+**Then** the task is passed through to $ARGUMENTS substitution in prompts
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 3b.1.1 | `--task` flag accepted by CLI | ⬜ |
+| 3b.1.2 | Task displays in execution panel before run | ⬜ |
+| 3b.1.3 | Task is included in API request body | ⬜ |
+| 3b.1.4 | `--task` and `--input` flags coexist | ⬜ |
+
+**Validation Commands:**
+```bash
+syn workflow run research-workflow-v2 --task "Test task" --dry-run
+syn workflow run research-workflow-v2 --task "Test" --input topic=auth --dry-run
+```
+
+### F3b.2 $ARGUMENTS Substitution
+
+**Given** a phase prompt contains `$ARGUMENTS`
+**When** the workflow executes with `task="Investigate auth"`
+**Then** `$ARGUMENTS` is replaced with the task string in the agent prompt
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 3b.2.1 | `$ARGUMENTS` replaced with task string | ⬜ |
+| 3b.2.2 | `$ARGUMENTS` and `{{variable}}` coexist in same prompt | ⬜ |
+| 3b.2.3 | Missing task → `$ARGUMENTS` replaced with empty string | ⬜ |
+| 3b.2.4 | Legacy `{{variable}}`-only prompts still work | ⬜ |
+
+### F3b.3 Input Declarations in API
+
+**Given** a workflow with `input_declarations` exists
+**When** I GET `/api/v1/workflows/{id}`
+**Then** the response includes `input_declarations` with name, description, required, default
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 3b.3.1 | `input_declarations` array present in response | ⬜ |
+| 3b.3.2 | Each declaration has name, description, required | ⬜ |
+| 3b.3.3 | Workflows without declarations return `[]` | ⬜ |
+| 3b.3.4 | `argument_hint` present on phase definitions | ⬜ |
+
+**Validation Commands:**
+```bash
+curl -s http://localhost:8000/api/v1/workflows/research-workflow-v2 | jq '.input_declarations'
+curl -s http://localhost:8000/api/v1/workflows/research-workflow-v2 | jq '.phases[0].argument_hint'
+```
+
+### F3b.4 Dashboard Task Input Form
+
+**Given** I open the workflow detail page for a workflow with input declarations
+**When** the page loads
+**Then** I see a task textarea and dynamic input fields based on declarations
+
+| # | Acceptance Criteria | Status |
+|---|---------------------|--------|
+| 3b.4.1 | Task textarea is always visible | ⬜ |
+| 3b.4.2 | Required inputs show asterisk indicator | ⬜ |
+| 3b.4.3 | Default values pre-filled from declarations | ⬜ |
+| 3b.4.4 | Run button disabled when required inputs missing | ⬜ |
+| 3b.4.5 | Task and inputs passed to executeWorkflow API call | ⬜ |
+
+---
+
 ## Feature 4: Dashboard Backend API
 
 ### F4.1 Health Check

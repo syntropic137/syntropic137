@@ -36,6 +36,15 @@ class WorkflowSummaryResponse(BaseModel):
     runs_count: int = 0
 
 
+class InputDeclarationModel(BaseModel):
+    """Input declaration within a workflow template."""
+
+    name: str
+    description: str | None = None
+    required: bool = True
+    default: str | None = None
+
+
 class PhaseDefinition(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -47,6 +56,8 @@ class PhaseDefinition(BaseModel):
     prompt_template: str | None = None
     timeout_seconds: int = 300
     allowed_tools: list[str] = Field(default_factory=list)
+    argument_hint: str | None = None
+    model: str | None = None
 
 
 class WorkflowResponse(BaseModel):
@@ -58,6 +69,7 @@ class WorkflowResponse(BaseModel):
     workflow_type: str
     classification: str
     phases: list[PhaseDefinition] = Field(default_factory=list)
+    input_declarations: list[InputDeclarationModel] = Field(default_factory=list)
     created_at: str | None = None
     runs_count: int = 0
     runs_link: str | None = None
@@ -183,6 +195,8 @@ async def get_workflow(workflow_id: str) -> WorkflowResponse:
                     prompt_template=p.get("prompt_template"),
                     timeout_seconds=p.get("timeout_seconds", 300),
                     allowed_tools=p.get("allowed_tools", []),
+                    argument_hint=p.get("argument_hint"),
+                    model=p.get("model"),
                 )
             )
         else:
@@ -196,8 +210,26 @@ async def get_workflow(workflow_id: str) -> WorkflowResponse:
                     prompt_template=p.prompt_template if hasattr(p, "prompt_template") else None,
                     timeout_seconds=p.timeout_seconds if hasattr(p, "timeout_seconds") else 300,
                     allowed_tools=list(p.allowed_tools) if hasattr(p, "allowed_tools") else [],
+                    argument_hint=p.argument_hint if hasattr(p, "argument_hint") else None,
+                    model=p.model if hasattr(p, "model") else None,
                 )
             )
+
+    # Build input declarations from detail (if available)
+    input_decls: list[InputDeclarationModel] = []
+    if hasattr(detail, "input_declarations"):
+        for d in detail.input_declarations or []:
+            if isinstance(d, dict):
+                input_decls.append(InputDeclarationModel(**d))
+            else:
+                input_decls.append(
+                    InputDeclarationModel(
+                        name=d.name,
+                        description=d.description if hasattr(d, "description") else None,
+                        required=d.required if hasattr(d, "required") else True,
+                        default=d.default if hasattr(d, "default") else None,
+                    )
+                )
 
     return WorkflowResponse(
         id=detail.id,
@@ -206,6 +238,7 @@ async def get_workflow(workflow_id: str) -> WorkflowResponse:
         workflow_type=detail.workflow_type,
         classification=detail.classification,
         phases=phases,
+        input_declarations=input_decls,
         created_at=str(detail.created_at) if detail.created_at else None,
         runs_count=detail.runs_count,
         runs_link=f"/api/workflows/{detail.id}/runs",

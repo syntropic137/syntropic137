@@ -13,6 +13,7 @@ from event_sourcing import AggregateRoot, aggregate, command_handler, event_sour
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        InputDeclaration,
         PhaseDefinition,
     )
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
@@ -55,6 +56,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._repository_url: str | None = None
         self._repository_ref: str | None = None
         self._phases: list[PhaseDefinition] = []
+        self._input_declarations: list[InputDeclaration] = []
         self._status: WorkflowStatus = WorkflowStatus.PENDING
         self._project_name: str | None = None
         self._description: str | None = None
@@ -77,6 +79,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def phases(self) -> list[PhaseDefinition]:
         """Get workflow phases."""
         return list(self._phases)
+
+    @property
+    def input_declarations(self) -> list[InputDeclaration]:
+        """Get workflow input declarations."""
+        return list(self._input_declarations)
 
     # =========================================================================
     # COMMAND HANDLERS - Validate business rules, emit events
@@ -120,6 +127,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             phases=command.phases,
             project_name=command.project_name,
             description=command.description,
+            input_declarations=command.input_declarations,
         )
 
         self._apply(event)
@@ -139,6 +147,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         with dict attributes instead of proper typed objects. Handle both cases.
         """
         from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+            InputDeclaration,
             PhaseDefinition,
             WorkflowClassification,
             WorkflowType,
@@ -200,6 +209,21 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
             self._project_name = event_data.get("project_name")
             self._description = event_data.get("description")
+
+        # Rehydrate input declarations (ISS-211, backward compat: default [])
+        declarations_raw: list[object] = []
+        if hasattr(event, "input_declarations"):
+            declarations_raw = list(event.input_declarations or [])
+        else:
+            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+            declarations_raw = list(event_data.get("input_declarations", []))
+
+        self._input_declarations = []
+        for decl in declarations_raw:
+            if isinstance(decl, dict):
+                self._input_declarations.append(InputDeclaration(**decl))
+            else:
+                self._input_declarations.append(decl)  # type: ignore[arg-type]
 
     @event_sourcing_handler("WorkflowCreated")
     def on_workflow_created_legacy(self, event: WorkflowTemplateCreatedEvent) -> None:

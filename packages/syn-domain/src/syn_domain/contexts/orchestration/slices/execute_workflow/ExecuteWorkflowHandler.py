@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
+    AgentConfiguration,
     ExecutablePhase,
 )
 from syn_domain.contexts.orchestration.slices.execute_workflow.errors import (
@@ -73,17 +74,39 @@ class ExecuteWorkflowHandler:
 
         phases = self._get_executable_phases(workflow)
 
+        # Apply defaults from input_declarations for any missing inputs
+        merged_inputs = dict(command.inputs)
+        for decl in workflow.input_declarations:
+            if decl.default is not None and decl.name not in merged_inputs:
+                merged_inputs[decl.name] = decl.default
+
+        # Merge task into inputs so $ARGUMENTS and {{task}} both work.
+        # Explicit task field wins over inputs["task"] for $ARGUMENTS.
+        if command.task is not None:
+            merged_inputs["task"] = command.task
+
         # Resolve placeholders in repo_url from inputs (e.g., {{repository}} → owner/repo)
         repo_url = getattr(workflow, "_repository_url", None)
-        if repo_url and command.inputs:
-            for key, value in command.inputs.items():
+        if repo_url and merged_inputs:
+            for key, value in merged_inputs.items():
                 repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+
+        # Guard: fail fast if repo_url still contains unresolved placeholders
+        if repo_url and "{{" in repo_url:
+            import re
+
+            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+            msg = (
+                f"Repository URL contains unresolved placeholders: {unresolved}. "
+                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
+            )
+            raise ValueError(msg)
 
         result = await self._processor.run(
             workflow_id=command.aggregate_id,
             workflow_name=workflow.name or "",
             phases=phases,
-            inputs=command.inputs,
+            inputs=merged_inputs,
             execution_id=command.execution_id or str(uuid4()),
             repo_url=repo_url,
         )
@@ -97,12 +120,19 @@ class ExecuteWorkflowHandler:
         """Convert workflow template phases to executable phases."""
         executable_phases = []
         for phase in workflow.phases:
+            # Build agent config with per-phase model override if specified
+            agent_config = AgentConfiguration()
+            phase_model = getattr(phase, "model", None)
+            if phase_model:
+                agent_config = AgentConfiguration(model=phase_model)
+
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,
                     name=phase.name,
                     order=phase.order,
                     description=phase.description,
+                    agent_config=agent_config,
                     prompt_template=phase.prompt_template or "",
                     output_artifact_type=(
                         phase.output_artifact_types[0] if phase.output_artifact_types else "text"

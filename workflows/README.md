@@ -30,34 +30,80 @@ repository:
   url: https://github.com/org/repo
   ref: main
 
-# Phases - the building blocks
+# Input declarations — what this workflow expects at runtime
+# Maps to the --task flag and --input key=value pairs in the CLI
+inputs:
+  - name: task                # Special: substituted for $ARGUMENTS in prompts
+    description: "What to work on (issue body, topic, etc.)"
+    required: true
+  - name: topic               # Additional named inputs
+    description: "Short topic label"
+    required: false
+    default: "general"
+
+# Phases - the building blocks (each phase = one Claude Code command)
 phases:
   - id: phase-1
     name: Research Phase
     order: 1
     execution_type: sequential  # sequential|parallel|human_in_loop
     description: Gather information
-    
+    argument_hint: "[task-description]"  # Hint for what $ARGUMENTS expects
+    model: sonnet                        # Per-phase model override (optional)
+
     # I/O artifact types
     input_artifacts: []
     output_artifacts:
       - research_summary
       - source_references
-    
+
     # Agent configuration
-    prompt_template: research_v1
     max_tokens: 4096
     timeout_seconds: 300
+
+    # Prompt template — the Claude Code command
+    # Use $ARGUMENTS for the primary task, {{variable}} for named inputs
+    prompt_template: |
+      You are a research assistant.
+
+      ## Your Task
+      $ARGUMENTS
+
+      ## How to Approach This
+      1. Identify key areas of interest
+      2. Gather context from {{topic}}
+      3. Output structured findings
 
   - id: phase-2
     name: Analysis Phase
     order: 2
     execution_type: sequential
+    argument_hint: "[task-description]"
     input_artifacts:
       - research_summary
     output_artifacts:
       - analysis_report
+    prompt_template: |
+      Analyze the research findings.
+
+      ## Original Task
+      $ARGUMENTS
+
+      ## Previous Phase Output
+      {{phase-1}}
 ```
+
+### Prompt Substitution
+
+Workflow prompts support two substitution patterns that coexist:
+
+| Pattern | Source | Example |
+|---------|--------|---------|
+| `$ARGUMENTS` | The `task` field (CLI `--task` flag) | `$ARGUMENTS` → `"Investigate auth middleware"` |
+| `{{variable}}` | Named inputs (CLI `--input key=value`) | `{{topic}}` → `"authentication"` |
+| `{{phase-id}}` | Output from a previous phase | `{{phase-1}}` → *(phase 1 artifact content)* |
+
+Built-in variables: `{{execution_id}}`, `{{workflow_id}}`, `{{repo_url}}`
 
 ## Seeding Workflows
 

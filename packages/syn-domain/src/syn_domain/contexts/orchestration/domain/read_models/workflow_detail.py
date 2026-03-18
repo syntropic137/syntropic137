@@ -47,6 +47,22 @@ class PhaseDefinitionDetail:
     allowed_tools: tuple[str, ...] = ()
     """Tools allowed during this phase execution."""
 
+    argument_hint: str | None = None
+    """Hint for what $ARGUMENTS expects (e.g., '[task-description]')."""
+
+    model: str | None = None
+    """Per-phase model override (e.g., 'sonnet', 'opus')."""
+
+
+@dataclass(frozen=True)
+class InputDeclarationDetail:
+    """Read model for an input declaration within a workflow template."""
+
+    name: str
+    description: str | None = None
+    required: bool = True
+    default: str | None = None
+
 
 @dataclass(frozen=True)
 class WorkflowDetail:
@@ -75,6 +91,9 @@ class WorkflowDetail:
     phases: list[PhaseDefinitionDetail] = field(default_factory=list)
     """List of phase definitions in the workflow."""
 
+    input_declarations: list[InputDeclarationDetail] = field(default_factory=list)
+    """Declared inputs for this workflow (ISS-211)."""
+
     created_at: datetime | None = None
     """When the workflow template was created."""
 
@@ -95,8 +114,21 @@ class WorkflowDetail:
                 prompt_template=p.get(PhaseFields.PROMPT_TEMPLATE),
                 timeout_seconds=p.get(PhaseFields.TIMEOUT_SECONDS, PhaseDefaults.TIMEOUT_SECONDS),
                 allowed_tools=tuple(p.get(PhaseFields.ALLOWED_TOOLS, [])),
+                argument_hint=p.get("argument_hint"),
+                model=p.get("model"),
             )
             for i, p in enumerate(phases_data)
+        ]
+
+        input_decls_data = data.get("input_declarations", [])
+        input_decls = [
+            InputDeclarationDetail(
+                name=d.get("name", ""),
+                description=d.get("description"),
+                required=d.get("required", True),
+                default=d.get("default"),
+            )
+            for d in input_decls_data
         ]
 
         return cls(
@@ -106,6 +138,7 @@ class WorkflowDetail:
             classification=data.get(WorkflowFields.CLASSIFICATION, ""),
             description=data.get(WorkflowFields.DESCRIPTION),
             phases=phases,
+            input_declarations=input_decls,
             created_at=data.get(WorkflowFields.CREATED_AT),
             runs_count=data.get(WorkflowFields.RUNS_COUNT, 0),
         )
@@ -135,6 +168,18 @@ class WorkflowDetail:
                 PhaseFields.PROMPT_TEMPLATE: p.prompt_template,
                 PhaseFields.TIMEOUT_SECONDS: p.timeout_seconds,
                 PhaseFields.ALLOWED_TOOLS: list(p.allowed_tools),
+                "argument_hint": p.argument_hint,
+                "model": p.model,
+            }
+
+        def input_decl_to_dict(d: InputDeclarationDetail | dict) -> dict:
+            if isinstance(d, dict):
+                return d
+            return {
+                "name": d.name,
+                "description": d.description,
+                "required": d.required,
+                "default": d.default,
             }
 
         return {
@@ -144,6 +189,7 @@ class WorkflowDetail:
             WorkflowFields.CLASSIFICATION: self.classification,
             WorkflowFields.DESCRIPTION: self.description,
             WorkflowFields.PHASES: [phase_to_dict(p) for p in self.phases],
+            "input_declarations": [input_decl_to_dict(d) for d in self.input_declarations],
             WorkflowFields.CREATED_AT: self._to_iso_string(self.created_at),
             WorkflowFields.RUNS_COUNT: self.runs_count,
         }

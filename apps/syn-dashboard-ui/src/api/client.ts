@@ -68,6 +68,7 @@ export async function getWorkflowHistory(workflowId: string): Promise<ExecutionH
 
 export interface ExecuteWorkflowRequest {
   inputs?: Record<string, string>
+  task?: string
   provider?: string
   max_budget_usd?: number
 }

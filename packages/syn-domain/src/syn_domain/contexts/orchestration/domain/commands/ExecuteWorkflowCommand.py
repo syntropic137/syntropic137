@@ -33,6 +33,12 @@ class ExecuteWorkflowCommand(BaseModel):
         description="Custom execution ID (generated if not provided)",
     )
 
+    # Primary task description — substituted for $ARGUMENTS in phase prompts
+    task: str | None = Field(
+        default=None,
+        description="Primary task description, substituted for $ARGUMENTS in prompts",
+    )
+
     # Dry run mode - validate without executing
     dry_run: bool = Field(
         default=False,

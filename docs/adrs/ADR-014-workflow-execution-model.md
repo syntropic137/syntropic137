@@ -180,6 +180,8 @@ Existing endpoints updated:
 - ADR-012: Artifact Storage
 - **ADR-023: Workspace-First Execution Model** - Specifies how `WorkflowExecutionEngine`
   implements this model with required workspace isolation and event persistence
+- **ADR-048: Workflows as Claude Code Commands** - Extends this model with input declarations,
+  `$ARGUMENTS` substitution, and per-phase model overrides (ISS-211)
 
 ## Files Changed
 - `packages/syn-domain/.../read_models/workflow_execution_summary.py` - New
