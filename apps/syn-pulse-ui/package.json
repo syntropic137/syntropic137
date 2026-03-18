@@ -11,8 +11,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@nivo/calendar": "^0.88.0",
-    "@nivo/core": "^0.88.0",
+    "@nivo/calendar": "^0.99.0",
+    "@nivo/core": "^0.99.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
