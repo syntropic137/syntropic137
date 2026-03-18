@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from rich.console import Console
+from rich.table import Table
 
 console = Console()
 
@@ -34,6 +36,46 @@ def print_error(message: str) -> None:
 def print_success(message: str) -> None:
     """Print a green success message."""
     console.print(f"[green]{message}[/green]")
+
+
+def format_duration(ms: float) -> str:
+    """Convert milliseconds to human-readable duration (e.g., '1.2s', '2m 15s', '1h 30m')."""
+    if ms < 1000:
+        return f"{ms:.0f}ms"
+    seconds = ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    if minutes < 60:
+        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m" if mins else f"{hours}h"
+
+
+def format_timestamp(iso: str | None) -> str:
+    """Convert ISO timestamp to local time string (e.g., 'Mar 16 14:30')."""
+    if not iso:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        local_dt = dt.astimezone()
+        return local_dt.strftime("%b %d %H:%M")
+    except (ValueError, TypeError):
+        return iso
+
+
+def format_breakdown(breakdown: dict[str, str], title: str) -> Table:
+    """Render a cost/token breakdown dict as a Rich sub-table."""
+    table = Table(title=title, show_edge=False, pad_edge=False)
+    table.add_column("Key", style="cyan")
+    table.add_column("Value", justify="right")
+    for key, value in breakdown.items():
+        table.add_row(key, str(value))
+    return table
 
 
 def status_style(status: str) -> str:
