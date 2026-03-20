@@ -11,3 +11,4 @@ REPO_FAILURE = "repo_failure"
 
 # Cross-context projections (owned by other contexts)
 SESSION_SUMMARIES = "session_summaries"
+WORKFLOW_EXECUTIONS = "workflow_executions"  # owned by orchestration/slices/list_executions

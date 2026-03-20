@@ -9,6 +9,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.github._shared.projection_names import INSTALLATIONS
 from syn_domain.contexts.github.domain.read_models.installation import (
     Installation,
     InstallationStatus,
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PROJECTION_NAME = "installations"
+PROJECTION_NAME = INSTALLATIONS
 
 
 def _inst_to_dict(inst: Installation) -> dict[str, Any]:

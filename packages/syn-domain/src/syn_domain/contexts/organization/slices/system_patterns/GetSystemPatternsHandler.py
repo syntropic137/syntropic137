@@ -12,6 +12,7 @@ from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization._shared.projection_names import (
     REPO_CORRELATION,
     REPO_COST,
+    WORKFLOW_EXECUTIONS,
 )
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
@@ -60,7 +61,7 @@ class GetSystemPatternsHandler:
         if not exec_to_repo:
             return []
 
-        all_executions = await self._store.get_all("workflow_executions")
+        all_executions = await self._store.get_all(WORKFLOW_EXECUTIONS)
         execution_ids = set(exec_to_repo.keys())
 
         # Group by (error_type, error_message)

@@ -9,6 +9,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.github._shared.projection_names import TRIGGER_RULES
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
     TriggerStatus,
 )
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PROJECTION_NAME = "trigger_rules"
+PROJECTION_NAME = TRIGGER_RULES
 
 
 def _rule_to_dict(rule: TriggerRule) -> dict[str, Any]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_EXECUTIONS
 from syn_domain.contexts.organization.domain.queries.get_system_activity import (
     GetSystemActivityQuery,
 )
@@ -33,7 +34,7 @@ class TestGetSystemActivityHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-1",
             {
                 "workflow_execution_id": "exec-1",
@@ -64,7 +65,7 @@ class TestGetSystemActivityHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-1",
             {
                 "workflow_execution_id": "exec-1",
@@ -92,7 +93,7 @@ class TestGetSystemActivityHandler:
                 },
             )
             await store.save(
-                "workflow_executions",
+                WORKFLOW_EXECUTIONS,
                 f"exec-{i}",
                 {
                     "workflow_execution_id": f"exec-{i}",

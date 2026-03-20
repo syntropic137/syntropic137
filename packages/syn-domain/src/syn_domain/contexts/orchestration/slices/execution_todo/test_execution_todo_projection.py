@@ -222,3 +222,29 @@ class TestEdgeCases:
         await proj.on_workflow_execution_started(event)
         todos = await proj.get_pending("exec-1")
         assert todos[0].phase_id == "p-1"
+
+
+# =========================================================================
+# Restart resilience
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestRestartResilience:
+    """State persists in the store across projection instance restarts."""
+
+    @pytest.mark.anyio
+    async def test_new_instance_same_store_sees_todos(self) -> None:
+        """A fresh projection instance backed by the same store returns the same todos."""
+        store = InMemoryProjectionStore()
+        proj1 = ExecutionTodoProjection(store=store)
+        await proj1.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
+        todos_before = await proj1.get_pending("exec-1")
+        assert len(todos_before) == 1
+
+        # Simulate restart: new projection instance, same store
+        proj2 = ExecutionTodoProjection(store=store)
+        todos_after = await proj2.get_pending("exec-1")
+        assert len(todos_after) == 1
+        assert todos_after[0].action == todos_before[0].action
+        assert todos_after[0].phase_id == todos_before[0].phase_id

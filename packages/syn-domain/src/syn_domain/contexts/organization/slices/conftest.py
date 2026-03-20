@@ -38,13 +38,17 @@ class FakeProjectionStore:
         self,
         projection: str,
         filters: dict[str, Any] | None = None,
-        order_by: str | None = None,  # noqa: ARG002
+        order_by: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         records = list(self._data.get(projection, {}).values())
         if filters:
             records = [r for r in records if all(r.get(k) == v for k, v in filters.items())]
+        if order_by:
+            reverse = order_by.startswith("-")
+            field = order_by.lstrip("-")
+            records.sort(key=lambda r: (r.get(field) is None, r.get(field)), reverse=reverse)
         if offset:
             records = records[offset:]
         if limit is not None:

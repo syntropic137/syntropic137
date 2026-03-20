@@ -24,6 +24,7 @@ from syn_api.types import (
     TriggerHistoryEntry,
     TriggerSummary,
 )
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
@@ -172,7 +173,11 @@ async def enable_preset(
     existing = await list_triggers(repository=repository)
     if isinstance(existing, Ok):
         for t in existing.value:
-            if t.name == command.name and t.event == command.event and t.status != "deleted":
+            if (
+                t.name == command.name
+                and t.event == command.event
+                and t.status != TriggerStatus.DELETED
+            ):
                 return Err(
                     TriggerError.INVALID_INPUT,
                     message=f"Trigger '{command.name}' already exists for {repository}",
@@ -367,9 +372,9 @@ async def pause_trigger(
     indexed = await store.get(trigger_id)
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
-    if indexed.status == "paused":
+    if indexed.status == TriggerStatus.PAUSED:
         return Err(TriggerError.ALREADY_PAUSED)
-    if indexed.status == "deleted":
+    if indexed.status == TriggerStatus.DELETED:
         return Err(TriggerError.ALREADY_DELETED)
 
     command = PauseTriggerCommand(
@@ -385,7 +390,7 @@ async def pause_trigger(
     if result is None:
         return Err(TriggerError.NOT_FOUND, message=f"Failed to pause trigger {trigger_id}")
 
-    await store.update_status(trigger_id, "paused")
+    await store.update_status(trigger_id, TriggerStatus.PAUSED.value)
     await sync_published_events_to_projections()
     return Ok(None)
 
@@ -419,9 +424,9 @@ async def resume_trigger(
     indexed = await store.get(trigger_id)
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
-    if indexed.status == "active":
+    if indexed.status == TriggerStatus.ACTIVE:
         return Err(TriggerError.ALREADY_ACTIVE)
-    if indexed.status == "deleted":
+    if indexed.status == TriggerStatus.DELETED:
         return Err(TriggerError.ALREADY_DELETED)
 
     command = ResumeTriggerCommand(
@@ -436,7 +441,7 @@ async def resume_trigger(
     if result is None:
         return Err(TriggerError.NOT_FOUND, message=f"Failed to resume trigger {trigger_id}")
 
-    await store.update_status(trigger_id, "active")
+    await store.update_status(trigger_id, TriggerStatus.ACTIVE.value)
     await sync_published_events_to_projections()
     return Ok(None)
 
@@ -470,7 +475,7 @@ async def delete_trigger(
     indexed = await store.get(trigger_id)
     if indexed is None:
         return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
-    if indexed.status == "deleted":
+    if indexed.status == TriggerStatus.DELETED:
         return Err(TriggerError.ALREADY_DELETED)
 
     command = DeleteTriggerCommand(
@@ -485,7 +490,7 @@ async def delete_trigger(
     if result is None:
         return Err(TriggerError.NOT_FOUND, message=f"Failed to delete trigger {trigger_id}")
 
-    await store.update_status(trigger_id, "deleted")
+    await store.update_status(trigger_id, TriggerStatus.DELETED.value)
     await sync_published_events_to_projections()
     return Ok(None)
 

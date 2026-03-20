@@ -9,6 +9,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from syn_domain.contexts.github._shared.projection_names import TRIGGER_HISTORY
 from syn_domain.contexts.github.domain.read_models.trigger_history_entry import (
     TriggerHistoryEntry,
 )
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-PROJECTION_NAME = "trigger_history"
+PROJECTION_NAME = TRIGGER_HISTORY
 
 
 def _entry_to_dict(entry: TriggerHistoryEntry) -> dict[str, Any]:

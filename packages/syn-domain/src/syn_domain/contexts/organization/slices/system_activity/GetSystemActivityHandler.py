@@ -7,7 +7,10 @@ membership via correlation and in-memory projections.
 from datetime import UTC
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
-from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_CORRELATION,
+    WORKFLOW_EXECUTIONS,
+)
 from syn_domain.contexts.organization.domain.queries.get_system_activity import (
     GetSystemActivityQuery,
 )
@@ -59,7 +62,7 @@ class GetSystemActivityHandler:
         if not execution_ids:
             return []
 
-        all_executions = await self._store.get_all("workflow_executions")
+        all_executions = await self._store.get_all(WORKFLOW_EXECUTIONS)
 
         entries = []
         for ex in all_executions:
