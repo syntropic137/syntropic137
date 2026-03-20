@@ -25,7 +25,9 @@ syntropic137/
 ├── apps/
 │   ├── syn-api/               # FastAPI HTTP server (routes + v1 application services)
 │   ├── syn-cli/               # CLI tool ("syn") — HTTP client for syn-api
-│   └── syn-dashboard-ui/      # Dashboard frontend (Vite + React)
+│   ├── syn-dashboard-ui/      # Dashboard frontend (Vite + React) — operational UI
+│   ├── syn-docs/              # Public-facing documentation site (Next.js + Fumadocs)
+│   └── syn-pulse-ui/          # Pulse/heatmap UI
 ├── packages/
 │   ├── syn-domain/            # Domain events, aggregates, ports
 │   ├── syn-adapters/          # Orchestration + observability adapters
@@ -35,8 +37,12 @@ syntropic137/
 │   ├── agentic-primitives/    # Composable agent building blocks, isolation providers
 │   └── event-sourcing-platform/ # ES infrastructure, VSA tool, projections
 ├── infra/                     # Docker Compose, setup wizard, secrets
+├── docs/                      # Internal/local development docs (ADRs, architecture notes,
+│                              #   deployment guides) — NOT the public docs site
 └── docs/adrs/                 # Architecture Decision Records
 ```
+
+> **Docs vs syn-docs:** `docs/` is internal — local dev guides, ADRs, architecture references for contributors. `apps/syn-docs/` is the public-facing documentation site deployed externally. Content for the public docs site lives in `apps/syn-docs/content/`.
 
 ### Submodules (`lib/`)
 

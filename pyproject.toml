@@ -36,6 +36,7 @@ dev = [
     "asyncpg>=0.31.0",
     "testcontainers>=4.13.3",
     "pyright>=1.1.408",
+    "playwright>=1.58.0",
 ]
 
 [build-system]
