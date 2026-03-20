@@ -20,6 +20,8 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_domain.contexts.github._shared.projection_names import WORKFLOW_DISPATCH
+
 logger = logging.getLogger(__name__)
 
 # Event types this projection subscribes to
@@ -38,12 +40,12 @@ class WorkflowDispatchProjection(CheckpointedProjection):
     4. Saves checkpoint for reliable position tracking
     """
 
-    PROJECTION_NAME = "workflow_dispatch"
+    PROJECTION_NAME = WORKFLOW_DISPATCH
     VERSION = 1
 
-    def __init__(self, execution_service: Any = None) -> None:
+    def __init__(self, execution_service: Any = None, store: Any = None) -> None:
         self._execution_service = execution_service
-        self._dispatched: list[dict[str, Any]] = []
+        self._store = store
 
     def get_name(self) -> str:
         return self.PROJECTION_NAME
@@ -85,7 +87,12 @@ class WorkflowDispatchProjection(CheckpointedProjection):
             return ProjectionResult.FAILURE
 
     async def clear_all_data(self) -> None:
-        self._dispatched.clear()
+        if self._store is not None:
+            records = await self._store.get_all(self.PROJECTION_NAME)
+            for record in records:
+                key = record.get("execution_id")
+                if key:
+                    await self._store.delete(self.PROJECTION_NAME, key)
 
     async def _on_trigger_fired(self, event_data: dict[str, Any]) -> None:
         """Handle a TriggerFired event by dispatching the workflow."""
@@ -99,9 +106,10 @@ class WorkflowDispatchProjection(CheckpointedProjection):
             "execution_id": execution_id,
             "workflow_id": workflow_id,
             "workflow_inputs": workflow_inputs,
-            "dispatched_at": datetime.now(UTC),
+            "dispatched_at": datetime.now(UTC).isoformat(),
         }
-        self._dispatched.append(dispatch_record)
+        if self._store is not None and execution_id:
+            await self._store.save(self.PROJECTION_NAME, execution_id, dispatch_record)
 
         if not workflow_id:
             logger.warning(f"TriggerFired event {trigger_id} has no workflow_id, skipping dispatch")
@@ -129,7 +137,3 @@ class WorkflowDispatchProjection(CheckpointedProjection):
                 f"workflow={workflow_id} execution={execution_id} "
                 "(no execution service configured)"
             )
-
-    def get_dispatched(self) -> list[dict[str, Any]]:
-        """Get list of dispatched records (for testing/debugging)."""
-        return list(self._dispatched)

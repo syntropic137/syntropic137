@@ -21,7 +21,7 @@ class TestGetSystemStatusHandler:
     @pytest.mark.asyncio
     async def test_all_healthy(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker"]
         )
         handler = GetSystemStatusHandler(store, sys_proj, repo_proj)
@@ -63,7 +63,7 @@ class TestGetSystemStatusHandler:
     @pytest.mark.asyncio
     async def test_degraded_when_some_failing(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker"]
         )
         handler = GetSystemStatusHandler(store, sys_proj, repo_proj)
@@ -98,7 +98,7 @@ class TestGetSystemStatusHandler:
     @pytest.mark.asyncio
     async def test_empty_system(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections("sys-1", "Empty", "org-1", [])
+        sys_proj, repo_proj = await _make_projections("sys-1", "Empty", "org-1", [])
         handler = GetSystemStatusHandler(store, sys_proj, repo_proj)
 
         result = await handler.handle(GetSystemStatusQuery(system_id="sys-1"))
@@ -111,7 +111,7 @@ class TestGetSystemStatusHandler:
     async def test_all_repos_failing(self) -> None:
         """When majority of repos are failing, overall status is 'failing'."""
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker", "acme/web"]
         )
         handler = GetSystemStatusHandler(store, sys_proj, repo_proj)
@@ -137,7 +137,7 @@ class TestGetSystemStatusHandler:
     async def test_no_health_data_returns_inactive(self) -> None:
         """Repos with no health data should be marked inactive."""
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        sys_proj, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemStatusHandler(store, sys_proj, repo_proj)
 
         # No health data seeded

@@ -31,7 +31,7 @@ class GetGlobalCostHandler:
 
     async def handle(self, query: GetGlobalCostQuery) -> SystemCost:  # noqa: ARG002
         """Handle GetGlobalCostQuery."""
-        repos = self._repo_projection.list_all()
+        repos = await self._repo_projection.list_all()
 
         total_cost = Decimal("0")
         total_tokens = 0

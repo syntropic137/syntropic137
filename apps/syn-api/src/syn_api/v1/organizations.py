@@ -68,7 +68,7 @@ async def list_organizations(
     await ensure_connected()
 
     projection = get_organization_projection()
-    orgs = projection.list_all()
+    orgs = await projection.list_all()
 
     return Ok(
         [
@@ -98,7 +98,7 @@ async def get_organization(
     await ensure_connected()
 
     projection = get_organization_projection()
-    org = projection.get(organization_id)
+    org = await projection.get(organization_id)
 
     if org is None:
         return Err(OrganizationError.NOT_FOUND, message=f"Organization {organization_id} not found")

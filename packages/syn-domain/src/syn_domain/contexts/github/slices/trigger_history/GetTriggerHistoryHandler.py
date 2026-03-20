@@ -26,7 +26,7 @@ class GetTriggerHistoryHandler:
     Reads from the trigger history projection.
     """
 
-    def handle(self, query: GetTriggerHistoryQuery) -> list[TriggerHistoryEntry]:
+    async def handle(self, query: GetTriggerHistoryQuery) -> list[TriggerHistoryEntry]:
         """Handle the query.
 
         Args:
@@ -36,7 +36,7 @@ class GetTriggerHistoryHandler:
             List of TriggerHistoryEntry read models.
         """
         projection = get_trigger_history_projection()
-        return projection.get_history(
+        return await projection.get_history(
             trigger_id=query.trigger_id,
             limit=query.limit,
         )

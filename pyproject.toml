@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.12.2"
+version = "0.13.0"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -36,7 +36,6 @@ dev = [
     "asyncpg>=0.31.0",
     "testcontainers>=4.13.3",
     "pyright>=1.1.408",
-    "playwright>=1.58.0",
 ]
 
 [build-system]

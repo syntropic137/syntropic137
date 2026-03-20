@@ -82,7 +82,7 @@ class TestGetContributionHeatmapHandler:
             ]
         )
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
         result = await handler.handle(
@@ -108,7 +108,7 @@ class TestGetContributionHeatmapHandler:
             ]
         )
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
 
         await store.save(
             "repo_correlation",
@@ -137,7 +137,7 @@ class TestGetContributionHeatmapHandler:
         """Filter that resolves to no execution IDs returns empty result."""
         pool = _make_mock_pool([])
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         # No correlations in store → empty execution_ids
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
@@ -162,7 +162,7 @@ class TestGetContributionHeatmapHandler:
             ]
         )
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
 
         handler = GetContributionHeatmapHandler(pool=pool, store=store, repo_projection=repo_proj)
 

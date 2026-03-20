@@ -84,7 +84,7 @@ async def list_repos(
     await ensure_connected()
 
     projection = get_repo_projection()
-    repos = projection.list_all(
+    repos = await projection.list_all(
         organization_id=organization_id,
         system_id=system_id,
         provider=provider,
@@ -123,7 +123,7 @@ async def get_repo(
     await ensure_connected()
 
     projection = get_repo_projection()
-    repo = projection.get(repo_id)
+    repo = await projection.get(repo_id)
 
     if repo is None:
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")

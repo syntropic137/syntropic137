@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 
 
 class ListSystemsHandler:
-    def handle(self, query: ListSystemsQuery) -> list[SystemSummary]:
+    async def handle(self, query: ListSystemsQuery) -> list[SystemSummary]:
         projection = get_system_projection()
-        return projection.list_all(organization_id=query.organization_id)
+        return await projection.list_all(organization_id=query.organization_id)
 
 
 _handler: ListSystemsHandler | None = None
