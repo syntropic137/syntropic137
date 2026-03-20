@@ -21,7 +21,7 @@ class TestGetSystemHistoryHandler:
     @pytest.mark.asyncio
     async def test_returns_chronological_order(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         await store.save(
@@ -70,7 +70,7 @@ class TestGetSystemHistoryHandler:
     @pytest.mark.asyncio
     async def test_respects_limit(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         for i in range(5):
@@ -98,7 +98,7 @@ class TestGetSystemHistoryHandler:
     @pytest.mark.asyncio
     async def test_empty_for_unknown_system(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", [])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", [])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         result = await handler.handle(GetSystemHistoryQuery(system_id="sys-1"))
@@ -108,7 +108,7 @@ class TestGetSystemHistoryHandler:
     async def test_offset_pagination(self) -> None:
         """Offset should skip entries before applying limit."""
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         for i in range(5):
@@ -141,7 +141,7 @@ class TestGetSystemHistoryHandler:
     async def test_offset_beyond_total(self) -> None:
         """Offset beyond total entries returns empty list."""
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         await store.save(

@@ -12,12 +12,37 @@ See AGENTS.md "Projection Consistency in Processor Loops".
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from event_sourcing import AutoDispatchProjection
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 
 from syn_domain.contexts.orchestration.slices.execution_todo.value_objects import (
     TodoAction,
     TodoItem,
 )
+
+
+def _item_to_dict(item: TodoItem) -> dict:
+    return {
+        "execution_id": item.execution_id,
+        "action": item.action.value,
+        "phase_id": item.phase_id,
+        "workspace_id": item.workspace_id,
+        "session_id": item.session_id,
+    }
+
+
+def _item_from_dict(data: dict) -> TodoItem:
+    return TodoItem(
+        execution_id=data["execution_id"],
+        action=TodoAction(data["action"]),
+        phase_id=data.get("phase_id"),
+        workspace_id=data.get("workspace_id"),
+        session_id=data.get("session_id"),
+    )
 
 
 class ExecutionTodoProjection(AutoDispatchProjection):
@@ -33,10 +58,9 @@ class ExecutionTodoProjection(AutoDispatchProjection):
     PROJECTION_NAME = "execution_todo"
     VERSION = 1
 
-    def __init__(self) -> None:
-        """Initialize with empty to-do state."""
-        # execution_id → list of pending TodoItems
-        self._todos: dict[str, list[TodoItem]] = {}
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
+        """Initialize with a projection store."""
+        self._store = store
 
     def get_name(self) -> str:
         """Unique projection name for checkpoint tracking."""
@@ -48,18 +72,25 @@ class ExecutionTodoProjection(AutoDispatchProjection):
 
     async def clear_all_data(self) -> None:
         """Clear all to-do data (for rebuild)."""
-        self._todos.clear()
+        records = await self._store.get_all(self.PROJECTION_NAME)
+        for record in records:
+            execution_id = record.get("execution_id")
+            if execution_id:
+                await self._store.delete(self.PROJECTION_NAME, execution_id)
 
     # =========================================================================
     # Query interface
     # =========================================================================
 
-    def get_pending(self, execution_id: str) -> list[TodoItem]:
+    async def get_pending(self, execution_id: str) -> list[TodoItem]:
         """Get all pending to-do items for an execution.
 
         Returns items in insertion order (FIFO).
         """
-        return list(self._todos.get(execution_id, []))
+        data = await self._store.get(self.PROJECTION_NAME, execution_id)
+        if data is None:
+            return []
+        return [_item_from_dict(d) for d in data.get("items", [])]
 
     # =========================================================================
     # Event handlers
@@ -79,13 +110,22 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         sorted_phases = sorted(phase_defs, key=lambda p: p.get("order", 0))
         first_phase = sorted_phases[0]
 
-        self._todos[execution_id] = [
-            TodoItem(
-                execution_id=execution_id,
-                action=TodoAction.PROVISION_WORKSPACE,
-                phase_id=first_phase["phase_id"],
-            ),
-        ]
+        await self._store.save(
+            self.PROJECTION_NAME,
+            execution_id,
+            {
+                "execution_id": execution_id,
+                "items": [
+                    _item_to_dict(
+                        TodoItem(
+                            execution_id=execution_id,
+                            action=TodoAction.PROVISION_WORKSPACE,
+                            phase_id=first_phase["phase_id"],
+                        )
+                    )
+                ],
+            },
+        )
 
     async def on_workspace_provisioned_for_phase(self, event_data: dict) -> None:
         """Workspace ready → run agent."""
@@ -93,7 +133,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
-        self._replace_todo(
+        await self._replace_todo(
             execution_id,
             TodoItem(
                 execution_id=execution_id,
@@ -110,7 +150,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
-        self._replace_todo(
+        await self._replace_todo(
             execution_id,
             TodoItem(
                 execution_id=execution_id,
@@ -126,7 +166,7 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
-        self._replace_todo(
+        await self._replace_todo(
             execution_id,
             TodoItem(
                 execution_id=execution_id,
@@ -147,12 +187,17 @@ class ExecutionTodoProjection(AutoDispatchProjection):
             return
 
         phase_id = event_data.get("phase_id")
-        current = self._todos.get(execution_id, [])
-        self._todos[execution_id] = [
+        current = await self.get_pending(execution_id)
+        remaining = [
             t
             for t in current
             if not (t.action == TodoAction.COMPLETE_PHASE and t.phase_id == phase_id)
         ]
+        await self._store.save(
+            self.PROJECTION_NAME,
+            execution_id,
+            {"execution_id": execution_id, "items": [_item_to_dict(t) for t in remaining]},
+        )
 
     async def on_next_phase_ready(self, event_data: dict) -> None:
         """Aggregate decided next phase → append PROVISION_WORKSPACE to-do.
@@ -166,40 +211,52 @@ class ExecutionTodoProjection(AutoDispatchProjection):
         if not execution_id:
             return
 
-        if execution_id not in self._todos:
-            self._todos[execution_id] = []
-        self._todos[execution_id].append(
+        current = await self.get_pending(execution_id)
+        current.append(
             TodoItem(
                 execution_id=execution_id,
                 action=TodoAction.PROVISION_WORKSPACE,
                 phase_id=event_data.get("next_phase_id"),
-            ),
+            )
+        )
+        await self._store.save(
+            self.PROJECTION_NAME,
+            execution_id,
+            {"execution_id": execution_id, "items": [_item_to_dict(t) for t in current]},
         )
 
     async def on_workflow_completed(self, event_data: dict) -> None:
         """Workflow completed → clear all todos."""
         execution_id = event_data.get("execution_id", "")
-        self._todos.pop(execution_id, None)
+        if execution_id:
+            await self._store.delete(self.PROJECTION_NAME, execution_id)
 
     async def on_workflow_failed(self, event_data: dict) -> None:
         """Workflow failed → clear all todos."""
         execution_id = event_data.get("execution_id", "")
-        self._todos.pop(execution_id, None)
+        if execution_id:
+            await self._store.delete(self.PROJECTION_NAME, execution_id)
 
     async def on_execution_cancelled(self, event_data: dict) -> None:
         """Execution cancelled → clear all todos."""
         execution_id = event_data.get("execution_id", "")
-        self._todos.pop(execution_id, None)
+        if execution_id:
+            await self._store.delete(self.PROJECTION_NAME, execution_id)
 
     async def on_workflow_interrupted(self, event_data: dict) -> None:
         """Workflow interrupted → clear all todos."""
         execution_id = event_data.get("execution_id", "")
-        self._todos.pop(execution_id, None)
+        if execution_id:
+            await self._store.delete(self.PROJECTION_NAME, execution_id)
 
     # =========================================================================
     # Internal
     # =========================================================================
 
-    def _replace_todo(self, execution_id: str, new_todo: TodoItem) -> None:
+    async def _replace_todo(self, execution_id: str, new_todo: TodoItem) -> None:
         """Replace all pending todos for an execution with a single new one."""
-        self._todos[execution_id] = [new_todo]
+        await self._store.save(
+            self.PROJECTION_NAME,
+            execution_id,
+            {"execution_id": execution_id, "items": [_item_to_dict(new_todo)]},
+        )

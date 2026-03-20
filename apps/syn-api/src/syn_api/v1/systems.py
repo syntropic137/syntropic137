@@ -71,7 +71,7 @@ async def list_systems(
     await ensure_connected()
 
     projection = get_system_projection()
-    systems = projection.list_all(organization_id=organization_id)
+    systems = await projection.list_all(organization_id=organization_id)
 
     return Ok(
         [
@@ -101,7 +101,7 @@ async def get_system(
     await ensure_connected()
 
     projection = get_system_projection()
-    system = projection.get(system_id)
+    system = await projection.get(system_id)
 
     if system is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
@@ -223,7 +223,7 @@ async def get_system_status(system_id: str) -> Result[dict[str, Any], SystemErro
     await ensure_connected()
 
     sys_proj = get_system_projection()
-    if sys_proj.get(system_id) is None:
+    if (await sys_proj.get(system_id)) is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
     handler = GetSystemStatusHandler(
@@ -254,7 +254,7 @@ async def get_system_cost(system_id: str) -> Result[dict[str, Any], SystemErrorC
     await ensure_connected()
 
     sys_proj = get_system_projection()
-    if sys_proj.get(system_id) is None:
+    if (await sys_proj.get(system_id)) is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
     handler = GetSystemCostHandler(
@@ -286,7 +286,8 @@ async def get_system_activity(
 
     await ensure_connected()
 
-    if get_system_projection().get(system_id) is None:
+    _sys_proj = get_system_projection()
+    if (await _sys_proj.get(system_id)) is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
     handler = GetSystemActivityHandler(
@@ -320,7 +321,7 @@ async def get_system_patterns(
     await ensure_connected()
 
     sys_proj = get_system_projection()
-    if sys_proj.get(system_id) is None:
+    if (await sys_proj.get(system_id)) is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
     handler = GetSystemPatternsHandler(
@@ -352,7 +353,8 @@ async def get_system_history(
 
     await ensure_connected()
 
-    if get_system_projection().get(system_id) is None:
+    _sys_proj = get_system_projection()
+    if (await _sys_proj.get(system_id)) is None:
         return Err(SystemErrorCode.NOT_FOUND, message=f"System {system_id} not found")
 
     handler = GetSystemHistoryHandler(

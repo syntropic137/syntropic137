@@ -73,6 +73,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
     manager = get_projection_manager()
     artifact_query = ArtifactQueryService(manager.artifact_list)
 
+    from syn_adapters.projection_stores import get_projection_store
     from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
         ExecutionTodoProjection,
     )
@@ -89,7 +90,7 @@ async def get_execution_processor() -> WorkflowExecutionProcessor:
         controller=get_controller(),
         prompt_builder=_build_workspace_prompt,
         command_builder=_build_claude_command,
-        todo_projection=ExecutionTodoProjection(),
+        todo_projection=ExecutionTodoProjection(store=get_projection_store()),
     )
 
 

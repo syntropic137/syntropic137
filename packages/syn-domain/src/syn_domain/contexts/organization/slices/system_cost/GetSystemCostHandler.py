@@ -36,11 +36,11 @@ class GetSystemCostHandler:
 
     async def handle(self, query: GetSystemCostQuery) -> SystemCost:
         """Handle GetSystemCostQuery."""
-        system = self._system_projection.get(query.system_id)
+        system = await self._system_projection.get(query.system_id)
         system_name = system.name if system else ""
         organization_id = system.organization_id if system else ""
 
-        repos = self._repo_projection.list_all(system_id=query.system_id)
+        repos = await self._repo_projection.list_all(system_id=query.system_id)
 
         total_cost = Decimal("0")
         total_tokens = 0

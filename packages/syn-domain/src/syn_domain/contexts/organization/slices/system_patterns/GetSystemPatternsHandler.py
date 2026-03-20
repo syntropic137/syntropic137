@@ -45,7 +45,7 @@ class GetSystemPatternsHandler:
 
     async def _get_execution_ids_for_system(self, system_id: str) -> dict[str, str]:
         """Map execution_id → repo_full_name for all repos in a system."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)
@@ -110,7 +110,7 @@ class GetSystemPatternsHandler:
 
     async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:
         """Find repos with cost > 3x median."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         costs: list[tuple[str, Decimal]] = []
 
         for repo in repos:
@@ -147,7 +147,7 @@ class GetSystemPatternsHandler:
     async def handle(self, query: GetSystemPatternsQuery) -> SystemPatterns:
         """Handle GetSystemPatternsQuery."""
         # TODO(#200): Implement time-window filtering
-        system = self._system_projection.get(query.system_id)
+        system = await self._system_projection.get(query.system_id)
         system_name = system.name if system else ""
 
         exec_to_repo = await self._get_execution_ids_for_system(query.system_id)

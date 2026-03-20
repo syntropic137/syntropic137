@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.organization.domain.read_models.organization_summary import (
     OrganizationSummary,
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_domain.contexts.organization.domain.events.OrganizationCreatedEvent import (
         OrganizationCreatedEvent,
     )
@@ -27,12 +28,42 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+PROJECTION_NAME = "organizations"
+
+
+def _org_to_dict(org: OrganizationSummary) -> dict[str, Any]:
+    return {
+        "organization_id": org.organization_id,
+        "name": org.name,
+        "slug": org.slug,
+        "created_by": org.created_by,
+        "created_at": org.created_at.isoformat() if org.created_at else None,
+        "system_count": org.system_count,
+        "repo_count": org.repo_count,
+        "is_deleted": org.is_deleted,
+    }
+
+
+def _org_from_dict(data: dict[str, Any]) -> OrganizationSummary:
+    return OrganizationSummary(
+        organization_id=data["organization_id"],
+        name=data["name"],
+        slug=data["slug"],
+        created_by=data.get("created_by", ""),
+        created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
+        system_count=data.get("system_count", 0),
+        repo_count=data.get("repo_count", 0),
+        is_deleted=data.get("is_deleted", False),
+    )
+
 
 class OrganizationProjection:
-    def __init__(self) -> None:
-        self._orgs: dict[str, OrganizationSummary] = {}
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
+        self._store = store
 
-    def handle_organization_created(self, event: OrganizationCreatedEvent) -> OrganizationSummary:
+    async def handle_organization_created(
+        self, event: OrganizationCreatedEvent
+    ) -> OrganizationSummary:
         summary = OrganizationSummary(
             organization_id=event.organization_id,
             name=event.name,
@@ -40,53 +71,67 @@ class OrganizationProjection:
             created_by=event.created_by,
             created_at=datetime.now(UTC),
         )
-        self._orgs[event.organization_id] = summary
+        await self._store.save(PROJECTION_NAME, event.organization_id, _org_to_dict(summary))
         logger.info(f"Projected OrganizationCreated: {event.organization_id} ({event.name})")
         return summary
 
-    def handle_organization_updated(
+    async def handle_organization_updated(
         self, event: OrganizationUpdatedEvent
     ) -> OrganizationSummary | None:
-        org = self._orgs.get(event.organization_id)
-        if org is None:
+        data = await self._store.get(PROJECTION_NAME, event.organization_id)
+        if data is None:
             logger.warning(f"OrganizationUpdated for unknown org: {event.organization_id}")
             return None
         if event.name is not None:
-            org.name = event.name
+            data["name"] = event.name
         if event.slug is not None:
-            org.slug = event.slug
+            data["slug"] = event.slug
+        await self._store.save(PROJECTION_NAME, event.organization_id, data)
         logger.info(f"Projected OrganizationUpdated: {event.organization_id}")
-        return org
+        return _org_from_dict(data)
 
-    def handle_organization_deleted(
+    async def handle_organization_deleted(
         self, event: OrganizationDeletedEvent
     ) -> OrganizationSummary | None:
-        org = self._orgs.get(event.organization_id)
-        if org is None:
+        data = await self._store.get(PROJECTION_NAME, event.organization_id)
+        if data is None:
             logger.warning(f"OrganizationDeleted for unknown org: {event.organization_id}")
             return None
-        org.is_deleted = True
+        data["is_deleted"] = True
+        await self._store.save(PROJECTION_NAME, event.organization_id, data)
         logger.info(f"Projected OrganizationDeleted: {event.organization_id}")
-        return org
+        return _org_from_dict(data)
 
-    def get(self, organization_id: str) -> OrganizationSummary | None:
-        return self._orgs.get(organization_id)
+    async def get(self, organization_id: str) -> OrganizationSummary | None:
+        data = await self._store.get(PROJECTION_NAME, organization_id)
+        return _org_from_dict(data) if data else None
 
-    def list_all(self, include_deleted: bool = False) -> list[OrganizationSummary]:
-        results = list(self._orgs.values())
+    async def list_all(self, include_deleted: bool = False) -> list[OrganizationSummary]:
+        records = await self._store.get_all(PROJECTION_NAME)
+        results = [_org_from_dict(r) for r in records]
         if not include_deleted:
             results = [o for o in results if not o.is_deleted]
         return results
 
-    def increment_system_count(self, organization_id: str, delta: int = 1) -> None:
-        org = self._orgs.get(organization_id)
-        if org:
-            org.system_count += delta
+    async def increment_system_count(self, organization_id: str, delta: int = 1) -> None:
+        data = await self._store.get(PROJECTION_NAME, organization_id)
+        if data:
+            data["system_count"] = data.get("system_count", 0) + delta
+            await self._store.save(PROJECTION_NAME, organization_id, data)
 
-    def increment_repo_count(self, organization_id: str, delta: int = 1) -> None:
-        org = self._orgs.get(organization_id)
-        if org:
-            org.repo_count += delta
+    async def increment_repo_count(self, organization_id: str, delta: int = 1) -> None:
+        data = await self._store.get(PROJECTION_NAME, organization_id)
+        if data:
+            data["repo_count"] = data.get("repo_count", 0) + delta
+            await self._store.save(PROJECTION_NAME, organization_id, data)
+
+    async def clear_all_data(self) -> None:
+        """Clear all projection data (for rebuild)."""
+        records = await self._store.get_all(PROJECTION_NAME)
+        for record in records:
+            org_id = record.get("organization_id")
+            if org_id:
+                await self._store.delete(PROJECTION_NAME, org_id)
 
 
 _projection: OrganizationProjection | None = None
@@ -95,7 +140,9 @@ _projection: OrganizationProjection | None = None
 def get_organization_projection() -> OrganizationProjection:
     global _projection
     if _projection is None:
-        _projection = OrganizationProjection()
+        from syn_adapters.projection_stores import get_projection_store
+
+        _projection = OrganizationProjection(store=get_projection_store())
     return _projection
 
 

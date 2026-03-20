@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.organization.domain.read_models.repo_summary import (
     RepoSummary,
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
         RepoAssignedToSystemEvent,
     )
@@ -26,12 +27,48 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+PROJECTION_NAME = "repos"
+
+
+def _repo_to_dict(repo: RepoSummary) -> dict[str, Any]:
+    return {
+        "repo_id": repo.repo_id,
+        "organization_id": repo.organization_id,
+        "system_id": repo.system_id,
+        "provider": repo.provider,
+        "provider_repo_id": repo.provider_repo_id,
+        "full_name": repo.full_name,
+        "owner": repo.owner,
+        "default_branch": repo.default_branch,
+        "installation_id": repo.installation_id,
+        "is_private": repo.is_private,
+        "created_by": repo.created_by,
+        "created_at": repo.created_at.isoformat() if repo.created_at else None,
+    }
+
+
+def _repo_from_dict(data: dict[str, Any]) -> RepoSummary:
+    return RepoSummary(
+        repo_id=data["repo_id"],
+        organization_id=data["organization_id"],
+        system_id=data.get("system_id", ""),
+        provider=data.get("provider", "github"),
+        provider_repo_id=data.get("provider_repo_id", ""),
+        full_name=data.get("full_name", ""),
+        owner=data.get("owner", ""),
+        default_branch=data.get("default_branch", "main"),
+        installation_id=data.get("installation_id", ""),
+        is_private=data.get("is_private", False),
+        created_by=data.get("created_by", ""),
+        created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None,
+    )
+
 
 class RepoProjection:
-    def __init__(self) -> None:
-        self._repos: dict[str, RepoSummary] = {}
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
+        self._store = store
 
-    def handle_repo_registered(self, event: RepoRegisteredEvent) -> RepoSummary:
+    async def handle_repo_registered(self, event: RepoRegisteredEvent) -> RepoSummary:
         summary = RepoSummary(
             repo_id=event.repo_id,
             organization_id=event.organization_id,
@@ -45,43 +82,47 @@ class RepoProjection:
             created_by=event.created_by,
             created_at=datetime.now(UTC),
         )
-        self._repos[event.repo_id] = summary
+        await self._store.save(PROJECTION_NAME, event.repo_id, _repo_to_dict(summary))
         logger.info(f"Projected RepoRegistered: {event.repo_id} ({event.full_name})")
         return summary
 
-    def handle_repo_assigned_to_system(
+    async def handle_repo_assigned_to_system(
         self, event: RepoAssignedToSystemEvent
     ) -> RepoSummary | None:
-        repo = self._repos.get(event.repo_id)
-        if repo is None:
+        data = await self._store.get(PROJECTION_NAME, event.repo_id)
+        if data is None:
             logger.warning(f"RepoAssignedToSystem for unknown repo: {event.repo_id}")
             return None
-        repo.system_id = event.system_id
+        data["system_id"] = event.system_id
+        await self._store.save(PROJECTION_NAME, event.repo_id, data)
         logger.info(f"Projected RepoAssignedToSystem: {event.repo_id} -> {event.system_id}")
-        return repo
+        return _repo_from_dict(data)
 
-    def handle_repo_unassigned_from_system(
+    async def handle_repo_unassigned_from_system(
         self, event: RepoUnassignedFromSystemEvent
     ) -> RepoSummary | None:
-        repo = self._repos.get(event.repo_id)
-        if repo is None:
+        data = await self._store.get(PROJECTION_NAME, event.repo_id)
+        if data is None:
             logger.warning(f"RepoUnassignedFromSystem for unknown repo: {event.repo_id}")
             return None
-        repo.system_id = ""
+        data["system_id"] = ""
+        await self._store.save(PROJECTION_NAME, event.repo_id, data)
         logger.info(f"Projected RepoUnassignedFromSystem: {event.repo_id}")
-        return repo
+        return _repo_from_dict(data)
 
-    def get(self, repo_id: str) -> RepoSummary | None:
-        return self._repos.get(repo_id)
+    async def get(self, repo_id: str) -> RepoSummary | None:
+        data = await self._store.get(PROJECTION_NAME, repo_id)
+        return _repo_from_dict(data) if data else None
 
-    def list_all(
+    async def list_all(
         self,
         organization_id: str | None = None,
         system_id: str | None = None,
         provider: str | None = None,
         unassigned: bool = False,
     ) -> list[RepoSummary]:
-        results = list(self._repos.values())
+        records = await self._store.get_all(PROJECTION_NAME)
+        results = [_repo_from_dict(r) for r in records]
         if organization_id:
             results = [r for r in results if r.organization_id == organization_id]
         if system_id:
@@ -92,6 +133,14 @@ class RepoProjection:
             results = [r for r in results if not r.system_id]
         return results
 
+    async def clear_all_data(self) -> None:
+        """Clear all projection data (for rebuild)."""
+        records = await self._store.get_all(PROJECTION_NAME)
+        for record in records:
+            repo_id = record.get("repo_id")
+            if repo_id:
+                await self._store.delete(PROJECTION_NAME, repo_id)
+
 
 _projection: RepoProjection | None = None
 
@@ -99,7 +148,9 @@ _projection: RepoProjection | None = None
 def get_repo_projection() -> RepoProjection:
     global _projection
     if _projection is None:
-        _projection = RepoProjection()
+        from syn_adapters.projection_stores import get_projection_store
+
+        _projection = RepoProjection(store=get_projection_store())
     return _projection
 
 

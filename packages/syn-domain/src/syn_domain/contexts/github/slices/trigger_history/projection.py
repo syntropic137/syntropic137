@@ -7,28 +7,68 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.github.domain.read_models.trigger_history_entry import (
     TriggerHistoryEntry,
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
     from syn_domain.contexts.github.domain.events.TriggerFiredEvent import (
         TriggerFiredEvent,
     )
 
 logger = logging.getLogger(__name__)
 
+PROJECTION_NAME = "trigger_history"
+
+
+def _entry_to_dict(entry: TriggerHistoryEntry) -> dict[str, Any]:
+    return {
+        "trigger_id": entry.trigger_id,
+        "execution_id": entry.execution_id,
+        "webhook_delivery_id": entry.webhook_delivery_id,
+        "github_event_type": entry.github_event_type,
+        "repository": entry.repository,
+        "pr_number": entry.pr_number,
+        "payload_summary": entry.payload_summary,
+        "fired_at": entry.fired_at.isoformat() if entry.fired_at else None,
+        "status": entry.status,
+        "cost_usd": entry.cost_usd,
+    }
+
+
+def _entry_from_dict(data: dict[str, Any]) -> TriggerHistoryEntry:
+    return TriggerHistoryEntry(
+        trigger_id=data["trigger_id"],
+        execution_id=data["execution_id"],
+        webhook_delivery_id=data.get("webhook_delivery_id", ""),
+        github_event_type=data.get("github_event_type", ""),
+        repository=data.get("repository", ""),
+        pr_number=data.get("pr_number"),
+        payload_summary=data.get("payload_summary", {}),
+        fired_at=datetime.fromisoformat(data["fired_at"]) if data.get("fired_at") else None,
+        status=data.get("status", "dispatched"),
+        cost_usd=data.get("cost_usd"),
+    )
+
+
+def _entry_key(entry: TriggerHistoryEntry) -> str:
+    """Unique store key: delivery ID if present, else trigger+execution."""
+    if entry.webhook_delivery_id:
+        return entry.webhook_delivery_id
+    return f"{entry.trigger_id}_{entry.execution_id}"
+
 
 class TriggerHistoryProjection:
     """Projects TriggerFired events into TriggerHistoryEntry read models."""
 
-    def __init__(self) -> None:
+    def __init__(self, store: ProjectionStoreProtocol) -> None:
         """Initialize the projection."""
-        self._entries: list[TriggerHistoryEntry] = []
+        self._store = store
 
-    def handle_trigger_fired(self, event: TriggerFiredEvent) -> TriggerHistoryEntry:
+    async def handle_trigger_fired(self, event: TriggerFiredEvent) -> TriggerHistoryEntry:
         """Handle a TriggerFired event."""
         entry = TriggerHistoryEntry(
             trigger_id=event.trigger_id,
@@ -40,20 +80,32 @@ class TriggerHistoryProjection:
             payload_summary=dict(event.payload_summary),
             fired_at=datetime.now(UTC),
         )
-        self._entries.append(entry)
+        key = _entry_key(entry)
+        await self._store.save(PROJECTION_NAME, key, _entry_to_dict(entry))
         logger.info(f"Projected TriggerFired: {event.trigger_id} -> {event.execution_id}")
         return entry
 
-    def get_history(self, trigger_id: str, limit: int = 50) -> list[TriggerHistoryEntry]:
+    async def get_history(self, trigger_id: str, limit: int = 50) -> list[TriggerHistoryEntry]:
         """Get firing history for a trigger, most recent first."""
-        matching = [e for e in self._entries if e.trigger_id == trigger_id]
+        records = await self._store.get_all(PROJECTION_NAME)
+        matching = [_entry_from_dict(r) for r in records if r.get("trigger_id") == trigger_id]
         matching.sort(key=lambda e: e.fired_at or datetime.min, reverse=True)
         return matching[:limit]
 
-    def get_all_history(self, limit: int = 50) -> list[TriggerHistoryEntry]:
+    async def get_all_history(self, limit: int = 50) -> list[TriggerHistoryEntry]:
         """Get all trigger firing history, most recent first."""
-        entries = sorted(self._entries, key=lambda e: e.fired_at or datetime.min, reverse=True)
+        records = await self._store.get_all(PROJECTION_NAME)
+        entries = [_entry_from_dict(r) for r in records]
+        entries.sort(key=lambda e: e.fired_at or datetime.min, reverse=True)
         return entries[:limit]
+
+    async def clear_all_data(self) -> None:
+        """Clear all projection data (for rebuild)."""
+        records = await self._store.get_all(PROJECTION_NAME)
+        for record in records:
+            entry = _entry_from_dict(record)
+            key = _entry_key(entry)
+            await self._store.delete(PROJECTION_NAME, key)
 
 
 # Singleton
@@ -64,7 +116,9 @@ def get_trigger_history_projection() -> TriggerHistoryProjection:
     """Get the global trigger history projection instance."""
     global _projection
     if _projection is None:
-        _projection = TriggerHistoryProjection()
+        from syn_adapters.projection_stores import get_projection_store
+
+        _projection = TriggerHistoryProjection(store=get_projection_store())
     return _projection
 
 

@@ -288,14 +288,12 @@ async def get_trigger(
     )
 
 
-def get_trigger_history(
+async def get_trigger_history(
     trigger_id: str,
     limit: int = 50,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[TriggerHistoryEntry], TriggerError]:
     """Get execution history for a trigger rule.
-
-    Note: This is a synchronous function (the handler is sync).
 
     Args:
         trigger_id: The trigger rule ID.
@@ -318,7 +316,7 @@ def get_trigger_history(
         return Err(TriggerError.INVALID_INPUT, message=str(e))
 
     handler = get_trigger_history_handler()
-    entries = handler.handle(query)
+    entries = await handler.handle(query)
 
     return Ok(
         [

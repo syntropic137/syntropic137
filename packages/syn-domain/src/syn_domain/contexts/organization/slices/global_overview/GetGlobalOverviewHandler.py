@@ -43,9 +43,9 @@ class GetGlobalOverviewHandler:
 
     async def handle(self, query: GetGlobalOverviewQuery) -> GlobalOverview:  # noqa: ARG002
         """Handle GetGlobalOverviewQuery."""
-        systems = self._system_projection.list_all()
-        all_repos = self._repo_projection.list_all()
-        unassigned = self._repo_projection.list_all(unassigned=True)
+        systems = await self._system_projection.list_all()
+        all_repos = await self._repo_projection.list_all()
+        unassigned = await self._repo_projection.list_all(unassigned=True)
 
         # Batch-load all cost and health data — avoid N+1
         all_cost_data = await self._store.get_all(REPO_COST)
@@ -68,7 +68,7 @@ class GetGlobalOverviewHandler:
         entries: list[SystemOverviewEntry] = []
 
         for system in systems:
-            sys_repos = self._repo_projection.list_all(system_id=system.system_id)
+            sys_repos = await self._repo_projection.list_all(system_id=system.system_id)
             sys_cost = Decimal("0")
             healthy = 0
             failing = 0

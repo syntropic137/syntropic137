@@ -24,7 +24,7 @@ class GetInstallationHandler:
     Reads from the installation projection to return the current state.
     """
 
-    def handle(self, query: GetInstallationQuery) -> Installation | None:
+    async def handle(self, query: GetInstallationQuery) -> Installation | None:
         """Handle the query.
 
         Args:
@@ -34,7 +34,7 @@ class GetInstallationHandler:
             Installation if found, None otherwise.
         """
         projection = get_installation_projection()
-        return projection.get(query.installation_id)
+        return await projection.get(query.installation_id)
 
 
 # Singleton handler instance

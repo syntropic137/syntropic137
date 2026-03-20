@@ -43,7 +43,7 @@ class GetContributionHeatmapHandler:
 
     async def _get_execution_ids_for_repo(self, repo_id: str) -> set[str]:
         """Resolve execution IDs for a single repo."""
-        repo = self._repo_projection.get(repo_id)
+        repo = await self._repo_projection.get(repo_id)
         if not repo:
             return set()
 
@@ -54,7 +54,7 @@ class GetContributionHeatmapHandler:
 
     async def _get_execution_ids_for_system(self, system_id: str) -> set[str]:
         """Resolve execution IDs for all repos in a system."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)
@@ -62,7 +62,7 @@ class GetContributionHeatmapHandler:
 
     async def _get_execution_ids_for_organization(self, organization_id: str) -> set[str]:
         """Resolve execution IDs for all repos in an organization."""
-        repos = self._repo_projection.list_all(organization_id=organization_id)
+        repos = await self._repo_projection.list_all(organization_id=organization_id)
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)

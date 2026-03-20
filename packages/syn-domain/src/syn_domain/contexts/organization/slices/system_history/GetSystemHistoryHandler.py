@@ -47,7 +47,7 @@ class GetSystemHistoryHandler:
 
     async def _get_execution_ids_for_system(self, system_id: str) -> set[str]:
         """Look up execution IDs for all repos in a system."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)

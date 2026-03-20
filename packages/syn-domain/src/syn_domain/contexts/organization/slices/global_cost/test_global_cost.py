@@ -23,7 +23,7 @@ class TestGetGlobalCostHandler:
     @pytest.mark.asyncio
     async def test_aggregates_all_repo_costs(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _setup_projections()
+        _, repo_proj = await _setup_projections()
         handler = GetGlobalCostHandler(store, repo_proj)
 
         await store.save(
@@ -69,7 +69,7 @@ class TestGetGlobalCostHandler:
         )
 
         store = FakeProjectionStore()
-        handler = GetGlobalCostHandler(store, RepoProjection())
+        handler = GetGlobalCostHandler(store, RepoProjection(store=store))
 
         result = await handler.handle(GetGlobalCostQuery())
 

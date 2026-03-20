@@ -313,8 +313,8 @@ class ProjectionManager:
             "repo_correlation": RepoCorrelationProjection(self._store),
             "repo_health": RepoHealthProjection(self._store),
             "repo_cost": RepoCostProjection(self._store),
-            # Processor to-do list (ISS-196) — in-memory, no persistent store needed
-            "execution_todo": ExecutionTodoProjection(),
+            # Processor to-do list (ISS-196) — store-backed for crash resilience (ISS-222)
+            "execution_todo": ExecutionTodoProjection(store=self._store),
             # Real-time projection for WebSocket push (doesn't use store)
             "realtime": get_realtime_projection(),
         }
