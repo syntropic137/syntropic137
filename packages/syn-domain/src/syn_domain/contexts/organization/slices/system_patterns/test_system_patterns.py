@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import pytest
 
+from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_EXECUTIONS
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
 )
@@ -23,7 +24,7 @@ class TestGetSystemPatternsHandler:
     @pytest.mark.asyncio
     async def test_groups_failures_by_error(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        sys_proj, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemPatternsHandler(store, sys_proj, repo_proj)
 
         # Correlate two executions
@@ -46,7 +47,7 @@ class TestGetSystemPatternsHandler:
 
         # Two failed executions with same error
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-1",
             {
                 "workflow_execution_id": "exec-1",
@@ -57,7 +58,7 @@ class TestGetSystemPatternsHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-2",
             {
                 "workflow_execution_id": "exec-2",
@@ -78,7 +79,7 @@ class TestGetSystemPatternsHandler:
     @pytest.mark.asyncio
     async def test_detects_cost_outliers(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker", "acme/web"]
         )
         handler = GetSystemPatternsHandler(store, sys_proj, repo_proj)
@@ -121,7 +122,7 @@ class TestGetSystemPatternsHandler:
     @pytest.mark.asyncio
     async def test_empty_when_no_data(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections("sys-1", "Backend", "org-1", [])
+        sys_proj, repo_proj = await _make_projections("sys-1", "Backend", "org-1", [])
         handler = GetSystemPatternsHandler(store, sys_proj, repo_proj)
 
         result = await handler.handle(GetSystemPatternsQuery(system_id="sys-1"))
@@ -133,7 +134,7 @@ class TestGetSystemPatternsHandler:
     async def test_boundary_factor_3x(self) -> None:
         """Exactly 3x median should NOT be an outlier (>3x required)."""
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker"]
         )
         handler = GetSystemPatternsHandler(store, sys_proj, repo_proj)
@@ -166,7 +167,7 @@ class TestGetSystemPatternsHandler:
     async def test_single_repo_no_outliers(self) -> None:
         """A single repo cannot be an outlier (need at least 2)."""
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        sys_proj, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemPatternsHandler(store, sys_proj, repo_proj)
 
         await store.save(

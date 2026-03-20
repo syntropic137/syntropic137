@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 
 
 class ListReposHandler:
-    def handle(self, query: ListReposQuery) -> list[RepoSummary]:
+    async def handle(self, query: ListReposQuery) -> list[RepoSummary]:
         projection = get_repo_projection()
-        return projection.list_all(
+        return await projection.list_all(
             organization_id=query.organization_id,
             system_id=query.system_id,
             provider=query.provider,

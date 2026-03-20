@@ -18,9 +18,9 @@ if TYPE_CHECKING:
 
 
 class GetOrganizationHandler:
-    def handle(self, query: GetOrganizationQuery) -> OrganizationSummary | None:
+    async def handle(self, query: GetOrganizationQuery) -> OrganizationSummary | None:
         projection = get_organization_projection()
-        return projection.get(query.organization_id)
+        return await projection.get(query.organization_id)
 
 
 _handler: GetOrganizationHandler | None = None

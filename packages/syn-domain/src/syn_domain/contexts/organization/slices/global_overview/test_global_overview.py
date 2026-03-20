@@ -13,9 +13,11 @@ from syn_domain.contexts.organization.slices.conftest import FakeProjectionStore
 from syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler import (
     GetGlobalOverviewHandler,
 )
+from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
+from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
 
 
-def _setup_projections():  # type: ignore[no-untyped-def]
+async def _setup_projections() -> tuple[SystemProjection, RepoProjection]:
     """Create projections with two systems and some repos."""
     from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
         RepoAssignedToSystemEvent,
@@ -26,17 +28,12 @@ def _setup_projections():  # type: ignore[no-untyped-def]
     from syn_domain.contexts.organization.domain.events.SystemCreatedEvent import (
         SystemCreatedEvent,
     )
-    from syn_domain.contexts.organization.slices.list_repos.projection import (
-        RepoProjection,
-    )
-    from syn_domain.contexts.organization.slices.list_systems.projection import (
-        SystemProjection,
-    )
 
-    sys_proj = SystemProjection()
-    repo_proj = RepoProjection()
+    store = FakeProjectionStore()
+    sys_proj = SystemProjection(store=store)
+    repo_proj = RepoProjection(store=store)
 
-    sys_proj.handle_system_created(
+    await sys_proj.handle_system_created(
         SystemCreatedEvent(
             system_id="sys-1",
             organization_id="org-1",
@@ -45,7 +42,7 @@ def _setup_projections():  # type: ignore[no-untyped-def]
             created_by="test",
         )
     )
-    sys_proj.handle_system_created(
+    await sys_proj.handle_system_created(
         SystemCreatedEvent(
             system_id="sys-2",
             organization_id="org-1",
@@ -56,7 +53,7 @@ def _setup_projections():  # type: ignore[no-untyped-def]
     )
 
     # Register repos
-    repo_proj.handle_repo_registered(
+    await repo_proj.handle_repo_registered(
         RepoRegisteredEvent(
             repo_id="r-1",
             organization_id="org-1",
@@ -70,12 +67,12 @@ def _setup_projections():  # type: ignore[no-untyped-def]
             created_by="test",
         )
     )
-    repo_proj.handle_repo_assigned_to_system(
+    await repo_proj.handle_repo_assigned_to_system(
         RepoAssignedToSystemEvent(repo_id="r-1", system_id="sys-1")
     )
 
     # Unassigned repo
-    repo_proj.handle_repo_registered(
+    await repo_proj.handle_repo_registered(
         RepoRegisteredEvent(
             repo_id="r-2",
             organization_id="org-1",
@@ -98,7 +95,7 @@ class TestGetGlobalOverviewHandler:
     @pytest.mark.asyncio
     async def test_aggregates_systems_and_repos(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _setup_projections()
+        sys_proj, repo_proj = await _setup_projections()
         handler = GetGlobalOverviewHandler(store, sys_proj, repo_proj)
 
         await store.save(
@@ -121,15 +118,10 @@ class TestGetGlobalOverviewHandler:
 
     @pytest.mark.asyncio
     async def test_empty_when_no_systems(self) -> None:
-        from syn_domain.contexts.organization.slices.list_repos.projection import (
-            RepoProjection,
-        )
-        from syn_domain.contexts.organization.slices.list_systems.projection import (
-            SystemProjection,
-        )
-
         store = FakeProjectionStore()
-        handler = GetGlobalOverviewHandler(store, SystemProjection(), RepoProjection())
+        handler = GetGlobalOverviewHandler(
+            store, SystemProjection(store=store), RepoProjection(store=store)
+        )
 
         result = await handler.handle(GetGlobalOverviewQuery())
 
@@ -141,7 +133,7 @@ class TestGetGlobalOverviewHandler:
     async def test_partial_data(self) -> None:
         """Repos with cost but no health, and vice versa."""
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _setup_projections()
+        sys_proj, repo_proj = await _setup_projections()
         handler = GetGlobalOverviewHandler(store, sys_proj, repo_proj)
 
         # acme/api has cost but no health

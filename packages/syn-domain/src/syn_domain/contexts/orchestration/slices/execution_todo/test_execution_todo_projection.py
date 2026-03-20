@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.slices.execution_todo.projection import (
     ExecutionTodoProjection,
 )
@@ -54,11 +55,11 @@ class TestFullLifecycle:
     @pytest.mark.anyio
     async def test_two_phase_lifecycle(self) -> None:
         """Full lifecycle: 2-phase workflow produces correct todo sequence."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
 
         # 1. Execution started → PROVISION_WORKSPACE for phase 1
         await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 1
         assert todos[0].action == TodoAction.PROVISION_WORKSPACE
         assert todos[0].phase_id == "p-1"
@@ -67,7 +68,7 @@ class TestFullLifecycle:
         await proj.on_workspace_provisioned_for_phase(
             {"execution_id": "exec-1", "phase_id": "p-1", "workspace_id": "ws-1"}
         )
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 1
         assert todos[0].action == TodoAction.RUN_AGENT
         assert todos[0].workspace_id == "ws-1"
@@ -76,7 +77,7 @@ class TestFullLifecycle:
         await proj.on_agent_execution_completed(
             {"execution_id": "exec-1", "phase_id": "p-1", "session_id": "sess-1"}
         )
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 1
         assert todos[0].action == TodoAction.COLLECT_ARTIFACTS
         assert todos[0].session_id == "sess-1"
@@ -85,20 +86,20 @@ class TestFullLifecycle:
         await proj.on_artifacts_collected_for_phase(
             {"execution_id": "exec-1", "phase_id": "p-1", "artifact_ids": ["art-1"]}
         )
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 1
         assert todos[0].action == TodoAction.COMPLETE_PHASE
 
         # 5. Phase completed → cleared
         await proj.on_phase_completed({"execution_id": "exec-1", "phase_id": "p-1"})
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 0
 
         # 6. Next phase ready → PROVISION_WORKSPACE for phase 2
         await proj.on_next_phase_ready(
             {"execution_id": "exec-1", "next_phase_id": "p-2", "next_phase_order": 2}
         )
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 1
         assert todos[0].action == TodoAction.PROVISION_WORKSPACE
         assert todos[0].phase_id == "p-2"
@@ -114,12 +115,12 @@ class TestFullLifecycle:
             {"execution_id": "exec-1", "phase_id": "p-2", "artifact_ids": ["art-2"]}
         )
         await proj.on_phase_completed({"execution_id": "exec-1", "phase_id": "p-2"})
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert len(todos) == 0
 
         # 11. Workflow completed → all cleared
         await proj.on_workflow_completed({"execution_id": "exec-1"})
-        assert proj.get_pending("exec-1") == []
+        assert await proj.get_pending("exec-1") == []
 
 
 # =========================================================================
@@ -134,28 +135,28 @@ class TestTerminalEventsClearTodos:
     @pytest.mark.anyio
     async def test_workflow_failed_clears(self) -> None:
         """WorkflowFailed clears all todos."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
-        assert len(proj.get_pending("exec-1")) == 1
+        assert len(await proj.get_pending("exec-1")) == 1
 
         await proj.on_workflow_failed({"execution_id": "exec-1"})
-        assert proj.get_pending("exec-1") == []
+        assert await proj.get_pending("exec-1") == []
 
     @pytest.mark.anyio
     async def test_execution_cancelled_clears(self) -> None:
         """ExecutionCancelled clears all todos."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
         await proj.on_execution_cancelled({"execution_id": "exec-1"})
-        assert proj.get_pending("exec-1") == []
+        assert await proj.get_pending("exec-1") == []
 
     @pytest.mark.anyio
     async def test_workflow_interrupted_clears(self) -> None:
         """WorkflowInterrupted clears all todos."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
         await proj.on_workflow_interrupted({"execution_id": "exec-1"})
-        assert proj.get_pending("exec-1") == []
+        assert await proj.get_pending("exec-1") == []
 
 
 # =========================================================================
@@ -170,9 +171,9 @@ class TestLegacyMode:
     @pytest.mark.anyio
     async def test_no_phase_definitions_no_todos(self) -> None:
         """Legacy mode: no phase_definitions → no todos created."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started(LEGACY_STARTED_EVENT)
-        assert proj.get_pending("exec-legacy") == []
+        assert await proj.get_pending("exec-legacy") == []
 
 
 # =========================================================================
@@ -187,25 +188,25 @@ class TestEdgeCases:
     @pytest.mark.anyio
     async def test_empty_execution_id_ignored(self) -> None:
         """Events with empty execution_id are ignored."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started({"execution_id": "", "phase_definitions": []})
-        assert proj._todos == {}
+        assert await proj.get_pending("") == []
 
     @pytest.mark.anyio
     async def test_get_pending_unknown_execution(self) -> None:
         """get_pending for unknown execution returns empty list."""
-        proj = ExecutionTodoProjection()
-        assert proj.get_pending("nonexistent") == []
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
+        assert await proj.get_pending("nonexistent") == []
 
     @pytest.mark.anyio
     async def test_clear_all_data(self) -> None:
         """clear_all_data removes all state."""
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
-        assert len(proj.get_pending("exec-1")) == 1
+        assert len(await proj.get_pending("exec-1")) == 1
 
         await proj.clear_all_data()
-        assert proj.get_pending("exec-1") == []
+        assert await proj.get_pending("exec-1") == []
 
     @pytest.mark.anyio
     async def test_phases_sorted_by_order(self) -> None:
@@ -217,7 +218,33 @@ class TestEdgeCases:
                 {"phase_id": "p-1", "name": "First", "order": 1},
             ],
         }
-        proj = ExecutionTodoProjection()
+        proj = ExecutionTodoProjection(store=InMemoryProjectionStore())
         await proj.on_workflow_execution_started(event)
-        todos = proj.get_pending("exec-1")
+        todos = await proj.get_pending("exec-1")
         assert todos[0].phase_id == "p-1"
+
+
+# =========================================================================
+# Restart resilience
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestRestartResilience:
+    """State persists in the store across projection instance restarts."""
+
+    @pytest.mark.anyio
+    async def test_new_instance_same_store_sees_todos(self) -> None:
+        """A fresh projection instance backed by the same store returns the same todos."""
+        store = InMemoryProjectionStore()
+        proj1 = ExecutionTodoProjection(store=store)
+        await proj1.on_workflow_execution_started(TWO_PHASE_STARTED_EVENT)
+        todos_before = await proj1.get_pending("exec-1")
+        assert len(todos_before) == 1
+
+        # Simulate restart: new projection instance, same store
+        proj2 = ExecutionTodoProjection(store=store)
+        todos_after = await proj2.get_pending("exec-1")
+        assert len(todos_after) == 1
+        assert todos_after[0].action == todos_before[0].action
+        assert todos_after[0].phase_id == todos_before[0].phase_id

@@ -7,7 +7,10 @@ membership, sorted chronologically (oldest first).
 from datetime import UTC
 
 from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
-from syn_domain.contexts.organization._shared.projection_names import REPO_CORRELATION
+from syn_domain.contexts.organization._shared.projection_names import (
+    REPO_CORRELATION,
+    WORKFLOW_EXECUTIONS,
+)
 from syn_domain.contexts.organization.domain.queries.get_system_history import (
     GetSystemHistoryQuery,
 )
@@ -47,7 +50,7 @@ class GetSystemHistoryHandler:
 
     async def _get_execution_ids_for_system(self, system_id: str) -> set[str]:
         """Look up execution IDs for all repos in a system."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)
@@ -60,7 +63,7 @@ class GetSystemHistoryHandler:
         if not execution_ids:
             return []
 
-        all_executions = await self._store.get_all("workflow_executions")
+        all_executions = await self._store.get_all(WORKFLOW_EXECUTIONS)
 
         entries = []
         for ex in all_executions:

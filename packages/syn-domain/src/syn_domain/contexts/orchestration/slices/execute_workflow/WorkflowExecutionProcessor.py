@@ -104,7 +104,7 @@ CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 class TodoProjection(Protocol):
     """Protocol for the to-do list projection used by the processor."""
 
-    def get_pending(self, execution_id: str) -> list[TodoItem]: ...
+    async def get_pending(self, execution_id: str) -> list[TodoItem]: ...
 
 
 class ExecutionRepository(Protocol):
@@ -258,7 +258,7 @@ class WorkflowExecutionProcessor:
         try:
             # Main processor loop
             while True:
-                todos = self._todo_projection.get_pending(execution_id)
+                todos = await self._todo_projection.get_pending(execution_id)
                 if not todos:
                     break
 

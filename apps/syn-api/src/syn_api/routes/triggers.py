@@ -165,7 +165,7 @@ async def get_trigger_history(
     limit: int = 50,
 ) -> dict[str, Any]:
     """Get execution history for a trigger."""
-    result = trig.get_trigger_history(trigger_id=trigger_id, limit=limit)
+    result = await trig.get_trigger_history(trigger_id=trigger_id, limit=limit)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -196,7 +196,7 @@ async def get_all_history(limit: int = 50) -> dict[str, Any]:
 
     all_entries = []
     for t in list_result.value:
-        hist = trig.get_trigger_history(trigger_id=t.trigger_id, limit=limit)
+        hist = await trig.get_trigger_history(trigger_id=t.trigger_id, limit=limit)
         if not isinstance(hist, Err):
             for e in hist.value:
                 all_entries.append(

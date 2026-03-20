@@ -51,7 +51,7 @@ async def list_repos(
         projection = get_installation_projection()
 
         if installation_id:
-            inst = projection.get(installation_id)
+            inst = await projection.get(installation_id)
             if inst is None:
                 return Err(
                     GitHubError.NOT_FOUND,
@@ -59,7 +59,7 @@ async def list_repos(
                 )
             repos = inst.repositories if hasattr(inst, "repositories") else []
         else:
-            active = projection.get_all_active()
+            active = await projection.get_all_active()
             repos = []
             for inst in active:
                 for repo in inst.repositories:
@@ -92,7 +92,7 @@ async def get_installation(
         )
 
         projection = get_installation_projection()
-        inst = projection.get(installation_id)
+        inst = await projection.get(installation_id)
 
         if inst is None:
             return Err(
@@ -179,7 +179,7 @@ async def verify_and_process_webhook(
                 from syn_domain.contexts.github.domain.events import AppInstalledEvent
 
                 event = AppInstalledEvent.from_webhook(payload)
-                projection.handle_app_installed(event)
+                await projection.handle_app_installed(event)
         except Exception:
             logger.exception("Failed to handle installation event")
 
