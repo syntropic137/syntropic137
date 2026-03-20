@@ -180,3 +180,6 @@ HANDOFF-*.md
 /workspaces/
 .playwright-mcp/
 .agentic/
+
+# Root-level planning voice notes (scratch — not committed per AGENTS.md policy)
+/*.txt
