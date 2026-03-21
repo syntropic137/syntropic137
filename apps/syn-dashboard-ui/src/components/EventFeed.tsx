@@ -91,32 +91,35 @@ export function EventFeed() {
       .catch(() => {/* non-fatal */})
   }, [])
 
-  // Connect to global activity WebSocket
+  // Connect to global activity SSE feed
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/activity`)
+    const source = new EventSource('/sse/activity')
 
-    ws.onopen = () => setConnected(true)
-    ws.onclose = () => setConnected(false)
-    ws.onerror = () => setConnected(false)
+    source.onopen = () => setConnected(true)
+    source.onerror = () => setConnected(false)
 
-    ws.onmessage = (msg) => {
+    source.onmessage = (e: MessageEvent<string>) => {
       try {
-        const parsed = JSON.parse(msg.data)
+        const parsed = JSON.parse(e.data) as {
+          type: string
+          event_type?: string
+          timestamp?: string
+          data?: Record<string, unknown>
+        }
         if (parsed.type === 'event' && parsed.event_type?.startsWith('git_')) {
           const newEvent: GitEvent = {
             time: parsed.timestamp ?? new Date().toISOString(),
             event_type: parsed.event_type,
-            data: parsed.data ?? {},
+            data: (parsed.data ?? {}) as GitEvent['data'],
           }
           setEvents((prev) => [newEvent, ...prev].slice(0, 100))
         }
       } catch {
-        // ignore malformed messages
+        // ignore malformed frames
       }
     }
 
-    return () => ws.close()
+    return () => source.close()
   }, [])
 
   return (

@@ -1,188 +1,124 @@
 /**
- * Hook for real-time execution event streaming via WebSocket.
+ * Hook for real-time execution event streaming via Server-Sent Events.
  *
- * This replaces the old SSE-based subscribeToEvents with a WebSocket
- * connection that receives domain events from the RealTimeProjection.
+ * Replaces the previous WebSocket-based implementation. The SSE endpoint
+ * is strictly server-to-client, making EventSource the correct fit:
+ * - Native browser reconnect (no manual retry loop required)
+ * - Plain HTTP — works through all proxies and load balancers
+ * - No extra dependency
  *
  * Event flow:
- *   Event Store → Subscription → ProjectionManager → RealTimeProjection → WebSocket → This Hook
+ *   Event Store → Subscription → ProjectionManager → RealTimeProjection → SSE → This Hook
  *
  * Usage:
  *   const { isConnected, events, latestEvent } = useExecutionStream(executionId)
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
-/** Event message from WebSocket */
-export interface ExecutionEvent {
-  type: 'connected' | 'event' | 'error'
-  event_type?: string
-  execution_id?: string
-  data?: Record<string, unknown>
-  timestamp?: string
-  message?: string
-  error?: string
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Typed envelope matching SSEEventFrame on the backend. */
+export interface SSEEventFrame {
+  type: 'connected' | 'event' | 'terminal'
+  event_type: string
+  execution_id: string | null
+  /** Event payload from domain model_dump(). Keys vary per event type. */
+  data: Record<string, unknown>
+  timestamp: string
 }
 
 /** Options for the hook */
 export interface UseExecutionStreamOptions {
-  /** Callback when an event is received */
-  onEvent?: (event: ExecutionEvent) => void
-  /** Auto-reconnect on disconnect (default: true) */
-  autoReconnect?: boolean
-  /** Reconnect delay in ms (default: 2000) */
-  reconnectDelay?: number
-  /** Max reconnect attempts before giving up (default: 5) */
-  maxReconnectAttempts?: number
+  /** Callback invoked for every frame received (including connected/terminal). */
+  onEvent?: (frame: SSEEventFrame) => void
 }
 
 /** Return type for the hook */
 export interface UseExecutionStreamResult {
-  /** Whether WebSocket is connected */
+  /** Whether the EventSource is currently open. */
   isConnected: boolean
-  /** All events received */
-  events: ExecutionEvent[]
-  /** Most recent event */
-  latestEvent: ExecutionEvent | null
-  /** Send a command to the server (future: pause/resume/cancel) */
-  sendCommand: (command: string, payload?: Record<string, unknown>) => void
+  /** All frames received since mount. */
+  events: SSEEventFrame[]
+  /** Most recent frame. */
+  latestEvent: SSEEventFrame | null
 }
 
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
 /**
- * Hook for streaming execution events via WebSocket.
+ * Stream execution events for *executionId* via SSE.
  *
- * @param executionId - The execution ID to subscribe to
- * @param options - Configuration options
+ * The EventSource reconnects automatically on network interruptions.
+ * The stream closes server-side when a terminal event (WorkflowCompleted /
+ * WorkflowFailed) is broadcast; the hook reflects this via ``isConnected``.
+ *
+ * @param executionId - The execution to subscribe to (undefined → no-op).
+ * @param options     - Optional callback configuration.
  */
 export function useExecutionStream(
   executionId: string | undefined,
-  options: UseExecutionStreamOptions = {}
+  options: UseExecutionStreamOptions = {},
 ): UseExecutionStreamResult {
-  const {
-    onEvent,
-    autoReconnect = true,
-    reconnectDelay = 2000,
-    maxReconnectAttempts = 5,
-  } = options
+  const { onEvent } = options
 
   const [isConnected, setIsConnected] = useState(false)
-  const [events, setEvents] = useState<ExecutionEvent[]>([])
-  const [latestEvent, setLatestEvent] = useState<ExecutionEvent | null>(null)
+  const [events, setEvents] = useState<SSEEventFrame[]>([])
+  const [latestEvent, setLatestEvent] = useState<SSEEventFrame | null>(null)
 
-  const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimeoutRef = useRef<number | null>(null)
-  const reconnectAttemptsRef = useRef(0)
-  // Store callback in ref to avoid triggering reconnects on callback change
+  const sourceRef = useRef<EventSource | null>(null)
+  // Keep callback in a ref so changing it never triggers a reconnect.
   const onEventRef = useRef(onEvent)
   useEffect(() => {
     onEventRef.current = onEvent
   }, [onEvent])
 
-  // Clean up reconnect timeout
-  const clearReconnectTimeout = useCallback(() => {
-    if (reconnectTimeoutRef.current !== null) {
-      window.clearTimeout(reconnectTimeoutRef.current)
-      reconnectTimeoutRef.current = null
-    }
-  }, [])
-
-  // Send command to server
-  const sendCommand = useCallback(
-    (command: string, payload: Record<string, unknown> = {}) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ command, ...payload }))
-      }
-    },
-    []
-  )
-
-  // Connect to WebSocket
   useEffect(() => {
     if (!executionId) return
 
-    const connect = () => {
-      // Determine WebSocket URL based on current protocol
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${protocol}//${window.location.host}/ws/executions/${executionId}`
+    const url = `/sse/executions/${executionId}`
+    const source = new EventSource(url)
+    sourceRef.current = source
 
-      const ws = new WebSocket(wsUrl)
-      wsRef.current = ws
+    source.onopen = () => {
+      setIsConnected(true)
+    }
 
-      ws.onopen = () => {
-        console.log(`[WebSocket] Connected to execution ${executionId}`)
-        setIsConnected(true)
-        clearReconnectTimeout()
-        // Reset reconnect attempts on successful connection
-        reconnectAttemptsRef.current = 0
-      }
+    source.onerror = () => {
+      // EventSource sets readyState to CONNECTING and retries automatically.
+      // We reflect the momentary gap in isConnected.
+      setIsConnected(false)
+    }
 
-      ws.onmessage = (messageEvent) => {
-        try {
-          const event: ExecutionEvent = JSON.parse(messageEvent.data)
+    source.onmessage = (e: MessageEvent<string>) => {
+      try {
+        const frame = JSON.parse(e.data) as SSEEventFrame
+        setEvents((prev) => [...prev, frame])
+        setLatestEvent(frame)
+        onEventRef.current?.(frame)
 
-          // Update state
-          setEvents((prev) => [...prev, event])
-          setLatestEvent(event)
-
-          // Call user callback (via ref to avoid reconnects)
-          onEventRef.current?.(event)
-
-          // Log event type
-          if (event.type === 'connected') {
-            console.log(`[WebSocket] Subscribed to execution ${event.execution_id}`)
-          } else if (event.type === 'event') {
-            console.log(`[WebSocket] Event: ${event.event_type}`, event.data)
-          }
-        } catch (e) {
-          console.error('[WebSocket] Failed to parse message:', e)
+        if (frame.type === 'terminal') {
+          // Server closed the stream; no further reconnect needed.
+          source.close()
+          setIsConnected(false)
         }
-      }
-
-      ws.onerror = (error) => {
-        console.error('[WebSocket] Error:', error)
-      }
-
-      ws.onclose = (closeEvent) => {
-        console.log(`[WebSocket] Disconnected (code: ${closeEvent.code})`)
-        setIsConnected(false)
-        wsRef.current = null
-
-        // Auto-reconnect if enabled and under max attempts
-        // Note: reconnectAttemptsRef is reset to 0 on successful connection (see ws.onopen above)
-        if (autoReconnect && !closeEvent.wasClean) {
-          reconnectAttemptsRef.current += 1
-          if (reconnectAttemptsRef.current <= maxReconnectAttempts) {
-            console.log(
-              `[WebSocket] Reconnecting in ${reconnectDelay}ms... (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`
-            )
-            reconnectTimeoutRef.current = window.setTimeout(connect, reconnectDelay)
-          } else {
-            console.warn(
-              `[WebSocket] Max reconnect attempts (${maxReconnectAttempts}) reached. Giving up.`
-            )
-          }
-        }
+      } catch {
+        // Ignore malformed frames — keepalive comments never reach onmessage.
       }
     }
 
-    connect()
-
-    // Cleanup on unmount or executionId change
     return () => {
-      clearReconnectTimeout()
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounted')
-        wsRef.current = null
-      }
+      source.close()
+      sourceRef.current = null
+      setIsConnected(false)
     }
-  }, [executionId, autoReconnect, reconnectDelay, maxReconnectAttempts, clearReconnectTimeout])
+  }, [executionId])
 
-  return {
-    isConnected,
-    events,
-    latestEvent,
-    sendCommand,
-  }
+  return { isConnected, events, latestEvent }
 }
 
 export default useExecutionStream

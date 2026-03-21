@@ -117,7 +117,7 @@ class EventProvenance:
 # only handle template events (WorkflowCreated) and runs_count updates.
 # Execution events go to EXECUTION projections (execution_list, execution_detail).
 #
-# The "realtime" projection pushes events to WebSocket clients for live UI updates.
+# The "realtime" projection pushes events to SSE clients for live UI updates.
 # It doesn't persist data - it's a pure forwarding layer.
 EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     # GitHub trigger events (cross-context correlation)
@@ -315,7 +315,7 @@ class ProjectionManager:
             "repo_cost": RepoCostProjection(self._store),
             # Processor to-do list (ISS-196) — store-backed for crash resilience (ISS-222)
             "execution_todo": ExecutionTodoProjection(store=self._store),
-            # Real-time projection for WebSocket push (doesn't use store)
+            # Real-time projection for SSE push (doesn't use store)
             "realtime": get_realtime_projection(),
         }
         self._initialized = True
@@ -531,7 +531,7 @@ class ProjectionManager:
 
     @property
     def realtime(self) -> Any:
-        """Get the real-time projection for WebSocket push."""
+        """Get the real-time projection for SSE push."""
         self._ensure_initialized()
         return self._projections["realtime"]
 

@@ -6,6 +6,9 @@ that provides per-projection checkpoint tracking.
 Architecture:
     Event Store → SubscriptionCoordinator → CheckpointedProjections
                                          └→ RealTimeProjection (side-effect)
+                                              │
+                                              ▼
+                                        SSE Clients
 """
 
 from __future__ import annotations
@@ -39,14 +42,14 @@ logger = get_logger(__name__)
 class RealTimeProjectionAdapter(CheckpointedProjection):
     """Adapter to make RealTimeProjection work with SubscriptionCoordinator.
 
-    This wraps the RealTimeProjection (which broadcasts to WebSocket clients)
+    This wraps the RealTimeProjection (which broadcasts to SSE clients)
     as a CheckpointedProjection. Since RealTimeProjection doesn't persist data,
     we always return SKIP but still call the handlers for broadcasting.
 
     The checkpoint is saved but only to track position - no data is persisted.
     """
 
-    PROJECTION_NAME = "realtime_websocket"
+    PROJECTION_NAME = "realtime_sse"
     VERSION = 1
 
     def __init__(self, realtime_projection: RealTimeProjection) -> None:
@@ -59,7 +62,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         return self.VERSION
 
     def get_subscribed_event_types(self) -> set[str] | None:
-        """Subscribe to all events for WebSocket broadcast."""
+        """Subscribe to all events for SSE broadcast."""
         return {
             "WorkflowExecutionStarted",
             "PhaseStarted",
@@ -77,7 +80,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
         envelope: EventEnvelope[Any],
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
-        """Forward events to RealTimeProjection for WebSocket broadcast."""
+        """Forward events to RealTimeProjection for SSE broadcast."""
         event_type = envelope.event.event_type
         event_data = envelope.event.model_dump()
         global_nonce = envelope.metadata.global_nonce or 0
@@ -90,7 +93,7 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
             if handler:
                 await handler(event_data)
                 logger.debug(
-                    "Broadcasted event to WebSocket clients",
+                    "Broadcasted event to SSE clients",
                     extra={
                         "event_type": event_type,
                         "handler": handler_name,
@@ -110,11 +113,11 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
 
         except Exception as e:
             logger.error(
-                "Error broadcasting to WebSocket",
+                "Error broadcasting to SSE clients",
                 extra={"event_type": event_type, "error": str(e)},
                 exc_info=True,
             )
-            # Don't fail the projection for WebSocket errors
+            # Don't fail the projection for SSE broadcast errors
             return ProjectionResult.SKIP
 
     def _to_snake_case(self, name: str) -> str:
@@ -149,7 +152,7 @@ class CoordinatorSubscriptionService:
         Args:
             event_store: Event store client with subscribe() method
             projections: List of CheckpointedProjection instances
-            realtime_projection: Optional RealTimeProjection for WebSocket broadcast
+            realtime_projection: Optional RealTimeProjection for SSE broadcast
         """
         self._event_store = event_store
         self._projections = projections

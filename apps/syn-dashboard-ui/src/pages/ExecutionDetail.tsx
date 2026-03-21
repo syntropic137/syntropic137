@@ -69,7 +69,7 @@ export function ExecutionDetail() {
     refreshExecution()
   }, [refreshExecution])
 
-  // WebSocket subscription for live updates
+  // SSE subscription for live updates
   const { isConnected } = useExecutionStream(executionId, {
     onEvent: (event) => {
       // Refresh on relevant domain events

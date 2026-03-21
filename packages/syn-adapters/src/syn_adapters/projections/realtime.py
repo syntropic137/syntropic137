@@ -1,11 +1,11 @@
-"""Real-time projection that pushes events to WebSocket clients.
+"""Real-time projection that pushes events to SSE subscribers.
 
 This projection doesn't persist data - it forwards events from the
-subscription service to connected WebSocket clients in real-time.
+subscription service to connected SSE clients in real-time.
 
 This is the correct ES pattern: events flow through the event store,
 subscription service dispatches to projections, and this projection
-delivers events to the UI via WebSocket.
+delivers events to the UI via Server-Sent Events.
 
 Architecture:
     Event Store → Subscription Service → ProjectionManager
@@ -14,239 +14,288 @@ Architecture:
                                      RealTimeProjection
                                               │
                                               ▼
-                                     WebSocket Clients
+                                       SSE Clients
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
-from weakref import WeakSet
+from typing import Any, Literal, TypeAlias
 
 from agentic_logging import get_logger
-
-if TYPE_CHECKING:
-    from fastapi import WebSocket
+from pydantic import BaseModel, ConfigDict
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+# Recursive JSON value type — justified: domain event payloads are
+# arbitrary model_dump() outputs. JsonValue captures all serialisable
+# leaf types; the recursive structure is validated by Pydantic at frame
+# construction time.
+type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+
+# Queue type alias — one queue per SSE subscriber.
+# None is the sentinel that signals the stream should close (terminal event).
+SSEQueue: TypeAlias = asyncio.Queue["SSEEventFrame | None"]
+
+
+class SSEEventFrame(BaseModel, frozen=True):
+    """Typed envelope for all SSE frames pushed to subscribers.
+
+    Every frame sent over an SSE connection is serialised from this model.
+    The ``type`` field distinguishes the three frame kinds:
+
+    - ``connected``: initial handshake sent when a client subscribes
+    - ``event``: a domain event forwarded from the event store
+    - ``terminal``: signals the stream is ending (execution complete/failed)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["connected", "event", "terminal"]
+    event_type: str
+    execution_id: str | None = None
+    # Any is justified here: data is a pass-through of domain event
+    # model_dump() output. The domain layer owns the schema; Pydantic
+    # validates structure at frame construction. Callers must not rely
+    # on specific key types beyond what the domain guarantees.
+    data: dict[str, Any]
+    timestamp: str
+
+
+# ---------------------------------------------------------------------------
+# Projection
+# ---------------------------------------------------------------------------
+
 
 class RealTimeProjection:
-    """Projection that pushes domain events to WebSocket clients.
+    """Projection that pushes domain events to SSE subscribers.
 
     This projection:
-    1. Maintains a registry of WebSocket connections per execution_id
+    1. Maintains a registry of asyncio queues per channel (execution_id or
+       the global ``_activity_`` channel)
     2. Receives events from ProjectionManager (via subscription service)
-    3. Broadcasts relevant events to connected clients
+    3. Broadcasts typed SSEEventFrame objects onto each subscriber's queue
 
-    It does NOT persist any data - it's a pure forwarding layer.
+    It does NOT persist any data — it's a pure forwarding layer.
     """
 
     # Projection interface
     name = "realtime"
 
+    # Channel key used for the global activity feed
+    _ACTIVITY_KEY = "_activity_"
+
     def __init__(self) -> None:
-        """Initialize the real-time projection."""
-        # execution_id -> set of WebSocket connections
-        self._connections: dict[str, WeakSet[WebSocket]] = {}
+        """Initialise the real-time projection."""
+        # channel → set of subscriber queues
+        self._queues: dict[str, set[SSEQueue]] = {}
         self._lock = asyncio.Lock()
+
+    # ------------------------------------------------------------------
+    # Connection management
+    # ------------------------------------------------------------------
 
     @property
     def connection_count(self) -> int:
-        """Get total number of active connections."""
-        return sum(len(conns) for conns in self._connections.values())
+        """Total number of active SSE subscribers."""
+        return sum(len(qs) for qs in self._queues.values())
 
     @property
     def execution_count(self) -> int:
-        """Get number of executions with active connections."""
-        return len(self._connections)
+        """Number of channels with at least one active subscriber."""
+        return len(self._queues)
 
-    async def connect(self, execution_id: str, websocket: WebSocket) -> None:
-        """Register a WebSocket connection for an execution.
+    async def connect(self, channel: str) -> SSEQueue:
+        """Register a new SSE subscriber for *channel*.
 
-        Args:
-            execution_id: The execution to subscribe to.
-            websocket: The WebSocket connection.
-        """
-        async with self._lock:
-            if execution_id not in self._connections:
-                self._connections[execution_id] = WeakSet()
-            self._connections[execution_id].add(websocket)
-
-        logger.debug(
-            "WebSocket connected for real-time events",
-            extra={"execution_id": execution_id},
-        )
-
-    async def disconnect(self, execution_id: str, websocket: WebSocket) -> None:
-        """Unregister a WebSocket connection.
+        Creates a fresh queue, adds it to the channel's subscriber set,
+        and returns it.  The caller (route handler) owns the queue and
+        must call :meth:`disconnect` in its ``finally`` block.
 
         Args:
-            execution_id: The execution subscribed to.
-            websocket: The WebSocket connection.
+            channel: Execution ID or ``_activity_`` for the global feed.
+
+        Returns:
+            The subscriber's dedicated queue.
         """
+        queue: SSEQueue = asyncio.Queue()
         async with self._lock:
-            if execution_id in self._connections:
-                self._connections[execution_id].discard(websocket)
-                # Clean up empty sets
-                if not self._connections[execution_id]:
-                    del self._connections[execution_id]
+            if channel not in self._queues:
+                self._queues[channel] = set()
+            self._queues[channel].add(queue)
 
         logger.debug(
-            "WebSocket disconnected",
-            extra={"execution_id": execution_id},
+            "SSE client connected",
+            extra={"channel": channel, "subscribers": len(self._queues.get(channel, set()))},
         )
+        return queue
+
+    async def disconnect(self, channel: str, queue: SSEQueue) -> None:
+        """Unregister a subscriber queue for *channel*.
+
+        Args:
+            channel: The channel the subscriber was listening on.
+            queue: The queue returned by :meth:`connect`.
+        """
+        async with self._lock:
+            if channel in self._queues:
+                self._queues[channel].discard(queue)
+                if not self._queues[channel]:
+                    del self._queues[channel]
+
+        logger.debug("SSE client disconnected", extra={"channel": channel})
+
+    # ------------------------------------------------------------------
+    # Broadcasting
+    # ------------------------------------------------------------------
 
     async def broadcast(
         self,
-        execution_id: str,
+        channel: str,
         event_type: str,
+        # Any is justified: data originates from domain event model_dump()
+        # calls in the subscription adapter. The domain layer owns the schema;
+        # Pydantic validates structure when SSEEventFrame is constructed.
         data: dict[str, Any],
+        *,
+        terminal: bool = False,
     ) -> None:
-        """Broadcast an event to all connected clients for an execution.
+        """Put a frame onto every subscriber queue for *channel*.
 
         Args:
-            execution_id: The execution ID.
-            event_type: The domain event type.
-            data: The event data.
+            channel: Execution ID or ``_activity_``.
+            event_type: Domain event type string (e.g. ``"PhaseStarted"``).
+            data: Event payload from ``model_dump()``.
+            terminal: If ``True``, also enqueue the ``None`` sentinel so
+                route handlers exit cleanly after delivering the frame.
         """
         logger.info(
-            "Broadcasting event to WebSocket clients",
+            "Broadcasting SSE event",
             extra={
-                "execution_id": execution_id,
+                "channel": channel,
                 "event_type": event_type,
-                "connection_count": len(self._connections.get(execution_id, [])),
+                "subscribers": len(self._queues.get(channel, set())),
             },
         )
 
-        async with self._lock:
-            connections = list(self._connections.get(execution_id, []))
-
-        if not connections:
-            return
-
-        message = json.dumps(
-            {
-                "type": "event",
-                "event_type": event_type,
-                "data": data,
-                "timestamp": datetime.now(UTC).isoformat(),
-            }
+        frame = SSEEventFrame(
+            type="terminal" if terminal else "event",
+            event_type=event_type,
+            execution_id=channel if channel != self._ACTIVITY_KEY else None,
+            data=data,
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
-        # Send to all connections, tracking dead ones
-        dead_connections: list[WebSocket] = []
-        for ws in connections:
-            try:
-                await ws.send_text(message)
-            except Exception:
-                dead_connections.append(ws)
+        async with self._lock:
+            queues = list(self._queues.get(channel, set()))
 
-        # Clean up dead connections
-        if dead_connections:
-            async with self._lock:
-                for ws in dead_connections:
-                    if execution_id in self._connections:
-                        self._connections[execution_id].discard(ws)
+        for queue in queues:
+            await queue.put(frame)
+            if terminal:
+                await queue.put(None)  # sentinel — closes the SSE stream
 
-    # ==========================================================================
-    # Event Handlers - Called by ProjectionManager
-    # ==========================================================================
-
-    async def on_workflow_execution_started(self, event: dict[str, Any]) -> None:
-        """Handle WorkflowExecutionStarted event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "WorkflowExecutionStarted", event)
-
-    async def on_phase_started(self, event: dict[str, Any]) -> None:
-        """Handle PhaseStarted event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "PhaseStarted", event)
-
-    async def on_phase_completed(self, event: dict[str, Any]) -> None:
-        """Handle PhaseCompleted event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "PhaseCompleted", event)
-
-    async def on_workflow_completed(self, event: dict[str, Any]) -> None:
-        """Handle WorkflowCompleted event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "WorkflowCompleted", event)
-
-    async def on_workflow_failed(self, event: dict[str, Any]) -> None:
-        """Handle WorkflowFailed event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "WorkflowFailed", event)
-
-    async def on_session_started(self, event: dict[str, Any]) -> None:
-        """Handle SessionStarted event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "SessionStarted", event)
-
-    async def on_session_completed(self, event: dict[str, Any]) -> None:
-        """Handle SessionCompleted event."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "SessionCompleted", event)
-
-    async def on_operation_recorded(self, event: dict[str, Any]) -> None:
-        """Handle OperationRecorded event (tool calls, messages, etc.)."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "OperationRecorded", event)
-
-    async def on_artifact_created(self, event: dict[str, Any]) -> None:
-        """Handle ArtifactCreated event."""
-        # Artifacts may not have execution_id, but we can try
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "ArtifactCreated", event)
-
-    async def on_subagent_started(self, event: dict[str, Any]) -> None:
-        """Handle SubagentStarted event - subagent spawned via Task tool."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "SubagentStarted", event)
-
-    async def on_subagent_stopped(self, event: dict[str, Any]) -> None:
-        """Handle SubagentStopped event - subagent completed."""
-        execution_id = event.get("execution_id")
-        if execution_id:
-            await self.broadcast(execution_id, "SubagentStopped", event)
-
-    # ==========================================================================
-    # Global Activity Channel
-    # ==========================================================================
-
-    _ACTIVITY_KEY = "_activity_"
-
-    async def broadcast_global(self, event_type: str, data: dict[str, Any]) -> None:
-        """Broadcast a repo-level event to all global activity feed subscribers.
+    async def broadcast_global(
+        self,
+        event_type: str,
+        # Any is justified: see broadcast() above.
+        data: dict[str, Any],
+    ) -> None:
+        """Broadcast a repo-level event to all global activity subscribers.
 
         Used for git commit/push events and other non-execution-scoped events
         that should appear in the dashboard's global live feed.
 
         Args:
-            event_type: The event type string (e.g. "git_commit").
-            data: The event payload.
+            event_type: Event type string (e.g. ``"git_commit"``).
+            data: Event payload.
         """
         await self.broadcast(self._ACTIVITY_KEY, event_type, data)
 
+    # ------------------------------------------------------------------
+    # Event handlers — called by ProjectionManager / RealTimeProjectionAdapter
+    # ------------------------------------------------------------------
 
-# Singleton instance - registered with ProjectionManager at startup
+    async def on_workflow_execution_started(self, event: dict[str, Any]) -> None:
+        """Handle WorkflowExecutionStarted event."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "WorkflowExecutionStarted", event)
+
+    async def on_phase_started(self, event: dict[str, Any]) -> None:
+        """Handle PhaseStarted event."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "PhaseStarted", event)
+
+    async def on_phase_completed(self, event: dict[str, Any]) -> None:
+        """Handle PhaseCompleted event."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "PhaseCompleted", event)
+
+    async def on_workflow_completed(self, event: dict[str, Any]) -> None:
+        """Handle WorkflowCompleted event — sends terminal sentinel."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "WorkflowCompleted", event, terminal=True)
+
+    async def on_workflow_failed(self, event: dict[str, Any]) -> None:
+        """Handle WorkflowFailed event — sends terminal sentinel."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "WorkflowFailed", event, terminal=True)
+
+    async def on_session_started(self, event: dict[str, Any]) -> None:
+        """Handle SessionStarted event."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "SessionStarted", event)
+
+    async def on_session_completed(self, event: dict[str, Any]) -> None:
+        """Handle SessionCompleted event."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "SessionCompleted", event)
+
+    async def on_operation_recorded(self, event: dict[str, Any]) -> None:
+        """Handle OperationRecorded event (tool calls, messages, etc.)."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "OperationRecorded", event)
+
+    async def on_artifact_created(self, event: dict[str, Any]) -> None:
+        """Handle ArtifactCreated event."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "ArtifactCreated", event)
+
+    async def on_subagent_started(self, event: dict[str, Any]) -> None:
+        """Handle SubagentStarted event — subagent spawned via Task tool."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "SubagentStarted", event)
+
+    async def on_subagent_stopped(self, event: dict[str, Any]) -> None:
+        """Handle SubagentStopped event — subagent completed."""
+        execution_id = event.get("execution_id")
+        if isinstance(execution_id, str):
+            await self.broadcast(execution_id, "SubagentStopped", event)
+
+
+# ---------------------------------------------------------------------------
+# Singleton
+# ---------------------------------------------------------------------------
+
 _realtime_projection: RealTimeProjection | None = None
 
 
 def get_realtime_projection() -> RealTimeProjection:
-    """Get the singleton RealTimeProjection instance."""
+    """Return the singleton RealTimeProjection instance."""
     global _realtime_projection
     if _realtime_projection is None:
         _realtime_projection = RealTimeProjection()

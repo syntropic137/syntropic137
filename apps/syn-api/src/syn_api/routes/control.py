@@ -1,11 +1,17 @@
-"""WebSocket and HTTP control endpoints — thin wrapper over v1."""
+"""HTTP control endpoints for execution lifecycle — thin wrapper over v1.
+
+Pause, resume, cancel, inject, and state inspection for running executions.
+The previous bidirectional WebSocket endpoint (``/ws/control/{id}``) has been
+removed — all control actions are fully covered by the HTTP endpoints below,
+which the CLI and dashboard already use exclusively.
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import syn_api.v1.executions as ex
@@ -54,69 +60,6 @@ class StateResponse(BaseModel):
 
     execution_id: str
     state: str
-
-
-# =============================================================================
-# WebSocket Endpoint
-# =============================================================================
-
-
-@router.websocket("/ws/control/{execution_id}")
-async def control_websocket(websocket: WebSocket, execution_id: str) -> None:
-    """WebSocket endpoint for bidirectional execution control."""
-    await websocket.accept()
-
-    try:
-        state_result = await ex.get_state(execution_id)
-        state_val = "unknown"
-        if not isinstance(state_result, Err):
-            state_val = state_result.value.get("state", "unknown")
-
-        await websocket.send_json(
-            {"type": "state", "execution_id": execution_id, "state": state_val}
-        )
-
-        while True:
-            data = await websocket.receive_json()
-            cmd_type = data.get("command")
-
-            result = None
-            if cmd_type == "pause":
-                result = await ex.pause(execution_id, reason=data.get("reason"))
-            elif cmd_type == "resume":
-                result = await ex.resume(execution_id)
-            elif cmd_type == "cancel":
-                result = await ex.cancel(execution_id, reason=data.get("reason"))
-            elif cmd_type == "inject":
-                result = await ex.inject(
-                    execution_id,
-                    message=data.get("message", ""),
-                    role=data.get("role", "user"),
-                )
-
-            if result is not None and not isinstance(result, Err):
-                ctrl = result.value
-                await websocket.send_json(
-                    {
-                        "type": "result",
-                        "success": ctrl.success,
-                        "state": ctrl.new_state,
-                        "message": ctrl.message,
-                        "error": ctrl.error,
-                    }
-                )
-            elif result is not None:
-                await websocket.send_json({"type": "error", "error": result.message})
-            else:
-                await websocket.send_json(
-                    {"type": "error", "error": f"Unknown command: {cmd_type}"}
-                )
-
-    except WebSocketDisconnect:
-        logger.debug("WebSocket disconnected", extra={"execution_id": execution_id})
-    except Exception as e:
-        logger.exception("WebSocket error")
-        await websocket.close(code=1011, reason=str(e))
 
 
 # =============================================================================

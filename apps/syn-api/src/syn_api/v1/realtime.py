@@ -1,39 +1,40 @@
-"""Realtime operations — access the RealTimeProjection for WebSocket support.
+"""Realtime operations — access the RealTimeProjection for SSE support.
 
-The WebSocket protocol stays in the dashboard — the API module just
-provides access to the projection singleton.
+The SSE protocol layer lives in ``syn_api.routes.sse``; this module
+provides the service-layer access point to the projection singleton.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from syn_api._wiring import get_realtime
 from syn_api.types import ObservabilityError, Ok, RealtimeHealth, Result
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
+    from syn_adapters.projections.realtime import RealTimeProjection
 
 
-def get_realtime_projection_ref() -> Any:
+def get_realtime_projection_ref() -> RealTimeProjection:
     """Return the RealTimeProjection singleton.
 
-    The dashboard's WebSocket handler uses this to connect/disconnect
-    clients and broadcast events.
+    The SSE route handlers use this to connect/disconnect subscribers
+    and receive broadcast frames via their per-client queues.
     """
-    return get_realtime()
+    return get_realtime()  # type: ignore[return-value]
 
 
 async def get_realtime_health(
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[RealtimeHealth, ObservabilityError]:
-    """Get health status of the realtime projection.
+    """Get health status of the realtime SSE projection.
 
     Args:
         auth: Optional authentication context.
 
     Returns:
-        Ok(RealtimeHealth) with connection and execution counts.
+        Ok(RealtimeHealth) with active subscriber and execution counts.
     """
     projection = get_realtime()
     return Ok(
