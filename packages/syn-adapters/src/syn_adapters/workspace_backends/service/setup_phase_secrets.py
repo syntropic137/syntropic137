@@ -83,8 +83,6 @@ class SetupPhaseSecrets:
         Raises:
             GitHubAppNotConfiguredError: If require_github=True and App not configured
         """
-        import os
-
         from syn_adapters.github.client import GitHubAuthError
         from syn_shared.settings.github import GitHubAppSettings
 
@@ -125,10 +123,19 @@ class SetupPhaseSecrets:
         elif require_github:
             raise GitHubAppNotConfiguredError()
 
-        # Get Claude auth from environment
+        # Get Claude auth from Settings (validated by pydantic-settings at startup)
         # CLAUDE_CODE_OAUTH_TOKEN takes priority over ANTHROPIC_API_KEY
-        claude_code_oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
-        anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+        from syn_shared.settings import get_settings
+
+        settings = get_settings()
+        claude_code_oauth_token = (
+            settings.claude_code_oauth_token.get_secret_value()
+            if settings.claude_code_oauth_token
+            else None
+        )
+        anthropic_api_key = (
+            settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+        )
 
         if claude_code_oauth_token and anthropic_api_key:
             logger.warning(
@@ -168,11 +175,13 @@ class SetupPhaseSecrets:
         """
         import os
 
+        from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
+
         return cls(
             github_app_token=None,
             claude_code_oauth_token=claude_code_oauth_token
-            or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
-            anthropic_api_key=anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY"),
+            or os.environ.get(ENV_CLAUDE_CODE_OAUTH_TOKEN),
+            anthropic_api_key=anthropic_api_key or os.environ.get(ENV_ANTHROPIC_API_KEY),
             git_author_name=git_author_name,
             git_author_email=git_author_email,
         )

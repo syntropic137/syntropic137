@@ -1384,7 +1384,7 @@ wheels = [
 
 [[package]]
 name = "syn-adapters"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/syn-adapters" }
 dependencies = [
     { name = "agentic-events" },
@@ -1446,7 +1446,7 @@ provides-extras = ["postgres", "claude", "agents", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1475,10 +1475,11 @@ requires-dist = [
 
 [[package]]
 name = "syn-cli"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "apps/syn-cli" }
 dependencies = [
     { name = "httpx" },
+    { name = "pydantic" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -1486,13 +1487,14 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
     { name = "rich", specifier = ">=13.9.0" },
     { name = "typer", specifier = ">=0.15.0" },
 ]
 
 [[package]]
 name = "syn-collector"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
@@ -1532,7 +1534,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-domain"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
@@ -1553,7 +1555,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-perf"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/syn-perf" }
 dependencies = [
     { name = "rich" },
@@ -1581,7 +1583,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-shared"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/syn-shared" }
 dependencies = [
     { name = "pydantic" },
@@ -1600,7 +1602,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-tokens"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "packages/syn-tokens" }
 dependencies = [
     { name = "pydantic" },
@@ -1617,7 +1619,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "0.12.1"
+version = "0.13.0"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },

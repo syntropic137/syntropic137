@@ -18,6 +18,12 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 
+from syn_shared.env_constants import (
+    ENV_SYN_AGENT_NETWORK,
+    ENV_SYN_WORKSPACE_CONTAINER_DIR,
+    ENV_SYN_WORKSPACE_HOST_DIR,
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -73,16 +79,16 @@ class AgenticIsolationAdapter:
 
         # Get paths from env or args
         container_dir = workspace_container_dir or os.environ.get(
-            "SYN_WORKSPACE_CONTAINER_DIR", "/workspaces"
+            ENV_SYN_WORKSPACE_CONTAINER_DIR, "/workspaces"
         )
-        host_dir = workspace_host_dir or os.environ.get("SYN_WORKSPACE_HOST_DIR")
+        host_dir = workspace_host_dir or os.environ.get(ENV_SYN_WORKSPACE_HOST_DIR)
 
         self._container_base_dir = container_dir
         self._host_base_dir = host_dir  # May be None if same as container dir
 
         # ISS-43: Use agent-net so containers can reach the shared Envoy proxy
         # but cannot reach the internet directly.
-        agent_network = os.environ.get("SYN_AGENT_NETWORK", "agent-net")
+        agent_network = os.environ.get(ENV_SYN_AGENT_NETWORK, "agent-net")
 
         self._provider = WorkspaceDockerProvider(
             default_image=default_image,
