@@ -100,9 +100,9 @@ We will implement a **catch-up subscription with live tailing** pattern:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### RealTimeProjection for UI Streaming (Added 2025-12-09)
+### RealTimeProjection for UI Streaming (Updated 2026-03-21 — SSE replaces WebSocket)
 
-In addition to persisting projections, the architecture supports a **RealTimeProjection** for streaming domain events to UI clients via WebSocket:
+In addition to persisting projections, the architecture supports a **RealTimeProjection** for streaming domain events to UI clients via **Server-Sent Events (SSE)**. WebSocket was replaced in ISS-262; see ADR-049 for the full rationale.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -119,23 +119,23 @@ In addition to persisting projections, the architecture supports a **RealTimePro
 │    WorkflowDetail)               SessionList)                       │       │
 │       │                              │                              │       │
 │       ▼                              ▼                              ▼       │
-│   PostgreSQL                    PostgreSQL                   WebSocket     │
-│   (Read Models)                 (Read Models)                Clients (UI)  │
+│   PostgreSQL                    PostgreSQL                    SSE Clients  │
+│   (Read Models)                 (Read Models)                 (UI / CLI)   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 The `RealTimeProjection`:
-- Is a **non-persisting** projection that maintains WebSocket connections
+- Is a **non-persisting** projection that maintains one `asyncio.Queue[SSEEventFrame | None]` per SSE subscriber
 - Receives events from the same `ProjectionManager` as persisting projections
-- Broadcasts events to connected UI clients for that execution
-- Connects via `/ws/executions/{execution_id}` endpoint
-- Uses the `useExecutionStream` React hook on the frontend
+- Broadcasts typed `SSEEventFrame` objects onto each subscriber's queue; route handlers drain queues and emit `text/event-stream` responses
+- Clients connect via `GET /sse/executions/{execution_id}` (execution stream) or `GET /sse/activity` (global feed)
+- Uses the `useExecutionStream` React hook (browser `EventSource`) on the frontend, and `httpx.Client.stream()` in the CLI
 
 This pattern ensures:
 1. **Single event source:** All UI updates come from the Event Store
-2. **No parallel paths:** No SSE or separate event systems
-3. **Consistent with ES principles:** Projections (including real-time) are consumers of the event stream
+2. **Consistent with ES principles:** Projections (including real-time) are consumers of the event stream
+3. **Separation of concerns:** Observation (SSE GET) and control (HTTP POST) are distinct interfaces
 
 ## Consequences
 

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted — **Updated 2026-03-21**
+
+> **ISS-262 note:** The bidirectional WebSocket control endpoint (`/ws/control/{execution_id}`) was removed. It was redundant — all control actions (pause, resume, cancel, inject) are fully covered by the HTTP POST endpoints described in this ADR, which remain the canonical interfaces. Observation streams (execution events) are now served via SSE; see ADR-049.
 
 ## Date
 
