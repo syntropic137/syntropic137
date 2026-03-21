@@ -131,28 +131,6 @@ services:
       timeout: 20s
       retries: 3
 
-  # Bucket initialisation — run explicitly via `just dev` / `just selfhost-up`, NOT on default up.
-  # profiles: [init] keeps this container out of the default `docker compose up`
-  # set so Docker Desktop does not show a stopped/grey container alongside the
-  # running services.  It is run explicitly (and removed on exit) by `just dev`.
-  minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
-    profiles: ["init"]
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
-      mc mb --ignore-existing local/syn-artifacts &&
-      mc mb --ignore-existing local/syn-conversations &&
-      echo 'Buckets ready!'
-      "
-    restart: "no"
-
   # =============================================================================
   # REDIS - Caching and Pub/Sub
   # =============================================================================
