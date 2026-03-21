@@ -1,0 +1,28 @@
+{
+  "id": "syntropic137",
+  "name": "Syntropic137",
+  "version": "0.1.0",
+  "description": "Execute and monitor AI workflows on Syntropic137 — orchestration, observability, and GitHub automation",
+  "author": "Syntropic137",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiUrl": {
+        "type": "string",
+        "default": "http://localhost:8137",
+        "description": "Syntropic137 API base URL"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Bearer token for remote deployments (optional for local)"
+      }
+    }
+  },
+  "uiHints": {
+    "apiKey": {
+      "secret": true
+    }
+  },
+  "skills": ["SKILL.md"],
+  "entry": "dist/index.js"
+}

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor import (
     WorkflowExecutionProcessor,
 )
@@ -32,7 +33,7 @@ def _make_processor() -> WorkflowExecutionProcessor:
         controller=None,
         prompt_builder=AsyncMock(return_value="test prompt"),
         command_builder=MagicMock(return_value=["claude", "--model", "haiku"]),
-        todo_projection=ExecutionTodoProjection(),
+        todo_projection=ExecutionTodoProjection(store=InMemoryProjectionStore()),
     )
 
 
@@ -156,6 +157,6 @@ class TestProcessorProjectionSync:
         await processor._save_and_sync(aggregate)
 
         # The local projection should now have a todo
-        todos = processor._todo_projection.get_pending("exec-sync")
+        todos = await processor._todo_projection.get_pending("exec-sync")
         assert len(todos) == 1
         assert todos[0].phase_id == "p-1"

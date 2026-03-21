@@ -23,7 +23,7 @@ class TestGetSystemCostHandler:
     @pytest.mark.asyncio
     async def test_aggregates_repo_costs(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker"]
         )
         handler = GetSystemCostHandler(store, sys_proj, repo_proj)
@@ -68,7 +68,7 @@ class TestGetSystemCostHandler:
     @pytest.mark.asyncio
     async def test_empty_when_no_costs(self) -> None:
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        sys_proj, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemCostHandler(store, sys_proj, repo_proj)
 
         result = await handler.handle(GetSystemCostQuery(system_id="sys-1"))
@@ -80,7 +80,7 @@ class TestGetSystemCostHandler:
     async def test_partial_cost_data(self) -> None:
         """Some repos have cost data, some don't — totals only include available data."""
         store = FakeProjectionStore()
-        sys_proj, repo_proj = _make_projections(
+        sys_proj, repo_proj = await _make_projections(
             "sys-1", "Backend", "org-1", ["acme/api", "acme/worker"]
         )
         handler = GetSystemCostHandler(store, sys_proj, repo_proj)

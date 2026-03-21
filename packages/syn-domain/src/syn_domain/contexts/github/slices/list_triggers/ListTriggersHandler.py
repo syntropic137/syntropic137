@@ -24,7 +24,7 @@ class ListTriggersHandler:
     Reads from the trigger rule projection to return matching rules.
     """
 
-    def handle(self, query: ListTriggersQuery) -> list[TriggerRule]:
+    async def handle(self, query: ListTriggersQuery) -> list[TriggerRule]:
         """Handle the query.
 
         Args:
@@ -34,7 +34,7 @@ class ListTriggersHandler:
             List of matching TriggerRule read models.
         """
         projection = get_trigger_rule_projection()
-        return projection.list_all(
+        return await projection.list_all(
             repository=query.repository,
             status=query.status,
         )

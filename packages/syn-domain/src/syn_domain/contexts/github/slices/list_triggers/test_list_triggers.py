@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import (
     TriggerStatus,
 )
@@ -40,35 +41,35 @@ def _make_registered_event(trigger_id: str, **overrides) -> TriggerRegisteredEve
 class TestTriggerRuleProjection:
     """Tests for TriggerRuleProjection."""
 
-    def test_handle_trigger_registered(self) -> None:
+    async def test_handle_trigger_registered(self) -> None:
         """Test projecting a TriggerRegistered event."""
-        projection = TriggerRuleProjection()
+        projection = TriggerRuleProjection(store=InMemoryProjectionStore())
         event = _make_registered_event("tr-1")
 
-        rule = projection.handle_trigger_registered(event)
+        rule = await projection.handle_trigger_registered(event)
 
         assert rule.trigger_id == "tr-1"
         assert rule.status == TriggerStatus.ACTIVE
-        assert projection.get("tr-1") is not None
+        assert await projection.get("tr-1") is not None
 
-    def test_handle_trigger_paused(self) -> None:
+    async def test_handle_trigger_paused(self) -> None:
         """Test projecting a TriggerPaused event."""
-        projection = TriggerRuleProjection()
-        projection.handle_trigger_registered(_make_registered_event("tr-1"))
+        projection = TriggerRuleProjection(store=InMemoryProjectionStore())
+        await projection.handle_trigger_registered(_make_registered_event("tr-1"))
 
-        rule = projection.handle_trigger_paused(
+        rule = await projection.handle_trigger_paused(
             TriggerPausedEvent(trigger_id="tr-1", paused_by="admin")
         )
 
         assert rule is not None
         assert rule.status == TriggerStatus.PAUSED
 
-    def test_handle_trigger_fired_updates_count(self) -> None:
+    async def test_handle_trigger_fired_updates_count(self) -> None:
         """Test that TriggerFired updates fire_count and last_fired_at."""
-        projection = TriggerRuleProjection()
-        projection.handle_trigger_registered(_make_registered_event("tr-1"))
+        projection = TriggerRuleProjection(store=InMemoryProjectionStore())
+        await projection.handle_trigger_registered(_make_registered_event("tr-1"))
 
-        rule = projection.handle_trigger_fired(
+        rule = await projection.handle_trigger_fired(
             TriggerFiredEvent(
                 trigger_id="tr-1",
                 execution_id="exec-1",
@@ -80,28 +81,30 @@ class TestTriggerRuleProjection:
         assert rule.fire_count == 1
         assert rule.last_fired_at is not None
 
-    def test_list_all_with_filters(self) -> None:
+    async def test_list_all_with_filters(self) -> None:
         """Test listing triggers with filters."""
-        projection = TriggerRuleProjection()
-        projection.handle_trigger_registered(
+        projection = TriggerRuleProjection(store=InMemoryProjectionStore())
+        await projection.handle_trigger_registered(
             _make_registered_event("tr-1", repository="org/repo-a")
         )
-        projection.handle_trigger_registered(
+        await projection.handle_trigger_registered(
             _make_registered_event("tr-2", repository="org/repo-b")
         )
-        projection.handle_trigger_registered(
+        await projection.handle_trigger_registered(
             _make_registered_event("tr-3", repository="org/repo-a")
         )
-        projection.handle_trigger_paused(TriggerPausedEvent(trigger_id="tr-3", paused_by="admin"))
+        await projection.handle_trigger_paused(
+            TriggerPausedEvent(trigger_id="tr-3", paused_by="admin")
+        )
 
-        all_rules = projection.list_all()
+        all_rules = await projection.list_all()
         assert len(all_rules) == 3
 
-        repo_a = projection.list_all(repository="org/repo-a")
+        repo_a = await projection.list_all(repository="org/repo-a")
         assert len(repo_a) == 2
 
-        active = projection.list_all(status="active")
+        active = await projection.list_all(status="active")
         assert len(active) == 2
 
-        repo_a_active = projection.list_all(repository="org/repo-a", status="active")
+        repo_a_active = await projection.list_all(repository="org/repo-a", status="active")
         assert len(repo_a_active) == 1

@@ -110,6 +110,46 @@ services:
       - syn-internal
 
   # ===========================================================================
+  # DOCKER SOCKET PROXY (ISS-164)
+  # ===========================================================================
+  # Restricts api to only the Docker API endpoints it actually uses.
+  # The real socket is mounted ONLY here — api talks to this proxy via TCP.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: syn137-docker-socket-proxy
+    environment:
+      CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
+      ALLOW_START: 1    # docker start → POST /containers/{id}/start
+      ALLOW_STOP: 1     # docker stop  → POST /containers/{id}/stop
+      EXEC: 1           # docker exec  → /exec/* paths
+      POST: 1           # Enable all non-GET verbs (POST, DELETE, PUT)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: "0.1"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    networks:
+      - syn-proxy
+
+  # ===========================================================================
   # API
   # ===========================================================================
   api:
@@ -121,7 +161,6 @@ services:
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
       - api_logs:/app/logs
-      - /var/run/docker.sock:/var/run/docker.sock
       - ../workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1"]
@@ -148,20 +187,21 @@ services:
       # Workspace configuration
       - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
       - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
-    # Run as root so entrypoint can match Docker socket GID, then drop to 'syn' via gosu.
-    # no-new-privileges is omitted here (unlike other services) because gosu needs
-    # setuid to de-escalate. All other hardening remains (read_only, cap_drop, etc.).
-    user: root
+      # Docker socket proxy (ISS-164)
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
     secrets:
       - db_password
       - redis_password
     restart: always
     read_only: true
+    security_opt:
+      - no-new-privileges:true
     cap_drop:
       - ALL
-    cap_add:
-      - SETUID   # Required for gosu to drop privileges
-      - SETGID   # Required for gosu to match Docker socket GID
     tmpfs:
       - /tmp
       - /home/syn/.config  # 1Password CLI needs writable config dir on read-only FS
@@ -177,6 +217,7 @@ services:
         max-file: "3"
     networks:
       - syn-internal
+      - syn-proxy
 
   # ===========================================================================
   # FRONTEND (nginx)
@@ -259,6 +300,7 @@ services:
 
   minio-init:
     container_name: syn137-minio-init
+    profiles: ["init"]
     networks:
       - syn-internal
 
@@ -330,3 +372,7 @@ networks:
   syn-internal:
     name: syn137_internal
     driver: bridge
+  syn-proxy:
+    name: syn137_proxy
+    driver: bridge
+    internal: true  # no external routing — proxy ↔ api only

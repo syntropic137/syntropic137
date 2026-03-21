@@ -99,6 +99,10 @@ just cli workflow create "My Workflow"
 just cli workflow seed --dry-run
 just cli workflow validate workflows/examples/research.yaml
 
+# Execute a workflow with a task (ISS-211: CC command pattern)
+just cli workflow run research-workflow-v2 --task "Investigate how auth middleware works"
+just cli workflow run research-workflow-v2 --task "$(gh issue view 42 --json body -q .body)" --input topic=auth
+
 # Direct execution
 uv run syn --help
 ```

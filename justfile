@@ -378,26 +378,29 @@ dev: _workspace-check
     echo "2️⃣ Building and starting Docker services..."
     ${_COMPOSE} up -d --build
     echo ""
-    echo "3️⃣ Waiting for services to be healthy..."
+    echo "3️⃣ Initialising MinIO buckets..."
+    ${_COMPOSE} --profile init run --rm minio-init
+    echo ""
+    echo "4️⃣ Waiting for services to be healthy..."
     sleep 5
     echo ""
-    echo "4️⃣ Seeding workflows..."
+    echo "5️⃣ Seeding workflows..."
     just seed-workflows || echo "   ⚠️ Seed skipped (workflows may already exist)"
     echo ""
-    echo "5️⃣ Seeding triggers..."
+    echo "6️⃣ Seeding triggers..."
     just seed-triggers || echo "   ⚠️ Seed skipped (triggers may already exist)"
     echo ""
-    echo "5½ Seeding organization..."
+    echo "6½ Seeding organization..."
     just seed-organization || echo "   ⚠️ Seed skipped (organization may already exist)"
     echo ""
-    echo "6️⃣ Starting dashboard frontend..."
+    echo "7️⃣ Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
     sleep 1  # let previous process fully exit
     (cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true)
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "7️⃣ Starting Pulse metrics frontend..."
+    echo "8️⃣ Starting Pulse metrics frontend..."
     lsof -ti:5174 | xargs kill 2>/dev/null || true
     sleep 1
     (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
@@ -410,8 +413,8 @@ dev: _workspace-check
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
     echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8000"
-    echo "   📊 API Docs:     http://localhost:8000/docs"
+    echo "   🚀 Backend API:  http://localhost:8137"
+    echo "   📊 API Docs:     http://localhost:8137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -455,29 +458,32 @@ dev-fresh: _workspace-check
     echo "4️⃣ Building and starting Docker services..."
     ${_COMPOSE} up -d --build
     echo ""
-    echo "5️⃣ Waiting for services to be healthy..."
+    echo "5️⃣ Initialising MinIO buckets..."
+    ${_COMPOSE} --profile init run --rm minio-init
+    echo ""
+    echo "6️⃣ Waiting for services to be healthy..."
     sleep 8
     echo ""
-    echo "6️⃣ Running database migrations..."
+    echo "7️⃣ Running database migrations..."
     just feedback-migrate 2>/dev/null || echo "   Skipped: psql not installed (feedback tables created on first use)"
     echo ""
-    echo "7️⃣ Seeding workflows..."
+    echo "8️⃣ Seeding workflows..."
     just seed-workflows
     echo ""
-    echo "8️⃣ Seeding triggers..."
+    echo "9️⃣ Seeding triggers..."
     just seed-triggers
     echo ""
-    echo "8½ Seeding organization..."
+    echo "9½ Seeding organization..."
     just seed-organization
     echo ""
-    echo "9️⃣ Starting dashboard frontend..."
+    echo "🔟 Starting dashboard frontend..."
     lsof -ti:5173 | xargs kill 2>/dev/null || true
     sleep 1
     (cd apps/syn-dashboard-ui && pnpm install --silent 2>/dev/null || true)
     (cd apps/syn-dashboard-ui && pnpm run dev > /tmp/syn-dashboard.log 2>&1 &)
     sleep 3
     echo ""
-    echo "🔟 Starting Pulse metrics frontend..."
+    echo "1️⃣1️⃣ Starting Pulse metrics frontend..."
     lsof -ti:5174 | xargs kill 2>/dev/null || true
     sleep 1
     (cd apps/syn-pulse-ui && pnpm install --silent 2>/dev/null || true)
@@ -490,8 +496,8 @@ dev-fresh: _workspace-check
     echo ""
     echo "   🌐 Dashboard:    http://localhost:5173"
     echo "   📈 Pulse:        http://localhost:5174"
-    echo "   🚀 Backend API:  http://localhost:8000"
-    echo "   📊 API Docs:     http://localhost:8000/docs"
+    echo "   🚀 Backend API:  http://localhost:8137"
+    echo "   📊 API Docs:     http://localhost:8137/docs"
     echo "   💾 Database:     localhost:5432"
     echo "   📦 Event Store:  localhost:50051"
     echo "   🗂️  MinIO:        http://localhost:9001"
@@ -622,11 +628,11 @@ dev-webhooks:
     fi
     echo "🔗 Starting webhook proxy..."
     echo "   Source: $DEV__SMEE_URL"
-    echo "   Target: http://localhost:8000/webhooks/github"
+    echo "   Target: http://localhost:8137/webhooks/github"
     echo ""
     echo "   Press Ctrl+C to stop"
     echo ""
-    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github
+    npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github
 
 # View smee proxy logs
 dev-webhooks-logs:
@@ -767,12 +773,12 @@ import-check:
     @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck fitness test dashboard-qa test-debt vsa-validate topology-check docs-sync
+qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck test-cov dashboard-qa vsa-validate topology-check docs-sync
+qa-full: lint format typecheck validate-domain-events fitness test-cov dashboard-qa test-debt vsa-validate topology-check docs-sync
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
@@ -791,6 +797,10 @@ format-check:
 # Run type checker (strict mode)
 typecheck:
     uv run pyright
+
+# Validate domain event definitions
+validate-domain-events:
+    uv run python scripts/validate_domain_events.py
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
 fitness-check: aps-build
@@ -948,6 +958,9 @@ selfhost-up: _selfhost-preflight _workspace-check
     echo "🚀 Starting Syn137 self-host stack..."
     {{compose_selfhost}} up -d --build
     echo ""
+    echo "🪣 Initialising MinIO buckets..."
+    {{compose_selfhost}} --profile init run --rm minio-init
+    echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
     echo ""
@@ -963,6 +976,9 @@ selfhost-up-tunnel: _selfhost-preflight _workspace-check
     source infra/scripts/selfhost-env.sh
     echo "🚀 Starting Syn137 self-host stack with Cloudflare Tunnel..."
     {{compose_selfhost_cf}} up -d --build
+    echo ""
+    echo "🪣 Initialising MinIO buckets..."
+    {{compose_selfhost_cf}} --profile init run --rm minio-init
     echo ""
     echo "⏳ Waiting for services to be ready..."
     uv run python infra/scripts/health_check.py --wait --timeout 180 || true
@@ -1513,9 +1529,9 @@ _webhook-start:
     if [ -n "${DEV__SMEE_URL:-}" ]; then
         uv run python scripts/manage_webhook_url.py --mode dev || true
         pkill -f "smee-client.*${DEV__SMEE_URL}" 2>/dev/null || true
-        echo "5️⃣  Starting webhook proxy (smee.io → localhost:8000)..."
-        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8000/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
-        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8000/webhooks/github"
+        echo "5️⃣  Starting webhook proxy (smee.io → localhost:8137)..."
+        npx -y smee-client --url "$DEV__SMEE_URL" --target http://localhost:8137/webhooks/github --path /webhooks/github > /tmp/smee.log 2>&1 &
+        echo "   🔗 Webhook proxy: $DEV__SMEE_URL → http://localhost:8137/webhooks/github"
         exit 0
     fi
 

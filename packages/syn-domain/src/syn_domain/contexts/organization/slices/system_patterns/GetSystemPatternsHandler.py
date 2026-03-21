@@ -12,6 +12,7 @@ from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization._shared.projection_names import (
     REPO_CORRELATION,
     REPO_COST,
+    WORKFLOW_EXECUTIONS,
 )
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
@@ -45,7 +46,7 @@ class GetSystemPatternsHandler:
 
     async def _get_execution_ids_for_system(self, system_id: str) -> dict[str, str]:
         """Map execution_id → repo_full_name for all repos in a system."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         repo_names = {r.full_name for r in repos}
 
         correlations = await self._store.get_all(REPO_CORRELATION)
@@ -60,7 +61,7 @@ class GetSystemPatternsHandler:
         if not exec_to_repo:
             return []
 
-        all_executions = await self._store.get_all("workflow_executions")
+        all_executions = await self._store.get_all(WORKFLOW_EXECUTIONS)
         execution_ids = set(exec_to_repo.keys())
 
         # Group by (error_type, error_message)
@@ -110,7 +111,7 @@ class GetSystemPatternsHandler:
 
     async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:
         """Find repos with cost > 3x median."""
-        repos = self._repo_projection.list_all(system_id=system_id)
+        repos = await self._repo_projection.list_all(system_id=system_id)
         costs: list[tuple[str, Decimal]] = []
 
         for repo in repos:
@@ -147,7 +148,7 @@ class GetSystemPatternsHandler:
     async def handle(self, query: GetSystemPatternsQuery) -> SystemPatterns:
         """Handle GetSystemPatternsQuery."""
         # TODO(#200): Implement time-window filtering
-        system = self._system_projection.get(query.system_id)
+        system = await self._system_projection.get(query.system_id)
         system_name = system.name if system else ""
 
         exec_to_repo = await self._get_execution_ids_for_system(query.system_id)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_EXECUTIONS
 from syn_domain.contexts.organization.domain.queries.get_system_activity import (
     GetSystemActivityQuery,
 )
@@ -21,7 +22,7 @@ class TestGetSystemActivityHandler:
     @pytest.mark.asyncio
     async def test_returns_correlated_executions(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemActivityHandler(store, repo_proj)
 
         await store.save(
@@ -33,7 +34,7 @@ class TestGetSystemActivityHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-1",
             {
                 "workflow_execution_id": "exec-1",
@@ -51,7 +52,7 @@ class TestGetSystemActivityHandler:
     @pytest.mark.asyncio
     async def test_filters_out_unrelated_repos(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemActivityHandler(store, repo_proj)
 
         # Correlation for a repo NOT in the system
@@ -64,7 +65,7 @@ class TestGetSystemActivityHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-1",
             {
                 "workflow_execution_id": "exec-1",
@@ -79,7 +80,7 @@ class TestGetSystemActivityHandler:
     @pytest.mark.asyncio
     async def test_pagination(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemActivityHandler(store, repo_proj)
 
         for i in range(5):
@@ -92,7 +93,7 @@ class TestGetSystemActivityHandler:
                 },
             )
             await store.save(
-                "workflow_executions",
+                WORKFLOW_EXECUTIONS,
                 f"exec-{i}",
                 {
                     "workflow_execution_id": f"exec-{i}",

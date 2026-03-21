@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_EXECUTIONS
 from syn_domain.contexts.organization.domain.queries.get_system_history import (
     GetSystemHistoryQuery,
 )
@@ -21,7 +22,7 @@ class TestGetSystemHistoryHandler:
     @pytest.mark.asyncio
     async def test_returns_chronological_order(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         await store.save(
@@ -42,7 +43,7 @@ class TestGetSystemHistoryHandler:
         )
 
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-1",
             {
                 "workflow_execution_id": "exec-1",
@@ -51,7 +52,7 @@ class TestGetSystemHistoryHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-2",
             {
                 "workflow_execution_id": "exec-2",
@@ -70,7 +71,7 @@ class TestGetSystemHistoryHandler:
     @pytest.mark.asyncio
     async def test_respects_limit(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         for i in range(5):
@@ -83,7 +84,7 @@ class TestGetSystemHistoryHandler:
                 },
             )
             await store.save(
-                "workflow_executions",
+                WORKFLOW_EXECUTIONS,
                 f"exec-{i}",
                 {
                     "workflow_execution_id": f"exec-{i}",
@@ -98,7 +99,7 @@ class TestGetSystemHistoryHandler:
     @pytest.mark.asyncio
     async def test_empty_for_unknown_system(self) -> None:
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", [])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", [])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         result = await handler.handle(GetSystemHistoryQuery(system_id="sys-1"))
@@ -108,7 +109,7 @@ class TestGetSystemHistoryHandler:
     async def test_offset_pagination(self) -> None:
         """Offset should skip entries before applying limit."""
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         for i in range(5):
@@ -121,7 +122,7 @@ class TestGetSystemHistoryHandler:
                 },
             )
             await store.save(
-                "workflow_executions",
+                WORKFLOW_EXECUTIONS,
                 f"exec-{i}",
                 {
                     "workflow_execution_id": f"exec-{i}",
@@ -141,7 +142,7 @@ class TestGetSystemHistoryHandler:
     async def test_offset_beyond_total(self) -> None:
         """Offset beyond total entries returns empty list."""
         store = FakeProjectionStore()
-        _, repo_proj = _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
+        _, repo_proj = await _make_projections("sys-1", "Backend", "org-1", ["acme/api"])
         handler = GetSystemHistoryHandler(store, repo_proj)
 
         await store.save(
@@ -153,7 +154,7 @@ class TestGetSystemHistoryHandler:
             },
         )
         await store.save(
-            "workflow_executions",
+            WORKFLOW_EXECUTIONS,
             "exec-0",
             {
                 "workflow_execution_id": "exec-0",

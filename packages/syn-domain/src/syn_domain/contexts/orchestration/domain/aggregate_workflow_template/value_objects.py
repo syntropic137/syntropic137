@@ -35,6 +35,21 @@ class PhaseExecutionType(str, Enum):
     HUMAN_IN_LOOP = "human_in_loop"
 
 
+class InputDeclaration(BaseModel):
+    """Declaration of an expected workflow input.
+
+    Describes what data a workflow expects at execution time.
+    Used for validation, documentation, and UI form generation.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str = Field(..., min_length=1)
+    description: str | None = None
+    required: bool = True
+    default: str | None = None
+
+
 class PhaseDefinition(BaseModel):
     """Definition of a workflow phase.
 
@@ -67,3 +82,10 @@ class PhaseDefinition(BaseModel):
     timeout_seconds: int | None = None
     allowed_tools: list[str] = Field(default_factory=list)
     """Tools allowed during this phase execution."""
+
+    # Claude Code command extensions (ISS-211)
+    argument_hint: str | None = None
+    """Describes what $ARGUMENTS expects for this phase (e.g., '[task-description]')."""
+
+    model: str | None = None
+    """Per-phase model override (e.g., 'sonnet', 'opus')."""

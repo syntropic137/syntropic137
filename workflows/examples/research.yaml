@@ -1,5 +1,6 @@
 # Research Workflow
 # A simple workflow for conducting research on a topic or codebase.
+# Uses Claude Code command pattern: $ARGUMENTS for the primary task.
 
 id: research-workflow-v2
 name: Research Workflow
@@ -11,17 +12,26 @@ type: research
 classification: standard
 
 # No default repository — research workflows don't need repo access.
-# Override at runtime with: {"inputs": {"topic": "...", "repo_url": "https://github.com/org/repo"}}
 repository: null
 
 # Project association (optional)
 project_name: null
+
+# Input declarations (ISS-211: CC command inputs)
+inputs:
+  - name: task
+    description: "What to research (issue body, topic description, etc.)"
+    required: true
+  - name: topic
+    description: "Short topic label (used in phase outputs for backward compat)"
+    required: false
 
 phases:
   - id: discovery
     name: Discovery Phase
     order: 1
     execution_type: sequential
+    argument_hint: "[task-description]"
     description: |
       Initial exploration and scoping. Identify key areas of interest,
       gather context, and define research questions.
@@ -32,14 +42,16 @@ phases:
     max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
-      You are a research assistant. Your task is to conduct initial exploration and scoping for the following topic:
+      You are a research assistant conducting initial exploration and scoping.
 
-      Topic: {{topic}}
+      ## Your Task
+      $ARGUMENTS
 
-      Please:
+      ## How to Approach This
       1. Identify key areas of interest related to this topic
-      2. Gather relevant context
+      2. Gather relevant context from the codebase or available sources
       3. Define 3-5 research questions to guide deeper investigation
+      4. Note any assumptions or constraints
 
       Output a structured research scope with your initial questions.
 
@@ -47,6 +59,7 @@ phases:
     name: Deep Dive Analysis
     order: 2
     execution_type: sequential
+    argument_hint: "[task-description]"
     description: |
       In-depth investigation of identified areas. Analyze code patterns,
       documentation, and dependencies.
@@ -59,15 +72,19 @@ phases:
     max_tokens: 8192
     timeout_seconds: 600
     prompt_template: |
-      You are a research analyst. Based on the discovery phase findings below, conduct a deep dive analysis.
+      You are a research analyst conducting a deep dive analysis.
 
-      Previous Discovery:
+      ## Original Task
+      $ARGUMENTS
+
+      ## Previous Discovery
       {{discovery}}
 
-      Please:
+      ## How to Approach This
       1. Investigate each identified area in depth
       2. Analyze patterns, trade-offs, and implications
       3. Document detailed findings with supporting evidence
+      4. Cross-reference findings across areas
 
       Output comprehensive detailed findings.
 
@@ -75,6 +92,7 @@ phases:
     name: Synthesis & Documentation
     order: 3
     execution_type: sequential
+    argument_hint: "[task-description]"
     description: |
       Consolidate findings into actionable documentation.
       Produce recommendations and next steps.
@@ -88,14 +106,18 @@ phases:
     max_tokens: 4096
     timeout_seconds: 300
     prompt_template: |
-      You are a technical writer synthesizing research findings. Based on the analysis below, create actionable documentation.
+      You are a technical writer synthesizing research findings.
 
-      Deep Dive Analysis:
+      ## Original Task
+      $ARGUMENTS
+
+      ## Deep Dive Analysis
       {{deep-dive}}
 
-      Please:
+      ## How to Approach This
       1. Summarize key findings in a clear, structured format
-      2. Provide specific recommendations
+      2. Provide specific, actionable recommendations
       3. List concrete action items with priorities
+      4. Identify risks and open questions
 
       Output a research summary with recommendations and action items.

@@ -313,7 +313,7 @@ def create_coordinator_service(
         SessionListProjection(projection_store),
         ArtifactListProjection(projection_store),
         DashboardMetricsProjection(projection_store),
-        WorkflowDispatchProjection(execution_service=execution_service),
+        WorkflowDispatchProjection(execution_service=execution_service, store=projection_store),
         TriggerQueryProjection(projection_store),
     ]
 

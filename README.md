@@ -22,8 +22,8 @@ just dev                        # syncs deps, builds containers, seeds data, sta
 | Service | URL |
 |---------|-----|
 | Frontend | http://localhost:5173 |
-| API | http://localhost:8000 |
-| API Docs | http://localhost:8000/docs |
+| API | http://localhost:8137 |
+| API Docs | http://localhost:8137/docs |
 | MinIO Console | http://localhost:9001 |
 
 Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
@@ -94,10 +94,13 @@ just cli -- <command>           # run via just
 ```bash
 syn workflow list
 syn workflow show <id>
-syn workflow run <id> --input key=value
+syn workflow run <id> --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml
-syn run <id> -i key=value       # shortcut
+
+# Examples
+syn workflow run research-workflow-v2 --task "$(gh issue view 211 --json body -q .body)"
+syn workflow run github-pr --task "Add error handling" -i repository=owner/repo
 ```
 
 ### Execution Control

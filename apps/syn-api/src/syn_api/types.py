@@ -195,6 +195,15 @@ class WorkflowSummary(BaseModel):
     runs_count: int = 0
 
 
+class InputDeclarationResponse(BaseModel):
+    """Input declaration within a workflow template."""
+
+    name: str
+    description: str | None = None
+    required: bool = True
+    default: str | None = None
+
+
 class PhaseDefinitionResponse(BaseModel):
     """Phase definition within a workflow template."""
 
@@ -206,6 +215,8 @@ class PhaseDefinitionResponse(BaseModel):
     prompt_template: str | None = None
     timeout_seconds: int = 300
     allowed_tools: list[str] = Field(default_factory=list)
+    argument_hint: str | None = None
+    model: str | None = None
 
 
 class WorkflowDetail(BaseModel):
@@ -217,6 +228,7 @@ class WorkflowDetail(BaseModel):
     workflow_type: str
     classification: str
     phases: list[PhaseDefinitionResponse] = Field(default_factory=list)
+    input_declarations: list[InputDeclarationResponse] = Field(default_factory=list)
     created_at: datetime | None = None
     runs_count: int = 0
 

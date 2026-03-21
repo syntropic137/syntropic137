@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # Runtime imports needed for Pydantic model field types (noqa: TC001)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (  # noqa: TC001
+    InputDeclaration,
     PhaseDefinition,
     WorkflowClassification,
     WorkflowType,
@@ -42,3 +43,6 @@ class CreateWorkflowTemplateCommand(BaseModel):
     # Optional context
     project_name: str | None = None
     description: str | None = None
+
+    # Input declarations (ISS-211: CC command inputs)
+    input_declarations: list[InputDeclaration] = Field(default_factory=list)
