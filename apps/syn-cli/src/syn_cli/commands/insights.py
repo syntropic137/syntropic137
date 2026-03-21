@@ -128,6 +128,9 @@ def heatmap(
     ] = "sessions",
 ) -> None:
     """Show a contribution heatmap of activity over time."""
+    # Accept "cost" as an alias for "cost_usd"
+    if metric == "cost":
+        metric = "cost_usd"
     try:
         with get_client() as client:
             params: dict[str, str] = {"metric": metric}

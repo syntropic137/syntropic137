@@ -78,7 +78,7 @@ def list_executions(
         style = status_style(s)
         phases = f"{ex.get('completed_phases', 0)}/{ex.get('total_phases', 0)}"
         table.add_row(
-            ex.get("workflow_execution_id", "")[:12],
+            ex.get("workflow_execution_id", ""),
             ex.get("workflow_name") or ex.get("workflow_id", ""),
             f"[{style}]{s}[/{style}]" if style else s,
             format_timestamp(ex.get("started_at")),
