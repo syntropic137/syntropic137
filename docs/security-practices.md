@@ -34,9 +34,15 @@ CI runs [Google's OSV Scanner](https://github.com/google/osv-scanner) on every p
 
 **Rollout:** OSV runs in warn mode (`continue-on-error: true`) until a clean baseline is established, then switches to blocking. See `TODO(#259)` in `ci.yml`.
 
-### npm install hygiene
+### npm/pnpm install hygiene
 
-The `pnpm install --ignore-scripts` flag is used for third-party library installs in CI. This prevents `postinstall` hooks from executing arbitrary code — a common npm supply chain attack vector. First-party packages that require build scripts are handled separately.
+`--ignore-scripts` is applied to all package installs in CI to block `postinstall` hooks — the primary npm supply chain attack vector (event-stream, ua-parser-js style). Applied per-project:
+
+- **ui-feedback-react** (submodule, pnpm): `pnpm install --ignore-scripts`
+- **syn-dashboard-ui** (npm): `npm ci --ignore-scripts` — Vite 7.x sources esbuild via optional platform packages, so no binary restore is needed
+- **syn-docs** (pnpm): `pnpm.onlyBuiltDependencies` allowlist in `package.json` restricts install scripts to explicitly reviewed packages (esbuild, sharp, @img/\*)
+
+The `onlyBuiltDependencies` approach for pnpm is preferred over blanket `--ignore-scripts` when some packages legitimately require build steps. The allowlist is code-reviewed and auditable.
 
 ### CODEOWNERS
 
@@ -79,6 +85,7 @@ If a secret is accidentally committed:
 ## Planned Controls (not yet implemented)
 
 - [ ] Pre-commit secret gate (`detect-secrets` or `gitleaks`) — ISS-259
+- [x] `dependency-review-action` — blocks newly added CVE-laden or script-running packages on PRs
 - [ ] Dependabot for Actions + npm — ISS-259
 - [ ] OSV Scanner switched to blocking mode (after baseline) — ISS-259 `TODO(#259)`
 - [ ] Topology auto-snapshot on commit — ISS-260

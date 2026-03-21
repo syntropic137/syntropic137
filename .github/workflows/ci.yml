@@ -258,9 +258,12 @@ jobs:
         working-directory: lib/ui-feedback/packages/ui-feedback-react
         run: pnpm install --ignore-scripts
 
+      # ISS-259: --ignore-scripts blocks postinstall hooks (Shai Hulud/event-stream
+      # style attacks). Vite 7.x sources esbuild via optional platform packages,
+      # not postinstall, so no explicit binary restore is needed.
       - name: Install dashboard dependencies
         working-directory: apps/syn-dashboard-ui
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Link ui-feedback-react
         working-directory: apps/syn-dashboard-ui
@@ -353,6 +356,8 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Run OSV Scanner
+        # TODO(#259): Pin to commit SHA once we confirm v1.9.0 SHA.
+        # Use: gh api repos/google/osv-scanner-action/git/ref/tags/v1.9.0
         uses: google/osv-scanner-action@v1.9.0
         continue-on-error: true  # TODO(#259): remove after first clean baseline run
         with:
@@ -361,6 +366,26 @@ jobs:
             --lockfile=apps/syn-dashboard-ui/package-lock.json
             --lockfile=apps/syn-pulse-ui/pnpm-lock.yaml
             --lockfile=packages/openclaw-plugin/package-lock.json
+
+  #############################################################################
+  # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)
+  #
+  # Runs only on pull_request events — compares the base vs head dependency
+  # graph and fails if any newly added package has known vulnerabilities or
+  # contains install scripts (deny-script-packages).
+  #############################################################################
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      # ISS-259: Pinned to SHA (v4.9.0). Flags newly added packages with CVEs
+      # or install scripts — catches supply chain risks at PR review time.
+      - name: Dependency Review
+        uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
 
   #############################################################################
   # SUMMARY - Required status check for PRs
@@ -378,6 +403,7 @@ jobs:
       - docs-site
       - submodule-check
       - osv-scan
+      - dependency-review
     runs-on: ubuntu-latest
     steps:
       - name: Check all jobs
