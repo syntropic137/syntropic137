@@ -35,7 +35,15 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
     SetupPhaseSecrets,
 )
-from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
+from syn_shared.env_constants import (
+    ENV_ANTHROPIC_API_KEY,
+    ENV_CLAUDE_CODE_OAUTH_TOKEN,
+    ENV_GIT_AUTHOR_EMAIL,
+    ENV_GIT_AUTHOR_NAME,
+    ENV_GIT_COMMITTER_EMAIL,
+    ENV_GIT_COMMITTER_NAME,
+    ENV_GITHUB_APP_TOKEN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +249,7 @@ class ManagedWorkspace:
 
         if secrets.github_app_token:
             # GITHUB_APP_TOKEN is the only supported GitHub auth method
-            setup_env["GITHUB_APP_TOKEN"] = secrets.github_app_token
+            setup_env[ENV_GITHUB_APP_TOKEN] = secrets.github_app_token
 
         if secrets.claude_code_oauth_token:
             setup_env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = secrets.claude_code_oauth_token
@@ -249,13 +257,15 @@ class ManagedWorkspace:
         if secrets.anthropic_api_key:
             setup_env[ENV_ANTHROPIC_API_KEY] = secrets.anthropic_api_key
 
-        # Git identity from GitHub App bot configuration
+        # Git identity from GitHub App bot configuration.
+        # Both author and committer are set explicitly — entrypoint.sh would derive
+        # committer from author if omitted, but we set both for clarity.
         if secrets.git_author_name:
-            setup_env["GIT_AUTHOR_NAME"] = secrets.git_author_name
-            setup_env["GIT_COMMITTER_NAME"] = secrets.git_author_name
+            setup_env[ENV_GIT_AUTHOR_NAME] = secrets.git_author_name
+            setup_env[ENV_GIT_COMMITTER_NAME] = secrets.git_author_name
         if secrets.git_author_email:
-            setup_env["GIT_AUTHOR_EMAIL"] = secrets.git_author_email
-            setup_env["GIT_COMMITTER_EMAIL"] = secrets.git_author_email
+            setup_env[ENV_GIT_AUTHOR_EMAIL] = secrets.git_author_email
+            setup_env[ENV_GIT_COMMITTER_EMAIL] = secrets.git_author_email
 
         # Write setup script to container
         script = setup_script or DEFAULT_SETUP_SCRIPT
