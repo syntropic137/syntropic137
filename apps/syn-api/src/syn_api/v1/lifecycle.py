@@ -21,6 +21,7 @@ from syn_api._wiring import (
     get_workflow_dispatcher,
 )
 from syn_api.types import Err, LifecycleError, Ok, Result
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
 
 if TYPE_CHECKING:
     from typing import Any
@@ -192,9 +193,9 @@ def validate_credentials(
 
     # Export Anthropic API key if available (needed for agent execution, not dashboard)
     api_key = settings.anthropic_api_key
-    has_oauth = bool(os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"))
+    has_oauth = bool(settings.claude_code_oauth_token)
     if api_key:
-        os.environ["ANTHROPIC_API_KEY"] = api_key.get_secret_value()
+        os.environ[ENV_ANTHROPIC_API_KEY] = api_key.get_secret_value()
     elif has_oauth:
         logger.info("Using CLAUDE_CODE_OAUTH_TOKEN for agent execution (no ANTHROPIC_API_KEY)")
     elif not settings.is_test:

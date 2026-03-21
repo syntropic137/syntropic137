@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY
+
 if TYPE_CHECKING:
     from syn_adapters.workspace_backends.tokens.token_vending_adapter import (
         TokenVendingServiceAdapter,
@@ -200,7 +202,7 @@ class DirectTokenInjectionAdapter:
 
         # Map to environment variables
         env_mapping = {
-            TokenType.ANTHROPIC: "ANTHROPIC_API_KEY",
+            TokenType.ANTHROPIC: ENV_ANTHROPIC_API_KEY,
             TokenType.GITHUB: "GITHUB_TOKEN",
         }
 

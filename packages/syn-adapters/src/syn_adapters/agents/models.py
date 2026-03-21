@@ -17,6 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from syn_shared.env_constants import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
 from syn_shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -137,13 +138,13 @@ class ModelRegistry:
         # TODO: hardcoded values. Not maintainable. Should come from a central config.
         self._aliases = {
             # Sonnet aliases
-            "sonnet": "claude-sonnet-4-5-20250514",
+            MODEL_SONNET: "claude-sonnet-4-5-20250514",
             "claude-sonnet": "claude-sonnet-4-5-20250514",
             # Opus aliases
-            "opus": "claude-3-opus-20240229",
+            MODEL_OPUS: "claude-3-opus-20240229",
             "claude-opus": "claude-3-opus-20240229",
             # Haiku aliases - uses Claude 3.5 Haiku (current available)
-            "haiku": "claude-3-5-haiku-20241022",
+            MODEL_HAIKU: "claude-3-5-haiku-20241022",
             "claude-haiku": "claude-3-5-haiku-20241022",
         }
         logger.warning("using_fallback_models", aliases=list(self._aliases.keys()))

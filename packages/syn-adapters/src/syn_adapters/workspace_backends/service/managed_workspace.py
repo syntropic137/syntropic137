@@ -35,6 +35,7 @@ from syn_adapters.workspace_backends.service.setup_phase_secrets import (
     DEFAULT_SETUP_SCRIPT,
     SetupPhaseSecrets,
 )
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
 
 logger = logging.getLogger(__name__)
 
@@ -243,10 +244,10 @@ class ManagedWorkspace:
             setup_env["GITHUB_APP_TOKEN"] = secrets.github_app_token
 
         if secrets.claude_code_oauth_token:
-            setup_env["CLAUDE_CODE_OAUTH_TOKEN"] = secrets.claude_code_oauth_token
+            setup_env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = secrets.claude_code_oauth_token
 
         if secrets.anthropic_api_key:
-            setup_env["ANTHROPIC_API_KEY"] = secrets.anthropic_api_key
+            setup_env[ENV_ANTHROPIC_API_KEY] = secrets.anthropic_api_key
 
         # Git identity from GitHub App bot configuration
         if secrets.git_author_name:

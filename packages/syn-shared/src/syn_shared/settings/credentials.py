@@ -22,6 +22,8 @@ import logging
 import os
 from dataclasses import dataclass
 
+from syn_shared.env_constants import ENV_ANTHROPIC_API_KEY, ENV_CLAUDE_CODE_OAUTH_TOKEN
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,8 +56,8 @@ ANTHROPIC_SERVICE = ServiceCredentialConfig(
     hosts=("api.anthropic.com",),
     header_name="x-api-key",
     header_template="{value}",
-    env_var="ANTHROPIC_API_KEY",
-    oauth_env_var="CLAUDE_CODE_OAUTH_TOKEN",
+    env_var=ENV_ANTHROPIC_API_KEY,
+    oauth_env_var=ENV_CLAUDE_CODE_OAUTH_TOKEN,
     oauth_header_template="Bearer {value}",
 )
 
