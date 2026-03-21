@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionCostResponse(BaseModel):
@@ -21,8 +21,8 @@ class SessionCostResponse(BaseModel):
     tool_calls: int = 0
     turns: int = 0
     duration_ms: float = 0.0
-    cost_by_model: dict[str, str] = {}
-    cost_by_tool: dict[str, str] = {}
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_finalized: bool = False
     started_at: str | None = None
     completed_at: str | None = None
@@ -42,9 +42,9 @@ class ExecutionCostResponse(BaseModel):
     total_tokens: int = 0
     tool_calls: int = 0
     duration_ms: float = 0.0
-    cost_by_phase: dict[str, str] = {}
-    cost_by_model: dict[str, str] = {}
-    cost_by_tool: dict[str, str] = {}
+    cost_by_phase: dict[str, str] = Field(default_factory=dict)
+    cost_by_model: dict[str, str] = Field(default_factory=dict)
+    cost_by_tool: dict[str, str] = Field(default_factory=dict)
     is_complete: bool = False
     started_at: str | None = None
     completed_at: str | None = None
@@ -60,5 +60,5 @@ class CostSummaryResponse(BaseModel):
     total_executions: int = 0
     total_tokens: int = 0
     total_tool_calls: int = 0
-    top_models: list[dict[str, str]] = []
-    top_sessions: list[dict[str, str]] = []
+    top_models: list[dict[str, str]] = Field(default_factory=list)
+    top_sessions: list[dict[str, str]] = Field(default_factory=list)

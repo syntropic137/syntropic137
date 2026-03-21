@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class SessionSummaryResponse(BaseModel):
@@ -54,9 +54,9 @@ class SessionDetailResponse(BaseModel):
     output_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
-    operations: list[OperationInfo] = []
+    operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
     duration_seconds: float | None = None
     error_message: str | None = None
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)
