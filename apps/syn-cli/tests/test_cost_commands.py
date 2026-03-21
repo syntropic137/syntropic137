@@ -31,8 +31,8 @@ def _mock_client(*responses: MagicMock) -> MagicMock:
 
     client.get.side_effect = _next_response
     client.post.side_effect = _next_response
-    client.__enter__ = lambda _self: client
-    client.__exit__ = MagicMock(return_value=False)
+    client.__enter__.return_value = client
+    client.__exit__.return_value = False
     return client
 
 

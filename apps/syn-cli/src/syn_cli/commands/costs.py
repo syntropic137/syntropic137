@@ -29,6 +29,16 @@ app = typer.Typer(
 )
 
 
+def _safe_format_cost(value: str) -> str:
+    """Format a cost string that may or may not already be $-prefixed."""
+    if value.startswith("$"):
+        return value
+    try:
+        return format_cost(value)
+    except Exception:
+        return value
+
+
 def _handle_connect_error() -> None:
     from syn_cli.client import get_api_url
 
@@ -115,7 +125,7 @@ def list_session_costs(
 
     for s in items:
         table.add_row(
-            s.session_id[:12] + "...",
+            s.session_id[:12] + "..." if len(s.session_id) > 12 else s.session_id,
             format_cost(s.total_cost_usd),
             format_tokens(s.total_tokens),
             format_duration(s.duration_ms),
@@ -153,9 +163,9 @@ def show_session_cost(
     console.print(Panel(panel_text, title="[cyan]Session Cost Detail[/cyan]", border_style="cyan"))
 
     if s.cost_by_model:
-        console.print(format_breakdown(s.cost_by_model, "Cost by Model"))
+        console.print(format_breakdown(s.cost_by_model, "Cost by Model", _safe_format_cost))
     if s.cost_by_tool:
-        console.print(format_breakdown(s.cost_by_tool, "Cost by Tool"))
+        console.print(format_breakdown(s.cost_by_tool, "Cost by Tool", _safe_format_cost))
 
 
 @app.command("executions")
@@ -187,7 +197,7 @@ def list_execution_costs(
 
     for e in items:
         table.add_row(
-            e.execution_id[:12] + "...",
+            e.execution_id[:12] + "..." if len(e.execution_id) > 12 else e.execution_id,
             format_cost(e.total_cost_usd),
             str(e.session_count),
             format_tokens(e.total_tokens),
@@ -226,8 +236,8 @@ def show_execution_cost(
     )
 
     if e.cost_by_phase:
-        console.print(format_breakdown(e.cost_by_phase, "Cost by Phase"))
+        console.print(format_breakdown(e.cost_by_phase, "Cost by Phase", _safe_format_cost))
     if e.cost_by_model:
-        console.print(format_breakdown(e.cost_by_model, "Cost by Model"))
+        console.print(format_breakdown(e.cost_by_model, "Cost by Model", _safe_format_cost))
     if e.cost_by_tool:
-        console.print(format_breakdown(e.cost_by_tool, "Cost by Tool"))
+        console.print(format_breakdown(e.cost_by_tool, "Cost by Tool", _safe_format_cost))

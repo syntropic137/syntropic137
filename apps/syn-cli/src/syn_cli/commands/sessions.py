@@ -71,7 +71,7 @@ def list_sessions(
     for s in items:
         style = status_style(s.status)
         table.add_row(
-            s.id[:12] + "...",
+            s.id[:12] + "..." if len(s.id) > 12 else s.id,
             f"[{style}]{s.status}[/{style}]" if style else s.status,
             s.agent_provider or "-",
             format_tokens(s.total_tokens),

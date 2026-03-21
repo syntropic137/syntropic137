@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from rich.console import Console
 from rich.table import Table
@@ -68,13 +72,17 @@ def format_timestamp(iso: str | None) -> str:
         return iso
 
 
-def format_breakdown(breakdown: dict[str, str], title: str) -> Table:
+def format_breakdown(
+    breakdown: dict[str, str],
+    title: str,
+    value_fn: Callable[[str], str] | None = None,
+) -> Table:
     """Render a cost/token breakdown dict as a Rich sub-table."""
     table = Table(title=title, show_edge=False, pad_edge=False)
     table.add_column("Key", style="cyan")
     table.add_column("Value", justify="right")
     for key, value in breakdown.items():
-        table.add_row(key, str(value))
+        table.add_row(key, value_fn(value) if value_fn else str(value))
     return table
 
 
