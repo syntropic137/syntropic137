@@ -80,6 +80,7 @@ class SessionResponse(BaseModel):
     cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
+    cost_by_model: dict[str, Decimal] = Field(default_factory=dict)
     operations: list[OperationInfo] = Field(default_factory=list)
     started_at: str | None = None
     completed_at: str | None = None
@@ -185,6 +186,7 @@ async def get_session(session_id: str) -> SessionResponse:
         cache_read_tokens=detail.cache_read_tokens,
         total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
+        cost_by_model={k: Decimal(str(v)) for k, v in detail.cost_by_model.items()},
         operations=operations,
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,

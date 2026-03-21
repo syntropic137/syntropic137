@@ -45,6 +45,7 @@ class TimescaleSessionCostQuery:
                     (data->>'total_cost_usd')::numeric as sdk_cost,
                     (data->>'duration_ms')::bigint as duration_ms_val,
                     data->>'model' as agent_model,
+                    data->'model_usage' as model_usage,
                     time as completed_at,
                     execution_id,
                     phase_id
@@ -97,6 +98,25 @@ class TimescaleSessionCostQuery:
                 TOOL_EXECUTION_COMPLETED,
             )
 
+            # ISS-265: Per-model cost breakdown — aggregate token_usage events by model
+            # Used as fallback when session_summary.model_usage is absent (orphaned sessions)
+            per_model_rows = await conn.fetch(
+                """
+                SELECT
+                    data->>'model' as model,
+                    SUM((data->>'input_tokens')::int) as input_tokens,
+                    SUM((data->>'output_tokens')::int) as output_tokens,
+                    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+                    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read
+                FROM agent_events
+                WHERE session_id = $1 AND event_type = $2
+                  AND data->>'model' IS NOT NULL
+                GROUP BY data->>'model'
+                """,
+                session_id,
+                TOKEN_USAGE,
+            )
+
             # Get started_at from session_started event, or fall back to first token_usage
             started_at = await conn.fetchval(
                 """
@@ -142,6 +162,28 @@ class TimescaleSessionCostQuery:
                 session_cost.agent_model = exec_result["agent_model"]
             elif token_result and token_result.get("agent_model"):
                 session_cost.agent_model = token_result["agent_model"]
+
+            # ISS-265: Populate cost_by_model
+            # Prefer authoritative model_usage from session_summary (exact SDK cost per model)
+            model_usage = exec_result["model_usage"] if exec_result else None
+            if model_usage and isinstance(model_usage, dict):
+                session_cost.cost_by_model = {
+                    model_id: Decimal(str(m.get("costUSD", 0)))
+                    for model_id, m in model_usage.items()
+                    if isinstance(m, dict)
+                }
+            elif per_model_rows:
+                # Fallback: estimate per-model cost from token_usage aggregation
+                session_cost.cost_by_model = {
+                    row["model"]: self._cost_calculator.calculate_token_cost(
+                        input_tokens=row["input_tokens"] or 0,
+                        output_tokens=row["output_tokens"] or 0,
+                        cache_creation=row["cache_creation"] or 0,
+                        cache_read=row["cache_read"] or 0,
+                    )
+                    for row in per_model_rows
+                    if row["model"]
+                }
             session_cost.started_at = started_at
             session_cost.execution_id = token_result.get("execution_id")
             session_cost.phase_id = token_result.get("phase_id")

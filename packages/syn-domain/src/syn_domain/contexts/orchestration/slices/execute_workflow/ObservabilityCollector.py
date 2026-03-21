@@ -209,8 +209,9 @@ class ObservabilityCollector:
         cache_read: int,
         num_turns: int | None,
         duration_ms: int | None,
+        model_usage: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        """Record end-of-session summary with authoritative CLI totals (ISS-217).
+        """Record end-of-session summary with authoritative CLI totals (ISS-217/265).
 
         Emits a session_summary observation so SessionCostProjection.on_session_summary()
         can overwrite accumulated estimates with the SDK-reported values.
@@ -230,6 +231,7 @@ class ObservabilityCollector:
                 "num_turns": num_turns,
                 "duration_ms": duration_ms,
                 "model": self._agent_model,
+                "model_usage": model_usage,
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,

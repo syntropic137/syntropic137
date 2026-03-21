@@ -151,6 +151,7 @@ class AgentExecutionHandler:
                 cache_read=stream_result.result_cache_read,
                 num_turns=stream_result.num_turns,
                 duration_ms=stream_result.duration_ms,
+                model_usage=stream_result.model_usage,
             )
 
         # Prefer result event totals (authoritative) over accumulated per-turn counts

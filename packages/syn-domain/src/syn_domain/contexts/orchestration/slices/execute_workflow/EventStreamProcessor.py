@@ -85,6 +85,8 @@ class StreamResult:
     result_cache_read: int = 0
     duration_ms: int | None = None
     num_turns: int | None = None
+    # Per-model breakdown from CLI modelUsage (ISS-265)
+    model_usage: dict[str, dict[str, Any]] | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -126,6 +128,8 @@ class EventStreamProcessor:
         self._result_cache_read: int = 0
         self._result_duration_ms: int | None = None
         self._result_num_turns: int | None = None
+        # ISS-265: Per-model breakdown from CLI modelUsage
+        self._result_model_usage: dict[str, dict[str, Any]] | None = None
 
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
@@ -227,6 +231,7 @@ class EventStreamProcessor:
             result_cache_read=self._result_cache_read,
             duration_ms=self._result_duration_ms,
             num_turns=self._result_num_turns,
+            model_usage=self._result_model_usage,
         )
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
@@ -355,6 +360,8 @@ class EventStreamProcessor:
         self._result_cost_usd = cli_event.get("total_cost_usd")
         self._result_duration_ms = cli_event.get("duration_ms")
         self._result_num_turns = cli_event.get("num_turns")
+        # ISS-265: per-model breakdown (camelCase from CLI)
+        self._result_model_usage = cli_event.get("modelUsage") or None
 
         if self._result_input_tokens > 0 or self._result_output_tokens > 0:
             logger.info(
