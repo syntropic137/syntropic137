@@ -79,36 +79,35 @@ def watch_execution(
     console.print()
 
     try:
-        with get_streaming_client() as client:
-            with client.stream("GET", url) as response:
-                if response.status_code == 404:
-                    print_error(f"Execution not found: {execution_id}")
-                    raise typer.Exit(1)
-                if response.status_code != 200:
-                    print_error(f"HTTP {response.status_code}")
-                    raise typer.Exit(1)
+        with get_streaming_client() as client, client.stream("GET", url) as response:
+            if response.status_code == 404:
+                print_error(f"Execution not found: {execution_id}")
+                raise typer.Exit(1)
+            if response.status_code != 200:
+                print_error(f"HTTP {response.status_code}")
+                raise typer.Exit(1)
 
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    frame = _parse_sse_line(line)
-                    if frame is None:
-                        continue
-                    frame_type = str(frame.get("type", ""))
-                    if frame_type == "connected":
-                        console.print("[green]Connected.[/green]")
-                    elif frame_type == "terminal":
-                        _render_event(frame)
-                        console.print("[dim]Stream ended.[/dim]")
-                        return
-                    elif frame_type == "event":
-                        _render_event(frame)
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                frame = _parse_sse_line(line)
+                if frame is None:
+                    continue
+                frame_type = str(frame.get("type", ""))
+                if frame_type == "connected":
+                    console.print("[green]Connected.[/green]")
+                elif frame_type == "terminal":
+                    _render_event(frame)
+                    console.print("[dim]Stream ended.[/dim]")
+                    return
+                elif frame_type == "event":
+                    _render_event(frame)
     except KeyboardInterrupt:
         console.print("\n[dim]Stopped.[/dim]")
     except Exception:
         print_error(f"Could not connect to API at {get_api_url()}")
         console.print("[dim]Make sure the API server is running.[/dim]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
 
 @app.command("activity")
@@ -121,26 +120,25 @@ def watch_activity() -> None:
     console.print()
 
     try:
-        with get_streaming_client() as client:
-            with client.stream("GET", url) as response:
-                if response.status_code != 200:
-                    print_error(f"HTTP {response.status_code}")
-                    raise typer.Exit(1)
+        with get_streaming_client() as client, client.stream("GET", url) as response:
+            if response.status_code != 200:
+                print_error(f"HTTP {response.status_code}")
+                raise typer.Exit(1)
 
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    frame = _parse_sse_line(line)
-                    if frame is None:
-                        continue
-                    frame_type = str(frame.get("type", ""))
-                    if frame_type == "connected":
-                        console.print("[green]Connected — watching global activity.[/green]")
-                    elif frame_type == "event":
-                        _render_event(frame)
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                frame = _parse_sse_line(line)
+                if frame is None:
+                    continue
+                frame_type = str(frame.get("type", ""))
+                if frame_type == "connected":
+                    console.print("[green]Connected — watching global activity.[/green]")
+                elif frame_type == "event":
+                    _render_event(frame)
     except KeyboardInterrupt:
         console.print("\n[dim]Stopped.[/dim]")
     except Exception:
         print_error(f"Could not connect to API at {get_api_url()}")
         console.print("[dim]Make sure the API server is running.[/dim]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None

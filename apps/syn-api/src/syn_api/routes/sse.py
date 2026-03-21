@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +41,8 @@ import syn_api.v1.realtime as rt
 from syn_api.types import Err
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from syn_adapters.projections.realtime import SSEEventFrame, SSEQueue
 
 logger = get_logger(__name__)
@@ -103,7 +104,7 @@ async def execution_sse(execution_id: str, request: Request) -> StreamingRespons
 
                 try:
                     frame: SSEEventFrame | None = await asyncio.wait_for(queue.get(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
                     continue
 
@@ -157,7 +158,7 @@ async def activity_sse(request: Request) -> StreamingResponse:
 
                 try:
                     frame: SSEEventFrame | None = await asyncio.wait_for(queue.get(), timeout=30.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
                     continue
 

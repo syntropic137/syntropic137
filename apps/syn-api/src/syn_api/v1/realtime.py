@@ -12,8 +12,8 @@ from syn_api._wiring import get_realtime
 from syn_api.types import ObservabilityError, Ok, RealtimeHealth, Result
 
 if TYPE_CHECKING:
-    from syn_api.auth import AuthContext
     from syn_adapters.projections.realtime import RealTimeProjection
+    from syn_api.auth import AuthContext
 
 
 def get_realtime_projection_ref() -> RealTimeProjection:

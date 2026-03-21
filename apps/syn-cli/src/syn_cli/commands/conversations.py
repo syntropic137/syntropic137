@@ -59,7 +59,7 @@ def show(
 
     console.print(
         f"[bold]Conversation:[/bold] {session_id[:16]}  "
-        f"[dim](lines {offset + 1}–{offset + len(lines)} of {total})[/dim]"
+        f"[dim](lines {offset + 1}-{offset + len(lines)} of {total})[/dim]"
     )
     console.print()
 

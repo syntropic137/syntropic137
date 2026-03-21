@@ -159,10 +159,9 @@ def delete(
     force: Annotated[bool, typer.Option("--force", "-f", help="Skip confirmation")] = False,
 ) -> None:
     """Delete an organization."""
-    if not force:
-        if not typer.confirm(f"Delete organization {organization_id}?"):
-            console.print("[dim]Aborted.[/dim]")
-            raise typer.Exit(0)
+    if not force and not typer.confirm(f"Delete organization {organization_id}?"):
+        console.print("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
 
     try:
         with get_client() as client:

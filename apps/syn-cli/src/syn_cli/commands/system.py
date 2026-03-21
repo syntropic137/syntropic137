@@ -180,10 +180,9 @@ def delete(
     force: Annotated[bool, typer.Option("--force", "-f", help="Skip confirmation")] = False,
 ) -> None:
     """Delete a system."""
-    if not force:
-        if not typer.confirm(f"Delete system {system_id}?"):
-            console.print("[dim]Aborted.[/dim]")
-            raise typer.Exit(0)
+    if not force and not typer.confirm(f"Delete system {system_id}?"):
+        console.print("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
 
     try:
         with get_client() as client:
@@ -403,7 +402,7 @@ def system_patterns(
                 o.get("execution_id", "")[:12],
                 o.get("repo_full_name", ""),
                 format_cost(o.get("cost_usd") or "0"),
-                f"{factor:.1f}×",
+                f"{factor:.1f}x",
             )
         console.print(table)
 

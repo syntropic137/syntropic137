@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Literal, TypeAlias
+from typing import Literal
 
 from agentic_logging import get_logger
 from pydantic import BaseModel, ConfigDict
@@ -40,7 +40,7 @@ type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, J
 
 # Queue type alias — one queue per SSE subscriber.
 # None is the sentinel that signals the stream should close (terminal event).
-SSEQueue: TypeAlias = asyncio.Queue["SSEEventFrame | None"]
+type SSEQueue = asyncio.Queue["SSEEventFrame | None"]
 
 
 class SSEEventFrame(BaseModel):

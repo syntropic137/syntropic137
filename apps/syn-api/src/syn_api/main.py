@@ -25,10 +25,10 @@ from syn_api.routes import (
     organizations_router,
     repos_router,
     sessions_router,
+    sse_router,
     systems_router,
     triggers_router,
     webhooks_router,
-    sse_router,
     workflows_router,
 )
 from syn_api.types import Err, Ok

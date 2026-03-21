@@ -40,7 +40,7 @@ def overview() -> None:
         raise typer.Exit(1)
 
     d = resp.json()
-    console.print(f"[bold]Global Overview[/bold]")
+    console.print("[bold]Global Overview[/bold]")
     console.print(f"  Systems:            {d.get('total_systems', 0)}")
     console.print(f"  Repos:              {d.get('total_repos', 0)}")
     if d.get("unassigned_repos"):
