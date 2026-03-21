@@ -383,7 +383,11 @@ class InMemoryOrganizationRepository:
         """
         if aggregate.id:
             self._organizations[str(aggregate.id)] = aggregate
-        events = aggregate.get_uncommitted_events() if hasattr(aggregate, "get_uncommitted_events") else []
+        events = (
+            aggregate.get_uncommitted_events()
+            if hasattr(aggregate, "get_uncommitted_events")
+            else []
+        )
         if events:
             publisher = get_event_publisher()
             await publisher.publish(events)
@@ -422,7 +426,11 @@ class InMemorySystemRepository:
         """Save the system aggregate and publish uncommitted events."""
         if aggregate.id:
             self._systems[str(aggregate.id)] = aggregate
-        events = aggregate.get_uncommitted_events() if hasattr(aggregate, "get_uncommitted_events") else []
+        events = (
+            aggregate.get_uncommitted_events()
+            if hasattr(aggregate, "get_uncommitted_events")
+            else []
+        )
         if events:
             publisher = get_event_publisher()
             await publisher.publish(events)
@@ -461,7 +469,11 @@ class InMemoryRepoRepository:
         """Save the repo aggregate and publish uncommitted events."""
         if aggregate.id:
             self._repos[str(aggregate.id)] = aggregate
-        events = aggregate.get_uncommitted_events() if hasattr(aggregate, "get_uncommitted_events") else []
+        events = (
+            aggregate.get_uncommitted_events()
+            if hasattr(aggregate, "get_uncommitted_events")
+            else []
+        )
         if events:
             publisher = get_event_publisher()
             await publisher.publish(events)
