@@ -48,7 +48,7 @@ def main() -> None:
         except S3Error as e:
             print(f"  ✗ S3 error: {e}", file=sys.stderr)
             sys.exit(1)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if attempt >= MAX_ATTEMPTS:
                 print(
                     f"  ✗ MinIO not reachable after {MAX_ATTEMPTS} attempts: {e}",
