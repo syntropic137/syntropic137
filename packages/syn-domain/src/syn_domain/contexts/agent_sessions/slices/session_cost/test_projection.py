@@ -444,6 +444,44 @@ class TestOnSessionSummary:
         assert cost.agent_model == "claude-haiku-4-5-20251001"
 
     @pytest.mark.asyncio
+    async def test_model_usage_populates_cost_by_model(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """model_usage from session_summary sets cost_by_model with exact SDK costUSD values."""
+        await projection.on_session_summary(
+            {
+                "session_id": "session-1",
+                "data": {
+                    "total_cost_usd": 0.15,
+                    "total_input_tokens": 1000,
+                    "total_output_tokens": 500,
+                    "model": "claude-opus-4-6",
+                    "model_usage": {
+                        "claude-opus-4-6": {
+                            "input_tokens": 800,
+                            "output_tokens": 400,
+                            "costUSD": 0.12,
+                        },
+                        "claude-haiku-4-5-20251001": {
+                            "input_tokens": 200,
+                            "output_tokens": 100,
+                            "costUSD": 0.03,
+                        },
+                    },
+                },
+            }
+        )
+
+        cost = await projection.get_session_cost("session-1")
+        assert cost is not None
+        assert cost.cost_by_model == {
+            "claude-opus-4-6": Decimal("0.12"),
+            "claude-haiku-4-5-20251001": Decimal("0.03"),
+        }
+        # Total cost is authoritative SDK value, not sum of model breakdown
+        assert cost.total_cost_usd == Decimal("0.15")
+
+    @pytest.mark.asyncio
     async def test_summary_without_cost_preserves_existing(
         self, projection: SessionCostProjection
     ) -> None:
