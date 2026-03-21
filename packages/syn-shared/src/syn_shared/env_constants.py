@@ -21,8 +21,9 @@ Usage:
 # Read from Settings (pydantic-settings); these are the raw env var name strings.
 # ---------------------------------------------------------------------------
 
-ENV_CLAUDE_CODE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
 ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
+ENV_CLAUDE_CODE_OAUTH_TOKEN = "CLAUDE_CODE_OAUTH_TOKEN"
+ENV_GITHUB_TOKEN = "GITHUB_TOKEN"
 
 # ---------------------------------------------------------------------------
 # Agent execution env vars
@@ -55,6 +56,7 @@ __all__ = [
     "ENV_ANTHROPIC_BASE_URL",
     "ENV_CLAUDE_CODE_OAUTH_TOKEN",
     "ENV_CLAUDE_SESSION_ID",
+    "ENV_GITHUB_TOKEN",
     "ENV_SYN_AGENT_NETWORK",
     "ENV_SYN_WORKSPACE_CONTAINER_DIR",
     "ENV_SYN_WORKSPACE_HOST_DIR",
