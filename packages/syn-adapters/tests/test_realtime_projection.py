@@ -104,9 +104,7 @@ class TestRealTimeProjectionBroadcast:
         await projection.broadcast("exec-1", "TestEvent", {"key": "value"})
 
     @pytest.mark.asyncio
-    async def test_broadcast_to_multiple_subscribers(
-        self, projection: RealTimeProjection
-    ) -> None:
+    async def test_broadcast_to_multiple_subscribers(self, projection: RealTimeProjection) -> None:
         """Test broadcast reaches all subscribers on the channel."""
         q1 = await projection.connect("exec-1")
         q2 = await projection.connect("exec-1")
@@ -116,9 +114,7 @@ class TestRealTimeProjectionBroadcast:
         assert q2.qsize() == 1
 
     @pytest.mark.asyncio
-    async def test_broadcast_only_to_matching_channel(
-        self, projection: RealTimeProjection
-    ) -> None:
+    async def test_broadcast_only_to_matching_channel(self, projection: RealTimeProjection) -> None:
         """Test that broadcasts do not cross channels."""
         q1 = await projection.connect("exec-1")
         q2 = await projection.connect("exec-2")
@@ -145,9 +141,7 @@ class TestRealTimeProjectionBroadcast:
         assert sentinel is None
 
     @pytest.mark.asyncio
-    async def test_broadcast_non_terminal_no_sentinel(
-        self, projection: RealTimeProjection
-    ) -> None:
+    async def test_broadcast_non_terminal_no_sentinel(self, projection: RealTimeProjection) -> None:
         """Test that non-terminal broadcasts do not enqueue a sentinel."""
         queue: SSEQueue = await projection.connect("exec-1")
         await projection.broadcast("exec-1", "PhaseStarted", {})
@@ -197,9 +191,7 @@ class TestRealTimeProjectionEventHandlers:
         assert frame.event_type == "OperationRecorded"
 
     @pytest.mark.asyncio
-    async def test_on_workflow_completed_is_terminal(
-        self, projection: RealTimeProjection
-    ) -> None:
+    async def test_on_workflow_completed_is_terminal(self, projection: RealTimeProjection) -> None:
         """Test that WorkflowCompleted sends a terminal frame + sentinel."""
         queue: SSEQueue = await projection.connect("exec-1")
         await projection.on_workflow_completed({"execution_id": "exec-1"})
