@@ -23,6 +23,7 @@ from syn_adapters.agents.protocol import (
     AgentTimeoutError,
 )
 from syn_shared import get_settings
+from syn_shared.env_constants import MODEL_SONNET
 from syn_shared.logging import get_logger
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ class ClaudeAgent(AgentProtocol):
 
     # Default model alias - resolved from primitives
     # Use "sonnet" alias which maps to latest Claude Sonnet
-    DEFAULT_MODEL = "sonnet"
+    DEFAULT_MODEL = MODEL_SONNET
 
     @classmethod
     def resolve_model(cls, model: str) -> str:
