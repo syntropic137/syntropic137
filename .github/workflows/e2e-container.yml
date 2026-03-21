@@ -27,6 +27,9 @@ concurrency:
   group: e2e-container-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   #############################################################################
   # DOCKER BUILD - Validate workspace image (runs in parallel)
@@ -39,17 +42,17 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           submodules: true
 
       - name: Set up Python for build script
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
 
       - name: Build workspace image via build-provider.py
         working-directory: lib/agentic-primitives
@@ -74,17 +77,17 @@ jobs:
     if: github.event.inputs.run_full_e2e == 'true'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           submodules: true
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
         with:
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
 
@@ -106,9 +109,10 @@ jobs:
     needs: [docker-build]
     runs-on: ubuntu-latest
     steps:
-      - name: Check jobs
+      - name: Check results
         run: |
           if [[ "${{ needs.docker-build.result }}" == "failure" ]]; then
+            echo "❌ Docker build failed"
             exit 1
           fi
-          echo "✅ Docker build passed!"
+          echo "✅ E2E container checks passed"
