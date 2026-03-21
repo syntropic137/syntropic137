@@ -228,13 +228,13 @@ def system_status(
     overall = d.get("overall_status", "")
     style = status_style(overall)
     console.print(f"[bold]{d.get('system_name', system_id)}[/bold]")
+    console.print(f"  Status: [{style}]{overall}[/{style}]" if style else f"  Status: {overall}")
     console.print(
-        f"  Status: [{style}]{overall}[/{style}]" if style else f"  Status: {overall}"
+        f"  Repos:  {d.get('total_repos', 0)}  "
+        f"healthy={d.get('healthy_repos', 0)}  "
+        f"degraded={d.get('degraded_repos', 0)}  "
+        f"failing={d.get('failing_repos', 0)}"
     )
-    console.print(f"  Repos:  {d.get('total_repos', 0)}  "
-                  f"healthy={d.get('healthy_repos', 0)}  "
-                  f"degraded={d.get('degraded_repos', 0)}  "
-                  f"failing={d.get('failing_repos', 0)}")
 
     repos = d.get("repos", [])
     if repos:

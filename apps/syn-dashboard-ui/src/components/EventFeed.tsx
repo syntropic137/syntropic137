@@ -93,7 +93,7 @@ export function EventFeed() {
 
   // Connect to global activity SSE feed
   useEffect(() => {
-    const source = new EventSource('/sse/activity')
+    const source = new EventSource(`${API_BASE}/sse/activity`)
 
     source.onopen = () => setConnected(true)
     source.onerror = () => setConnected(false)

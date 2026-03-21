@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { API_BASE } from '../api/client'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,7 +81,7 @@ export function useExecutionStream(
   useEffect(() => {
     if (!executionId) return
 
-    const url = `/sse/executions/${executionId}`
+    const url = `${API_BASE}/sse/executions/${executionId}`
     const source = new EventSource(url)
     sourceRef.current = source
 

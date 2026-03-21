@@ -35,9 +35,7 @@ def _handle_connect_error() -> None:
 @app.command("register")
 def register(
     org: Annotated[str, typer.Option("--org", "-o", help="Organization ID")],
-    url: Annotated[
-        str, typer.Option("--url", "-u", help="Full repo name (owner/repo)")
-    ],
+    url: Annotated[str, typer.Option("--url", "-u", help="Full repo name (owner/repo)")],
     system: Annotated[
         str | None, typer.Option("--system", "-s", help="Assign to system immediately")
     ] = None,
@@ -83,7 +81,9 @@ def register(
             if assign_resp.status_code == 200:
                 console.print(f"  [green]Assigned to system:[/green] {system}")
             else:
-                console.print(f"  [yellow]Assign failed:[/yellow] {assign_resp.json().get('detail', '')}")
+                console.print(
+                    f"  [yellow]Assign failed:[/yellow] {assign_resp.json().get('detail', '')}"
+                )
         except Exception:
             console.print("  [yellow]Could not assign to system.[/yellow]")
 

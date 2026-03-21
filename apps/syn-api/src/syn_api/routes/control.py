@@ -9,7 +9,7 @@ which the CLI and dashboard already use exclusively.
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel

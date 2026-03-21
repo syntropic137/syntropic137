@@ -117,9 +117,7 @@ def show_execution(
 
     console.print(f"[bold]Execution:[/bold] {ex.get('workflow_execution_id', '')}")
     console.print(f"  Workflow:   {ex.get('workflow_name') or ex.get('workflow_id', '')}")
-    console.print(
-        f"  Status:     [{style}]{s}[/{style}]" if style else f"  Status:     {s}"
-    )
+    console.print(f"  Status:     [{style}]{s}[/{style}]" if style else f"  Status:     {s}")
     console.print(f"  Started:    {format_timestamp(ex.get('started_at'))}")
     if ex.get("completed_at"):
         console.print(f"  Completed:  {format_timestamp(ex.get('completed_at'))}")

@@ -280,7 +280,7 @@ export async function getTokenMetrics(sessionId: string): Promise<TokenMetricsRe
  * @param executionId - The execution ID to subscribe to
  */
 export function getExecutionSSEUrl(executionId: string): string {
-  return `/sse/executions/${executionId}`
+  return `${API_BASE}/sse/executions/${executionId}`
 }
 
 
@@ -320,7 +320,7 @@ export async function getSSEHealth(): Promise<{
   active_executions: number
   active_connections: number
 }> {
-  return fetchJSON('/sse/health')
+  return fetchJSON(`${API_BASE}/sse/health`)
 }
 
 // =============================================================================

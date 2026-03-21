@@ -2,19 +2,20 @@
 
 Tests verify that:
 1. Connections can be registered/unregistered
-2. Events are broadcast to connected clients
-3. Dead connections are cleaned up
+2. Events are broadcast to connected SSE queues
+3. Terminal sentinel is enqueued correctly
 """
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock
+import asyncio
 
 import pytest
 
 from syn_adapters.projections.realtime import (
     RealTimeProjection,
+    SSEEventFrame,
+    SSEQueue,
     get_realtime_projection,
     reset_realtime_projection,
 )
@@ -27,229 +28,214 @@ def projection() -> RealTimeProjection:
     return RealTimeProjection()
 
 
-@pytest.fixture
-def mock_websocket() -> MagicMock:
-    """Create a mock WebSocket."""
-    ws = MagicMock()
-    ws.send_text = AsyncMock()
-    return ws
-
-
 @pytest.mark.unit
 class TestRealTimeProjectionConnection:
     """Test connection management."""
 
     @pytest.mark.asyncio
-    async def test_connect(self, projection: RealTimeProjection, mock_websocket: MagicMock) -> None:
-        """Test registering a WebSocket connection."""
-        await projection.connect("exec-1", mock_websocket)
+    async def test_connect(self, projection: RealTimeProjection) -> None:
+        """Test registering an SSE subscriber returns a queue."""
+        queue = await projection.connect("exec-1")
 
+        assert isinstance(queue, asyncio.Queue)
         assert projection.execution_count == 1
         assert projection.connection_count == 1
 
     @pytest.mark.asyncio
-    async def test_connect_multiple(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
-        """Test registering multiple connections for same execution."""
-        ws2 = MagicMock()
-        ws2.send_text = AsyncMock()
+    async def test_connect_multiple(self, projection: RealTimeProjection) -> None:
+        """Test registering multiple subscribers for the same channel."""
+        q1 = await projection.connect("exec-1")
+        q2 = await projection.connect("exec-1")
 
-        await projection.connect("exec-1", mock_websocket)
-        await projection.connect("exec-1", ws2)
-
+        assert q1 is not q2
         assert projection.execution_count == 1
         assert projection.connection_count == 2
 
     @pytest.mark.asyncio
-    async def test_connect_different_executions(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
-        """Test connections to different executions."""
-        ws2 = MagicMock()
-        ws2.send_text = AsyncMock()
-
-        await projection.connect("exec-1", mock_websocket)
-        await projection.connect("exec-2", ws2)
+    async def test_connect_different_executions(self, projection: RealTimeProjection) -> None:
+        """Test subscribers on different channels are tracked separately."""
+        await projection.connect("exec-1")
+        await projection.connect("exec-2")
 
         assert projection.execution_count == 2
         assert projection.connection_count == 2
 
     @pytest.mark.asyncio
-    async def test_disconnect(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
-        """Test unregistering a WebSocket connection."""
-        await projection.connect("exec-1", mock_websocket)
-        await projection.disconnect("exec-1", mock_websocket)
+    async def test_disconnect(self, projection: RealTimeProjection) -> None:
+        """Test unregistering a subscriber queue."""
+        queue = await projection.connect("exec-1")
+        await projection.disconnect("exec-1", queue)
 
         assert projection.execution_count == 0
         assert projection.connection_count == 0
 
     @pytest.mark.asyncio
-    async def test_disconnect_partial(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
-        """Test disconnecting one of multiple connections."""
-        ws2 = MagicMock()
-        ws2.send_text = AsyncMock()
-
-        await projection.connect("exec-1", mock_websocket)
-        await projection.connect("exec-1", ws2)
-        await projection.disconnect("exec-1", mock_websocket)
+    async def test_disconnect_partial(self, projection: RealTimeProjection) -> None:
+        """Test disconnecting one of multiple subscribers."""
+        q1 = await projection.connect("exec-1")
+        await projection.connect("exec-1")
+        await projection.disconnect("exec-1", q1)
 
         assert projection.execution_count == 1
         assert projection.connection_count == 1
 
 
+@pytest.mark.unit
 class TestRealTimeProjectionBroadcast:
     """Test event broadcasting."""
 
     @pytest.mark.asyncio
-    async def test_broadcast_to_connected(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
-        """Test broadcasting an event to connected clients."""
-        await projection.connect("exec-1", mock_websocket)
+    async def test_broadcast_delivers_frame(self, projection: RealTimeProjection) -> None:
+        """Test that broadcast puts a typed SSEEventFrame on the queue."""
+        queue = await projection.connect("exec-1")
         await projection.broadcast("exec-1", "TestEvent", {"key": "value"})
 
-        mock_websocket.send_text.assert_called_once()
-        message = json.loads(mock_websocket.send_text.call_args[0][0])
-        assert message["type"] == "event"
-        assert message["event_type"] == "TestEvent"
-        assert message["data"] == {"key": "value"}
-        assert "timestamp" in message
+        assert queue.qsize() == 1
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.type == "event"
+        assert frame.event_type == "TestEvent"
+        assert frame.data == {"key": "value"}
+        assert frame.timestamp
 
     @pytest.mark.asyncio
     async def test_broadcast_no_connections(self, projection: RealTimeProjection) -> None:
-        """Test broadcasting when no connections exist."""
-        # Should not raise
+        """Test broadcasting when no subscribers exist does not raise."""
         await projection.broadcast("exec-1", "TestEvent", {"key": "value"})
 
     @pytest.mark.asyncio
-    async def test_broadcast_to_multiple(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
+    async def test_broadcast_to_multiple_subscribers(
+        self, projection: RealTimeProjection
     ) -> None:
-        """Test broadcasting to multiple connections."""
-        ws2 = MagicMock()
-        ws2.send_text = AsyncMock()
-
-        await projection.connect("exec-1", mock_websocket)
-        await projection.connect("exec-1", ws2)
+        """Test broadcast reaches all subscribers on the channel."""
+        q1 = await projection.connect("exec-1")
+        q2 = await projection.connect("exec-1")
         await projection.broadcast("exec-1", "TestEvent", {"key": "value"})
 
-        assert mock_websocket.send_text.call_count == 1
-        assert ws2.send_text.call_count == 1
+        assert q1.qsize() == 1
+        assert q2.qsize() == 1
 
     @pytest.mark.asyncio
-    async def test_broadcast_only_to_execution(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
+    async def test_broadcast_only_to_matching_channel(
+        self, projection: RealTimeProjection
     ) -> None:
-        """Test that broadcasts only go to matching execution."""
-        ws2 = MagicMock()
-        ws2.send_text = AsyncMock()
-
-        await projection.connect("exec-1", mock_websocket)
-        await projection.connect("exec-2", ws2)
+        """Test that broadcasts do not cross channels."""
+        q1 = await projection.connect("exec-1")
+        q2 = await projection.connect("exec-2")
         await projection.broadcast("exec-1", "TestEvent", {"key": "value"})
 
-        assert mock_websocket.send_text.call_count == 1
-        assert ws2.send_text.call_count == 0
+        assert q1.qsize() == 1
+        assert q2.qsize() == 0
 
     @pytest.mark.asyncio
-    async def test_broadcast_cleans_dead_connections(self, projection: RealTimeProjection) -> None:
-        """Test that dead connections are cleaned up after failed send."""
-        # Create a mock that fails on send
-        dead_ws = MagicMock()
-        dead_ws.send_text = AsyncMock(side_effect=Exception("Connection closed"))
+    async def test_broadcast_terminal_enqueues_sentinel(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """Test that terminal=True enqueues the frame then a None sentinel."""
+        queue: SSEQueue = await projection.connect("exec-1")
+        await projection.broadcast("exec-1", "WorkflowCompleted", {}, terminal=True)
 
-        await projection.connect("exec-1", dead_ws)
-        assert projection.connection_count == 1
+        assert queue.qsize() == 2  # frame + sentinel
 
-        await projection.broadcast("exec-1", "TestEvent", {"key": "value"})
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.type == "terminal"
 
-        # Connection should be removed
-        assert projection.connection_count == 0
+        sentinel = await queue.get()
+        assert sentinel is None
+
+    @pytest.mark.asyncio
+    async def test_broadcast_non_terminal_no_sentinel(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """Test that non-terminal broadcasts do not enqueue a sentinel."""
+        queue: SSEQueue = await projection.connect("exec-1")
+        await projection.broadcast("exec-1", "PhaseStarted", {})
+
+        assert queue.qsize() == 1
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.type == "event"
 
 
+@pytest.mark.unit
 class TestRealTimeProjectionEventHandlers:
     """Test domain event handlers."""
 
     @pytest.mark.asyncio
-    async def test_on_workflow_execution_started(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
+    async def test_on_workflow_execution_started(self, projection: RealTimeProjection) -> None:
         """Test handling WorkflowExecutionStarted event."""
-        await projection.connect("exec-1", mock_websocket)
+        queue = await projection.connect("exec-1")
         await projection.on_workflow_execution_started(
-            {
-                "execution_id": "exec-1",
-                "workflow_id": "wf-1",
-            }
+            {"execution_id": "exec-1", "workflow_id": "wf-1"}
         )
 
-        mock_websocket.send_text.assert_called_once()
-        message = json.loads(mock_websocket.send_text.call_args[0][0])
-        assert message["event_type"] == "WorkflowExecutionStarted"
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "WorkflowExecutionStarted"
 
     @pytest.mark.asyncio
-    async def test_on_phase_started(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
+    async def test_on_phase_started(self, projection: RealTimeProjection) -> None:
         """Test handling PhaseStarted event."""
-        await projection.connect("exec-1", mock_websocket)
-        await projection.on_phase_started(
-            {
-                "execution_id": "exec-1",
-                "phase_id": "phase-1",
-            }
-        )
+        queue = await projection.connect("exec-1")
+        await projection.on_phase_started({"execution_id": "exec-1", "phase_id": "phase-1"})
 
-        mock_websocket.send_text.assert_called_once()
-        message = json.loads(mock_websocket.send_text.call_args[0][0])
-        assert message["event_type"] == "PhaseStarted"
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "PhaseStarted"
 
     @pytest.mark.asyncio
-    async def test_on_operation_recorded(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
-    ) -> None:
+    async def test_on_operation_recorded(self, projection: RealTimeProjection) -> None:
         """Test handling OperationRecorded event."""
-        await projection.connect("exec-1", mock_websocket)
+        queue = await projection.connect("exec-1")
         await projection.on_operation_recorded(
-            {
-                "execution_id": "exec-1",
-                "operation_type": "tool_completed",
-                "tool_name": "Read",
-            }
+            {"execution_id": "exec-1", "operation_type": "tool_completed", "tool_name": "Read"}
         )
 
-        mock_websocket.send_text.assert_called_once()
-        message = json.loads(mock_websocket.send_text.call_args[0][0])
-        assert message["event_type"] == "OperationRecorded"
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.event_type == "OperationRecorded"
 
     @pytest.mark.asyncio
-    async def test_event_without_execution_id(
-        self, projection: RealTimeProjection, mock_websocket: MagicMock
+    async def test_on_workflow_completed_is_terminal(
+        self, projection: RealTimeProjection
     ) -> None:
-        """Test that events without execution_id are ignored."""
-        await projection.connect("exec-1", mock_websocket)
-        await projection.on_phase_started({"phase_id": "phase-1"})  # No execution_id
+        """Test that WorkflowCompleted sends a terminal frame + sentinel."""
+        queue: SSEQueue = await projection.connect("exec-1")
+        await projection.on_workflow_completed({"execution_id": "exec-1"})
 
-        mock_websocket.send_text.assert_not_called()
+        frame = await queue.get()
+        assert isinstance(frame, SSEEventFrame)
+        assert frame.type == "terminal"
+        assert frame.event_type == "WorkflowCompleted"
+
+        sentinel = await queue.get()
+        assert sentinel is None
+
+    @pytest.mark.asyncio
+    async def test_event_without_execution_id_is_ignored(
+        self, projection: RealTimeProjection
+    ) -> None:
+        """Test that events without execution_id are silently dropped."""
+        queue = await projection.connect("exec-1")
+        await projection.on_phase_started({"phase_id": "phase-1"})  # no execution_id
+
+        assert queue.qsize() == 0
 
 
+@pytest.mark.unit
 class TestSingleton:
     """Test singleton behavior."""
 
     def test_get_realtime_projection_singleton(self) -> None:
-        """Test that get_realtime_projection returns same instance."""
+        """Test that get_realtime_projection returns the same instance."""
         reset_realtime_projection()
         p1 = get_realtime_projection()
         p2 = get_realtime_projection()
         assert p1 is p2
 
     def test_reset_clears_singleton(self) -> None:
-        """Test that reset_realtime_projection clears the singleton."""
+        """Test that reset_realtime_projection returns a new instance."""
         p1 = get_realtime_projection()
         reset_realtime_projection()
         p2 = get_realtime_projection()

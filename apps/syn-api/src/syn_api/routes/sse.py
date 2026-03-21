@@ -98,15 +98,11 @@ async def execution_sse(execution_id: str, request: Request) -> StreamingRespons
 
             while True:
                 if await request.is_disconnected():
-                    logger.debug(
-                        "SSE client disconnected", extra={"execution_id": execution_id}
-                    )
+                    logger.debug("SSE client disconnected", extra={"execution_id": execution_id})
                     break
 
                 try:
-                    frame: SSEEventFrame | None = await asyncio.wait_for(
-                        queue.get(), timeout=30.0
-                    )
+                    frame: SSEEventFrame | None = await asyncio.wait_for(queue.get(), timeout=30.0)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
                     continue
@@ -119,9 +115,7 @@ async def execution_sse(execution_id: str, request: Request) -> StreamingRespons
                 yield _data_line(frame)
 
         except Exception:
-            logger.exception(
-                "SSE stream error", extra={"execution_id": execution_id}
-            )
+            logger.exception("SSE stream error", extra={"execution_id": execution_id})
         finally:
             with contextlib.suppress(Exception):
                 await realtime.disconnect(execution_id, queue)
@@ -162,9 +156,7 @@ async def activity_sse(request: Request) -> StreamingResponse:
                     break
 
                 try:
-                    frame: SSEEventFrame | None = await asyncio.wait_for(
-                        queue.get(), timeout=30.0
-                    )
+                    frame: SSEEventFrame | None = await asyncio.wait_for(queue.get(), timeout=30.0)
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
                     continue

@@ -39,14 +39,14 @@ def _render_event(frame: dict[str, object]) -> None:
 
     ts = format_timestamp(str(frame.get("timestamp", "")))
 
-    if event_type == "ExecutionStarted":
+    if event_type == "WorkflowExecutionStarted":
         exec_id = str(data.get("execution_id", ""))[:12]
         console.print(f"[dim]{ts}[/dim]  [green]▶ started[/green]  {exec_id}")
-    elif event_type in ("ExecutionCompleted", "WorkflowCompleted"):
+    elif event_type == "WorkflowCompleted":
         exec_id = str(data.get("execution_id", ""))[:12]
         cost = format_cost(data.get("total_cost_usd") or "0")
         console.print(f"[dim]{ts}[/dim]  [green]✓ completed[/green]  {exec_id}  {cost}")
-    elif event_type in ("ExecutionFailed", "WorkflowFailed"):
+    elif event_type == "WorkflowFailed":
         exec_id = str(data.get("execution_id", ""))[:12]
         err = str(data.get("error_message") or "")[:60]
         console.print(f"[dim]{ts}[/dim]  [red]✗ failed[/red]  {exec_id}  {err}")

@@ -119,9 +119,7 @@ def timeline(
     """Show a chronological tool-call timeline for a session."""
     try:
         with get_client() as client:
-            resp = client.get(
-                f"/events/sessions/{session_id}/timeline", params={"limit": limit}
-            )
+            resp = client.get(f"/events/sessions/{session_id}/timeline", params={"limit": limit})
     except Exception:
         _handle_connect_error()
         return

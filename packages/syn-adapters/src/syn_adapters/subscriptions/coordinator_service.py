@@ -49,6 +49,10 @@ class RealTimeProjectionAdapter(CheckpointedProjection):
     The checkpoint is saved but only to track position - no data is persisted.
     """
 
+    # Name changed from "realtime_websocket" (ISS-262 SSE migration).
+    # On first deploy this causes a one-time checkpoint reset and full event
+    # replay. RealTimeProjection is stateless (forwards to connected clients
+    # only), so replaying old events to empty queues is harmless.
     PROJECTION_NAME = "realtime_sse"
     VERSION = 1
 

@@ -31,9 +31,7 @@ def list_artifacts(
     workflow: Annotated[
         str | None, typer.Option("--workflow", "-w", help="Filter by workflow ID")
     ] = None,
-    phase: Annotated[
-        str | None, typer.Option("--phase", "-p", help="Filter by phase ID")
-    ] = None,
+    phase: Annotated[str | None, typer.Option("--phase", "-p", help="Filter by phase ID")] = None,
     artifact_type: Annotated[
         str | None, typer.Option("--type", "-t", help="Filter by artifact type")
     ] = None,

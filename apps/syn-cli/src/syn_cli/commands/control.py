@@ -165,7 +165,7 @@ def inject(
     try:
         with get_client() as client:
             resp = client.post(
-                f"/api/executions/{execution_id}/inject",
+                f"/executions/{execution_id}/inject",
                 json={"message": message},
             )
     except Exception:

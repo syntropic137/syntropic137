@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import Any, Literal, TypeAlias
+from typing import Literal, TypeAlias
 
 from agentic_logging import get_logger
 from pydantic import BaseModel, ConfigDict
@@ -43,7 +43,7 @@ type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, J
 SSEQueue: TypeAlias = asyncio.Queue["SSEEventFrame | None"]
 
 
-class SSEEventFrame(BaseModel, frozen=True):
+class SSEEventFrame(BaseModel):
     """Typed envelope for all SSE frames pushed to subscribers.
 
     Every frame sent over an SSE connection is serialised from this model.
@@ -54,16 +54,15 @@ class SSEEventFrame(BaseModel, frozen=True):
     - ``terminal``: signals the stream is ending (execution complete/failed)
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     type: Literal["connected", "event", "terminal"]
     event_type: str
     execution_id: str | None = None
-    # Any is justified here: data is a pass-through of domain event
-    # model_dump() output. The domain layer owns the schema; Pydantic
-    # validates structure at frame construction. Callers must not rely
-    # on specific key types beyond what the domain guarantees.
-    data: dict[str, Any]
+    # Data is the domain event model_dump() output, constrained to JSON
+    # via the JsonValue recursive type. The domain layer owns the schema;
+    # Pydantic validates the recursive structure at frame construction.
+    data: dict[str, JsonValue]
     timestamp: str
 
 
@@ -158,10 +157,7 @@ class RealTimeProjection:
         self,
         channel: str,
         event_type: str,
-        # Any is justified: data originates from domain event model_dump()
-        # calls in the subscription adapter. The domain layer owns the schema;
-        # Pydantic validates structure when SSEEventFrame is constructed.
-        data: dict[str, Any],
+        data: dict[str, JsonValue],
         *,
         terminal: bool = False,
     ) -> None:
@@ -202,8 +198,7 @@ class RealTimeProjection:
     async def broadcast_global(
         self,
         event_type: str,
-        # Any is justified: see broadcast() above.
-        data: dict[str, Any],
+        data: dict[str, JsonValue],
     ) -> None:
         """Broadcast a repo-level event to all global activity subscribers.
 
@@ -220,67 +215,67 @@ class RealTimeProjection:
     # Event handlers — called by ProjectionManager / RealTimeProjectionAdapter
     # ------------------------------------------------------------------
 
-    async def on_workflow_execution_started(self, event: dict[str, Any]) -> None:
+    async def on_workflow_execution_started(self, event: dict[str, JsonValue]) -> None:
         """Handle WorkflowExecutionStarted event."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "WorkflowExecutionStarted", event)
 
-    async def on_phase_started(self, event: dict[str, Any]) -> None:
+    async def on_phase_started(self, event: dict[str, JsonValue]) -> None:
         """Handle PhaseStarted event."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "PhaseStarted", event)
 
-    async def on_phase_completed(self, event: dict[str, Any]) -> None:
+    async def on_phase_completed(self, event: dict[str, JsonValue]) -> None:
         """Handle PhaseCompleted event."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "PhaseCompleted", event)
 
-    async def on_workflow_completed(self, event: dict[str, Any]) -> None:
+    async def on_workflow_completed(self, event: dict[str, JsonValue]) -> None:
         """Handle WorkflowCompleted event — sends terminal sentinel."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "WorkflowCompleted", event, terminal=True)
 
-    async def on_workflow_failed(self, event: dict[str, Any]) -> None:
+    async def on_workflow_failed(self, event: dict[str, JsonValue]) -> None:
         """Handle WorkflowFailed event — sends terminal sentinel."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "WorkflowFailed", event, terminal=True)
 
-    async def on_session_started(self, event: dict[str, Any]) -> None:
+    async def on_session_started(self, event: dict[str, JsonValue]) -> None:
         """Handle SessionStarted event."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "SessionStarted", event)
 
-    async def on_session_completed(self, event: dict[str, Any]) -> None:
+    async def on_session_completed(self, event: dict[str, JsonValue]) -> None:
         """Handle SessionCompleted event."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "SessionCompleted", event)
 
-    async def on_operation_recorded(self, event: dict[str, Any]) -> None:
+    async def on_operation_recorded(self, event: dict[str, JsonValue]) -> None:
         """Handle OperationRecorded event (tool calls, messages, etc.)."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "OperationRecorded", event)
 
-    async def on_artifact_created(self, event: dict[str, Any]) -> None:
+    async def on_artifact_created(self, event: dict[str, JsonValue]) -> None:
         """Handle ArtifactCreated event."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "ArtifactCreated", event)
 
-    async def on_subagent_started(self, event: dict[str, Any]) -> None:
+    async def on_subagent_started(self, event: dict[str, JsonValue]) -> None:
         """Handle SubagentStarted event — subagent spawned via Task tool."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
             await self.broadcast(execution_id, "SubagentStarted", event)
 
-    async def on_subagent_stopped(self, event: dict[str, Any]) -> None:
+    async def on_subagent_stopped(self, event: dict[str, JsonValue]) -> None:
         """Handle SubagentStopped event — subagent completed."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):

@@ -54,24 +54,7 @@ export default defineConfig({
         rewrite: (p: string) => p.replace(/^\/api\/v1/, ''),  // Strip /api/v1/ — mirrors nginx behavior
         configure: (proxy) => quietProxy(proxy, 'api'),
       },
-      // Only proxy our app WebSocket paths — avoid intercepting Vite's HMR socket
-      '/ws/executions': {
-        target: 'ws://localhost:8137',
-        ws: true,
-        changeOrigin: true,
-        configure: (proxy) => quietProxy(proxy, 'ws'),
-      },
-      '/ws/activity': {
-        target: 'ws://localhost:8137',
-        ws: true,
-        changeOrigin: true,
-        configure: (proxy) => quietProxy(proxy, 'ws'),
-      },
-      '/ws/health': {
-        target: 'http://localhost:8137',
-        changeOrigin: true,
-        configure: (proxy) => quietProxy(proxy, 'ws'),
-      },
+      // SSE streams go through the /api/v1 proxy above (rewritten to /sse/* on the backend).
     },
     fs: {
       // Allow serving files from the ui-feedback package

@@ -118,21 +118,11 @@ def cost() -> None:
 
 @app.command("heatmap")
 def heatmap(
-    org: Annotated[
-        str | None, typer.Option("--org", help="Filter by organization ID")
-    ] = None,
-    system: Annotated[
-        str | None, typer.Option("--system", help="Filter by system ID")
-    ] = None,
-    repo: Annotated[
-        str | None, typer.Option("--repo", help="Filter by repo ID")
-    ] = None,
-    start: Annotated[
-        str | None, typer.Option("--start", help="Start date (YYYY-MM-DD)")
-    ] = None,
-    end: Annotated[
-        str | None, typer.Option("--end", help="End date (YYYY-MM-DD)")
-    ] = None,
+    org: Annotated[str | None, typer.Option("--org", help="Filter by organization ID")] = None,
+    system: Annotated[str | None, typer.Option("--system", help="Filter by system ID")] = None,
+    repo: Annotated[str | None, typer.Option("--repo", help="Filter by repo ID")] = None,
+    start: Annotated[str | None, typer.Option("--start", help="Start date (YYYY-MM-DD)")] = None,
+    end: Annotated[str | None, typer.Option("--end", help="End date (YYYY-MM-DD)")] = None,
     metric: Annotated[
         str, typer.Option("--metric", "-m", help="Metric: sessions, cost, tokens")
     ] = "sessions",
