@@ -425,9 +425,7 @@ class TestOnSessionSummary:
         assert cost.cache_read_tokens == 120000
 
     @pytest.mark.asyncio
-    async def test_agent_model_stored_from_summary(
-        self, projection: SessionCostProjection
-    ) -> None:
+    async def test_agent_model_stored_from_summary(self, projection: SessionCostProjection) -> None:
         """agent_model is populated from session_summary model field."""
         await projection.on_session_summary(
             {
