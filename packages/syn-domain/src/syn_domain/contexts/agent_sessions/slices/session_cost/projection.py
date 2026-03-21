@@ -205,6 +205,15 @@ class SessionCostProjection:
             session_cost.total_cost_usd = Decimal(str(data["total_cost_usd"]))
             session_cost.token_cost_usd = session_cost.total_cost_usd
 
+        # ISS-265: Per-model breakdown from CLI modelUsage
+        model_usage = data.get("model_usage")
+        if model_usage and isinstance(model_usage, dict):
+            session_cost.cost_by_model = {
+                model_id: Decimal(str(m.get("costUSD", 0)))
+                for model_id, m in model_usage.items()
+                if isinstance(m, dict)
+            }
+
         # Update timestamp
         ts = event_data.get("timestamp")
         if ts:

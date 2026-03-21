@@ -8,6 +8,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from decimal import Decimal
+
 from syn_api._wiring import (
     ensure_connected,
     get_projection_mgr,
@@ -196,6 +199,7 @@ async def get_session(
     total_cost = session.total_cost_usd
     total_tokens = session.total_tokens
     agent_model = None
+    cost_by_model: dict[str, Decimal] = {}
     duration_seconds = None
     try:
         cost = await manager.session_cost.get_session_cost(session_id)
@@ -208,6 +212,7 @@ async def get_session(
             total_tokens = cost.total_tokens or session.total_tokens
             total_cost = cost.total_cost_usd
             agent_model = cost.agent_model
+            cost_by_model = cost.cost_by_model
             if cost.duration_ms:
                 duration_seconds = cost.duration_ms / 1000.0
     except Exception:
@@ -228,6 +233,7 @@ async def get_session(
             total_tokens=total_tokens,
             total_cost_usd=total_cost,
             agent_model=agent_model,
+            cost_by_model=cost_by_model,
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,

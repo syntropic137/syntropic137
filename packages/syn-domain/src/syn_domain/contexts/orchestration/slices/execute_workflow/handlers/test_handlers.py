@@ -229,6 +229,7 @@ class TestAgentExecutionHandler:
             cache_read=144509,
             num_turns=7,
             duration_ms=48000,
+            model_usage=None,
         )
 
 
