@@ -174,9 +174,10 @@ async def health_check(
                 **sub_status,
                 "status": "healthy" if sub_healthy else "degraded",
             }
-            if not sub_healthy and mode == "full":
-                response["mode"] = "degraded"
+            if not sub_healthy:
                 response.setdefault("degraded_reasons", []).append("subscription_coordinator")
+                if mode == "full":
+                    response["mode"] = "degraded"
         except Exception:
             response["subscription"] = {"status": "unknown"}
 
