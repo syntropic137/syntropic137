@@ -356,9 +356,10 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
       - name: Run OSV Scanner
-        # TODO(#259): Pin to commit SHA once we confirm v1.9.0 SHA.
-        # Use: gh api repos/google/osv-scanner-action/git/ref/tags/v1.9.0
-        uses: google/osv-scanner-action@v1.9.0
+        # v1.9.0 restructured the repo — root action.yml lost its `runs:` section.
+        # The actual action now lives in the osv-scanner-action/ subdirectory.
+        # SHA confirmed: gh api repos/google/osv-scanner-action/git/ref/tags/v1.9.0
+        uses: google/osv-scanner-action/osv-scanner-action@19ec1116569a47416e11a45848722b1af31a857b # v1.9.0
         continue-on-error: true  # TODO(#259): remove after first clean baseline run
         with:
           scan-args: |-
