@@ -84,20 +84,99 @@ class TestEventStreamProcessor:
         assert result.conversation_lines == []
 
     @pytest.mark.asyncio
-    async def test_result_event_accumulates_tokens(self) -> None:
+    async def test_result_event_captured_in_stream_result(self) -> None:
+        """Result event totals flow into StreamResult — not into TokenAccumulator (ISS-217)."""
         tokens = TokenAccumulator()
         proc = _make_processor(tokens=tokens)
         result_line = json.dumps(
             {
                 "type": "result",
                 "result": "done",
-                "usage": {"input_tokens": 500, "output_tokens": 100},
+                "total_cost_usd": 0.0319,
+                "duration_ms": 48000,
+                "num_turns": 7,
+                "usage": {
+                    "input_tokens": 685,
+                    "output_tokens": 1961,
+                    "cache_creation_input_tokens": 5596,
+                    "cache_read_input_tokens": 144509,
+                },
             }
         )
         result = await proc.process_stream(_lines_to_stream(result_line), MockWorkspace())
-        assert tokens.input_tokens == 500
-        assert tokens.output_tokens == 100
+
+        # Authoritative totals in StreamResult
+        assert result.result_input_tokens == 685
+        assert result.result_output_tokens == 1961
+        assert result.result_cache_creation == 5596
+        assert result.result_cache_read == 144509
+        assert result.total_cost_usd == pytest.approx(0.0319)
+        assert result.duration_ms == 48000
+        assert result.num_turns == 7
         assert result.line_count == 1
+
+        # Result event is cumulative — must NOT be added to the per-turn accumulator
+        assert tokens.input_tokens == 0
+        assert tokens.output_tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_result_event_does_not_emit_token_usage_observation(self) -> None:
+        """Result event must not record a TOKEN_USAGE observation (double-count guard, ISS-217)."""
+        obs = MockObservability()
+        proc = _make_processor(observability=obs)
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "done",
+                "total_cost_usd": 0.05,
+                "usage": {"input_tokens": 1000, "output_tokens": 200},
+            }
+        )
+        await proc.process_stream(_lines_to_stream(result_line), MockWorkspace())
+
+        token_obs = [r for r in obs.recordings if r[0] == "token_usage"]
+        assert len(token_obs) == 0
+
+    @pytest.mark.asyncio
+    async def test_per_turn_tokens_not_double_counted(self) -> None:
+        """Per-turn assistant tokens accumulate; result event totals don't stack on top (ISS-217)."""
+        tokens = TokenAccumulator()
+        obs = MockObservability()
+        proc = _make_processor(tokens=tokens, observability=obs)
+
+        assistant_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [],
+                    "usage": {"input_tokens": 300, "output_tokens": 80},
+                },
+            }
+        )
+        result_line = json.dumps(
+            {
+                "type": "result",
+                "result": "done",
+                "total_cost_usd": 0.01,
+                # CLI reports cumulative — same numbers in this single-turn case
+                "usage": {"input_tokens": 300, "output_tokens": 80},
+            }
+        )
+        result = await proc.process_stream(
+            _lines_to_stream(assistant_line, result_line), MockWorkspace()
+        )
+
+        # Accumulator only has the per-turn assistant event tokens
+        assert tokens.input_tokens == 300
+        assert tokens.output_tokens == 80
+
+        # Only one TOKEN_USAGE observation (from assistant event, not the result event)
+        token_obs = [r for r in obs.recordings if r[0] == "token_usage"]
+        assert len(token_obs) == 1
+
+        # Result totals are in StreamResult
+        assert result.result_input_tokens == 300
+        assert result.total_cost_usd == pytest.approx(0.01)
 
     @pytest.mark.asyncio
     async def test_assistant_event_tokens(self) -> None:
