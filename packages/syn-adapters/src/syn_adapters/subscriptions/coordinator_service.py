@@ -275,6 +275,111 @@ class CoordinatorSubscriptionService:
         logger.info("Coordinator subscription service stopped")
 
 
+def _camel_to_snake(name: str) -> str:
+    """Convert CamelCase event type to snake_case handler suffix."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+class _NamespacedProjectionAdapter(CheckpointedProjection):
+    """Base adapter for projections that receive namespace-qualified event types.
+
+    Org context events are stored as "organization.OrganizationCreated" etc.
+    AutoDispatchProjection maps on_* methods to bare CamelCase names (no namespace),
+    so standard auto-dispatch never fires. This adapter strips the namespace prefix
+    ("organization.") before building the handler name, then delegates to the
+    wrapped projection's on_* methods.
+    """
+
+    PROJECTION_NAME: str
+    VERSION: int
+    _SUBSCRIBED: set[str]
+
+    def __init__(self, projection: Any) -> None:
+        self._projection = projection
+
+    def get_name(self) -> str:
+        return self.PROJECTION_NAME
+
+    def get_version(self) -> int:
+        return self.VERSION
+
+    def get_subscribed_event_types(self) -> set[str] | None:
+        return self._SUBSCRIBED
+
+    async def clear_all_data(self) -> None:
+        await self._projection.clear_all_data()
+
+    async def handle_event(
+        self,
+        envelope: Any,
+        checkpoint_store: Any,
+    ) -> ProjectionResult:
+        event_type = envelope.event.event_type  # e.g. "organization.OrganizationCreated"
+        event_data = envelope.event.model_dump()
+        global_nonce = envelope.metadata.global_nonce or 0
+
+        try:
+            bare = event_type.split(".")[-1]  # "OrganizationCreated"
+            handler_name = f"on_{_camel_to_snake(bare)}"  # "on_organization_created"
+            handler = getattr(self._projection, handler_name, None)
+            if handler:
+                await handler(event_data)
+
+            await checkpoint_store.save_checkpoint(
+                ProjectionCheckpoint(
+                    projection_name=self.PROJECTION_NAME,
+                    global_position=global_nonce,
+                    updated_at=datetime.now(UTC),
+                    version=self.VERSION,
+                )
+            )
+            return ProjectionResult.SUCCESS
+
+        except Exception:
+            logger.exception(
+                "OrgProjectionAdapter handler failed for event %s in %s",
+                event_type,
+                self.PROJECTION_NAME,
+            )
+            return ProjectionResult.FAILURE
+
+
+class _OrganizationListAdapter(_NamespacedProjectionAdapter):
+    PROJECTION_NAME = "organization_list"
+    VERSION = 1
+    _SUBSCRIBED = {
+        "organization.OrganizationCreated",
+        "organization.OrganizationUpdated",
+        "organization.OrganizationDeleted",
+        "organization.SystemCreated",
+        "organization.SystemDeleted",
+        "organization.RepoRegistered",
+    }
+
+
+class _SystemListAdapter(_NamespacedProjectionAdapter):
+    PROJECTION_NAME = "system_list"
+    VERSION = 1
+    _SUBSCRIBED = {
+        "organization.SystemCreated",
+        "organization.SystemUpdated",
+        "organization.SystemDeleted",
+        "organization.RepoRegistered",
+        "organization.RepoAssignedToSystem",
+        "organization.RepoUnassignedFromSystem",
+    }
+
+
+class _RepoListAdapter(_NamespacedProjectionAdapter):
+    PROJECTION_NAME = "repo_list"
+    VERSION = 1
+    _SUBSCRIBED = {
+        "organization.RepoRegistered",
+        "organization.RepoAssignedToSystem",
+        "organization.RepoUnassignedFromSystem",
+    }
+
+
 def create_coordinator_service(
     event_store: Any,
     projection_store: Any,
@@ -310,6 +415,11 @@ def create_coordinator_service(
         WorkflowExecutionListProjection,
     )
     from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowListProjection
+    from syn_domain.contexts.organization._shared.organization_projection import (
+        OrganizationProjection,
+    )
+    from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
+    from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
 
     # Create all checkpointed projections
     projections: list[CheckpointedProjection] = [
@@ -322,6 +432,10 @@ def create_coordinator_service(
         DashboardMetricsProjection(projection_store),
         WorkflowDispatchProjection(execution_service=execution_service, store=projection_store),
         TriggerQueryProjection(projection_store),
+        # Organization context — namespace-qualified events require adapters
+        _OrganizationListAdapter(OrganizationProjection(projection_store)),
+        _SystemListAdapter(SystemProjection(projection_store)),
+        _RepoListAdapter(RepoProjection(projection_store)),
     ]
 
     return CoordinatorSubscriptionService(

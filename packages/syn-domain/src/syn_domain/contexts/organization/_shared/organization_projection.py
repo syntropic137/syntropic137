@@ -187,17 +187,26 @@ class OrganizationProjection:
         if org_id:
             await self.increment_system_count(org_id)
 
+    # Canonical name for coordinator dispatch (bare event type: SystemCreated)
+    on_system_created = on_system_created_increment
+
     async def on_system_deleted_decrement(self, event: dict[str, Any]) -> None:
         """Decrement system_count when a system is deleted."""
         org_id = str(event.get("organization_id", ""))
         if org_id:
             await self.increment_system_count(org_id, delta=-1)
 
+    # Canonical name for coordinator dispatch (bare event type: SystemDeleted)
+    on_system_deleted = on_system_deleted_decrement
+
     async def on_repo_registered_increment(self, event: dict[str, Any]) -> None:
         """Increment repo_count when a repo is registered under this org."""
         org_id = str(event.get("organization_id", ""))
         if org_id:
             await self.increment_repo_count(org_id)
+
+    # Canonical name for coordinator dispatch (bare event type: RepoRegistered)
+    on_repo_registered = on_repo_registered_increment
 
 
 _projection: OrganizationProjection | None = None

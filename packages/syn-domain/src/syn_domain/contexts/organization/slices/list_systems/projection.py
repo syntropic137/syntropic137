@@ -182,17 +182,26 @@ class SystemProjection:
         if system_id:
             await self.increment_repo_count(system_id)
 
+    # Canonical name for coordinator dispatch (bare event type: RepoRegistered)
+    on_repo_registered = on_repo_registered_increment
+
     async def on_repo_assigned_increment(self, event: dict[str, Any]) -> None:
         """Increment repo_count when a repo is assigned to this system."""
         system_id = str(event.get("system_id", ""))
         if system_id:
             await self.increment_repo_count(system_id)
 
+    # Canonical name for coordinator dispatch (bare event type: RepoAssignedToSystem)
+    on_repo_assigned_to_system = on_repo_assigned_increment
+
     async def on_repo_unassigned_decrement(self, event: dict[str, Any]) -> None:
         """Decrement repo_count when a repo is unassigned from this system."""
         system_id = str(event.get("old_system_id") or event.get("system_id", ""))
         if system_id:
             await self.increment_repo_count(system_id, delta=-1)
+
+    # Canonical name for coordinator dispatch (bare event type: RepoUnassignedFromSystem)
+    on_repo_unassigned_from_system = on_repo_unassigned_decrement
 
 
 _projection: SystemProjection | None = None
