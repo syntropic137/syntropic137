@@ -236,20 +236,38 @@ class CoordinatorSubscriptionService:
         )
 
     async def _run_coordinator(self) -> None:
-        """Run the coordinator with error handling."""
+        """Run the coordinator with exponential-backoff reconnect on error.
+
+        The gRPC subscription can die on startup (event store not ready) or
+        mid-run (GOAWAY / RST_STREAM). Rather than letting the task crash and
+        leaving projections stale forever, we reset coordinator state and retry
+        with backoff (1 s → 2 s → 4 s … capped at 60 s).
+        """
         assert self._coordinator is not None, "Coordinator not initialized"
-        try:
-            await self._coordinator.start()
-        except asyncio.CancelledError:
-            logger.info("Coordinator subscription cancelled")
-            raise
-        except Exception as e:
-            logger.error(
-                "Coordinator subscription error",
-                extra={"error": str(e)},
-                exc_info=True,
-            )
-            raise
+        delay = 1.0
+        max_delay = 60.0
+
+        while self._running:
+            try:
+                await self._coordinator.start()
+                delay = 1.0  # reset backoff on clean exit
+            except asyncio.CancelledError:
+                logger.info("Coordinator subscription cancelled")
+                raise
+            except Exception as e:
+                if not self._running:
+                    break
+                logger.error(
+                    "Coordinator subscription error — retrying in %.0fs",
+                    delay,
+                    extra={"error": str(e)},
+                    exc_info=True,
+                )
+                # coordinator.start() sets _running=True early; reset via stop()
+                # so the next call to start() doesn't return "already running".
+                await self._coordinator.stop()
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_delay)
 
     async def stop(self) -> None:
         """Stop the coordinator subscription service gracefully."""
