@@ -1,0 +1,18 @@
+# CODEOWNERS — ISS-259: Supply chain hardening
+#
+# Changes to sensitive paths require explicit review from the maintainer.
+# This prevents a contributor from merging a compromised workflow, Docker
+# config, or shared package without a human approval gate.
+
+# CI/CD — workflow changes are highest risk (arbitrary code execution in CI)
+/.github/                   @neural
+
+# Infrastructure and secrets management
+/docker/                    @neural
+/infra/                     @neural
+
+# Shared configuration — env constants, settings, credentials
+/packages/syn-shared/       @neural
+
+# Submodule references — pinned commit changes must be intentional
+/.gitmodules                @neural
