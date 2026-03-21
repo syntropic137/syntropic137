@@ -143,7 +143,6 @@ class TestObservabilityCollectorWithWriter:
         assert call.kwargs["observation_type"] == "git.commit"
         assert call.kwargs["data"]["commit_sha"] == "abc123"
 
-
     @pytest.mark.anyio
     async def test_record_session_summary(self) -> None:
         """record_session_summary emits SESSION_SUMMARY with authoritative CLI totals (ISS-217)."""
