@@ -148,8 +148,9 @@ class ObservabilityCollector:
         self,
         agent_name: str,
         tool_use_id: str,
+        model: str | None = None,
     ) -> None:
-        """Record subagent started."""
+        """Record subagent started (ISS-269: includes model + parent_session_id)."""
         if self._writer is None:
             return
 
@@ -159,12 +160,14 @@ class ObservabilityCollector:
             data={
                 "agent_name": agent_name,
                 "subagent_tool_use_id": tool_use_id,
+                "model": model,
+                "parent_session_id": self._session_id,
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
         )
-        logger.info("Subagent started: %s (id=%s)", agent_name, tool_use_id)
+        logger.info("Subagent started: %s (id=%s, model=%s)", agent_name, tool_use_id, model)
 
     async def record_subagent_stopped(
         self,
@@ -173,8 +176,9 @@ class ObservabilityCollector:
         duration_ms: int | None,
         success: bool | None,
         tools_used: dict[str, int] | None,
+        model: str | None = None,
     ) -> None:
-        """Record subagent stopped."""
+        """Record subagent stopped (ISS-269: includes model)."""
         if self._writer is None:
             return
 
@@ -187,15 +191,18 @@ class ObservabilityCollector:
                 "duration_ms": duration_ms,
                 "success": success,
                 "tools_used": tools_used,
+                "model": model,
+                "parent_session_id": self._session_id,
             },
             execution_id=self._execution_id,
             phase_id=self._phase_id,
             workspace_id=self._workspace_id,
         )
         logger.info(
-            "Subagent stopped: %s (id=%s, duration=%dms, tools=%s)",
+            "Subagent stopped: %s (id=%s, model=%s, duration=%dms, tools=%s)",
             agent_name,
             tool_use_id,
+            model,
             duration_ms or 0,
             tools_used,
         )
