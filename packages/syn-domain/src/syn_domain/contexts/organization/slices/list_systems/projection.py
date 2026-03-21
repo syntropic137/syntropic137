@@ -127,6 +127,73 @@ class SystemProjection:
             if system_id:
                 await self._store.delete(PROJECTION_NAME, system_id)
 
+    # ------------------------------------------------------------------
+    # Dict-based adapters — called by ProjectionManager dispatch
+    # ------------------------------------------------------------------
+
+    async def on_system_created(self, event: dict[str, Any]) -> None:
+        """Handle SystemCreated event dict from manager dispatch."""
+        system_id = str(event.get("system_id", ""))
+        if not system_id:
+            return
+        summary = SystemSummary(
+            system_id=system_id,
+            organization_id=str(event.get("organization_id", "")),
+            name=str(event.get("name", "")),
+            description=str(event.get("description", "")),
+            created_by=str(event.get("created_by", "")),
+            created_at=datetime.now(UTC),
+        )
+        await self._store.save(PROJECTION_NAME, system_id, _sys_to_dict(summary))
+        logger.info(f"Projected SystemCreated: {system_id}")
+
+    async def on_system_updated(self, event: dict[str, Any]) -> None:
+        """Handle SystemUpdated event dict from manager dispatch."""
+        system_id = str(event.get("system_id", ""))
+        if not system_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, system_id)
+        if data is None:
+            logger.warning(f"SystemUpdated for unknown system: {system_id}")
+            return
+        if event.get("name") is not None:
+            data["name"] = event["name"]
+        if event.get("description") is not None:
+            data["description"] = event["description"]
+        await self._store.save(PROJECTION_NAME, system_id, data)
+        logger.info(f"Projected SystemUpdated: {system_id}")
+
+    async def on_system_deleted(self, event: dict[str, Any]) -> None:
+        """Handle SystemDeleted event dict from manager dispatch."""
+        system_id = str(event.get("system_id", ""))
+        if not system_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, system_id)
+        if data is None:
+            logger.warning(f"SystemDeleted for unknown system: {system_id}")
+            return
+        data["is_deleted"] = True
+        await self._store.save(PROJECTION_NAME, system_id, data)
+        logger.info(f"Projected SystemDeleted: {system_id}")
+
+    async def on_repo_registered_increment(self, event: dict[str, Any]) -> None:
+        """Increment repo_count when a repo is assigned to this system at registration."""
+        system_id = str(event.get("system_id", ""))
+        if system_id:
+            await self.increment_repo_count(system_id)
+
+    async def on_repo_assigned_increment(self, event: dict[str, Any]) -> None:
+        """Increment repo_count when a repo is assigned to this system."""
+        system_id = str(event.get("system_id", ""))
+        if system_id:
+            await self.increment_repo_count(system_id)
+
+    async def on_repo_unassigned_decrement(self, event: dict[str, Any]) -> None:
+        """Decrement repo_count when a repo is unassigned from this system."""
+        system_id = str(event.get("old_system_id") or event.get("system_id", ""))
+        if system_id:
+            await self.increment_repo_count(system_id, delta=-1)
+
 
 _projection: SystemProjection | None = None
 

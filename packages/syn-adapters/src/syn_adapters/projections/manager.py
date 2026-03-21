@@ -36,6 +36,11 @@ from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowList
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
     WorkflowPhaseMetricsProjection,
 )
+from syn_domain.contexts.organization._shared.organization_projection import (
+    OrganizationProjection,
+)
+from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
+from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
 from syn_domain.contexts.organization.slices.repo_correlation import (
     RepoCorrelationProjection,
 )
@@ -120,6 +125,41 @@ class EventProvenance:
 # The "realtime" projection pushes events to SSE clients for live UI updates.
 # It doesn't persist data - it's a pure forwarding layer.
 EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
+    # Organization context events — create/update/delete org/system/repo
+    # Note: all events are namespaced as "organization.*" per @event decorator
+    "organization.OrganizationCreated": [
+        ("organization_list", "on_organization_created"),
+    ],
+    "organization.OrganizationUpdated": [
+        ("organization_list", "on_organization_updated"),
+    ],
+    "organization.OrganizationDeleted": [
+        ("organization_list", "on_organization_deleted"),
+    ],
+    "organization.SystemCreated": [
+        ("system_list", "on_system_created"),
+        ("organization_list", "on_system_created_increment"),
+    ],
+    "organization.SystemUpdated": [
+        ("system_list", "on_system_updated"),
+    ],
+    "organization.SystemDeleted": [
+        ("system_list", "on_system_deleted"),
+        ("organization_list", "on_system_deleted_decrement"),
+    ],
+    "organization.RepoRegistered": [
+        ("repo_list", "on_repo_registered"),
+        ("organization_list", "on_repo_registered_increment"),
+        ("system_list", "on_repo_registered_increment"),
+    ],
+    "organization.RepoAssignedToSystem": [
+        ("repo_list", "on_repo_assigned_to_system"),
+        ("system_list", "on_repo_assigned_increment"),
+    ],
+    "organization.RepoUnassignedFromSystem": [
+        ("repo_list", "on_repo_unassigned_from_system"),
+        ("system_list", "on_repo_unassigned_decrement"),
+    ],
     # GitHub trigger events (cross-context correlation)
     "github.TriggerFired": [
         ("repo_correlation", "on_trigger_fired"),
@@ -309,7 +349,11 @@ class ProjectionManager:
             "execution_cost": ExecutionCostProjection(self._store),
             # TimescaleDB-backed observability projections (CQRS pattern)
             "session_tools": self._create_session_tools_projection(),
-            # Organization projections
+            # Organization context projections — list/show entities
+            "organization_list": OrganizationProjection(self._store),
+            "system_list": SystemProjection(self._store),
+            "repo_list": RepoProjection(self._store),
+            # Organization insight projections — cross-context correlation
             "repo_correlation": RepoCorrelationProjection(self._store),
             "repo_health": RepoHealthProjection(self._store),
             "repo_cost": RepoCostProjection(self._store),

@@ -141,6 +141,58 @@ class RepoProjection:
             if repo_id:
                 await self._store.delete(PROJECTION_NAME, repo_id)
 
+    # ------------------------------------------------------------------
+    # Dict-based adapters — called by ProjectionManager dispatch
+    # ------------------------------------------------------------------
+
+    async def on_repo_registered(self, event: dict[str, Any]) -> None:
+        """Handle RepoRegistered event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        summary = RepoSummary(
+            repo_id=repo_id,
+            organization_id=str(event.get("organization_id", "")),
+            system_id=str(event.get("system_id") or ""),
+            provider=str(event.get("provider", "github")),
+            provider_repo_id=str(event.get("provider_repo_id", "")),
+            full_name=str(event.get("full_name", "")),
+            owner=str(event.get("owner", "")),
+            default_branch=str(event.get("default_branch", "main")),
+            installation_id=str(event.get("installation_id", "")),
+            is_private=bool(event.get("is_private", False)),
+            created_by=str(event.get("created_by", "")),
+            created_at=datetime.now(UTC),
+        )
+        await self._store.save(PROJECTION_NAME, repo_id, _repo_to_dict(summary))
+        logger.info(f"Projected RepoRegistered: {repo_id}")
+
+    async def on_repo_assigned_to_system(self, event: dict[str, Any]) -> None:
+        """Handle RepoAssignedToSystem event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, repo_id)
+        if data is None:
+            logger.warning(f"RepoAssignedToSystem for unknown repo: {repo_id}")
+            return
+        data["system_id"] = str(event.get("system_id", ""))
+        await self._store.save(PROJECTION_NAME, repo_id, data)
+        logger.info(f"Projected RepoAssignedToSystem: {repo_id}")
+
+    async def on_repo_unassigned_from_system(self, event: dict[str, Any]) -> None:
+        """Handle RepoUnassignedFromSystem event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, repo_id)
+        if data is None:
+            logger.warning(f"RepoUnassignedFromSystem for unknown repo: {repo_id}")
+            return
+        data["system_id"] = ""
+        await self._store.save(PROJECTION_NAME, repo_id, data)
+        logger.info(f"Projected RepoUnassignedFromSystem: {repo_id}")
+
 
 _projection: RepoProjection | None = None
 

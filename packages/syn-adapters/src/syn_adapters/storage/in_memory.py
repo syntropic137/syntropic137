@@ -375,9 +375,18 @@ class InMemoryOrganizationRepository:
         self._organizations: dict[str, Any] = {}
 
     async def save(self, aggregate: Any) -> None:
-        """Save the organization aggregate."""
+        """Save the organization aggregate and publish uncommitted events.
+
+        Publishes events to InMemoryEventPublisher so that
+        sync_published_events_to_projections() can dispatch them — mirroring
+        the production flow (SDK save → event store → subscription service).
+        """
         if aggregate.id:
             self._organizations[str(aggregate.id)] = aggregate
+        events = aggregate.get_uncommitted_events() if hasattr(aggregate, "get_uncommitted_events") else []
+        if events:
+            publisher = get_event_publisher()
+            await publisher.publish(events)
 
     async def get_by_id(self, organization_id: str) -> Any:
         """Get organization by ID."""
@@ -410,9 +419,13 @@ class InMemorySystemRepository:
         self._systems: dict[str, Any] = {}
 
     async def save(self, aggregate: Any) -> None:
-        """Save the system aggregate."""
+        """Save the system aggregate and publish uncommitted events."""
         if aggregate.id:
             self._systems[str(aggregate.id)] = aggregate
+        events = aggregate.get_uncommitted_events() if hasattr(aggregate, "get_uncommitted_events") else []
+        if events:
+            publisher = get_event_publisher()
+            await publisher.publish(events)
 
     async def get_by_id(self, system_id: str) -> Any:
         """Get system by ID."""
@@ -445,9 +458,13 @@ class InMemoryRepoRepository:
         self._repos: dict[str, Any] = {}
 
     async def save(self, aggregate: Any) -> None:
-        """Save the repo aggregate."""
+        """Save the repo aggregate and publish uncommitted events."""
         if aggregate.id:
             self._repos[str(aggregate.id)] = aggregate
+        events = aggregate.get_uncommitted_events() if hasattr(aggregate, "get_uncommitted_events") else []
+        if events:
+            publisher = get_event_publisher()
+            await publisher.publish(events)
 
     async def get_by_id(self, repo_id: str) -> Any:
         """Get repo by ID."""
