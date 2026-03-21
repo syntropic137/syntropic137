@@ -141,13 +141,29 @@ class AgentExecutionHandler:
                     stream_result.line_count,
                 )
 
+        # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2)
+        if collector is not None:
+            await collector.record_session_summary(
+                total_cost_usd=stream_result.total_cost_usd,
+                input_tokens=stream_result.result_input_tokens,
+                output_tokens=stream_result.result_output_tokens,
+                cache_creation=stream_result.result_cache_creation,
+                cache_read=stream_result.result_cache_read,
+                num_turns=stream_result.num_turns,
+                duration_ms=stream_result.duration_ms,
+            )
+
+        # Prefer result event totals (authoritative) over accumulated per-turn counts
+        final_input = stream_result.result_input_tokens or tokens.input_tokens
+        final_output = stream_result.result_output_tokens or tokens.output_tokens
+
         command = AgentExecutionCompletedCommand(
             execution_id=todo.execution_id,
             phase_id=todo.phase_id,
             session_id=session_id,
             exit_code=exit_code,
-            input_tokens=tokens.input_tokens,
-            output_tokens=tokens.output_tokens,
+            input_tokens=final_input,
+            output_tokens=final_output,
         )
 
         return AgentExecutionResult(
