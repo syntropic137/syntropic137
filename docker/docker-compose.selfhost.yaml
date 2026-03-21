@@ -275,6 +275,8 @@ services:
   # ===========================================================================
   minio:
     container_name: syn137-minio
+    ports:
+      - "127.0.0.1:9000:9000" # S3 API — localhost-only, required for bucket init script
     volumes:
       - minio_data:/data
     restart: always
