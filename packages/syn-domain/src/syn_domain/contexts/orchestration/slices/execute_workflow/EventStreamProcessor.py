@@ -282,7 +282,9 @@ class EventStreamProcessor:
         if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
             input_preview = ctx_data.get("input_preview", "")
             event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
-            await self._collector.record_subagent_started(event.agent_name, tool_use_id)
+            await self._collector.record_subagent_started(
+                event.agent_name, tool_use_id, model=event.model
+            )
 
         elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
             success = ctx_data.get("success", True)
@@ -294,6 +296,7 @@ class EventStreamProcessor:
                     duration_ms=stopped_event.duration_ms,
                     success=stopped_event.success,
                     tools_used=stopped_event.tools_used,
+                    model=stopped_event.model,
                 )
 
     async def _process_cli_event(self, line: str) -> dict[str, Any] | None:
@@ -434,7 +437,9 @@ class EventStreamProcessor:
         # ADR-037: Detect Task/Agent tool as subagent start (raw CLI format)
         if tool_name in _SUBAGENT_TOOL_NAMES and tool_use_id:
             event = self._subagents.on_task_started(tool_use_id, tool_input)
-            await self._collector.record_subagent_started(event.agent_name, tool_use_id)
+            await self._collector.record_subagent_started(
+                event.agent_name, tool_use_id, model=event.model
+            )
 
     async def _handle_user_event(self, cli_event: dict[str, Any]) -> None:
         """Handle user event — process tool results."""
@@ -489,4 +494,5 @@ class EventStreamProcessor:
                 duration_ms=event.duration_ms,
                 success=event.success,
                 tools_used=event.tools_used,
+                model=event.model,
             )

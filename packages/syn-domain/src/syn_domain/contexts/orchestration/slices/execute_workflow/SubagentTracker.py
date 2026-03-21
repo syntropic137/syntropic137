@@ -27,6 +27,7 @@ class SubagentLifecycleRecord:
     duration_ms: int | None = None
     success: bool | None = None
     tools_used: dict[str, int] | None = None
+    model: str | None = None  # ISS-269: model the subagent runs on (from agent definition)
 
 
 class SubagentTracker:
@@ -38,7 +39,8 @@ class SubagentTracker:
     """
 
     def __init__(self) -> None:
-        self._active: dict[str, tuple[str, datetime, dict[str, int]]] = {}
+        # active: tool_use_id → (agent_name, started_at, tools_used, model)
+        self._active: dict[str, tuple[str, datetime, dict[str, int], str | None]] = {}
         self._tool_names_cache: dict[str, str] = {}
 
     def register_tool_use(self, tool_use_id: str, tool_name: str) -> None:
@@ -64,11 +66,13 @@ class SubagentTracker:
         agent_name = str(input_data.get("subagent_type", input_data.get("description", "unknown")))[
             :50
         ]
-        self._active[tool_use_id] = (agent_name, datetime.now(UTC), {})
+        model = input_data.get("model") or None  # populated once ISS-270 wires --agents
+        self._active[tool_use_id] = (agent_name, datetime.now(UTC), {}, model)
         return SubagentLifecycleRecord(
             agent_name=agent_name,
             tool_use_id=tool_use_id,
             event_type="started",
+            model=model,
         )
 
     def on_task_started_from_hook(
@@ -84,19 +88,22 @@ class SubagentTracker:
             SubagentLifecycleRecord with event_type="started"
         """
         agent_name = "unknown"
+        model: str | None = None
         if input_preview:
             try:
                 input_data = json.loads(input_preview)
                 agent_name = str(
                     input_data.get("subagent_type", input_data.get("description", "unknown"))
                 )[:50]
+                model = input_data.get("model") or None
             except (json.JSONDecodeError, TypeError):
                 pass
-        self._active[tool_use_id] = (agent_name, datetime.now(UTC), {})
+        self._active[tool_use_id] = (agent_name, datetime.now(UTC), {}, model)
         return SubagentLifecycleRecord(
             agent_name=agent_name,
             tool_use_id=tool_use_id,
             event_type="started",
+            model=model,
         )
 
     def on_task_completed(self, tool_use_id: str, success: bool) -> SubagentLifecycleRecord | None:
@@ -111,7 +118,7 @@ class SubagentTracker:
         """
         if tool_use_id not in self._active:
             return None
-        agent_name, started_at, tools_used = self._active.pop(tool_use_id)
+        agent_name, started_at, tools_used, model = self._active.pop(tool_use_id)
         duration_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
         return SubagentLifecycleRecord(
             agent_name=agent_name,
@@ -120,6 +127,7 @@ class SubagentTracker:
             duration_ms=duration_ms,
             success=success,
             tools_used=tools_used,
+            model=model,
         )
 
     def attribute_tool(self, tool_name: str) -> None:
@@ -130,7 +138,7 @@ class SubagentTracker:
             self._active.keys(),
             key=lambda k: self._active[k][1],  # Sort by started_at
         )
-        _, _, tools_dict = self._active[latest_id]
+        _, _, tools_dict, _ = self._active[latest_id]
         tools_dict[tool_name] = tools_dict.get(tool_name, 0) + 1
 
     @property
