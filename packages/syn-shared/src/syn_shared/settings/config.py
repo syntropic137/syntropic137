@@ -232,18 +232,20 @@ class Settings(BaseSettings):
     claude_code_oauth_token: SecretStr | None = Field(
         default=None,
         description=(
-            "Claude Code OAuth token for Claude models. "
-            "Obtained via Claude Code OAuth flow. "
-            "If set, takes priority over ANTHROPIC_API_KEY."
+            "Claude Code OAuth token. Takes priority over ANTHROPIC_API_KEY when both are set. "
+            "Obtain via: claude setup (Claude Code OAuth flow). "
+            "At least one of CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY is required "
+            "for agent execution."
         ),
     )
 
     anthropic_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "Anthropic API key for Claude models. "
-            "Get from: https://console.anthropic.com/settings/keys "
-            "Required when using Claude agent adapter (unless CLAUDE_CODE_OAUTH_TOKEN is set)."
+            "Anthropic API key. Used when CLAUDE_CODE_OAUTH_TOKEN is not set. "
+            "Get from: https://console.anthropic.com/settings/keys. "
+            "At least one of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required "
+            "for agent execution."
         ),
     )
 
