@@ -168,11 +168,11 @@ async def health_check(
     if _subscription_service is not None:
         try:
             sub_healthy = _subscription_service.is_healthy
-            response["subscriptions"] = "healthy" if sub_healthy else "degraded"
+            response["subscription"] = {"status": "healthy" if sub_healthy else "degraded"}
             if not sub_healthy and mode == "full":
                 response["mode"] = "degraded"
         except Exception:
-            response["subscriptions"] = "unknown"
+            response["subscription"] = {"status": "unknown"}
 
     return Ok(response)
 
