@@ -98,24 +98,29 @@ class TimescaleSessionCostQuery:
                 TOOL_EXECUTION_COMPLETED,
             )
 
-            # ISS-265: Per-model cost breakdown — aggregate token_usage events by model
-            # Used as fallback when session_summary.model_usage is absent (orphaned sessions)
-            per_model_rows = await conn.fetch(
-                """
-                SELECT
-                    data->>'model' as model,
-                    SUM((data->>'input_tokens')::int) as input_tokens,
-                    SUM((data->>'output_tokens')::int) as output_tokens,
-                    SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
-                    SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read
-                FROM agent_events
-                WHERE session_id = $1 AND event_type = $2
-                  AND data->>'model' IS NOT NULL
-                GROUP BY data->>'model'
-                """,
-                session_id,
-                TOKEN_USAGE,
-            )
+            # ISS-265: Per-model cost breakdown — only needed when session_summary.model_usage
+            # is absent (orphaned/legacy sessions). Skip on the common hot-path.
+            model_usage_from_summary = exec_result["model_usage"] if exec_result else None
+            if model_usage_from_summary is None:
+                per_model_rows = await conn.fetch(
+                    """
+                    SELECT
+                        data->>'model' as model,
+                        SUM((data->>'input_tokens')::int) as input_tokens,
+                        SUM((data->>'output_tokens')::int) as output_tokens,
+                        SUM(COALESCE((data->>'cache_creation_tokens')::int, 0)) as cache_creation,
+                        SUM(COALESCE((data->>'cache_read_tokens')::int, 0)) as cache_read
+                    FROM agent_events
+                    WHERE session_id = $1 AND event_type = $2
+                      AND data->>'model' IS NOT NULL
+                    GROUP BY data->>'model'
+                    """,
+                    session_id,
+                    TOKEN_USAGE,
+                )
+            else:
+                # session_summary.model_usage is authoritative; no fallback aggregation needed
+                per_model_rows = []
 
             # Get started_at from session_started event, or fall back to first token_usage
             started_at = await conn.fetchval(
@@ -165,11 +170,10 @@ class TimescaleSessionCostQuery:
 
             # ISS-265: Populate cost_by_model
             # Prefer authoritative model_usage from session_summary (exact SDK cost per model)
-            model_usage = exec_result["model_usage"] if exec_result else None
-            if model_usage and isinstance(model_usage, dict):
+            if model_usage_from_summary and isinstance(model_usage_from_summary, dict):
                 session_cost.cost_by_model = {
                     model_id: Decimal(str(m.get("costUSD", 0)))
-                    for model_id, m in model_usage.items()
+                    for model_id, m in model_usage_from_summary.items()
                     if isinstance(m, dict)
                 }
             elif per_model_rows:
