@@ -85,7 +85,7 @@ If a secret is accidentally committed:
 ## Planned Controls (not yet implemented)
 
 - [ ] Pre-commit secret gate (`detect-secrets` or `gitleaks`) — ISS-259
-- [x] `dependency-review-action` — blocks newly added CVE-laden or script-running packages on PRs
+- [x] `dependency-review-action` — added; warn-only until repo goes public (requires GitHub Advanced Security, free for public repos)
 - [ ] Dependabot for Actions + npm — ISS-259
 - [ ] OSV Scanner switched to blocking mode (after baseline) — ISS-259 `TODO(#259)`
 - [ ] Topology auto-snapshot on commit — ISS-260

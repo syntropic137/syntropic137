@@ -384,8 +384,11 @@ jobs:
 
       # ISS-259: Pinned to SHA (v4.9.0). Flags newly added packages with CVEs
       # or install scripts — catches supply chain risks at PR review time.
+      # Requires GitHub Advanced Security (free for public repos). Currently
+      # warn-only until repo goes public and GHAS is auto-enabled.
       - name: Dependency Review
         uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
+        continue-on-error: true  # TODO(#259): remove after repo goes public (GHAS required)
 
   #############################################################################
   # SUMMARY - Required status check for PRs
