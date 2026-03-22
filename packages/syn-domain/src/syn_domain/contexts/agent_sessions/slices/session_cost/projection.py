@@ -183,12 +183,22 @@ class SessionCostProjection:
         # Extract summary data
         data = event_data.get("data", {})
 
-        # Use authoritative totals from SessionSummary
+        # Use authoritative totals from SessionSummary (ISS-217)
         session_cost.input_tokens = data.get("total_input_tokens", session_cost.input_tokens)
         session_cost.output_tokens = data.get("total_output_tokens", session_cost.output_tokens)
+        session_cost.cache_creation_tokens = data.get(
+            "cache_creation_tokens", session_cost.cache_creation_tokens
+        )
+        session_cost.cache_read_tokens = data.get(
+            "cache_read_tokens", session_cost.cache_read_tokens
+        )
         session_cost.tool_calls = data.get("tool_count", session_cost.tool_calls)
         session_cost.turns = data.get("num_turns", session_cost.turns)
         session_cost.duration_ms = data.get("duration_ms", session_cost.duration_ms)
+
+        # Model from result event
+        if data.get("model"):
+            session_cost.agent_model = data["model"]
 
         # Use SDK-provided cost if available (most accurate)
         if data.get("total_cost_usd") is not None:

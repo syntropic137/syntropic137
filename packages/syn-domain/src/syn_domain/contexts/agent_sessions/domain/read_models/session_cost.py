@@ -76,6 +76,10 @@ class SessionCost:
     cost_by_tool_tokens: dict[str, Decimal] = field(default_factory=dict)
     """Token cost breakdown by tool (derived from tokens_by_tool)."""
 
+    # Model
+    agent_model: str | None = None
+    """Primary model used for this session (from CLI result event)."""
+
     # Status
     is_finalized: bool = False
     """Whether the session has completed."""
@@ -152,6 +156,7 @@ class SessionCost:
             tokens_by_tool=tokens_by_tool,
             cost_by_tool_tokens=cost_by_tool_tokens,
             is_finalized=data.get("is_finalized", False),
+            agent_model=data.get("agent_model"),
             started_at=started_at,
             completed_at=completed_at,
         )
@@ -180,6 +185,7 @@ class SessionCost:
             "tokens_by_tool": self.tokens_by_tool,
             "cost_by_tool_tokens": {k: str(v) for k, v in self.cost_by_tool_tokens.items()},
             "is_finalized": self.is_finalized,
+            "agent_model": self.agent_model,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }

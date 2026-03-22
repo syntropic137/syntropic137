@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import (
     ObservationType,
 )
+from syn_shared.events import SESSION_SUMMARY
 
 if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
@@ -197,6 +198,50 @@ class ObservabilityCollector:
             tool_use_id,
             duration_ms or 0,
             tools_used,
+        )
+
+    async def record_session_summary(
+        self,
+        total_cost_usd: float | None,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation: int,
+        cache_read: int,
+        num_turns: int | None,
+        duration_ms: int | None,
+    ) -> None:
+        """Record end-of-session summary with authoritative CLI totals (ISS-217).
+
+        Emits a session_summary observation so SessionCostProjection.on_session_summary()
+        can overwrite accumulated estimates with the SDK-reported values.
+        """
+        if self._writer is None:
+            return
+
+        await self._writer.record_observation(
+            session_id=self._session_id,
+            observation_type=SESSION_SUMMARY,
+            data={
+                "total_cost_usd": total_cost_usd,
+                "total_input_tokens": input_tokens,
+                "total_output_tokens": output_tokens,
+                "cache_creation_tokens": cache_creation,
+                "cache_read_tokens": cache_read,
+                "num_turns": num_turns,
+                "duration_ms": duration_ms,
+                "model": self._agent_model,
+            },
+            execution_id=self._execution_id,
+            phase_id=self._phase_id,
+            workspace_id=self._workspace_id,
+        )
+        logger.info(
+            "Session summary recorded: cost=$%s, %d in, %d out, %d turns, %dms",
+            total_cost_usd,
+            input_tokens,
+            output_tokens,
+            num_turns or 0,
+            duration_ms or 0,
         )
 
     async def record_embedded_event(
