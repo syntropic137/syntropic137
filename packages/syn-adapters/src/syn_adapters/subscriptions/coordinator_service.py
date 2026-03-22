@@ -17,7 +17,7 @@ import asyncio
 import contextlib
 import re
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import asyncpg
 from agentic_logging import get_logger
@@ -308,9 +308,9 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
     wrapped projection's on_* methods.
     """
 
-    PROJECTION_NAME: str
-    VERSION: int
-    _SUBSCRIBED: set[str]
+    PROJECTION_NAME: ClassVar[str]
+    VERSION: ClassVar[int]
+    _SUBSCRIBED: ClassVar[set[str]]
 
     def __init__(self, projection: Any) -> None:
         self._projection = projection
@@ -363,9 +363,9 @@ class _NamespacedProjectionAdapter(CheckpointedProjection):
 
 
 class _OrganizationListAdapter(_NamespacedProjectionAdapter):
-    PROJECTION_NAME = "organization_list"
-    VERSION = 1
-    _SUBSCRIBED = {
+    PROJECTION_NAME: ClassVar[str] = "organization_list"
+    VERSION: ClassVar[int] = 1
+    _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.OrganizationCreated",
         "organization.OrganizationUpdated",
         "organization.OrganizationDeleted",
@@ -376,9 +376,9 @@ class _OrganizationListAdapter(_NamespacedProjectionAdapter):
 
 
 class _SystemListAdapter(_NamespacedProjectionAdapter):
-    PROJECTION_NAME = "system_list"
-    VERSION = 1
-    _SUBSCRIBED = {
+    PROJECTION_NAME: ClassVar[str] = "system_list"
+    VERSION: ClassVar[int] = 1
+    _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.SystemCreated",
         "organization.SystemUpdated",
         "organization.SystemDeleted",
@@ -389,9 +389,9 @@ class _SystemListAdapter(_NamespacedProjectionAdapter):
 
 
 class _RepoListAdapter(_NamespacedProjectionAdapter):
-    PROJECTION_NAME = "repo_list"
-    VERSION = 1
-    _SUBSCRIBED = {
+    PROJECTION_NAME: ClassVar[str] = "repo_list"
+    VERSION: ClassVar[int] = 1
+    _SUBSCRIBED: ClassVar[set[str]] = {
         "organization.RepoRegistered",
         "organization.RepoAssignedToSystem",
         "organization.RepoUnassignedFromSystem",
