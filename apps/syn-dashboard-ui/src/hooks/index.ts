@@ -5,7 +5,7 @@
 export { useExecutionControl, type ExecutionState } from './useExecutionControl'
 export { useExecutionStream } from './useExecutionStream'
 export type {
-  ExecutionEvent,
+  SSEEventFrame,
   UseExecutionStreamOptions,
   UseExecutionStreamResult,
 } from './useExecutionStream'

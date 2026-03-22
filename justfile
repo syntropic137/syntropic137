@@ -1553,6 +1553,12 @@ _workspace-check:
     set -euo pipefail
     IMAGE="agentic-workspace-claude-cli:latest"
 
+    # Auto-init submodules if not yet initialized (worktree-safe)
+    if [ ! -f lib/agentic-primitives/.git ] && [ ! -d lib/agentic-primitives/.git ]; then
+        echo "📦 Submodules not initialized — initializing..."
+        just submodules-init
+    fi
+
     # Check if image exists
     if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
         echo "⚠️  Workspace image not found. Building..."

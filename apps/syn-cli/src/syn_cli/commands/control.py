@@ -157,6 +157,33 @@ def status(
 
 
 @app.command()
+def inject(
+    execution_id: Annotated[str, typer.Argument(help="Execution ID")],
+    message: Annotated[str, typer.Option("--message", "-m", help="Message to inject")],
+) -> None:
+    """Inject a message into a running execution."""
+    try:
+        with get_client() as client:
+            resp = client.post(
+                f"/executions/{execution_id}/inject",
+                json={"message": message},
+            )
+    except Exception:
+        _handle_connect_error()
+        return
+
+    if resp.status_code == 404:
+        print_error(f"Execution not found: {execution_id}")
+        raise typer.Exit(1)
+    if resp.status_code != 200:
+        error = resp.json().get("detail", "Unknown error")
+        print_error(f"Failed to inject: {error}")
+        raise typer.Exit(1)
+
+    console.print(f"[green]Message injected into execution {execution_id}[/green]")
+
+
+@app.command()
 def stop(
     execution_id: Annotated[str, typer.Argument(help="Execution ID to stop")],
     reason: Annotated[

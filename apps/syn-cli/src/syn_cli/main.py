@@ -10,13 +10,22 @@ from rich.console import Console
 from syn_cli.client import get_api_url, get_client
 from syn_cli.commands import (
     agent,
+    artifacts,
     config,
     control,
+    conversations,
     costs,
+    events,
+    execution,
+    insights,
     metrics,
     observe,
+    org,
+    repo,
     sessions,
+    system,
     triggers,
+    watch,
     workflow,
 )
 
@@ -34,13 +43,22 @@ console = Console()
 # Register subcommands
 app.add_typer(workflow.app, name="workflow")
 app.add_typer(agent.app, name="agent")
+app.add_typer(artifacts.app, name="artifacts")
 app.add_typer(config.app, name="config")
 app.add_typer(control.app, name="control")
-app.add_typer(triggers.app, name="triggers")
+app.add_typer(conversations.app, name="conversations")
 app.add_typer(costs.app, name="costs")
-app.add_typer(sessions.app, name="sessions")
+app.add_typer(events.app, name="events")
+app.add_typer(execution.app, name="execution")
+app.add_typer(insights.app, name="insights")
 app.add_typer(metrics.app, name="metrics")
 app.add_typer(observe.app, name="observe")
+app.add_typer(org.app, name="org")
+app.add_typer(repo.app, name="repo")
+app.add_typer(sessions.app, name="sessions")
+app.add_typer(system.app, name="system")
+app.add_typer(triggers.app, name="triggers")
+app.add_typer(watch.app, name="watch")
 
 
 @app.command()

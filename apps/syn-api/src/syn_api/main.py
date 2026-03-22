@@ -25,10 +25,10 @@ from syn_api.routes import (
     organizations_router,
     repos_router,
     sessions_router,
+    sse_router,
     systems_router,
     triggers_router,
     webhooks_router,
-    websocket_router,
     workflows_router,
 )
 from syn_api.types import Err, Ok
@@ -128,7 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(triggers_router)
     app.include_router(webhooks_router)
-    app.include_router(websocket_router)
+    app.include_router(sse_router)
     app.include_router(organizations_router)
     app.include_router(systems_router)
     app.include_router(repos_router)
