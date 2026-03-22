@@ -10,7 +10,7 @@ import os
 
 import pytest
 
-from syn_api.types import Err, Ok, OrganizationError, RepoError, SystemErrorCode
+from syn_api.types import Err, Ok, OrganizationError
 
 os.environ.setdefault("APP_ENVIRONMENT", "test")
 
