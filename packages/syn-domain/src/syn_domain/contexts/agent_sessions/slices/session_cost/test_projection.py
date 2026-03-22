@@ -346,6 +346,140 @@ class TestSessionCostFinalized:
         assert session_cost.completed_at is not None
 
 
+class TestOnSessionSummary:
+    """Tests for on_session_summary — authoritative CLI totals (ISS-100/217)."""
+
+    @pytest.mark.asyncio
+    async def test_overwrites_accumulated_cost_with_sdk_value(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """session_summary total_cost_usd replaces accumulated estimate."""
+        # Accumulate some per-turn costs first
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "event_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 2713,
+                    "output_tokens": 2017,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                },
+            }
+        )
+        # session_summary arrives with SDK's authoritative total
+        await projection.on_session_summary(
+            {
+                "session_id": "session-1",
+                "execution_id": "exec-1",
+                "phase_id": "phase-1",
+                "data": {
+                    "total_cost_usd": 0.0319359,
+                    "total_input_tokens": 685,
+                    "total_output_tokens": 1961,
+                    "cache_creation_tokens": 5596,
+                    "cache_read_tokens": 144509,
+                    "num_turns": 7,
+                    "duration_ms": 48022,
+                    "model": "claude-haiku-4-5-20251001",
+                },
+            }
+        )
+
+        cost = await projection.get_session_cost("session-1")
+        assert cost is not None
+        assert cost.total_cost_usd == Decimal("0.0319359")
+        assert cost.input_tokens == 685
+        assert cost.output_tokens == 1961
+        assert cost.cache_creation_tokens == 5596
+        assert cost.cache_read_tokens == 144509
+        assert cost.turns == 7
+        assert cost.duration_ms == 48022
+        assert cost.agent_model == "claude-haiku-4-5-20251001"
+        assert cost.is_finalized is True
+
+    @pytest.mark.asyncio
+    async def test_cache_tokens_populated_from_summary(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """Cache tokens are set from session_summary data (not zeroed by the overwrite)."""
+        await projection.on_session_summary(
+            {
+                "session_id": "session-1",
+                "data": {
+                    "total_cost_usd": 0.05,
+                    "total_input_tokens": 100,
+                    "total_output_tokens": 50,
+                    "cache_creation_tokens": 8000,
+                    "cache_read_tokens": 120000,
+                    "num_turns": 3,
+                    "duration_ms": 5000,
+                    "model": "claude-sonnet-4-6",
+                },
+            }
+        )
+
+        cost = await projection.get_session_cost("session-1")
+        assert cost is not None
+        assert cost.cache_creation_tokens == 8000
+        assert cost.cache_read_tokens == 120000
+
+    @pytest.mark.asyncio
+    async def test_agent_model_stored_from_summary(self, projection: SessionCostProjection) -> None:
+        """agent_model is populated from session_summary model field."""
+        await projection.on_session_summary(
+            {
+                "session_id": "session-1",
+                "data": {
+                    "total_cost_usd": 0.01,
+                    "total_input_tokens": 10,
+                    "total_output_tokens": 5,
+                    "model": "claude-haiku-4-5-20251001",
+                },
+            }
+        )
+
+        cost = await projection.get_session_cost("session-1")
+        assert cost is not None
+        assert cost.agent_model == "claude-haiku-4-5-20251001"
+
+    @pytest.mark.asyncio
+    async def test_summary_without_cost_preserves_existing(
+        self, projection: SessionCostProjection
+    ) -> None:
+        """If total_cost_usd is absent, accumulated cost is not zeroed."""
+        await projection.on_agent_observation(
+            {
+                "session_id": "session-1",
+                "event_type": ObservationType.TOKEN_USAGE.value,
+                "data": {
+                    "input_tokens": 500,
+                    "output_tokens": 100,
+                    "cache_creation_tokens": 0,
+                    "cache_read_tokens": 0,
+                },
+            }
+        )
+        accumulated = (await projection.get_session_cost("session-1")).total_cost_usd  # type: ignore[union-attr]
+
+        await projection.on_session_summary(
+            {
+                "session_id": "session-1",
+                "data": {
+                    # No total_cost_usd
+                    "total_input_tokens": 500,
+                    "total_output_tokens": 100,
+                    "num_turns": 1,
+                    "duration_ms": 2000,
+                },
+            }
+        )
+
+        cost = await projection.get_session_cost("session-1")
+        assert cost is not None
+        assert cost.total_cost_usd == accumulated
+
+
 class TestQueryOperations:
     """Tests for projection query operations."""
 

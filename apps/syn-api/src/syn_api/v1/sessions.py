@@ -191,14 +191,23 @@ async def get_session(
     # Get cost data
     input_tokens = 0
     output_tokens = 0
+    cache_creation_tokens = 0
+    cache_read_tokens = 0
     total_cost = session.total_cost_usd
+    total_tokens = session.total_tokens
+    agent_model = None
     duration_seconds = None
     try:
         cost = await manager.session_cost.get_session_cost(session_id)
         if cost:
             input_tokens = cost.input_tokens
             output_tokens = cost.output_tokens
+            cache_creation_tokens = cost.cache_creation_tokens
+            cache_read_tokens = cost.cache_read_tokens
+            # ISS-217: Use authoritative totals from cost projection; fall back to session_list
+            total_tokens = cost.total_tokens or session.total_tokens
             total_cost = cost.total_cost_usd
+            agent_model = cost.agent_model
             if cost.duration_ms:
                 duration_seconds = cost.duration_ms / 1000.0
     except Exception:
@@ -214,8 +223,11 @@ async def get_session(
             status=session.status,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            total_tokens=session.total_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
+            total_tokens=total_tokens,
             total_cost_usd=total_cost,
+            agent_model=agent_model,
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,

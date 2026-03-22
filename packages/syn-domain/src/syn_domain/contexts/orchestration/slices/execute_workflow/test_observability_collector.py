@@ -143,6 +143,52 @@ class TestObservabilityCollectorWithWriter:
         assert call.kwargs["observation_type"] == "git.commit"
         assert call.kwargs["data"]["commit_sha"] == "abc123"
 
+    @pytest.mark.anyio
+    async def test_record_session_summary(self) -> None:
+        """record_session_summary emits SESSION_SUMMARY with authoritative CLI totals (ISS-217)."""
+        writer = AsyncMock()
+        collector = _make_collector(writer=writer)
+
+        await collector.record_session_summary(
+            total_cost_usd=0.0319,
+            input_tokens=685,
+            output_tokens=1961,
+            cache_creation=5596,
+            cache_read=144509,
+            num_turns=7,
+            duration_ms=48000,
+        )
+
+        writer.record_observation.assert_called_once()
+        call = writer.record_observation.call_args
+        assert call.kwargs["observation_type"] == "session_summary"
+        assert call.kwargs["session_id"] == "sess-1"
+        assert call.kwargs["execution_id"] == "exec-1"
+        data = call.kwargs["data"]
+        assert data["total_cost_usd"] == pytest.approx(0.0319)
+        assert data["total_input_tokens"] == 685
+        assert data["total_output_tokens"] == 1961
+        assert data["cache_creation_tokens"] == 5596
+        assert data["cache_read_tokens"] == 144509
+        assert data["num_turns"] == 7
+        assert data["duration_ms"] == 48000
+        assert data["model"] == "claude-haiku"
+
+    @pytest.mark.anyio
+    async def test_record_session_summary_noop_without_writer(self) -> None:
+        """record_session_summary is no-op with None writer."""
+        collector = _make_collector(writer=None)
+        # Must not raise
+        await collector.record_session_summary(
+            total_cost_usd=0.05,
+            input_tokens=100,
+            output_tokens=50,
+            cache_creation=0,
+            cache_read=0,
+            num_turns=None,
+            duration_ms=None,
+        )
+
 
 @pytest.mark.unit
 class TestObservabilityCollectorNullWriter:

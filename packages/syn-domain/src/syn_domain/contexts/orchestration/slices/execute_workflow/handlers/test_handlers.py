@@ -128,6 +128,109 @@ class TestAgentExecutionHandler:
         assert result.command.exit_code == 1
         assert result.stream_result.interrupt_requested is True
 
+    @pytest.mark.anyio
+    async def test_uses_result_event_tokens_for_command(self) -> None:
+        """Command uses authoritative result-event tokens, not accumulated (ISS-217)."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+
+        mock_stream_result = StreamResult(
+            line_count=10,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            total_cost_usd=0.0319,
+            result_input_tokens=685,
+            result_output_tokens=1961,
+            result_cache_creation=5596,
+            result_cache_read=144509,
+            duration_ms=48000,
+            num_turns=7,
+        )
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.EventStreamProcessor"
+        ) as MockProcessor:
+            mock_instance = AsyncMock()
+            mock_instance.process_stream.return_value = mock_stream_result
+            MockProcessor.return_value = mock_instance
+
+            todo = TodoItem(
+                execution_id="exec-1",
+                action=TodoAction.RUN_AGENT,
+                phase_id="p-1",
+            )
+            result = await handler.handle(
+                todo=todo,
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["claude"],
+                session_id="sess-1",
+                agent_model="claude-haiku",
+                timeout_seconds=300,
+            )
+
+        # Command must use the result-event totals
+        assert result.command.input_tokens == 685
+        assert result.command.output_tokens == 1961
+
+    @pytest.mark.anyio
+    async def test_session_summary_emitted_after_streaming(self) -> None:
+        """record_session_summary is called with CLI result totals (ISS-217)."""
+        handler = AgentExecutionHandler(controller=None)
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+
+        mock_stream_result = StreamResult(
+            line_count=5,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+            total_cost_usd=0.0319,
+            result_input_tokens=685,
+            result_output_tokens=1961,
+            result_cache_creation=5596,
+            result_cache_read=144509,
+            duration_ms=48000,
+            num_turns=7,
+        )
+
+        collector = AsyncMock()
+
+        with patch(
+            "syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler.EventStreamProcessor"
+        ) as MockProcessor:
+            mock_instance = AsyncMock()
+            mock_instance.process_stream.return_value = mock_stream_result
+            MockProcessor.return_value = mock_instance
+
+            todo = TodoItem(
+                execution_id="exec-1",
+                action=TodoAction.RUN_AGENT,
+                phase_id="p-1",
+            )
+            await handler.handle(
+                todo=todo,
+                workspace=workspace,
+                agent_env={},
+                claude_cmd=["claude"],
+                session_id="sess-1",
+                agent_model="claude-haiku",
+                timeout_seconds=300,
+                collector=collector,
+            )
+
+        collector.record_session_summary.assert_called_once_with(
+            total_cost_usd=0.0319,
+            input_tokens=685,
+            output_tokens=1961,
+            cache_creation=5596,
+            cache_read=144509,
+            num_turns=7,
+            duration_ms=48000,
+        )
+
 
 # =========================================================================
 # ArtifactCollectionHandler

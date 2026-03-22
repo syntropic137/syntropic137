@@ -76,6 +76,8 @@ class SessionResponse(BaseModel):
     workspace_path: str | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
     total_tokens: int = 0
     total_cost_usd: Decimal = Decimal("0")
     operations: list[OperationInfo] = Field(default_factory=list)
@@ -174,11 +176,13 @@ async def get_session(session_id: str) -> SessionResponse:
         phase_id=detail.phase_id,
         milestone_id=None,
         agent_provider=detail.agent_type,
-        agent_model=None,
+        agent_model=detail.agent_model,
         status=detail.status,
         workspace_path=detail.workspace_path,
         input_tokens=detail.input_tokens,
         output_tokens=detail.output_tokens,
+        cache_creation_tokens=detail.cache_creation_tokens,
+        cache_read_tokens=detail.cache_read_tokens,
         total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
         operations=operations,
