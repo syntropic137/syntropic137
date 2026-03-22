@@ -266,20 +266,21 @@ export async function getTokenMetrics(sessionId: string): Promise<TokenMetricsRe
 }
 
 // =============================================================================
-// WEBSOCKET API
+// SSE API
 // =============================================================================
 
 /**
- * Get WebSocket URL for an execution stream.
+ * Get the SSE URL for an execution event stream.
  *
- * The WebSocket endpoint receives domain events from RealTimeProjection:
- *   Event Store → Subscription → ProjectionManager → RealTimeProjection → WebSocket
+ * Returns a relative URL — no protocol switching required; SSE runs over
+ * plain HTTP/HTTPS just like every other API call.
+ *
+ *   Event Store → Subscription → ProjectionManager → RealTimeProjection → SSE
  *
  * @param executionId - The execution ID to subscribe to
  */
-export function getExecutionWebSocketUrl(executionId: string): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${protocol}//${window.location.host}/ws/executions/${executionId}`
+export function getExecutionSSEUrl(executionId: string): string {
+  return `${API_BASE}/sse/executions/${executionId}`
 }
 
 
@@ -312,14 +313,14 @@ export async function cancelExecution(
 }
 
 /**
- * Check WebSocket health endpoint.
+ * Check SSE subsystem health.
  */
-export async function getWebSocketHealth(): Promise<{
+export async function getSSEHealth(): Promise<{
   status: string
   active_executions: number
   active_connections: number
 }> {
-  return fetchJSON('/ws/health')
+  return fetchJSON(`${API_BASE}/sse/health`)
 }
 
 // =============================================================================

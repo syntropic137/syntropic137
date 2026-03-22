@@ -133,6 +133,81 @@ class OrganizationProjection:
             if org_id:
                 await self._store.delete(PROJECTION_NAME, org_id)
 
+    # ------------------------------------------------------------------
+    # Dict-based adapters — called by ProjectionManager dispatch
+    # ------------------------------------------------------------------
+
+    async def on_organization_created(self, event: dict[str, Any]) -> None:
+        """Handle OrganizationCreated event dict from manager dispatch."""
+        org_id = str(event.get("organization_id", ""))
+        if not org_id:
+            return
+        summary = OrganizationSummary(
+            organization_id=org_id,
+            name=str(event.get("name", "")),
+            slug=str(event.get("slug", "")),
+            created_by=str(event.get("created_by", "")),
+            created_at=datetime.now(UTC),
+        )
+        await self._store.save(PROJECTION_NAME, org_id, _org_to_dict(summary))
+        logger.info(f"Projected OrganizationCreated: {org_id}")
+
+    async def on_organization_updated(self, event: dict[str, Any]) -> None:
+        """Handle OrganizationUpdated event dict from manager dispatch."""
+        org_id = str(event.get("organization_id", ""))
+        if not org_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, org_id)
+        if data is None:
+            logger.warning(f"OrganizationUpdated for unknown org: {org_id}")
+            return
+        if event.get("name") is not None:
+            data["name"] = event["name"]
+        if event.get("slug") is not None:
+            data["slug"] = event["slug"]
+        await self._store.save(PROJECTION_NAME, org_id, data)
+        logger.info(f"Projected OrganizationUpdated: {org_id}")
+
+    async def on_organization_deleted(self, event: dict[str, Any]) -> None:
+        """Handle OrganizationDeleted event dict from manager dispatch."""
+        org_id = str(event.get("organization_id", ""))
+        if not org_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, org_id)
+        if data is None:
+            logger.warning(f"OrganizationDeleted for unknown org: {org_id}")
+            return
+        data["is_deleted"] = True
+        await self._store.save(PROJECTION_NAME, org_id, data)
+        logger.info(f"Projected OrganizationDeleted: {org_id}")
+
+    async def on_system_created_increment(self, event: dict[str, Any]) -> None:
+        """Increment system_count when a system is created under this org."""
+        org_id = str(event.get("organization_id", ""))
+        if org_id:
+            await self.increment_system_count(org_id)
+
+    # Canonical name for coordinator dispatch (bare event type: SystemCreated)
+    on_system_created = on_system_created_increment
+
+    async def on_system_deleted_decrement(self, event: dict[str, Any]) -> None:
+        """Decrement system_count when a system is deleted."""
+        org_id = str(event.get("organization_id", ""))
+        if org_id:
+            await self.increment_system_count(org_id, delta=-1)
+
+    # Canonical name for coordinator dispatch (bare event type: SystemDeleted)
+    on_system_deleted = on_system_deleted_decrement
+
+    async def on_repo_registered_increment(self, event: dict[str, Any]) -> None:
+        """Increment repo_count when a repo is registered under this org."""
+        org_id = str(event.get("organization_id", ""))
+        if org_id:
+            await self.increment_repo_count(org_id)
+
+    # Canonical name for coordinator dispatch (bare event type: RepoRegistered)
+    on_repo_registered = on_repo_registered_increment
+
 
 _projection: OrganizationProjection | None = None
 
