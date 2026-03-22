@@ -77,6 +77,14 @@ class StreamResult:
     interrupt_reason: str | None
     agent_task_result: dict[str, Any] | None
     conversation_lines: list[str] = field(default_factory=list)
+    # Authoritative totals from the CLI result event (ISS-217)
+    total_cost_usd: float | None = None
+    result_input_tokens: int = 0
+    result_output_tokens: int = 0
+    result_cache_creation: int = 0
+    result_cache_read: int = 0
+    duration_ms: int | None = None
+    num_turns: int | None = None
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
@@ -109,6 +117,15 @@ class EventStreamProcessor:
         self._session_id = session_id
         self._workspace_id = workspace_id
         self._agent_model = agent_model
+
+        # ISS-217: Authoritative totals captured from the CLI result event
+        self._result_cost_usd: float | None = None
+        self._result_input_tokens: int = 0
+        self._result_output_tokens: int = 0
+        self._result_cache_creation: int = 0
+        self._result_cache_read: int = 0
+        self._result_duration_ms: int | None = None
+        self._result_num_turns: int | None = None
 
         # ISS-196: Use collector if provided, else create one from raw writer
         if collector is not None:
@@ -190,10 +207,11 @@ class EventStreamProcessor:
                 agent_task_result = task_result
 
         logger.info(
-            "Agent runner streaming complete: %d lines, %d input tokens, %d output tokens",
+            "Agent runner streaming complete: %d lines, cost=$%s (%d in, %d out)",
             line_count,
-            self._tokens.input_tokens,
-            self._tokens.output_tokens,
+            self._result_cost_usd,
+            self._result_input_tokens,
+            self._result_output_tokens,
         )
 
         return StreamResult(
@@ -202,6 +220,13 @@ class EventStreamProcessor:
             interrupt_reason=interrupt_reason,
             agent_task_result=agent_task_result,
             conversation_lines=conversation_lines,
+            total_cost_usd=self._result_cost_usd,
+            result_input_tokens=self._result_input_tokens,
+            result_output_tokens=self._result_output_tokens,
+            result_cache_creation=self._result_cache_creation,
+            result_cache_read=self._result_cache_read,
+            duration_ms=self._result_duration_ms,
+            num_turns=self._result_num_turns,
         )
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
@@ -317,23 +342,29 @@ class EventStreamProcessor:
             except (json.JSONDecodeError, ValueError):
                 logger.debug("Could not parse TASK_RESULT block")
 
-        # Extract token usage
+        # ISS-217: Capture authoritative cumulative totals from the result event.
+        # The result event usage is the TOTAL across all turns — do NOT add it to
+        # TokenAccumulator (which already has per-turn sums) or record a TOKEN_USAGE
+        # observation (which would double-count with per-turn assistant events).
+        # These values are carried in StreamResult and emitted as a session_summary.
         usage = cli_event.get("usage", {})
-        input_tokens = usage.get("input_tokens", 0)
-        output_tokens = usage.get("output_tokens", 0)
+        self._result_input_tokens = usage.get("input_tokens", 0)
+        self._result_output_tokens = usage.get("output_tokens", 0)
+        self._result_cache_creation = usage.get("cache_creation_input_tokens", 0)
+        self._result_cache_read = usage.get("cache_read_input_tokens", 0)
+        self._result_cost_usd = cli_event.get("total_cost_usd")
+        self._result_duration_ms = cli_event.get("duration_ms")
+        self._result_num_turns = cli_event.get("num_turns")
 
-        if input_tokens > 0 or output_tokens > 0:
-            self._tokens.record(input_tokens, output_tokens)
-
-            cache_creation = usage.get("cache_creation_input_tokens", 0)
-            cache_read = usage.get("cache_read_input_tokens", 0)
-            await self._collector.record_token_usage(
-                input_tokens,
-                output_tokens,
-                cache_creation,
-                cache_read,
+        if self._result_input_tokens > 0 or self._result_output_tokens > 0:
+            logger.info(
+                "Result totals: cost=$%s, %d in, %d out (cache: %d read, %d create)",
+                self._result_cost_usd,
+                self._result_input_tokens,
+                self._result_output_tokens,
+                self._result_cache_read,
+                self._result_cache_creation,
             )
-            logger.info("Result token usage: %d in, %d out", input_tokens, output_tokens)
 
         return task_result
 
