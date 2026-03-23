@@ -141,17 +141,8 @@ issue = "#197"
 value = 30
 issue = "#197"
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.models::_load_models"]
-value = 55
-issue = "#197"
-
-
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.collector.client::_send_batch"]
 value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.events.store::insert_batch"]
-value = 35
 issue = "#197"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.github.client::get_installation_token"]
@@ -168,14 +159,6 @@ issue = "#197"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.supabase::list_objects"]
 value = 50
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter::copy_from"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets::create"]
-value = 40
 issue = "#197"
 
 [max-cognitive."python:packages.syn-collector.src.syn_collector.cli::_run_watcher"]
@@ -433,10 +416,6 @@ value = 145
 issue = "#197"
 
 
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.artifacts.bundle"]
-value = 100
-issue = "#197"
-
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.collector.client"]
 value = 130
 issue = "#197"
@@ -509,10 +488,6 @@ issue = "#197"
 value = 80
 issue = "#197"
 
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service"]
-value = 135
-issue = "#197"
-
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.subscriptions.position_checkpoint"]
 value = 80
 issue = "#197"
@@ -535,14 +510,6 @@ issue = "#197"
 
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.managed_workspace"]
 value = 105
-issue = "#197"
-
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets"]
-value = 80
-issue = "#197"
-
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_service"]
-value = 55
 issue = "#197"
 
 [max-cognitive-file."packages.syn-collector.src.syn_collector.cli"]
@@ -748,10 +715,6 @@ value = 20
 issue = "#197"
 
 
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.events.store::insert_batch"]
-value = 20
-issue = "#197"
-
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection::on_agent_observation"]
 value = 20
 issue = "#197"
@@ -815,10 +778,6 @@ value = 675
 issue = "#197"
 
 
-[max-loc-file."packages.syn-adapters.src.syn_adapters.artifacts.bundle"]
-value = 720
-issue = "#197"
-
 [max-loc-file."packages.syn-adapters.src.syn_adapters.collector.client"]
 value = 955
 issue = "#197"
@@ -863,10 +822,6 @@ issue = "#197"
 value = 670
 issue = "#197"
 
-[max-loc-file."packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service"]
-value = 750
-issue = "#197"
-
 [max-loc-file."packages.syn-adapters.src.syn_adapters.subscriptions.service"]
 value = 1890
 issue = "#197"
@@ -881,10 +836,6 @@ issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.managed_workspace"]
 value = 855
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_service"]
-value = 610
 issue = "#197"
 
 [max-loc-file."packages.syn-collector.src.syn_collector.watcher.hooks"]
@@ -1133,10 +1084,6 @@ issue = "#274"
 
 [max-cognitive-file."apps.syn-cli.src.syn_cli.commands.insights"]
 value = 85
-issue = "#274"
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.models::_load_models"]
-value = 20
 issue = "#274"
 
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler::handle"]
@@ -1557,10 +1504,6 @@ issue = "#274"
 
 [max-loc-function."python:lib.event-sourcing-platform.infra-as-code.tools.render_config::render_proxmox"]
 value = 110
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.artifacts.bundle::load_from_storage"]
-value = 105
 issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.workspace_backends.docker.docker_sidecar_adapter::start"]
