@@ -15,7 +15,6 @@ See ADR-029: Simplified Event System
 from __future__ import annotations
 
 import io
-import json
 import logging
 import os
 from datetime import UTC, datetime
@@ -25,6 +24,11 @@ import asyncpg
 from pydantic import ValidationError
 
 from syn_adapters.events.models import AgentEvent
+from syn_adapters.events.queries import (
+    query_execution_events,
+    query_recent_by_types as _query_recent_by_types,
+    query_session_events,
+)
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -251,46 +255,9 @@ class AgentEventStore:
         if self.pool is None:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
-        async with self.pool.acquire() as conn:
-            if event_type:
-                rows = await conn.fetch(
-                    """
-                    SELECT time, event_type, session_id, execution_id, phase_id, data
-                    FROM agent_events
-                    WHERE session_id = $1 AND event_type = $2
-                    ORDER BY time DESC
-                    LIMIT $3 OFFSET $4
-                    """,
-                    session_id,
-                    event_type,
-                    limit,
-                    offset,
-                )
-            else:
-                rows = await conn.fetch(
-                    """
-                    SELECT time, event_type, session_id, execution_id, phase_id, data
-                    FROM agent_events
-                    WHERE session_id = $1
-                    ORDER BY time DESC
-                    LIMIT $2 OFFSET $3
-                    """,
-                    session_id,
-                    limit,
-                    offset,
-                )
-
-        return [
-            {
-                "time": row["time"],
-                "event_type": row["event_type"],
-                "session_id": row["session_id"],
-                "execution_id": row["execution_id"],
-                "phase_id": row["phase_id"],
-                "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
-            }
-            for row in rows
-        ]
+        return await query_session_events(
+            self.pool, session_id, event_type=event_type, limit=limit, offset=offset
+        )
 
     async def query_by_execution(
         self,
@@ -314,44 +281,9 @@ class AgentEventStore:
         if self.pool is None:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
-        async with self.pool.acquire() as conn:
-            if event_type:
-                rows = await conn.fetch(
-                    """
-                    SELECT time, event_type, session_id, execution_id, phase_id, data
-                    FROM agent_events
-                    WHERE execution_id = $1 AND event_type = $2
-                    ORDER BY time DESC
-                    LIMIT $3
-                    """,
-                    execution_id,
-                    event_type,
-                    limit,
-                )
-            else:
-                rows = await conn.fetch(
-                    """
-                    SELECT time, event_type, session_id, execution_id, phase_id, data
-                    FROM agent_events
-                    WHERE execution_id = $1
-                    ORDER BY time DESC
-                    LIMIT $2
-                    """,
-                    execution_id,
-                    limit,
-                )
-
-        return [
-            {
-                "timestamp": row["time"].isoformat(),
-                "event_type": row["event_type"],
-                "session_id": row["session_id"],
-                "execution_id": row["execution_id"],
-                "phase_id": row["phase_id"],
-                **json.loads(row["data"]),
-            }
-            for row in rows
-        ]
+        return await query_execution_events(
+            self.pool, execution_id, event_type=event_type, limit=limit
+        )
 
     async def query_recent_by_types(
         self,
@@ -375,30 +307,7 @@ class AgentEventStore:
         if self.pool is None:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
-        async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT time, event_type, session_id, execution_id, phase_id, data
-                FROM agent_events
-                WHERE event_type = ANY($1)
-                ORDER BY time DESC
-                LIMIT $2
-                """,
-                event_types,
-                limit,
-            )
-
-        return [
-            {
-                "time": row["time"].isoformat(),
-                "event_type": row["event_type"],
-                "session_id": row["session_id"],
-                "execution_id": row["execution_id"],
-                "phase_id": row["phase_id"],
-                "data": json.loads(row["data"]) if isinstance(row["data"], str) else row["data"],
-            }
-            for row in rows
-        ]
+        return await _query_recent_by_types(self.pool, event_types, limit=limit)
 
     # Keys in the top-level event dict that must NOT be overridden by user data.
     # AgentEvent.from_dict() uses "message" to detect Claude conversation messages,
