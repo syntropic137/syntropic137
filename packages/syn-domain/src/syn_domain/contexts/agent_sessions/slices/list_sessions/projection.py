@@ -3,6 +3,8 @@
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -34,6 +36,55 @@ def _calculate_duration(
         return (completed_at - started_at).total_seconds()
     except (ValueError, TypeError):
         return None
+
+
+def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
+    """Accumulate token counts and cost from an operation event."""
+    op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
+    if op_tokens:
+        existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
+        existing["input_tokens"] = existing.get("input_tokens", 0) + (event_data.get("input_tokens", 0) or 0)
+        existing["output_tokens"] = existing.get("output_tokens", 0) + (event_data.get("output_tokens", 0) or 0)
+
+    existing["total_cost_usd"] = float(
+        Decimal(str(existing.get("total_cost_usd", 0)))
+        + Decimal(str(event_data.get("cost_usd", 0)))
+    )
+
+
+_OPERATION_FIELDS = [
+    "operation_id", "operation_type", "timestamp", "duration_seconds", "success",
+    "input_tokens", "output_tokens", "total_tokens",
+    "tool_name", "tool_use_id", "tool_input", "tool_output",
+    "message_role", "message_content", "thinking_content",
+]
+
+_OPERATION_DEFAULTS: dict[str, Any] = {"operation_id": "", "operation_type": "", "success": True}
+
+
+def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
+    """Append an operation record to the session's operations list."""
+    operation = {
+        field: event_data.get(field, _OPERATION_DEFAULTS.get(field))
+        for field in _OPERATION_FIELDS
+    }
+    operations = existing.get("operations", [])
+    operations.append(operation)
+    existing["operations"] = operations
+
+
+def _update_subagent_record(
+    subagents: list[dict[str, Any]], event_data: dict,
+) -> None:
+    """Find and update the matching subagent record with completion data."""
+    subagent_tool_use_id = event_data.get("subagent_tool_use_id", "")
+    for subagent in subagents:
+        if subagent.get("subagent_tool_use_id") == subagent_tool_use_id:
+            subagent["stopped_at"] = event_data.get("timestamp")
+            subagent["duration_ms"] = event_data.get("duration_ms")
+            subagent["tools_used"] = event_data.get("tools_used", {})
+            subagent["success"] = event_data.get("success", True)
+            break
 
 
 class SessionListProjection(AutoDispatchProjection):
@@ -91,58 +142,15 @@ class SessionListProjection(AutoDispatchProjection):
         await self._store.save(self.PROJECTION_NAME, session_id, summary.to_dict())
 
     async def on_operation_recorded(self, event_data: dict) -> None:
-        """Handle OperationRecorded - update token counts and store operation.
-
-        Handles both v1 and v2 event formats for backward compatibility.
-        """
+        """Handle OperationRecorded - update token counts and store operation."""
         session_id = event_data.get("session_id")
         if not session_id:
             return
 
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         if existing:
-            # Accumulate tokens from operation (for MESSAGE_RESPONSE operations)
-            op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
-            if op_tokens:
-                existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
-                # Also accumulate input/output tokens
-                input_toks = event_data.get("input_tokens", 0) or 0
-                output_toks = event_data.get("output_tokens", 0) or 0
-                existing["input_tokens"] = existing.get("input_tokens", 0) + input_toks
-                existing["output_tokens"] = existing.get("output_tokens", 0) + output_toks
-
-            existing["total_cost_usd"] = float(
-                Decimal(str(existing.get("total_cost_usd", 0)))
-                + Decimal(str(event_data.get("cost_usd", 0)))
-            )
-
-            # Store the operation with all fields (v2 event format)
-            operations = existing.get("operations", [])
-            operations.append(
-                {
-                    "operation_id": event_data.get("operation_id", ""),
-                    "operation_type": event_data.get("operation_type", ""),
-                    "timestamp": event_data.get("timestamp"),
-                    "duration_seconds": event_data.get("duration_seconds"),
-                    "success": event_data.get("success", True),
-                    # Token metrics
-                    "input_tokens": event_data.get("input_tokens"),
-                    "output_tokens": event_data.get("output_tokens"),
-                    "total_tokens": event_data.get("total_tokens"),
-                    # Tool details
-                    "tool_name": event_data.get("tool_name"),
-                    "tool_use_id": event_data.get("tool_use_id"),
-                    "tool_input": event_data.get("tool_input"),
-                    "tool_output": event_data.get("tool_output"),
-                    # Message details
-                    "message_role": event_data.get("message_role"),
-                    "message_content": event_data.get("message_content"),
-                    # Thinking details
-                    "thinking_content": event_data.get("thinking_content"),
-                }
-            )
-            existing["operations"] = operations
-
+            _accumulate_tokens(existing, event_data)
+            _append_operation(existing, event_data)
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_session_completed(self, event_data: dict) -> None:
@@ -213,10 +221,7 @@ class SessionListProjection(AutoDispatchProjection):
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
     async def on_subagent_stopped(self, event_data: dict) -> None:
-        """Handle SubagentStopped event - update subagent record with completion data.
-
-        Updates the matching subagent record with duration and tools used.
-        """
+        """Handle SubagentStopped event - update subagent record with completion data."""
         session_id = event_data.get("session_id")
         if not session_id:
             return
@@ -224,26 +229,14 @@ class SessionListProjection(AutoDispatchProjection):
         existing = await self._store.get(self.PROJECTION_NAME, session_id)
         if existing:
             subagents = existing.get("subagents", [])
-            subagent_tool_use_id = event_data.get("subagent_tool_use_id", "")
-
-            # Find and update the matching subagent record
-            for subagent in subagents:
-                if subagent.get("subagent_tool_use_id") == subagent_tool_use_id:
-                    subagent["stopped_at"] = event_data.get("timestamp")
-                    subagent["duration_ms"] = event_data.get("duration_ms")
-                    subagent["tools_used"] = event_data.get("tools_used", {})
-                    subagent["success"] = event_data.get("success", True)
-                    break
-
+            _update_subagent_record(subagents, event_data)
             existing["subagents"] = subagents
 
-            # Aggregate tools_by_subagent
-            tools_by_subagent = existing.get("tools_by_subagent", {})
-            agent_name = event_data.get("agent_name", "unknown")
             tools_used = event_data.get("tools_used", {})
             if tools_used:
-                tools_by_subagent[agent_name] = tools_used
-            existing["tools_by_subagent"] = tools_by_subagent
+                tools_by_subagent = existing.get("tools_by_subagent", {})
+                tools_by_subagent[event_data.get("agent_name", "unknown")] = tools_used
+                existing["tools_by_subagent"] = tools_by_subagent
 
             await self._store.save(self.PROJECTION_NAME, session_id, existing)
 
