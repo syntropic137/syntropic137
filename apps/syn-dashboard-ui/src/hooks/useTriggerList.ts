@@ -41,6 +41,7 @@ export function useTriggerList(): UseTriggerListResult {
   )
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetchTriggers is an async data loader, setState happens in the .then callback, not synchronously in the effect body
     fetchTriggers()
   }, [fetchTriggers])
 

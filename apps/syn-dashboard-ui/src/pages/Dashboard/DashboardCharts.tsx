@@ -95,25 +95,12 @@ export function DashboardCharts({ metrics }: DashboardChartsProps) {
     ]
     : []
 
-  const workflowStatusData: ChartDataItem[] = metrics
-    ? [
-      { name: 'Completed', value: metrics.completed_workflows, fill: '#22c55e' },
-      { name: 'Failed', value: metrics.failed_workflows, fill: '#ef4444' },
-      { name: 'Other', value: metrics.total_workflows - metrics.completed_workflows - metrics.failed_workflows, fill: '#6366f1' },
-    ].filter(d => d.value > 0)
-    : []
-
   return (
-    <>
-      {/* Token distribution */}
-      <DonutChart
-        data={tokenDistribution}
-        emptyMessage="No token data yet"
-        tooltipFormatter={(value: number) => [value.toLocaleString(), 'tokens']}
-      />
-
-      {/* Workflow status — rendered in second card by parent */}
-    </>
+    <DonutChart
+      data={tokenDistribution}
+      emptyMessage="No token data yet"
+      tooltipFormatter={(value: number) => [value.toLocaleString(), 'tokens']}
+    />
   )
 }
 
