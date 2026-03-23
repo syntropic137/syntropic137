@@ -1,0 +1,345 @@
+"""Trigger command operations and write endpoints."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING, Any
+
+from fastapi import APIRouter, HTTPException
+
+from syn_api._wiring import (ensure_connected, get_trigger_repo, get_trigger_store,
+    get_workflow_repo, sync_published_events_to_projections)
+from syn_api.types import Err, Ok, Result, TriggerError
+from syn_domain.contexts.github.domain.aggregate_trigger.TriggerStatus import TriggerStatus
+
+if TYPE_CHECKING:
+    from syn_api.auth import AuthContext
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/triggers", tags=["triggers"])
+
+
+
+async def register_trigger(
+    name: str,
+    event: str,
+    repository: str,
+    workflow_id: str,
+    conditions: list[dict] | None = None,
+    installation_id: str = "",
+    input_mapping: dict[str, str] | None = None,
+    config: dict | None = None,
+    created_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[str, TriggerError]:
+    """Register a new GitHub event trigger for a workflow."""
+    from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
+        RegisterTriggerCommand,
+    )
+    from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
+        RegisterTriggerHandler,
+    )
+
+    await ensure_connected()
+
+    workflow_repo = get_workflow_repo()
+    if not await workflow_repo.exists(workflow_id):
+        return Err(
+            TriggerError.WORKFLOW_NOT_FOUND,
+            message=f"Workflow '{workflow_id}' does not exist. Seed workflows before creating triggers.",
+        )
+
+    try:
+        command = RegisterTriggerCommand(
+            name=name, event=event, repository=repository, workflow_id=workflow_id,
+            conditions=tuple(conditions or []), installation_id=installation_id,
+            input_mapping=tuple((input_mapping or {}).items()),
+            config=tuple((config or {}).items()), created_by=created_by,
+        )
+    except ValueError as e:
+        return Err(TriggerError.INVALID_INPUT, message=str(e))
+
+    store = get_trigger_store()
+    repo = get_trigger_repo()
+    handler = RegisterTriggerHandler(store=store, repository=repo)
+
+    try:
+        aggregate = await handler.handle(command)
+        await store.index_trigger(
+            trigger_id=aggregate.trigger_id, name=aggregate.name,
+            event=aggregate.event, repository=aggregate.repository,
+            workflow_id=aggregate.workflow_id,
+            conditions=[
+                {"field": c.field, "operator": c.operator, "value": c.value}
+                for c in aggregate.conditions
+            ],
+            input_mapping=aggregate.input_mapping, config=aggregate.config,
+            installation_id=aggregate.installation_id,
+            created_by=aggregate.created_by, status=aggregate.status.value,
+        )
+        await sync_published_events_to_projections()
+        return Ok(aggregate.trigger_id)
+    except Exception as e:
+        return Err(TriggerError.INVALID_INPUT, message=str(e))
+
+
+async def enable_preset(
+    preset_name: str,
+    repository: str,
+    installation_id: str = "",
+    created_by: str = "system",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[str, TriggerError]:
+    """Enable a built-in trigger preset for a repository."""
+    from syn_domain.contexts.github._shared.trigger_presets import create_preset_command
+    from syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler import (
+        RegisterTriggerHandler,
+    )
+
+    await ensure_connected()
+
+    try:
+        command = create_preset_command(
+            preset_name=preset_name, repository=repository,
+            installation_id=installation_id, created_by=created_by,
+        )
+    except (ValueError, KeyError):
+        return Err(TriggerError.PRESET_NOT_FOUND, message=f"Preset '{preset_name}' not found")
+
+    workflow_repo = get_workflow_repo()
+    if not await workflow_repo.exists(command.workflow_id):
+        return Err(
+            TriggerError.WORKFLOW_NOT_FOUND,
+            message=f"Workflow '{command.workflow_id}' does not exist. Seed workflows before creating triggers.",
+        )
+
+    # Dedup check: skip if an active/paused trigger with the same name+repo+event exists
+    from syn_api.routes.triggers.queries import list_triggers
+
+    existing = await list_triggers(repository=repository)
+    if isinstance(existing, Ok):
+        for t in existing.value:
+            if t.name == command.name and t.event == command.event and t.status != TriggerStatus.DELETED:
+                return Err(
+                    TriggerError.INVALID_INPUT,
+                    message=f"Trigger '{command.name}' already exists for {repository}",
+                )
+
+    store = get_trigger_store()
+    repo = get_trigger_repo()
+    handler = RegisterTriggerHandler(store=store, repository=repo)
+
+    try:
+        aggregate = await handler.handle(command)
+        await store.index_trigger(
+            trigger_id=aggregate.trigger_id, name=aggregate.name,
+            event=aggregate.event, repository=aggregate.repository,
+            workflow_id=aggregate.workflow_id,
+            conditions=[
+                {"field": c.field, "operator": c.operator, "value": c.value}
+                for c in aggregate.conditions
+            ],
+            input_mapping=aggregate.input_mapping, config=aggregate.config,
+            installation_id=aggregate.installation_id,
+            created_by=aggregate.created_by, status=aggregate.status.value,
+        )
+        await sync_published_events_to_projections()
+        return Ok(aggregate.trigger_id)
+    except Exception as e:
+        return Err(TriggerError.INVALID_INPUT, message=str(e))
+
+
+async def pause_trigger(
+    trigger_id: str,
+    reason: str | None = None,
+    paused_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, TriggerError]:
+    """Pause an active trigger."""
+    from syn_domain.contexts.github.domain.commands.PauseTriggerCommand import PauseTriggerCommand
+    from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import ManageTriggerHandler
+
+    await ensure_connected()
+    store = get_trigger_store()
+
+    indexed = await store.get(trigger_id)
+    if indexed is None:
+        return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
+    if indexed.status == TriggerStatus.PAUSED:
+        return Err(TriggerError.ALREADY_PAUSED)
+    if indexed.status == TriggerStatus.DELETED:
+        return Err(TriggerError.ALREADY_DELETED)
+
+    command = PauseTriggerCommand(trigger_id=trigger_id, paused_by=paused_by, reason=reason)
+    repo = get_trigger_repo()
+    handler = ManageTriggerHandler(store=store, repository=repo)
+    result = await handler.pause(command)
+
+    if result is None:
+        return Err(TriggerError.NOT_FOUND, message=f"Failed to pause trigger {trigger_id}")
+
+    await store.update_status(trigger_id, TriggerStatus.PAUSED.value)
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
+async def resume_trigger(
+    trigger_id: str,
+    resumed_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, TriggerError]:
+    """Resume a paused trigger."""
+    from syn_domain.contexts.github.domain.commands.ResumeTriggerCommand import ResumeTriggerCommand
+    from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import ManageTriggerHandler
+
+    await ensure_connected()
+    store = get_trigger_store()
+
+    indexed = await store.get(trigger_id)
+    if indexed is None:
+        return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
+    if indexed.status == TriggerStatus.ACTIVE:
+        return Err(TriggerError.ALREADY_ACTIVE)
+    if indexed.status == TriggerStatus.DELETED:
+        return Err(TriggerError.ALREADY_DELETED)
+
+    command = ResumeTriggerCommand(trigger_id=trigger_id, resumed_by=resumed_by)
+    repo = get_trigger_repo()
+    handler = ManageTriggerHandler(store=store, repository=repo)
+    result = await handler.resume(command)
+
+    if result is None:
+        return Err(TriggerError.NOT_FOUND, message=f"Failed to resume trigger {trigger_id}")
+
+    await store.update_status(trigger_id, TriggerStatus.ACTIVE.value)
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
+async def delete_trigger(
+    trigger_id: str,
+    deleted_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, TriggerError]:
+    """Soft-delete a trigger rule."""
+    from syn_domain.contexts.github.domain.commands.DeleteTriggerCommand import DeleteTriggerCommand
+    from syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler import ManageTriggerHandler
+
+    await ensure_connected()
+    store = get_trigger_store()
+
+    indexed = await store.get(trigger_id)
+    if indexed is None:
+        return Err(TriggerError.NOT_FOUND, message=f"Trigger {trigger_id} not found")
+    if indexed.status == TriggerStatus.DELETED:
+        return Err(TriggerError.ALREADY_DELETED)
+
+    command = DeleteTriggerCommand(trigger_id=trigger_id, deleted_by=deleted_by)
+    repo = get_trigger_repo()
+    handler = ManageTriggerHandler(store=store, repository=repo)
+    result = await handler.delete(command)
+
+    if result is None:
+        return Err(TriggerError.NOT_FOUND, message=f"Failed to delete trigger {trigger_id}")
+
+    await store.update_status(trigger_id, TriggerStatus.DELETED.value)
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
+async def disable_triggers(
+    repository: str,
+    paused_by: str = "",
+    reason: str | None = None,
+    auth: AuthContext | None = None,
+) -> Result[int, TriggerError]:
+    """Pause all active triggers for a repository."""
+    from syn_api.routes.triggers.queries import list_triggers
+
+    list_result = await list_triggers(repository=repository, status="active", auth=auth)
+    if isinstance(list_result, Err):
+        return Err(list_result.error, message=list_result.message)
+
+    paused_count = 0
+    for trigger in list_result.value:
+        result = await pause_trigger(
+            trigger_id=trigger.trigger_id,
+            reason=reason or f"Bulk disable for {repository}",
+            paused_by=paused_by, auth=auth,
+        )
+        if isinstance(result, Ok):
+            paused_count += 1
+
+    return Ok(paused_count)
+
+
+
+@router.post("")
+async def register_trigger_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+    """Register a new trigger rule."""
+    try:
+        result = await register_trigger(
+            name=body["name"], event=body["event"],
+            repository=body.get("repository", ""), workflow_id=body.get("workflow_id", ""),
+            conditions=body.get("conditions"), installation_id=body.get("installation_id", ""),
+            input_mapping=body.get("input_mapping"), config=body.get("config"),
+            created_by=body.get("created_by", "api"),
+        )
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+    return {"trigger_id": result.value, "name": body["name"], "status": "active"}
+
+
+@router.post("/presets/{preset_name}")
+async def enable_preset_endpoint(preset_name: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Enable a preset for a repository."""
+    repository = body.get("repository", "")
+    if not repository:
+        raise HTTPException(status_code=400, detail="repository is required")
+
+    result = await enable_preset(
+        preset_name=preset_name, repository=repository,
+        installation_id=body.get("installation_id", ""),
+        created_by=body.get("created_by", "api"),
+    )
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+    return {"trigger_id": result.value, "name": preset_name, "status": "active", "preset": preset_name}
+
+
+@router.patch("/{trigger_id}")
+async def update_trigger_endpoint(trigger_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Update trigger (pause/resume)."""
+    action = body.get("action", "")
+    if action == "pause":
+        result = await pause_trigger(
+            trigger_id=trigger_id, reason=body.get("reason"),
+            paused_by=body.get("paused_by", "api"),
+        )
+    elif action == "resume":
+        result = await resume_trigger(
+            trigger_id=trigger_id, resumed_by=body.get("resumed_by", "api"),
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown action: {action}")
+
+    if isinstance(result, Err):
+        raise HTTPException(
+            status_code=409, detail=f"Cannot {action} trigger {trigger_id}: {result.message}",
+        )
+    return {"trigger_id": trigger_id, "status": action + "d", "action": action}
+
+
+@router.delete("/{trigger_id}")
+async def delete_trigger_endpoint(trigger_id: str) -> dict[str, Any]:
+    """Delete a trigger rule."""
+    result = await delete_trigger(trigger_id=trigger_id, deleted_by="api")
+    if isinstance(result, Err):
+        raise HTTPException(
+            status_code=409, detail=f"Cannot delete trigger {trigger_id}: {result.message}",
+        )
+    return {"trigger_id": trigger_id, "status": "deleted"}
