@@ -13,6 +13,13 @@ if ! command -v just &>/dev/null; then
     exit 0
 fi
 
+# Only regenerate when Python or Rust source files are in the commit.
+# Config-only changes (version bumps, docs, justfile) don't affect topology.
+CHANGED_SRC=$(git diff --cached --name-only | grep -E '\.(py|rs)$' || true)
+if [ -z "$CHANGED_SRC" ]; then
+    exit 0
+fi
+
 echo "🔍 Updating topology artifact..."
 just topology-analyze
 
