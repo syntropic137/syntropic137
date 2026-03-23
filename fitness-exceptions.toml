@@ -150,10 +150,6 @@ issue = "#197"
 value = 30
 issue = "#197"
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.events.models::from_dict"]
-value = 90
-issue = "#197"
-
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.events.store::insert_batch"]
 value = 35
 issue = "#197"
@@ -172,22 +168,6 @@ issue = "#197"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.supabase::list_objects"]
 value = 50
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.projections.session_tools::_row_to_operation"]
-value = 85
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service::_run_catchup"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service::_run_live_subscription"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service::_subscription_loop"]
-value = 35
 issue = "#197"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter::copy_from"]
@@ -780,16 +760,8 @@ value = 20
 issue = "#197"
 
 
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.events.models::from_dict"]
-value = 25
-issue = "#197"
-
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.events.store::insert_batch"]
 value = 20
-issue = "#197"
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.projections.session_tools::_row_to_operation"]
-value = 40
 issue = "#197"
 
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection::on_agent_observation"]
@@ -1609,26 +1581,6 @@ issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.artifacts.bundle::load_from_storage"]
 value = 105
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.events.models::from_dict"]
-value = 140
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.projections.session_tools::_row_to_operation"]
-value = 120
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.subscriptions.service::_run_catchup"]
-value = 130
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.subscriptions.service::_run_live_subscription"]
-value = 115
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.subscriptions.service::_subscription_loop"]
-value = 115
 issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter::stream"]
