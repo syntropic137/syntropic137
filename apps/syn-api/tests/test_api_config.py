@@ -1,4 +1,4 @@
-"""Tests for syn_api.v1.config — get config, validate config, env template.
+"""Tests for syn_api.services.config — get config, validate config, env template.
 
 Uses APP_ENVIRONMENT=test for in-memory adapters.
 """
@@ -12,7 +12,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 async def test_get_config():
     """Get configuration snapshot."""
-    from syn_api.v1.config import get_config
+    from syn_api.services.config import get_config
 
     result = await get_config()
 
@@ -27,7 +27,7 @@ async def test_get_config():
 
 async def test_get_config_masks_secrets():
     """Config masks secrets by default."""
-    from syn_api.v1.config import get_config
+    from syn_api.services.config import get_config
 
     result = await get_config(show_secrets=False)
     assert isinstance(result, Ok)
@@ -41,7 +41,7 @@ async def test_get_config_masks_secrets():
 
 async def test_validate_config():
     """Validate config returns issues list."""
-    from syn_api.v1.config import validate_config
+    from syn_api.services.config import validate_config
 
     result = await validate_config()
 
@@ -58,7 +58,7 @@ async def test_validate_config():
 
 async def test_get_env_template():
     """Get environment template."""
-    from syn_api.v1.config import get_env_template
+    from syn_api.services.config import get_env_template
 
     result = await get_env_template()
 
