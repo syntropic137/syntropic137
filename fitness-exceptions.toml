@@ -1135,43 +1135,6 @@ issue = "#274"
 value = 30
 issue = "#274"
 
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
-value = 55
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail::ExecutionDetail"]
-value = 65
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ExecutionList::ExecutionList"]
-value = 45
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail::ConversationLogViewer"]
-value = 40
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail::SessionDetail"]
-value = 85
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/TriggerDetail::TriggerDetail"]
-value = 40
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/TriggerList::TriggerList"]
-value = 75
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail::WorkflowDetail"]
-value = 90
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
-value = 45
-issue = "#274"
-
-
 [max-cognitive."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::SummaryStats"]
 value = 35
 issue = "#274"
@@ -1285,55 +1248,6 @@ issue = "#274"
 value = 35
 issue = "#274"
 
-[max-cognitive-file."apps/syn-dashboard-ui/src/api/client"]
-value = 175
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/components/EventFeed"]
-value = 60
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/ArtifactDetail"]
-value = 130
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/ArtifactList"]
-value = 55
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/ExecutionDetail"]
-value = 130
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/ExecutionList"]
-value = 90
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/SessionDetail"]
-value = 250
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/SessionList"]
-value = 55
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/TriggerDetail"]
-value = 80
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/TriggerList"]
-value = 185
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/WorkflowDetail"]
-value = 185
-issue = "#274"
-
-[max-cognitive-file."apps/syn-dashboard-ui/src/pages/WorkflowRuns"]
-value = 90
-issue = "#274"
-
-
 [max-cognitive-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
 value = 120
 issue = "#274"
@@ -1349,43 +1263,6 @@ issue = "#274"
 [max-cognitive-file."packages/openclaw-plugin/src/tools/observability"]
 value = 125
 issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
-value = 30
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail::ExecutionDetail"]
-value = 35
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionList::ExecutionList"]
-value = 25
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail::ConversationLogViewer"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail::SessionDetail"]
-value = 50
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/TriggerDetail::TriggerDetail"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/TriggerList::TriggerList"]
-value = 30
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail::WorkflowDetail"]
-value = 50
-issue = "#274"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
-value = 20
-issue = "#274"
-
 
 [max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
 value = 20
@@ -1423,39 +1300,6 @@ issue = "#274"
 [max-cyclomatic."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
 value = 25
 issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/api/client"]
-value = 520
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/ArtifactDetail"]
-value = 550
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/Dashboard"]
-value = 580
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/ExecutionDetail"]
-value = 745
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/ExecutionList"]
-value = 505
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/SessionDetail"]
-value = 990
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/TriggerList"]
-value = 560
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/WorkflowDetail"]
-value = 795
-issue = "#274"
-
 
 [max-loc-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
 value = 580
@@ -1544,83 +1388,6 @@ issue = "#274"
 [max-loc-function."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler::handle"]
 value = 115
 issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/components/ExecutionCostSummary::ExecutionCostSummary"]
-value = 180
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/components/MarkdownViewer::MarkdownViewer"]
-value = 135
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/components/SessionCostCard::SessionCostCard"]
-value = 155
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/components/SubagentCard::SubagentCard"]
-value = 115
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/components/ToolCostBreakdown::ToolCostBreakdown"]
-value = 105
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/components/WorkspaceInfoCard::WorkspaceInfoCard"]
-value = 110
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
-value = 260
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/ArtifactList::ArtifactList"]
-value = 130
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/Dashboard::Dashboard"]
-value = 290
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail::ExecutionDetail"]
-value = 370
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/ExecutionList::ExecutionList"]
-value = 245
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail::ConversationLogViewer"]
-value = 200
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail::SessionDetail"]
-value = 345
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/SessionList::SessionList"]
-value = 145
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/TriggerDetail::TriggerDetail"]
-value = 200
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/TriggerList::TriggerList"]
-value = 240
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail::WorkflowDetail"]
-value = 385
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowList::WorkflowList"]
-value = 165
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
-value = 165
-issue = "#274"
-
 
 [max-loc-function."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::ContributionHeatmap"]
 value = 135

@@ -1,0 +1,87 @@
+import {
+  Activity,
+  Brain,
+  CheckCircle2,
+  GitBranch,
+  GitCommit,
+  GitMerge,
+  MessageSquare,
+  Play,
+  Terminal,
+  Users,
+  Wrench,
+  XCircle,
+} from 'lucide-react'
+
+export const operationIcons: Record<string, typeof Activity> = {
+  tool_execution_started: Play,
+  tool_execution_completed: Terminal,
+  token_usage: Activity,
+  session_started: Play,
+  session_completed: CheckCircle2,
+  subagent_started: Users,
+  subagent_stopped: Users,
+  git_commit: GitCommit,
+  git_push: GitBranch,
+  git_branch_changed: GitBranch,
+  git_operation: GitMerge,
+  git_merge: GitMerge,
+  git_rewrite: GitCommit,
+  git_checkout: GitBranch,
+  message_request: MessageSquare,
+  message_response: MessageSquare,
+  tool_started: Play,
+  tool_completed: Terminal,
+  tool_blocked: XCircle,
+  thinking: Brain,
+  error: XCircle,
+  agent_request: MessageSquare,
+  agent_response: MessageSquare,
+  tool_use: Wrench,
+  tool_execution: Wrench,
+  tool_result: Terminal,
+  validation: CheckCircle2,
+}
+
+export const TOOL_EVENT_TYPES = ['tool_execution_started', 'tool_execution_completed'] as const
+
+export const operationColors: Record<string, string> = {
+  tool_execution_started: 'text-amber-400 bg-amber-500/10',
+  tool_execution_completed: 'text-emerald-400 bg-emerald-500/10',
+  token_usage: 'text-cyan-400 bg-cyan-500/10',
+  session_started: 'text-blue-400 bg-blue-500/10',
+  session_completed: 'text-green-400 bg-green-500/10',
+  subagent_started: 'text-violet-400 bg-violet-500/10',
+  subagent_stopped: 'text-violet-400 bg-violet-500/10',
+  git_commit: 'text-orange-400 bg-orange-500/10',
+  git_push: 'text-orange-400 bg-orange-500/10',
+  git_branch_changed: 'text-orange-400 bg-orange-500/10',
+  git_operation: 'text-orange-400 bg-orange-500/10',
+  git_merge: 'text-orange-400 bg-orange-500/10',
+  git_rewrite: 'text-orange-400 bg-orange-500/10',
+  git_checkout: 'text-orange-400 bg-orange-500/10',
+  message_request: 'text-blue-400 bg-blue-500/10',
+  message_response: 'text-indigo-400 bg-indigo-500/10',
+  tool_started: 'text-amber-400 bg-amber-500/10',
+  tool_completed: 'text-emerald-400 bg-emerald-500/10',
+  tool_blocked: 'text-red-400 bg-red-500/10',
+  thinking: 'text-purple-400 bg-purple-500/10',
+  error: 'text-red-400 bg-red-500/10',
+  agent_request: 'text-blue-400 bg-blue-500/10',
+  agent_response: 'text-indigo-400 bg-indigo-500/10',
+  tool_use: 'text-amber-400 bg-amber-500/10',
+  tool_execution: 'text-amber-400 bg-amber-500/10',
+  tool_result: 'text-emerald-400 bg-emerald-500/10',
+  validation: 'text-green-400 bg-green-500/10',
+}
+
+export const conversationEventColors: Record<string, string> = {
+  system: 'text-gray-400 bg-gray-500/10',
+  assistant: 'text-blue-400 bg-blue-500/10',
+  user: 'text-green-400 bg-green-500/10',
+  result: 'text-purple-400 bg-purple-500/10',
+}
+
+export const PROVIDER_ENVIRONMENTS: Record<string, { backend: string; image: string }> = {
+  claude: { backend: 'docker', image: 'agentic-workspace-claude-cli' },
+}
