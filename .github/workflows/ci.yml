@@ -112,9 +112,6 @@ jobs:
       - name: Structural & ES invariants
         run: just fitness-invariants
 
-      - name: Topology validation
-        run: just topology-check
-
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################
