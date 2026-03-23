@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
-# pre-commit: invalidate the topology cache stamp when source files change.
-#
-# fitness-check regenerates topology on demand (commit-SHA cache). This hook
-# removes the stamp so the next fitness-check run knows to regenerate.
+# pre-commit: regenerate topology when source files change.
+# Keeps .topology/ committed alongside code so changes are visible in git history.
+# fitness-check is the CI safety net — it re-syncs if topology is stale.
 #
 # Install: just install-hooks
 set -euo pipefail
 
 CHANGED_SRC=$(git diff --cached --name-only | grep -E '\.(py|rs)$' || true)
 if [ -n "$CHANGED_SRC" ]; then
-    rm -f .topology/.commit-sha
+    echo "🔍 Source files changed — regenerating topology..."
+    if just topology-analyze 2>/dev/null; then
+        # Clear sync marker (fitness-check will write the real commit SHA)
+        rm -f .topology/.commit-sha
+        # Stage topology data (viz/*.html is gitignored)
+        git add .topology/
+        echo "✅ Topology regenerated and staged"
+    else
+        echo "⚠️  Could not regenerate topology (is APS CLI built?). Invalidating cache."
+        rm -f .topology/.commit-sha
+    fi
 fi
