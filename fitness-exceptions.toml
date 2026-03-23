@@ -1176,38 +1176,9 @@ issue = "#274"
 value = 35
 issue = "#274"
 
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
-value = 70
+[max-cognitive."typescript:apps/syn-docs/app/api/docs-txt/[...slug]/route::renderOpenAPIPage"]
+value = 65
 issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::handleKeyDown"]
-value = 40
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackWidget::FeedbackWidget"]
-value = 150
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackDetail::FeedbackDetail"]
-value = 35
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackList::FeedbackList"]
-value = 60
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackModal::FeedbackModal"]
-value = 50
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/ScreenshotUploader::ScreenshotUploader"]
-value = 75
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
-value = 45
-issue = "#274"
-
 
 [max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/integrations/grpc-event-store::readEvents"]
 value = 35
@@ -1263,22 +1234,6 @@ issue = "#274"
 
 [max-cognitive."typescript:lib/event-sourcing-platform/vsa/vscode-extension/src/validation::parseOutput"]
 value = 35
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useFeedbackApi::handleResponse"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useFeedbackApi::useFeedbackApi"]
-value = 35
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useScreenCapture::useScreenCapture"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
-value = 60
 issue = "#274"
 
 [max-cognitive."typescript:packages/openclaw-plugin/src/tools/observability::synGetSession"]
@@ -1387,40 +1342,11 @@ value = 20
 issue = "#274"
 
 
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackWidget::FeedbackWidget"]
-value = 65
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackDetail::FeedbackDetail"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackList::FeedbackList"]
+[max-cyclomatic."typescript:apps/syn-docs/app/api/docs-txt/[...slug]/route::renderOpenAPIPage"]
 value = 25
 issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackModal::FeedbackModal"]
-value = 25
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/ScreenshotUploader::ScreenshotUploader"]
-value = 35
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
-value = 20
-issue = "#274"
-
 
 [max-cyclomatic."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/replay/state-assertions::createDiff"]
-value = 25
-issue = "#274"
-
-[max-cyclomatic."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
 value = 25
 issue = "#274"
 
@@ -1626,34 +1552,6 @@ issue = "#274"
 value = 135
 issue = "#274"
 
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
-value = 230
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackWidget::FeedbackWidget"]
-value = 420
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackDetail::FeedbackDetail"]
-value = 285
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackList::FeedbackList"]
-value = 255
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackModal::FeedbackModal"]
-value = 275
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/ScreenshotUploader::ScreenshotUploader"]
-value = 215
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
-value = 120
-issue = "#274"
-
 [max-loc-function."typescript:lib/event-sourcing-platform/examples/004-cqrs-patterns-ts/src/main::main"]
 value = 155
 issue = "#274"
@@ -1674,14 +1572,3 @@ issue = "#274"
 value = 110
 issue = "#274"
 
-[max-loc-function."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useFeedbackApi::useFeedbackApi"]
-value = 135
-issue = "#274"
-
-[max-loc-function."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useScreenCapture::useScreenCapture"]
-value = 110
-issue = "#274"
-
-[max-loc-function."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
-value = 145
-issue = "#274"
