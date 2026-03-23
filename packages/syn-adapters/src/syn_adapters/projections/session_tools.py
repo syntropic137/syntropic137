@@ -58,6 +58,80 @@ _GIT_EVENT_TYPES = (
 )
 
 
+def _extract_agent_label(data: dict[str, Any]) -> str:
+    """Extract a display name for a subagent from tool input data."""
+    tool_input = data.get("input_preview") or data.get("tool_input")
+    if isinstance(tool_input, str):
+        try:
+            tool_input = json.loads(tool_input)
+        except (json.JSONDecodeError, TypeError):
+            tool_input = None
+    if isinstance(tool_input, dict):
+        return str(
+            tool_input.get("description")
+            or tool_input.get("subagent_type")
+            or data.get("tool_name", "")
+        )
+    return str(data.get("tool_name", ""))
+
+
+def _row_to_subagent_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
+    """Convert a tool event row for an Agent/Task tool into a subagent operation."""
+    tool_use_id = data.get("tool_use_id", "")
+    is_started = event_type == TOOL_EXECUTION_STARTED
+    subagent_op = SUBAGENT_STARTED if is_started else SUBAGENT_STOPPED
+    agent_label = _extract_agent_label(data)
+    obs_id = f"subagent-{subagent_op}-{tool_use_id}-{row['time'].isoformat()}"
+    return ToolOperation(
+        observation_id=obs_id,
+        tool_name=agent_label,
+        tool_use_id=tool_use_id or None,
+        operation_type=subagent_op,
+        timestamp=row["time"],
+        success=data.get("success") if not is_started else None,
+        input_preview=data.get("input_preview") or json.dumps(data),
+        output_preview=data.get("output_preview") if not is_started else None,
+        duration_ms=data.get("duration_ms") if not is_started else None,
+    )
+
+
+def _row_to_git_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
+    """Convert a git event row into a ToolOperation."""
+    import re as _re
+
+    obs_id = f"git-{event_type}-{row['time'].isoformat()}"
+    git_subcmd = data.get("operation", "")
+    git_branch = data.get("branch") or data.get("to_branch") or None
+
+    if not git_branch and event_type == "git_operation":
+        cmd = data.get("command", "")
+        _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
+        if _m:
+            git_branch = _m.group(1)
+
+    if event_type == GIT_REWRITE and not git_subcmd:
+        git_subcmd = data.get("operation", "rebase")
+
+    return ToolOperation(
+        observation_id=obs_id,
+        tool_name=git_subcmd,
+        tool_use_id=None,
+        operation_type=event_type,
+        timestamp=row["time"],
+        success=True,
+        input_preview=None,
+        output_preview=None,
+        duration_ms=None,
+        git_sha=data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None,
+        git_message=data.get("message")
+        or data.get("message_preview")
+        or data.get("commit_message")
+        or None,
+        git_branch=git_branch,
+        git_repo=data.get("repo") or None,
+    )
+
+
 @dataclass
 class ToolOperation:
     """Read model for a session timeline event from TimescaleDB.
@@ -263,13 +337,9 @@ class SessionToolsProjection:
     def _row_to_operation(self, row: Any) -> ToolOperation | None:
         """Convert a database row to a ToolOperation.
 
-        Args:
-            row: Database row with event data
-
-        Returns:
-            ToolOperation read model, or None if the row should be skipped
+        Dispatches to specialized handlers based on event type.
+        Returns None if the row should be skipped.
         """
-        # Parse JSON data field
         data = row["data"]
         if isinstance(data, str):
             data = json.loads(data)
@@ -279,88 +349,20 @@ class SessionToolsProjection:
         # TODO(#175): Flip dedup direction when Claude Code's SubagentStart hook
         # includes prompt/description data. Currently native subagent events are
         # sparse (no prompt), so we drop them and relabel Agent/Task tool events
-        # as subagent operations instead. This matches what event_parser.py does
-        # in the Docker pipeline. When the hook is enriched, prefer native events
-        # and drop the tool events.
+        # as subagent operations instead.
         if event_type in _SUBAGENT_EVENT_TYPES:
             return None
 
-        # Relabel Agent/Task tool events as subagent operations so the prompt
-        # is visible in the expandable details.
+        # Relabel Agent/Task tool events as subagent operations
         if event_type in (TOOL_EXECUTION_STARTED, TOOL_EXECUTION_COMPLETED):
             tool_name = data.get("tool_name") or (data.get("context") or {}).get("tool_name", "")
             if tool_name in _SUBAGENT_TOOL_NAMES:
-                tool_use_id = data.get("tool_use_id", "")
-                is_started = event_type == TOOL_EXECUTION_STARTED
-                subagent_op = SUBAGENT_STARTED if is_started else SUBAGENT_STOPPED
-                # Extract a display name from the tool input
-                tool_input = data.get("input_preview") or data.get("tool_input")
-                if isinstance(tool_input, str):
-                    try:
-                        tool_input = json.loads(tool_input)
-                    except (json.JSONDecodeError, TypeError):
-                        tool_input = None
-                if isinstance(tool_input, dict):
-                    agent_label = (
-                        tool_input.get("description")
-                        or tool_input.get("subagent_type")
-                        or tool_name
-                    )
-                else:
-                    agent_label = tool_name
-                obs_id = f"subagent-{subagent_op}-{tool_use_id}-{row['time'].isoformat()}"
-                return ToolOperation(
-                    observation_id=obs_id,
-                    tool_name=str(agent_label),
-                    tool_use_id=tool_use_id or None,
-                    operation_type=subagent_op,
-                    timestamp=row["time"],
-                    success=data.get("success") if not is_started else None,
-                    input_preview=data.get("input_preview") or json.dumps(data),
-                    output_preview=data.get("output_preview") if not is_started else None,
-                    duration_ms=data.get("duration_ms") if not is_started else None,
-                )
+                return _row_to_subagent_operation(row, data, event_type)
 
-        is_git = event_type in _GIT_EVENT_TYPES
-        if is_git:
-            obs_id = f"git-{event_type}-{row['time'].isoformat()}"
+        if event_type in _GIT_EVENT_TYPES:
+            return _row_to_git_operation(row, data, event_type)
 
-            # Extract the operation subcommand for display in the timeline title
-            git_subcmd = data.get("operation", "")
-            git_branch = data.get("branch") or data.get("to_branch") or None
-            if not git_branch and event_type == "git_operation":
-                # Parse branch from "git checkout -b <branch>" or "git checkout <branch>"
-                cmd = data.get("command", "")
-                import re as _re
-
-                _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
-                if _m:
-                    git_branch = _m.group(1)
-
-            # For git_rewrite, use the rewrite type (rebase/amend) as the subcommand
-            if event_type == GIT_REWRITE and not git_subcmd:
-                git_subcmd = data.get("operation", "rebase")
-
-            return ToolOperation(
-                observation_id=obs_id,
-                tool_name=git_subcmd,
-                tool_use_id=None,
-                operation_type=event_type,
-                timestamp=row["time"],
-                success=True,
-                input_preview=None,
-                output_preview=None,
-                duration_ms=None,
-                git_sha=data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None,
-                git_message=data.get("message")
-                or data.get("message_preview")
-                or data.get("commit_message")
-                or None,
-                git_branch=git_branch,
-                git_repo=data.get("repo") or None,
-            )
-
-        # Generate a unique ID from the row data
+        # Standard tool/other event
         is_completed = event_type == TOOL_EXECUTION_COMPLETED
         tool_use_id = data.get("tool_use_id", "")
         obs_id = data.get("observation_id") or f"{tool_use_id}-{row['time'].isoformat()}"
