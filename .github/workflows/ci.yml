@@ -286,6 +286,15 @@ jobs:
         with:
           submodules: true
 
+      - name: Setup Rust (for APS topology CLI)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install just
+        uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
+
+      - name: Generate topology data
+        run: just topology-analyze
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
