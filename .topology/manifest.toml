@@ -1,13 +1,13 @@
 [topology]
 version = "0.1.0"
-generated_at = "2025-12-17T21:06:45Z"
+generated_at = "2025-12-17T23:03:02Z"
 generator = "aps-cli"
 generator_version = "0.1.0"
 
 [analysis]
 root = "."
-languages = ["typescript", "rust", "python", "tsx"]
-total_files = 1197
-total_functions = 10208
-total_modules = 855
-total_dependencies = 4712
+languages = ["rust", "python", "tsx", "typescript"]
+total_files = 1283
+total_functions = 10246
+total_modules = 833
+total_dependencies = 4745
