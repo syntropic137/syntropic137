@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useExecutionControl } from '../useExecutionControl'
+import { useExecutionControl, type ExecutionState } from '../useExecutionControl'
 
 vi.mock('../../api/client', () => ({
   cancelExecution: vi.fn(),
@@ -87,7 +87,7 @@ describe('useExecutionControl', () => {
 
     const { result, rerender } = renderHook(
       ({ state }) => useExecutionControl('exec-1', state),
-      { initialProps: { state: 'running' as string } },
+      { initialProps: { state: 'running' as ExecutionState } },
     )
 
     // Cancel → optimistic 'cancelling'
