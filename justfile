@@ -781,12 +781,12 @@ import-check:
     @uv run python scripts/import_check.py
 
 # Comprehensive QA: all checks (pre-commit, comprehensive)
-qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate topology-check docs-sync
+qa: lint format typecheck validate-domain-events fitness test dashboard-qa test-debt vsa-validate docs-sync
     @echo ""
     @echo "✅ All QA checks passed!"
 
 # Full QA with coverage: qa + coverage report (pre-push, CI)
-qa-full: lint format typecheck validate-domain-events fitness test-cov dashboard-qa test-debt vsa-validate topology-check docs-sync
+qa-full: lint format typecheck validate-domain-events fitness test-cov dashboard-qa test-debt vsa-validate docs-sync
     @echo ""
     @echo "✅ Full QA passed with coverage!"
 
@@ -867,9 +867,9 @@ topology-viz: aps-build
 # Full topology regeneration (analyze + visualize)
 topology: topology-analyze topology-viz
 
-# Regenerate topology and validate (topology is no longer committed — #293)
+# Regenerate topology on demand (topology is no longer committed — #293)
 topology-check: topology-analyze
-    @echo "✅ Topology artifacts regenerated and valid"
+    @echo "✅ Topology artifacts regenerated"
 
 # Pre-merge validation (all checks before opening PR)
 validate-pre-merge quick="":
