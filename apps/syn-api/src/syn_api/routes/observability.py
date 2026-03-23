@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
-from syn_api._wiring import ensure_connected, get_event_store_instance, get_projection_mgr
+from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
     Err,
     ObservabilityError,
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/observability", tags=["observability"])
 async def get_tool_timeline(
     session_id: str,
     limit: int = 1000,
-    include_blocked: bool = False,
+    include_blocked: bool = False,  # noqa: ARG001
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[dict[str, Any]], ObservabilityError]:
     """Get the tool call timeline for a session.
