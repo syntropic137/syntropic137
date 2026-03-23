@@ -1,11 +1,10 @@
 import type { SyntropicClient } from "../client.js";
 import { formatError } from "../errors.js";
-import type {
-  ExecutionDetail,
-  ExecutionListResponse,
-  ExecutionSummary,
-  PhaseExecutionInfo,
-} from "../types.js";
+import type { ExecutionListResponse, ExecutionSummary } from "../types.js";
+
+// Re-export extracted execution detail function for backwards compatibility
+export { synGetExecution } from "./execution_detail.js";
+export type { GetExecutionArgs } from "./execution_detail.js";
 
 // ---------------------------------------------------------------------------
 // syn_list_executions
@@ -46,58 +45,6 @@ export async function synListExecutions(
       ...lines,
     ].join("\n"),
   };
-}
-
-// ---------------------------------------------------------------------------
-// syn_get_execution
-// ---------------------------------------------------------------------------
-
-export interface GetExecutionArgs {
-  execution_id: string;
-}
-
-export async function synGetExecution(
-  client: SyntropicClient,
-  args: GetExecutionArgs,
-): Promise<{ content: string; isError?: true }> {
-  const result = await client.get<ExecutionDetail>(
-    `/executions/${encodeURIComponent(args.execution_id)}`,
-  );
-  if (!result.ok) return formatError(result.error);
-
-  const d = result.data;
-  const phaseLines = d.phases.map((p: PhaseExecutionInfo) => {
-    const dur = p.duration_seconds > 0 ? ` · ${p.duration_seconds.toFixed(1)}s` : "";
-    const cost = p.cost_usd !== "0" ? ` · $${p.cost_usd}` : "";
-    return `  - **${p.name}** — ${p.status}${dur}${cost}`;
-  });
-
-  const sections = [
-    `## Execution: ${d.workflow_name}`,
-    "",
-    `| Field | Value |`,
-    `|-------|-------|`,
-    `| ID | ${d.workflow_execution_id} |`,
-    `| Workflow | ${d.workflow_id} |`,
-    `| Status | ${d.status} |`,
-    `| Tokens | ${d.total_tokens.toLocaleString()} (in: ${d.total_input_tokens.toLocaleString()}, out: ${d.total_output_tokens.toLocaleString()}) |`,
-    `| Cost | $${d.total_cost_usd} |`,
-    `| Duration | ${d.total_duration_seconds.toFixed(1)}s |`,
-  ];
-
-  if (d.started_at) sections.push(`| Started | ${d.started_at} |`);
-  if (d.completed_at) sections.push(`| Completed | ${d.completed_at} |`);
-  if (d.error_message) sections.push(`| Error | ${d.error_message} |`);
-
-  if (phaseLines.length > 0) {
-    sections.push("", "### Phases", ...phaseLines);
-  }
-
-  if (d.artifact_ids.length > 0) {
-    sections.push("", `### Artifacts: ${d.artifact_ids.join(", ")}`);
-  }
-
-  return { content: sections.join("\n") };
 }
 
 /** Tool definitions for execution tools. */

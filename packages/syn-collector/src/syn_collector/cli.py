@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import signal
 import sys
 from pathlib import Path
 
@@ -208,93 +207,7 @@ def sidecar(
     )
 
 
-async def _run_watcher(
-    hooks_file: Path,
-    transcript_dir: Path,
-    collector_url: str,
-    api_key: str | None,
-    batch_size: int,
-    batch_interval_ms: int,
-) -> None:
-    """Run the file watcher with HTTP client.
-
-    Args:
-        hooks_file: Path to hook events JSONL
-        transcript_dir: Directory with transcript files
-        collector_url: Collector service URL
-        api_key: Optional API key
-        batch_size: Events per batch
-        batch_interval_ms: Max ms between flushes
-    """
-    from syn_collector.client.http import EventCollectorClient
-    from syn_collector.watcher.hooks import HookWatcher
-    from syn_collector.watcher.transcript import TranscriptWatcher
-
-    # Setup graceful shutdown
-    shutdown_event = asyncio.Event()
-
-    def signal_handler() -> None:
-        logger.info("Shutdown signal received")
-        shutdown_event.set()
-
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
-
-    # Create client and watchers
-    async with EventCollectorClient(
-        collector_url,
-        api_key=api_key,
-        batch_size=batch_size,
-        batch_interval_ms=batch_interval_ms,
-    ) as client:
-        hook_watcher = HookWatcher(hooks_file)
-        transcript_watcher = TranscriptWatcher(transcript_dir)
-
-        # Watch tasks
-        async def watch_hooks() -> None:
-            async for event in hook_watcher.watch(from_end=True):
-                if shutdown_event.is_set():
-                    break
-                await client.emit(event)
-
-        async def watch_transcripts() -> None:
-            async for event in transcript_watcher.watch(from_end=True):
-                if shutdown_event.is_set():
-                    break
-                await client.emit(event)
-
-        async def periodic_flush() -> None:
-            while not shutdown_event.is_set():
-                await asyncio.sleep(batch_interval_ms / 1000)
-                try:
-                    await client.flush()
-                except Exception as e:
-                    logger.error(f"Flush error: {e}")
-
-        # Run all tasks concurrently
-        tasks = [
-            asyncio.create_task(watch_hooks()),
-            asyncio.create_task(watch_transcripts()),
-            asyncio.create_task(periodic_flush()),
-        ]
-
-        # Wait for shutdown
-        await shutdown_event.wait()
-
-        # Cancel tasks
-        for task in tasks:
-            task.cancel()
-
-        # Wait for tasks to complete
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Final flush
-        logger.info("Performing final flush...")
-        await client.flush()
-
-        logger.info(f"Watcher stopped. Stats: {client.stats}")
-
+from syn_collector.watcher_runner import run_watcher as _run_watcher  # noqa: E402
 
 if __name__ == "__main__":
     main()

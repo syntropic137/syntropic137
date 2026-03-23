@@ -1,53 +1,42 @@
 """Spend Tracker for monitoring and limiting Claude API usage.
 
-This service manages budget allocation and spend tracking:
-- Allocate budgets per execution based on workflow type
-- Track spend atomically (input tokens, output tokens, cost)
-- Check budget before allowing requests
-- Alert on threshold breaches
-
 See Also:
     - docs/deployment/claude-api-security.md
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
+from syn_tokens.budget_stores import (  # noqa: F401 - re-export for backwards compat
+    InMemoryBudgetStore,
+    RedisBudgetStore,
+)
 from syn_tokens.models import DEFAULT_BUDGETS, SpendBudget, WorkflowType
+from syn_tokens.pricing import (  # noqa: F401 - re-export for backwards compat
+    CLAUDE_PRICING,
+    DEFAULT_MODEL,
+    calculate_cost,
+)
+from syn_tokens.singletons import (  # noqa: F401 - re-export for backwards compat
+    configure_redis_spend_tracker,
+    get_spend_tracker,
+    reset_spend_tracker,
+)
 from syn_tokens.threshold import ThresholdMonitor
+from syn_tokens.usage_summary import build_usage_summary
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from redis.asyncio import Redis
+    from syn_tokens.budget_stores import (
+        BudgetStore,
+    )
 
 logger = logging.getLogger(__name__)
-
-# Redis key prefixes
-REDIS_BUDGET_PREFIX = "syn:budget:"
-
-# Claude pricing (per 1M tokens)
-CLAUDE_PRICING = {
-    "claude-3-5-sonnet-20241022": {
-        "input": Decimal("3.00"),
-        "output": Decimal("15.00"),
-    },
-    "claude-3-opus-20240229": {
-        "input": Decimal("15.00"),
-        "output": Decimal("75.00"),
-    },
-    "claude-3-haiku-20240307": {
-        "input": Decimal("0.25"),
-        "output": Decimal("1.25"),
-    },
-}
-
-DEFAULT_MODEL = "claude-3-5-sonnet-20241022"
 
 
 @dataclass
@@ -57,111 +46,6 @@ class SpendCheckResult:
     allowed: bool
     reason: str | None = None
     budget: SpendBudget | None = None
-
-
-class BudgetStore(Protocol):
-    """Protocol for budget storage backends."""
-
-    async def store(self, budget: SpendBudget) -> None:
-        """Store a budget."""
-        ...
-
-    async def get(self, execution_id: str) -> SpendBudget | None:
-        """Get a budget by execution ID."""
-        ...
-
-    async def update(self, budget: SpendBudget) -> None:
-        """Update an existing budget."""
-        ...
-
-    async def delete(self, execution_id: str) -> bool:
-        """Delete a budget. Returns True if deleted."""
-        ...
-
-
-class InMemoryBudgetStore:
-    """In-memory budget store for testing."""
-
-    def __init__(self) -> None:
-        self._budgets: dict[str, SpendBudget] = {}
-
-    async def store(self, budget: SpendBudget) -> None:
-        """Store a budget."""
-        self._budgets[budget.execution_id] = budget
-
-    async def get(self, execution_id: str) -> SpendBudget | None:
-        """Get a budget by execution ID."""
-        return self._budgets.get(execution_id)
-
-    async def update(self, budget: SpendBudget) -> None:
-        """Update an existing budget."""
-        self._budgets[budget.execution_id] = budget
-
-    async def delete(self, execution_id: str) -> bool:
-        """Delete a budget."""
-        if execution_id in self._budgets:
-            del self._budgets[execution_id]
-            return True
-        return False
-
-    def clear(self) -> None:
-        """Clear all budgets (for testing)."""
-        self._budgets.clear()
-
-
-class RedisBudgetStore:
-    """Redis-backed budget store."""
-
-    def __init__(self, redis: Redis) -> None:
-        self._redis = redis
-
-    async def store(self, budget: SpendBudget) -> None:
-        """Store a budget."""
-        key = f"{REDIS_BUDGET_PREFIX}{budget.execution_id}"
-        await self._redis.set(key, json.dumps(budget.to_dict()))
-
-    async def get(self, execution_id: str) -> SpendBudget | None:
-        """Get a budget by execution ID."""
-        key = f"{REDIS_BUDGET_PREFIX}{execution_id}"
-        data = await self._redis.get(key)
-
-        if data is None:
-            return None
-
-        return SpendBudget.from_dict(json.loads(data))
-
-    async def update(self, budget: SpendBudget) -> None:
-        """Update an existing budget (atomic via Redis)."""
-        await self.store(budget)
-
-    async def delete(self, execution_id: str) -> bool:
-        """Delete a budget."""
-        key = f"{REDIS_BUDGET_PREFIX}{execution_id}"
-        deleted = await self._redis.delete(key)
-        return deleted > 0
-
-
-def calculate_cost(
-    input_tokens: int,
-    output_tokens: int,
-    model: str = DEFAULT_MODEL,
-) -> Decimal:
-    """Calculate cost for token usage.
-
-    Args:
-        input_tokens: Number of input tokens
-        output_tokens: Number of output tokens
-        model: Claude model name
-
-    Returns:
-        Cost in USD
-    """
-    pricing = CLAUDE_PRICING.get(model, CLAUDE_PRICING[DEFAULT_MODEL])
-
-    input_cost = Decimal(input_tokens) * pricing["input"] / Decimal("1000000")
-    output_cost = Decimal(output_tokens) * pricing["output"] / Decimal("1000000")
-
-    return input_cost + output_cost
 
 
 class SpendTracker:
@@ -383,39 +267,11 @@ class SpendTracker:
         return deleted
 
     async def get_usage_summary(self, execution_id: str) -> dict | None:
-        """Get usage summary for an execution.
-
-        Returns:
-            Dictionary with usage stats or None if no budget
-        """
+        """Get usage summary for an execution."""
         budget = await self._store.get(execution_id)
-
         if budget is None:
             return None
-
-        return {
-            "execution_id": execution_id,
-            "workflow_type": budget.workflow_type.value,
-            "input_tokens": {
-                "used": budget.used_input_tokens,
-                "max": budget.max_input_tokens,
-                "remaining": budget.remaining_input_tokens,
-                "percent": budget.input_usage_percent,
-            },
-            "output_tokens": {
-                "used": budget.used_output_tokens,
-                "max": budget.max_output_tokens,
-                "remaining": budget.remaining_output_tokens,
-                "percent": budget.output_usage_percent,
-            },
-            "cost_usd": {
-                "used": str(budget.used_cost_usd),
-                "max": str(budget.max_cost_usd),
-                "remaining": str(budget.remaining_cost_usd),
-                "percent": budget.cost_usage_percent,
-            },
-            "is_exhausted": budget.is_exhausted,
-        }
+        return build_usage_summary(execution_id, budget)
 
     async def _check_thresholds(self, budget: SpendBudget) -> None:
         """Check if any thresholds are breached and send alerts."""
@@ -435,54 +291,3 @@ class SpendTracker:
                     await self._alert_callback(alert)
                 except Exception as e:
                     logger.error("Alert callback failed: %s", e)
-
-
-# Singleton instance
-_spend_tracker: SpendTracker | None = None
-_budget_store: InMemoryBudgetStore | RedisBudgetStore | None = None
-
-
-def get_spend_tracker() -> SpendTracker:
-    """Get the singleton spend tracker.
-
-    Uses in-memory store by default.
-    """
-    global _spend_tracker, _budget_store
-
-    if _spend_tracker is not None:
-        return _spend_tracker
-
-    if _budget_store is None:
-        _budget_store = InMemoryBudgetStore()
-
-    _spend_tracker = SpendTracker(_budget_store)
-    logger.info("Spend tracker initialized (in-memory)")
-
-    return _spend_tracker
-
-
-async def configure_redis_spend_tracker(redis: Redis) -> SpendTracker:
-    """Configure the spend tracker to use Redis.
-
-    Args:
-        redis: Redis async client
-
-    Returns:
-        Configured SpendTracker
-    """
-    global _spend_tracker, _budget_store
-
-    _budget_store = RedisBudgetStore(redis)
-    _spend_tracker = SpendTracker(_budget_store)
-    logger.info("Spend tracker initialized (Redis)")
-
-    return _spend_tracker
-
-
-def reset_spend_tracker() -> None:
-    """Reset the singleton (for testing)."""
-    global _spend_tracker, _budget_store
-    _spend_tracker = None
-    if isinstance(_budget_store, InMemoryBudgetStore):
-        _budget_store.clear()
-    _budget_store = None
