@@ -114,6 +114,34 @@ def _detect_inner_type(content: list[Any]) -> str | None:
     return None
 
 
+def _extract_tool_use(item: dict[str, Any], event_data: dict[str, Any]) -> None:
+    """Extract fields from a tool_use content item (assistant message)."""
+    if "tool_name" not in event_data:
+        event_data["tool_name"] = item.get("name")
+    if "tool_use_id" not in event_data:
+        event_data["tool_use_id"] = item.get("id")
+    if "input_preview" not in event_data:
+        tool_input = item.get("input")
+        if tool_input:
+            event_data["input_preview"] = json.dumps(tool_input)[:500]
+
+
+def _extract_tool_result(item: dict[str, Any], event_data: dict[str, Any]) -> None:
+    """Extract fields from a tool_result content item (user message)."""
+    if "tool_use_id" not in event_data:
+        event_data["tool_use_id"] = item.get("tool_use_id")
+    if "tool_name" not in event_data and "tool_name" in item:
+        event_data["tool_name"] = item["tool_name"]
+    if "success" not in event_data:
+        event_data["success"] = not item.get("is_error", False)
+
+
+_TOOL_CONTENT_EXTRACTORS: dict[str, Any] = {
+    "tool_use": _extract_tool_use,
+    "tool_result": _extract_tool_result,
+}
+
+
 def _extract_tool_data(content: list[Any], event_data: dict[str, Any]) -> None:
     """Extract tool info from nested Claude CLI message content.
 
@@ -121,25 +149,10 @@ def _extract_tool_data(content: list[Any], event_data: dict[str, Any]) -> None:
     Mutates event_data in place with extracted fields.
     """
     for item in content:
-        if not isinstance(item, dict):
-            continue
-        item_type = item.get("type")
-        if item_type == "tool_use":
-            if "tool_name" not in event_data:
-                event_data["tool_name"] = item.get("name")
-            if "tool_use_id" not in event_data:
-                event_data["tool_use_id"] = item.get("id")
-            if "input_preview" not in event_data:
-                tool_input = item.get("input")
-                if tool_input:
-                    event_data["input_preview"] = json.dumps(tool_input)[:500]
-        elif item_type == "tool_result":
-            if "tool_use_id" not in event_data:
-                event_data["tool_use_id"] = item.get("tool_use_id")
-            if "tool_name" not in event_data and "tool_name" in item:
-                event_data["tool_name"] = item["tool_name"]
-            if "success" not in event_data:
-                event_data["success"] = not item.get("is_error", False)
+        if isinstance(item, dict):
+            extractor = _TOOL_CONTENT_EXTRACTORS.get(item.get("type", ""))
+            if extractor:
+                extractor(item, event_data)
 
 
 class AgentEvent(BaseModel):
