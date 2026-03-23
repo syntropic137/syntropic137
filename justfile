@@ -812,21 +812,11 @@ validate-domain-events:
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
 fitness-check: aps-build
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # Regenerate topology only if stale — commit SHA is stored in .topology/.commit-sha
-    CURRENT_SHA=$(git rev-parse HEAD)
-    STORED_SHA=$(cat .topology/.commit-sha 2>/dev/null || echo "none")
-    if [ "$CURRENT_SHA" != "$STORED_SHA" ]; then
-        echo "🔍 Topology stale — regenerating..."
-        just topology-analyze
-        echo "$CURRENT_SHA" > .topology/.commit-sha
-    else
-        echo "✅ Topology up to date ($(echo $CURRENT_SHA | head -c 8))"
-    fi
-    echo "Checking architecture fitness thresholds..."
+    # Always regenerate topology before checking — never validate against stale data
+    just topology-analyze
+    @echo "Checking architecture fitness thresholds..."
     {{_aps_bin}} run fitness validate .
-    echo "✅ Fitness threshold checks passed"
+    @echo "✅ Fitness threshold checks passed"
 
 # Check structural & ES invariants (pytest-based, AST analysis)
 fitness-invariants:
