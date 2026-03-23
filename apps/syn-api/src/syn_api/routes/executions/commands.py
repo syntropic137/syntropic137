@@ -43,7 +43,8 @@ class ExecuteWorkflowRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inputs: dict[str, str] = Field(
-        default_factory=dict, description="Input variables for the workflow.",
+        default_factory=dict,
+        description="Input variables for the workflow.",
     )
     task: str | None = Field(
         default=None,
@@ -131,13 +132,16 @@ async def execute(
 
     processor = await get_execution_processor()
     handler = ExecuteWorkflowHandler(
-        processor=processor, workflow_repository=get_workflow_repo(),
+        processor=processor,
+        workflow_repository=get_workflow_repo(),
     )
 
     try:
         cmd = ExecuteWorkflowCommand(
-            aggregate_id=workflow_id, inputs=inputs or {},
-            execution_id=execution_id, task=task,
+            aggregate_id=workflow_id,
+            inputs=inputs or {},
+            execution_id=execution_id,
+            task=task,
         )
         result = await handler.handle(cmd)
     except WorkflowNotFoundError:
@@ -145,16 +149,19 @@ async def execute(
     except Exception as e:
         return Err(WorkflowError.EXECUTION_FAILED, message=str(e))
 
-    return Ok(ExecutionSummary(
-        workflow_execution_id=result.execution_id,
-        workflow_id=workflow_id, workflow_name=workflow_name,
-        status=result.status,
-        completed_phases=result.metrics.completed_phases,
-        total_phases=result.metrics.total_phases,
-        total_tokens=result.metrics.total_tokens,
-        total_cost_usd=result.metrics.total_cost_usd,
-        error_message=result.error_message,
-    ))
+    return Ok(
+        ExecutionSummary(
+            workflow_execution_id=result.execution_id,
+            workflow_id=workflow_id,
+            workflow_name=workflow_name,
+            status=result.status,
+            completed_phases=result.metrics.completed_phases,
+            total_phases=result.metrics.total_phases,
+            total_tokens=result.metrics.total_tokens,
+            total_cost_usd=result.metrics.total_cost_usd,
+            error_message=result.error_message,
+        )
+    )
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
@@ -171,18 +178,25 @@ async def execute_workflow_endpoint(
 
     async def _run() -> None:
         await execute(
-            workflow_id=workflow_id, inputs=request.inputs,
-            execution_id=execution_id, task=request.task,
+            workflow_id=workflow_id,
+            inputs=request.inputs,
+            execution_id=execution_id,
+            task=request.task,
         )
 
     background_tasks.add_task(_run)
     logger.info(
         "Started workflow execution",
-        extra={"execution_id": execution_id, "workflow_id": workflow_id,
-               "provider": request.provider},
+        extra={
+            "execution_id": execution_id,
+            "workflow_id": workflow_id,
+            "provider": request.provider,
+        },
     )
     return ExecuteWorkflowResponse(
-        execution_id=execution_id, workflow_id=workflow_id, status="started",
+        execution_id=execution_id,
+        workflow_id=workflow_id,
+        status="started",
         message=f"Workflow execution started with provider '{request.provider}'",
     )
 
@@ -217,8 +231,10 @@ async def get_execution_status_endpoint(
 
     return ExecutionStatusResponse(
         execution_id=detail.workflow_execution_id,
-        workflow_id=detail.workflow_id, status=detail.status,
-        current_phase=current_phase, completed_phases=completed_phases,
+        workflow_id=detail.workflow_id,
+        status=detail.status,
+        current_phase=current_phase,
+        completed_phases=completed_phases,
         total_phases=total_phases,
         started_at=str(_to_datetime(detail.started_at)) if detail.started_at else None,
         completed_at=str(_to_datetime(detail.completed_at)) if detail.completed_at else None,
@@ -239,9 +255,12 @@ async def list_active_executions_endpoint(
 
     return [
         ExecutionStatusResponse(
-            execution_id=s.workflow_execution_id, workflow_id=s.workflow_id,
-            status=s.status, current_phase=None,
-            completed_phases=s.completed_phases, total_phases=s.total_phases,
+            execution_id=s.workflow_execution_id,
+            workflow_id=s.workflow_id,
+            status=s.status,
+            current_phase=None,
+            completed_phases=s.completed_phases,
+            total_phases=s.total_phases,
             started_at=str(_to_datetime(s.started_at)) if s.started_at else None,
             completed_at=str(_to_datetime(s.completed_at)) if s.completed_at else None,
             error=s.error_message,

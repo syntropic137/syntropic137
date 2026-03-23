@@ -487,7 +487,9 @@ async def get_repo_cost_endpoint(repo_id: str) -> dict[str, Any]:
 
 
 @router.get("/{repo_id}/activity")
-async def get_repo_activity_endpoint(repo_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+async def get_repo_activity_endpoint(
+    repo_id: str, offset: int = 0, limit: int = 50
+) -> dict[str, Any]:
     """Get execution timeline for a repo."""
     result = await get_repo_activity(repo_id, offset=offset, limit=limit)
     if isinstance(result, Err):

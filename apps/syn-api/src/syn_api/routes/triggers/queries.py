@@ -49,9 +49,13 @@ async def list_triggers(
     return Ok(
         [
             TriggerSummary(
-                trigger_id=t.trigger_id, name=t.name, event=t.event,
-                repository=t.repository, workflow_id=t.workflow_id,
-                status=t.status, fire_count=t.fire_count,
+                trigger_id=t.trigger_id,
+                name=t.name,
+                event=t.event,
+                repository=t.repository,
+                workflow_id=t.workflow_id,
+                status=t.status,
+                fire_count=t.fire_count,
                 created_at=t.created_at if hasattr(t, "created_at") else None,
             )
             for t in triggers
@@ -73,9 +77,12 @@ async def get_trigger(
 
     return Ok(
         TriggerDetail(
-            trigger_id=indexed.trigger_id, name=indexed.name,
-            event=indexed.event, repository=indexed.repository,
-            workflow_id=indexed.workflow_id, status=indexed.status,
+            trigger_id=indexed.trigger_id,
+            name=indexed.name,
+            event=indexed.event,
+            repository=indexed.repository,
+            workflow_id=indexed.workflow_id,
+            status=indexed.status,
             fire_count=indexed.fire_count,
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
             conditions=list(indexed.conditions) if indexed.conditions else [],
@@ -112,11 +119,15 @@ async def get_trigger_history(
     return Ok(
         [
             TriggerHistoryEntry(
-                trigger_id=e.trigger_id, execution_id=e.execution_id,
+                trigger_id=e.trigger_id,
+                execution_id=e.execution_id,
                 webhook_delivery_id=e.webhook_delivery_id,
-                github_event_type=e.github_event_type, repository=e.repository,
-                pr_number=e.pr_number, fired_at=e.fired_at,
-                status=e.status, cost_usd=e.cost_usd,
+                github_event_type=e.github_event_type,
+                repository=e.repository,
+                pr_number=e.pr_number,
+                fired_at=e.fired_at,
+                status=e.status,
+                cost_usd=e.cost_usd,
             )
             for e in entries
         ]
@@ -141,9 +152,13 @@ async def list_triggers_endpoint(
     return {
         "triggers": [
             {
-                "trigger_id": t.trigger_id, "name": t.name, "event": t.event,
-                "repository": t.repository, "workflow_id": t.workflow_id,
-                "status": str(t.status), "fire_count": t.fire_count,
+                "trigger_id": t.trigger_id,
+                "name": t.name,
+                "event": t.event,
+                "repository": t.repository,
+                "workflow_id": t.workflow_id,
+                "status": str(t.status),
+                "fire_count": t.fire_count,
             }
             for t in result.value
         ],
@@ -163,12 +178,16 @@ async def get_all_history_endpoint(limit: int = 50) -> dict[str, Any]:
         hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
         if not isinstance(hist, Err):
             for e in hist.value:
-                all_entries.append({
-                    "trigger_id": t.trigger_id,
-                    "fired_at": e.fired_at.isoformat() if e.fired_at else None,
-                    "execution_id": e.execution_id, "event_type": e.github_event_type,
-                    "pr_number": e.pr_number, "status": e.status,
-                })
+                all_entries.append(
+                    {
+                        "trigger_id": t.trigger_id,
+                        "fired_at": e.fired_at.isoformat() if e.fired_at else None,
+                        "execution_id": e.execution_id,
+                        "event_type": e.github_event_type,
+                        "pr_number": e.pr_number,
+                        "status": e.status,
+                    }
+                )
 
     all_entries.sort(key=lambda x: x.get("fired_at") or "", reverse=True)
     all_entries = all_entries[:limit]
@@ -184,11 +203,18 @@ async def get_trigger_endpoint(trigger_id: str) -> dict[str, Any]:
 
     t = result.value
     return {
-        "trigger_id": t.trigger_id, "name": t.name, "event": t.event,
-        "conditions": t.conditions, "repository": t.repository,
-        "installation_id": t.installation_id, "workflow_id": t.workflow_id,
-        "input_mapping": t.input_mapping, "status": str(t.status),
-        "fire_count": t.fire_count, "config": t.config, "created_by": t.created_by,
+        "trigger_id": t.trigger_id,
+        "name": t.name,
+        "event": t.event,
+        "conditions": t.conditions,
+        "repository": t.repository,
+        "installation_id": t.installation_id,
+        "workflow_id": t.workflow_id,
+        "input_mapping": t.input_mapping,
+        "status": str(t.status),
+        "fire_count": t.fire_count,
+        "config": t.config,
+        "created_by": t.created_by,
     }
 
 
@@ -207,9 +233,12 @@ async def get_trigger_history_endpoint(
         "entries": [
             {
                 "fired_at": e.fired_at.isoformat() if e.fired_at else None,
-                "execution_id": e.execution_id, "webhook_delivery_id": e.webhook_delivery_id,
-                "event_type": e.github_event_type, "pr_number": e.pr_number,
-                "status": e.status, "cost_usd": e.cost_usd,
+                "execution_id": e.execution_id,
+                "webhook_delivery_id": e.webhook_delivery_id,
+                "event_type": e.github_event_type,
+                "pr_number": e.pr_number,
+                "status": e.status,
+                "cost_usd": e.cost_usd,
             }
             for e in result.value
         ],

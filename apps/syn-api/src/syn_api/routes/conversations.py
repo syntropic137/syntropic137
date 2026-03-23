@@ -234,7 +234,9 @@ async def get_conversation_log_endpoint(
 
 
 @router.get("/{session_id}/metadata", response_model=ConversationMetadataResponse | None)
-async def get_conversation_metadata_endpoint(session_id: str) -> ConversationMetadataResponse | None:
+async def get_conversation_metadata_endpoint(
+    session_id: str,
+) -> ConversationMetadataResponse | None:
     """Get conversation metadata for a session."""
     result = await get_conversation_metadata(session_id)
 

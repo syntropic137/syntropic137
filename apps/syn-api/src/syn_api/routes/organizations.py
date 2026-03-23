@@ -275,7 +275,9 @@ async def get_organization_endpoint(organization_id: str) -> dict[str, Any]:
 
 
 @router.put("/{organization_id}")
-async def update_organization_endpoint(organization_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def update_organization_endpoint(
+    organization_id: str, body: dict[str, Any]
+) -> dict[str, Any]:
     """Update an organization."""
     result = await update_organization(
         organization_id=organization_id,
