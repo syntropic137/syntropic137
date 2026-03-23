@@ -8,7 +8,6 @@ import { TriggerFilters } from './TriggerFilters'
 
 export function TriggerList() {
   const {
-    triggers,
     setTriggers,
     filteredTriggers,
     loading,
@@ -27,7 +26,7 @@ export function TriggerList() {
     busyIds,
     actionError,
     clearError,
-  } = useTriggerActions(triggers, setTriggers, fetchTriggers)
+  } = useTriggerActions(setTriggers, fetchTriggers)
 
   return (
     <div className="space-y-6">

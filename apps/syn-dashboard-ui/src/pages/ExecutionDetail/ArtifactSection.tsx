@@ -14,7 +14,10 @@ export function ArtifactSection({ phases, artifactDetails }: ArtifactSectionProp
     <Card>
       <CardHeader
         title="Artifacts"
-        subtitle={`${Object.keys(artifactDetails).length || phases.filter(p => p.artifact_id).length} artifact${phases.filter(p => p.artifact_id).length === 1 ? '' : 's'} produced`}
+        subtitle={(() => {
+          const artifactCount = Object.keys(artifactDetails).length || phases.filter(p => p.artifact_id).length
+          return `${artifactCount} artifact${artifactCount === 1 ? '' : 's'} produced`
+        })()}
       />
       <CardContent>
         <div className="space-y-2">

@@ -1,3 +1,5 @@
+import { Link, useNavigate } from 'react-router-dom'
+
 import { Card, CardContent, CardHeader } from '../../components'
 import type { WorkflowSummary } from '../../types'
 
@@ -6,18 +8,20 @@ interface RecentWorkflowsTableProps {
 }
 
 export function RecentWorkflowsTable({ workflows }: RecentWorkflowsTableProps) {
+  const navigate = useNavigate()
+
   return (
     <Card>
       <CardHeader
         title="Recent Workflows"
         subtitle="Latest workflow executions"
         action={
-          <a
-            href="/workflows"
+          <Link
+            to="/workflows"
             className="text-xs text-[var(--color-accent)] hover:underline"
           >
             View all →
-          </a>
+          </Link>
         }
       />
       <CardContent noPadding>
@@ -48,7 +52,7 @@ export function RecentWorkflowsTable({ workflows }: RecentWorkflowsTableProps) {
                 <tr
                   key={workflow.id}
                   className="border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-surface-elevated)] cursor-pointer transition-colors"
-                  onClick={() => (window.location.href = `/workflows/${workflow.id}`)}
+                  onClick={() => navigate(`/workflows/${workflow.id}`)}
                 >
                   <td className="px-4 py-3">
                     <span className="text-sm font-medium text-[var(--color-text-primary)]">

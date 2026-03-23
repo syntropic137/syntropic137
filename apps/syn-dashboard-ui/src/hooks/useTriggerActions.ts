@@ -13,7 +13,6 @@ export interface UseTriggerActionsResult {
 }
 
 export function useTriggerActions(
-  _triggers: TriggerSummary[],
   setTriggers: React.Dispatch<React.SetStateAction<TriggerSummary[]>>,
   fetchTriggers: (showLoader?: boolean) => void,
 ): UseTriggerActionsResult {

@@ -3,13 +3,12 @@ import { Clock } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 import { Card, CardContent, CardHeader } from '../../components'
-import type { ArtifactResponse, ExecutionDetailResponse } from '../../types'
+import type { ExecutionDetailResponse } from '../../types'
 import { phaseStatusColors, phaseStatusIcons } from './executionConstants'
 
 interface PhaseTimelineProps {
   phases: ExecutionDetailResponse['phases']
   now: number
-  artifactDetails: Record<string, ArtifactResponse>
 }
 
 export function PhaseTimeline({ phases, now }: PhaseTimelineProps) {

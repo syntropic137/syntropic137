@@ -3,14 +3,14 @@
  */
 
 /**
- * Format an ISO timestamp to HH:MM:SS local time.
+ * Format an ISO timestamp to a locale time string (e.g. "1:23:45 PM"), or the browser default.
  */
 export function formatTime(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString()
 }
 
 /**
- * Format an ISO date string to a locale date string, or '\u2014' if null/empty.
+ * Format an ISO date string to a full locale date+time string, or '\u2014' if null/empty.
  */
 export function formatDate(dateStr: string | null | undefined): string {
   if (!dateStr) return '\u2014'

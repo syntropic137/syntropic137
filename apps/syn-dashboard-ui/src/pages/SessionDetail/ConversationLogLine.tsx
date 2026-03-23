@@ -58,7 +58,11 @@ export function ConversationLogLine({
             <button
               onClick={(e) => {
                 e.stopPropagation()
-                const content = JSON.stringify(line.parsed || JSON.parse(line.raw), null, 2)
+                let parsed = line.parsed
+                if (!parsed) {
+                  try { parsed = JSON.parse(line.raw) } catch { parsed = undefined }
+                }
+                const content = parsed ? JSON.stringify(parsed, null, 2) : line.raw
                 onCopy(content, line.line_number)
               }}
               className={clsx(
@@ -82,7 +86,10 @@ export function ConversationLogLine({
             </button>
           </div>
           <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs text-[var(--color-text-secondary)]">
-            {JSON.stringify(line.parsed || JSON.parse(line.raw), null, 2)}
+            {(() => {
+              if (line.parsed) return JSON.stringify(line.parsed, null, 2)
+              try { return JSON.stringify(JSON.parse(line.raw), null, 2) } catch { return line.raw }
+            })()}
           </pre>
         </div>
       )}

@@ -101,7 +101,7 @@ export function ExecutionDetail() {
         <MetricCard title="Artifacts" value={execution.artifact_ids.length} icon={FileText} color="accent" href="/artifacts" />
       </div>
 
-      <PhaseTimeline phases={execution.phases} now={now} artifactDetails={artifactDetails} />
+      <PhaseTimeline phases={execution.phases} now={now} />
 
       {execution.artifact_ids.length > 0 && (
         <ArtifactSection phases={execution.phases} artifactDetails={artifactDetails} />

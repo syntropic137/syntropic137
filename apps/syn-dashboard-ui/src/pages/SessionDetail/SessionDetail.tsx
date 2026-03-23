@@ -55,7 +55,7 @@ export function SessionDetail() {
     prevScrollHeightRef.current = currentHeight
     const heightDiff = currentHeight - prevHeight
     if (prevHeight > 0 && heightDiff > 0 && window.scrollY > 50) {
-      window.scrollBy({ top: heightDiff, behavior: 'instant' })
+      window.scrollBy({ top: heightDiff, behavior: 'auto' })
     }
   }, [session?.operations?.length])
 
