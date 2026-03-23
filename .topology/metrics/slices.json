@@ -7,67 +7,70 @@
   "schema_version": "1.0.0",
   "slices": [
     {
-      "id": "packages.syn-collector",
+      "id": "scripts.validate_domain_events",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 2,
         "internal_imports": 0,
-        "module_count": 9,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "packages.syn-collector.src.syn_collector.collector.service",
-        "packages.syn-collector.src.syn_collector.watcher.transcript",
-        "packages.syn-collector.src.syn_collector.watcher.base",
-        "packages.syn-collector.src.syn_collector.events.ids",
-        "packages.syn-collector.src.syn_collector.client.http",
-        "packages.syn-collector.src.syn_collector.watcher.hooks",
-        "packages.syn-collector.src.syn_collector.cli",
-        "packages.syn-collector.src.syn_collector.collector.dedup",
-        "packages.syn-collector.src.syn_collector.collector.store"
-      ]
-    },
-    {
-      "id": "docker.sidecar-proxy",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
         "module_count": 1,
         "outbound_coupling": 0,
         "sis": 1.0
       },
       "modules": [
-        "docker.sidecar-proxy.token_injector"
+        "scripts.validate_domain_events"
       ]
     },
     {
-      "id": "conftest",
+      "id": "apps.syn-api",
       "metrics": {
         "cross_slice_imports": 0,
-        "inbound_coupling": 0,
+        "inbound_coupling": 3,
         "internal_imports": 0,
-        "module_count": 1,
+        "module_count": 40,
         "outbound_coupling": 0,
         "sis": 1.0
       },
       "modules": [
-        "conftest"
-      ]
-    },
-    {
-      "id": "lib.syntropic137-claude-plugin",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "lib.syntropic137-claude-plugin.hooks.handlers.session-start"
+        "apps.syn-api.src.syn_api.v1.executions",
+        "apps.syn-api.src.syn_api.v1.realtime",
+        "apps.syn-api.src.syn_api.v1.workspaces",
+        "apps.syn-api.src.syn_api.routes.sse",
+        "apps.syn-api.src.syn_api.routes.executions",
+        "apps.syn-api.src.syn_api.v1.systems",
+        "apps.syn-api.src.syn_api.v1.config",
+        "apps.syn-api.src.syn_api.routes.artifacts",
+        "apps.syn-api.src.syn_api.routes.organizations",
+        "apps.syn-api.src.syn_api.main",
+        "apps.syn-api.src.syn_api.v1.lifecycle",
+        "apps.syn-api.src.syn_api.routes.workflows",
+        "apps.syn-api.src.syn_api.v1.insights",
+        "apps.syn-api.src.syn_api.routes.execution",
+        "apps.syn-api.src.syn_api.config",
+        "apps.syn-api.src.syn_api.middleware.webhook_recorder",
+        "apps.syn-api.src.syn_api.routes.control",
+        "apps.syn-api.src.syn_api.routes.observability",
+        "apps.syn-api.src.syn_api._wiring",
+        "apps.syn-api.src.syn_api.routes.metrics",
+        "apps.syn-api.src.syn_api.v1.repos",
+        "apps.syn-api.src.syn_api.v1.metrics",
+        "apps.syn-api.src.syn_api.routes.conversations",
+        "apps.syn-api.src.syn_api.v1.conversations",
+        "apps.syn-api.src.syn_api.routes.insights",
+        "apps.syn-api.src.syn_api.routes.triggers",
+        "apps.syn-api.src.syn_api.routes.webhooks",
+        "apps.syn-api.src.syn_api.v1.sessions",
+        "apps.syn-api.src.syn_api.v1.organizations",
+        "apps.syn-api.src.syn_api.v1.triggers",
+        "apps.syn-api.src.syn_api.routes.sessions",
+        "apps.syn-api.src.syn_api.routes.events",
+        "apps.syn-api.src.syn_api.v1.observability",
+        "apps.syn-api.src.syn_api.routes.repos",
+        "apps.syn-api.src.syn_api.v1.workflows",
+        "apps.syn-api.src.syn_api.v1.github",
+        "apps.syn-api.src.syn_api.v1.artifacts",
+        "apps.syn-api.src.syn_api.routes.systems",
+        "apps.syn-api.src.syn_api.v1.agents",
+        "apps.syn-api.src.syn_api.routes.costs"
       ]
     },
     {
@@ -81,325 +84,60 @@
         "sis": 1.0
       },
       "modules": [
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.testing.scenario.result_validator",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.query",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.proto.eventstore.v1.eventstore_pb2",
-        "lib.event-sourcing-platform.event-store.sdks.sdk-py.sdk_py.gen.eventstore.v1.eventstore_pb2_grpc",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.testing.scenario.errors",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.grpc_client",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.aggregate",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.event_store",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.checkpoint",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.event",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.stores.memory_checkpoint",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.repository",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.subscriptions.coordinator",
-        "lib.event-sourcing-platform.infra-as-code.tools.render_config",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.errors",
         "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.command",
-        "lib.event-sourcing-platform.event-store.sdks.sdk-py.sdk_py.client_rt",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.decorators.commands",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.memory",
+        "lib.event-sourcing-platform.event-store.sdks.sdk-py.sdk_py.gen.eventstore.v1.eventstore_pb2_grpc",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.stores.memory_checkpoint",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.testing.scenario.result_validator",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.testing.scenario.errors",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.stores.postgres_checkpoint",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.subscriptions.coordinator",
         "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.testing.scenario.aggregate_scenario",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.errors",
         "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.decorators.events",
         "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.proto.eventstore.v1.eventstore_pb2_grpc",
-        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.stores.postgres_checkpoint"
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.memory",
+        "lib.event-sourcing-platform.infra-as-code.tools.render_config",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.repository",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.query",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.event_store",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.grpc_client",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.aggregate",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.decorators.commands",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.proto.eventstore.v1.eventstore_pb2",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.checkpoint",
+        "lib.event-sourcing-platform.event-store.sdks.sdk-py.sdk_py.client_rt",
+        "lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.core.event"
       ]
     },
     {
-      "id": "workspaces.ws-8ee55176",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "workspaces.ws-8ee55176.repos.sandbox_syn-engineer-beta.utils.generate_report"
-      ]
-    },
-    {
-      "id": "scripts.pre_merge_validation",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 1,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.pre_merge_validation"
-      ]
-    },
-    {
-      "id": "scripts.op_env_export",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.op_env_export"
-      ]
-    },
-    {
-      "id": "scripts.manage_webhook_url",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.manage_webhook_url"
-      ]
-    },
-    {
-      "id": "scripts.e2e_acceptance_tests",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.e2e_acceptance_tests"
-      ]
-    },
-    {
-      "id": "packages.syn-domain",
+      "id": "ci.fitness",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 3,
         "internal_imports": 0,
-        "module_count": 213,
+        "module_count": 4,
         "outbound_coupling": 0,
         "sis": 1.0
       },
       "modules": [
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_sessions",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_detail",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.UpdateOrganizationCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_organization",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_correlation.RepoCorrelationHandlers",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.queries.get_trigger_history",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_cost.GetRepoCostHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ArtifactRepositoryPort",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_health",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.InstallationRevokedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.OrganizationUpdatedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.upload_artifact.UploadArtifactHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_workflow_detail.GetWorkflowDetailHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.get_installation.GetInstallationHandler",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.events.agent_observation",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerResumedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_session",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.projection",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.queries.get_installation",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_health",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.SystemUpdatedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_failure",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.debouncer",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.RefreshTokenCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerPausedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerDeletedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_history",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.AppInstalledEvent",
-        "packages.syn-domain.src.syn_domain.contexts.github._shared.github_client",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.tool_execution",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_health.GetRepoHealthHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_activity",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_workflow_detail.projection",
-        "packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_query_store",
-        "packages.syn-domain.src.syn_domain.contexts.organization._shared.organization_projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.SystemCreatedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.trigger_history.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.WorkflowTemplateRepositoryPort",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.WorkspaceServicePort",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_systems.projection",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.tool_timeline.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_activity",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.RegisterRepoCommand",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TokenRefreshedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.record_operation.RecordOperationHandler",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts._shared.value_objects",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.session_summary",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ObservabilityServicePort",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.tool_tokens",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_failures.GetRepoFailuresHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_contribution_heatmap",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.UpdateSystemCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workspace_metrics.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.queries.list_accessible_repos",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.dashboard_metrics.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.RegisterTriggerCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.value_objects",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.RepoUnassignedFromSystemEvent",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.refresh_token.RefreshTokenHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_organizations.ListOrganizationsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.read_models.installation",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_status",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.read_models.accessible_repository",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.tool_timeline.ToolTimelineHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.OrganizationCreatedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.token_metrics.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.conftest",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.errors",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ArtifactQueryServicePort",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_patterns",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.list_artifacts.projection",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions._shared.value_objects",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_executions.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_workflows.ListWorkflowsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.SessionCostHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.CreateOrganizationCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_cost",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.record_operation.commands",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.DeleteSystemCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.SystemDeletedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.create_organization.CreateOrganizationHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.system_status",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.token_metrics.TokenMetricsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.events.ArtifactUploadedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.RepoRegisteredEvent",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_activity.GetSystemActivityHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_activity.GetRepoActivityHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.PauseTriggerCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.get_organization.GetOrganizationHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.InstallationSuspendedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_installation.InstallationAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.dashboard_metrics.GetDashboardMetricsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ArtifactContentStoragePort",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.list_artifacts.ListArtifactsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerFiredEvent",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_cost.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_cost",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_health.projection",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_history.GetSystemHistoryHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.global_overview",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_failures",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_todo.projection",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.ListTriggersHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.contribution_heatmap",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.ExecutionValueObjects",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.create_artifact.CreateArtifactHandler",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.session_cost",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_execution_correlation",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_workflows.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.create_system.CreateSystemHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_cost",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.ExecutionCostHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.DeleteTriggerCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_correlation.projection",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.OrganizationDeletedEvent",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workspace_metrics",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.ports",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.SessionRepositoryPort",
-        "packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_presets",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.CreateSystemCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_systems.ListSystemsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.UnassignRepoFromSystemCommand",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.AgentFactoryPort",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.get_installation.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ConversationStoragePort",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.system_cost",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.read_models.artifact_summary",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.safety_guards",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.register_repo.RegisterRepoHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_activity",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_summary",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.execution_cost",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.token_metrics",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerRegisteredEvent",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.global_cost.GetGlobalCostHandler",
-        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.services.artifact_query_service",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler",
-        "packages.syn-domain.src.syn_domain.contexts.github._shared.value_objects",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker",
-        "packages.syn-domain.src.syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_sessions.GetRepoSessionsHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.system_patterns",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.DeleteOrganizationCommand",
-        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.ResumeTriggerCommand",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.manage_system.ManageSystemHandler",
-        "packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.workflow_definition",
-        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.ListReposHandler",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService",
-        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller",
-        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.ListSessionsHandler"
+        "ci.fitness.event_sourcing.conftest",
+        "ci.fitness.conftest",
+        "ci.fitness._imports",
+        "ci.fitness._event_discovery"
+      ]
+    },
+    {
+      "id": "scripts.extract_openapi",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.extract_openapi"
       ]
     },
     {
@@ -417,7 +155,7 @@
       ]
     },
     {
-      "id": "lib.agent-paradise-standards-system",
+      "id": "scripts.e2e_acceptance_tests",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 0,
@@ -427,7 +165,67 @@
         "sis": 1.0
       },
       "modules": [
-        "lib.agent-paradise-standards-system.standards-experimental.v1.EXP-V1-0002-todo-tracker.examples.sample-repos.python.sample"
+        "scripts.e2e_acceptance_tests"
+      ]
+    },
+    {
+      "id": "scripts.replay_webhooks",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.replay_webhooks"
+      ]
+    },
+    {
+      "id": "scripts.add_test_markers",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.add_test_markers"
+      ]
+    },
+    {
+      "id": "lib::agent_paradise_standards_system",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 3,
+        "internal_imports": 0,
+        "module_count": 19,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::substandards::CL01_cli_contract",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::substandards::SS01_substandard_structure",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::LANG01_rust",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::VIZ01_dashboard",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::templates::standard::skeleton",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0003_fitness_functions",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0002_todo_tracker",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::VIZ01_mermaid",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::VIZ01_dashboard",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::3D01_force_directed",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::templates::experiment::skeleton",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::LANG01_rust",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::3D01_force_directed",
+        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology",
+        "lib::agent_paradise_standards_system::crates::aps_cli",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::VIZ01_mermaid",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta",
+        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::templates::substandard::skeleton"
       ]
     },
     {
@@ -445,17 +243,27 @@
       ]
     },
     {
-      "id": "scripts.seed_triggers",
+      "id": "packages.syn-shared",
       "metrics": {
         "cross_slice_imports": 0,
-        "inbound_coupling": 0,
+        "inbound_coupling": 3,
         "internal_imports": 0,
-        "module_count": 1,
+        "module_count": 11,
         "outbound_coupling": 0,
         "sis": 1.0
       },
       "modules": [
-        "scripts.seed_triggers"
+        "packages.syn-shared.src.syn_shared.settings.op_resolver",
+        "packages.syn-shared.src.syn_shared.settings.github",
+        "packages.syn-shared.src.syn_shared.settings.config",
+        "packages.syn-shared.src.syn_shared.settings.credentials",
+        "packages.syn-shared.src.syn_shared.settings.workspace",
+        "packages.syn-shared.src.syn_shared.logging.interface",
+        "packages.syn-shared.src.syn_shared.testing",
+        "packages.syn-shared.src.syn_shared.logging.structured",
+        "packages.syn-shared.src.syn_shared.events.factories",
+        "packages.syn-shared.src.syn_shared.events",
+        "packages.syn-shared.src.syn_shared.settings.storage"
       ]
     },
     {
@@ -473,7 +281,29 @@
       ]
     },
     {
-      "id": "scripts.capture_codecity",
+      "id": "packages.syn-collector",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 2,
+        "internal_imports": 0,
+        "module_count": 9,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "packages.syn-collector.src.syn_collector.collector.store",
+        "packages.syn-collector.src.syn_collector.watcher.hooks",
+        "packages.syn-collector.src.syn_collector.cli",
+        "packages.syn-collector.src.syn_collector.watcher.transcript",
+        "packages.syn-collector.src.syn_collector.collector.dedup",
+        "packages.syn-collector.src.syn_collector.collector.service",
+        "packages.syn-collector.src.syn_collector.client.http",
+        "packages.syn-collector.src.syn_collector.watcher.base",
+        "packages.syn-collector.src.syn_collector.events.ids"
+      ]
+    },
+    {
+      "id": "scripts.generate_llms_txt",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 0,
@@ -483,54 +313,195 @@
         "sis": 1.0
       },
       "modules": [
-        "scripts.capture_codecity"
+        "scripts.generate_llms_txt"
       ]
     },
     {
-      "id": "lib::event_sourcing_platform",
+      "id": "scripts.seed_triggers",
       "metrics": {
-        "cross_slice_imports": 179,
-        "inbound_coupling": 1,
-        "internal_imports": 5,
-        "module_count": 6,
-        "outbound_coupling": 15,
-        "sis": 0.02717391304347826
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
       },
       "modules": [
-        "lib::event_sourcing_platform::event_store::eventstore_bin",
-        "lib::event_sourcing_platform::vsa::vsa_core",
-        "lib::event_sourcing_platform::event_sourcing::rust",
-        "lib::event_sourcing_platform::vsa::vsa_cli",
-        "lib::event_sourcing_platform::event_store::sdks::sdk_rs",
-        "lib::event_sourcing_platform::vsa::vsa_wasm"
+        "scripts.seed_triggers"
       ]
     },
     {
-      "id": "packages.syn-shared",
+      "id": "scripts.import_check",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.import_check"
+      ]
+    },
+    {
+      "id": "apps.syn-cli",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 3,
         "internal_imports": 0,
-        "module_count": 11,
+        "module_count": 22,
         "outbound_coupling": 0,
         "sis": 1.0
       },
       "modules": [
-        "packages.syn-shared.src.syn_shared.settings.op_resolver",
-        "packages.syn-shared.src.syn_shared.events.factories",
-        "packages.syn-shared.src.syn_shared.logging.structured",
-        "packages.syn-shared.src.syn_shared.testing",
-        "packages.syn-shared.src.syn_shared.settings.config",
-        "packages.syn-shared.src.syn_shared.logging.interface",
-        "packages.syn-shared.src.syn_shared.settings.github",
-        "packages.syn-shared.src.syn_shared.events",
-        "packages.syn-shared.src.syn_shared.settings.workspace",
-        "packages.syn-shared.src.syn_shared.settings.credentials",
-        "packages.syn-shared.src.syn_shared.settings.storage"
+        "apps.syn-cli.src.syn_cli.commands.control",
+        "apps.syn-cli.src.syn_cli.commands.org",
+        "apps.syn-cli.src.syn_cli.commands.sessions",
+        "apps.syn-cli.src.syn_cli.commands.agent",
+        "apps.syn-cli.src.syn_cli.commands.system",
+        "apps.syn-cli.src.syn_cli.commands.workflow",
+        "apps.syn-cli.src.syn_cli.main",
+        "apps.syn-cli.src.syn_cli.commands.observe",
+        "apps.syn-cli.src.syn_cli.client",
+        "apps.syn-cli.src.syn_cli.commands._workflow_resolver",
+        "apps.syn-cli.src.syn_cli.commands.watch",
+        "apps.syn-cli.src.syn_cli.commands.metrics",
+        "apps.syn-cli.src.syn_cli.commands.artifacts",
+        "apps.syn-cli.src.syn_cli.commands.repo",
+        "apps.syn-cli.src.syn_cli.commands.costs",
+        "apps.syn-cli.src.syn_cli._output",
+        "apps.syn-cli.src.syn_cli.commands.config",
+        "apps.syn-cli.src.syn_cli.commands.execution",
+        "apps.syn-cli.src.syn_cli.commands.triggers",
+        "apps.syn-cli.src.syn_cli.commands.insights",
+        "apps.syn-cli.src.syn_cli.commands.conversations",
+        "apps.syn-cli.src.syn_cli.commands.events"
       ]
     },
     {
-      "id": "scripts.replay_webhooks",
+      "id": "infra.scripts",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 1,
+        "internal_imports": 0,
+        "module_count": 7,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "infra.scripts.github_manifest",
+        "infra.scripts.cloudflare_tunnel",
+        "infra.scripts.init_minio_buckets",
+        "infra.scripts.shared",
+        "infra.scripts.secrets_setup",
+        "infra.scripts.health_check",
+        "infra.scripts.setup"
+      ]
+    },
+    {
+      "id": "packages.syn-perf",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 10,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "packages.syn-perf.src.syn_perf.reporters.json_report",
+        "packages.syn-perf.src.syn_perf.benchmarks.throughput",
+        "packages.syn-perf.src.syn_perf.benchmarks.single",
+        "packages.syn-perf.src.syn_perf.benchmarks.parallel",
+        "packages.syn-perf.src.syn_perf.benchmarks.base",
+        "packages.syn-perf.src.syn_perf.reporters.console",
+        "packages.syn-perf.src.syn_perf.metrics.collector",
+        "packages.syn-perf.src.syn_perf.benchmarks.compare",
+        "packages.syn-perf.src.syn_perf.cli",
+        "packages.syn-perf.src.syn_perf.metrics.stats"
+      ]
+    },
+    {
+      "id": "lib.agentic-primitives",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 3,
+        "internal_imports": 0,
+        "module_count": 65,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.github",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.session-start",
+        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.buffer",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.event_parser",
+        "lib.agentic-primitives.plugins.sdlc.hooks.handlers.user-prompt",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.post-tool-use",
+        "lib.agentic-primitives.plugins.observability.hooks.git.install",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.settings",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.user-prompt",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.config",
+        "lib.agentic-primitives.plugins.observability.hooks.handlers.observe",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.types",
+        "lib.agentic-primitives.plugins.sdlc.hooks.validators.security.python",
+        "lib.agentic-primitives.plugins.sdlc.hooks.git.install",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.notification",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.python",
+        "lib.agentic-primitives.plugins.research.tools.firecrawl.firecrawl_scraper",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.git.install",
+        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.player",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.stop",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.user-prompt",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.stop",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.workspace",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.subagent-stop",
+        "lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.settings",
+        "lib.agentic-primitives.plugins.sdlc.hooks.validators.prompt.pii",
+        "lib.agentic-primitives.scripts.run_benchmark",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.notification",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.prompt.pii",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.local",
+        "lib.agentic-primitives.plugins.sdlc.hooks.handlers.pre-tool-use",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.retry",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.subagent-stop",
+        "lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.git.install",
+        "lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.logger",
+        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.emitter",
+        "lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.handlers.observe",
+        "lib.agentic-primitives.scripts.build-provider",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.post-tool-use",
+        "lib.agentic-primitives.plugins.sdlc.hooks.validators.security.file",
+        "lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.github",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.handlers.user-prompt",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.handlers.pre-tool-use",
+        "lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.config",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.output_stream",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.pre-compact",
+        "lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env",
+        "lib.agentic-primitives.scripts.python_qa",
+        "lib.agentic-primitives.plugins.workspace.hooks.handlers.session-end",
+        "lib.agentic-primitives.plugins.sdlc.hooks.validators.security.bash",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.base",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.env-management.references.python.generate_env_example",
+        "lib.agentic-primitives.scripts.capture_recording",
+        "lib.agentic-primitives.lib.python.agentic_events.conftest",
+        "lib.agentic-primitives.plugins.sdlc.skills.env-management.references.python.generate_env_example",
+        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.fixtures",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.session-end",
+        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker",
+        "lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.formatters",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.pre-compact",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.bash",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env",
+        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.recorder",
+        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.session-start",
+        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.file"
+      ]
+    },
+    {
+      "id": "docker.token-injector",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 0,
@@ -540,7 +511,447 @@
         "sis": 1.0
       },
       "modules": [
-        "scripts.replay_webhooks"
+        "docker.token-injector.token_injector"
+      ]
+    },
+    {
+      "id": "scripts.pre_merge_validation",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 1,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.pre_merge_validation"
+      ]
+    },
+    {
+      "id": "scripts.validate_event_store",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 2,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.validate_event_store"
+      ]
+    },
+    {
+      "id": "scripts.validate_isolation",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.validate_isolation"
+      ]
+    },
+    {
+      "id": "docker.sidecar-proxy",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "docker.sidecar-proxy.token_injector"
+      ]
+    },
+    {
+      "id": "packages.syn-adapters",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 3,
+        "internal_imports": 0,
+        "module_count": 55,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "packages.syn-adapters.src.syn_adapters.storage.event_store_client",
+        "packages.syn-adapters.src.syn_adapters.agents.mock",
+        "packages.syn-adapters.src.syn_adapters.object_storage.minio",
+        "packages.syn-adapters.src.syn_adapters.artifacts.bundle",
+        "packages.syn-adapters.src.syn_adapters.storage.artifact_storage.memory",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter",
+        "packages.syn-adapters.src.syn_adapters.subscriptions.service",
+        "packages.syn-adapters.src.syn_adapters.control.ports",
+        "packages.syn-adapters.src.syn_adapters.control.adapters.projection",
+        "packages.syn-adapters.src.syn_adapters.events.buffer",
+        "packages.syn-adapters.src.syn_adapters.storage.trigger_query_store",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets",
+        "packages.syn-adapters.src.syn_adapters.projections.realtime",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.tokens.token_injection_adapter",
+        "packages.syn-adapters.src.syn_adapters.github.client",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.memory.memory_adapter",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.tokens.token_vending_adapter",
+        "packages.syn-adapters.src.syn_adapters.object_storage.factory",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.docker.shared_envoy_adapter",
+        "packages.syn-adapters.src.syn_adapters.object_storage.protocol",
+        "packages.syn-adapters.src.syn_adapters.storage.in_memory",
+        "packages.syn-adapters.src.syn_adapters.projections.trigger_query_projection",
+        "packages.syn-adapters.src.syn_adapters.subscriptions.position_checkpoint",
+        "packages.syn-adapters.src.syn_adapters.agents.models",
+        "packages.syn-adapters.src.syn_adapters.storage.artifact_storage.minio",
+        "packages.syn-adapters.src.syn_adapters.projection_stores.protocol",
+        "packages.syn-adapters.src.syn_adapters.projection_stores.postgres_store",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.docker.docker_sidecar_adapter",
+        "packages.syn-adapters.src.syn_adapters.agents.session_context",
+        "packages.syn-adapters.src.syn_adapters.agents.protocol",
+        "packages.syn-adapters.src.syn_adapters.events.schema",
+        "packages.syn-adapters.src.syn_adapters.projections.manager",
+        "packages.syn-adapters.src.syn_adapters.object_storage.local",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.service.managed_workspace",
+        "packages.syn-adapters.src.syn_adapters.control.adapters.redis_adapter",
+        "packages.syn-adapters.src.syn_adapters.control.controller",
+        "packages.syn-adapters.src.syn_adapters.object_storage.supabase",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_service",
+        "packages.syn-adapters.src.syn_adapters.conversations.minio",
+        "packages.syn-adapters.src.syn_adapters.projection_stores.memory_store",
+        "packages.syn-adapters.src.syn_adapters.projection_stores",
+        "packages.syn-adapters.src.syn_adapters.storage.repositories",
+        "packages.syn-adapters.src.syn_adapters.projections.session_tools",
+        "packages.syn-adapters.src.syn_adapters.collector.client",
+        "packages.syn-adapters.src.syn_adapters.storage",
+        "packages.syn-adapters.src.syn_adapters.events.store",
+        "packages.syn-adapters.src.syn_adapters.events.models",
+        "packages.syn-adapters.src.syn_adapters.control.adapters.memory",
+        "packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service",
+        "packages.syn-adapters.src.syn_adapters.workspace_backends.recording.adapter",
+        "packages.syn-adapters.src.syn_adapters.conversations.protocol",
+        "packages.syn-adapters.src.syn_adapters.agents.claude",
+        "packages.syn-adapters.src.syn_adapters.storage.artifact_storage.factory",
+        "packages.syn-adapters.src.syn_adapters.control.state_machine",
+        "packages.syn-adapters.src.syn_adapters.agents.factory"
+      ]
+    },
+    {
+      "id": "packages.syn-domain",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 3,
+        "internal_imports": 0,
+        "module_count": 213,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.session_summary",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.create_system.CreateSystemHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.CreateOrganizationCommand",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.dashboard_metrics",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.contribution_heatmap",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.OrganizationDeletedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ConversationStoragePort",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.conftest",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_cost.projection",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.create_artifact.CreateArtifactHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.SessionRepositoryPort",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_executions.projection",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.tool_execution",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.value_objects",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.global_overview",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_patterns",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerFiredEvent",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.trigger_history.GetTriggerHistoryHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github._shared.value_objects",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.register_repo.RegisterRepoHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_health",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_organizations.ListOrganizationsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_execution_correlation",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_failures.GetRepoFailuresHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerDeletedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_sessions.GetRepoSessionsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.RegisterTriggerCommand",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.ListReposHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.DeleteSystemCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.DeleteOrganizationCommand",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerRegisteredEvent",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.record_operation.commands",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_execution_summary",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.errors",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.OrganizationCreatedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.projection",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ArtifactContentStoragePort",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.list_artifacts.ListArtifactsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_health.GetRepoHealthHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.system_status",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.get_installation.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.UpdateOrganizationCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.create_organization.CreateOrganizationHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.PauseTriggerCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.SystemCreatedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.upload_artifact.UploadArtifactHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_session",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.ports",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.refresh_token.RefreshTokenHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.SessionCostHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.execution_cost",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.session_cost",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.queries.list_accessible_repos",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerCondition",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_todo.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.OrganizationUpdatedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.queries.get_trigger_history",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system",
+        "packages.syn-domain.src.syn_domain.contexts.github._shared.github_client",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.RegisterRepoCommand",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.manage_system.ManageSystemHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workspace_metrics",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.dashboard_metrics.GetDashboardMetricsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.token_metrics",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerPausedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.AgentFactoryPort",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_activity",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.ListSessionsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ArtifactRepositoryPort",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts._shared.value_objects",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.trigger_history.projection",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.read_models.installation",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EmbeddedEventScanner",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.events.agent_observation",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.tool_tokens",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.ports.ArtifactContentStoragePort",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.services.artifact_query_service",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_cost",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.get_installation.GetInstallationHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.SubagentTracker",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_contribution_heatmap",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.workflow_definition",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TokenRefreshedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.ResumeTriggerCommand",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.WorkflowTemplateRepositoryPort",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_workflows.ListWorkflowsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.complete_session.CompleteSessionHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_failures",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_failure",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_status",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.tool_timeline.projection",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.RecordTriggerFiredCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_organization",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ArtifactQueryServicePort",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_cost.GetRepoCostHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_activity.GetRepoActivityHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.dashboard_metrics.projection",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.WorkspaceServicePort",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_workflows.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_cost",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.InstallationSuspendedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.contribution_heatmap.TimescaleHeatmapQuery",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.queries.get_installation",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_activity",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.UpdateSystemCommand",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration._shared.ExecutionValueObjects",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.tool_timeline.ToolTimelineHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.DeleteTriggerCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.RepoUnassignedFromSystemEvent",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.ObservabilityServicePort",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_workflow_detail.GetWorkflowDetailHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.UnassignRepoFromSystemCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_health.projection",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.InstallationRevokedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.ExecutionCostHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_query_store",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.SystemUpdatedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_sessions",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.commands.CreateSystemCommand",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.system_cost",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.CancelSignalPoller",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.start_session.StartSessionHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_system_history",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.system_patterns",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.events.ArtifactUploadedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_summary",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_history.GetSystemHistoryHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.commands.RefreshTokenCommand",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.token_metrics.TokenMetricsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.workflow_detail",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.slices.list_artifacts.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_systems.ListSystemsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_presets",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.debouncer",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects",
+        "packages.syn-domain.src.syn_domain.contexts.artifacts.domain.read_models.artifact_summary",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.cost_calculator",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.SystemDeletedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.list_systems.projection",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.register_trigger.RegisterTriggerHandler",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions._shared.value_objects",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.queries.get_repo_cost",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.TriggerResumedEvent",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.read_models.accessible_repository",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_correlation.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_health",
+        "packages.syn-domain.src.syn_domain.contexts.organization._shared.organization_projection",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.record_operation.RecordOperationHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.ListTriggersHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_workflow_detail.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.read_models.repo_activity",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_activity.GetSystemActivityHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_installation.InstallationAggregate",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_correlation.RepoCorrelationHandlers",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.events.AppInstalledEvent",
+        "packages.syn-domain.src.syn_domain.contexts.organization.domain.events.RepoRegisteredEvent",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workspace_metrics.projection",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.global_cost.GetGlobalCostHandler",
+        "packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.token_metrics.projection",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.phase_detail",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.ports.WorkflowExecutionRepositoryPort",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.get_organization.GetOrganizationHandler",
+        "packages.syn-domain.src.syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.safety_guards",
+        "packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler",
+        "packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerConfig"
+      ]
+    },
+    {
+      "id": "lib::agent-paradise-standards-system",
+      "metrics": {
+        "cross_slice_imports": 47,
+        "inbound_coupling": 2,
+        "internal_imports": 130,
+        "module_count": 42,
+        "outbound_coupling": 10,
+        "sis": 0.7344632768361582
+      },
+      "modules": [
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::grammars",
+        "lib::agent-paradise-standards-system::crates::aps-core::versioning",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::grammars",
+        "lib::agent-paradise-standards-system::crates::aps-core::metadata",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::force_3d",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::codecity",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::render_mermaid",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::analyze_rust",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::index",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::examples::sample-repos::rust::sample",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::grammars::rust",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::complexity",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::grammars::python",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::artifact",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::grammars::rust",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::grammars::python",
+        "lib::agent-paradise-standards-system::crates::aps-core::promotion",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::queries",
+        "lib::agent-paradise-standards-system::crates::aps-core::diagnostics",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::render_aps",
+        "lib::agent-paradise-standards-system::crates::aps-core::discovery",
+        "lib::agent-paradise-standards-system::crates::aps-core::views",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::queries",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::complexity",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::render_mermaid",
+        "lib::agent-paradise-standards-system::crates::aps-core::templates",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::render_sample",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::force_3d",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::analyze_rust",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::clusters",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::vsa",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::render_aps",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::index",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::scanner",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::languages",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::render_sample",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::config",
+        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::codecity",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::vsa",
+        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::clusters"
+      ]
+    },
+    {
+      "id": "scripts.manage_webhook_url",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.manage_webhook_url"
+      ]
+    },
+    {
+      "id": "lib.ui-feedback",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 8,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.api.media",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.api.stats",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.memory",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.postgres",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.router",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.main",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.api.feedback",
+        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.protocol"
       ]
     },
     {
@@ -572,7 +983,7 @@
       ]
     },
     {
-      "id": "scripts.extract_openapi",
+      "id": "scripts.check_test_debt",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 0,
@@ -582,75 +993,182 @@
         "sis": 1.0
       },
       "modules": [
-        "scripts.extract_openapi"
+        "scripts.check_test_debt"
       ]
     },
     {
-      "id": "scripts.validate_isolation",
+      "id": "lib::event-sourcing-platform",
       "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.validate_isolation"
-      ]
-    },
-    {
-      "id": "scripts.generate-architecture-docs",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.generate-architecture-docs"
-      ]
-    },
-    {
-      "id": "packages.syn-perf",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 10,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "packages.syn-perf.src.syn_perf.benchmarks.single",
-        "packages.syn-perf.src.syn_perf.metrics.collector",
-        "packages.syn-perf.src.syn_perf.benchmarks.parallel",
-        "packages.syn-perf.src.syn_perf.benchmarks.compare",
-        "packages.syn-perf.src.syn_perf.reporters.json_report",
-        "packages.syn-perf.src.syn_perf.reporters.console",
-        "packages.syn-perf.src.syn_perf.cli",
-        "packages.syn-perf.src.syn_perf.benchmarks.throughput",
-        "packages.syn-perf.src.syn_perf.metrics.stats",
-        "packages.syn-perf.src.syn_perf.benchmarks.base"
-      ]
-    },
-    {
-      "id": "ci.fitness",
-      "metrics": {
-        "cross_slice_imports": 0,
+        "cross_slice_imports": 2599,
         "inbound_coupling": 3,
+        "internal_imports": 442,
+        "module_count": 56,
+        "outbound_coupling": 17,
+        "sis": 0.14534692535350213
+      },
+      "modules": [
+        "lib::event-sourcing-platform::event-sourcing::rust::projection",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::suggestions",
+        "lib::event-sourcing-platform::event-sourcing::rust::repository",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::query_scanner",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain",
+        "lib::event-sourcing-platform::vsa::vsa-core::manifest",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::slice_scanner",
+        "lib::event-sourcing-platform::vsa::vsa-cli::commands::init",
+        "lib::event-sourcing-platform::event-sourcing::rust::command",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::projection_scanner",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::upcaster",
+        "lib::event-sourcing-platform::vsa::vsa-cli::templates::context",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::projection",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::event",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::domain_scanner",
+        "lib::event-sourcing-platform::event-sourcing::rust::event",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::query",
+        "lib::event-sourcing-platform::event-sourcing::rust::client",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::query_slice_rules",
+        "lib::event-sourcing-platform::vsa::vsa-cli::commands::list",
+        "lib::event-sourcing-platform::vsa::vsa-core::integration_events",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation",
+        "lib::event-sourcing-platform::event-store::eventstore-core::trait_event_store",
+        "lib::event-sourcing-platform::event-sourcing::rust::examples::basic_aggregate",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::bounded_context_rules",
+        "lib::event-sourcing-platform::vsa::vsa-cli::commands::manifest",
+        "lib::event-sourcing-platform::event-sourcing::rust::examples::order_processing",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::command_scanner",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::aggregate",
+        "lib::event-sourcing-platform::event-store::eventstore-core::errors",
+        "lib::event-sourcing-platform::vsa::vsa-core::validator",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::event_scanner",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::value_object",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::rules",
+        "lib::event-sourcing-platform::event-store::eventstore-proto::build",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanners::aggregate_scanner",
+        "lib::event-sourcing-platform::vsa::vsa-core::domain::command",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::import_parser",
+        "lib::event-sourcing-platform::vsa::vsa-cli::commands::validate",
+        "lib::event-sourcing-platform::event-store::eventstore-backend-postgres::store_postgres",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::structure_rules",
+        "lib::event-sourcing-platform::event-sourcing::rust::aggregate",
+        "lib::event-sourcing-platform::vsa::vsa-core::framework",
+        "lib::event-sourcing-platform::vsa::vsa-cli::commands::generate",
+        "lib::event-sourcing-platform::event-store::eventstore-backend-memory::store_memory",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::slice_location_rules",
+        "lib::event-sourcing-platform::vsa::vsa-core::patterns",
+        "lib::event-sourcing-platform::event-sourcing::rust::error",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::integration_event_rules",
+        "lib::event-sourcing-platform::event-store::sdks::sdk-rs::examples::basic",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::dependency_rules",
+        "lib::event-sourcing-platform::vsa::vsa-core::scanner",
+        "lib::event-sourcing-platform::vsa::vsa-core::validation::isolation_rules",
+        "lib::event-sourcing-platform::vsa::vsa-core::bounded_contexts",
+        "lib::event-sourcing-platform::vsa::vsa-core::config",
+        "lib::event-sourcing-platform::vsa::vsa-cli::templates::engine"
+      ]
+    },
+    {
+      "id": "scripts.capture_codecity",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "scripts.capture_codecity"
+      ]
+    },
+    {
+      "id": "workspaces.ws-8ee55176",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "workspaces.ws-8ee55176.repos.sandbox_syn-engineer-beta.utils.generate_report"
+      ]
+    },
+    {
+      "id": "lib.syntropic137-claude-plugin",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "lib.syntropic137-claude-plugin.hooks.handlers.session-start"
+      ]
+    },
+    {
+      "id": "lib.agent-paradise-standards-system",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "lib.agent-paradise-standards-system.standards-experimental.v1.EXP-V1-0002-todo-tracker.examples.sample-repos.python.sample"
+      ]
+    },
+    {
+      "id": "conftest",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
+        "internal_imports": 0,
+        "module_count": 1,
+        "outbound_coupling": 0,
+        "sis": 1.0
+      },
+      "modules": [
+        "conftest"
+      ]
+    },
+    {
+      "id": "lib::event_sourcing_platform",
+      "metrics": {
+        "cross_slice_imports": 179,
+        "inbound_coupling": 1,
+        "internal_imports": 5,
+        "module_count": 6,
+        "outbound_coupling": 15,
+        "sis": 0.02717391304347826
+      },
+      "modules": [
+        "lib::event_sourcing_platform::vsa::vsa_cli",
+        "lib::event_sourcing_platform::event_store::sdks::sdk_rs",
+        "lib::event_sourcing_platform::vsa::vsa_wasm",
+        "lib::event_sourcing_platform::event_sourcing::rust",
+        "lib::event_sourcing_platform::event_store::eventstore_bin",
+        "lib::event_sourcing_platform::vsa::vsa_core"
+      ]
+    },
+    {
+      "id": "packages.syn-tokens",
+      "metrics": {
+        "cross_slice_imports": 0,
+        "inbound_coupling": 0,
         "internal_imports": 0,
         "module_count": 4,
         "outbound_coupling": 0,
         "sis": 1.0
       },
       "modules": [
-        "ci.fitness._imports",
-        "ci.fitness._event_discovery",
-        "ci.fitness.conftest",
-        "ci.fitness.event_sourcing.conftest"
+        "packages.syn-tokens.src.syn_tokens.vending",
+        "packages.syn-tokens.src.syn_tokens.spend",
+        "packages.syn-tokens.src.syn_tokens.models",
+        "packages.syn-tokens.src.syn_tokens.threshold"
       ]
     },
     {
@@ -668,154 +1186,7 @@
       ]
     },
     {
-      "id": "lib.agentic-primitives",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 3,
-        "internal_imports": 0,
-        "module_count": 65,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.types",
-        "lib.agentic-primitives.scripts.capture_recording",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.handlers.user-prompt",
-        "lib.agentic-primitives.plugins.sdlc.hooks.validators.security.bash",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.pre-compact",
-        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.buffer",
-        "lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env",
-        "lib.agentic-primitives.plugins.sdlc.hooks.validators.security.python",
-        "lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.github",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker",
-        "lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.handlers.observe",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.settings",
-        "lib.agentic-primitives.plugins.sdlc.hooks.handlers.user-prompt",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.subagent-stop",
-        "lib.agentic-primitives.plugins.sdlc.hooks.validators.prompt.pii",
-        "lib.agentic-primitives.plugins.observability.hooks.git.install",
-        "lib.agentic-primitives.scripts.build-provider",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.user-prompt",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.file",
-        "lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.formatters",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.notification",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.user-prompt",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.post-tool-use",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.stop",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.post-tool-use",
-        "lib.agentic-primitives.plugins.sdlc.skills.env-management.references.python.generate_env_example",
-        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.fixtures",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.local",
-        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.emitter",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.stop",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.env-management.references.python.generate_env_example",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.bash",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.python",
-        "lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.config",
-        "lib.agentic-primitives.scripts.run_benchmark",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.handlers.pre-tool-use",
-        "lib.agentic-primitives.lib.python.agentic_events.conftest",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.prompt.pii",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.pre-compact",
-        "lib.agentic-primitives.plugins.sdlc.hooks.handlers.pre-tool-use",
-        "lib.agentic-primitives.plugins.sdlc.hooks.git.install",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.github",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.subagent-stop",
-        "lib.agentic-primitives.plugins.research.tools.firecrawl.firecrawl_scraper",
-        "lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.git.install",
-        "lib.agentic-primitives.scripts.python_qa",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.notification",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.config",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.retry",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.session-start",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.session-start",
-        "lib.agentic-primitives.plugins.workspace.hooks.handlers.session-end",
-        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.player",
-        "lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.settings",
-        "lib.agentic-primitives.lib.python.agentic_events.agentic_events.recorder",
-        "lib.agentic-primitives.plugins.observability.hooks.handlers.observe",
-        "lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.logger",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.workspace",
-        "lib.agentic-primitives.plugins.sdlc.hooks.validators.security.file",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.event_parser",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.output_stream",
-        "lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.base",
-        "lib.agentic-primitives.build.claude-cli.plugins.workspace.hooks.handlers.session-end",
-        "lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.git.install"
-      ]
-    },
-    {
-      "id": "lib::event-sourcing-platform",
-      "metrics": {
-        "cross_slice_imports": 2599,
-        "inbound_coupling": 3,
-        "internal_imports": 442,
-        "module_count": 56,
-        "outbound_coupling": 17,
-        "sis": 0.14534692535350213
-      },
-      "modules": [
-        "lib::event-sourcing-platform::event-sourcing::rust::command",
-        "lib::event-sourcing-platform::vsa::vsa-cli::templates::context",
-        "lib::event-sourcing-platform::event-store::eventstore-backend-postgres::store_postgres",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::slice_location_rules",
-        "lib::event-sourcing-platform::event-sourcing::rust::client",
-        "lib::event-sourcing-platform::vsa::vsa-cli::commands::validate",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::upcaster",
-        "lib::event-sourcing-platform::event-sourcing::rust::aggregate",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::structure_rules",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::event_scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::rules",
-        "lib::event-sourcing-platform::vsa::vsa-core::validator",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::isolation_rules",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::slice_scanner",
-        "lib::event-sourcing-platform::event-sourcing::rust::examples::basic_aggregate",
-        "lib::event-sourcing-platform::vsa::vsa-cli::commands::list",
-        "lib::event-sourcing-platform::vsa::vsa-cli::commands::manifest",
-        "lib::event-sourcing-platform::event-store::eventstore-core::trait_event_store",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::domain_scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::bounded_context_rules",
-        "lib::event-sourcing-platform::event-store::eventstore-core::errors",
-        "lib::event-sourcing-platform::event-sourcing::rust::repository",
-        "lib::event-sourcing-platform::event-sourcing::rust::projection",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::projection",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::integration_event_rules",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::manifest",
-        "lib::event-sourcing-platform::vsa::vsa-core::integration_events",
-        "lib::event-sourcing-platform::vsa::vsa-cli::templates::engine",
-        "lib::event-sourcing-platform::event-sourcing::rust::error",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::query_scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::config",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::import_parser",
-        "lib::event-sourcing-platform::event-store::eventstore-proto::build",
-        "lib::event-sourcing-platform::vsa::vsa-cli::commands::init",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::event",
-        "lib::event-sourcing-platform::vsa::vsa-core::patterns",
-        "lib::event-sourcing-platform::event-store::sdks::sdk-rs::examples::basic",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::projection_scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::aggregate_scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::command",
-        "lib::event-sourcing-platform::event-store::eventstore-backend-memory::store_memory",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::query",
-        "lib::event-sourcing-platform::vsa::vsa-core::scanners::command_scanner",
-        "lib::event-sourcing-platform::vsa::vsa-core::framework",
-        "lib::event-sourcing-platform::vsa::vsa-cli::commands::generate",
-        "lib::event-sourcing-platform::event-sourcing::rust::examples::order_processing",
-        "lib::event-sourcing-platform::event-sourcing::rust::event",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::value_object",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::dependency_rules",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::query_slice_rules",
-        "lib::event-sourcing-platform::vsa::vsa-core::domain::aggregate",
-        "lib::event-sourcing-platform::vsa::vsa-core::validation::suggestions",
-        "lib::event-sourcing-platform::vsa::vsa-core::bounded_contexts"
-      ]
-    },
-    {
-      "id": "scripts.check_test_debt",
+      "id": "scripts.op_env_export",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 0,
@@ -825,70 +1196,7 @@
         "sis": 1.0
       },
       "modules": [
-        "scripts.check_test_debt"
-      ]
-    },
-    {
-      "id": "scripts.add_test_markers",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.add_test_markers"
-      ]
-    },
-    {
-      "id": "apps.syn-cli",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 3,
-        "internal_imports": 0,
-        "module_count": 22,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "apps.syn-cli.src.syn_cli.commands.repo",
-        "apps.syn-cli.src.syn_cli.commands.config",
-        "apps.syn-cli.src.syn_cli.commands._workflow_resolver",
-        "apps.syn-cli.src.syn_cli.commands.events",
-        "apps.syn-cli.src.syn_cli.commands.costs",
-        "apps.syn-cli.src.syn_cli.commands.metrics",
-        "apps.syn-cli.src.syn_cli.client",
-        "apps.syn-cli.src.syn_cli.commands.workflow",
-        "apps.syn-cli.src.syn_cli.commands.observe",
-        "apps.syn-cli.src.syn_cli.main",
-        "apps.syn-cli.src.syn_cli.commands.triggers",
-        "apps.syn-cli.src.syn_cli.commands.sessions",
-        "apps.syn-cli.src.syn_cli.commands.org",
-        "apps.syn-cli.src.syn_cli.commands.control",
-        "apps.syn-cli.src.syn_cli.commands.insights",
-        "apps.syn-cli.src.syn_cli.commands.agent",
-        "apps.syn-cli.src.syn_cli.commands.conversations",
-        "apps.syn-cli.src.syn_cli.commands.system",
-        "apps.syn-cli.src.syn_cli._output",
-        "apps.syn-cli.src.syn_cli.commands.execution",
-        "apps.syn-cli.src.syn_cli.commands.artifacts",
-        "apps.syn-cli.src.syn_cli.commands.watch"
-      ]
-    },
-    {
-      "id": "scripts.validate_event_store",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 2,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.validate_event_store"
+        "scripts.op_env_export"
       ]
     },
     {
@@ -906,20 +1214,6 @@
       ]
     },
     {
-      "id": "scripts.generate_llms_txt",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.generate_llms_txt"
-      ]
-    },
-    {
       "id": "scripts.e2e_true_agentic_workflow",
       "metrics": {
         "cross_slice_imports": 0,
@@ -934,7 +1228,7 @@
       ]
     },
     {
-      "id": "scripts.import_check",
+      "id": "scripts.generate-architecture-docs",
       "metrics": {
         "cross_slice_imports": 0,
         "inbound_coupling": 0,
@@ -944,301 +1238,7 @@
         "sis": 1.0
       },
       "modules": [
-        "scripts.import_check"
-      ]
-    },
-    {
-      "id": "packages.syn-adapters",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 3,
-        "internal_imports": 0,
-        "module_count": 55,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets",
-        "packages.syn-adapters.src.syn_adapters.control.adapters.memory",
-        "packages.syn-adapters.src.syn_adapters.projections.manager",
-        "packages.syn-adapters.src.syn_adapters.agents.protocol",
-        "packages.syn-adapters.src.syn_adapters.subscriptions.position_checkpoint",
-        "packages.syn-adapters.src.syn_adapters.storage.artifact_storage.memory",
-        "packages.syn-adapters.src.syn_adapters.projection_stores.memory_store",
-        "packages.syn-adapters.src.syn_adapters.projection_stores.protocol",
-        "packages.syn-adapters.src.syn_adapters.projections.session_tools",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.tokens.token_injection_adapter",
-        "packages.syn-adapters.src.syn_adapters.events.store",
-        "packages.syn-adapters.src.syn_adapters.control.controller",
-        "packages.syn-adapters.src.syn_adapters.storage",
-        "packages.syn-adapters.src.syn_adapters.agents.factory",
-        "packages.syn-adapters.src.syn_adapters.object_storage.protocol",
-        "packages.syn-adapters.src.syn_adapters.object_storage.factory",
-        "packages.syn-adapters.src.syn_adapters.control.ports",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.service.managed_workspace",
-        "packages.syn-adapters.src.syn_adapters.projections.trigger_query_projection",
-        "packages.syn-adapters.src.syn_adapters.collector.client",
-        "packages.syn-adapters.src.syn_adapters.events.schema",
-        "packages.syn-adapters.src.syn_adapters.artifacts.bundle",
-        "packages.syn-adapters.src.syn_adapters.storage.artifact_storage.minio",
-        "packages.syn-adapters.src.syn_adapters.object_storage.local",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.recording.adapter",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_service",
-        "packages.syn-adapters.src.syn_adapters.conversations.protocol",
-        "packages.syn-adapters.src.syn_adapters.projection_stores.postgres_store",
-        "packages.syn-adapters.src.syn_adapters.storage.event_store_client",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.docker.docker_sidecar_adapter",
-        "packages.syn-adapters.src.syn_adapters.events.buffer",
-        "packages.syn-adapters.src.syn_adapters.control.adapters.projection",
-        "packages.syn-adapters.src.syn_adapters.conversations.minio",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.docker.shared_envoy_adapter",
-        "packages.syn-adapters.src.syn_adapters.storage.in_memory",
-        "packages.syn-adapters.src.syn_adapters.object_storage.minio",
-        "packages.syn-adapters.src.syn_adapters.object_storage.supabase",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.memory.memory_adapter",
-        "packages.syn-adapters.src.syn_adapters.agents.mock",
-        "packages.syn-adapters.src.syn_adapters.events.models",
-        "packages.syn-adapters.src.syn_adapters.control.state_machine",
-        "packages.syn-adapters.src.syn_adapters.control.adapters.redis_adapter",
-        "packages.syn-adapters.src.syn_adapters.github.client",
-        "packages.syn-adapters.src.syn_adapters.subscriptions.service",
-        "packages.syn-adapters.src.syn_adapters.workspace_backends.tokens.token_vending_adapter",
-        "packages.syn-adapters.src.syn_adapters.projections.realtime",
-        "packages.syn-adapters.src.syn_adapters.agents.session_context",
-        "packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service",
-        "packages.syn-adapters.src.syn_adapters.agents.claude",
-        "packages.syn-adapters.src.syn_adapters.storage.trigger_query_store",
-        "packages.syn-adapters.src.syn_adapters.storage.artifact_storage.factory",
-        "packages.syn-adapters.src.syn_adapters.storage.repositories",
-        "packages.syn-adapters.src.syn_adapters.agents.models",
-        "packages.syn-adapters.src.syn_adapters.projection_stores"
-      ]
-    },
-    {
-      "id": "apps.syn-api",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 3,
-        "internal_imports": 0,
-        "module_count": 40,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "apps.syn-api.src.syn_api.routes.costs",
-        "apps.syn-api.src.syn_api.v1.config",
-        "apps.syn-api.src.syn_api.v1.sessions",
-        "apps.syn-api.src.syn_api.v1.github",
-        "apps.syn-api.src.syn_api.middleware.webhook_recorder",
-        "apps.syn-api.src.syn_api.routes.artifacts",
-        "apps.syn-api.src.syn_api.v1.realtime",
-        "apps.syn-api.src.syn_api.v1.repos",
-        "apps.syn-api.src.syn_api.routes.sse",
-        "apps.syn-api.src.syn_api.config",
-        "apps.syn-api.src.syn_api.v1.executions",
-        "apps.syn-api.src.syn_api.v1.systems",
-        "apps.syn-api.src.syn_api.routes.execution",
-        "apps.syn-api.src.syn_api.v1.organizations",
-        "apps.syn-api.src.syn_api.routes.insights",
-        "apps.syn-api.src.syn_api.routes.metrics",
-        "apps.syn-api.src.syn_api.routes.observability",
-        "apps.syn-api.src.syn_api.v1.workspaces",
-        "apps.syn-api.src.syn_api.routes.triggers",
-        "apps.syn-api.src.syn_api.v1.lifecycle",
-        "apps.syn-api.src.syn_api.routes.webhooks",
-        "apps.syn-api.src.syn_api.v1.agents",
-        "apps.syn-api.src.syn_api.routes.systems",
-        "apps.syn-api.src.syn_api.routes.repos",
-        "apps.syn-api.src.syn_api.v1.insights",
-        "apps.syn-api.src.syn_api.v1.artifacts",
-        "apps.syn-api.src.syn_api.routes.organizations",
-        "apps.syn-api.src.syn_api.routes.workflows",
-        "apps.syn-api.src.syn_api.routes.conversations",
-        "apps.syn-api.src.syn_api.v1.conversations",
-        "apps.syn-api.src.syn_api.routes.sessions",
-        "apps.syn-api.src.syn_api.v1.triggers",
-        "apps.syn-api.src.syn_api.v1.observability",
-        "apps.syn-api.src.syn_api.v1.workflows",
-        "apps.syn-api.src.syn_api._wiring",
-        "apps.syn-api.src.syn_api.v1.metrics",
-        "apps.syn-api.src.syn_api.routes.executions",
-        "apps.syn-api.src.syn_api.routes.events",
-        "apps.syn-api.src.syn_api.routes.control",
-        "apps.syn-api.src.syn_api.main"
-      ]
-    },
-    {
-      "id": "packages.syn-tokens",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 4,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "packages.syn-tokens.src.syn_tokens.threshold",
-        "packages.syn-tokens.src.syn_tokens.spend",
-        "packages.syn-tokens.src.syn_tokens.models",
-        "packages.syn-tokens.src.syn_tokens.vending"
-      ]
-    },
-    {
-      "id": "infra.scripts",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 1,
-        "internal_imports": 0,
-        "module_count": 7,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "infra.scripts.github_manifest",
-        "infra.scripts.setup",
-        "infra.scripts.cloudflare_tunnel",
-        "infra.scripts.secrets_setup",
-        "infra.scripts.init_minio_buckets",
-        "infra.scripts.health_check",
-        "infra.scripts.shared"
-      ]
-    },
-    {
-      "id": "lib::agent-paradise-standards-system",
-      "metrics": {
-        "cross_slice_imports": 47,
-        "inbound_coupling": 2,
-        "internal_imports": 130,
-        "module_count": 42,
-        "outbound_coupling": 10,
-        "sis": 0.7344632768361582
-      },
-      "modules": [
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::index",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::codecity",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::clusters",
-        "lib::agent-paradise-standards-system::crates::aps-core::templates",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::grammars::python",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::grammars",
-        "lib::agent-paradise-standards-system::crates::aps-core::diagnostics",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::force_3d",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::grammars",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::languages",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::codecity",
-        "lib::agent-paradise-standards-system::crates::aps-core::views",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::complexity",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::grammars::rust",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::force_3d",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::render_mermaid",
-        "lib::agent-paradise-standards-system::crates::aps-core::promotion",
-        "lib::agent-paradise-standards-system::crates::aps-core::discovery",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::render_sample",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::complexity",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::render_sample",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::substandards::VIZ01-dashboard::vsa",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::queries",
-        "lib::agent-paradise-standards-system::crates::aps-core::metadata",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::clusters",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::config",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::index",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::substandards::VIZ01-dashboard::vsa",
-        "lib::agent-paradise-standards-system::crates::aps-core::versioning",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::render_aps",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::grammars::rust",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::render_aps",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::analyze_rust",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::artifact",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::scanner",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0002-todo-tracker::examples::sample-repos::rust::sample",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::examples::render_mermaid",
-        "lib::agent-paradise-standards-system::standards::v1::APS-V1-0001-code-topology::adapter::grammars::python",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter::queries",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::adapter",
-        "lib::agent-paradise-standards-system::standards-experimental::v1::EXP-V1-0001-code-topology::examples::analyze_rust"
-      ]
-    },
-    {
-      "id": "lib.ui-feedback",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 8,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.protocol",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.api.feedback",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.api.stats",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.main",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.memory",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.api.media",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.postgres",
-        "lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.router"
-      ]
-    },
-    {
-      "id": "scripts.validate_domain_events",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 2,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "scripts.validate_domain_events"
-      ]
-    },
-    {
-      "id": "lib::agent_paradise_standards_system",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 3,
-        "internal_imports": 0,
-        "module_count": 19,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::3D01_force_directed",
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::VIZ01_mermaid",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::templates::substandard::skeleton",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology",
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology",
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::VIZ01_dashboard",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::VIZ01_mermaid",
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0002_todo_tracker",
-        "lib::agent_paradise_standards_system::crates::aps_cli",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta",
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0003_fitness_functions",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::3D01_force_directed",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::VIZ01_dashboard",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::templates::experiment::skeleton",
-        "lib::agent_paradise_standards_system::standards_experimental::v1::EXP_V1_0001_code_topology::substandards::LANG01_rust",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0001_code_topology::substandards::LANG01_rust",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::substandards::CL01_cli_contract",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::templates::standard::skeleton",
-        "lib::agent_paradise_standards_system::standards::v1::APS_V1_0000_meta::substandards::SS01_substandard_structure"
-      ]
-    },
-    {
-      "id": "docker.token-injector",
-      "metrics": {
-        "cross_slice_imports": 0,
-        "inbound_coupling": 0,
-        "internal_imports": 0,
-        "module_count": 1,
-        "outbound_coupling": 0,
-        "sis": 1.0
-      },
-      "modules": [
-        "docker.token-injector.token_injector"
+        "scripts.generate-architecture-docs"
       ]
     }
   ]
