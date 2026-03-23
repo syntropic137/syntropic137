@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import logging
 from datetime import UTC, datetime
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
@@ -242,361 +243,140 @@ class EventSubscriptionService:
     async def _subscription_loop(self) -> None:
         """Main subscription loop with automatic reconnection.
 
-        This runs catch-up first, then switches to live subscription.
-        If the live subscription fails, it will retry with exponential backoff.
+        Runs catch-up first, then switches to live subscription.
+        Retries with exponential backoff on failure.
         """
-        retry_delay = 1.0  # Initial retry delay in seconds
-        max_retry_delay = 60.0  # Maximum retry delay
+        retry_delay = 1.0
+        max_retry_delay = 60.0
         consecutive_failures = 0
 
-        logger.info(
-            "[SUBSCRIPTION] 🔄 Main loop started",
-            extra={"last_position": self._last_position},
-        )
+        logger.info("[SUBSCRIPTION] Main loop started", extra={"position": self._last_position})
 
         while not self._stop_event.is_set():
             try:
-                # Only count as reconnect if we've had failures or previous connections
-                is_reconnect = consecutive_failures > 0 or self._reconnect_count > 0
-                if is_reconnect:
+                if consecutive_failures > 0 or self._reconnect_count > 0:
                     self._reconnect_count += 1
-                    logger.info(
-                        "[SUBSCRIPTION] 🔄 Reconnecting after failure/disconnect",
-                        extra={
-                            "reconnect_count": self._reconnect_count,
-                            "consecutive_failures": consecutive_failures,
-                            "from_position": self._last_position + 1
-                            if self._last_position > 0
-                            else 0,
-                        },
-                    )
-                else:
-                    logger.info(
-                        "[SUBSCRIPTION] 📥 Starting initial connection",
-                        extra={
-                            "from_position": self._last_position + 1
-                            if self._last_position > 0
-                            else 0,
-                        },
-                    )
+                    logger.info("[SUBSCRIPTION] Reconnecting", extra={"attempt": self._reconnect_count})
 
-                # Phase 1: Catch-up (always run on reconnect to pick up missed events)
                 await self._run_catchup()
-
-                # Reset backoff state on successful catch-up
                 consecutive_failures = 0
                 retry_delay = 1.0
-
                 self._caught_up = True
-                logger.info(
-                    "[SUBSCRIPTION] ✅ Catch-up complete, transitioning to live",
-                    extra={
-                        "position": self._last_position,
-                        "events_processed": self._events_processed,
-                        "reconnect_count": self._reconnect_count,
-                    },
-                )
 
-                # Phase 2: Live subscription
-                logger.info(
-                    "[SUBSCRIPTION] 🔴 Starting live subscription",
-                    extra={"from_position": self._last_position + 1},
-                )
+                logger.info("[SUBSCRIPTION] Catch-up complete, starting live", extra={"position": self._last_position})
                 await self._run_live_subscription()
 
-                # If we get here, subscription exited normally (shouldn't happen in healthy state)
+                # Live subscription exited — reconnect
                 self._caught_up = False
-                logger.warning(
-                    "[SUBSCRIPTION] ⚠️ Live subscription exited unexpectedly, will reconnect",
-                    extra={
-                        "last_position": self._last_position,
-                        "events_processed": self._events_processed,
-                    },
-                )
-                consecutive_failures = 0
-                retry_delay = 1.0
+                logger.warning("[SUBSCRIPTION] Live stream ended, will reconnect")
 
             except asyncio.CancelledError:
-                logger.info("[SUBSCRIPTION] 🛑 Loop cancelled by stop signal")
                 raise
             except Exception as e:
                 consecutive_failures += 1
                 self._caught_up = False
-                logger.error(
-                    "[SUBSCRIPTION] ❌ Loop failed, will retry with backoff",
-                    extra={
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                        "consecutive_failures": consecutive_failures,
-                        "retry_delay_seconds": retry_delay,
-                        "last_position": self._last_position,
-                    },
-                    exc_info=True,
-                )
-
-                # Wait before retry with exponential backoff
+                logger.error("[SUBSCRIPTION] Loop failed", extra={"error": str(e), "retry_delay": retry_delay}, exc_info=True)
                 if not self._stop_event.is_set():
-                    logger.info(
-                        "[SUBSCRIPTION] ⏳ Waiting before retry",
-                        extra={"delay_seconds": retry_delay},
-                    )
                     await asyncio.sleep(retry_delay)
                     retry_delay = min(retry_delay * 2, max_retry_delay)
 
-        logger.info(
-            "[SUBSCRIPTION] 🛑 Main loop stopped",
-            extra={
-                "final_position": self._last_position,
-                "total_events_processed": self._events_processed,
-                "total_reconnects": self._reconnect_count,
-            },
-        )
+        logger.info("[SUBSCRIPTION] Main loop stopped", extra={"position": self._last_position, "events": self._events_processed})
         self._running = False
 
     async def _run_catchup(self) -> None:
         """Run catch-up subscription to process historical events.
 
-        Uses the read_all RPC for reliable batch reading with explicit
+        Uses read_all RPC for reliable batch reading with explicit
         pagination and end-of-batch signals.
         """
         events_in_batch = 0
-        total_catchup_events = 0
-        batch_number = 0
-        # Start from the next position (exclusive start)
         from_position = self._last_position + 1 if self._last_position > 0 else 0
 
-        logger.info(
-            "[SUBSCRIPTION] 📥 Catch-up phase starting",
-            extra={
-                "from_position": from_position,
-                "checkpoint_position": self._last_position,
-                "batch_size": self._batch_size,
-            },
-        )
+        logger.info("[SUBSCRIPTION] Catch-up starting", extra={"from": from_position})
 
         while not self._stop_event.is_set():
-            batch_number += 1
-            # Read batch of events using the new read_all RPC
-            logger.debug(
-                "[SUBSCRIPTION] 📖 Reading batch from event store",
-                extra={
-                    "batch_number": batch_number,
-                    "from_position": from_position,
-                    "max_count": self._batch_size,
-                },
-            )
-
             events, is_end, next_position = await self._event_store.read_all(
                 from_global_nonce=from_position,
                 max_count=self._batch_size,
                 forward=True,
             )
 
-            logger.info(
-                "[SUBSCRIPTION] 📦 Batch received",
-                extra={
-                    "batch_number": batch_number,
-                    "from_position": from_position,
-                    "events_in_batch": len(events),
-                    "is_end": is_end,
-                    "next_position": next_position,
-                },
-            )
-
             if not events:
-                # No more events, catch-up complete
-                logger.info(
-                    "[SUBSCRIPTION] ✅ Catch-up complete (no more events)",
-                    extra={
-                        "total_batches": batch_number,
-                        "total_events": total_catchup_events,
-                        "final_position": self._last_position,
-                    },
-                )
                 break
 
-            # Process events
-            for idx, envelope in enumerate(events):
-                if self._stop_event.is_set():
-                    logger.info("[SUBSCRIPTION] 🛑 Catch-up interrupted by stop signal")
-                    break
+            events_in_batch = await self._process_catchup_batch(events, events_in_batch)
 
-                event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
-                global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-                logger.debug(
-                    "[SUBSCRIPTION] 📨 Processing catch-up event",
-                    extra={
-                        "event_type": event_type,
-                        "global_nonce": global_nonce,
-                        "batch_index": idx + 1,
-                        "batch_size": len(events),
-                    },
-                )
-
-                dispatch_success = await self._dispatch_event(envelope)
-                self._last_event_time = datetime.now(UTC)
-
-                # CRITICAL: Only advance position if dispatch succeeded
-                # This ensures at-least-once delivery guarantee
-                if dispatch_success:
-                    events_in_batch += 1
-                    total_catchup_events += 1
-                    if envelope.metadata.global_nonce is not None:
-                        self._last_position = envelope.metadata.global_nonce
-                else:
-                    # Dispatch failed - stop catch-up to prevent position drift
-                    logger.error(
-                        "[SUBSCRIPTION] 🛑 Stopping catch-up due to dispatch failure",
-                        extra={
-                            "failed_at_position": getattr(
-                                getattr(envelope, "metadata", None), "global_nonce", None
-                            ),
-                            "last_successful_position": self._last_position,
-                        },
-                    )
-                    raise RuntimeError(
-                        f"Event dispatch failed at position "
-                        f"{getattr(getattr(envelope, 'metadata', None), 'global_nonce', None)}. "
-                        "Stopping to prevent position drift. Will retry on reconnect."
-                    )
-
-            # Save position periodically during catch-up
             if events_in_batch >= self._batch_size:
                 await self._save_position()
                 events_in_batch = 0
-                logger.debug(
-                    "Catch-up progress",
-                    extra={
-                        "position": self._last_position,
-                        "events_processed": self._events_processed,
-                    },
-                )
 
-            # Use explicit end signal instead of heuristic
             if is_end:
                 break
-
-            # Continue from next position for next batch
             from_position = next_position
 
-        # Final save after catch-up
         if events_in_batch > 0:
             await self._save_position()
+
+    async def _process_catchup_batch(self, events: Sequence[object], events_in_batch: int) -> int:
+        """Process a batch of catch-up events, advancing position on success.
+
+        Returns updated events_in_batch count.
+        Raises RuntimeError if dispatch fails (triggers reconnect).
+        """
+        for envelope in events:
+            if self._stop_event.is_set():
+                break
+
+            dispatch_success = await self._dispatch_event(envelope)
+            self._last_event_time = datetime.now(UTC)
+
+            # CRITICAL: Only advance position if dispatch succeeded
+            if dispatch_success:
+                events_in_batch += 1
+                if envelope.metadata.global_nonce is not None:  # type: ignore[union-attr]
+                    self._last_position = envelope.metadata.global_nonce  # type: ignore[union-attr]
+            else:
+                nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+                raise RuntimeError(
+                    f"Event dispatch failed at position {nonce}. "
+                    "Stopping to prevent position drift. Will retry on reconnect."
+                )
+
+        return events_in_batch
 
     async def _run_live_subscription(self) -> None:
         """Run live subscription for real-time events.
 
-        This method will exit (not raise) when the subscription stream ends,
-        allowing the main loop to reconnect.
+        Exits (not raises) when the stream ends, allowing the main loop to reconnect.
         """
         events_since_save = 0
-        live_events_received = 0
         last_save_time = datetime.now(UTC)
-
         start_position = self._last_position + 1
-        logger.info(
-            "[SUBSCRIPTION] 🔴 Live subscription connecting",
-            extra={
-                "from_position": start_position,
-                "checkpoint_position": self._last_position,
-            },
-        )
 
-        try:
-            # Start subscription from current position + 1 (since we've processed up to current)
-            logger.info(
-                "[SUBSCRIPTION] 📡 Establishing gRPC stream to event store",
-                extra={"from_global_nonce": start_position},
-            )
+        logger.info("[SUBSCRIPTION] Live subscription connecting", extra={"from": start_position})
 
-            async for envelope in self._event_store.subscribe(from_global_nonce=start_position):
-                if self._stop_event.is_set():
-                    logger.info(
-                        "[SUBSCRIPTION] 🛑 Live subscription stopped by signal",
-                        extra={"events_received": live_events_received},
-                    )
-                    return
+        async for envelope in self._event_store.subscribe(from_global_nonce=start_position):
+            if self._stop_event.is_set():
+                return
 
-                event_type = getattr(getattr(envelope, "event", None), "event_type", "unknown")
-                global_nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-                aggregate_id = getattr(
-                    getattr(envelope, "metadata", None), "aggregate_id", "unknown"
-                )
-                live_events_received += 1
-                self._last_event_time = datetime.now(UTC)
+            self._last_event_time = datetime.now(UTC)
+            dispatch_success = await self._dispatch_event(envelope)
 
-                logger.info(
-                    "[SUBSCRIPTION] 📨 Live event received",
-                    extra={
-                        "event_type": event_type,
-                        "global_nonce": global_nonce,
-                        "aggregate_id": aggregate_id,
-                        "live_event_number": live_events_received,
-                    },
-                )
+            # CRITICAL: Only advance position if dispatch succeeded
+            if dispatch_success:
+                events_since_save += 1
+                if envelope.metadata.global_nonce is not None:
+                    self._last_position = envelope.metadata.global_nonce
+            else:
+                nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+                raise RuntimeError(f"Event dispatch failed at position {nonce}. Triggering reconnect.")
 
-                dispatch_success = await self._dispatch_event(envelope)
-
-                # CRITICAL: Only advance position if dispatch succeeded
-                if dispatch_success:
-                    events_since_save += 1
-                    if envelope.metadata.global_nonce is not None:
-                        self._last_position = envelope.metadata.global_nonce
-                else:
-                    # Dispatch failed - raise to trigger reconnect
-                    # This ensures we retry the failed event
-                    raise RuntimeError(
-                        f"Event dispatch failed at position {global_nonce}. "
-                        "Triggering reconnect to retry."
-                    )
-
-                # Save position periodically
-                now = datetime.now(UTC)
-                should_save = (
-                    events_since_save >= self._batch_size
-                    or (now - last_save_time).total_seconds() >= self._position_save_interval
-                )
-
-                if should_save:
-                    logger.debug(
-                        "[SUBSCRIPTION] 💾 Saving position checkpoint",
-                        extra={
-                            "position": self._last_position,
-                            "events_since_last_save": events_since_save,
-                        },
-                    )
-                    await self._save_position()
-                    events_since_save = 0
-                    last_save_time = now
-
-            # Stream ended - this triggers reconnection in main loop
-            logger.warning(
-                "[SUBSCRIPTION] ⚠️ Live stream ended (server closed connection)",
-                extra={
-                    "last_position": self._last_position,
-                    "live_events_received": live_events_received,
-                },
-            )
-
-        except asyncio.CancelledError:
-            logger.info(
-                "[SUBSCRIPTION] 🛑 Live subscription cancelled",
-                extra={"live_events_received": live_events_received},
-            )
-            raise
-        except Exception as e:
-            # Re-raise to trigger reconnection in main loop
-            logger.error(
-                "[SUBSCRIPTION] ❌ Live subscription error",
-                extra={
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "last_position": self._last_position,
-                    "live_events_received": live_events_received,
-                },
-                exc_info=True,
-            )
-            raise
+            # Save position periodically
+            now = datetime.now(UTC)
+            if events_since_save >= self._batch_size or (now - last_save_time).total_seconds() >= self._position_save_interval:
+                await self._save_position()
+                events_since_save = 0
+                last_save_time = now
 
     async def _dispatch_event(self, envelope: object) -> bool:
         """Dispatch an event to projections via validated envelope.
