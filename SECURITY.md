@@ -130,7 +130,7 @@ If a secret is accidentally committed:
 - [ ] Pre-commit secret gate (gitleaks or detect-secrets)
 - [ ] Dependabot for Actions + npm
 - [ ] CodeQL SAST
-- [ ] Container scanning (evaluate ecosystem — see security-practices.md for context)
+- [ ] Container scanning (Docker Scout)
 - [ ] OpenSSF Scorecard integration
 - [ ] Sigstore/cosign artifact signing
 - [ ] SBOM generation

@@ -9,7 +9,7 @@ Usage:
 
 import asyncio
 import base64
-import math
+import math as _math
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,14 +20,12 @@ REPO_ROOT = Path(__file__).parent.parent
 HTML_SRC = REPO_ROOT / ".topology" / "viz" / "codecity.html"
 OUT_DIR = REPO_ROOT / ".topology" / "viz"
 
-# Output resolution (1280×720 keeps GIF manageable; bump to 1920×1080 for MP4)
+# Output resolution (1280x720 keeps GIF manageable; bump to 1920x1080 for MP4)
 WIDTH = 1280
 HEIGHT = 720
 
 FPS = 30
 DURATION_S = 28  # seconds total
-
-import math as _math
 
 # ---------------------------------------------------------------------------
 # Two-phase camera:
@@ -43,15 +41,15 @@ import math as _math
 # ---------------------------------------------------------------------------
 DESCENT_END_S = 6.0
 
-ORBIT_PHI        = 0.85   # angle from vertical — elevated side view, buildings + layout both visible
-ORBIT_R_FACTOR   = 1.50   # radius = 1.5 × citySize — full city in frame with breathing room
-ORBIT_THETA_0    = 0.4    # starting azimuth when orbit begins
-ORBIT_PERIOD_S   = 21.0   # one full revolution in 21 s (nice leisurely pace)
+ORBIT_PHI = 0.85  # angle from vertical — elevated side view, buildings + layout both visible
+ORBIT_R_FACTOR = 1.50  # radius = 1.5x citySize — full city in frame with breathing room
+ORBIT_THETA_0 = 0.4  # starting azimuth when orbit begins
+ORBIT_PERIOD_S = 21.0  # one full revolution in 21 s (nice leisurely pace)
 
 # Descent start values (bird's eye)
-DESCENT_PHI_0    = 0.15
-DESCENT_R_0      = 1.85
-DESCENT_THETA_0  = 0.0
+DESCENT_PHI_0 = 0.15
+DESCENT_R_0 = 1.85
+DESCENT_THETA_0 = 0.0
 
 # Label fade timing
 LABEL_FULL_UNTIL_S = 4.0
@@ -77,15 +75,15 @@ def camera_at(frame: int, total: int) -> tuple[float, float, float, float, float
 
     if t_s <= DESCENT_END_S:
         s = smoothstep(t_s / DESCENT_END_S)
-        r_f   = lerp(DESCENT_R_0,     ORBIT_R_FACTOR, s)
-        phi   = lerp(DESCENT_PHI_0,   ORBIT_PHI,      s)
-        theta = lerp(DESCENT_THETA_0, ORBIT_THETA_0,  s)
+        r_f = lerp(DESCENT_R_0, ORBIT_R_FACTOR, s)
+        phi = lerp(DESCENT_PHI_0, ORBIT_PHI, s)
+        theta = lerp(DESCENT_THETA_0, ORBIT_THETA_0, s)
         return r_f, phi, theta, 0.0, 0.0
     else:
         # Constant angular velocity — perfectly smooth, zero easing
         t_orbit = t_s - DESCENT_END_S
-        omega   = 2 * _math.pi / ORBIT_PERIOD_S
-        theta   = ORBIT_THETA_0 + omega * t_orbit
+        omega = 2 * _math.pi / ORBIT_PERIOD_S
+        theta = ORBIT_THETA_0 + omega * t_orbit
         return ORBIT_R_FACTOR, ORBIT_PHI, theta, 0.0, 0.0
 
 
@@ -142,13 +140,11 @@ async def capture(frame_dir: Path) -> None:
             await page.wait_for_function("window.__cc !== undefined", timeout=30000)
             await page.wait_for_timeout(2000)  # let first render settle
 
-            city_size: float = await page.evaluate(
-                "window.__cc ? window.__cc.citySize : 150"
-            )
+            city_size: float = await page.evaluate("window.__cc ? window.__cc.citySize : 150")
             print(f"citySize = {city_size:.1f}")
 
-            label_full_f  = int(LABEL_FULL_UNTIL_S * FPS)
-            label_gone_f  = int(LABEL_FADE_UNTIL_S * FPS)
+            label_full_f = int(LABEL_FULL_UNTIL_S * FPS)
+            label_gone_f = int(LABEL_FADE_UNTIL_S * FPS)
 
             print(f"Capturing {total_frames} frames at {FPS} fps ({DURATION_S}s)…")
             for i in range(total_frames):
@@ -206,14 +202,22 @@ def encode(frame_dir: Path) -> None:
     print("\nEncoding MP4…")
     subprocess.run(
         [
-            "ffmpeg", "-y",
-            "-framerate", str(FPS),
-            "-i", frames_glob,
-            "-c:v", "libx264",
-            "-preset", "slow",
-            "-crf", "18",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            str(FPS),
+            "-i",
+            frames_glob,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
             str(mp4_out),
         ],
         check=True,
@@ -224,22 +228,30 @@ def encode(frame_dir: Path) -> None:
     palette = frame_dir / "palette.png"
     subprocess.run(
         [
-            "ffmpeg", "-y",
-            "-framerate", str(FPS),
-            "-i", frames_glob,
-            "-vf", f"fps=15,scale=960:-1:flags=lanczos,palettegen=max_colors=256:stats_mode=diff",
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            str(FPS),
+            "-i",
+            frames_glob,
+            "-vf",
+            "fps=15,scale=960:-1:flags=lanczos,palettegen=max_colors=256:stats_mode=diff",
             str(palette),
         ],
         check=True,
     )
     subprocess.run(
         [
-            "ffmpeg", "-y",
-            "-framerate", str(FPS),
-            "-i", frames_glob,
-            "-i", str(palette),
+            "ffmpeg",
+            "-y",
+            "-framerate",
+            str(FPS),
+            "-i",
+            frames_glob,
+            "-i",
+            str(palette),
             "-filter_complex",
-            f"fps=15,scale=960:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+            "fps=15,scale=960:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
             str(gif_out),
         ],
         check=True,
@@ -257,8 +269,8 @@ def main() -> None:
         encode(frame_dir)
 
     print(f"\nDone! Files in {OUT_DIR}/")
-    print(f"  codecity_flythrough.mp4")
-    print(f"  codecity_flythrough.gif")
+    print("  codecity_flythrough.mp4")
+    print("  codecity_flythrough.gif")
 
 
 if __name__ == "__main__":

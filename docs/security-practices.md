@@ -110,16 +110,14 @@ Not yet implemented. Planned controls:
 
 ### Container Scanning
 
-OSV Scanner covers app-layer dependencies (Python, npm, etc.) via lock files. OS-layer
-CVEs in base images are a separate concern. We are not currently using a dedicated
-container scanner.
+Not yet implemented. OSV Scanner covers app-layer dependencies (Python, npm, etc.) via
+lock files. For OS-layer CVEs in base images, we will use **Docker Scout**.
 
-> **Why not Trivy?** Aquasecurity (the Trivy maintainer) has experienced multiple
-> security incidents affecting the integrity of their tooling. Using a compromised
-> security scanner is a meaningful supply chain risk — it creates a false sense of
-> coverage while potentially introducing attack surface. OSV Scanner (Google) covers
-> the dependency layer. Evaluate the container scanner ecosystem when ready to implement;
-> do not default to Trivy without first assessing its current security posture.
+**Why Docker Scout:** We already trust Docker for the container runtime — Scout is
+maintained by the same team, keeping the trust chain short rather than introducing a new
+third-party security dependency. Trivy (aquasecurity) is commonly cited but aquasecurity
+has experienced multiple security incidents; a compromised scanner is itself a supply
+chain risk.
 
 ### Secret Scanning
 
@@ -140,7 +138,7 @@ Not yet implemented as a blocking gate. Planned controls:
 - [ ] Dependabot for Actions + npm — ISS-259
 - [ ] OSV Scanner switched to blocking mode (after baseline) — ISS-259 `TODO(#259)`
 - [ ] CodeQL SAST — post-launch
-- [ ] Container scanning — evaluate ecosystem before choosing tool (see Container Scanning note above)
+- [ ] Container scanning (Docker Scout) — post-launch
 - [ ] gitleaks CI secret scanning — ISS-259
 - [ ] `uv sync --frozen` enforced in CI
 - [ ] Topology auto-snapshot on commit — ISS-260

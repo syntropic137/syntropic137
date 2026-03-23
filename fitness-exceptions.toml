@@ -242,8 +242,8 @@ value = 40
 issue = "#197"
 
 [max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query::calculate"]
-value = 50
-issue = "#197"
+value = 60
+issue = "#274"
 
 [max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler::evaluate"]
 value = 30
@@ -1030,3 +1030,15 @@ issue = "#197"
 [max-loc-file."packages.syn-tokens.src.syn_tokens.vending"]
 value = 1025
 issue = "#197"
+
+[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler::handle"]
+value = 35
+issue = "#274"
+
+[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler::_find_failure_patterns"]
+value = 30
+issue = "#274"
+
+[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler::handle"]
+value = 50
+issue = "#274"
