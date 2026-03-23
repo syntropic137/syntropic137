@@ -46,15 +46,15 @@ export function SessionDetail() {
     useSessionData(sessionId)
 
   const timelineRef = useRef<HTMLDivElement>(null)
-  const capturedScrollHeightRef = useRef(0)
-  if (timelineRef.current) {
-    capturedScrollHeightRef.current = timelineRef.current.scrollHeight
-  }
+  const prevScrollHeightRef = useRef(0)
   useLayoutEffect(() => {
     const el = timelineRef.current
     if (!el) return
-    const heightDiff = el.scrollHeight - capturedScrollHeightRef.current
-    if (heightDiff > 0 && window.scrollY > 50) {
+    const prevHeight = prevScrollHeightRef.current
+    const currentHeight = el.scrollHeight
+    prevScrollHeightRef.current = currentHeight
+    const heightDiff = currentHeight - prevHeight
+    if (prevHeight > 0 && heightDiff > 0 && window.scrollY > 50) {
       window.scrollBy({ top: heightDiff, behavior: 'instant' })
     }
   }, [session?.operations?.length])
