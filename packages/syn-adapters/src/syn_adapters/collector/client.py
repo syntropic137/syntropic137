@@ -9,102 +9,32 @@ See: ADR-017, ADR-018, PROJECT-PLAN_20251209_observability-unification.md
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field
+
+from syn_adapters.collector.models import (
+    BatchResponse,
+    CollectorEvent,
+    EventBatch,
+    generate_event_id,
+    generate_tool_event_id,
+)
+
+# Re-export for backward compatibility
+__all__ = [
+    "BatchResponse",
+    "CollectorClient",
+    "CollectorEvent",
+    "EventBatch",
+    "generate_event_id",
+    "generate_tool_event_id",
+]
 
 logger = logging.getLogger(__name__)
-
-
-class CollectorEvent(BaseModel):
-    """A single observation event to send to the Collector.
-
-    Attributes:
-        event_id: Deterministic ID for deduplication (SHA256 hash)
-        event_type: Type of event (e.g., "tool_execution_started")
-        session_id: Agent session identifier
-        timestamp: When the event occurred (ISO 8601)
-        data: Event-specific payload
-    """
-
-    event_id: str = Field(..., description="Deterministic ID for deduplication")
-    event_type: str = Field(..., description="Type of event")
-    session_id: str = Field(..., description="Agent session identifier")
-    timestamp: datetime = Field(..., description="When the event occurred")
-    data: dict[str, Any] = Field(default_factory=dict, description="Event payload")
-
-    model_config = {"frozen": True}
-
-
-class EventBatch(BaseModel):
-    """Batch of events to send to Collector."""
-
-    agent_id: str = Field(..., description="Agent sending the batch")
-    batch_id: str = Field(..., description="Unique batch identifier")
-    events: list[CollectorEvent] = Field(default_factory=list, description="Events in batch")
-
-
-class BatchResponse(BaseModel):
-    """Response from Collector after processing a batch."""
-
-    accepted: int = Field(..., ge=0, description="Events successfully accepted")
-    duplicates: int = Field(..., ge=0, description="Duplicate events skipped")
-    batch_id: str = Field(..., description="Batch ID for correlation")
-
-
-def generate_event_id(
-    session_id: str,
-    event_type: str,
-    timestamp: datetime,
-    content_hash: str | None = None,
-) -> str:
-    """Generate deterministic event ID for deduplication.
-
-    Same inputs always produce the same event_id.
-
-    Args:
-        session_id: Agent session identifier
-        event_type: Type of event
-        timestamp: When the event occurred
-        content_hash: Optional hash of event-specific content
-
-    Returns:
-        32-character hex string (truncated SHA256)
-    """
-    key_parts = [session_id, event_type, timestamp.isoformat()]
-    if content_hash:
-        key_parts.append(content_hash)
-    key = "|".join(key_parts)
-    return hashlib.sha256(key.encode()).hexdigest()[:32]
-
-
-def generate_tool_event_id(
-    session_id: str,
-    event_type: str,
-    timestamp: datetime,
-    tool_name: str,
-    tool_use_id: str,
-) -> str:
-    """Generate event ID for tool execution events.
-
-    Args:
-        session_id: Agent session identifier
-        event_type: Type of tool event (started/completed/blocked)
-        timestamp: When the event occurred
-        tool_name: Name of the tool
-        tool_use_id: Claude's tool use identifier
-
-    Returns:
-        32-character hex string
-    """
-    content = f"{tool_name}|{tool_use_id}"
-    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-    return generate_event_id(session_id, event_type, timestamp, content_hash)
 
 
 class CollectorClient:
@@ -223,6 +153,45 @@ class CollectorClient:
 
         return await self._send_batch(batch)
 
+    async def _attempt_send(
+        self, batch: EventBatch, headers: dict[str, str]
+    ) -> BatchResponse:
+        """Attempt a single batch send (no retries).
+
+        Args:
+            batch: EventBatch to send
+            headers: HTTP headers for the request
+
+        Returns:
+            BatchResponse on success
+
+        Raises:
+            httpx.HTTPStatusError: On client errors (4xx) — not retryable.
+            httpx.HTTPStatusError: On server errors (5xx) — retryable.
+            httpx.RequestError: On connection/transport errors — retryable.
+        """
+        assert self._client is not None
+        response = await self._client.post(
+            f"{self.collector_url}/events",
+            json=batch.model_dump(mode="json"),
+            headers=headers,
+        )
+        response.raise_for_status()
+
+        result = BatchResponse(**response.json())
+
+        self._stats["events_sent"] += result.accepted
+        self._stats["batches_sent"] += 1
+
+        logger.debug(
+            "Batch %s sent: %d accepted, %d duplicates",
+            batch.batch_id,
+            result.accepted,
+            result.duplicates,
+        )
+
+        return result
+
     async def _send_batch(self, batch: EventBatch) -> BatchResponse:
         """Send a batch with retries.
 
@@ -239,7 +208,7 @@ class CollectorClient:
             await self.start()
             assert self._client is not None
 
-        headers = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -247,34 +216,13 @@ class CollectorClient:
 
         for attempt in range(self.max_retries + 1):
             try:
-                response = await self._client.post(
-                    f"{self.collector_url}/events",
-                    json=batch.model_dump(mode="json"),
-                    headers=headers,
-                )
-                response.raise_for_status()
-
-                result = BatchResponse(**response.json())
-
-                # Update stats
-                self._stats["events_sent"] += result.accepted
-                self._stats["batches_sent"] += 1
-
-                logger.debug(
-                    "Batch %s sent: %d accepted, %d duplicates",
-                    batch.batch_id,
-                    result.accepted,
-                    result.duplicates,
-                )
-
-                return result
+                return await self._attempt_send(batch, headers)
 
             except httpx.HTTPStatusError as e:
                 last_error = e
                 if e.response.status_code < 500:
                     logger.error("Client error sending batch: %s", e)
                     raise
-
                 logger.warning("Server error sending batch (attempt %d): %s", attempt + 1, e)
 
             except httpx.RequestError as e:

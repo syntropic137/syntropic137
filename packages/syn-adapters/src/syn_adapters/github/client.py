@@ -217,6 +217,66 @@ class GitHubAppClient:
             msg = f"Failed to generate JWT: {e}"
             raise GitHubAuthError(msg) from e
 
+    def _check_token_response(self, response: httpx.Response, iid: str) -> None:
+        """Check installation token response for errors.
+
+        Args:
+            response: HTTP response from token endpoint
+            iid: Installation ID (for error messages)
+
+        Raises:
+            GitHubAuthError: On 401, 403 (non-rate-limit), or 404.
+            GitHubRateLimitError: On 403 with rate limit.
+        """
+        if response.status_code == 401:
+            msg = "JWT authentication failed - check App ID and private key"
+            raise GitHubAuthError(msg)
+
+        if response.status_code == 403:
+            if "rate limit" in response.text.lower():
+                reset_header = response.headers.get("X-RateLimit-Reset")
+                reset_at = None
+                if reset_header:
+                    reset_at = datetime.fromtimestamp(int(reset_header), tz=UTC)
+                raise GitHubRateLimitError("Rate limit exceeded", reset_at=reset_at)
+            msg = f"Permission denied: {response.text}"
+            raise GitHubAuthError(msg)
+
+        if response.status_code == 404:
+            msg = f"Installation {iid} not found"
+            raise GitHubAuthError(msg)
+
+        response.raise_for_status()
+
+    def _parse_installation_token(self, data: dict, iid: str) -> InstallationToken:
+        """Parse and cache an installation token from API response data.
+
+        Args:
+            data: JSON response from GitHub token endpoint
+            iid: Installation ID for cache key
+
+        Returns:
+            Parsed InstallationToken.
+        """
+        expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+
+        token = InstallationToken(
+            token=data["token"],
+            expires_at=expires_at,
+            permissions=data.get("permissions", {}),
+            repository_selection=data.get("repository_selection", "all"),
+        )
+        self._cached_tokens[iid] = token
+
+        logger.info(
+            "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
+            iid,
+            expires_at.isoformat(),
+            list(token.permissions.keys()),
+        )
+
+        return token
+
     async def get_installation_token(
         self, installation_id: str | None = None, force_refresh: bool = False
     ) -> str:
@@ -264,44 +324,9 @@ class GitHubAppClient:
                 headers={"Authorization": f"Bearer {jwt_token}"},
             )
 
-            if response.status_code == 401:
-                msg = "JWT authentication failed - check App ID and private key"
-                raise GitHubAuthError(msg)
+            self._check_token_response(response, iid)
 
-            if response.status_code == 403:
-                if "rate limit" in response.text.lower():
-                    reset_header = response.headers.get("X-RateLimit-Reset")
-                    reset_at = None
-                    if reset_header:
-                        reset_at = datetime.fromtimestamp(int(reset_header), tz=UTC)
-                    raise GitHubRateLimitError("Rate limit exceeded", reset_at=reset_at)
-                msg = f"Permission denied: {response.text}"
-                raise GitHubAuthError(msg)
-
-            if response.status_code == 404:
-                msg = f"Installation {iid} not found"
-                raise GitHubAuthError(msg)
-
-            response.raise_for_status()
-
-            data = response.json()
-            expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
-
-            token = InstallationToken(
-                token=data["token"],
-                expires_at=expires_at,
-                permissions=data.get("permissions", {}),
-                repository_selection=data.get("repository_selection", "all"),
-            )
-            self._cached_tokens[iid] = token
-
-            logger.info(
-                "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
-                iid,
-                expires_at.isoformat(),
-                list(token.permissions.keys()),
-            )
-
+            token = self._parse_installation_token(response.json(), iid)
             return token.token
 
         except httpx.HTTPError as e:

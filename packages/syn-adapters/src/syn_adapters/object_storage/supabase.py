@@ -45,6 +45,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _parse_last_modified(item: dict[str, Any]) -> datetime:
+    """Parse last-modified timestamp from a Supabase list item."""
+    last_modified_str = item.get("updated_at") or item.get("created_at")
+    if not last_modified_str:
+        return datetime.now(UTC)
+    try:
+        return datetime.fromisoformat(last_modified_str.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return datetime.now(UTC)
+
+
+def _storage_object_from_item(item: dict[str, Any], key: str) -> StorageObject:
+    """Build a StorageObject from a Supabase list item."""
+    metadata = item.get("metadata", {})
+    return StorageObject(
+        key=key,
+        size_bytes=metadata.get("size", 0),
+        content_type=metadata.get("mimetype"),
+        etag=item.get("id"),
+        last_modified=_parse_last_modified(item),
+    )
+
+
 class SupabaseStorage:
     """Supabase Storage adapter.
 
@@ -282,15 +305,7 @@ class SupabaseStorage:
         """
         try:
             client = self._get_client()
-
-            # Supabase doesn't have a direct HEAD method, so we list with prefix
-            # and filter for exact match
-            parts = key.rsplit("/", 1)
-            if len(parts) == 2:
-                folder, filename = parts
-            else:
-                folder = ""
-                filename = key
+            folder, filename = self._split_key(key)
 
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
@@ -301,39 +316,29 @@ class SupabaseStorage:
             if not response:
                 return None
 
-            # Find exact match
-            for item in response:
-                if item.get("name") == filename:
-                    # Parse metadata
-                    metadata = item.get("metadata", {})
-                    size = metadata.get("size", 0)
-                    content_type = metadata.get("mimetype")
-
-                    # Parse last modified
-                    last_modified_str = item.get("updated_at") or item.get("created_at")
-                    if last_modified_str:
-                        try:
-                            last_modified = datetime.fromisoformat(
-                                last_modified_str.replace("Z", "+00:00")
-                            )
-                        except (ValueError, TypeError):
-                            last_modified = datetime.now(UTC)
-                    else:
-                        last_modified = datetime.now(UTC)
-
-                    return StorageObject(
-                        key=key,
-                        size_bytes=size,
-                        content_type=content_type,
-                        etag=item.get("id"),
-                        last_modified=last_modified,
-                    )
-
-            return None
+            return self._find_matching_object(response, filename, key)
 
         except Exception as e:
             logger.warning("Failed to get object info from Supabase: %s - %s", key, e)
             return None
+
+    @staticmethod
+    def _split_key(key: str) -> tuple[str, str]:
+        """Split an object key into (folder, filename)."""
+        parts = key.rsplit("/", 1)
+        if len(parts) == 2:
+            return parts[0], parts[1]
+        return "", key
+
+    @staticmethod
+    def _find_matching_object(
+        response: list[dict[str, Any]], filename: str, key: str
+    ) -> StorageObject | None:
+        """Find an exact filename match in a Supabase list response."""
+        for item in response:
+            if item.get("name") == filename:
+                return _storage_object_from_item(item, key)
+        return None
 
     async def list_objects(
         self,
@@ -354,11 +359,8 @@ class SupabaseStorage:
         """
         try:
             client = self._get_client()
-
-            # Parse offset from continuation token
             offset = int(continuation_token) if continuation_token else 0
 
-            # Supabase list returns files in a folder
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
@@ -370,56 +372,35 @@ class SupabaseStorage:
             )
 
             if not response:
-                return ListResult(objects=[], prefix=prefix if prefix else None)
+                return ListResult(objects=[], prefix=prefix or None)
 
-            objects: list[StorageObject] = []
-            for item in response:
-                # Skip folders
-                if item.get("id") is None:
-                    continue
-
-                name = item.get("name", "")
-                full_key = f"{prefix}/{name}" if prefix else name
-
-                metadata = item.get("metadata", {})
-                size = metadata.get("size", 0)
-                content_type = metadata.get("mimetype")
-
-                # Parse last modified
-                last_modified_str = item.get("updated_at") or item.get("created_at")
-                if last_modified_str:
-                    try:
-                        last_modified = datetime.fromisoformat(
-                            last_modified_str.replace("Z", "+00:00")
-                        )
-                    except (ValueError, TypeError):
-                        last_modified = datetime.now(UTC)
-                else:
-                    last_modified = datetime.now(UTC)
-
-                objects.append(
-                    StorageObject(
-                        key=full_key,
-                        size_bytes=size,
-                        content_type=content_type,
-                        etag=item.get("id"),
-                        last_modified=last_modified,
-                    )
-                )
-
-            # Check if truncated
+            objects = self._build_object_list(response, prefix)
             is_truncated = len(response) >= max_keys
 
             return ListResult(
                 objects=objects,
                 is_truncated=is_truncated,
                 next_continuation_token=str(offset + max_keys) if is_truncated else None,
-                prefix=prefix if prefix else None,
+                prefix=prefix or None,
             )
 
         except Exception as e:
             logger.warning("Failed to list objects from Supabase: %s - %s", prefix, e)
-            return ListResult(objects=[], prefix=prefix if prefix else None)
+            return ListResult(objects=[], prefix=prefix or None)
+
+    @staticmethod
+    def _build_object_list(
+        response: list[dict[str, Any]], prefix: str
+    ) -> list[StorageObject]:
+        """Convert a Supabase list response into StorageObject instances, skipping folders."""
+        objects: list[StorageObject] = []
+        for item in response:
+            if item.get("id") is None:
+                continue
+            name = item.get("name", "")
+            full_key = f"{prefix}/{name}" if prefix else name
+            objects.append(_storage_object_from_item(item, full_key))
+        return objects
 
     async def get_presigned_url(
         self,

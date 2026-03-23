@@ -25,22 +25,16 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
+from syn_adapters.workspace_backends.service.workspace_lifecycle import (
+    build_isolation_config,
+    cleanup_workspace,
+    create_workspace_aggregate,
+    provision_workspace,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
     CapabilityType,
     IsolationBackendType,
-    IsolationConfig,
-    SecurityPolicy,
-    SidecarConfig,
     TokenType,
-)
-from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
-    WorkspaceAggregate,
-)
-from syn_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
-    CreateWorkspaceCommand,
-)
-from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
-    TerminateWorkspaceCommand,
 )
 
 if TYPE_CHECKING:
@@ -58,8 +52,12 @@ if TYPE_CHECKING:
         SidecarPort,
     )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
+        IsolationConfig,
         IsolationHandle,
         SidecarHandle,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
+        WorkspaceAggregate,
     )
 
 logger = logging.getLogger(__name__)
@@ -68,30 +66,9 @@ logger = logging.getLogger(__name__)
 class WorkspaceBackend(Enum):
     """Backend type for workspace isolation.
 
-    Type-safe enum for selecting workspace backend. Use with WorkspaceService.create().
-
-    Backends:
-        DOCKER: Production-grade isolation using Docker containers.
-                Uses agentic_isolation.WorkspaceDockerProvider with security hardening.
-
-        MEMORY: In-memory mocks for fast unit testing.
-                TEST ENVIRONMENT ONLY - will fail if APP_ENVIRONMENT != "test".
-
-        LOCAL: Local filesystem for integration testing without Docker.
-               TEST ENVIRONMENT ONLY - will fail if APP_ENVIRONMENT != "test".
-
-        RECORDING: Replay pre-recorded sessions for offline integration testing.
-                   TEST ENVIRONMENT ONLY - no API calls.
-
-    Usage:
-        # Production (default)
-        service = WorkspaceService.create(backend=WorkspaceBackend.DOCKER)
-
-        # Testing
-        service = WorkspaceService.create(backend=WorkspaceBackend.MEMORY)
-
-        # Recording replay
-        service = WorkspaceService.create_recording(Recording.SIMPLE_BASH)
+    DOCKER: Production-grade Docker containers.
+    MEMORY/LOCAL: Test-only mocks (requires APP_ENVIRONMENT=test).
+    RECORDING: Replay pre-recorded sessions for offline testing.
     """
 
     DOCKER = "docker"
@@ -132,39 +109,13 @@ class WorkspaceServiceConfig:
 class WorkspaceService:
     """Orchestrates workspace lifecycle with all adapters.
 
-    This is the main entry point for creating and managing workspaces.
-    It composes:
-    - IsolationBackendPort (container management via agentic_isolation)
-    - SidecarPort (proxy management)
-    - TokenInjectionAdapter (token vending + injection)
-    - EventStreamPort (stdout streaming)
-
-    Factory method:
-        WorkspaceService.create(backend=WorkspaceBackend.DOCKER)  # Production
-        WorkspaceService.create(backend=WorkspaceBackend.MEMORY)  # Testing
-
-    Backends:
-        DOCKER: Production-grade isolation using Docker containers
-        MEMORY: In-memory mocks (requires APP_ENVIRONMENT=test)
-        LOCAL: Local filesystem (requires APP_ENVIRONMENT=test)
+    Composes IsolationBackendPort, SidecarPort, TokenInjectionAdapter,
+    and EventStreamPort into a single facade.
 
     Usage:
         service = WorkspaceService.create()  # Defaults to DOCKER
-
-        async with service.create_workspace(
-            execution_id="exec-123",
-            workflow_id="wf-456",
-        ) as workspace:
-            # Inject tokens
-            await workspace.inject_tokens([TokenType.ANTHROPIC])
-
-            # Execute commands
+        async with service.create_workspace(execution_id="exec-123") as workspace:
             result = await workspace.execute(["python", "script.py"])
-
-            # Stream agent output
-            async for line in workspace.stream(["python", "-u", "agent.py"]):
-                event = json.loads(line)
-                handle_event(event)
     """
 
     def __init__(
@@ -423,6 +374,47 @@ class WorkspaceService:
             config=cfg,
         )
 
+    def _build_workspace_aggregate_and_config(
+        self,
+        workspace_id: str,
+        execution_id: str,
+        workflow_id: str | None,
+        phase_id: str | None,
+        extra_environment: dict[str, str] | None,
+    ) -> tuple[WorkspaceAggregate, IsolationConfig]:
+        """Create aggregate and isolation config for a new workspace.
+
+        Args:
+            workspace_id: Unique workspace ID
+            execution_id: Execution ID for audit trail
+            workflow_id: Optional workflow ID
+            phase_id: Optional phase ID
+            extra_environment: Additional environment variables
+
+        Returns:
+            Tuple of (WorkspaceAggregate, IsolationConfig).
+        """
+        aggregate = create_workspace_aggregate(
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id,
+            backend=self._config.backend,
+            capabilities=self._config.capabilities,
+            image=self._config.image,
+        )
+
+        isolation_config = build_isolation_config(
+            config=self._config,
+            workspace_id=workspace_id,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id,
+            extra_environment=extra_environment,
+        )
+
+        return aggregate, isolation_config
+
     @asynccontextmanager
     async def create_workspace(
         self,
@@ -437,12 +429,8 @@ class WorkspaceService:
     ) -> AsyncIterator[ManagedWorkspace]:
         """Create a managed workspace with full lifecycle.
 
-        This is an async context manager that:
-        1. Creates isolation container
-        2. Starts sidecar proxy (if with_sidecar=True)
-        3. Optionally injects tokens
-        4. Yields ManagedWorkspace for use
-        5. Cleans up on exit (destroys container + sidecar)
+        Creates isolation container, optional sidecar proxy, injects tokens,
+        yields ManagedWorkspace, and cleans up on exit.
 
         Args:
             execution_id: Execution ID for audit trail
@@ -451,91 +439,28 @@ class WorkspaceService:
             with_sidecar: Whether to start sidecar proxy
             inject_tokens: Whether to inject tokens automatically
             token_types: Token types to inject (if inject_tokens=True)
-            extra_environment: Additional environment variables to inject
-                (e.g., OTel configuration for observability)
+            extra_environment: Additional environment variables
 
         Yields:
             ManagedWorkspace for command execution
-
-        Example:
-            async with service.create_workspace(
-                execution_id="exec-123",
-                workflow_id="wf-456",
-                inject_tokens=True,
-                extra_environment={"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
-            ) as workspace:
-                result = await workspace.execute(["python", "script.py"])
         """
         import uuid
 
         workspace_id = str(uuid.uuid4())
 
-        # Create aggregate and emit creation event
-        aggregate = WorkspaceAggregate()
-        create_cmd = CreateWorkspaceCommand(
-            aggregate_id=workspace_id,
-            execution_id=execution_id,
-            workflow_id=workflow_id,
-            phase_id=phase_id,
-            isolation_backend=self._config.backend,
-            capabilities=self._config.capabilities,
-            image=self._config.image,
-        )
-        aggregate.create_workspace(create_cmd)
-
-        # Build isolation config with merged environment
-        merged_environment = dict(self._config.environment or {})
-        if extra_environment:
-            merged_environment.update(extra_environment)
-
-        isolation_config = IsolationConfig(
-            execution_id=execution_id,
-            workspace_id=workspace_id,
-            workflow_id=workflow_id,
-            phase_id=phase_id,
-            backend=self._config.backend,
-            capabilities=self._config.capabilities,
-            image=self._config.image,
-            security_policy=SecurityPolicy(
-                memory_limit_mb=self._config.memory_limit_mb,
-                cpu_limit_cores=self._config.cpu_limit_cores,
-            ),
-            environment=merged_environment,
+        aggregate, isolation_config = self._build_workspace_aggregate_and_config(
+            workspace_id, execution_id, workflow_id, phase_id, extra_environment,
         )
 
         isolation_handle: IsolationHandle | None = None
         sidecar_handle: SidecarHandle | None = None
 
         try:
-            # 1. Create isolation container
-            logger.info(
-                "Creating workspace (id=%s, execution=%s)",
-                workspace_id,
-                execution_id,
-            )
-            isolation_handle = await self._isolation.create(isolation_config)
-            aggregate.record_isolation_started(
-                isolation_id=isolation_handle.isolation_id,
-                isolation_type=isolation_handle.isolation_type,
+            isolation_handle, sidecar_handle = await provision_workspace(
+                self, isolation_config, aggregate, workspace_id,
+                with_sidecar=with_sidecar,
             )
 
-            # 2. Start sidecar if requested
-            if with_sidecar:
-                sidecar_config = SidecarConfig(
-                    workspace_id=workspace_id,
-                    listen_port=8080,
-                    allowed_hosts=self._config.allowed_hosts,
-                )
-                sidecar_handle = await self._sidecar.start(
-                    sidecar_config,
-                    isolation_handle,
-                )
-                logger.info(
-                    "Sidecar started (proxy=%s)",
-                    sidecar_handle.proxy_url,
-                )
-
-            # 3. Create managed workspace
             workspace = ManagedWorkspace(
                 workspace_id=workspace_id,
                 execution_id=execution_id,
@@ -545,7 +470,6 @@ class WorkspaceService:
                 _service=self,
             )
 
-            # 4. Inject tokens if requested
             if inject_tokens and sidecar_handle:
                 types = token_types or [TokenType.ANTHROPIC]
                 await workspace.inject_tokens(types)
@@ -553,42 +477,15 @@ class WorkspaceService:
             yield workspace
 
         except Exception as e:
-            # Record error in aggregate
             if aggregate:
                 aggregate.record_error(str(e), str(type(e).__name__))
             logger.exception("Workspace error (id=%s): %s", workspace_id, e)
             raise
 
         finally:
-            # 5. Cleanup
-            logger.info("Cleaning up workspace (id=%s)", workspace_id)
-
-            # Revoke tokens
-            if inject_tokens:
-                try:
-                    await self._token_injection.revoke(execution_id)
-                except Exception as e:
-                    logger.warning("Failed to revoke tokens: %s", e)
-
-            # Stop sidecar
-            if sidecar_handle:
-                try:
-                    await self._sidecar.stop(sidecar_handle)
-                except Exception as e:
-                    logger.warning("Failed to stop sidecar: %s", e)
-
-            # Destroy isolation
-            if isolation_handle:
-                try:
-                    await self._isolation.destroy(isolation_handle)
-                except Exception as e:
-                    logger.warning("Failed to destroy isolation: %s", e)
-
-            # Emit termination event
-            terminate_cmd = TerminateWorkspaceCommand(
-                workspace_id=workspace_id,
-                reason="Execution completed",
+            await cleanup_workspace(
+                self, aggregate, workspace_id, execution_id,
+                isolation_handle=isolation_handle,
+                sidecar_handle=sidecar_handle,
+                inject_tokens=inject_tokens,
             )
-            aggregate.terminate_workspace(terminate_cmd)
-
-            logger.info("Workspace cleaned up (id=%s)", workspace_id)

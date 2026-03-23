@@ -235,6 +235,44 @@ class LocalStorage:
         except Exception:
             return None
 
+    def _resolve_search_params(self, prefix: str) -> tuple[Path, str]:
+        """Resolve the search path and glob pattern from a prefix."""
+        if not prefix:
+            return self._base_path, "**/*"
+
+        search_path = self._resolve_path(prefix)
+        if prefix.endswith("/"):
+            return search_path, "*"
+
+        return search_path.parent, prefix.split("/")[-1] + "*"
+
+    def _file_to_storage_object(self, file_path: Path) -> StorageObject:
+        """Convert a filesystem path to a StorageObject."""
+        relative_path = file_path.relative_to(self._base_path)
+        key = str(relative_path).replace("\\", "/")
+        stat = file_path.stat()
+        content_type, _ = mimetypes.guess_type(str(file_path))
+
+        return StorageObject(
+            key=key,
+            size_bytes=stat.st_size,
+            content_type=content_type,
+            last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
+        )
+
+    def _collect_files(self, search_path: Path, pattern: str, max_keys: int) -> list[StorageObject]:
+        """Collect matching files from the filesystem (runs in executor)."""
+        if not search_path.exists():
+            return []
+
+        result: list[StorageObject] = []
+        for file_path in search_path.rglob(pattern):
+            if len(result) >= max_keys:
+                break
+            if file_path.is_file():
+                result.append(self._file_to_storage_object(file_path))
+        return result
+
     async def list_objects(
         self,
         prefix: str = "",
@@ -252,58 +290,21 @@ class LocalStorage:
         Returns:
             ListResult with matching files.
         """
+        prefix_or_none = prefix if prefix else None
         try:
-            # Resolve prefix path
-            if prefix:
-                search_path = self._resolve_path(prefix)
-                # If prefix doesn't end with /, treat as directory
-                if not prefix.endswith("/"):
-                    search_path = search_path.parent
-                    pattern = prefix.split("/")[-1] + "*"
-                else:
-                    pattern = "*"
-            else:
-                search_path = self._base_path
-                pattern = "**/*"
-
-            objects: list[StorageObject] = []
-
-            def collect_files() -> list[StorageObject]:
-                result: list[StorageObject] = []
-                if not search_path.exists():
-                    return result
-
-                # Use rglob for recursive search
-                for file_path in search_path.rglob(pattern):
-                    if file_path.is_file() and len(result) < max_keys:
-                        # Convert path back to key
-                        relative_path = file_path.relative_to(self._base_path)
-                        key = str(relative_path).replace("\\", "/")
-
-                        stat = file_path.stat()
-                        content_type, _ = mimetypes.guess_type(str(file_path))
-
-                        result.append(
-                            StorageObject(
-                                key=key,
-                                size_bytes=stat.st_size,
-                                content_type=content_type,
-                                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                            )
-                        )
-                return result
-
-            objects = await asyncio.get_event_loop().run_in_executor(None, collect_files)
-
+            search_path, pattern = self._resolve_search_params(prefix)
+            objects = await asyncio.get_event_loop().run_in_executor(
+                None, self._collect_files, search_path, pattern, max_keys
+            )
             return ListResult(
                 objects=objects,
                 is_truncated=len(objects) >= max_keys,
-                prefix=prefix if prefix else None,
+                prefix=prefix_or_none,
             )
         except ValueError:
-            return ListResult(objects=[], prefix=prefix if prefix else None)
+            return ListResult(objects=[], prefix=prefix_or_none)
         except Exception:
-            return ListResult(objects=[], prefix=prefix if prefix else None)
+            return ListResult(objects=[], prefix=prefix_or_none)
 
     async def get_presigned_url(
         self,
