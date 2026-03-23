@@ -1,4 +1,4 @@
-"""Tests for syn_api.v1.triggers — register, list, get, pause, resume, delete cycle.
+"""Tests for syn_api.routes.triggers — register, list, get, pause, resume, delete cycle.
 
 Uses APP_ENVIRONMENT=test for in-memory adapters.
 """
@@ -67,7 +67,7 @@ async def _seed_test_workflows():
 
 async def test_register_trigger():
     """Register a trigger and get back an ID."""
-    from syn_api.v1.triggers import register_trigger
+    from syn_api.routes.triggers import register_trigger
 
     result = await register_trigger(
         name="ci-self-heal",
@@ -83,7 +83,7 @@ async def test_register_trigger():
 
 async def test_register_trigger_invalid_input():
     """Register with missing required fields fails."""
-    from syn_api.v1.triggers import register_trigger
+    from syn_api.routes.triggers import register_trigger
 
     result = await register_trigger(
         name="",
@@ -97,7 +97,7 @@ async def test_register_trigger_invalid_input():
 
 async def test_list_triggers_empty():
     """List triggers when none exist."""
-    from syn_api.v1.triggers import list_triggers
+    from syn_api.routes.triggers import list_triggers
 
     result = await list_triggers()
 
@@ -107,7 +107,7 @@ async def test_list_triggers_empty():
 
 async def test_register_and_list_triggers():
     """Register a trigger then list it."""
-    from syn_api.v1.triggers import list_triggers, register_trigger
+    from syn_api.routes.triggers import list_triggers, register_trigger
 
     await register_trigger(
         name="test-trigger",
@@ -127,7 +127,7 @@ async def test_register_and_list_triggers():
 
 async def test_list_triggers_filter_by_repository():
     """Filter triggers by repository."""
-    from syn_api.v1.triggers import list_triggers, register_trigger
+    from syn_api.routes.triggers import list_triggers, register_trigger
 
     await register_trigger(name="t1", event="push", repository="owner/repo-a", workflow_id="wf-1")
     await register_trigger(name="t2", event="push", repository="owner/repo-b", workflow_id="wf-2")
@@ -140,7 +140,7 @@ async def test_list_triggers_filter_by_repository():
 
 async def test_get_trigger():
     """Register a trigger then get its details."""
-    from syn_api.v1.triggers import get_trigger, register_trigger
+    from syn_api.routes.triggers import get_trigger, register_trigger
 
     reg_result = await register_trigger(
         name="detail-trigger",
@@ -166,7 +166,7 @@ async def test_get_trigger():
 
 async def test_get_trigger_not_found():
     """Get a trigger that doesn't exist."""
-    from syn_api.v1.triggers import get_trigger
+    from syn_api.routes.triggers import get_trigger
 
     result = await get_trigger("nonexistent-id")
     assert isinstance(result, Err)
@@ -174,7 +174,7 @@ async def test_get_trigger_not_found():
 
 async def test_pause_trigger():
     """Pause an active trigger."""
-    from syn_api.v1.triggers import get_trigger, pause_trigger, register_trigger
+    from syn_api.routes.triggers import get_trigger, pause_trigger, register_trigger
 
     reg_result = await register_trigger(
         name="pausable", event="push", repository="owner/repo", workflow_id="wf-1"
@@ -192,7 +192,7 @@ async def test_pause_trigger():
 
 async def test_pause_already_paused():
     """Pausing an already-paused trigger returns error."""
-    from syn_api.v1.triggers import pause_trigger, register_trigger
+    from syn_api.routes.triggers import pause_trigger, register_trigger
 
     reg_result = await register_trigger(
         name="double-pause", event="push", repository="owner/repo", workflow_id="wf-1"
@@ -206,7 +206,7 @@ async def test_pause_already_paused():
 
 async def test_resume_trigger():
     """Resume a paused trigger."""
-    from syn_api.v1.triggers import get_trigger, pause_trigger, register_trigger, resume_trigger
+    from syn_api.routes.triggers import get_trigger, pause_trigger, register_trigger, resume_trigger
 
     reg_result = await register_trigger(
         name="resumable", event="push", repository="owner/repo", workflow_id="wf-1"
@@ -224,7 +224,7 @@ async def test_resume_trigger():
 
 async def test_delete_trigger():
     """Delete a trigger."""
-    from syn_api.v1.triggers import delete_trigger, get_trigger, register_trigger
+    from syn_api.routes.triggers import delete_trigger, get_trigger, register_trigger
 
     reg_result = await register_trigger(
         name="deletable", event="push", repository="owner/repo", workflow_id="wf-1"
@@ -241,7 +241,7 @@ async def test_delete_trigger():
 
 async def test_delete_already_deleted():
     """Deleting an already-deleted trigger returns error."""
-    from syn_api.v1.triggers import delete_trigger, register_trigger
+    from syn_api.routes.triggers import delete_trigger, register_trigger
 
     reg_result = await register_trigger(
         name="double-delete", event="push", repository="owner/repo", workflow_id="wf-1"
@@ -255,7 +255,7 @@ async def test_delete_already_deleted():
 
 async def test_disable_triggers():
     """Disable all triggers for a repository."""
-    from syn_api.v1.triggers import disable_triggers, list_triggers, register_trigger
+    from syn_api.routes.triggers import disable_triggers, list_triggers, register_trigger
 
     await register_trigger(name="t1", event="push", repository="owner/repo", workflow_id="wf-1")
     await register_trigger(
@@ -279,7 +279,7 @@ async def test_disable_triggers():
 
 async def test_full_lifecycle():
     """Register → list → get → pause → resume → delete cycle."""
-    from syn_api.v1.triggers import (
+    from syn_api.routes.triggers import (
         delete_trigger,
         get_trigger,
         list_triggers,

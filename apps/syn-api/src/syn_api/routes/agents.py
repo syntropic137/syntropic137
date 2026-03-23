@@ -1,11 +1,13 @@
-"""Agent operations — list providers, test, and chat.
+"""Agent API endpoints and service operations.
 
-Maps directly to syn_adapters.agents (no domain layer).
+Provides agent provider listing, testing, and chat completion.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from fastapi import APIRouter, HTTPException
 
 from syn_api.types import (
     AgentError,
@@ -19,11 +21,18 @@ from syn_api.types import (
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
 
+router = APIRouter(prefix="/agents", tags=["agents"])
+
 # Provider display names and default models
 _PROVIDER_META: dict[str, tuple[str, str]] = {
     "claude": ("Claude (Anthropic)", "claude-sonnet-4-20250514"),
     "mock": ("Mock (test only)", "mock-v1"),
 }
+
+
+# =============================================================================
+# Service functions (importable by tests)
+# =============================================================================
 
 
 async def list_providers(
@@ -206,3 +215,60 @@ async def chat(
             output_tokens=response.output_tokens,
         )
     )
+
+
+# =============================================================================
+# HTTP Endpoints
+# =============================================================================
+
+
+@router.get("/providers")
+async def list_providers_endpoint() -> dict[str, Any]:
+    """List available agent providers."""
+    result = await list_providers()
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=500, detail=result.message)
+
+    return {
+        "providers": [p.model_dump() for p in result.value],
+        "total": len(result.value),
+    }
+
+
+@router.post("/test")
+async def test_agent_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+    """Test an agent provider with a simple prompt."""
+    try:
+        result = await test_agent(
+            provider=body["provider"],
+            prompt=body["prompt"],
+            model=body.get("model"),
+        )
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if isinstance(result, Err):
+        status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
+        raise HTTPException(status_code=status, detail=result.message)
+
+    return result.value.model_dump()
+
+
+@router.post("/chat")
+async def chat_endpoint(body: dict[str, Any]) -> dict[str, Any]:
+    """Send a stateless chat completion request."""
+    try:
+        result = await chat(
+            provider=body["provider"],
+            messages=body["messages"],
+            model=body.get("model"),
+        )
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    if isinstance(result, Err):
+        status = 400 if result.error == AgentError.PROVIDER_NOT_FOUND else 502
+        raise HTTPException(status_code=status, detail=result.message)
+
+    return result.value.model_dump()

@@ -23,7 +23,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 @pytest.mark.unit
 async def test_org_create_appears_in_list():
     """Created org must appear in list immediately after creation."""
-    from syn_api.v1.organizations import create_organization, list_organizations
+    from syn_api.routes.organizations import create_organization, list_organizations
 
     result = await create_organization(name="Acme Corp", slug="acme-corp")
     assert isinstance(result, Ok), f"create failed: {result}"
@@ -38,7 +38,7 @@ async def test_org_create_appears_in_list():
 @pytest.mark.unit
 async def test_org_create_appears_in_show():
     """Created org must be retrievable by ID."""
-    from syn_api.v1.organizations import create_organization, get_organization
+    from syn_api.routes.organizations import create_organization, get_organization
 
     result = await create_organization(name="Show Test Org", slug="show-test-org")
     assert isinstance(result, Ok)
@@ -54,7 +54,7 @@ async def test_org_create_appears_in_show():
 @pytest.mark.unit
 async def test_org_show_unknown_id_returns_not_found():
     """get_organization returns NOT_FOUND for an ID that was never created."""
-    from syn_api.v1.organizations import get_organization
+    from syn_api.routes.organizations import get_organization
 
     result = await get_organization("org-nonexistent-000")
     assert isinstance(result, Err)
@@ -64,7 +64,7 @@ async def test_org_show_unknown_id_returns_not_found():
 @pytest.mark.unit
 async def test_org_update_reflects_in_show():
     """Updated org name must appear in subsequent get_organization."""
-    from syn_api.v1.organizations import (
+    from syn_api.routes.organizations import (
         create_organization,
         get_organization,
         update_organization,
@@ -85,7 +85,7 @@ async def test_org_update_reflects_in_show():
 @pytest.mark.unit
 async def test_multiple_orgs_all_appear_in_list():
     """All created orgs appear in list (not just the last one)."""
-    from syn_api.v1.organizations import create_organization, list_organizations
+    from syn_api.routes.organizations import create_organization, list_organizations
 
     ids = []
     for i in range(3):
@@ -108,8 +108,8 @@ async def test_multiple_orgs_all_appear_in_list():
 @pytest.mark.unit
 async def test_system_create_appears_in_list():
     """Created system must appear in list immediately after creation."""
-    from syn_api.v1.organizations import create_organization
-    from syn_api.v1.systems import create_system, list_systems
+    from syn_api.routes.organizations import create_organization
+    from syn_api.routes.systems import create_system, list_systems
 
     org_result = await create_organization(name="Sys Org", slug="sys-org")
     assert isinstance(org_result, Ok)
@@ -130,8 +130,8 @@ async def test_system_create_appears_in_list():
 @pytest.mark.unit
 async def test_system_create_increments_org_system_count():
     """Creating a system increments the org's system_count."""
-    from syn_api.v1.organizations import create_organization, get_organization
-    from syn_api.v1.systems import create_system
+    from syn_api.routes.organizations import create_organization, get_organization
+    from syn_api.routes.systems import create_system
 
     org_result = await create_organization(name="Count Org", slug="count-org")
     assert isinstance(org_result, Ok)
@@ -157,8 +157,8 @@ async def test_system_create_increments_org_system_count():
 @pytest.mark.unit
 async def test_repo_register_appears_in_list():
     """Registered repo must appear in list immediately after registration."""
-    from syn_api.v1.organizations import create_organization
-    from syn_api.v1.repos import list_repos, register_repo
+    from syn_api.routes.organizations import create_organization
+    from syn_api.routes.repos import list_repos, register_repo
 
     org_result = await create_organization(name="Repo Org", slug="repo-org")
     assert isinstance(org_result, Ok)
@@ -181,8 +181,8 @@ async def test_repo_register_appears_in_list():
 @pytest.mark.unit
 async def test_repo_register_increments_org_repo_count():
     """Registering a repo increments the org's repo_count."""
-    from syn_api.v1.organizations import create_organization, get_organization
-    from syn_api.v1.repos import register_repo
+    from syn_api.routes.organizations import create_organization, get_organization
+    from syn_api.routes.repos import register_repo
 
     org_result = await create_organization(name="RCount Org", slug="rcount-org")
     assert isinstance(org_result, Ok)

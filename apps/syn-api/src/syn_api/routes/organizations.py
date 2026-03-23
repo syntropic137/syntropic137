@@ -1,25 +1,241 @@
-"""Organization management API endpoints — thin wrapper over v1."""
+"""Organization management API endpoints and service operations.
+
+Provides CRUD for organizations with domain aggregate interaction.
+"""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 
-import syn_api.v1.organizations as orgs
-from syn_api.types import Err, OrganizationError
+from syn_api._wiring import (
+    ensure_connected,
+    sync_published_events_to_projections,
+)
+from syn_api.types import (
+    Err,
+    Ok,
+    OrganizationError,
+    OrganizationSummaryResponse,
+    Result,
+)
+
+if TYPE_CHECKING:
+    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 
+# =============================================================================
+# Service functions (importable by tests)
+# =============================================================================
+
+
+async def create_organization(
+    name: str,
+    slug: str,
+    created_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[str, OrganizationError]:
+    """Create a new organization."""
+    from syn_adapters.storage.repositories import get_organization_repository
+    from syn_domain.contexts.organization.domain.commands.CreateOrganizationCommand import (
+        CreateOrganizationCommand,
+    )
+    from syn_domain.contexts.organization.slices.create_organization.CreateOrganizationHandler import (
+        CreateOrganizationHandler,
+    )
+
+    await ensure_connected()
+
+    try:
+        command = CreateOrganizationCommand(
+            name=name,
+            slug=slug,
+            created_by=created_by,
+        )
+    except ValueError as e:
+        return Err(OrganizationError.INVALID_INPUT, message=str(e))
+
+    repo = get_organization_repository()
+    handler = CreateOrganizationHandler(repository=repo)
+
+    try:
+        aggregate = await handler.handle(command)
+        await sync_published_events_to_projections()
+        return Ok(aggregate.organization_id)
+    except Exception as e:
+        return Err(OrganizationError.INVALID_INPUT, message=str(e))
+
+
+async def list_organizations(
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[list[OrganizationSummaryResponse], OrganizationError]:
+    """List all organizations."""
+    from syn_domain.contexts.organization.slices.list_organizations.projection import (
+        get_organization_projection,
+    )
+
+    await ensure_connected()
+
+    projection = get_organization_projection()
+    orgs = await projection.list_all()
+
+    return Ok(
+        [
+            OrganizationSummaryResponse(
+                organization_id=o.organization_id,
+                name=o.name,
+                slug=o.slug,
+                created_by=o.created_by,
+                created_at=o.created_at,
+                system_count=o.system_count,
+                repo_count=o.repo_count,
+            )
+            for o in orgs
+        ]
+    )
+
+
+async def get_organization(
+    organization_id: str,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[OrganizationSummaryResponse, OrganizationError]:
+    """Get organization details."""
+    from syn_domain.contexts.organization.slices.list_organizations.projection import (
+        get_organization_projection,
+    )
+
+    await ensure_connected()
+
+    projection = get_organization_projection()
+    org = await projection.get(organization_id)
+
+    if org is None:
+        return Err(OrganizationError.NOT_FOUND, message=f"Organization {organization_id} not found")
+
+    return Ok(
+        OrganizationSummaryResponse(
+            organization_id=org.organization_id,
+            name=org.name,
+            slug=org.slug,
+            created_by=org.created_by,
+            created_at=org.created_at,
+            system_count=org.system_count,
+            repo_count=org.repo_count,
+        )
+    )
+
+
+async def update_organization(
+    organization_id: str,
+    name: str | None = None,
+    slug: str | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, OrganizationError]:
+    """Update an organization."""
+    from syn_adapters.storage.repositories import get_organization_repository
+    from syn_domain.contexts.organization.domain.commands.UpdateOrganizationCommand import (
+        UpdateOrganizationCommand,
+    )
+    from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
+        ManageOrganizationHandler,
+    )
+
+    await ensure_connected()
+
+    try:
+        command = UpdateOrganizationCommand(
+            organization_id=organization_id,
+            name=name,
+            slug=slug,
+        )
+    except ValueError as e:
+        return Err(OrganizationError.INVALID_INPUT, message=str(e))
+
+    repo = get_organization_repository()
+    handler = ManageOrganizationHandler(repository=repo)
+    result = await handler.update(command)
+
+    if result is None:
+        return Err(OrganizationError.NOT_FOUND, message=f"Organization {organization_id} not found")
+
+    if not result.success:
+        error_enum = _classify_org_error(result.error)
+        return Err(error_enum, message=result.error)
+
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
+async def delete_organization(
+    organization_id: str,
+    deleted_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, OrganizationError]:
+    """Soft-delete an organization."""
+    from syn_adapters.storage.repositories import get_organization_repository
+    from syn_domain.contexts.organization.domain.commands.DeleteOrganizationCommand import (
+        DeleteOrganizationCommand,
+    )
+    from syn_domain.contexts.organization.slices.manage_organization.ManageOrganizationHandler import (
+        ManageOrganizationHandler,
+    )
+
+    await ensure_connected()
+
+    try:
+        command = DeleteOrganizationCommand(
+            organization_id=organization_id,
+            deleted_by=deleted_by,
+        )
+    except ValueError as e:
+        return Err(OrganizationError.INVALID_INPUT, message=str(e))
+
+    repo = get_organization_repository()
+    handler = ManageOrganizationHandler(repository=repo)
+    result = await handler.delete(command)
+
+    if result is None:
+        return Err(
+            OrganizationError.NOT_FOUND,
+            message=f"Organization {organization_id} not found",
+        )
+
+    if not result.success:
+        error_enum = _classify_org_error(result.error)
+        return Err(error_enum, message=result.error)
+
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
+def _classify_org_error(error_msg: str) -> OrganizationError:
+    """Map a domain ValueError message to a specific OrganizationError."""
+    lower = error_msg.lower()
+    if "already deleted" in lower:
+        return OrganizationError.ALREADY_DELETED
+    if "has systems" in lower:
+        return OrganizationError.HAS_SYSTEMS
+    if "has repos" in lower:
+        return OrganizationError.HAS_REPOS
+    return OrganizationError.INVALID_INPUT
+
+
+# =============================================================================
+# HTTP Endpoints
+# =============================================================================
+
+
 @router.post("")
-async def create_organization(body: dict[str, Any]) -> dict[str, Any]:
+async def create_organization_endpoint(body: dict[str, Any]) -> dict[str, Any]:
     """Create a new organization."""
     try:
-        result = await orgs.create_organization(
+        result = await create_organization(
             name=body["name"],
             slug=body["slug"],
             created_by=body.get("created_by", "api"),
@@ -34,9 +250,9 @@ async def create_organization(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("")
-async def list_organizations() -> dict[str, Any]:
+async def list_organizations_endpoint() -> dict[str, Any]:
     """List all organizations."""
-    result = await orgs.list_organizations()
+    result = await list_organizations()
 
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
@@ -48,9 +264,9 @@ async def list_organizations() -> dict[str, Any]:
 
 
 @router.get("/{organization_id}")
-async def get_organization(organization_id: str) -> dict[str, Any]:
+async def get_organization_endpoint(organization_id: str) -> dict[str, Any]:
     """Get organization details."""
-    result = await orgs.get_organization(organization_id)
+    result = await get_organization(organization_id)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=result.message)
@@ -59,9 +275,9 @@ async def get_organization(organization_id: str) -> dict[str, Any]:
 
 
 @router.put("/{organization_id}")
-async def update_organization(organization_id: str, body: dict[str, Any]) -> dict[str, Any]:
+async def update_organization_endpoint(organization_id: str, body: dict[str, Any]) -> dict[str, Any]:
     """Update an organization."""
-    result = await orgs.update_organization(
+    result = await update_organization(
         organization_id=organization_id,
         name=body.get("name"),
         slug=body.get("slug"),
@@ -75,9 +291,9 @@ async def update_organization(organization_id: str, body: dict[str, Any]) -> dic
 
 
 @router.delete("/{organization_id}")
-async def delete_organization(organization_id: str) -> dict[str, Any]:
+async def delete_organization_endpoint(organization_id: str) -> dict[str, Any]:
     """Soft-delete an organization."""
-    result = await orgs.delete_organization(
+    result = await delete_organization(
         organization_id=organization_id,
         deleted_by="api",
     )

@@ -1,4 +1,4 @@
-"""Tests for syn_api.v1.agents — list providers, test agent.
+"""Tests for syn_api.routes.agents — list providers, test agent.
 
 Uses APP_ENVIRONMENT=test for in-memory adapters.
 """
@@ -12,7 +12,7 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 async def test_list_providers():
     """List all known providers with availability info."""
-    from syn_api.v1.agents import list_providers
+    from syn_api.routes.agents import list_providers
 
     result = await list_providers()
 
@@ -30,7 +30,7 @@ async def test_list_providers():
 
 async def test_list_providers_includes_mock():
     """In test mode, mock provider should be available."""
-    from syn_api.v1.agents import list_providers
+    from syn_api.routes.agents import list_providers
 
     result = await list_providers()
     assert isinstance(result, Ok)
@@ -41,7 +41,7 @@ async def test_list_providers_includes_mock():
 
 async def test_test_agent_unknown_provider():
     """Testing an unknown provider returns error."""
-    from syn_api.v1.agents import test_agent
+    from syn_api.routes.agents import test_agent
 
     result = await test_agent(provider="nonexistent", prompt="Hello")
     assert isinstance(result, Err)
@@ -49,7 +49,7 @@ async def test_test_agent_unknown_provider():
 
 async def test_chat_unknown_provider():
     """Chat with unknown provider returns error."""
-    from syn_api.v1.agents import chat
+    from syn_api.routes.agents import chat
 
     result = await chat(
         provider="nonexistent",
@@ -60,7 +60,7 @@ async def test_chat_unknown_provider():
 
 async def test_test_agent_mock():
     """Test agent with mock provider."""
-    from syn_api.v1.agents import test_agent
+    from syn_api.routes.agents import test_agent
 
     result = await test_agent(provider="mock", prompt="Hello")
 
@@ -75,7 +75,7 @@ async def test_test_agent_mock():
 
 async def test_chat_mock():
     """Chat with mock provider."""
-    from syn_api.v1.agents import chat
+    from syn_api.routes.agents import chat
 
     result = await chat(
         provider="mock",

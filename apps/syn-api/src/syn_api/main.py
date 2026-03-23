@@ -12,12 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from syn_api.config import get_api_config
 from syn_api.routes import (
+    agents_router,
     artifacts_router,
-    control_router,
     conversations_router,
     costs_router,
     events_router,
-    execution_router,
     executions_router,
     insights_router,
     metrics_router,
@@ -57,7 +56,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
         - Stop subscription service
         - Disconnect from event store
     """
-    import syn_api.v1.lifecycle as lifecycle
+    import syn_api.services.lifecycle as lifecycle
 
     logger.info("Starting Syntropic137 API...")
 
@@ -116,13 +115,11 @@ def create_app() -> FastAPI:
     # nginx: location /api/v1/ → proxy_pass http://api:8000/
     # So /api/v1/workflows → strips to /workflows → matches these routes.
     app.include_router(workflows_router)
-    app.include_router(execution_router)
     app.include_router(executions_router)
     app.include_router(sessions_router)
     app.include_router(artifacts_router)
     app.include_router(metrics_router)
     app.include_router(observability_router)
-    app.include_router(control_router)
     app.include_router(costs_router)
     app.include_router(events_router)
     app.include_router(conversations_router)
@@ -133,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(systems_router)
     app.include_router(repos_router)
     app.include_router(insights_router)
+    app.include_router(agents_router)
 
     @app.get("/")
     async def root() -> dict[str, str]:
@@ -147,7 +145,7 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health() -> dict:
         """Health check endpoint with detailed subscription status."""
-        import syn_api.v1.lifecycle as lifecycle
+        import syn_api.services.lifecycle as lifecycle
 
         result = await lifecycle.health_check()
         if isinstance(result, Ok):

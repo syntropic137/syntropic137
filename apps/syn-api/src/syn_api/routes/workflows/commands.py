@@ -1,7 +1,7 @@
-"""Workflow operations — create, list, get, and validate templates.
+"""Workflow TEMPLATE command operations (create, validate).
 
-Maps to the orchestration context in syn-domain.
-Execution operations have moved to ``syn_api.v1.executions``.
+Service functions are plain ``async def`` (importable by tests).
+No HTTP endpoints currently — these are called from CLI or other services.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from uuid import uuid4
 
 from syn_api._wiring import (
     ensure_connected,
-    get_projection_mgr,
     get_publisher,
     get_workflow_repo,
     sync_published_events_to_projections,
@@ -20,140 +19,12 @@ from syn_api.types import (
     Err,
     Ok,
     Result,
-    WorkflowDetail,
     WorkflowError,
-    WorkflowSummary,
     WorkflowValidation,
 )
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
-
-
-async def list_workflows(
-    workflow_type: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[list[WorkflowSummary], WorkflowError]:
-    """List all workflow templates.
-
-    Args:
-        workflow_type: Optional filter by workflow type.
-        limit: Maximum results to return.
-        offset: Pagination offset.
-        auth: Optional authentication context.
-
-    Returns:
-        Ok(list[WorkflowSummary]) on success, Err(WorkflowError) on failure.
-    """
-    await ensure_connected()
-    manager = get_projection_mgr()
-    projection = manager.workflow_list
-    domain_summaries = await projection.query(
-        workflow_type_filter=workflow_type,
-        limit=limit,
-        offset=offset,
-    )
-    return Ok(
-        [
-            WorkflowSummary(
-                id=s.id,
-                name=s.name,
-                workflow_type=s.workflow_type,
-                classification=s.classification,
-                phase_count=s.phase_count,
-                description=s.description,
-                created_at=s.created_at,
-                runs_count=s.runs_count,
-            )
-            for s in domain_summaries
-        ]
-    )
-
-
-async def get_workflow(
-    workflow_id: str,
-    auth: AuthContext | None = None,  # noqa: ARG001
-) -> Result[WorkflowDetail, WorkflowError]:
-    """Get detailed information about a workflow template.
-
-    Args:
-        workflow_id: The workflow template ID.
-        auth: Optional authentication context.
-
-    Returns:
-        Ok(WorkflowDetail) on success, Err(WorkflowError.NOT_FOUND) if missing.
-    """
-    await ensure_connected()
-    manager = get_projection_mgr()
-    detail = await manager.workflow_detail.get_by_id(workflow_id)
-    if detail is None:
-        return Err(WorkflowError.NOT_FOUND, message=f"Workflow {workflow_id} not found")
-    # Convert domain phase objects to PhaseDefinitionResponse-compatible dicts
-    from syn_api.types import InputDeclarationResponse, PhaseDefinitionResponse
-
-    phases: list[PhaseDefinitionResponse] = []
-    for p in detail.phases or []:
-        if isinstance(p, dict):
-            phases.append(
-                PhaseDefinitionResponse(
-                    phase_id=str(p.get("phase_id") or p.get("id") or ""),
-                    name=str(p.get("name", "")),
-                    order=p.get("order", 0),
-                    description=p.get("description"),
-                    agent_type=p.get("agent_type", ""),
-                    prompt_template=p.get("prompt_template"),
-                    timeout_seconds=p.get("timeout_seconds", 300),
-                    allowed_tools=p.get("allowed_tools", []),
-                    argument_hint=p.get("argument_hint"),
-                    model=p.get("model"),
-                )
-            )
-        else:
-            phases.append(
-                PhaseDefinitionResponse(
-                    phase_id=str(p.id),
-                    name=p.name,
-                    order=p.order,
-                    description=p.description,
-                    agent_type=p.agent_type,
-                    prompt_template=p.prompt_template,
-                    timeout_seconds=p.timeout_seconds or 300,
-                    allowed_tools=list(p.allowed_tools or []),
-                    argument_hint=p.argument_hint if hasattr(p, "argument_hint") else None,
-                    model=p.model if hasattr(p, "model") else None,
-                )
-            )
-
-    # Map input declarations
-    input_decls: list[InputDeclarationResponse] = []
-    for d in detail.input_declarations or []:
-        if isinstance(d, dict):
-            input_decls.append(InputDeclarationResponse(**d))
-        else:
-            input_decls.append(
-                InputDeclarationResponse(
-                    name=d.name,
-                    description=d.description if hasattr(d, "description") else None,
-                    required=d.required if hasattr(d, "required") else True,
-                    default=d.default if hasattr(d, "default") else None,
-                )
-            )
-
-    return Ok(
-        WorkflowDetail(
-            id=detail.id,
-            name=detail.name,
-            description=detail.description,
-            workflow_type=detail.workflow_type,
-            classification=detail.classification,
-            phases=phases,
-            input_declarations=input_decls,
-            created_at=detail.created_at,
-            runs_count=detail.runs_count,
-        )
-    )
 
 
 async def create_workflow(
