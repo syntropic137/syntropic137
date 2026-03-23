@@ -12,8 +12,15 @@ from pydantic import BaseModel, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
-    Err, ExecutionDetail, ExecutionDetailFull, ExecutionError,
-    ExecutionSummary, Ok, PhaseExecution, Result, ToolOperation,
+    Err,
+    ExecutionDetail,
+    ExecutionDetailFull,
+    ExecutionError,
+    ExecutionSummary,
+    Ok,
+    PhaseExecution,
+    Result,
+    ToolOperation,
 )
 
 if TYPE_CHECKING:
@@ -24,6 +31,7 @@ router = APIRouter(tags=["executions"])
 
 # -- Response Models ----------------------------------------------------------
 
+
 class PhaseOperationInfo(BaseModel):
     operation_id: str
     operation_type: str
@@ -31,6 +39,7 @@ class PhaseOperationInfo(BaseModel):
     tool_name: str | None = None
     tool_use_id: str | None = None
     success: bool = True
+
 
 class PhaseExecutionInfo(BaseModel):
     phase_id: str
@@ -48,6 +57,7 @@ class PhaseExecutionInfo(BaseModel):
     error_message: str | None = None
     operations: list[PhaseOperationInfo] = []
 
+
 class ExecutionDetailResponse(BaseModel):
     workflow_execution_id: str
     workflow_id: str
@@ -64,6 +74,7 @@ class ExecutionDetailResponse(BaseModel):
     artifact_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
 
+
 class ExecutionSummaryResponse(BaseModel):
     workflow_execution_id: str
     workflow_id: str
@@ -77,22 +88,29 @@ class ExecutionSummaryResponse(BaseModel):
     total_cost_usd: Decimal = Decimal("0")
     tool_call_count: int = 0
 
+
 class ExecutionListResponse(BaseModel):
     executions: list[ExecutionSummaryResponse]
     total: int
     page: int = 1
     page_size: int = 50
 
+
 # -- Helpers ------------------------------------------------------------------
+
 
 def _to_str(val: object | None) -> str | None:
     return str(val) if val is not None else None
 
+
 # -- Service functions --------------------------------------------------------
 
+
 async def list_(
-    workflow_id: str | None = None, status: str | None = None,
-    limit: int = 100, offset: int = 0,
+    workflow_id: str | None = None,
+    status: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     await ensure_connected()
@@ -102,12 +120,15 @@ async def list_(
         domain_summaries = await projection.get_by_workflow_id(workflow_id)
     else:
         domain_summaries = await projection.get_all(
-            limit=limit, offset=offset, status_filter=status,
+            limit=limit,
+            offset=offset,
+            status_filter=status,
         )
     tool_counts: dict[str, int] = {}
     if domain_summaries:
         try:
             from syn_api._wiring import get_event_store_instance
+
             event_store = get_event_store_instance()
             pool = event_store.pool
             if pool is not None:
@@ -124,41 +145,56 @@ async def list_(
                 tool_counts = {row["execution_id"]: row["cnt"] for row in rows}
         except Exception:
             logger.debug("Could not query tool counts from agent_events", exc_info=True)
-    return Ok([
-        ExecutionSummary(
-            workflow_execution_id=s.workflow_execution_id,
-            workflow_id=s.workflow_id, workflow_name=s.workflow_name,
-            status=s.status, started_at=s.started_at, completed_at=s.completed_at,
-            completed_phases=s.completed_phases, total_phases=s.total_phases,
-            total_tokens=s.total_tokens, total_cost_usd=s.total_cost_usd,
-            tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
-            error_message=s.error_message,
-        ) for s in domain_summaries
-    ])
+    return Ok(
+        [
+            ExecutionSummary(
+                workflow_execution_id=s.workflow_execution_id,
+                workflow_id=s.workflow_id,
+                workflow_name=s.workflow_name,
+                status=s.status,
+                started_at=s.started_at,
+                completed_at=s.completed_at,
+                completed_phases=s.completed_phases,
+                total_phases=s.total_phases,
+                total_tokens=s.total_tokens,
+                total_cost_usd=s.total_cost_usd,
+                tool_call_count=tool_counts.get(s.workflow_execution_id, 0),
+                error_message=s.error_message,
+            )
+            for s in domain_summaries
+        ]
+    )
 
 
 async def get(
-    execution_id: str, auth: AuthContext | None = None,  # noqa: ARG001
+    execution_id: str,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionDetail, ExecutionError]:
     await ensure_connected()
     detail = await get_projection_mgr().workflow_execution_detail.get_by_id(execution_id)
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
-    return Ok(ExecutionDetail(
-        workflow_execution_id=detail.workflow_execution_id,
-        workflow_id=detail.workflow_id, workflow_name=detail.workflow_name,
-        status=detail.status, started_at=detail.started_at,
-        completed_at=detail.completed_at,
-        total_input_tokens=detail.total_input_tokens,
-        total_output_tokens=detail.total_output_tokens,
-        total_cost_usd=detail.total_cost_usd,
-        total_duration_seconds=detail.total_duration_seconds,
-        artifact_ids=list(detail.artifact_ids), error_message=detail.error_message,
-    ))
+    return Ok(
+        ExecutionDetail(
+            workflow_execution_id=detail.workflow_execution_id,
+            workflow_id=detail.workflow_id,
+            workflow_name=detail.workflow_name,
+            status=detail.status,
+            started_at=detail.started_at,
+            completed_at=detail.completed_at,
+            total_input_tokens=detail.total_input_tokens,
+            total_output_tokens=detail.total_output_tokens,
+            total_cost_usd=detail.total_cost_usd,
+            total_duration_seconds=detail.total_duration_seconds,
+            artifact_ids=list(detail.artifact_ids),
+            error_message=detail.error_message,
+        )
+    )
 
 
 async def get_detail(
-    execution_id: str, auth: AuthContext | None = None,  # noqa: ARG001
+    execution_id: str,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[ExecutionDetailFull, ExecutionError]:
     await ensure_connected()
     manager = get_projection_mgr()
@@ -175,57 +211,85 @@ async def get_detail(
                     tool_data = await manager.session_tools.get(session_id)
                     ops = [
                         ToolOperation(
-                            observation_id=op.observation_id, operation_type=op.operation_type,
-                            timestamp=op.timestamp, duration_ms=op.duration_ms,
-                            success=op.success, tool_name=op.tool_name, tool_use_id=op.tool_use_id,
-                        ) for op in (tool_data or [])
+                            observation_id=op.observation_id,
+                            operation_type=op.operation_type,
+                            timestamp=op.timestamp,
+                            duration_ms=op.duration_ms,
+                            success=op.success,
+                            tool_name=op.tool_name,
+                            tool_use_id=op.tool_use_id,
+                        )
+                        for op in (tool_data or [])
                     ]
                 except Exception:
                     logger.exception("Failed to load tool ops for session %s", session_id)
             _st = p.started_at if hasattr(p, "started_at") else None
             _co = p.completed_at if hasattr(p, "completed_at") else None
-            phases.append(PhaseExecution(
-                phase_id=p.workflow_phase_id, name=p.name, status=p.status,
-                session_id=session_id,
-                artifact_id=p.artifact_id if hasattr(p, "artifact_id") else None,
-                input_tokens=p.input_tokens, output_tokens=p.output_tokens,
-                cost_usd=Decimal(str(p.cost_usd)),
-                duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
-                started_at=datetime.fromisoformat(_st) if isinstance(_st, str) else _st,
-                completed_at=datetime.fromisoformat(_co) if isinstance(_co, str) else _co,
-                operations=ops,
-            ))
-    return Ok(ExecutionDetailFull(
-        workflow_execution_id=detail.workflow_execution_id,
-        workflow_id=detail.workflow_id, workflow_name=detail.workflow_name,
-        status=detail.status, phases=phases,
-        total_tokens=detail.total_input_tokens + detail.total_output_tokens,
-        total_cost_usd=detail.total_cost_usd,
-        started_at=detail.started_at, completed_at=detail.completed_at,
-        error_message=detail.error_message,
-    ))
+            phases.append(
+                PhaseExecution(
+                    phase_id=p.workflow_phase_id,
+                    name=p.name,
+                    status=p.status,
+                    session_id=session_id,
+                    artifact_id=p.artifact_id if hasattr(p, "artifact_id") else None,
+                    input_tokens=p.input_tokens,
+                    output_tokens=p.output_tokens,
+                    cost_usd=Decimal(str(p.cost_usd)),
+                    duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
+                    started_at=datetime.fromisoformat(_st) if isinstance(_st, str) else _st,
+                    completed_at=datetime.fromisoformat(_co) if isinstance(_co, str) else _co,
+                    operations=ops,
+                )
+            )
+    return Ok(
+        ExecutionDetailFull(
+            workflow_execution_id=detail.workflow_execution_id,
+            workflow_id=detail.workflow_id,
+            workflow_name=detail.workflow_name,
+            status=detail.status,
+            phases=phases,
+            total_tokens=detail.total_input_tokens + detail.total_output_tokens,
+            total_cost_usd=detail.total_cost_usd,
+            started_at=detail.started_at,
+            completed_at=detail.completed_at,
+            error_message=detail.error_message,
+        )
+    )
 
 
 async def list_active(
-    limit: int = 50, auth: AuthContext | None = None,  # noqa: ARG001
+    limit: int = 50,
+    auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[ExecutionSummary], ExecutionError]:
     """List currently running or paused executions."""
     await ensure_connected()
     all_execs = await get_projection_mgr().workflow_execution_list.get_all(
-        limit=limit, status_filter=None,
+        limit=limit,
+        status_filter=None,
     )
-    return Ok([
-        ExecutionSummary(
-            workflow_execution_id=s.workflow_execution_id,
-            workflow_id=s.workflow_id, workflow_name=s.workflow_name,
-            status=s.status, started_at=s.started_at, completed_at=s.completed_at,
-            completed_phases=s.completed_phases, total_phases=s.total_phases,
-            total_tokens=s.total_tokens, total_cost_usd=s.total_cost_usd,
-            error_message=s.error_message,
-        ) for s in all_execs if s.status in ("running", "paused", "pending")
-    ])
+    return Ok(
+        [
+            ExecutionSummary(
+                workflow_execution_id=s.workflow_execution_id,
+                workflow_id=s.workflow_id,
+                workflow_name=s.workflow_name,
+                status=s.status,
+                started_at=s.started_at,
+                completed_at=s.completed_at,
+                completed_phases=s.completed_phases,
+                total_phases=s.total_phases,
+                total_tokens=s.total_tokens,
+                total_cost_usd=s.total_cost_usd,
+                error_message=s.error_message,
+            )
+            for s in all_execs
+            if s.status in ("running", "paused", "pending")
+        ]
+    )
+
 
 # -- HTTP Endpoints -----------------------------------------------------------
+
 
 @router.get("/executions", response_model=ExecutionListResponse)
 async def list_executions_endpoint(
@@ -242,17 +306,24 @@ async def list_executions_endpoint(
         executions=[
             ExecutionSummaryResponse(
                 workflow_execution_id=e.workflow_execution_id,
-                workflow_id=e.workflow_id, workflow_name=e.workflow_name,
-                status=e.status, started_at=_to_str(e.started_at),
+                workflow_id=e.workflow_id,
+                workflow_name=e.workflow_name,
+                status=e.status,
+                started_at=_to_str(e.started_at),
                 completed_at=_to_str(e.completed_at),
-                completed_phases=e.completed_phases, total_phases=e.total_phases,
+                completed_phases=e.completed_phases,
+                total_phases=e.total_phases,
                 total_tokens=e.total_tokens,
                 total_cost_usd=Decimal(str(e.total_cost_usd)),
                 tool_call_count=e.tool_call_count,
-            ) for e in result.value
+            )
+            for e in result.value
         ],
-        total=len(result.value), page=page, page_size=page_size,
+        total=len(result.value),
+        page=page,
+        page_size=page_size,
     )
+
 
 @router.get("/executions/{execution_id}", response_model=ExecutionDetailResponse)
 async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
@@ -265,33 +336,47 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     for p in detail.phases or []:
         operations = [
             PhaseOperationInfo(
-                operation_id=op.observation_id, operation_type=op.operation_type,
+                operation_id=op.observation_id,
+                operation_type=op.operation_type,
                 timestamp=str(op.timestamp) if op.timestamp else None,
-                tool_name=op.tool_name, tool_use_id=op.tool_use_id,
+                tool_name=op.tool_name,
+                tool_use_id=op.tool_use_id,
                 success=op.success if op.success is not None else True,
-            ) for op in (p.operations or [])
+            )
+            for op in (p.operations or [])
         ]
-        phases.append(PhaseExecutionInfo(
-            phase_id=p.phase_id, name=p.name, status=p.status,
-            session_id=p.session_id, artifact_id=p.artifact_id,
-            input_tokens=p.input_tokens, output_tokens=p.output_tokens,
-            total_tokens=p.input_tokens + p.output_tokens,
-            duration_seconds=p.duration_seconds or 0.0, cost_usd=Decimal(str(p.cost_usd)),
-            started_at=str(p.started_at) if p.started_at else None,
-            completed_at=str(p.completed_at) if p.completed_at else None,
-            operations=operations,
-        ))
+        phases.append(
+            PhaseExecutionInfo(
+                phase_id=p.phase_id,
+                name=p.name,
+                status=p.status,
+                session_id=p.session_id,
+                artifact_id=p.artifact_id,
+                input_tokens=p.input_tokens,
+                output_tokens=p.output_tokens,
+                total_tokens=p.input_tokens + p.output_tokens,
+                duration_seconds=p.duration_seconds or 0.0,
+                cost_usd=Decimal(str(p.cost_usd)),
+                started_at=str(p.started_at) if p.started_at else None,
+                completed_at=str(p.completed_at) if p.completed_at else None,
+                operations=operations,
+            )
+        )
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
     return ExecutionDetailResponse(
         workflow_execution_id=detail.workflow_execution_id,
-        workflow_id=detail.workflow_id, workflow_name=detail.workflow_name,
+        workflow_id=detail.workflow_id,
+        workflow_name=detail.workflow_name,
         status=detail.status,
         started_at=str(detail.started_at) if detail.started_at else None,
         completed_at=str(detail.completed_at) if detail.completed_at else None,
-        phases=phases, total_input_tokens=total_input,
-        total_output_tokens=total_output, total_tokens=detail.total_tokens,
+        phases=phases,
+        total_input_tokens=total_input,
+        total_output_tokens=total_output,
+        total_tokens=detail.total_tokens,
         total_cost_usd=Decimal(str(detail.total_cost_usd)),
-        artifact_ids=artifact_ids, error_message=detail.error_message,
+        artifact_ids=artifact_ids,
+        error_message=detail.error_message,
     )

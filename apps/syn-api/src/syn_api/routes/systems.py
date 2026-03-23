@@ -497,7 +497,9 @@ async def get_system_cost_endpoint(system_id: str) -> dict[str, Any]:
 
 
 @router.get("/{system_id}/activity")
-async def get_system_activity_endpoint(system_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+async def get_system_activity_endpoint(
+    system_id: str, offset: int = 0, limit: int = 50
+) -> dict[str, Any]:
     """Get execution timeline for a system."""
     result = await get_system_activity(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):
@@ -515,7 +517,9 @@ async def get_system_patterns_endpoint(system_id: str) -> dict[str, Any]:
 
 
 @router.get("/{system_id}/history")
-async def get_system_history_endpoint(system_id: str, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+async def get_system_history_endpoint(
+    system_id: str, offset: int = 0, limit: int = 50
+) -> dict[str, Any]:
     """Get historical execution timeline for a system."""
     result = await get_system_history(system_id, offset=offset, limit=limit)
     if isinstance(result, Err):

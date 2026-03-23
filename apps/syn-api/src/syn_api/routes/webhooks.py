@@ -347,7 +347,10 @@ async def verify_and_process_webhook(
         return Err(GitHubError.INVALID_SIGNATURE, message=str(exc))
     except Exception:
         logger.exception("Failed to verify webhook signature")
-        return Err(GitHubError.INVALID_SIGNATURE, message="Signature verification failed — rejecting payload")
+        return Err(
+            GitHubError.INVALID_SIGNATURE,
+            message="Signature verification failed — rejecting payload",
+        )
 
     # 2. Parse payload
     try:
@@ -363,11 +366,15 @@ async def verify_and_process_webhook(
 
     # 4. Evaluate triggers
     compound_event = f"{event_type}.{action}" if action else event_type
-    triggers_fired, deferred = await _evaluate_triggers(event_type, action, payload, installation_id)
+    triggers_fired, deferred = await _evaluate_triggers(
+        event_type, action, payload, installation_id
+    )
 
     # 5. Post acknowledgments
     if triggers_fired:
-        await _post_trigger_acknowledgments(event_type, payload, triggers_fired, compound_event, installation_id)
+        await _post_trigger_acknowledgments(
+            event_type, payload, triggers_fired, compound_event, installation_id
+        )
 
     return Ok(
         WebhookResult(
