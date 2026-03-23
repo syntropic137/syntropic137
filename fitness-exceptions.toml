@@ -1613,8 +1613,12 @@ issue = "#277"
 value = 645
 issue = "#277"
 
+[max-loc-file."apps.syn-api.src.syn_api.routes.executions.queries"]
+value = 525
+issue = "#277"
+
 [max-loc-file."apps.syn-api.src.syn_api.routes.repos"]
-value = 820
+value = 825
 issue = "#277"
 
 [max-loc-file."apps.syn-api.src.syn_api.routes.sessions"]
@@ -1622,15 +1626,15 @@ value = 590
 issue = "#277"
 
 [max-loc-file."apps.syn-api.src.syn_api.routes.systems"]
-value = 835
+value = 845
 issue = "#277"
 
 [max-loc-file."apps.syn-api.src.syn_api.routes.triggers.commands"]
-value = 600
+value = 680
 issue = "#277"
 
 [max-loc-file."apps.syn-api.src.syn_api.routes.webhooks"]
-value = 760
+value = 775
 issue = "#277"
 
 [max-loc-file."apps.syn-api.src.syn_api.services.lifecycle"]
