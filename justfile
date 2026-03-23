@@ -867,11 +867,9 @@ topology-viz: aps-build
 # Full topology regeneration (analyze + visualize)
 topology: topology-analyze topology-viz
 
-# Check if .topology/ is up-to-date (fast: manifest timestamp check)
-topology-check: aps-build
-    @echo "🔍 Checking topology freshness..."
-    {{_aps_bin}} run topology validate .topology
-    @echo "✅ Topology artifacts valid"
+# Regenerate topology and validate (topology is no longer committed — #293)
+topology-check: topology-analyze
+    @echo "✅ Topology artifacts regenerated and valid"
 
 # Pre-merge validation (all checks before opening PR)
 validate-pre-merge quick="":
