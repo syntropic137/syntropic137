@@ -7,14 +7,14 @@ from typing import Any
 
 import pytest
 
+from syn_domain.contexts.orchestration.domain.read_models.workspace_metrics import (
+    WorkspaceMetrics,
+)
 from syn_domain.contexts.orchestration.slices.workspace_metrics.projection import (
     WorkspaceMetricsProjection,
     _aggregate_metrics,
     _avg,
     _p95,
-)
-from syn_domain.contexts.orchestration.domain.read_models.workspace_metrics import (
-    WorkspaceMetrics,
 )
 
 

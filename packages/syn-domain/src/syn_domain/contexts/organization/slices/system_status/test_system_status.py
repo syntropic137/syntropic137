@@ -7,11 +7,11 @@ import pytest
 from syn_domain.contexts.organization.domain.queries.get_system_status import (
     GetSystemStatusQuery,
 )
+from syn_domain.contexts.organization.domain.read_models.repo_health import RepoHealth
 from syn_domain.contexts.organization.slices.conftest import (
     FakeProjectionStore,
     _make_projections,
 )
-from syn_domain.contexts.organization.domain.read_models.repo_health import RepoHealth
 from syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler import (
     GetSystemStatusHandler,
     _determine_overall_status,

@@ -34,7 +34,7 @@ class TestEvtHelper:
         """_evt falls back to dict access for GenericDomainEvent."""
 
         class DictEvent:
-            def __iter__(self):  # noqa: ANN204
+            def __iter__(self):
                 return iter({"workflow_id": "wf-dict"}.items())
 
         assert _evt(DictEvent(), "workflow_id") == "wf-dict"
@@ -43,7 +43,7 @@ class TestEvtHelper:
         """_evt returns default when field is not found."""
 
         class EmptyEvent:
-            def __iter__(self):  # noqa: ANN204
+            def __iter__(self):
                 return iter({}.items())
 
         assert _evt(EmptyEvent(), "missing", 42) == 42
@@ -52,7 +52,7 @@ class TestEvtHelper:
         """_evt uses model_dump() for Pydantic-style events without the attribute."""
 
         class PydanticEvent:
-            def model_dump(self) -> dict:  # noqa: ANN101
+            def model_dump(self) -> dict:
                 return {"status": "completed"}
 
         assert _evt(PydanticEvent(), "status") == "completed"

@@ -14,7 +14,6 @@ from syn_shared.events import (
     TOOL_EXECUTION_COMPLETED,
 )
 
-
 _SESSION_SUMMARY_QUERY = """
 SELECT
     (data->>'total_input_tokens')::int as total_input,

@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
+from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
     _calculate_token_cost,
@@ -14,7 +15,6 @@ from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     _update_completed_at,
     _update_started_at,
 )
-from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 
 class MockProjectionStore:

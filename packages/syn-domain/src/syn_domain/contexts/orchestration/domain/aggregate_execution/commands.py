@@ -5,11 +5,12 @@ Extracted from WorkflowExecutionAggregate to keep module under LOC threshold.
 
 from __future__ import annotations
 
-from datetime import datetime
-from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
+    from decimal import Decimal
+
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         PhaseDefinition,
     )

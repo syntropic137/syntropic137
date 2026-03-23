@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-import pytest
 
-from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
-    _build_create_command,
-    _handle_seed_error,
-)
+import pytest
 
 from syn_adapters.storage import (
     get_event_publisher,
@@ -18,6 +14,10 @@ from syn_adapters.storage import (
     reset_storage,
 )
 from syn_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
+    _build_create_command,
+    _handle_seed_error,
+)
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
 )

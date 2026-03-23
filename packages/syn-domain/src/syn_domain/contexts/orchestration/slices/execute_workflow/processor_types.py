@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
     ExecutablePhase,
     ExecutionMetrics,
@@ -15,12 +13,15 @@ from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects 
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
         AgentSessionAggregate,
     )
     from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
         ArtifactAggregate,
     )
+    from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoItem
     from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
         WorkflowExecutionAggregate,
     )

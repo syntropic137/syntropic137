@@ -43,10 +43,7 @@ def _normalize_event_data(event: Any) -> dict[str, Any]:
     Handles both Pydantic-style events (with attributes) and dict-like
     events from the gRPC event store.
     """
-    if hasattr(event, "model_dump"):
-        data = event.model_dump()
-    else:
-        data = dict(event)
+    data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
     # Ensure all expected keys exist
     for field in _EVENT_FIELDS:
         data.setdefault(field, [] if field in ("phases", "input_declarations") else None)

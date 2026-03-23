@@ -8,25 +8,25 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
 from syn_domain.contexts.organization._shared.projection_names import REPO_HEALTH
-from syn_domain.contexts.organization.domain.queries.get_system_status import (
-    GetSystemStatusQuery,
-)
 from syn_domain.contexts.organization.domain.read_models.repo_health import RepoHealth
 from syn_domain.contexts.organization.domain.read_models.system_status import (
     RepoStatusEntry,
     SystemStatus,
 )
-from syn_domain.contexts.organization.slices.list_repos.projection import (
-    RepoProjection,
-)
-from syn_domain.contexts.organization.slices.list_systems.projection import (
-    SystemProjection,
-)
 
 if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.organization.domain.queries.get_system_status import (
+        GetSystemStatusQuery,
+    )
     from syn_domain.contexts.organization.domain.read_models.repo_summary import RepoSummary
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        RepoProjection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        SystemProjection,
+    )
 
 
 def _repo_status(health: RepoHealth) -> str:

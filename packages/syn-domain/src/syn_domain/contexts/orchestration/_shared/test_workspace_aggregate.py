@@ -23,10 +23,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggre
     WorkspaceAggregate,
     _build_command_event,
 )
-from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
-    CommandExecutedEvent,
-)
-from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import CommandFailedEvent
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
@@ -39,6 +35,10 @@ from syn_domain.contexts.orchestration.domain.commands.InjectTokensCommand impor
 from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
+from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
+    CommandExecutedEvent,
+)
+from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import CommandFailedEvent
 
 # =============================================================================
 # FIXTURES

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
 
-from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (
+from syn_domain.contexts.orchestration.domain.aggregate_execution.commands import (  # noqa: TC001 - re-exported + used at runtime by @command_handler
     AgentExecutionCompletedCommand,
     ArtifactsCollectedCommand,
     CancelExecutionCommand,

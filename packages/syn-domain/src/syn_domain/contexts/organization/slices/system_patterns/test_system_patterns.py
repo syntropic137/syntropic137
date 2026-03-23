@@ -10,11 +10,11 @@ from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_E
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
 )
+from syn_domain.contexts.organization.domain.read_models.system_patterns import FailurePattern
 from syn_domain.contexts.organization.slices.conftest import (
     FakeProjectionStore,
     _make_projections,
 )
-from syn_domain.contexts.organization.domain.read_models.system_patterns import FailurePattern
 from syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler import (
     GetSystemPatternsHandler,
     _accumulate_failure,
