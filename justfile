@@ -48,7 +48,7 @@ onboard-dev *flags:
         echo "✅ Submodules already initialized"
     fi
 
-    # 2. .env
+    # 3. .env
     if [ ! -f .env ]; then
         echo "📝 Creating .env from template with dev defaults..."
         cp .env.example .env
@@ -60,7 +60,7 @@ onboard-dev *flags:
         echo "✅ .env already exists"
     fi
 
-    # 3. Python deps
+    # 4. Python deps
     if [ ! -d .venv ]; then
         echo "📦 Syncing Python dependencies..."
         uv sync
@@ -68,7 +68,7 @@ onboard-dev *flags:
         echo "✅ Python dependencies already installed"
     fi
 
-    # 4. Dashboard deps
+    # 5. Dashboard deps
     if [ ! -d apps/syn-dashboard-ui/node_modules ]; then
         echo "📦 Installing dashboard frontend dependencies..."
         just dashboard-install
@@ -76,7 +76,7 @@ onboard-dev *flags:
         echo "✅ Dashboard dependencies already installed"
     fi
 
-    # 5. Kick off workspace image build in background (if needed)
+    # 6. Kick off workspace image build in background (if needed)
     #    Runs while the user does interactive GitHub App / Cloudflare setup.
     BUILD_PID=""
     if ! docker image inspect agentic-workspace-claude-cli:latest >/dev/null 2>&1; then
@@ -90,7 +90,7 @@ onboard-dev *flags:
     # Source .env so subsequent checks can see existing values
     if [ -f .env ]; then set -a && source .env && set +a; fi
 
-    # 6. Webhook delivery — tunnel or Smee (mutually exclusive)
+    # 7. Webhook delivery — tunnel or Smee (mutually exclusive)
     if echo "{{flags}}" | grep -q -- "--tunnel"; then
         echo ""
         echo "🌐 Setting up Cloudflare tunnel for webhook delivery..."
@@ -351,6 +351,14 @@ setup-stage stage:
 
 # --- Development ---
 # Uses DRY Docker Compose: base + override files (ADR-034)
+
+# One-time contributor setup: point git at tracked hooks (core.hooksPath).
+# Opt-in by design — auto-running hooks on clone is an arbitrary code execution
+# risk (same reason CI uses --ignore-scripts). Run once after cloning.
+install-hooks:
+    git config core.hooksPath scripts/hooks
+    chmod +x scripts/hooks/*
+    @echo "✅ Git hooks enabled (core.hooksPath=scripts/hooks)"
 
 # Setup and run the FULL development environment (backend + frontend)
 # Always rebuilds images to pick up code changes
@@ -804,6 +812,8 @@ validate-domain-events:
 
 # Check architecture fitness thresholds (APSS-based, reads .topology/metrics/)
 fitness-check: aps-build
+    # Always regenerate topology before checking — never validate against stale data
+    just topology-analyze
     @echo "Checking architecture fitness thresholds..."
     {{_aps_bin}} run fitness validate .
     @echo "✅ Fitness threshold checks passed"

@@ -183,7 +183,7 @@ RESEARCH-PHASE_*.md
 DEEP-DIVE_*.md
 
 # Topology visualizations (derived — regenerate with `just topology-viz`)
-.topology/viz/*.html
+.topology/viz/
 
 # Browser testing screenshots
 /assets/
