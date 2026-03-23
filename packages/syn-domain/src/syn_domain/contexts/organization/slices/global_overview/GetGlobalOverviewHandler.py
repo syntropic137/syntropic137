@@ -7,7 +7,7 @@ in-memory projections and projection stores.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from syn_domain.contexts.organization._shared.projection_names import (
     REPO_COST,
@@ -30,6 +30,59 @@ if TYPE_CHECKING:
     from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
 
 
+def _build_index(
+    records: list[dict[str, Any]],
+    key_field: str,
+    model_class: type[RepoCost] | type[RepoHealth],
+) -> dict[str, RepoCost | RepoHealth]:
+    """Build a lookup dict from projection store records."""
+    result: dict[str, Any] = {}
+    for record in records:
+        name = record.get(key_field, "")
+        if name:
+            result[name] = model_class.from_dict(record)
+    return result
+
+
+def _determine_system_status(failing: int, total: int) -> str:
+    """Classify a system's overall status from repo health counts."""
+    if total > 0 and failing > total / 2:
+        return "failing"
+    if failing > 0:
+        return "degraded"
+    return "healthy"
+
+
+def _compute_system_entry(
+    system: Any,
+    repos: list[RepoSummary],
+    cost_by_repo: dict[str, RepoCost],
+    health_by_repo: dict[str, RepoHealth],
+) -> SystemOverviewEntry:
+    """Build a SystemOverviewEntry for one system from its repos."""
+    sys_cost = Decimal("0")
+    failing = 0
+
+    for repo in repos:
+        rc = cost_by_repo.get(repo.full_name)
+        if rc:
+            sys_cost += rc.total_cost_usd
+
+        rh = health_by_repo.get(repo.full_name)
+        if rh and rh.total_executions > 0 and rh.success_rate < 0.5:
+            failing += 1
+
+    return SystemOverviewEntry(
+        system_id=system.system_id,
+        system_name=system.name,
+        organization_id=system.organization_id,
+        repo_count=len(repos),
+        overall_status=_determine_system_status(failing, len(repos)),
+        active_executions=0,
+        total_cost_usd=sys_cost,
+    )
+
+
 class GetGlobalOverviewHandler:
     """Query handler: get global overview of all systems and repos."""
 
@@ -49,74 +102,25 @@ class GetGlobalOverviewHandler:
         all_repos = await self._repo_projection.list_all()
         unassigned = await self._repo_projection.list_all(unassigned=True)
 
-        # Batch-load all cost and health data — avoid N+1
-        all_cost_data = await self._store.get_all(REPO_COST)
-        all_health_data = await self._store.get_all(REPO_HEALTH)
-
-        cost_by_repo: dict[str, RepoCost] = {}
-        for cd in all_cost_data:
-            name = cd.get("repo_full_name", "")
-            if name:
-                cost_by_repo[name] = RepoCost.from_dict(cd)
-
-        health_by_repo: dict[str, RepoHealth] = {}
-        for hd in all_health_data:
-            name = hd.get("repo_full_name", "")
-            if name:
-                health_by_repo[name] = RepoHealth.from_dict(hd)
+        cost_by_repo = _build_index(await self._store.get_all(REPO_COST), "repo_full_name", RepoCost)
+        health_by_repo = _build_index(
+            await self._store.get_all(REPO_HEALTH), "repo_full_name", RepoHealth
+        )
 
         repos_by_system: dict[str, list[RepoSummary]] = {}
         for repo in all_repos:
             repos_by_system.setdefault(repo.system_id or "", []).append(repo)
 
-        total_cost = Decimal("0")
-        total_active = 0
-        entries: list[SystemOverviewEntry] = []
-
-        for system in systems:
-            sys_repos = repos_by_system.get(system.system_id, [])
-            sys_cost = Decimal("0")
-            healthy = 0
-            failing = 0
-
-            for repo in sys_repos:
-                rc = cost_by_repo.get(repo.full_name)
-                if rc:
-                    sys_cost += rc.total_cost_usd
-
-                rh = health_by_repo.get(repo.full_name)
-                if rh:
-                    if rh.total_executions > 0 and rh.success_rate < 0.5:
-                        failing += 1
-                    elif rh.total_executions > 0:
-                        healthy += 1
-
-            total_cost += sys_cost
-
-            if failing > len(sys_repos) / 2:
-                status = "failing"
-            elif failing > 0:
-                status = "degraded"
-            else:
-                status = "healthy"
-
-            entries.append(
-                SystemOverviewEntry(
-                    system_id=system.system_id,
-                    system_name=system.name,
-                    organization_id=system.organization_id,
-                    repo_count=len(sys_repos),
-                    overall_status=status,
-                    active_executions=0,
-                    total_cost_usd=sys_cost,
-                )
-            )
+        entries = [
+            _compute_system_entry(system, repos_by_system.get(system.system_id, []), cost_by_repo, health_by_repo)  # type: ignore[arg-type]
+            for system in systems
+        ]
 
         return GlobalOverview(
             total_systems=len(systems),
             total_repos=len(all_repos),
             unassigned_repos=len(unassigned),
-            total_active_executions=total_active,
-            total_cost_usd=total_cost,
+            total_active_executions=0,
+            total_cost_usd=sum((e.total_cost_usd for e in entries), Decimal("0")),
             systems=entries,
         )

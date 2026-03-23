@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import dataclasses
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
@@ -81,6 +81,39 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.WorkspaceTerminatedEvent import (
         WorkspaceTerminatedEvent,
+    )
+
+
+def _build_command_event(
+    workspace_id: str, command: list[str], result: ExecutionResult,
+) -> Any:
+    """Build a CommandExecutedEvent or CommandFailedEvent from execution result."""
+    from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
+        CommandExecutedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
+        CommandFailedEvent,
+    )
+
+    if result.success:
+        return CommandExecutedEvent(
+            workspace_id=workspace_id,
+            command=command,
+            exit_code=result.exit_code,
+            success=True,
+            duration_ms=result.duration_ms,
+            stdout_lines=result.stdout_lines,
+            stderr_lines=result.stderr_lines,
+            executed_at=datetime.now(UTC),
+        )
+    return CommandFailedEvent(
+        workspace_id=workspace_id,
+        command=command,
+        exit_code=result.exit_code,
+        error_message=result.stderr[:500] if result.stderr else "Unknown error",
+        duration_ms=result.duration_ms,
+        timed_out=result.timed_out,
+        failed_at=datetime.now(UTC),
     )
 
 
@@ -342,60 +375,20 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
 
     @command_handler("ExecuteCommandCommand")
     def execute_command(self, command: ExecuteCommandCommand) -> None:
-        """Handle ExecuteCommandCommand.
-
-        Records a command execution result.
-        Note: Actual execution is done by the application layer via ports.
-        """
-        from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
-            CommandExecutedEvent,
-        )
-        from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import (
-            CommandFailedEvent,
-        )
-
-        # Validate: workspace must be ready
+        """Handle ExecuteCommandCommand."""
         if not self.can_execute_commands:
             msg = f"Cannot execute command: workspace is {self._status.value}"
             raise ValueError(msg)
-
-        # Validate: must have command
         if not command.command:
             msg = "Command is required"
             raise ValueError(msg)
-
-        # Result should be provided by application layer
         if command.result is None:
             msg = "Execution result is required (provided by application layer)"
             raise ValueError(msg)
 
-        result: ExecutionResult = command.result
-
-        # Create appropriate event based on success
-        event: CommandExecutedEvent | CommandFailedEvent
-        if result.success:
-            event = CommandExecutedEvent(
-                workspace_id=str(self._workspace_id),
-                command=command.command,
-                exit_code=result.exit_code,
-                success=True,
-                duration_ms=result.duration_ms,
-                stdout_lines=result.stdout_lines,
-                stderr_lines=result.stderr_lines,
-                executed_at=datetime.now(UTC),
-            )
-        else:
-            event = CommandFailedEvent(
-                workspace_id=str(self._workspace_id),
-                command=command.command,
-                exit_code=result.exit_code,
-                error_message=result.stderr[:500] if result.stderr else "Unknown error",
-                duration_ms=result.duration_ms,
-                timed_out=result.timed_out,
-                failed_at=datetime.now(UTC),
-            )
-
-        self._apply(event)
+        self._apply(
+            _build_command_event(str(self._workspace_id), command.command, command.result)
+        )
 
     @command_handler("TerminateWorkspaceCommand")
     def terminate_workspace(self, command: TerminateWorkspaceCommand) -> None:

@@ -5,6 +5,16 @@ from decimal import Decimal
 from enum import Enum
 
 
+_MILLION = Decimal("1000000")
+
+
+def _token_cost(count: int, price_per_million: Decimal | None) -> Decimal:
+    """Calculate cost for a token count at a given price per million."""
+    if not price_per_million or not count:
+        return Decimal("0")
+    return (Decimal(count) * price_per_million) / _MILLION
+
+
 class CostType(str, Enum):
     """Types of costs that can be incurred."""
 
@@ -115,36 +125,16 @@ class ModelPricing:
     cache_read_price_per_million: Decimal | None = None
 
     def calculate_cost(self, tokens: TokenCount) -> CostAmount:
-        """Calculate the cost for given token counts.
-
-        Args:
-            tokens: The token counts to calculate cost for.
-
-        Returns:
-            The total cost for the tokens.
-        """
-        input_cost = (Decimal(tokens.input_tokens) * self.input_price_per_million) / Decimal(
-            "1000000"
+        """Calculate the cost for given token counts."""
+        input_cost = _token_cost(tokens.input_tokens, self.input_price_per_million)
+        output_cost = _token_cost(tokens.output_tokens, self.output_price_per_million)
+        cache_creation_cost = _token_cost(
+            tokens.cache_creation_tokens, self.cache_creation_price_per_million,
         )
-        output_cost = (Decimal(tokens.output_tokens) * self.output_price_per_million) / Decimal(
-            "1000000"
+        cache_read_cost = _token_cost(
+            tokens.cache_read_tokens, self.cache_read_price_per_million,
         )
-
-        cache_creation_cost = Decimal("0")
-        cache_read_cost = Decimal("0")
-
-        if self.cache_creation_price_per_million and tokens.cache_creation_tokens:
-            cache_creation_cost = (
-                Decimal(tokens.cache_creation_tokens) * self.cache_creation_price_per_million
-            ) / Decimal("1000000")
-
-        if self.cache_read_price_per_million and tokens.cache_read_tokens:
-            cache_read_cost = (
-                Decimal(tokens.cache_read_tokens) * self.cache_read_price_per_million
-            ) / Decimal("1000000")
-
-        total = input_cost + output_cost + cache_creation_cost + cache_read_cost
-        return CostAmount(total)
+        return CostAmount(input_cost + output_cost + cache_creation_cost + cache_read_cost)
 
 
 # Default pricing for common models (prices in USD per million tokens)

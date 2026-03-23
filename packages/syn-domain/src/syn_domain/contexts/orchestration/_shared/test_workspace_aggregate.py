@@ -21,7 +21,10 @@ from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects 
 )
 from syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate import (
     WorkspaceAggregate,
+    _build_command_event,
 )
+from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import CommandExecutedEvent
+from syn_domain.contexts.orchestration.domain.events.CommandFailedEvent import CommandFailedEvent
 from syn_domain.contexts.orchestration.domain.commands.CreateWorkspaceCommand import (
     CreateWorkspaceCommand,
 )
@@ -597,3 +600,31 @@ class TestEventSourcing:
         assert events[0].event.event_type == "WorkspaceCreated"
         assert events[1].event.event_type == "IsolationStarted"
         assert events[2].event.event_type == "TokensInjected"
+
+
+@pytest.mark.unit
+class TestBuildCommandEvent:
+    def test_success_returns_executed_event(self) -> None:
+        result = ExecutionResult(exit_code=0, success=True, duration_ms=150.0, stdout_lines=10, stderr_lines=0)
+        event = _build_command_event("ws-1", ["echo", "hello"], result)
+        assert isinstance(event, CommandExecutedEvent)
+        assert event.workspace_id == "ws-1"
+        assert event.command == ["echo", "hello"]
+        assert event.exit_code == 0
+        assert event.duration_ms == 150.0
+
+    def test_failure_returns_failed_event(self) -> None:
+        result = ExecutionResult(exit_code=1, success=False, duration_ms=50.0, stderr="Permission denied", timed_out=False)
+        event = _build_command_event("ws-1", ["rm", "/root"], result)
+        assert isinstance(event, CommandFailedEvent)
+        assert event.workspace_id == "ws-1"
+        assert event.exit_code == 1
+        assert event.error_message == "Permission denied"
+        assert event.timed_out is False
+
+    def test_long_stderr_truncated(self) -> None:
+        long_stderr = "x" * 1000
+        result = ExecutionResult(exit_code=1, success=False, duration_ms=10.0, stderr=long_stderr)
+        event = _build_command_event("ws-1", ["bad-cmd"], result)
+        assert isinstance(event, CommandFailedEvent)
+        assert len(event.error_message) == 500

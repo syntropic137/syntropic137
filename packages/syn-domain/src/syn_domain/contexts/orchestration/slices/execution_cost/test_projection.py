@@ -8,7 +8,13 @@ import pytest
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
 from syn_domain.contexts.orchestration.slices.execution_cost.projection import (
     ExecutionCostProjection,
+    _calculate_token_cost,
+    _get_or_create,
+    _track_session,
+    _update_completed_at,
+    _update_started_at,
 )
+from syn_domain.contexts.orchestration.domain.read_models.execution_cost import ExecutionCost
 
 
 class MockProjectionStore:
@@ -214,3 +220,80 @@ class TestSessionCostFinalized:
         execution_cost = await projection.get_execution_cost("exec-1")
         assert execution_cost is not None
         assert execution_cost.completed_at is not None
+
+
+@pytest.mark.unit
+class TestExtractedHelpers:
+    """Tests for module-level helper functions extracted for complexity reduction."""
+
+    def test_get_or_create_from_none(self) -> None:
+        """_get_or_create returns new ExecutionCost when existing is None."""
+        result = _get_or_create(None, "exec-new")
+        assert result.execution_id == "exec-new"
+        assert result.input_tokens == 0
+
+    def test_get_or_create_from_dict(self) -> None:
+        """_get_or_create reconstitutes from existing dict."""
+        existing = ExecutionCost(execution_id="exec-1")
+        existing.input_tokens = 500
+        result = _get_or_create(existing.to_dict(), "exec-1")
+        assert result.execution_id == "exec-1"
+        assert result.input_tokens == 500
+
+    def test_track_session_adds_new(self) -> None:
+        """_track_session adds a new session_id."""
+        ec = ExecutionCost(execution_id="exec-1")
+        _track_session(ec, "sess-1")
+        assert "sess-1" in ec.session_ids
+        assert ec.session_count == 1
+
+    def test_track_session_idempotent(self) -> None:
+        """_track_session does not duplicate existing session_id."""
+        ec = ExecutionCost(execution_id="exec-1")
+        _track_session(ec, "sess-1")
+        _track_session(ec, "sess-1")
+        assert ec.session_count == 1
+
+    def test_track_session_skips_none(self) -> None:
+        """_track_session is a no-op for None session_id."""
+        ec = ExecutionCost(execution_id="exec-1")
+        _track_session(ec, None)
+        assert ec.session_count == 0
+
+    def test_update_started_at_sets_from_string(self) -> None:
+        """_update_started_at parses ISO string."""
+        ec = ExecutionCost(execution_id="exec-1")
+        _update_started_at(ec, "2026-03-23T10:00:00")
+        assert ec.started_at is not None
+        assert ec.started_at.hour == 10
+
+    def test_update_started_at_no_overwrite(self) -> None:
+        """_update_started_at does not overwrite existing value."""
+        ec = ExecutionCost(execution_id="exec-1")
+        first = datetime(2026, 1, 1)
+        ec.started_at = first
+        _update_started_at(ec, "2026-03-23T10:00:00")
+        assert ec.started_at == first
+
+    def test_calculate_token_cost(self) -> None:
+        """_calculate_token_cost computes correct cost."""
+        cost = _calculate_token_cost(1_000_000, 1_000_000, 0, 0)
+        # 1M input @ $3 + 1M output @ $15 = $18
+        from decimal import Decimal
+        assert cost == Decimal("18.00")
+
+    def test_update_completed_at_sets_latest(self) -> None:
+        """_update_completed_at updates to latest timestamp."""
+        ec = ExecutionCost(execution_id="exec-1")
+        _update_completed_at(ec, "2026-03-23T10:00:00")
+        assert ec.completed_at is not None
+
+        _update_completed_at(ec, "2026-03-23T09:00:00")
+        # Should keep the later time
+        assert ec.completed_at.hour == 10
+
+    def test_update_completed_at_skips_none(self) -> None:
+        """_update_completed_at is a no-op for None."""
+        ec = ExecutionCost(execution_id="exec-1")
+        _update_completed_at(ec, None)
+        assert ec.completed_at is None

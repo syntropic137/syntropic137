@@ -9,6 +9,12 @@ import pytest
 
 from syn_domain.contexts.orchestration.slices.workspace_metrics.projection import (
     WorkspaceMetricsProjection,
+    _aggregate_metrics,
+    _avg,
+    _p95,
+)
+from syn_domain.contexts.orchestration.domain.read_models.workspace_metrics import (
+    WorkspaceMetrics,
 )
 
 
@@ -326,3 +332,59 @@ class TestWorkspaceMetricsProjection:
         session_b_metrics = await projection.get_by_session("session-B")
         assert len(session_b_metrics) == 1
         assert session_b_metrics[0].session_id == "session-B"
+
+
+@pytest.mark.unit
+class TestExtractedHelpers:
+    """Tests for module-level helper functions extracted for complexity reduction."""
+
+    def test_avg_empty(self) -> None:
+        assert _avg([]) == 0.0
+
+    def test_avg_values(self) -> None:
+        assert _avg([10.0, 20.0, 30.0]) == 20.0
+
+    def test_p95_empty(self) -> None:
+        assert _p95([]) == 0.0
+
+    def test_p95_single(self) -> None:
+        assert _p95([42.0]) == 42.0
+
+    def test_p95_values(self) -> None:
+        values = [float(i) for i in range(1, 101)]  # 1..100
+        result = _p95(values)
+        assert result == 96.0  # 95th percentile of 1..100
+
+    def test_aggregate_metrics_empty(self) -> None:
+        result = _aggregate_metrics([])
+        assert result["error_count"] == 0
+        assert result["total_commands"] == 0
+
+    def test_aggregate_metrics_counts(self) -> None:
+        metrics = [
+            WorkspaceMetrics(
+                workspace_id="ws-1",
+                session_id="s-1",
+                isolation_backend="docker",
+                status="destroyed",
+                create_duration_ms=100.0,
+                commands_executed=3,
+                commands_succeeded=2,
+            ),
+            WorkspaceMetrics(
+                workspace_id="ws-2",
+                session_id="s-2",
+                isolation_backend="docker",
+                status="error",
+                create_duration_ms=200.0,
+                commands_executed=1,
+                commands_succeeded=0,
+            ),
+        ]
+        result = _aggregate_metrics(metrics)
+        assert result["by_backend"] == {"docker": 2}
+        assert result["by_status"] == {"destroyed": 1, "error": 1}
+        assert result["error_count"] == 1
+        assert result["total_commands"] == 4
+        assert result["successful_commands"] == 2
+        assert result["create_times"] == [100.0, 200.0]
