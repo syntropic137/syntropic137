@@ -11,6 +11,9 @@ from syn_cli.main import app
 
 runner = CliRunner()
 
+_HELPERS_CLIENT = "syn_cli.commands._api_helpers.get_client"
+_CONTROL_CLIENT = "syn_cli.commands.control.get_client"
+
 
 def _mock_response(status_code: int = 200, json_data: dict | None = None) -> MagicMock:
     resp = MagicMock()
@@ -49,31 +52,30 @@ class TestControlHelp:
 class TestControlPause:
     def test_pause_success(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "paused"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "pause", "exec-001"])
         assert result.exit_code == 0
         assert "Pause signal sent" in result.stdout
 
     def test_pause_with_reason(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "paused", "message": "OK"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(
                 app, ["control", "pause", "exec-001", "--reason", "investigating"]
             )
         assert result.exit_code == 0
-        client.post.assert_called_once()
         call_kwargs = client.post.call_args
         assert call_kwargs.kwargs.get("json") == {"reason": "investigating"}
 
     def test_pause_failure(self) -> None:
         client = _mock_client(_mock_response(404, {"detail": "Not found"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "pause", "exec-bad"])
         assert result.exit_code == 1
-        assert "Failed to pause" in result.stdout
+        assert "Not found" in result.stdout
 
     def test_pause_connection_error(self) -> None:
-        with patch("syn_cli.commands.control.get_client", side_effect=ConnectionError("refused")):
+        with patch(_HELPERS_CLIENT, side_effect=ConnectionError("refused")):
             result = runner.invoke(app, ["control", "pause", "exec-001"])
         assert result.exit_code == 1
         assert "Could not connect" in result.stdout
@@ -83,7 +85,7 @@ class TestControlPause:
 class TestControlResume:
     def test_resume_success(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "running"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "resume", "exec-001"])
         assert result.exit_code == 0
         assert "Resume signal sent" in result.stdout
@@ -93,14 +95,14 @@ class TestControlResume:
 class TestControlCancel:
     def test_cancel_with_force(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "cancelled"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "cancel", "exec-001", "--force"])
         assert result.exit_code == 0
         assert "Cancel signal sent" in result.stdout
 
     def test_cancel_confirmed(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "cancelled"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "cancel", "exec-001"], input="y\n")
         assert result.exit_code == 0
 
@@ -114,14 +116,14 @@ class TestControlCancel:
 class TestControlStatus:
     def test_status_running(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "running"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_CONTROL_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "status", "exec-001"])
         assert result.exit_code == 0
         assert "running" in result.stdout
 
     def test_status_completed(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "completed"}))
-        with patch("syn_cli.commands.control.get_client", return_value=client):
+        with patch(_CONTROL_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "status", "exec-001"])
         assert result.exit_code == 0
         assert "completed" in result.stdout

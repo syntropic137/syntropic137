@@ -49,7 +49,7 @@ class TestCostSummary:
             "top_sessions": [],
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "summary"])
         assert result.exit_code == 0
         assert "$1.23" in result.stdout
@@ -66,13 +66,13 @@ class TestCostSummary:
             "top_sessions": [],
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "summary"])
         assert result.exit_code == 0
         assert "claude-sonnet" in result.stdout
 
     def test_summary_connection_error(self) -> None:
-        with patch("syn_cli.commands.costs.get_client", side_effect=Exception("conn")):
+        with patch("syn_cli.commands._api_helpers.get_client", side_effect=Exception("conn")):
             result = runner.invoke(app, ["costs", "summary"])
         assert result.exit_code == 1
         assert "Could not connect" in result.stdout
@@ -91,14 +91,14 @@ class TestCostSessions:
             },
         ]
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "sessions"])
         assert result.exit_code == 0
         assert "sess-123456" in result.stdout
 
     def test_list_sessions_empty(self) -> None:
         client = _mock_client(_mock_response(200, []))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "sessions"])
         assert result.exit_code == 0
         assert "No session cost data" in result.stdout
@@ -121,7 +121,7 @@ class TestCostSessionDetail:
             "cost_by_tool": {},
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "session", "sess-abc"])
         assert result.exit_code == 0
         assert "$2.50" in result.stdout
@@ -129,7 +129,7 @@ class TestCostSessionDetail:
 
     def test_show_session_not_found(self) -> None:
         client = _mock_client(_mock_response(404, {"detail": "Session not found"}))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "session", "bad-id"])
         assert result.exit_code == 1
         assert "Session not found" in result.stdout
@@ -147,7 +147,7 @@ class TestCostExecutions:
             },
         ]
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "executions"])
         assert result.exit_code == 0
         assert "exec-123456" in result.stdout
@@ -170,7 +170,7 @@ class TestCostExecutionDetail:
             "cost_by_tool": {},
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.costs.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["costs", "execution", "exec-xyz"])
         assert result.exit_code == 0
         assert "$10.00" in result.stdout

@@ -11,6 +11,9 @@ from syn_cli.main import app
 
 runner = CliRunner()
 
+_HELPERS_CLIENT = "syn_cli.commands._api_helpers.get_client"
+_WORKFLOW_CLIENT = "syn_cli.commands.workflow._run.get_client"
+
 
 def _mock_response(status_code: int = 200, json_data: dict | None = None) -> MagicMock:
     resp = MagicMock()
@@ -22,7 +25,6 @@ def _mock_response(status_code: int = 200, json_data: dict | None = None) -> Mag
 def _mock_client(*responses: MagicMock) -> MagicMock:
     """Create a mock httpx.Client context manager returning sequential responses."""
     client = MagicMock()
-    # Track call order across get/post
     all_responses = list(responses)
     call_idx = {"i": 0}
 
@@ -51,7 +53,7 @@ class TestWorkflowHelp:
 class TestWorkflowList:
     def test_list_empty(self) -> None:
         client = _mock_client(_mock_response(200, {"workflows": []}))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["workflow", "list"])
         assert result.exit_code == 0
         assert "No workflows found" in result.stdout
@@ -66,7 +68,7 @@ class TestWorkflowList:
             }
         ]
         client = _mock_client(_mock_response(200, {"workflows": workflows}))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["workflow", "list"])
         assert result.exit_code == 0
         assert "Test Workflow" in result.stdout
@@ -77,7 +79,7 @@ class TestWorkflowList:
 class TestWorkflowCreate:
     def test_create_success(self) -> None:
         client = _mock_client(_mock_response(200, {"id": "wf-new-id"}))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(
                 app,
                 ["workflow", "create", "My Workflow", "--type", "research"],
@@ -106,7 +108,7 @@ class TestWorkflowValidate:
             "phase_count": 2,
         }
         client = _mock_client(_mock_response(200, validation))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["workflow", "validate", "/tmp/test.yaml"])
         assert result.exit_code == 0
         assert "Valid" in result.stdout
@@ -120,7 +122,7 @@ class TestWorkflowValidate:
             "errors": ["Missing required field: name"],
         }
         client = _mock_client(_mock_response(200, validation))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["workflow", "validate", "/tmp/bad.yaml"])
         assert result.exit_code == 1
         assert "Invalid" in result.stdout
@@ -130,7 +132,7 @@ class TestWorkflowValidate:
 class TestWorkflowRun:
     def test_run_not_found(self) -> None:
         client = _mock_client(_mock_response(200, {"workflows": []}))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_WORKFLOW_CLIENT, return_value=client):
             result = runner.invoke(app, ["workflow", "run", "nonexistent"])
         assert result.exit_code == 1
         assert "No workflow found" in result.stdout
@@ -145,7 +147,7 @@ class TestWorkflowRun:
             }
         ]
         client = _mock_client(_mock_response(200, {"workflows": workflows}))
-        with patch("syn_cli.commands.workflow.get_client", return_value=client):
+        with patch(_WORKFLOW_CLIENT, return_value=client):
             result = runner.invoke(app, ["workflow", "run", "wf-test-123", "--dry-run"])
         assert result.exit_code == 0
         assert "DRY RUN" in result.stdout
