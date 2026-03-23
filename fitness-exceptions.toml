@@ -145,21 +145,6 @@ issue = "#197"
 value = 30
 issue = "#197"
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.github.client::get_installation_token"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.local::list_objects"]
-value = 45
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.supabase::get_object_info"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.supabase::list_objects"]
-value = 50
-issue = "#197"
 
 [max-cognitive."python:packages.syn-collector.src.syn_collector.cli::_run_watcher"]
 value = 35
