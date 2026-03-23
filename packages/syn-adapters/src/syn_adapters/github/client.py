@@ -16,15 +16,19 @@ See Also:
 
 from __future__ import annotations
 
-import base64
 import logging
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import httpx
-import jwt
+
+from syn_adapters.github.client_jwt import (
+    JWT_ALGORITHM as JWT_ALGORITHM,
+    decode_private_key,
+    generate_jwt,
+)
+from syn_adapters.github.client_token import check_token_response, parse_installation_token
 
 if TYPE_CHECKING:
     from syn_shared.settings.github import GitHubAppSettings
@@ -33,15 +37,6 @@ logger = logging.getLogger(__name__)
 
 # GitHub API base URL
 GITHUB_API_URL = "https://api.github.com"
-
-# JWT algorithm for GitHub App authentication
-JWT_ALGORITHM = "RS256"
-
-# JWT validity period (GitHub allows max 10 minutes)
-JWT_EXPIRY_SECONDS = 10 * 60
-
-# Clock skew buffer (issue JWT 60 seconds in the past)
-CLOCK_SKEW_SECONDS = 60
 
 # Token refresh threshold (refresh when 10 min remaining)
 TOKEN_REFRESH_THRESHOLD_SECONDS = 10 * 60
@@ -164,10 +159,7 @@ class GitHubAppClient:
         return self._settings.bot_email
 
     def _get_private_key(self) -> str:
-        """Get the decoded private key.
-
-        The private key is stored base64-encoded in settings.
-        This method decodes it on first access and caches the result.
+        """Get the decoded private key (cached after first decode).
 
         Returns:
             PEM-formatted private key string.
@@ -181,7 +173,7 @@ class GitHubAppClient:
         try:
             assert self._settings.private_key is not None
             encoded = self._settings.private_key.get_secret_value()
-            self._private_key = base64.b64decode(encoded).decode("utf-8")
+            self._private_key = decode_private_key(encoded)
             return self._private_key
         except Exception as e:
             msg = f"Failed to decode private key: {e}"
@@ -190,92 +182,20 @@ class GitHubAppClient:
     def _generate_jwt(self) -> str:
         """Generate a JWT for GitHub App authentication.
 
-        The JWT is signed with the private key and used to
-        request installation access tokens.
-
         Returns:
             Signed JWT string (valid for 10 minutes).
 
         Raises:
             GitHubAuthError: If JWT generation fails.
         """
-        now = int(time.time())
-
-        payload = {
-            # Issued at (with clock skew buffer)
-            "iat": now - CLOCK_SKEW_SECONDS,
-            # Expires in 10 minutes
-            "exp": now + JWT_EXPIRY_SECONDS,
-            # Issuer is the App ID
-            "iss": self.app_id,
-        }
-
         try:
             private_key = self._get_private_key()
-            return jwt.encode(payload, private_key, algorithm=JWT_ALGORITHM)
-        except jwt.PyJWTError as e:
+            return generate_jwt(self.app_id, private_key)
+        except Exception as e:
+            if isinstance(e, GitHubAuthError):
+                raise
             msg = f"Failed to generate JWT: {e}"
             raise GitHubAuthError(msg) from e
-
-    def _check_token_response(self, response: httpx.Response, iid: str) -> None:
-        """Check installation token response for errors.
-
-        Args:
-            response: HTTP response from token endpoint
-            iid: Installation ID (for error messages)
-
-        Raises:
-            GitHubAuthError: On 401, 403 (non-rate-limit), or 404.
-            GitHubRateLimitError: On 403 with rate limit.
-        """
-        if response.status_code == 401:
-            msg = "JWT authentication failed - check App ID and private key"
-            raise GitHubAuthError(msg)
-
-        if response.status_code == 403:
-            if "rate limit" in response.text.lower():
-                reset_header = response.headers.get("X-RateLimit-Reset")
-                reset_at = None
-                if reset_header:
-                    reset_at = datetime.fromtimestamp(int(reset_header), tz=UTC)
-                raise GitHubRateLimitError("Rate limit exceeded", reset_at=reset_at)
-            msg = f"Permission denied: {response.text}"
-            raise GitHubAuthError(msg)
-
-        if response.status_code == 404:
-            msg = f"Installation {iid} not found"
-            raise GitHubAuthError(msg)
-
-        response.raise_for_status()
-
-    def _parse_installation_token(self, data: dict, iid: str) -> InstallationToken:
-        """Parse and cache an installation token from API response data.
-
-        Args:
-            data: JSON response from GitHub token endpoint
-            iid: Installation ID for cache key
-
-        Returns:
-            Parsed InstallationToken.
-        """
-        expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
-
-        token = InstallationToken(
-            token=data["token"],
-            expires_at=expires_at,
-            permissions=data.get("permissions", {}),
-            repository_selection=data.get("repository_selection", "all"),
-        )
-        self._cached_tokens[iid] = token
-
-        logger.info(
-            "Installation token generated (installation_id=%s, expires_at=%s, permissions=%s)",
-            iid,
-            expires_at.isoformat(),
-            list(token.permissions.keys()),
-        )
-
-        return token
 
     async def get_installation_token(
         self, installation_id: str | None = None, force_refresh: bool = False
@@ -324,9 +244,9 @@ class GitHubAppClient:
                 headers={"Authorization": f"Bearer {jwt_token}"},
             )
 
-            self._check_token_response(response, iid)
+            check_token_response(response, iid)
 
-            token = self._parse_installation_token(response.json(), iid)
+            token = parse_installation_token(response.json(), iid, self._cached_tokens)
             return token.token
 
         except httpx.HTTPError as e:

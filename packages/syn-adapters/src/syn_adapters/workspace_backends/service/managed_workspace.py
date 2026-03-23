@@ -31,18 +31,15 @@ if TYPE_CHECKING:
         WorkspaceAggregate,
     )
 
-from syn_adapters.workspace_backends.service.setup_phase_secrets import (
-    DEFAULT_SETUP_SCRIPT,
-    SetupPhaseSecrets,
+from syn_adapters.workspace_backends.service.managed_workspace_ops import (
+    interrupt_container,
 )
-from syn_shared.env_constants import (
-    ENV_ANTHROPIC_API_KEY,
-    ENV_CLAUDE_CODE_OAUTH_TOKEN,
-    ENV_GIT_AUTHOR_EMAIL,
-    ENV_GIT_AUTHOR_NAME,
-    ENV_GIT_COMMITTER_EMAIL,
-    ENV_GIT_COMMITTER_NAME,
-    ENV_GITHUB_APP_TOKEN,
+from syn_adapters.workspace_backends.service.setup_phase import (
+    clear_secrets,
+    run_setup_phase as _run_setup_phase,
+)
+from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+    SetupPhaseSecrets,
 )
 
 logger = logging.getLogger(__name__)
@@ -228,13 +225,7 @@ class ManagedWorkspace:
     ) -> ExecutionResult:
         """Run setup phase with secrets, then clear secrets (ADR-024).
 
-        This method:
-        1. Runs the setup script with secrets available as env vars
-        2. Clears all secrets from the container environment
-        3. Removes any temporary files that might contain secrets
-
-        After this method completes, the agent phase can safely run
-        without access to raw secrets.
+        Delegates to setup_phase.run_setup_phase(). See that module for details.
 
         Args:
             secrets: Secrets to make available during setup
@@ -243,97 +234,14 @@ class ManagedWorkspace:
         Returns:
             ExecutionResult from setup script
         """
-        # Build environment with secrets
-        # Uses explicit env var names for clarity (no GH_TOKEN ambiguity)
-        setup_env: dict[str, str] = {}
-
-        if secrets.github_app_token:
-            # GITHUB_APP_TOKEN is the only supported GitHub auth method
-            setup_env[ENV_GITHUB_APP_TOKEN] = secrets.github_app_token
-
-        if secrets.claude_code_oauth_token:
-            setup_env[ENV_CLAUDE_CODE_OAUTH_TOKEN] = secrets.claude_code_oauth_token
-
-        if secrets.anthropic_api_key:
-            setup_env[ENV_ANTHROPIC_API_KEY] = secrets.anthropic_api_key
-
-        # Git identity from GitHub App bot configuration.
-        # Both author and committer are set explicitly — entrypoint.sh would derive
-        # committer from author if omitted, but we set both for clarity.
-        if secrets.git_author_name:
-            setup_env[ENV_GIT_AUTHOR_NAME] = secrets.git_author_name
-            setup_env[ENV_GIT_COMMITTER_NAME] = secrets.git_author_name
-        if secrets.git_author_email:
-            setup_env[ENV_GIT_AUTHOR_EMAIL] = secrets.git_author_email
-            setup_env[ENV_GIT_COMMITTER_EMAIL] = secrets.git_author_email
-
-        # Write setup script to container
-        script = setup_script or DEFAULT_SETUP_SCRIPT
-        await self.inject_files(
-            [(".setup/setup.sh", script.encode())],
-            base_path="/workspace",
-        )
-
-        # Run setup script WITH secrets
-        logger.info("Running setup phase with secrets (workspace=%s)", self.workspace_id)
-        result = await self.execute(
-            ["bash", "/workspace/.setup/setup.sh"],
-            environment=setup_env,
-            timeout_seconds=60,  # Setup should be quick
-        )
-
-        if result.exit_code != 0:
-            logger.error(
-                "Setup phase failed (exit=%d): %s",
-                result.exit_code,
-                result.stderr,
-            )
-            return result
-
-        # Clear secrets from environment
-        await self._clear_secrets()
-
-        logger.info("Setup phase complete, secrets cleared (workspace=%s)", self.workspace_id)
-        return result
+        return await _run_setup_phase(self, secrets, setup_script)
 
     async def _clear_secrets(self) -> None:
         """Clear all traces of secrets from the container.
 
-        This is called after setup phase completes. It removes:
-        - Environment variables containing secrets
-        - Shell history
-        - Temporary files
-
-        Note: Git credentials in ~/.git-credentials are intentionally kept
-        so the agent can push without raw token access.
+        Delegates to setup_phase.clear_secrets(). See that module for details.
         """
-        # Clear shell history and temp files
-        clear_script = """#!/bin/bash
-# Clear shell history
-rm -f ~/.bash_history ~/.zsh_history /root/.bash_history /root/.zsh_history 2>/dev/null || true
-
-# Clear setup script (contains no secrets, but clean up)
-rm -rf /workspace/.setup 2>/dev/null || true
-
-# Clear any temp files
-rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
-
-# Note: ~/.git-credentials is kept intentionally for git push
-"""
-        await self.inject_files(
-            [(".cleanup/clear.sh", clear_script.encode())],
-            base_path="/workspace",
-        )
-        await self.execute(
-            ["bash", "/workspace/.cleanup/clear.sh"],
-            timeout_seconds=10,
-        )
-
-        # Clean up the cleanup script too
-        await self.execute(
-            ["rm", "-rf", "/workspace/.cleanup"],
-            timeout_seconds=5,
-        )
+        await clear_secrets(self)
 
     async def interrupt(self) -> bool:
         """Send SIGINT to the Claude CLI process inside the container.
@@ -344,38 +252,7 @@ rm -rf /tmp/secrets* /tmp/setup* 2>/dev/null || true
         Returns True if signal was delivered successfully. Non-fatal on failure
         so cleanup can continue even if the process is already gone.
         """
-        import asyncio
-
-        container_id = getattr(self.isolation_handle, "container_id", None)
-        if not container_id:
-            logger.warning("interrupt(): no container_id on isolation handle, skipping SIGINT")
-            return False
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "exec",
-                container_id,
-                "sh",
-                "-c",
-                "PID=$(pgrep -n claude) && kill -INT $PID",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await asyncio.wait_for(proc.communicate(), timeout=5.0)
-            success = proc.returncode == 0
-            if success:
-                logger.info("interrupt(): SIGINT delivered to claude process in %s", container_id)
-            else:
-                logger.warning(
-                    "interrupt(): no claude process found or SIGINT failed (exit=%d) for container %s",
-                    proc.returncode,
-                    container_id,
-                )
-            return success
-        except Exception as e:
-            logger.warning("interrupt(): failed to send SIGINT to %s: %s", container_id, e)
-            return False
+        return await interrupt_container(self.isolation_handle)
 
     @property
     def proxy_url(self) -> str | None:

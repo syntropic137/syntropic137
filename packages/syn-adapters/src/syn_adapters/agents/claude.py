@@ -10,6 +10,12 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.agents.claude_config import (
+    determine_auth_mode,
+    get_anthropic_client,
+    get_context_window,
+    resolve_model,
+)
 from syn_adapters.agents.protocol import (
     AgentAuthenticationError,
     AgentConfig,
@@ -19,7 +25,6 @@ from syn_adapters.agents.protocol import (
     AgentProvider,
     AgentRateLimitError,
     AgentResponse,
-    AgentRole,
     AgentTimeoutError,
 )
 from syn_shared import get_settings
@@ -59,8 +64,8 @@ class ClaudeAgent(AgentProtocol):
     # Use "sonnet" alias which maps to latest Claude Sonnet
     DEFAULT_MODEL = MODEL_SONNET
 
-    @classmethod
-    def resolve_model(cls, model: str) -> str:
+    @staticmethod
+    def resolve_model(model: str) -> str:
         """Resolve model alias to specific API version.
 
         Loads model definitions from agentic-primitives YAML files.
@@ -71,12 +76,10 @@ class ClaudeAgent(AgentProtocol):
         Returns:
             Specific API model name (e.g., "claude-sonnet-4-5-20250929")
         """
-        from syn_adapters.agents.models import resolve_model
-
         return resolve_model(model)
 
-    @classmethod
-    def get_context_window(cls, model: str) -> int:
+    @staticmethod
+    def get_context_window(model: str) -> int:
         """Get context window size for a model.
 
         Args:
@@ -85,9 +88,7 @@ class ClaudeAgent(AgentProtocol):
         Returns:
             Context window in tokens
         """
-        from syn_adapters.agents.models import get_model_registry
-
-        return get_model_registry().get_context_window(model)
+        return get_context_window(model)
 
     def __init__(
         self,
@@ -114,20 +115,7 @@ class ClaudeAgent(AgentProtocol):
             settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
         )
 
-        # OAuth token takes priority over API key
-        if self._oauth_token:
-            if self._api_key:
-                logger.warning(
-                    "claude_auth_precedence",
-                    msg="Both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set. "
-                    "Using CLAUDE_CODE_OAUTH_TOKEN. Remove ANTHROPIC_API_KEY to silence this warning.",
-                )
-            self._auth_mode: str = "oauth"
-        elif self._api_key:
-            self._auth_mode = "api_key"
-        else:
-            self._auth_mode = "none"
-
+        self._auth_mode: str = determine_auth_mode(self._oauth_token, self._api_key)
         self._client: Any | None = None
 
     @property
@@ -163,26 +151,9 @@ class ClaudeAgent(AgentProtocol):
         Uses OAuth token (auth_token) when available, otherwise falls back to API key.
         """
         if self._client is None:
-            if not self._oauth_token and not self._api_key:
-                msg = (
-                    "No Claude authentication configured. "
-                    "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
-                )
-                raise AgentAuthenticationError(msg, AgentProvider.CLAUDE)
-
-            try:
-                from anthropic import AsyncAnthropic
-            except ImportError as e:
-                msg = "anthropic package not installed. Run: uv add anthropic"
-                raise AgentError(msg, AgentProvider.CLAUDE) from e
-
-            if self._auth_mode == "oauth":
-                logger.info("claude_client_init", auth_mode="oauth")
-                self._client = AsyncAnthropic(auth_token=self._oauth_token)
-            else:
-                logger.info("claude_client_init", auth_mode="api_key")
-                self._client = AsyncAnthropic(api_key=self._api_key)
-
+            self._client = get_anthropic_client(
+                self._auth_mode, self._oauth_token, self._api_key,
+            )
         return self._client
 
     def _convert_messages(
@@ -193,22 +164,9 @@ class ClaudeAgent(AgentProtocol):
         Returns:
             Tuple of (system_prompt, messages_list).
         """
-        system_prompt: str | None = None
-        converted: list[dict[str, str]] = []
+        from syn_adapters.agents.claude_helpers import convert_messages
 
-        for msg in messages:
-            if msg.role == AgentRole.SYSTEM:
-                # Anthropic handles system as a separate parameter
-                system_prompt = msg.content
-            else:
-                converted.append(
-                    {
-                        "role": msg.role.value,
-                        "content": msg.content,
-                    }
-                )
-
-        return system_prompt, converted
+        return convert_messages(messages)
 
     async def complete(
         self,

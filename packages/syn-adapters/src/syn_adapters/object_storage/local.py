@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import mimetypes
-from datetime import UTC, datetime
 from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import TYPE_CHECKING
 
+from syn_adapters.object_storage.local_helpers import (
+    get_object_info as _get_object_info,
+    get_presigned_url as _get_presigned_url,
+    list_objects as _list_objects,
+)
 from syn_adapters.object_storage.protocol import (
     DownloadError,
     ListResult,
@@ -215,63 +218,7 @@ class LocalStorage:
         Returns:
             StorageObject with metadata, or None if not found.
         """
-        try:
-            file_path = self._resolve_path(key)
-
-            if not file_path.exists() or not file_path.is_file():
-                return None
-
-            stat = file_path.stat()
-            content_type, _ = mimetypes.guess_type(str(file_path))
-
-            return StorageObject(
-                key=key,
-                size_bytes=stat.st_size,
-                content_type=content_type,
-                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-            )
-        except ValueError:
-            return None
-        except Exception:
-            return None
-
-    def _resolve_search_params(self, prefix: str) -> tuple[Path, str]:
-        """Resolve the search path and glob pattern from a prefix."""
-        if not prefix:
-            return self._base_path, "**/*"
-
-        search_path = self._resolve_path(prefix)
-        if prefix.endswith("/"):
-            return search_path, "*"
-
-        return search_path.parent, prefix.split("/")[-1] + "*"
-
-    def _file_to_storage_object(self, file_path: Path) -> StorageObject:
-        """Convert a filesystem path to a StorageObject."""
-        relative_path = file_path.relative_to(self._base_path)
-        key = str(relative_path).replace("\\", "/")
-        stat = file_path.stat()
-        content_type, _ = mimetypes.guess_type(str(file_path))
-
-        return StorageObject(
-            key=key,
-            size_bytes=stat.st_size,
-            content_type=content_type,
-            last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-        )
-
-    def _collect_files(self, search_path: Path, pattern: str, max_keys: int) -> list[StorageObject]:
-        """Collect matching files from the filesystem (runs in executor)."""
-        if not search_path.exists():
-            return []
-
-        result: list[StorageObject] = []
-        for file_path in search_path.rglob(pattern):
-            if len(result) >= max_keys:
-                break
-            if file_path.is_file():
-                result.append(self._file_to_storage_object(file_path))
-        return result
+        return await _get_object_info(self._resolve_path, key)
 
     async def list_objects(
         self,
@@ -290,21 +237,12 @@ class LocalStorage:
         Returns:
             ListResult with matching files.
         """
-        prefix_or_none = prefix if prefix else None
-        try:
-            search_path, pattern = self._resolve_search_params(prefix)
-            objects = await asyncio.get_event_loop().run_in_executor(
-                None, self._collect_files, search_path, pattern, max_keys
-            )
-            return ListResult(
-                objects=objects,
-                is_truncated=len(objects) >= max_keys,
-                prefix=prefix_or_none,
-            )
-        except ValueError:
-            return ListResult(objects=[], prefix=prefix_or_none)
-        except Exception:
-            return ListResult(objects=[], prefix=prefix_or_none)
+        return await _list_objects(
+            self._base_path,
+            self._resolve_path,
+            prefix,
+            max_keys=max_keys,
+        )
 
     async def get_presigned_url(
         self,
@@ -326,5 +264,4 @@ class LocalStorage:
         Returns:
             file:// URL to the local file.
         """
-        file_path = self._resolve_path(key)
-        return f"file://{file_path}"
+        return await _get_presigned_url(self._resolve_path, key)

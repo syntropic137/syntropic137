@@ -9,7 +9,6 @@ See ADR-035: Agent Output Data Model and Storage.
 from __future__ import annotations
 
 import io
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -161,41 +160,9 @@ class MinioConversationStorage:
         if self._pool is None:
             raise RuntimeError("Storage not initialized")
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO session_conversations (
-                    session_id, bucket, object_key, size_bytes,
-                    execution_id, phase_id, workflow_id,
-                    event_count, total_input_tokens, total_output_tokens, tool_counts,
-                    started_at, completed_at, model, success
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-                ON CONFLICT (session_id) DO UPDATE SET
-                    object_key = EXCLUDED.object_key,
-                    size_bytes = EXCLUDED.size_bytes,
-                    completed_at = EXCLUDED.completed_at,
-                    event_count = EXCLUDED.event_count,
-                    total_input_tokens = EXCLUDED.total_input_tokens,
-                    total_output_tokens = EXCLUDED.total_output_tokens,
-                    tool_counts = EXCLUDED.tool_counts,
-                    success = EXCLUDED.success
-                """,
-                session_id,
-                self.BUCKET_NAME,
-                object_key,
-                size_bytes,
-                context.execution_id,
-                context.phase_id,
-                context.workflow_id,
-                context.event_count,
-                context.total_input_tokens,
-                context.total_output_tokens,
-                json.dumps(context.tool_counts) if context.tool_counts else None,
-                context.started_at,
-                context.completed_at,
-                context.model,
-                context.success,
-            )
+        from syn_adapters.conversations.minio_index import insert_index
+
+        await insert_index(self._pool, session_id, object_key, size_bytes, context, self.BUCKET_NAME)
 
     async def retrieve_session(
         self,
@@ -242,18 +209,9 @@ class MinioConversationStorage:
         if self._pool is None:
             return None
 
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM session_conversations WHERE session_id = $1
-                """,
-                session_id,
-            )
+        from syn_adapters.conversations.minio_index import get_session_metadata
 
-        if row is None:
-            return None
-
-        return dict(row)
+        return await get_session_metadata(self._pool, session_id)
 
     async def list_sessions_for_execution(
         self,
@@ -273,17 +231,9 @@ class MinioConversationStorage:
         if self._pool is None:
             return []
 
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT session_id FROM session_conversations
-                WHERE execution_id = $1
-                ORDER BY started_at
-                """,
-                execution_id,
-            )
+        from syn_adapters.conversations.minio_index import list_sessions_for_execution
 
-        return [row["session_id"] for row in rows]
+        return await list_sessions_for_execution(self._pool, execution_id)
 
 
 # Factory function for easy creation

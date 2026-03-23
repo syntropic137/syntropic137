@@ -41,23 +41,23 @@ class PositionCheckpoint:
         Returns:
             Last saved position, or 0 if none found
         """
+        position = await self._try_load_position()
+        if position is not None:
+            logger.info("Loaded subscription position", extra={"position": position})
+            return position
+        logger.info("No previous subscription position found, starting from 0")
+        return 0
+
+    async def _try_load_position(self) -> int | None:
+        """Attempt to load position, returning None on failure."""
         try:
-            position = await self._projection_store.get_position(self._position_key)
-            if position is not None:
-                logger.info(
-                    "Loaded subscription position",
-                    extra={"position": position},
-                )
-                return position
-            else:
-                logger.info("No previous subscription position found, starting from 0")
-                return 0
+            return await self._projection_store.get_position(self._position_key)
         except Exception as e:
             logger.warning(
                 "Failed to load subscription position, starting from 0",
                 extra={"error": str(e)},
             )
-            return 0
+            return None
 
     async def save(self, position: int) -> None:
         """Save current position to projection store.
@@ -98,36 +98,38 @@ class PositionCheckpoint:
             return
 
         try:
-            executions = await self._projection_store.get_all("workflow_executions")
-            sessions = await self._projection_store.get_all("agent_sessions")
-
-            total_records = len(executions) + len(sessions)
-
-            if total_records == 0 and position > 10:
-                logger.critical(
-                    "[SUBSCRIPTION] POSITION DRIFT DETECTED! "
-                    "Saved position exists but projection data is empty. "
-                    "This indicates the projection store was reset while event store wasn't. "
-                    "Consider running 'just dev-fresh' to reset both stores, "
-                    "or manually reset the subscription position to 0.",
-                    extra={
-                        "saved_position": position,
-                        "workflow_executions_count": len(executions),
-                        "agent_sessions_count": len(sessions),
-                        "action_required": "Operator intervention needed",
-                    },
-                )
-            elif total_records > 0:
-                logger.info(
-                    "[SUBSCRIPTION] Position consistency check passed",
-                    extra={
-                        "saved_position": position,
-                        "workflow_executions_count": len(executions),
-                        "agent_sessions_count": len(sessions),
-                    },
-                )
+            counts = await self._get_record_counts()
+            self._log_consistency_result(position, counts)
         except Exception as e:
             logger.warning(
                 "[SUBSCRIPTION] Could not validate position consistency",
                 extra={"error": str(e), "saved_position": position},
+            )
+
+    async def _get_record_counts(self) -> dict[str, int]:
+        """Fetch projection record counts for consistency checking."""
+        executions = await self._projection_store.get_all("workflow_executions")
+        sessions = await self._projection_store.get_all("agent_sessions")
+        return {
+            "workflow_executions_count": len(executions),
+            "agent_sessions_count": len(sessions),
+        }
+
+    @staticmethod
+    def _log_consistency_result(position: int, counts: dict[str, int]) -> None:
+        """Log the outcome of a consistency check."""
+        total = counts["workflow_executions_count"] + counts["agent_sessions_count"]
+        if total == 0 and position > 10:
+            logger.critical(
+                "[SUBSCRIPTION] POSITION DRIFT DETECTED! "
+                "Saved position exists but projection data is empty. "
+                "This indicates the projection store was reset while event store wasn't. "
+                "Consider running 'just dev-fresh' to reset both stores, "
+                "or manually reset the subscription position to 0.",
+                extra={"saved_position": position, **counts, "action_required": "Operator intervention needed"},
+            )
+        elif total > 0:
+            logger.info(
+                "[SUBSCRIPTION] Position consistency check passed",
+                extra={"saved_position": position, **counts},
             )

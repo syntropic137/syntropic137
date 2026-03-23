@@ -31,10 +31,14 @@ import hashlib
 import io
 import logging
 import mimetypes
-from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
+from syn_adapters.object_storage.minio_helpers import (
+    get_object_info as _get_object_info,
+    get_presigned_url as _get_presigned_url,
+    list_objects as _list_objects,
+)
 from syn_adapters.object_storage.protocol import (
     DownloadError,
     ListResult,
@@ -296,29 +300,7 @@ class MinioStorage:
         Returns:
             StorageObject with metadata, or None if not found.
         """
-        try:
-            client = self._get_client()
-
-            loop = asyncio.get_event_loop()
-            stat = await loop.run_in_executor(
-                None,
-                partial(client.stat_object, self._bucket_name, key),
-            )
-
-            return StorageObject(
-                key=key,
-                size_bytes=stat.size or 0,
-                content_type=stat.content_type,
-                etag=stat.etag,
-                last_modified=stat.last_modified or datetime.now(UTC),
-            )
-
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "nosuchkey" in error_msg or "not found" in error_msg:
-                return None
-            logger.warning("Failed to get object info from MinIO: %s - %s", key, e)
-            return None
+        return await _get_object_info(self._get_client, self._bucket_name, key)
 
     async def list_objects(
         self,
@@ -337,38 +319,12 @@ class MinioStorage:
         Returns:
             ListResult with matching objects.
         """
-        try:
-            client = self._get_client()
-
-            loop = asyncio.get_event_loop()
-
-            def list_objects_sync() -> list[StorageObject]:
-                objects: list[StorageObject] = []
-                for obj in client.list_objects(self._bucket_name, prefix=prefix):
-                    if len(objects) >= max_keys:
-                        break
-                    objects.append(
-                        StorageObject(
-                            key=obj.object_name or "",
-                            size_bytes=obj.size or 0,
-                            content_type=None,
-                            etag=obj.etag,
-                            last_modified=obj.last_modified or datetime.now(UTC),
-                        )
-                    )
-                return objects
-
-            objects = await loop.run_in_executor(None, list_objects_sync)
-
-            return ListResult(
-                objects=objects,
-                is_truncated=len(objects) >= max_keys,
-                prefix=prefix if prefix else None,
-            )
-
-        except Exception as e:
-            logger.warning("Failed to list objects from MinIO: %s - %s", prefix, e)
-            return ListResult(objects=[], prefix=prefix if prefix else None)
+        return await _list_objects(
+            self._get_client,
+            self._bucket_name,
+            prefix,
+            max_keys=max_keys,
+        )
 
     async def get_presigned_url(
         self,
@@ -387,25 +343,11 @@ class MinioStorage:
         Returns:
             Presigned URL string.
         """
-        try:
-            from datetime import timedelta
-
-            client = self._get_client()
-
-            loop = asyncio.get_event_loop()
-            url = await loop.run_in_executor(
-                None,
-                partial(
-                    client.presigned_get_object,
-                    self._bucket_name,
-                    key,
-                    expires=timedelta(seconds=expires_in),
-                ),
-            )
-            return url
-
-        except Exception as e:
-            logger.warning("Failed to generate presigned URL: %s - %s", key, e)
-            # Fallback to a non-presigned path
-            protocol = "https" if self._secure else "http"
-            return f"{protocol}://{self._endpoint}/{self._bucket_name}/{key}"
+        return await _get_presigned_url(
+            self._get_client,
+            self._bucket_name,
+            key,
+            expires_in=expires_in,
+            secure=self._secure,
+            endpoint=self._endpoint,
+        )

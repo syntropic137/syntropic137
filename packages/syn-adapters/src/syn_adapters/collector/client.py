@@ -208,42 +208,40 @@ class CollectorClient:
             await self.start()
             assert self._client is not None
 
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
+        headers = self._build_auth_headers()
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
             try:
                 return await self._attempt_send(batch, headers)
-
             except httpx.HTTPStatusError as e:
                 last_error = e
                 if e.response.status_code < 500:
                     logger.error("Client error sending batch: %s", e)
                     raise
                 logger.warning("Server error sending batch (attempt %d): %s", attempt + 1, e)
-
             except httpx.RequestError as e:
                 last_error = e
                 logger.warning("Request error sending batch (attempt %d): %s", attempt + 1, e)
 
-            # Exponential backoff
             if attempt < self.max_retries:
                 self._stats["retries"] += 1
-                delay = (2**attempt) * 0.1
-                await asyncio.sleep(delay)
+                await asyncio.sleep((2**attempt) * 0.1)
 
-        # All retries exhausted
         self._stats["events_failed"] += len(batch.events)
         logger.error(
             "Failed to send batch %s after %d attempts", batch.batch_id, self.max_retries + 1
         )
-
         if last_error:
             raise last_error
         raise RuntimeError("Failed to send batch")
+
+    def _build_auth_headers(self) -> dict[str, str]:
+        """Build HTTP headers with optional auth."""
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     # Convenience methods for tool events
 

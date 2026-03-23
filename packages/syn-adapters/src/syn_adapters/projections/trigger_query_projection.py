@@ -50,6 +50,13 @@ class TriggerQueryProjection(CheckpointedProjection):
     PROJECTION_NAME = "trigger_query"
     VERSION = 1
 
+    # Status-update events: event_type -> new status value
+    _STATUS_UPDATES: dict[str, str] = {
+        "github.TriggerPaused": "paused",
+        "github.TriggerResumed": "active",
+        "github.TriggerDeleted": "deleted",
+    }
+
     def __init__(self, store: Any) -> None:
         self._store = store
 
@@ -68,37 +75,45 @@ class TriggerQueryProjection(CheckpointedProjection):
         checkpoint_store: ProjectionCheckpointStore,
     ) -> ProjectionResult:
         event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
 
         try:
-            if event_type == "github.TriggerRegistered":
-                await self._on_trigger_registered(event_data)
-            elif event_type == "github.TriggerPaused":
-                await self._on_trigger_paused(event_data)
-            elif event_type == "github.TriggerResumed":
-                await self._on_trigger_resumed(event_data)
-            elif event_type == "github.TriggerDeleted":
-                await self._on_trigger_deleted(event_data)
-            elif event_type == "github.TriggerFired":
-                await self._on_trigger_fired(event_data, envelope)
-
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
+            await self._dispatch_event(event_type, envelope)
+            await self._save_checkpoint(checkpoint_store, envelope)
             return ProjectionResult.SUCCESS
-
         except Exception:
             logger.exception(
                 "Error handling trigger event",
                 extra={"event_type": event_type},
             )
             return ProjectionResult.FAILURE
+
+    async def _dispatch_event(
+        self, event_type: str, envelope: EventEnvelope[Any]
+    ) -> None:
+        """Route an event to the appropriate handler."""
+        event_data = envelope.event.model_dump()
+        if event_type == "github.TriggerRegistered":
+            await self._on_trigger_registered(event_data)
+        elif event_type == "github.TriggerFired":
+            await self._on_trigger_fired(event_data, envelope)
+        elif event_type in self._STATUS_UPDATES:
+            await self._update_trigger_status(event_data, self._STATUS_UPDATES[event_type])
+
+    async def _save_checkpoint(
+        self,
+        checkpoint_store: ProjectionCheckpointStore,
+        envelope: EventEnvelope[Any],
+    ) -> None:
+        """Persist the projection checkpoint after successful handling."""
+        global_nonce = envelope.metadata.global_nonce or 0
+        await checkpoint_store.save_checkpoint(
+            ProjectionCheckpoint(
+                projection_name=self.PROJECTION_NAME,
+                global_position=global_nonce,
+                updated_at=datetime.now(UTC),
+                version=self.VERSION,
+            )
+        )
 
     async def clear_all_data(self) -> None:
         """Clear all projection data for rebuild."""
@@ -128,25 +143,12 @@ class TriggerQueryProjection(CheckpointedProjection):
             },
         )
 
-    async def _on_trigger_paused(self, data: dict[str, Any]) -> None:
+    async def _update_trigger_status(self, data: dict[str, Any], status: str) -> None:
+        """Update a trigger's status in the index."""
         trigger_id = data.get("trigger_id", "")
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
-            existing["status"] = "paused"
-            await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
-
-    async def _on_trigger_resumed(self, data: dict[str, Any]) -> None:
-        trigger_id = data.get("trigger_id", "")
-        existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
-        if existing:
-            existing["status"] = "active"
-            await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
-
-    async def _on_trigger_deleted(self, data: dict[str, Any]) -> None:
-        trigger_id = data.get("trigger_id", "")
-        existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
-        if existing:
-            existing["status"] = "deleted"
+            existing["status"] = status
             await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
 
     async def _on_trigger_fired(self, data: dict[str, Any], envelope: EventEnvelope[Any]) -> None:
@@ -156,7 +158,14 @@ class TriggerQueryProjection(CheckpointedProjection):
         pr_number = data.get("pr_number")
         fired_at = envelope.metadata.timestamp.isoformat()
 
-        # Record fire
+        await self._record_fire(trigger_id, execution_id, pr_number, fired_at)
+        await self._record_delivery(delivery_id, trigger_id, fired_at)
+        await self._increment_fire_count(trigger_id)
+
+    async def _record_fire(
+        self, trigger_id: str, execution_id: str, pr_number: Any, fired_at: str
+    ) -> None:
+        """Record a fire event in the fire records namespace."""
         fire_key = f"{trigger_id}#{execution_id}"
         await self._store.save(
             NS_FIRE_RECORDS,
@@ -169,19 +178,24 @@ class TriggerQueryProjection(CheckpointedProjection):
             },
         )
 
-        # Record delivery for idempotency
-        if delivery_id:
-            await self._store.save(
-                NS_DELIVERIES,
-                delivery_id,
-                {
-                    "delivery_id": delivery_id,
-                    "trigger_id": trigger_id,
-                    "processed_at": fired_at,
-                },
-            )
+    async def _record_delivery(
+        self, delivery_id: str, trigger_id: str, fired_at: str
+    ) -> None:
+        """Record delivery for idempotency (no-op if delivery_id is empty)."""
+        if not delivery_id:
+            return
+        await self._store.save(
+            NS_DELIVERIES,
+            delivery_id,
+            {
+                "delivery_id": delivery_id,
+                "trigger_id": trigger_id,
+                "processed_at": fired_at,
+            },
+        )
 
-        # Increment fire count on trigger index
+    async def _increment_fire_count(self, trigger_id: str) -> None:
+        """Increment the fire count on the trigger index entry."""
         existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
         if existing:
             existing["fire_count"] = existing.get("fire_count", 0) + 1

@@ -4,7 +4,6 @@ This implementation persists projection data to PostgreSQL,
 using per-projection tables for isolation and testability.
 """
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -107,21 +106,22 @@ class PostgresProjectionStore:
 
     def _serialize(self, data: dict[str, Any]) -> str:
         """Serialize data to JSON, handling datetime objects."""
-        return json.dumps(data, default=self._json_serializer)
+        from syn_adapters.projection_stores.postgres_helpers import serialize
+
+        return serialize(data)
 
     def _deserialize(self, data: str | dict[str, Any]) -> dict[str, Any]:
         """Deserialize JSON data."""
-        if isinstance(data, dict):
-            return data
-        result: dict[str, Any] = json.loads(data)
-        return result
+        from syn_adapters.projection_stores.postgres_helpers import deserialize
+
+        return deserialize(data)
 
     @staticmethod
     def _json_serializer(obj: Any) -> Any:
         """JSON serializer for objects not serializable by default."""
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        raise TypeError(f"Type {type(obj)} not serializable")
+        from syn_adapters.projection_stores.postgres_helpers import json_serializer
+
+        return json_serializer(obj)
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
@@ -208,37 +208,9 @@ class PostgresProjectionStore:
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
-        # Build query
-        query = f"SELECT data FROM {table_name}"
-        params: list[Any] = []
-        param_idx = 1
+        from syn_adapters.projection_stores.postgres_helpers import build_query
 
-        # Apply filters (JSONB containment)
-        if filters:
-            conditions = []
-            for key, value in filters.items():
-                conditions.append(f"data->>'{key}' = ${param_idx}")
-                params.append(str(value))
-                param_idx += 1
-            query += " WHERE " + " AND ".join(conditions)
-
-        # Apply sorting
-        if order_by:
-            if order_by.startswith("-"):
-                field = order_by[1:]
-                direction = "DESC"
-            else:
-                field = order_by
-                direction = "ASC"
-            query += f" ORDER BY data->>'{field}' {direction}"
-        else:
-            query += " ORDER BY updated_at DESC"
-
-        # Apply pagination
-        if limit:
-            query += f" LIMIT {limit}"
-        if offset:
-            query += f" OFFSET {offset}"
+        query, params = build_query(table_name, filters, order_by, limit, offset)
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(query, *params)

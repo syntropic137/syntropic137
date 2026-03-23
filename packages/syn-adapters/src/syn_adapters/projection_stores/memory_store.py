@@ -28,6 +28,41 @@ def _assert_test_environment() -> None:
         )
 
 
+def _apply_filters(
+    results: list[dict[str, Any]], filters: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Filter results by matching all key-value pairs."""
+    if not filters:
+        return results
+    return [r for r in results if all(r.get(k) == v for k, v in filters.items())]
+
+
+def _apply_sorting(
+    results: list[dict[str, Any]], order_by: str | None
+) -> list[dict[str, Any]]:
+    """Sort results by field name, with optional '-' prefix for descending."""
+    if not order_by:
+        return results
+    descending = order_by.startswith("-")
+    field_name = order_by.lstrip("-")
+    return sorted(
+        results,
+        key=lambda x: (x.get(field_name) is None, x.get(field_name) or ""),
+        reverse=descending,
+    )
+
+
+def _apply_pagination(
+    results: list[dict[str, Any]], offset: int, limit: int | None
+) -> list[dict[str, Any]]:
+    """Apply offset and limit to results."""
+    if offset:
+        results = results[offset:]
+    if limit:
+        results = results[:limit]
+    return results
+
+
 @dataclass
 class ProjectionState:
     """Tracks state for a single projection."""
@@ -55,10 +90,7 @@ class InMemoryProjectionStore:
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
-        if projection not in self._data:
-            self._data[projection] = {}
-
-        self._data[projection][key] = data.copy()
+        self._data.setdefault(projection, {})[key] = data.copy()
         self._update_state(projection)
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
@@ -92,29 +124,9 @@ class InMemoryProjectionStore:
             return []
 
         results = list(self._data[projection].values())
-
-        # Apply filters
-        if filters:
-            results = [r for r in results if all(r.get(k) == v for k, v in filters.items())]
-
-        # Apply sorting
-        if order_by:
-            descending = order_by.startswith("-")
-            field_name = order_by.lstrip("-")
-            # Handle None values by putting them at the end
-            results = sorted(
-                results,
-                key=lambda x: (x.get(field_name) is None, x.get(field_name) or ""),
-                reverse=descending,
-            )
-
-        # Apply pagination
-        if offset:
-            results = results[offset:]
-        if limit:
-            results = results[:limit]
-
-        return results
+        results = _apply_filters(results, filters)
+        results = _apply_sorting(results, order_by)
+        return _apply_pagination(results, offset, limit)
 
     async def get_position(self, projection: str) -> int | None:
         """Get the last processed event position for a projection."""
@@ -123,10 +135,9 @@ class InMemoryProjectionStore:
 
     async def set_position(self, projection: str, position: int) -> None:
         """Update the last processed event position for a projection."""
-        if projection not in self._state:
-            self._state[projection] = ProjectionState()
-        self._state[projection].last_position = position
-        self._state[projection].last_updated = datetime.now(UTC)
+        state = self._ensure_state(projection)
+        state.last_position = position
+        state.last_updated = datetime.now(UTC)
 
     async def get_last_updated(self, projection: str) -> datetime | None:
         """Get the last update timestamp for a projection."""
@@ -135,9 +146,13 @@ class InMemoryProjectionStore:
 
     def _update_state(self, projection: str) -> None:
         """Update the state timestamp for a projection."""
+        self._ensure_state(projection).last_updated = datetime.now(UTC)
+
+    def _ensure_state(self, projection: str) -> ProjectionState:
+        """Get or create the ProjectionState for a projection."""
         if projection not in self._state:
             self._state[projection] = ProjectionState()
-        self._state[projection].last_updated = datetime.now(UTC)
+        return self._state[projection]
 
     def clear(self) -> None:
         """Clear all data (useful for test setup/teardown)."""

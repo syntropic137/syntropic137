@@ -8,11 +8,9 @@ See ADR-029: Simplified Event System
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 from agentic_events.types import ClaudeToolName
 
@@ -26,11 +24,12 @@ from syn_shared.events import (
     GIT_PUSH,
     GIT_REWRITE,
     SESSION_SUMMARY,
-    SUBAGENT_STARTED,
-    SUBAGENT_STOPPED,
     TOKEN_USAGE,
     TOOL_EXECUTION_COMPLETED,
     TOOL_EXECUTION_STARTED,
+)
+from syn_adapters.projections.session_tools_helpers import (
+    row_to_operation as _row_to_operation_impl,
 )
 
 if TYPE_CHECKING:
@@ -46,7 +45,6 @@ logger = logging.getLogger(__name__)
 _TIMELINE_EXCLUDE = (TOKEN_USAGE, COST_RECORDED, SESSION_SUMMARY)
 
 _SUBAGENT_TOOL_NAMES = {str(ClaudeToolName.SUBAGENT), str(ClaudeToolName.SUBAGENT_LEGACY)}
-_SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 _GIT_EVENT_TYPES = (
     GIT_COMMIT,
     GIT_PUSH,
@@ -56,80 +54,6 @@ _GIT_EVENT_TYPES = (
     GIT_REWRITE,
     GIT_CHECKOUT,
 )
-
-
-def _extract_agent_label(data: dict[str, Any]) -> str:
-    """Extract a display name for a subagent from tool input data."""
-    tool_input = data.get("input_preview") or data.get("tool_input")
-    if isinstance(tool_input, str):
-        try:
-            tool_input = json.loads(tool_input)
-        except (json.JSONDecodeError, TypeError):
-            tool_input = None
-    if isinstance(tool_input, dict):
-        return str(
-            tool_input.get("description")
-            or tool_input.get("subagent_type")
-            or data.get("tool_name", "")
-        )
-    return str(data.get("tool_name", ""))
-
-
-def _row_to_subagent_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
-    """Convert a tool event row for an Agent/Task tool into a subagent operation."""
-    tool_use_id = data.get("tool_use_id", "")
-    is_started = event_type == TOOL_EXECUTION_STARTED
-    subagent_op = SUBAGENT_STARTED if is_started else SUBAGENT_STOPPED
-    agent_label = _extract_agent_label(data)
-    obs_id = f"subagent-{subagent_op}-{tool_use_id}-{row['time'].isoformat()}"
-    return ToolOperation(
-        observation_id=obs_id,
-        tool_name=agent_label,
-        tool_use_id=tool_use_id or None,
-        operation_type=subagent_op,
-        timestamp=row["time"],
-        success=data.get("success") if not is_started else None,
-        input_preview=data.get("input_preview") or json.dumps(data),
-        output_preview=data.get("output_preview") if not is_started else None,
-        duration_ms=data.get("duration_ms") if not is_started else None,
-    )
-
-
-def _row_to_git_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
-    """Convert a git event row into a ToolOperation."""
-    import re as _re
-
-    obs_id = f"git-{event_type}-{row['time'].isoformat()}"
-    git_subcmd = data.get("operation", "")
-    git_branch = data.get("branch") or data.get("to_branch") or None
-
-    if not git_branch and event_type == "git_operation":
-        cmd = data.get("command", "")
-        _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
-        if _m:
-            git_branch = _m.group(1)
-
-    if event_type == GIT_REWRITE and not git_subcmd:
-        git_subcmd = data.get("operation", "rebase")
-
-    return ToolOperation(
-        observation_id=obs_id,
-        tool_name=git_subcmd,
-        tool_use_id=None,
-        operation_type=event_type,
-        timestamp=row["time"],
-        success=True,
-        input_preview=None,
-        output_preview=None,
-        duration_ms=None,
-        git_sha=data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None,
-        git_message=data.get("message")
-        or data.get("message_preview")
-        or data.get("commit_message")
-        or None,
-        git_branch=git_branch,
-        git_repo=data.get("repo") or None,
-    )
 
 
 @dataclass
@@ -340,41 +264,4 @@ class SessionToolsProjection:
         Dispatches to specialized handlers based on event type.
         Returns None if the row should be skipped.
         """
-        data = row["data"]
-        if isinstance(data, str):
-            data = json.loads(data)
-
-        event_type = row["event_type"]
-
-        # TODO(#175): Flip dedup direction when Claude Code's SubagentStart hook
-        # includes prompt/description data. Currently native subagent events are
-        # sparse (no prompt), so we drop them and relabel Agent/Task tool events
-        # as subagent operations instead.
-        if event_type in _SUBAGENT_EVENT_TYPES:
-            return None
-
-        # Relabel Agent/Task tool events as subagent operations
-        if event_type in (TOOL_EXECUTION_STARTED, TOOL_EXECUTION_COMPLETED):
-            tool_name = data.get("tool_name") or (data.get("context") or {}).get("tool_name", "")
-            if tool_name in _SUBAGENT_TOOL_NAMES:
-                return _row_to_subagent_operation(row, data, event_type)
-
-        if event_type in _GIT_EVENT_TYPES:
-            return _row_to_git_operation(row, data, event_type)
-
-        # Standard tool/other event
-        is_completed = event_type == TOOL_EXECUTION_COMPLETED
-        tool_use_id = data.get("tool_use_id", "")
-        obs_id = data.get("observation_id") or f"{tool_use_id}-{row['time'].isoformat()}"
-
-        return ToolOperation(
-            observation_id=obs_id or str(uuid4()),
-            tool_name=data.get("tool_name", ""),
-            tool_use_id=data.get("tool_use_id"),
-            operation_type=event_type,
-            timestamp=row["time"],
-            success=data.get("success") if is_completed else None,
-            input_preview=data.get("input_preview"),
-            output_preview=data.get("output_preview") if is_completed else None,
-            duration_ms=data.get("duration_ms") if is_completed else None,
-        )
+        return _row_to_operation_impl(row, _SUBAGENT_TOOL_NAMES, _GIT_EVENT_TYPES)

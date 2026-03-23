@@ -47,6 +47,10 @@ from syn_adapters.workspace_backends.docker.docker_container_ops import (
     get_container_network,
     wait_for_healthy,
 )
+from syn_adapters.workspace_backends.docker.docker_sidecar_helpers import (
+    build_sidecar_docker_cmd,
+    run_sidecar_container,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,78 +113,6 @@ class DockerSidecarAdapter:
         self._sidecars: dict[str, DockerSidecarState] = {}
         self._lock = asyncio.Lock()
 
-    def _build_sidecar_docker_cmd(
-        self,
-        config: SidecarConfig,
-        container_name: str,
-        network_name: str,
-    ) -> list[str]:
-        """Build the docker run command for a sidecar container.
-
-        Args:
-            config: Sidecar configuration
-            container_name: Name for the container
-            network_name: Docker network to attach to
-
-        Returns:
-            Command arguments list for docker run.
-        """
-        env_vars = [
-            f"SYN_WORKSPACE_ID={config.workspace_id}",
-            f"SYN_TOKEN_SERVICE_URL={self._token_service_url}",
-            f"SYN_ALLOWED_HOSTS={','.join(config.allowed_hosts)}",
-            f"SYN_LISTEN_PORT={config.listen_port}",
-        ]
-
-        docker_cmd = [
-            "docker",
-            "run",
-            "-d",
-            "--rm",
-            f"--name={container_name}",
-            f"--network={network_name}",
-            "--memory=128m",
-            "--cpus=0.25",
-        ]
-
-        for env in env_vars:
-            docker_cmd.extend(["-e", env])
-
-        docker_cmd.extend(
-            [
-                f"--label=syn.workspace_id={config.workspace_id}",
-                "--label=syn.component=sidecar",
-            ]
-        )
-
-        docker_cmd.append(config.proxy_image or self._default_image)
-        return docker_cmd
-
-    async def _run_sidecar_container(self, docker_cmd: list[str]) -> str:
-        """Execute docker run and return the container ID.
-
-        Args:
-            docker_cmd: Full docker run command arguments
-
-        Returns:
-            Container ID string.
-
-        Raises:
-            RuntimeError: If the docker run command fails.
-        """
-        proc = await asyncio.create_subprocess_exec(
-            *docker_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode != 0:
-            error_msg = stderr.decode().strip() if stderr else "Unknown error"
-            raise RuntimeError(f"Failed to start sidecar: {error_msg}")
-
-        return stdout.decode().strip()
-
     async def start(
         self,
         config: SidecarConfig,
@@ -208,7 +140,9 @@ class DockerSidecarAdapter:
         container_name = f"syn-sidecar-{config.workspace_id[:8]}-{short_id}"
         network_name = await get_container_network(isolation_handle.isolation_id)
 
-        docker_cmd = self._build_sidecar_docker_cmd(config, container_name, network_name)
+        docker_cmd = build_sidecar_docker_cmd(
+            config, container_name, network_name, self._token_service_url, self._default_image,
+        )
 
         logger.info(
             "Starting sidecar (name=%s, workspace=%s)",
@@ -217,7 +151,7 @@ class DockerSidecarAdapter:
         )
 
         try:
-            container_id = await self._run_sidecar_container(docker_cmd)
+            container_id = await run_sidecar_container(docker_cmd)
             await wait_for_healthy(container_name, timeout=30.0)
 
             proxy_url = f"http://{container_name}:{config.listen_port}"

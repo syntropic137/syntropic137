@@ -15,22 +15,19 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
-from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import asyncpg
 from agentic_logging import get_logger
 from event_sourcing import (
     CheckpointedProjection,
-    EventEnvelope,
     PostgresCheckpointStore,
-    ProjectionCheckpoint,
-    ProjectionCheckpointStore,
-    ProjectionResult,
     SubscriptionCoordinator,
 )
 
+from syn_adapters.subscriptions.realtime_adapter import (
+    RealTimeProjectionAdapter as RealTimeProjectionAdapter,
+)
 from syn_shared.settings import get_settings
 
 if TYPE_CHECKING:
@@ -38,95 +35,6 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-
-class RealTimeProjectionAdapter(CheckpointedProjection):
-    """Adapter to make RealTimeProjection work with SubscriptionCoordinator.
-
-    This wraps the RealTimeProjection (which broadcasts to SSE clients)
-    as a CheckpointedProjection. Since RealTimeProjection doesn't persist data,
-    we always return SKIP but still call the handlers for broadcasting.
-
-    The checkpoint is saved but only to track position - no data is persisted.
-    """
-
-    # Name changed from "realtime_websocket" (ISS-262 SSE migration).
-    # On first deploy this causes a one-time checkpoint reset and full event
-    # replay. RealTimeProjection is stateless (forwards to connected clients
-    # only), so replaying old events to empty queues is harmless.
-    PROJECTION_NAME = "realtime_sse"
-    VERSION = 1
-
-    def __init__(self, realtime_projection: RealTimeProjection) -> None:
-        self._realtime = realtime_projection
-
-    def get_name(self) -> str:
-        return self.PROJECTION_NAME
-
-    def get_version(self) -> int:
-        return self.VERSION
-
-    def get_subscribed_event_types(self) -> set[str] | None:
-        """Subscribe to all events for SSE broadcast."""
-        return {
-            "WorkflowExecutionStarted",
-            "PhaseStarted",
-            "PhaseCompleted",
-            "WorkflowCompleted",
-            "WorkflowFailed",
-            "SessionStarted",
-            "OperationRecorded",
-            "SessionCompleted",
-            "ArtifactCreated",
-        }
-
-    async def handle_event(
-        self,
-        envelope: EventEnvelope[Any],
-        checkpoint_store: ProjectionCheckpointStore,
-    ) -> ProjectionResult:
-        """Forward events to RealTimeProjection for SSE broadcast."""
-        event_type = envelope.event.event_type
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            # Map event type to handler method
-            handler_name = f"on_{self._to_snake_case(event_type)}"
-            handler = getattr(self._realtime, handler_name, None)
-
-            if handler:
-                await handler(event_data)
-                logger.debug(
-                    "Broadcasted event to SSE clients",
-                    extra={
-                        "event_type": event_type,
-                        "handler": handler_name,
-                    },
-                )
-
-            # Save checkpoint - we don't persist data, but track position
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception as e:
-            logger.error(
-                "Error broadcasting to SSE clients",
-                extra={"event_type": event_type, "error": str(e)},
-                exc_info=True,
-            )
-            # Don't fail the projection for SSE broadcast errors
-            return ProjectionResult.SKIP
-
-    def _to_snake_case(self, name: str) -> str:
-        """Convert CamelCase to snake_case."""
-        return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 class CoordinatorSubscriptionService:
@@ -293,110 +201,6 @@ class CoordinatorSubscriptionService:
         logger.info("Coordinator subscription service stopped")
 
 
-def _camel_to_snake(name: str) -> str:
-    """Convert CamelCase event type to snake_case handler suffix."""
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-
-
-class _NamespacedProjectionAdapter(CheckpointedProjection):
-    """Base adapter for projections that receive namespace-qualified event types.
-
-    Org context events are stored as "organization.OrganizationCreated" etc.
-    AutoDispatchProjection maps on_* methods to bare CamelCase names (no namespace),
-    so standard auto-dispatch never fires. This adapter strips the namespace prefix
-    ("organization.") before building the handler name, then delegates to the
-    wrapped projection's on_* methods.
-    """
-
-    PROJECTION_NAME: ClassVar[str]
-    VERSION: ClassVar[int]
-    _SUBSCRIBED: ClassVar[set[str]]
-
-    def __init__(self, projection: Any) -> None:
-        self._projection = projection
-
-    def get_name(self) -> str:
-        return self.PROJECTION_NAME
-
-    def get_version(self) -> int:
-        return self.VERSION
-
-    def get_subscribed_event_types(self) -> set[str] | None:
-        return self._SUBSCRIBED
-
-    async def clear_all_data(self) -> None:
-        await self._projection.clear_all_data()
-
-    async def handle_event(
-        self,
-        envelope: Any,
-        checkpoint_store: Any,
-    ) -> ProjectionResult:
-        event_type = envelope.event.event_type  # e.g. "organization.OrganizationCreated"
-        event_data = envelope.event.model_dump()
-        global_nonce = envelope.metadata.global_nonce or 0
-
-        try:
-            bare = event_type.split(".")[-1]  # "OrganizationCreated"
-            handler_name = f"on_{_camel_to_snake(bare)}"  # "on_organization_created"
-            handler = getattr(self._projection, handler_name, None)
-            if handler:
-                await handler(event_data)
-
-            await checkpoint_store.save_checkpoint(
-                ProjectionCheckpoint(
-                    projection_name=self.PROJECTION_NAME,
-                    global_position=global_nonce,
-                    updated_at=datetime.now(UTC),
-                    version=self.VERSION,
-                )
-            )
-            return ProjectionResult.SUCCESS
-
-        except Exception:
-            logger.exception(
-                "OrgProjectionAdapter handler failed for event %s in %s",
-                event_type,
-                self.PROJECTION_NAME,
-            )
-            return ProjectionResult.FAILURE
-
-
-class _OrganizationListAdapter(_NamespacedProjectionAdapter):
-    PROJECTION_NAME: ClassVar[str] = "organization_list"
-    VERSION: ClassVar[int] = 1
-    _SUBSCRIBED: ClassVar[set[str]] = {
-        "organization.OrganizationCreated",
-        "organization.OrganizationUpdated",
-        "organization.OrganizationDeleted",
-        "organization.SystemCreated",
-        "organization.SystemDeleted",
-        "organization.RepoRegistered",
-    }
-
-
-class _SystemListAdapter(_NamespacedProjectionAdapter):
-    PROJECTION_NAME: ClassVar[str] = "system_list"
-    VERSION: ClassVar[int] = 1
-    _SUBSCRIBED: ClassVar[set[str]] = {
-        "organization.SystemCreated",
-        "organization.SystemUpdated",
-        "organization.SystemDeleted",
-        "organization.RepoRegistered",
-        "organization.RepoAssignedToSystem",
-        "organization.RepoUnassignedFromSystem",
-    }
-
-
-class _RepoListAdapter(_NamespacedProjectionAdapter):
-    PROJECTION_NAME: ClassVar[str] = "repo_list"
-    VERSION: ClassVar[int] = 1
-    _SUBSCRIBED: ClassVar[set[str]] = {
-        "organization.RepoRegistered",
-        "organization.RepoAssignedToSystem",
-        "organization.RepoUnassignedFromSystem",
-    }
-
 
 def create_coordinator_service(
     event_store: Any,
@@ -415,6 +219,15 @@ def create_coordinator_service(
         Configured CoordinatorSubscriptionService
     """
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
+    from syn_adapters.subscriptions.realtime_adapter import (
+        OrganizationListAdapter as _OrganizationListAdapter,
+    )
+    from syn_adapters.subscriptions.realtime_adapter import (
+        RepoListAdapter as _RepoListAdapter,
+    )
+    from syn_adapters.subscriptions.realtime_adapter import (
+        SystemListAdapter as _SystemListAdapter,
+    )
     from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
     from syn_domain.contexts.artifacts.slices.list_artifacts import ArtifactListProjection
     from syn_domain.contexts.github.slices.dispatch_triggered_workflow import (

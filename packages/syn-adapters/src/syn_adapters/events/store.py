@@ -14,7 +14,6 @@ See ADR-029: Simplified Event System
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 from datetime import UTC, datetime
@@ -30,6 +29,11 @@ from syn_adapters.events.queries import (
     query_session_events,
 )
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
+from syn_adapters.events.store_helpers import (
+    RESERVED_OBSERVATION_KEYS,
+    _build_copy_buffer,
+    get_event_store as get_event_store,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,44 +42,6 @@ class EventValidationError(Exception):
     """Raised when event data fails validation."""
 
     pass
-
-
-def _event_to_copy_row(validated: AgentEvent) -> str:
-    """Convert a validated AgentEvent to a tab-separated COPY row."""
-    time, event_type, session_id, exec_id, phase_id, data_json = (
-        validated.to_insert_tuple()
-    )
-    row = [
-        time.isoformat() if isinstance(time, datetime) else time,
-        event_type,
-        session_id or "unknown",
-        exec_id or "\\N",
-        phase_id or "\\N",
-        data_json,
-    ]
-    return "\t".join(str(v) for v in row) + "\n"
-
-
-def _build_copy_buffer(
-    events: list[dict[str, Any]],
-    execution_id: str | None,
-    phase_id: str | None,
-) -> io.BytesIO:
-    """Build a BytesIO buffer of tab-separated rows for COPY."""
-    buffer = io.BytesIO()
-    for event in events:
-        if execution_id and "execution_id" not in event:
-            event = {**event, "execution_id": execution_id}
-        if phase_id and "phase_id" not in event:
-            event = {**event, "phase_id": phase_id}
-        try:
-            validated = AgentEvent.from_dict(event)
-        except Exception as e:
-            logger.warning("Skipping invalid event: %s", e)
-            continue
-        buffer.write(_event_to_copy_row(validated).encode("utf-8"))
-    buffer.seek(0)
-    return buffer
 
 
 class AgentEventStore:
@@ -310,25 +276,7 @@ class AgentEventStore:
 
         return await _query_recent_by_types(self.pool, event_types, limit=limit)
 
-    # Keys in the top-level event dict that must NOT be overridden by user data.
-    # AgentEvent.from_dict() uses "message" to detect Claude conversation messages,
-    # and the other keys are event metadata. Collisions silently corrupt stored events.
-    _RESERVED_OBSERVATION_KEYS: frozenset[str] = frozenset(
-        {
-            "event_type",
-            "type",
-            "session_id",
-            "execution_id",
-            "phase_id",
-            "workspace_id",
-            "timestamp",
-            "time",
-            "id",
-            # "message" is reserved: from_dict() calls message.get("content", []) to detect
-            # Claude tool_use/tool_result content blocks. A string "message" value crashes it.
-            "message",
-        }
-    )
+    _RESERVED_OBSERVATION_KEYS = RESERVED_OBSERVATION_KEYS
 
     async def record_observation(
         self,
@@ -383,43 +331,3 @@ class AgentEventStore:
             await self.pool.close()
             self.pool = None
             self._initialized = False
-
-
-# Singleton instance (lazy-loaded)
-_event_store: AgentEventStore | None = None
-
-
-def get_event_store(connection_string: str | None = None) -> AgentEventStore:
-    """Get or create the AgentEventStore singleton.
-
-    Uses SYN_OBSERVABILITY_DB_URL from settings (ADR-030 unified database).
-
-    Args:
-        connection_string: Optional connection string (uses settings if not provided)
-
-    Returns:
-        AgentEventStore instance
-
-    Raises:
-        ValueError: If SYN_OBSERVABILITY_DB_URL is not configured
-    """
-    global _event_store
-
-    if _event_store is None:
-        if connection_string is None:
-            from syn_shared.settings.config import get_settings
-
-            settings = get_settings()
-
-            if not settings.syn_observability_db_url:
-                raise ValueError(
-                    "SYN_OBSERVABILITY_DB_URL must be configured. "
-                    "Set it in your .env file: "
-                    "SYN_OBSERVABILITY_DB_URL=postgresql://user:pass@host:port/database"
-                )
-
-            connection_string = str(settings.syn_observability_db_url)
-
-        _event_store = AgentEventStore(connection_string)
-
-    return _event_store

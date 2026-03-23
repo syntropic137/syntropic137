@@ -105,7 +105,15 @@ class ModelRegistry:
 
         model_id = model_data.get("id", model_file.stem)
         self._models[model_id] = model_data
+        self._register_model_aliases(model_id, model_data, model_id_to_api_name)
 
+    def _register_model_aliases(
+        self,
+        model_id: str,
+        model_data: dict[str, Any],
+        model_id_to_api_name: dict[str, str],
+    ) -> None:
+        """Register aliases for a model if it has an api_name."""
         api_name = model_data.get("api_name")
         if not api_name:
             return
@@ -120,14 +128,23 @@ class ModelRegistry:
         """Create shorthand aliases from provider current_models configs."""
         for provider_id, config in self._providers.items():
             for model_type, model_id in config.get("current_models", {}).items():
-                api_name = model_id_to_api_name.get(model_id, model_id)
-                if api_name is None or model_type is None:
-                    continue
-                if provider_id == "anthropic":
-                    self._aliases[str(model_type)] = str(api_name)
-                    self._aliases[f"claude-{model_type}"] = str(api_name)
-                else:
-                    self._aliases[f"{provider_id}/{model_type}"] = str(api_name)
+                self._register_provider_alias(
+                    provider_id, str(model_type),
+                    model_id_to_api_name.get(model_id, model_id),
+                )
+
+    def _register_provider_alias(
+        self, provider_id: str, model_type: str, api_name: str | None
+    ) -> None:
+        """Register aliases for a single provider/model-type combination."""
+        if api_name is None:
+            return
+        resolved = str(api_name)
+        if provider_id == "anthropic":
+            self._aliases[model_type] = resolved
+            self._aliases[f"claude-{model_type}"] = resolved
+        else:
+            self._aliases[f"{provider_id}/{model_type}"] = resolved
 
     def _load_fallback(self) -> None:
         """Load fallback model definitions if primitives not available."""
@@ -178,16 +195,18 @@ class ModelRegistry:
         Returns:
             Model configuration dict or None if not found
         """
-        # Try direct lookup
         if model in self._models:
             return self._models[model]
+        return self._find_model_by_field(model)
 
-        # Try resolving alias to model ID
-        for _model_id, model_data in self._models.items():
+    def _find_model_by_field(self, model: str) -> dict[str, Any] | None:
+        """Search models by api_name or alias fields."""
+        for model_data in self._models.values():
             if model_data.get("api_name") == model or model_data.get("alias") == model:
                 return model_data
-
         return None
+
+    _DEFAULT_CONTEXT_WINDOW = 200_000
 
     def get_context_window(self, model: str) -> int:
         """Get the context window size for a model.
@@ -199,9 +218,9 @@ class ModelRegistry:
             Context window size in tokens (default 200000)
         """
         info = self.get_model_info(model)
-        if info:
-            return info.get("capabilities", {}).get("context_window", 200_000)
-        return 200_000
+        if not info:
+            return self._DEFAULT_CONTEXT_WINDOW
+        return info.get("capabilities", {}).get("context_window", self._DEFAULT_CONTEXT_WINDOW)
 
     def list_models(self, provider: str | None = None) -> list[str]:
         """List available model IDs.

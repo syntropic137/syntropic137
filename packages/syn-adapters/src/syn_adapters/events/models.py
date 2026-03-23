@@ -155,6 +155,15 @@ def _extract_tool_data(content: list[Any], event_data: dict[str, Any]) -> None:
                 extractor(item, event_data)
 
 
+def _resolve_event_type(data: dict[str, Any], raw_type: str) -> str:
+    """Resolve raw event type to normalized type, checking nested content first."""
+    message = data.get("message", {})
+    content = message.get("content", [])
+    inner_type = _detect_inner_type(content) if isinstance(content, list) else None
+    type_to_map = inner_type if inner_type else raw_type
+    return _EVENT_TYPE_MAPPING.get(type_to_map, raw_type)
+
+
 class AgentEvent(BaseModel):
     """Agent event stored in TimescaleDB.
 
@@ -192,11 +201,7 @@ class AgentEvent(BaseModel):
         """Convert UUID objects to strings if needed."""
         if v is None:
             return None
-        if isinstance(v, UUID):
-            return str(v)
-        if isinstance(v, str):
-            return v
-        return str(v)
+        return v if isinstance(v, str) else str(v)
 
     @field_validator("data", mode="before")
     @classmethod
@@ -240,35 +245,25 @@ class AgentEvent(BaseModel):
         """
         time_value = data.get("time") or data.get("timestamp") or datetime.now()
         raw_type = data.get("event_type") or data.get("type", "error")
-
-        # Detect tool events from nested message content
-        message = data.get("message", {})
-        content = message.get("content", [])
-        inner_type = _detect_inner_type(content) if isinstance(content, list) else None
-
-        # Map to normalized type (inner_type takes precedence for tool events)
-        type_to_map = inner_type if inner_type else raw_type
-        normalized_type = _EVENT_TYPE_MAPPING.get(type_to_map, raw_type)
+        normalized_type = _resolve_event_type(data, raw_type)
 
         # Build data dict from remaining fields
         event_data: dict[str, Any] = {k: v for k, v in data.items() if k not in _EXCLUDED_KEYS}
 
         # Extract tool info from nested content
+        content = data.get("message", {}).get("content", [])
         if isinstance(content, list):
             _extract_tool_data(content, event_data)
 
-        # Build normalized event (only include optional UUID fields if set)
         normalized: dict[str, Any] = {
             "time": time_value,
             "event_type": normalized_type,
             "data": event_data,
         }
-        if data.get("session_id"):
-            normalized["session_id"] = data["session_id"]
-        if data.get("execution_id"):
-            normalized["execution_id"] = data["execution_id"]
-        if data.get("phase_id"):
-            normalized["phase_id"] = data["phase_id"]
+        # Only include optional UUID fields if set
+        for field in ("session_id", "execution_id", "phase_id"):
+            if data.get(field):
+                normalized[field] = data[field]
 
         return cls(**normalized)
 

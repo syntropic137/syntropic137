@@ -26,6 +26,27 @@ NS_FIRE_RECORDS = "trigger_fire_records"
 NS_DELIVERIES = "trigger_deliveries"
 
 
+def _build_optional_filters(**kwargs: str | None) -> dict[str, Any] | None:
+    """Build a filters dict from non-None keyword arguments, or None if empty."""
+    filters = {k: v for k, v in kwargs.items() if v is not None}
+    return filters or None
+
+
+def _parse_trigger_config(config_data: Any) -> TriggerConfig:
+    """Parse a TriggerConfig from raw projection store data."""
+    if isinstance(config_data, dict):
+        return TriggerConfig(**config_data) if config_data else TriggerConfig()
+    return config_data
+
+
+def _latest_fired_at(records: list[dict[str, Any]]) -> datetime | None:
+    """Return the latest fired_at timestamp from fire records, or None."""
+    if not records:
+        return None
+    latest = max(records, key=lambda r: r.get("fired_at", ""))
+    return datetime.fromisoformat(latest["fired_at"])
+
+
 class PersistentTriggerQueryStore(TriggerQueryStore):
     """TriggerQueryStore backed by PostgreSQL via ProjectionStoreProtocol.
 
@@ -38,12 +59,6 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
 
     def _to_indexed_trigger(self, data: dict[str, Any]) -> _IndexedTrigger:
         """Reconstruct an _IndexedTrigger from projection store data."""
-        config_data = data.get("config", {})
-        if isinstance(config_data, dict):
-            config = TriggerConfig(**config_data) if config_data else TriggerConfig()
-        else:
-            config = config_data
-
         trigger = _IndexedTrigger(
             trigger_id=data.get("trigger_id", ""),
             name=data.get("name", ""),
@@ -52,7 +67,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
             workflow_id=data.get("workflow_id", ""),
             conditions=data.get("conditions", []),
             input_mapping=data.get("input_mapping", {}),
-            config=config,
+            config=_parse_trigger_config(data.get("config", {})),
             installation_id=data.get("installation_id", ""),
             created_by=data.get("created_by", ""),
             status=data.get("status", "active"),
@@ -80,14 +95,10 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         repository: str | None = None,
         status: str | None = None,
     ) -> list[_IndexedTrigger]:
-        filters: dict[str, Any] = {}
-        if repository:
-            filters["repository"] = repository
-        if status:
-            filters["status"] = status
+        filters = _build_optional_filters(repository=repository, status=status)
         results = await self._store.query(
             NS_TRIGGER_INDEX,
-            filters=filters if filters else None,
+            filters=filters,
         )
         return [self._to_indexed_trigger(d) for d in results]
 
@@ -103,10 +114,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
             NS_FIRE_RECORDS,
             filters={"trigger_id": trigger_id, "pr_number": str(pr_number)},
         )
-        if not records:
-            return None
-        latest = max(records, key=lambda r: r.get("fired_at", ""))
-        return datetime.fromisoformat(latest["fired_at"])
+        return _latest_fired_at(records)
 
     async def get_daily_fire_count(self, trigger_id: str) -> int:
         records = await self._store.query(
@@ -127,10 +135,7 @@ class PersistentTriggerQueryStore(TriggerQueryStore):
         )
         if exclude_trigger_id:
             records = [r for r in records if r.get("trigger_id") != exclude_trigger_id]
-        if not records:
-            return None
-        latest = max(records, key=lambda r: r.get("fired_at", ""))
-        return datetime.fromisoformat(latest["fired_at"])
+        return _latest_fired_at(records)
 
     async def was_delivery_processed(self, delivery_id: str) -> bool:
         data = await self._store.get(NS_DELIVERIES, delivery_id)

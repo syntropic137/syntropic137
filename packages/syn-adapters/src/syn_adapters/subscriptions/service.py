@@ -18,12 +18,13 @@ import asyncio
 import contextlib
 import logging
 from datetime import UTC, datetime
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
 
 from syn_adapters.subscriptions.position_checkpoint import PositionCheckpoint
+from syn_adapters.subscriptions.service_catchup import run_catchup
+from syn_adapters.subscriptions.service_live import run_live_subscription
 
 if TYPE_CHECKING:
     from event_sourcing import EventStoreClient
@@ -284,99 +285,12 @@ class EventSubscriptionService:
         self._running = False
 
     async def _run_catchup(self) -> None:
-        """Run catch-up subscription to process historical events.
-
-        Uses read_all RPC for reliable batch reading with explicit
-        pagination and end-of-batch signals.
-        """
-        events_in_batch = 0
-        from_position = self._last_position + 1 if self._last_position > 0 else 0
-
-        logger.info("[SUBSCRIPTION] Catch-up starting", extra={"from": from_position})
-
-        while not self._stop_event.is_set():
-            events, is_end, next_position = await self._event_store.read_all(
-                from_global_nonce=from_position,
-                max_count=self._batch_size,
-                forward=True,
-            )
-
-            if not events:
-                break
-
-            events_in_batch = await self._process_catchup_batch(events, events_in_batch)
-
-            if events_in_batch >= self._batch_size:
-                await self._save_position()
-                events_in_batch = 0
-
-            if is_end:
-                break
-            from_position = next_position
-
-        if events_in_batch > 0:
-            await self._save_position()
-
-    async def _process_catchup_batch(self, events: Sequence[object], events_in_batch: int) -> int:
-        """Process a batch of catch-up events, advancing position on success.
-
-        Returns updated events_in_batch count.
-        Raises RuntimeError if dispatch fails (triggers reconnect).
-        """
-        for envelope in events:
-            if self._stop_event.is_set():
-                break
-
-            dispatch_success = await self._dispatch_event(envelope)
-            self._last_event_time = datetime.now(UTC)
-
-            # CRITICAL: Only advance position if dispatch succeeded
-            if dispatch_success:
-                events_in_batch += 1
-                if envelope.metadata.global_nonce is not None:  # type: ignore[union-attr]
-                    self._last_position = envelope.metadata.global_nonce  # type: ignore[union-attr]
-            else:
-                nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-                raise RuntimeError(
-                    f"Event dispatch failed at position {nonce}. "
-                    "Stopping to prevent position drift. Will retry on reconnect."
-                )
-
-        return events_in_batch
+        """Run catch-up subscription to process historical events."""
+        await run_catchup(self)
 
     async def _run_live_subscription(self) -> None:
-        """Run live subscription for real-time events.
-
-        Exits (not raises) when the stream ends, allowing the main loop to reconnect.
-        """
-        events_since_save = 0
-        last_save_time = datetime.now(UTC)
-        start_position = self._last_position + 1
-
-        logger.info("[SUBSCRIPTION] Live subscription connecting", extra={"from": start_position})
-
-        async for envelope in self._event_store.subscribe(from_global_nonce=start_position):
-            if self._stop_event.is_set():
-                return
-
-            self._last_event_time = datetime.now(UTC)
-            dispatch_success = await self._dispatch_event(envelope)
-
-            # CRITICAL: Only advance position if dispatch succeeded
-            if dispatch_success:
-                events_since_save += 1
-                if envelope.metadata.global_nonce is not None:
-                    self._last_position = envelope.metadata.global_nonce
-            else:
-                nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-                raise RuntimeError(f"Event dispatch failed at position {nonce}. Triggering reconnect.")
-
-            # Save position periodically
-            now = datetime.now(UTC)
-            if events_since_save >= self._batch_size or (now - last_save_time).total_seconds() >= self._position_save_interval:
-                await self._save_position()
-                events_since_save = 0
-                last_save_time = now
+        """Run live subscription for real-time events."""
+        await run_live_subscription(self)
 
     async def _dispatch_event(self, envelope: object) -> bool:
         """Dispatch an event to projections via validated envelope.
