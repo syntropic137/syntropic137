@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
-# pre-commit: regenerate topology on every commit.
-# Keeps .topology/ committed alongside code so changes are visible in git history.
-# fitness-check is the CI safety net — it always regenerates before validating.
+# pre-commit hook
+#
+# Topology is no longer committed — CI regenerates it ephemerally via
+# `just fitness-check`. See #293.
 #
 # Install: just install-hooks
 set -euo pipefail
 
-echo "🔍 Regenerating topology..."
-if just topology-analyze 2>/dev/null; then
-    # Stage topology data (viz/*.html is gitignored)
-    git add .topology/
-    echo "✅ Topology regenerated and staged"
-else
-    echo "⚠️  Could not regenerate topology (is APS CLI built?). Skipping."
-fi
+# (placeholder — add future pre-commit checks here)
