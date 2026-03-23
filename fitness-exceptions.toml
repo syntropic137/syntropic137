@@ -174,10 +174,6 @@ issue = "#197"
 value = 35
 issue = "#197"
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter::stream"]
-value = 50
-issue = "#197"
-
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets::create"]
 value = 40
 issue = "#197"
@@ -509,10 +505,6 @@ issue = "#197"
 value = 90
 issue = "#197"
 
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.storage.in_memory"]
-value = 225
-issue = "#197"
-
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.storage.trigger_query_store"]
 value = 80
 issue = "#197"
@@ -535,10 +527,6 @@ issue = "#197"
 
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.workspace_backends.docker.docker_sidecar_adapter"]
 value = 105
-issue = "#197"
-
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.workspace_backends.memory.memory_adapter"]
-value = 70
 issue = "#197"
 
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.workspace_backends.recording.adapter"]
@@ -875,10 +863,6 @@ issue = "#197"
 value = 670
 issue = "#197"
 
-[max-loc-file."packages.syn-adapters.src.syn_adapters.storage.in_memory"]
-value = 895
-issue = "#197"
-
 [max-loc-file."packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service"]
 value = 750
 issue = "#197"
@@ -893,10 +877,6 @@ issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.workspace_backends.docker.docker_sidecar_adapter"]
 value = 825
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.workspace_backends.memory.memory_adapter"]
-value = 1090
 issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.managed_workspace"]
@@ -1581,10 +1561,6 @@ issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.artifacts.bundle::load_from_storage"]
 value = 105
-issue = "#274"
-
-[max-loc-function."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter::stream"]
-value = 140
 issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.workspace_backends.docker.docker_sidecar_adapter::start"]
