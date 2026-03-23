@@ -25,6 +25,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _build_exec_command(
+    container_name: str,
+    command: list[str],
+    working_directory: str | None,
+    environment: dict[str, str] | None,
+) -> list[str]:
+    """Build the docker exec command list."""
+    exec_cmd = ["docker", "exec", "-i", "-w", working_directory or "/workspace"]
+    if environment:
+        for key, value in environment.items():
+            exec_cmd.extend(["-e", f"{key}={value}"])
+    exec_cmd.append(container_name)
+    exec_cmd.extend(command)
+    return exec_cmd
+
+
+async def _cleanup_process(proc: asyncio.subprocess.Process) -> int | None:
+    """Terminate/kill process and return exit code."""
+    if proc.returncode is None:
+        try:
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
+        except (TimeoutError, ProcessLookupError):
+            proc.kill()
+    if proc.returncode is None:
+        await proc.wait()
+    return proc.returncode
+
+
 class AgenticEventStreamAdapter:
     """Implements EventStreamPort using agentic_isolation streaming.
 
@@ -93,97 +122,69 @@ class AgenticEventStreamAdapter:
         the same fix but is only used in agentic_isolation contexts. Both must stay
         in sync — changing docker.py alone has no effect on the dashboard.
         """
-        # Store timeout for use in the streaming loop
         stream_timeout = float(timeout_seconds) if timeout_seconds else None
         if self._provider is None:
             raise RuntimeError("Provider not set. Call set_provider first.")
 
-        # Get the workspace from the isolation adapter
-        # This is a bit awkward - in practice, we'd share state better
-        # For now, we'll use docker exec directly
-
         container_name = f"agentic-ws-{handle.isolation_id.split('-')[1]}"
-
-        exec_cmd = ["docker", "exec", "-i"]
-
-        if working_directory:
-            exec_cmd.extend(["-w", working_directory])
-        else:
-            exec_cmd.extend(["-w", "/workspace"])
-
-        if environment:
-            for key, value in environment.items():
-                exec_cmd.extend(["-e", f"{key}={value}"])
-
-        exec_cmd.append(container_name)
-        exec_cmd.extend(command)
+        exec_cmd = _build_exec_command(
+            container_name, command, working_directory, environment,
+        )
 
         logger.debug(
             "Starting stream (container=%s, cmd=%s, timeout=%s)",
-            container_name,
-            command,
-            stream_timeout,
+            container_name, command, stream_timeout,
         )
 
         start_time = time.monotonic()
-
-        # stderr=STDOUT: merge stderr into stdout so git hook JSONL events
-        # (emitted to stderr by post-commit/pre-push hooks) are read by the engine.
-        # See docstring above for full architectural rationale.
         proc = await asyncio.create_subprocess_exec(
             *exec_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            # Increase StreamReader line limit to 10 MB. Default is 64 KB, which
-            # is exceeded by large tool results (e.g. WebSearch responses in JSONL).
             limit=10 * 1024 * 1024,
         )
 
         try:
-            while True:
-                # Check overall timeout
-                if stream_timeout is not None:
-                    elapsed = time.monotonic() - start_time
-                    if elapsed >= stream_timeout:
-                        logger.warning("Stream timed out after %.1fs", elapsed)
-                        break
-
-                if proc.stdout is None:
-                    break
-
-                try:
-                    line_bytes = await asyncio.wait_for(
-                        proc.stdout.readline(),
-                        timeout=1.0,
-                    )
-                except TimeoutError:
-                    if proc.returncode is not None:
-                        break
-                    continue
-
-                if not line_bytes:
-                    break
-
-                line = line_bytes.decode("utf-8", errors="replace").rstrip("\n\r")
-                if line:
-                    yield line
-
+            async for line in self._read_lines(proc, stream_timeout, start_time):
+                yield line
         finally:
-            if proc.returncode is None:
-                try:
-                    proc.terminate()
-                    await asyncio.wait_for(proc.wait(), timeout=5.0)
-                except (TimeoutError, ProcessLookupError):
-                    proc.kill()
-
-            # Wait for process to fully exit if not already done
-            if proc.returncode is None:
-                await proc.wait()
-
-            self._last_exit_code = proc.returncode
-            if proc.returncode and proc.returncode != 0:
+            exit_code = await _cleanup_process(proc)
+            self._last_exit_code = exit_code
+            if exit_code and exit_code != 0:
                 logger.warning(
                     "Stream process exited with code %d (container=%s)",
-                    proc.returncode,
-                    container_name,
+                    exit_code, container_name,
                 )
+
+    @staticmethod
+    async def _read_lines(
+        proc: asyncio.subprocess.Process,
+        stream_timeout: float | None,
+        start_time: float,
+    ) -> AsyncIterator[str]:
+        """Read and yield decoded lines from process stdout."""
+        while True:
+            if stream_timeout is not None:
+                elapsed = time.monotonic() - start_time
+                if elapsed >= stream_timeout:
+                    logger.warning("Stream timed out after %.1fs", elapsed)
+                    break
+
+            if proc.stdout is None:
+                break
+
+            try:
+                line_bytes = await asyncio.wait_for(
+                    proc.stdout.readline(), timeout=1.0,
+                )
+            except TimeoutError:
+                if proc.returncode is not None:
+                    break
+                continue
+
+            if not line_bytes:
+                break
+
+            line = line_bytes.decode("utf-8", errors="replace").rstrip("\n\r")
+            if line:
+                yield line

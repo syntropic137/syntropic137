@@ -40,6 +40,44 @@ class EventValidationError(Exception):
     pass
 
 
+def _event_to_copy_row(validated: AgentEvent) -> str:
+    """Convert a validated AgentEvent to a tab-separated COPY row."""
+    time, event_type, session_id, exec_id, phase_id, data_json = (
+        validated.to_insert_tuple()
+    )
+    row = [
+        time.isoformat() if isinstance(time, datetime) else time,
+        event_type,
+        session_id or "unknown",
+        exec_id or "\\N",
+        phase_id or "\\N",
+        data_json,
+    ]
+    return "\t".join(str(v) for v in row) + "\n"
+
+
+def _build_copy_buffer(
+    events: list[dict[str, Any]],
+    execution_id: str | None,
+    phase_id: str | None,
+) -> io.BytesIO:
+    """Build a BytesIO buffer of tab-separated rows for COPY."""
+    buffer = io.BytesIO()
+    for event in events:
+        if execution_id and "execution_id" not in event:
+            event = {**event, "execution_id": execution_id}
+        if phase_id and "phase_id" not in event:
+            event = {**event, "phase_id": phase_id}
+        try:
+            validated = AgentEvent.from_dict(event)
+        except Exception as e:
+            logger.warning("Skipping invalid event: %s", e)
+            continue
+        buffer.write(_event_to_copy_row(validated).encode("utf-8"))
+    buffer.seek(0)
+    return buffer
+
+
 class AgentEventStore:
     """Store agent events with batch inserts for scale.
 
@@ -119,43 +157,7 @@ class AgentEventStore:
         if self.pool is None:
             raise RuntimeError("AgentEventStore pool is not initialized")
 
-        # Build COPY data as bytes
-        buffer = io.BytesIO()
-
-        for event in events:
-            # Add context IDs if provided
-            if execution_id and "execution_id" not in event:
-                event = {**event, "execution_id": execution_id}
-            if phase_id and "phase_id" not in event:
-                event = {**event, "phase_id": phase_id}
-
-            # Process through AgentEvent model for proper type mapping and data extraction
-            # This handles Claude CLI's nested event structure (tool_use, tool_result)
-            try:
-                validated = AgentEvent.from_dict(event)
-            except Exception as e:
-                logger.warning("Skipping invalid event: %s", e)
-                continue
-
-            # Get insert tuple from validated model
-            time, event_type, session_id, evt_exec_id, evt_phase_id, data_json = (
-                validated.to_insert_tuple()
-            )
-
-            # Write tab-separated row
-            # Format: time, event_type, session_id, execution_id, phase_id, data
-            row = [
-                time.isoformat() if isinstance(time, datetime) else time,
-                event_type,
-                session_id or "unknown",
-                evt_exec_id or "\\N",  # NULL representation
-                evt_phase_id or "\\N",
-                data_json,
-            ]
-            line = "\t".join(str(v) for v in row) + "\n"
-            buffer.write(line.encode("utf-8"))
-
-        buffer.seek(0)
+        buffer = _build_copy_buffer(events, execution_id, phase_id)
 
         async with self.pool.acquire() as conn:
             result = await conn.copy_to_table(
@@ -165,7 +167,6 @@ class AgentEventStore:
                 format="text",
             )
 
-        # Parse result to get count
         if isinstance(result, str) and result.startswith("COPY"):
             count = int(result.split()[1])
         else:

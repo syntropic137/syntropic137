@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agentic_isolation import (
@@ -273,84 +274,89 @@ class AgenticIsolationAdapter:
         Returns:
             List of (relative_path, content) tuples for matching files
         """
-        from pathlib import Path
+        workspace_path = self._resolve_workspace_path(handle)
+        if workspace_path is None:
+            return []
 
+        self._log_workspace_contents(workspace_path)
+        results = self._collect_matching_files(workspace_path, patterns)
+
+        logger.info(
+            "copy_from: Collected %d files matching patterns %s (workspace=%s)",
+            len(results), patterns, handle.isolation_id,
+        )
+        return results
+
+    @staticmethod
+    def _resolve_workspace_path(handle: IsolationHandle) -> Path | None:
+        """Validate and return the host workspace path, or None."""
         host_workspace = handle.host_workspace_path
         if not host_workspace:
             logger.warning(
                 "copy_from: No host_workspace_path in handle (workspace=%s)",
                 handle.isolation_id,
             )
-            return []
+            return None
 
         workspace_path = Path(host_workspace)
         logger.info(
             "copy_from: Checking path %s (exists=%s, workspace=%s)",
-            workspace_path,
-            workspace_path.exists(),
-            handle.isolation_id,
+            workspace_path, workspace_path.exists(), handle.isolation_id,
         )
 
         if not workspace_path.exists():
             logger.warning(
                 "copy_from: Workspace path does not exist (workspace=%s, path=%s)",
-                handle.isolation_id,
-                workspace_path,
+                handle.isolation_id, workspace_path,
             )
-            return []
+            return None
+        return workspace_path
 
-        # List what's actually in the workspace for debugging (guarded for performance)
-        if logger.isEnabledFor(logging.DEBUG):
-            try:
-                all_files = list(workspace_path.rglob("*"))
-                logger.debug(
-                    "copy_from: Found %d total files in workspace: %s",
-                    len(all_files),
-                    [str(f.relative_to(workspace_path)) for f in all_files[:20]],
-                )
-            except Exception as e:
-                logger.debug("copy_from: Failed to list files: %s", e)
+    @staticmethod
+    def _log_workspace_contents(workspace_path: Path) -> None:
+        """Log workspace directory contents at DEBUG level."""
+        if not logger.isEnabledFor(logging.DEBUG):
+            return
+        try:
+            all_files = list(workspace_path.rglob("*"))
+            logger.debug(
+                "copy_from: Found %d total files in workspace: %s",
+                len(all_files),
+                [str(f.relative_to(workspace_path)) for f in all_files[:20]],
+            )
+        except Exception as e:
+            logger.debug("copy_from: Failed to list files: %s", e)
 
+    @staticmethod
+    def _collect_matching_files(
+        workspace_path: Path, patterns: list[str],
+    ) -> list[tuple[str, bytes]]:
+        """Glob patterns against workspace and read matching files."""
         results: list[tuple[str, bytes]] = []
-        seen_paths: set[str] = set()  # Avoid duplicates if patterns overlap
+        seen_paths: set[str] = set()
 
-        # Use Path.glob() for each pattern - this properly handles **
         for pattern in patterns:
-            # Clean the pattern for glob
             clean_pattern = pattern.lstrip("/")
             if clean_pattern.startswith("workspace/"):
-                clean_pattern = clean_pattern[len("workspace/") :]
-
-            logger.debug("copy_from: Globbing pattern: %s", clean_pattern)
+                clean_pattern = clean_pattern[len("workspace/"):]
 
             for file_path in workspace_path.glob(clean_pattern):
                 if not file_path.is_file():
                     continue
-
                 relative_path = str(file_path.relative_to(workspace_path))
                 if relative_path in seen_paths:
                     continue
                 seen_paths.add(relative_path)
-
                 try:
                     content = file_path.read_bytes()
                     results.append((relative_path, content))
                     logger.info(
                         "copy_from: Collected file %s (%d bytes)",
-                        relative_path,
-                        len(content),
+                        relative_path, len(content),
                     )
                 except Exception as e:
                     logger.warning(
                         "copy_from: Failed to read file %s: %s",
-                        relative_path,
-                        e,
+                        relative_path, e,
                     )
-
-        logger.info(
-            "copy_from: Collected %d files matching patterns %s (workspace=%s)",
-            len(results),
-            patterns,
-            handle.isolation_id,
-        )
         return results

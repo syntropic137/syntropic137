@@ -66,63 +66,13 @@ class ModelRegistry:
             self._load_fallback()
             return
 
-        # First pass: Load all individual model files to get api_names
         model_id_to_api_name: dict[str, str] = {}
-
         for provider_dir in _PRIMITIVES_MODELS_PATH.iterdir():
             if not provider_dir.is_dir():
                 continue
+            self._load_provider(provider_dir, model_id_to_api_name)
 
-            provider_id = provider_dir.name
-
-            # Load provider config
-            config_path = provider_dir / "config.yaml"
-            if config_path.exists():
-                config = _load_yaml(config_path)
-                self._providers[provider_id] = config
-
-            # Load individual model files
-            for model_file in provider_dir.glob("*.yaml"):
-                if model_file.name == "config.yaml":
-                    continue
-
-                model_data = _load_yaml(model_file)
-                if not model_data:
-                    continue
-
-                model_id = model_data.get("id", model_file.stem)
-                self._models[model_id] = model_data
-
-                # Register model aliases
-                if api_name := model_data.get("api_name"):
-                    # Map model_id to api_name
-                    self._aliases[model_id] = api_name
-                    model_id_to_api_name[model_id] = api_name
-                    # Map explicit alias if present
-                    if alias := model_data.get("alias"):
-                        self._aliases[alias] = api_name
-
-        # Second pass: Create simple aliases from current_models that resolve to API names
-        for provider_id, config in self._providers.items():
-            current_models = config.get("current_models", {})
-            for model_type, model_id in current_models.items():
-                # Get the API name for this model
-                api_name = model_id_to_api_name.get(model_id, model_id)
-
-                # Simple aliases that work across versions:
-                # - "sonnet" -> latest sonnet API name
-                # - "claude-sonnet" -> latest sonnet API name
-                # - "opus" -> latest opus API name
-                # - "claude-opus" -> latest opus API name
-                if api_name is not None and model_type is not None:
-                    if provider_id == "anthropic":
-                        # Short alias (e.g., "sonnet")
-                        self._aliases[str(model_type)] = str(api_name)
-                        # Claude-prefixed alias (e.g., "claude-sonnet")
-                        self._aliases[f"claude-{model_type}"] = str(api_name)
-                    else:
-                        # Other providers: use provider/type format
-                        self._aliases[f"{provider_id}/{model_type}"] = str(api_name)
+        self._register_current_model_aliases(model_id_to_api_name)
 
         logger.debug(
             "models_loaded",
@@ -130,6 +80,54 @@ class ModelRegistry:
             models=len(self._models),
             aliases=len(self._aliases),
         )
+
+    def _load_provider(
+        self, provider_dir: Path, model_id_to_api_name: dict[str, str]
+    ) -> None:
+        """Load a single provider directory's config and model files."""
+        provider_id = provider_dir.name
+        config_path = provider_dir / "config.yaml"
+        if config_path.exists():
+            self._providers[provider_id] = _load_yaml(config_path)
+
+        for model_file in provider_dir.glob("*.yaml"):
+            if model_file.name == "config.yaml":
+                continue
+            self._register_model_file(model_file, model_id_to_api_name)
+
+    def _register_model_file(
+        self, model_file: Path, model_id_to_api_name: dict[str, str]
+    ) -> None:
+        """Register a single model YAML file."""
+        model_data = _load_yaml(model_file)
+        if not model_data:
+            return
+
+        model_id = model_data.get("id", model_file.stem)
+        self._models[model_id] = model_data
+
+        api_name = model_data.get("api_name")
+        if not api_name:
+            return
+        self._aliases[model_id] = api_name
+        model_id_to_api_name[model_id] = api_name
+        if alias := model_data.get("alias"):
+            self._aliases[alias] = api_name
+
+    def _register_current_model_aliases(
+        self, model_id_to_api_name: dict[str, str]
+    ) -> None:
+        """Create shorthand aliases from provider current_models configs."""
+        for provider_id, config in self._providers.items():
+            for model_type, model_id in config.get("current_models", {}).items():
+                api_name = model_id_to_api_name.get(model_id, model_id)
+                if api_name is None or model_type is None:
+                    continue
+                if provider_id == "anthropic":
+                    self._aliases[str(model_type)] = str(api_name)
+                    self._aliases[f"claude-{model_type}"] = str(api_name)
+                else:
+                    self._aliases[f"{provider_id}/{model_type}"] = str(api_name)
 
     def _load_fallback(self) -> None:
         """Load fallback model definitions if primitives not available."""
