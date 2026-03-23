@@ -60,7 +60,7 @@ export function ConversationLogLine({
                 e.stopPropagation()
                 let parsed = line.parsed
                 if (!parsed) {
-                  try { parsed = JSON.parse(line.raw) } catch { parsed = undefined }
+                  try { parsed = JSON.parse(line.raw) } catch { parsed = null }
                 }
                 const content = parsed ? JSON.stringify(parsed, null, 2) : line.raw
                 onCopy(content, line.line_number)
