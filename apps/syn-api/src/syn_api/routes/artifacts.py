@@ -200,8 +200,8 @@ async def create_artifact(
     title: str,
     content: str,
     phase_id: str | None = None,
-    session_id: str | None = None,
-    content_type: str = "text/markdown",
+    session_id: str | None = None,  # noqa: ARG001
+    content_type: str = "text/markdown",  # noqa: ARG001
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, ArtifactError]:
     """Create a new artifact.
@@ -262,7 +262,7 @@ async def create_artifact(
 async def upload_artifact(
     artifact_id: str,
     data: bytes,
-    filename: str,
+    filename: str,  # noqa: ARG001
     content_type: str = "application/octet-stream",
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, ArtifactError]:

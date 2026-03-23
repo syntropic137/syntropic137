@@ -1,11 +1,11 @@
 """Tests for syn_api.routes.conversations — conversation log retrieval."""
 
 import os
-
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from syn_api.types import Err, Ok, ObservabilityError
+import pytest
+
+from syn_api.types import Err, ObservabilityError, Ok
 
 # Ensure test environment for in-memory adapters
 os.environ.setdefault("APP_ENVIRONMENT", "test")

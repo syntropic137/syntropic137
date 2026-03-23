@@ -15,6 +15,8 @@ from syn_api.routes.workflows.commands import create_workflow, validate_yaml
 from syn_api.routes.workflows.queries import (
     get_workflow,
     list_workflows,
+)
+from syn_api.routes.workflows.queries import (
     router as queries_router,
 )
 
