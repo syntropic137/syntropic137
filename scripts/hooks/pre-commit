@@ -1,34 +1,13 @@
 #!/usr/bin/env bash
-# pre-commit: regenerate topology artifact and stage it before every commit.
+# pre-commit: invalidate the topology cache stamp when source files change.
 #
-# The .topology/ data files (manifest, metrics, graphs) are the source of
-# truth for architectural fitness checks and visualizations. Keeping them
-# in sync with the code means `just topology-viz` always reflects HEAD.
+# fitness-check regenerates topology on demand (commit-SHA cache). This hook
+# removes the stamp so the next fitness-check run knows to regenerate.
 #
 # Install: just install-hooks
 set -euo pipefail
 
-if ! command -v just &>/dev/null; then
-    echo "⚠️  just not found — skipping topology update" >&2
-    exit 0
-fi
-
-# Only regenerate when Python or Rust source files are in the commit.
-# Config-only changes (version bumps, docs, justfile) don't affect topology.
 CHANGED_SRC=$(git diff --cached --name-only | grep -E '\.(py|rs)$' || true)
-if [ -z "$CHANGED_SRC" ]; then
-    exit 0
+if [ -n "$CHANGED_SRC" ]; then
+    rm -f .topology/.commit-sha
 fi
-
-echo "🔍 Updating topology artifact..."
-just topology-analyze
-
-# Stage the data artifact (exclude viz — derived files committed separately)
-git add \
-    .topology/syn-manifest.json \
-    .topology/manifest.toml \
-    .topology/metrics/ \
-    .topology/graphs/ \
-    .topology/architecture/
-
-echo "✅ Topology artifact up to date"
