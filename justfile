@@ -1283,6 +1283,24 @@ docs-site-gen:
 docs-site-build: docs-site-gen
     cd apps/syn-docs && pnpm run build
 
+# --- Git Hooks ---
+
+# Install git hooks from scripts/hooks/ into .git/hooks/
+# Run once after clone: just install-hooks
+install-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    HOOKS_SRC="scripts/hooks"
+    HOOKS_DST=".git/hooks"
+    for hook in "$HOOKS_SRC"/*; do
+        name=$(basename "$hook")
+        dst="$HOOKS_DST/$name"
+        cp "$hook" "$dst"
+        chmod +x "$dst"
+        echo "✅ Installed $name"
+    done
+    echo "Git hooks installed from $HOOKS_SRC/"
+
 # --- Utilities ---
 
 # Seed workflows from YAML files

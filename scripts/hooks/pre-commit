@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# pre-commit: regenerate topology artifact and stage it before every commit.
+#
+# The .topology/ data files (manifest, metrics, graphs) are the source of
+# truth for architectural fitness checks and visualizations. Keeping them
+# in sync with the code means `just topology-viz` always reflects HEAD.
+#
+# Install: just install-hooks
+set -euo pipefail
+
+if ! command -v just &>/dev/null; then
+    echo "⚠️  just not found — skipping topology update" >&2
+    exit 0
+fi
+
+echo "🔍 Updating topology artifact..."
+just topology-analyze
+
+# Stage the data artifact (exclude viz — derived files committed separately)
+git add \
+    .topology/syn-manifest.json \
+    .topology/manifest.toml \
+    .topology/metrics/ \
+    .topology/graphs/ \
+    .topology/architecture/
+
+echo "✅ Topology artifact up to date"
