@@ -141,17 +141,10 @@ issue = "#197"
 value = 30
 issue = "#197"
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.factory::get_agent"]
-value = 35
-issue = "#197"
-
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.models::_load_models"]
 value = 55
 issue = "#197"
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.openai::complete"]
-value = 35
-issue = "#197"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.collector.client::_send_batch"]
 value = 30
@@ -463,9 +456,6 @@ issue = "#197"
 value = 145
 issue = "#197"
 
-[max-cognitive-file."packages.syn-adapters.src.syn_adapters.agents.openai"]
-value = 205
-issue = "#197"
 
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.artifacts.bundle"]
 value = 100
@@ -789,9 +779,6 @@ issue = "#197"
 value = 20
 issue = "#197"
 
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.openai::complete"]
-value = 20
-issue = "#197"
 
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.events.models::from_dict"]
 value = 25
@@ -867,9 +854,6 @@ issue = "#197"
 value = 675
 issue = "#197"
 
-[max-loc-file."packages.syn-adapters.src.syn_adapters.agents.openai"]
-value = 620
-issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.artifacts.bundle"]
 value = 720
