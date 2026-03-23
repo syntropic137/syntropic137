@@ -9,6 +9,7 @@ import {
 import type { MetricsResponse } from '../../types'
 
 interface ChartDataItem {
+  [key: string]: unknown
   name: string
   value: number
   fill: string

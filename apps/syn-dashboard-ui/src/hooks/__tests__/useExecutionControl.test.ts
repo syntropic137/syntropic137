@@ -44,7 +44,7 @@ describe('useExecutionControl', () => {
   })
 
   it('transitions to cancelling on successful cancel', async () => {
-    mockCancel.mockResolvedValue({ success: true })
+    mockCancel.mockResolvedValue({ success: true, execution_id: 'exec-1', state: 'cancelling', message: null })
 
     const { result } = renderHook(() => useExecutionControl('exec-1', 'running'))
 
@@ -58,7 +58,7 @@ describe('useExecutionControl', () => {
   })
 
   it('sets error on failed cancel', async () => {
-    mockCancel.mockResolvedValue({ success: false, message: 'Not allowed', state: 'completed' })
+    mockCancel.mockResolvedValue({ success: false, execution_id: 'exec-1', message: 'Not allowed', state: 'completed' })
 
     const { result } = renderHook(() => useExecutionControl('exec-1', 'running'))
 
@@ -83,11 +83,11 @@ describe('useExecutionControl', () => {
   })
 
   it('defers to projection terminal state once caught up', async () => {
-    mockCancel.mockResolvedValue({ success: true })
+    mockCancel.mockResolvedValue({ success: true, execution_id: 'exec-1', state: 'cancelling', message: null })
 
     const { result, rerender } = renderHook(
       ({ state }) => useExecutionControl('exec-1', state),
-      { initialProps: { state: 'running' as const } },
+      { initialProps: { state: 'running' as string } },
     )
 
     // Cancel → optimistic 'cancelling'
@@ -97,7 +97,7 @@ describe('useExecutionControl', () => {
     expect(result.current.state).toBe('cancelling')
 
     // Projection catches up → terminal state wins
-    rerender({ state: 'cancelled' as const })
+    rerender({ state: 'cancelled' })
     expect(result.current.state).toBe('cancelled')
   })
 })

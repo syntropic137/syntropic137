@@ -5,6 +5,9 @@ import { useWorkflowData } from '../useWorkflowData'
 vi.mock('../../api/workflows', () => ({
   getWorkflow: vi.fn(),
   getWorkflowHistory: vi.fn(),
+}))
+
+vi.mock('../../api/executions', () => ({
   listExecutions: vi.fn(),
 }))
 
@@ -16,7 +19,8 @@ vi.mock('../../api/artifacts', () => ({
   listArtifacts: vi.fn(),
 }))
 
-import { getWorkflow, getWorkflowHistory, listExecutions } from '../../api/workflows'
+import { getWorkflow, getWorkflowHistory } from '../../api/workflows'
+import { listExecutions } from '../../api/executions'
 import { getMetrics } from '../../api/observability'
 import { listArtifacts } from '../../api/artifacts'
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getWorkflow, getWorkflowHistory, listExecutions } from '../api/workflows'
+import { getWorkflow, getWorkflowHistory } from '../api/workflows'
+import { listExecutions } from '../api/executions'
 import { getMetrics } from '../api/observability'
 import { listArtifacts } from '../api/artifacts'
 import type {

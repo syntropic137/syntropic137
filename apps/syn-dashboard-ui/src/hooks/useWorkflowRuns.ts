@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { getWorkflow, listExecutions } from '../api/workflows'
+import { getWorkflow } from '../api/workflows'
+import { listExecutions } from '../api/executions'
 import type { WorkflowExecutionSummary, WorkflowResponse } from '../types'
 
 export interface UseWorkflowRunsResult {
