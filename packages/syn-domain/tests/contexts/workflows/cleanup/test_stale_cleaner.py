@@ -407,34 +407,39 @@ class TestIsPastExpectedCompletion:
 
     def test_no_expected_completion_returns_true(self) -> None:
         summary = MockExecutionSummary(
-            workflow_execution_id="e-1", expected_completion_at=None,
+            workflow_execution_id="e-1",
+            expected_completion_at=None,
         ).to_summary()
         assert _is_past_expected_completion(summary) is True
 
     def test_future_datetime_returns_false(self) -> None:
         future = datetime.now(UTC) + timedelta(hours=1)
         summary = MockExecutionSummary(
-            workflow_execution_id="e-1", expected_completion_at=future,
+            workflow_execution_id="e-1",
+            expected_completion_at=future,
         ).to_summary()
         assert _is_past_expected_completion(summary) is False
 
     def test_past_datetime_returns_true(self) -> None:
         past = datetime.now(UTC) - timedelta(hours=1)
         summary = MockExecutionSummary(
-            workflow_execution_id="e-1", expected_completion_at=past,
+            workflow_execution_id="e-1",
+            expected_completion_at=past,
         ).to_summary()
         assert _is_past_expected_completion(summary) is True
 
     def test_past_iso_string_returns_true(self) -> None:
         past_str = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         summary = MockExecutionSummary(
-            workflow_execution_id="e-1", expected_completion_at=past_str,
+            workflow_execution_id="e-1",
+            expected_completion_at=past_str,
         ).to_summary()
         assert _is_past_expected_completion(summary) is True
 
     def test_future_iso_string_returns_false(self) -> None:
         future_str = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         summary = MockExecutionSummary(
-            workflow_execution_id="e-1", expected_completion_at=future_str,
+            workflow_execution_id="e-1",
+            expected_completion_at=future_str,
         ).to_summary()
         assert _is_past_expected_completion(summary) is False

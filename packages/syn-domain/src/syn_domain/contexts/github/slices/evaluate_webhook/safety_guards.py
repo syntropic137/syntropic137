@@ -44,7 +44,9 @@ class GuardResult:
 
 
 async def _check_max_attempts(
-    rule: Any, pr_number: int, store: TriggerQueryStore,
+    rule: Any,
+    pr_number: int,
+    store: TriggerQueryStore,
 ) -> GuardResult | None:
     """Guard 1: Max attempts per PR + trigger combo."""
     attempts = await store.get_fire_count(trigger_id=rule.trigger_id, pr_number=pr_number)
@@ -56,7 +58,9 @@ async def _check_max_attempts(
 
 
 async def _check_cooldown(
-    rule: Any, pr_number: int, store: TriggerQueryStore,
+    rule: Any,
+    pr_number: int,
+    store: TriggerQueryStore,
 ) -> GuardResult | None:
     """Guard 2: Min time since last fire for same PR."""
     if rule.config.cooldown_seconds <= 0:
@@ -68,8 +72,10 @@ async def _check_cooldown(
     if elapsed < rule.config.cooldown_seconds:
         remaining = rule.config.cooldown_seconds - elapsed
         return GuardResult(
-            False, f"Cooldown: {remaining:.0f}s remaining",
-            retryable=True, retry_after_seconds=remaining + RETRY_BUFFER_SECONDS,
+            False,
+            f"Cooldown: {remaining:.0f}s remaining",
+            retryable=True,
+            retry_after_seconds=remaining + RETRY_BUFFER_SECONDS,
         )
     return None
 
@@ -82,7 +88,9 @@ async def _check_daily_limit(rule: Any, store: TriggerQueryStore) -> GuardResult
     return None
 
 
-async def _check_idempotency(payload: dict[str, Any], store: TriggerQueryStore) -> GuardResult | None:
+async def _check_idempotency(
+    payload: dict[str, Any], store: TriggerQueryStore
+) -> GuardResult | None:
     """Guard 4: Don't fire twice for same delivery."""
     delivery_id = payload.get("_delivery_id", "")
     if delivery_id and await store.was_delivery_processed(delivery_id):
@@ -91,7 +99,9 @@ async def _check_idempotency(payload: dict[str, Any], store: TriggerQueryStore) 
 
 
 async def _check_cross_trigger_cooldown(
-    rule: Any, pr_number: int, store: TriggerQueryStore,
+    rule: Any,
+    pr_number: int,
+    store: TriggerQueryStore,
 ) -> GuardResult | None:
     """Guard 5: Cross-trigger PR cooldown."""
     last_any = await store.get_last_any_fired_at(pr_number, exclude_trigger_id=rule.trigger_id)
@@ -100,7 +110,8 @@ async def _check_cross_trigger_cooldown(
     elapsed = (datetime.now(UTC) - last_any).total_seconds()
     if elapsed < CROSS_TRIGGER_COOLDOWN_SECONDS:
         return GuardResult(
-            False, f"Another trigger fired on PR #{pr_number} {elapsed:.0f}s ago",
+            False,
+            f"Another trigger fired on PR #{pr_number} {elapsed:.0f}s ago",
             retryable=True,
             retry_after_seconds=(CROSS_TRIGGER_COOLDOWN_SECONDS - elapsed) + RETRY_BUFFER_SECONDS,
         )

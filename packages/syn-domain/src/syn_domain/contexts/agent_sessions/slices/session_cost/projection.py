@@ -227,8 +227,12 @@ class SessionCostProjection:
 
         session_cost.input_tokens = data.get("total_input_tokens", session_cost.input_tokens)
         session_cost.output_tokens = data.get("total_output_tokens", session_cost.output_tokens)
-        session_cost.cache_creation_tokens = data.get("cache_creation_tokens", session_cost.cache_creation_tokens)
-        session_cost.cache_read_tokens = data.get("cache_read_tokens", session_cost.cache_read_tokens)
+        session_cost.cache_creation_tokens = data.get(
+            "cache_creation_tokens", session_cost.cache_creation_tokens
+        )
+        session_cost.cache_read_tokens = data.get(
+            "cache_read_tokens", session_cost.cache_read_tokens
+        )
         session_cost.tool_calls = data.get("tool_count", session_cost.tool_calls)
         session_cost.turns = data.get("num_turns", session_cost.turns)
         session_cost.duration_ms = data.get("duration_ms", session_cost.duration_ms)
@@ -260,8 +264,12 @@ class SessionCostProjection:
         _apply_finalized_tokens(session_cost, event_data)
         _apply_finalized_breakdowns(session_cost, event_data)
 
-        session_cost.started_at = _parse_timestamp(event_data.get("started_at")) or session_cost.started_at
-        session_cost.completed_at = _parse_timestamp(event_data.get("completed_at")) or session_cost.completed_at
+        session_cost.started_at = (
+            _parse_timestamp(event_data.get("started_at")) or session_cost.started_at
+        )
+        session_cost.completed_at = (
+            _parse_timestamp(event_data.get("completed_at")) or session_cost.completed_at
+        )
         session_cost.is_finalized = True
         await self._store.save(self.PROJECTION_NAME, session_id, session_cost.to_dict())
 

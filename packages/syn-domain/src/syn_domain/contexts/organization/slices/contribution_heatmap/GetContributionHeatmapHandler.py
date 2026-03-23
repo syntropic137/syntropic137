@@ -49,7 +49,9 @@ def _empty_result(
     days: list[HeatmapDayBucket] = []
     current = query.start_date
     while current <= query.end_date:
-        days.append(HeatmapDayBucket(date=current.isoformat(), count=0.0, breakdown=dict(_ZERO_BREAKDOWN)))
+        days.append(
+            HeatmapDayBucket(date=current.isoformat(), count=0.0, breakdown=dict(_ZERO_BREAKDOWN))
+        )
         current += timedelta(days=1)
     return ContributionHeatmapResult(
         metric=query.metric,

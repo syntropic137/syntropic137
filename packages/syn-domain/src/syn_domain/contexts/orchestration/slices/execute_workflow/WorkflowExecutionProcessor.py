@@ -9,26 +9,55 @@ from uuid import uuid4
 
 from syn_domain.contexts.orchestration._shared.TodoValueObjects import TodoAction, TodoItem
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
-    ExecutablePhase, ExecutionMetrics, PhaseDefinition, PhaseResult,
+    ExecutablePhase,
+    ExecutionMetrics,
+    PhaseDefinition,
+    PhaseResult,
 )
 from syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate import (
-    CompleteExecutionCommand, CompletePhaseCommand, FailExecutionCommand,
-    StartExecutionCommand, StartPhaseCommand, WorkflowExecutionAggregate,
+    CompleteExecutionCommand,
+    CompletePhaseCommand,
+    FailExecutionCommand,
+    StartExecutionCommand,
+    StartPhaseCommand,
+    WorkflowExecutionAggregate,
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import ArtifactCollector
-from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import ConversationRecorder
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import AgentExecutionHandler
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import ArtifactCollectionHandler
-from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import WorkspaceProvisionHandler
-from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import ObservabilityCollector
-from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import PhaseResultBuilder
+from syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector import (
+    ArtifactCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ConversationRecorder import (
+    ConversationRecorder,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+    AgentExecutionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.ArtifactCollectionHandler import (
+    ArtifactCollectionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+    WorkspaceProvisionHandler,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector import (
+    ObservabilityCollector,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.PhaseResultBuilder import (
+    PhaseResultBuilder,
+)
 from syn_domain.contexts.orchestration.slices.execute_workflow.processor_types import (
-    ArtifactRepository, CommandBuilder, ExecutionRepository, PromptBuilder,
-    SessionRepository, TodoProjection,
+    ArtifactRepository,
+    CommandBuilder,
+    ExecutionRepository,
+    PromptBuilder,
+    SessionRepository,
+    TodoProjection,
     WorkflowExecutionResult,  # re-exported for backward compatibility
 )
-from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import SessionLifecycleManager
-from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import TokenAccumulator
+from syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager import (
+    SessionLifecycleManager,
+)
+from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+    TokenAccumulator,
+)
 
 if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
@@ -37,9 +66,15 @@ if TYPE_CHECKING:
     from syn_adapters.conversations import ConversationStoragePort
     from syn_adapters.workspace_backends.service import WorkspaceService
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
-    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import ArtifactContentStoragePort
-    from syn_domain.contexts.artifacts.domain.services.artifact_query_service import ArtifactQueryServiceProtocol
-    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import ObservabilityRecorder
+    from syn_domain.contexts.artifacts.domain.ports.artifact_storage import (
+        ArtifactContentStoragePort,
+    )
+    from syn_domain.contexts.artifacts.domain.services.artifact_query_service import (
+        ArtifactQueryServiceProtocol,
+    )
+    from syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor import (
+        ObservabilityRecorder,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +137,9 @@ class WorkflowExecutionProcessor:
 
         phase_definitions = [
             PhaseDefinition(
-                phase_id=p.phase_id, name=p.name, order=p.order,
+                phase_id=p.phase_id,
+                name=p.name,
+                order=p.order,
                 timeout_seconds=p.timeout_seconds or p.agent_config.timeout_seconds,
             )
             for p in phases
@@ -110,9 +147,12 @@ class WorkflowExecutionProcessor:
         phase_map = {p.phase_id: p for p in phases}
 
         start_cmd = StartExecutionCommand(
-            execution_id=execution_id, workflow_id=workflow_id,
-            workflow_name=workflow_name, total_phases=len(phases),
-            inputs=inputs, expected_completion_at=expected_completion_at,
+            execution_id=execution_id,
+            workflow_id=workflow_id,
+            workflow_name=workflow_name,
+            total_phases=len(phases),
+            inputs=inputs,
+            expected_completion_at=expected_completion_at,
             phase_definitions=phase_definitions,
         )
         aggregate._handle_command(start_cmd)
@@ -129,56 +169,96 @@ class WorkflowExecutionProcessor:
                 if not todos:
                     break
                 await self._dispatch(
-                    todo=todos[0], aggregate=aggregate, phase_map=phase_map,
-                    phase_results=phase_results, all_artifact_ids=all_artifact_ids,
+                    todo=todos[0],
+                    aggregate=aggregate,
+                    phase_map=phase_map,
+                    phase_results=phase_results,
+                    all_artifact_ids=all_artifact_ids,
                     completed_phase_ids=completed_phase_ids,
-                    phase_outputs=phase_outputs, repo_url=repo_url,
+                    phase_outputs=phase_outputs,
+                    repo_url=repo_url,
                 )
             return await self._complete_execution(
-                aggregate, execution_id, workflow_id, phases,
-                phase_results, all_artifact_ids, started_at,
+                aggregate,
+                execution_id,
+                workflow_id,
+                phases,
+                phase_results,
+                all_artifact_ids,
+                started_at,
             )
         except Exception as e:
             return await self._fail_execution(
-                e, aggregate, execution_id, workflow_id, phases,
-                phase_results, all_artifact_ids, completed_phase_ids, started_at,
+                e,
+                aggregate,
+                execution_id,
+                workflow_id,
+                phases,
+                phase_results,
+                all_artifact_ids,
+                completed_phase_ids,
+                started_at,
             )
 
     async def _dispatch(
-        self, todo: TodoItem, aggregate: WorkflowExecutionAggregate,
-        phase_map: dict[str, ExecutablePhase], phase_results: list[PhaseResult],
-        all_artifact_ids: list[str], completed_phase_ids: list[str],
-        phase_outputs: dict[str, str], repo_url: str | None,
+        self,
+        todo: TodoItem,
+        aggregate: WorkflowExecutionAggregate,
+        phase_map: dict[str, ExecutablePhase],
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        repo_url: str | None,
     ) -> None:
         """Dispatch a single to-do item to its handler."""
         assert todo.phase_id is not None
         phase = phase_map[todo.phase_id]
         if todo.action == TodoAction.PROVISION_WORKSPACE:
             await self._handle_provision(
-                todo, phase, aggregate, repo_url, completed_phase_ids, phase_outputs,
+                todo,
+                phase,
+                aggregate,
+                repo_url,
+                completed_phase_ids,
+                phase_outputs,
             )
         elif todo.action == TodoAction.RUN_AGENT:
             await self._handle_run_agent(todo, phase, aggregate)
         elif todo.action == TodoAction.COLLECT_ARTIFACTS:
             await self._handle_collect_artifacts(
-                todo, phase, aggregate, all_artifact_ids, phase_outputs,
+                todo,
+                phase,
+                aggregate,
+                all_artifact_ids,
+                phase_outputs,
             )
         elif todo.action == TodoAction.COMPLETE_PHASE:
             await self._handle_complete_phase(
-                todo, phase, aggregate, phase_results, completed_phase_ids,
+                todo,
+                phase,
+                aggregate,
+                phase_results,
+                completed_phase_ids,
             )
 
     async def _complete_execution(
-        self, aggregate: WorkflowExecutionAggregate, execution_id: str,
-        workflow_id: str, phases: list[ExecutablePhase],
-        phase_results: list[PhaseResult], all_artifact_ids: list[str],
+        self,
+        aggregate: WorkflowExecutionAggregate,
+        execution_id: str,
+        workflow_id: str,
+        phases: list[ExecutablePhase],
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
         started_at: datetime,
     ) -> WorkflowExecutionResult:
         """Build completion command, save, and return success result."""
         metrics = ExecutionMetrics.from_results(phase_results)
         complete_cmd = CompleteExecutionCommand(
-            execution_id=execution_id, completed_phases=metrics.completed_phases,
-            total_phases=len(phases), total_input_tokens=metrics.total_input_tokens,
+            execution_id=execution_id,
+            completed_phases=metrics.completed_phases,
+            total_phases=len(phases),
+            total_input_tokens=metrics.total_input_tokens,
             total_output_tokens=metrics.total_output_tokens,
             total_cost_usd=metrics.total_cost_usd,
             duration_seconds=metrics.total_duration_seconds,
@@ -187,26 +267,39 @@ class WorkflowExecutionProcessor:
         aggregate._handle_command(complete_cmd)
         await self._save_and_sync(aggregate)
         return WorkflowExecutionResult(
-            workflow_id=workflow_id, execution_id=execution_id,
-            status="completed", started_at=started_at,
-            completed_at=datetime.now(UTC), phase_results=phase_results,
-            artifact_ids=all_artifact_ids, metrics=metrics,
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="completed",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            phase_results=phase_results,
+            artifact_ids=all_artifact_ids,
+            metrics=metrics,
         )
 
     async def _fail_execution(
-        self, error: Exception, aggregate: WorkflowExecutionAggregate,
-        execution_id: str, workflow_id: str, phases: list[ExecutablePhase],
-        phase_results: list[PhaseResult], all_artifact_ids: list[str],
-        completed_phase_ids: list[str], started_at: datetime,
+        self,
+        error: Exception,
+        aggregate: WorkflowExecutionAggregate,
+        execution_id: str,
+        workflow_id: str,
+        phases: list[ExecutablePhase],
+        phase_results: list[PhaseResult],
+        all_artifact_ids: list[str],
+        completed_phase_ids: list[str],
+        started_at: datetime,
     ) -> WorkflowExecutionResult:
         """Close open sessions, save failure event, and return failed result."""
         for _pid, mgr in list(self._session_managers.items()):
             await mgr.complete_failure(error_message=str(error))
         self._session_managers.clear()
         fail_cmd = FailExecutionCommand(
-            execution_id=execution_id, error=str(error),
-            error_type=type(error).__name__, failed_phase_id=None,
-            completed_phases=len(completed_phase_ids), total_phases=len(phases),
+            execution_id=execution_id,
+            error=str(error),
+            error_type=type(error).__name__,
+            failed_phase_id=None,
+            completed_phases=len(completed_phase_ids),
+            total_phases=len(phases),
         )
         try:
             aggregate._handle_command(fail_cmd)
@@ -214,33 +307,46 @@ class WorkflowExecutionProcessor:
         except Exception as save_err:
             logger.error("Failed to save failure event: %s", save_err)
         return WorkflowExecutionResult(
-            workflow_id=workflow_id, execution_id=execution_id,
-            status="failed", started_at=started_at,
-            completed_at=datetime.now(UTC), phase_results=phase_results,
+            workflow_id=workflow_id,
+            execution_id=execution_id,
+            status="failed",
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            phase_results=phase_results,
             artifact_ids=all_artifact_ids,
             metrics=ExecutionMetrics.from_results(phase_results),
             error_message=str(error),
         )
 
     async def _handle_provision(
-        self, todo: TodoItem, phase: ExecutablePhase,
-        aggregate: WorkflowExecutionAggregate, repo_url: str | None,
-        completed_phase_ids: list[str], phase_outputs: dict[str, str],
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
+        aggregate: WorkflowExecutionAggregate,
+        repo_url: str | None,
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
     ) -> None:
         """Dispatch PROVISION_WORKSPACE."""
         assert todo.phase_id is not None
         session_id = str(uuid4())
         start_cmd = StartPhaseCommand(
-            execution_id=todo.execution_id, workflow_id=aggregate.workflow_id or "",
-            phase_id=todo.phase_id, phase_name=phase.name,
-            phase_order=phase.order, session_id=session_id,
+            execution_id=todo.execution_id,
+            workflow_id=aggregate.workflow_id or "",
+            phase_id=todo.phase_id,
+            phase_name=phase.name,
+            phase_order=phase.order,
+            session_id=session_id,
         )
         aggregate._handle_command(start_cmd)
 
         session_mgr = SessionLifecycleManager(
-            repository=self._session_repo, session_id=session_id,
-            workflow_id=aggregate.workflow_id or "", execution_id=todo.execution_id,
-            phase_id=todo.phase_id, agent_provider=phase.agent_config.provider,
+            repository=self._session_repo,
+            session_id=session_id,
+            workflow_id=aggregate.workflow_id or "",
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            agent_provider=phase.agent_config.provider,
             agent_model=phase.agent_config.model,
         )
         await session_mgr.start()
@@ -248,16 +354,24 @@ class WorkflowExecutionProcessor:
         self._phase_started_at[todo.phase_id] = datetime.now(UTC)
 
         artifacts = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query,
+            self._artifact_repo,
+            self._artifact_content_storage,
+            self._artifact_query,
         )
         provision_handler = WorkspaceProvisionHandler(
             workspace_service=self._workspace_service,
-            prompt_builder=self._prompt_builder, command_builder=self._command_builder,
+            prompt_builder=self._prompt_builder,
+            command_builder=self._command_builder,
         )
         result = await provision_handler.handle(
-            todo=todo, phase=phase, workflow_id=aggregate.workflow_id or "",
-            session_id=session_id, repo_url=repo_url, artifacts=artifacts,
-            completed_phase_ids=completed_phase_ids, phase_outputs=phase_outputs,
+            todo=todo,
+            phase=phase,
+            workflow_id=aggregate.workflow_id or "",
+            session_id=session_id,
+            repo_url=repo_url,
+            artifacts=artifacts,
+            completed_phase_ids=completed_phase_ids,
+            phase_outputs=phase_outputs,
             inputs=self._inputs,
         )
 
@@ -269,7 +383,9 @@ class WorkflowExecutionProcessor:
         await self._save_and_sync(aggregate)
 
     async def _handle_run_agent(
-        self, todo: TodoItem, phase: ExecutablePhase,
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
     ) -> None:
         """Dispatch RUN_AGENT."""
@@ -279,15 +395,20 @@ class WorkflowExecutionProcessor:
         claude_cmd = self._active_cmds[todo.phase_id]
 
         collector = ObservabilityCollector(
-            writer=self._observability_writer, session_id=todo.session_id or "",
-            execution_id=todo.execution_id, phase_id=todo.phase_id,
+            writer=self._observability_writer,
+            session_id=todo.session_id or "",
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
             workspace_id=getattr(workspace, "id", None),
             agent_model=phase.agent_config.model,
         )
         agent_handler = AgentExecutionHandler(controller=self._controller)
         result = await agent_handler.handle(
-            todo=todo, workspace=workspace, agent_env=agent_env,
-            claude_cmd=claude_cmd, session_id=todo.session_id or "",
+            todo=todo,
+            workspace=workspace,
+            agent_env=agent_env,
+            claude_cmd=claude_cmd,
+            session_id=todo.session_id or "",
             agent_model=phase.agent_config.model,
             timeout_seconds=phase.timeout_seconds or phase.agent_config.timeout_seconds,
             collector=collector,
@@ -297,8 +418,10 @@ class WorkflowExecutionProcessor:
         await recorder.store(
             session_id=todo.session_id or "",
             lines=result.stream_result.conversation_lines,
-            execution_id=todo.execution_id, phase_id=todo.phase_id,
-            workflow_id=aggregate.workflow_id or "", model=phase.agent_config.model,
+            execution_id=todo.execution_id,
+            phase_id=todo.phase_id,
+            workflow_id=aggregate.workflow_id or "",
+            model=phase.agent_config.model,
             input_tokens=result.tokens.input_tokens,
             output_tokens=result.tokens.output_tokens,
             started_at=self._phase_started_at.get(todo.phase_id, datetime.now(UTC)),
@@ -319,21 +442,28 @@ class WorkflowExecutionProcessor:
         await self._save_and_sync(aggregate)
 
     async def _handle_collect_artifacts(
-        self, todo: TodoItem, phase: ExecutablePhase,
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,
         aggregate: WorkflowExecutionAggregate,
-        all_artifact_ids: list[str], phase_outputs: dict[str, str],
+        all_artifact_ids: list[str],
+        phase_outputs: dict[str, str],
     ) -> None:
         """Dispatch COLLECT_ARTIFACTS."""
         assert todo.phase_id is not None
         workspace = self._active_workspaces[todo.phase_id]
         artifacts = ArtifactCollector(
-            self._artifact_repo, self._artifact_content_storage, self._artifact_query,
+            self._artifact_repo,
+            self._artifact_content_storage,
+            self._artifact_query,
         )
         collection_handler = ArtifactCollectionHandler(artifact_collector=artifacts)
         result = await collection_handler.handle(
-            todo=todo, workspace=workspace,
+            todo=todo,
+            workspace=workspace,
             workflow_id=aggregate.workflow_id or "",
-            session_id=todo.session_id or "", phase_name=phase.name,
+            session_id=todo.session_id or "",
+            phase_name=phase.name,
             output_artifact_type=phase.output_artifact_type,
         )
         all_artifact_ids.extend(result.artifact_ids)
@@ -344,9 +474,12 @@ class WorkflowExecutionProcessor:
         await self._save_and_sync(aggregate)
 
     async def _handle_complete_phase(
-        self, todo: TodoItem, phase: ExecutablePhase,  # noqa: ARG002
+        self,
+        todo: TodoItem,
+        phase: ExecutablePhase,  # noqa: ARG002
         aggregate: WorkflowExecutionAggregate,
-        phase_results: list[PhaseResult], completed_phase_ids: list[str],
+        phase_results: list[PhaseResult],
+        completed_phase_ids: list[str],
     ) -> None:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
@@ -361,20 +494,27 @@ class WorkflowExecutionProcessor:
             warnings.append("no_artifacts")
 
         result = PhaseResultBuilder.success(
-            phase_id=todo.phase_id, started_at=started_at,
-            session_id=todo.session_id or "", artifact_ids=artifact_ids,
-            tokens=tokens, warnings=warnings,
+            phase_id=todo.phase_id,
+            started_at=started_at,
+            session_id=todo.session_id or "",
+            artifact_ids=artifact_ids,
+            tokens=tokens,
+            warnings=warnings,
         )
         phase_results.append(result)
         completed_phase_ids.append(todo.phase_id)
         duration = (datetime.now(UTC) - started_at).total_seconds()
 
         complete_cmd = CompletePhaseCommand(
-            execution_id=todo.execution_id, workflow_id=aggregate.workflow_id or "",
-            phase_id=todo.phase_id, session_id=todo.session_id,
+            execution_id=todo.execution_id,
+            workflow_id=aggregate.workflow_id or "",
+            phase_id=todo.phase_id,
+            session_id=todo.session_id,
             artifact_id=artifact_ids[0] if artifact_ids else None,
-            input_tokens=tokens.input_tokens, output_tokens=tokens.output_tokens,
-            total_tokens=tokens.total_tokens, cost_usd=tokens.estimate_cost(),
+            input_tokens=tokens.input_tokens,
+            output_tokens=tokens.output_tokens,
+            total_tokens=tokens.total_tokens,
+            cost_usd=tokens.estimate_cost(),
             duration_seconds=duration,
         )
         aggregate._handle_command(complete_cmd)
@@ -383,8 +523,10 @@ class WorkflowExecutionProcessor:
         session_mgr = self._session_managers.pop(todo.phase_id, None)
         if session_mgr is not None:
             await session_mgr.complete_success(
-                input_tokens=tokens.input_tokens, output_tokens=tokens.output_tokens,
-                total_tokens=tokens.total_tokens, duration_seconds=duration,
+                input_tokens=tokens.input_tokens,
+                output_tokens=tokens.output_tokens,
+                total_tokens=tokens.total_tokens,
+                duration_seconds=duration,
                 source="processor",
             )
 
@@ -417,5 +559,6 @@ class WorkflowExecutionProcessor:
     def _event_type_to_handler(event_type: str) -> str:
         """Convert CamelCase event type to on_snake_case handler name."""
         import re
+
         snake = re.sub(r"(?<!^)(?=[A-Z])", "_", event_type).lower()
         return f"on_{snake}"

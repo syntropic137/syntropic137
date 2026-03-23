@@ -360,8 +360,10 @@ class TestDetectExitCode:
         )
 
         stream_result = StreamResult(
-            line_count=5, interrupt_requested=True,
-            interrupt_reason="cancel", agent_task_result=None,
+            line_count=5,
+            interrupt_requested=True,
+            interrupt_reason="cancel",
+            agent_task_result=None,
         )
         workspace = MagicMock()
         assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 1
@@ -375,8 +377,10 @@ class TestDetectExitCode:
         )
 
         stream_result = StreamResult(
-            line_count=5, interrupt_requested=False,
-            interrupt_reason=None, agent_task_result=None,
+            line_count=5,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = 42
@@ -391,8 +395,10 @@ class TestDetectExitCode:
         )
 
         stream_result = StreamResult(
-            line_count=10, interrupt_requested=False,
-            interrupt_reason=None, agent_task_result=None,
+            line_count=10,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
         )
         workspace = MagicMock()
         workspace.last_stream_exit_code = 0

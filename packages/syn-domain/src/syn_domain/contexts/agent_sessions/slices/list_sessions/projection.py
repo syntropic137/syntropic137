@@ -43,8 +43,12 @@ def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
     op_tokens = event_data.get("total_tokens", 0) or event_data.get("tokens_used", 0)
     if op_tokens:
         existing["total_tokens"] = existing.get("total_tokens", 0) + op_tokens
-        existing["input_tokens"] = existing.get("input_tokens", 0) + (event_data.get("input_tokens", 0) or 0)
-        existing["output_tokens"] = existing.get("output_tokens", 0) + (event_data.get("output_tokens", 0) or 0)
+        existing["input_tokens"] = existing.get("input_tokens", 0) + (
+            event_data.get("input_tokens", 0) or 0
+        )
+        existing["output_tokens"] = existing.get("output_tokens", 0) + (
+            event_data.get("output_tokens", 0) or 0
+        )
 
     existing["total_cost_usd"] = float(
         Decimal(str(existing.get("total_cost_usd", 0)))
@@ -53,10 +57,21 @@ def _accumulate_tokens(existing: dict[str, Any], event_data: dict) -> None:
 
 
 _OPERATION_FIELDS = [
-    "operation_id", "operation_type", "timestamp", "duration_seconds", "success",
-    "input_tokens", "output_tokens", "total_tokens",
-    "tool_name", "tool_use_id", "tool_input", "tool_output",
-    "message_role", "message_content", "thinking_content",
+    "operation_id",
+    "operation_type",
+    "timestamp",
+    "duration_seconds",
+    "success",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "tool_name",
+    "tool_use_id",
+    "tool_input",
+    "tool_output",
+    "message_role",
+    "message_content",
+    "thinking_content",
 ]
 
 _OPERATION_DEFAULTS: dict[str, Any] = {"operation_id": "", "operation_type": "", "success": True}
@@ -65,8 +80,7 @@ _OPERATION_DEFAULTS: dict[str, Any] = {"operation_id": "", "operation_type": "",
 def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
     """Append an operation record to the session's operations list."""
     operation = {
-        field: event_data.get(field, _OPERATION_DEFAULTS.get(field))
-        for field in _OPERATION_FIELDS
+        field: event_data.get(field, _OPERATION_DEFAULTS.get(field)) for field in _OPERATION_FIELDS
     }
     operations = existing.get("operations", [])
     operations.append(operation)
@@ -74,7 +88,8 @@ def _append_operation(existing: dict[str, Any], event_data: dict) -> None:
 
 
 def _update_subagent_record(
-    subagents: list[dict[str, Any]], event_data: dict,
+    subagents: list[dict[str, Any]],
+    event_data: dict,
 ) -> None:
     """Find and update the matching subagent record with completion data."""
     subagent_tool_use_id = event_data.get("subagent_tool_use_id", "")

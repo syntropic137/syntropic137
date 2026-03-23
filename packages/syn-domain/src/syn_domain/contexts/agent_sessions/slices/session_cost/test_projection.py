@@ -7,7 +7,10 @@ from typing import Any
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
-from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection, _parse_timestamp
+from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
+    SessionCostProjection,
+    _parse_timestamp,
+)
 
 
 class MockProjectionStore:

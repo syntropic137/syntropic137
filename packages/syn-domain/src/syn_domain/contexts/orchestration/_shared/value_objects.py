@@ -129,10 +129,12 @@ class ModelPricing:
         input_cost = _token_cost(tokens.input_tokens, self.input_price_per_million)
         output_cost = _token_cost(tokens.output_tokens, self.output_price_per_million)
         cache_creation_cost = _token_cost(
-            tokens.cache_creation_tokens, self.cache_creation_price_per_million,
+            tokens.cache_creation_tokens,
+            self.cache_creation_price_per_million,
         )
         cache_read_cost = _token_cost(
-            tokens.cache_read_tokens, self.cache_read_price_per_million,
+            tokens.cache_read_tokens,
+            self.cache_read_price_per_million,
         )
         return CostAmount(input_cost + output_cost + cache_creation_cost + cache_read_cost)
 

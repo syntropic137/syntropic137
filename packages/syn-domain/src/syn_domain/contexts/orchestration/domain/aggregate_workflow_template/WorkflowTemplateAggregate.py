@@ -25,9 +25,15 @@ if TYPE_CHECKING:
 
 
 _EVENT_FIELDS = [
-    "name", "workflow_type", "classification",
-    "repository_url", "repository_ref", "phases",
-    "project_name", "description", "input_declarations",
+    "name",
+    "workflow_type",
+    "classification",
+    "repository_url",
+    "repository_ref",
+    "phases",
+    "project_name",
+    "description",
+    "input_declarations",
 ]
 
 

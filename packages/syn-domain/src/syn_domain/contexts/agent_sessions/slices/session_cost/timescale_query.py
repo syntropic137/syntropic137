@@ -83,10 +83,14 @@ def _resolve_agent_model(exec_result: Any, token_result: Any) -> str | None:
 
 
 def _resolve_duration(
-    exec_result: Any, token_result: Any, started_at: Any,
+    exec_result: Any,
+    token_result: Any,
+    started_at: Any,
 ) -> tuple[Any, int | None]:
     """Resolve completed_at and duration_ms from available data."""
-    completed_at = exec_result["completed_at"] if exec_result else token_result.get("last_observation")
+    completed_at = (
+        exec_result["completed_at"] if exec_result else token_result.get("last_observation")
+    )
     duration_ms_val = exec_result.get("duration_ms_val") if exec_result else None
 
     if duration_ms_val is not None:
@@ -118,8 +122,12 @@ class TimescaleSessionCostQuery:
         return exec_result, token_result
 
     def _calculate_cost(
-        self, exec_result: Any, input_tokens: int, output_tokens: int,
-        cache_creation: int, cache_read: int,
+        self,
+        exec_result: Any,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation: int,
+        cache_read: int,
     ) -> Decimal:
         """Calculate cost from SDK value or token-based estimation."""
         sdk_cost = exec_result.get("sdk_cost") if exec_result else None
@@ -146,7 +154,9 @@ class TimescaleSessionCostQuery:
                 started_at = token_result.get("started_at")
 
             input_tokens, output_tokens, cache_creation, cache_read = _extract_tokens(token_result)
-            total_cost = self._calculate_cost(exec_result, input_tokens, output_tokens, cache_creation, cache_read)
+            total_cost = self._calculate_cost(
+                exec_result, input_tokens, output_tokens, cache_creation, cache_read
+            )
             completed_at, duration_ms = _resolve_duration(exec_result, token_result, started_at)
 
             session_cost = SessionCost(session_id=session_id)

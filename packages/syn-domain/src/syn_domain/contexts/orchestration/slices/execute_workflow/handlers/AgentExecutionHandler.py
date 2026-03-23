@@ -50,13 +50,16 @@ def _detect_exit_code(
     if stream_exit_code is not None and stream_exit_code != 0:
         logger.error(
             "Agent CLI exited with code %d (phase=%s, lines=%d)",
-            stream_exit_code, phase_id, stream_result.line_count,
+            stream_exit_code,
+            phase_id,
+            stream_result.line_count,
         )
         return stream_exit_code
     if tokens.input_tokens == 0 and tokens.output_tokens == 0:
         logger.warning(
             "Agent produced 0 tokens (phase=%s, lines=%d) — CLI may have failed to start",
-            phase_id, stream_result.line_count,
+            phase_id,
+            stream_result.line_count,
         )
     return 0
 

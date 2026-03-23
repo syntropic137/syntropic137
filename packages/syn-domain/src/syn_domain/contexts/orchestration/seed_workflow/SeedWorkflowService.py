@@ -60,18 +60,24 @@ def _build_create_command(definition: WorkflowDefinition) -> CreateWorkflowTempl
     """Build a CreateWorkflowTemplateCommand from a workflow definition."""
     default_url = "https://github.com/placeholder/not-configured"
     return CreateWorkflowTemplateCommand(
-        aggregate_id=definition.id, name=definition.name,
-        workflow_type=definition.type, classification=definition.classification,
+        aggregate_id=definition.id,
+        name=definition.name,
+        workflow_type=definition.type,
+        classification=definition.classification,
         repository_url=(definition.repository.url if definition.repository else default_url),
         repository_ref=(definition.repository.ref if definition.repository else "main"),
-        phases=definition.get_domain_phases(), project_name=definition.project_name,
+        phases=definition.get_domain_phases(),
+        project_name=definition.project_name,
         description=definition.description,
         input_declarations=definition.get_domain_input_declarations(),
     )
 
 
 def _handle_seed_error(
-    error: Exception, workflow_id: str, name: str, existing_ids: set[str],
+    error: Exception,
+    workflow_id: str,
+    name: str,
+    existing_ids: set[str],
 ) -> SeedResult:
     """Handle seeding error, distinguishing duplicates from real failures."""
     error_str = str(error)
@@ -80,8 +86,10 @@ def _handle_seed_error(
         existing_ids.add(workflow_id)
         logger.info("Workflow already exists, skipping", workflow_id=workflow_id, name=name)
         return SeedResult(
-            workflow_id=workflow_id, name=name,
-            success=False, error=f"Workflow {workflow_id} already exists",
+            workflow_id=workflow_id,
+            name=name,
+            success=False,
+            error=f"Workflow {workflow_id} already exists",
         )
     logger.error("Failed to seed workflow", workflow_id=workflow_id, error=error_str)
     return SeedResult(workflow_id=workflow_id, name=name, success=False, error=error_str)
@@ -171,7 +179,10 @@ class WorkflowSeeder:
         return await self._seed_workflow(definition, dry_run=dry_run)
 
     async def _seed_workflow(
-        self, definition: WorkflowDefinition, *, dry_run: bool = False,
+        self,
+        definition: WorkflowDefinition,
+        *,
+        dry_run: bool = False,
     ) -> SeedResult:
         """Seed a single workflow from a definition."""
         workflow_id = definition.id
@@ -179,14 +190,18 @@ class WorkflowSeeder:
         if self._skip_existing and workflow_id in self._existing_ids:
             logger.debug("Skipping existing workflow", workflow_id=workflow_id)
             return SeedResult(
-                workflow_id=workflow_id, name=definition.name,
-                success=False, error=f"Workflow {workflow_id} already exists",
+                workflow_id=workflow_id,
+                name=definition.name,
+                success=False,
+                error=f"Workflow {workflow_id} already exists",
             )
 
         if dry_run:
             logger.info(
-                "Dry-run: would create workflow", workflow_id=workflow_id,
-                name=definition.name, phases=len(definition.phases),
+                "Dry-run: would create workflow",
+                workflow_id=workflow_id,
+                name=definition.name,
+                phases=len(definition.phases),
             )
             return SeedResult(workflow_id=workflow_id, name=definition.name, success=True)
 
@@ -194,7 +209,9 @@ class WorkflowSeeder:
         try:
             created_id = await self._handler.handle(command)
             self._existing_ids.add(workflow_id)
-            logger.info("Workflow seeded successfully", workflow_id=created_id, name=definition.name)
+            logger.info(
+                "Workflow seeded successfully", workflow_id=created_id, name=definition.name
+            )
             return SeedResult(workflow_id=created_id, name=definition.name, success=True)
         except Exception as e:
             return _handle_seed_error(e, workflow_id, definition.name, self._existing_ids)

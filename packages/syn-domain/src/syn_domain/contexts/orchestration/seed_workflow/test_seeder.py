@@ -224,7 +224,10 @@ class TestBuildCreateCommand:
         )
 
         definition = WorkflowDefinition(
-            id="wf-1", name="Test", type="research", classification="simple",
+            id="wf-1",
+            name="Test",
+            type="research",
+            classification="simple",
             repository={"url": "https://github.com/test/repo", "ref": "main"},
             phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
         )
@@ -239,7 +242,8 @@ class TestBuildCreateCommand:
         )
 
         definition = WorkflowDefinition(
-            id="wf-2", name="No Repo",
+            id="wf-2",
+            name="No Repo",
             phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
         )
         cmd = _build_create_command(definition)
@@ -254,7 +258,9 @@ class TestHandleSeedError:
         existing: set[str] = set()
         result = _handle_seed_error(
             Exception("Precondition failed: stream exists"),
-            "wf-1", "Test", existing,
+            "wf-1",
+            "Test",
+            existing,
         )
         assert result.success is False
         assert "already exists" in (result.error or "")
@@ -263,7 +269,10 @@ class TestHandleSeedError:
     def test_real_error_returns_failure(self) -> None:
         existing: set[str] = set()
         result = _handle_seed_error(
-            RuntimeError("connection refused"), "wf-1", "Test", existing,
+            RuntimeError("connection refused"),
+            "wf-1",
+            "Test",
+            existing,
         )
         assert result.success is False
         assert "connection refused" in (result.error or "")

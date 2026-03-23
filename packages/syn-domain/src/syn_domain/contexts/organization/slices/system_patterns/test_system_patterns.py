@@ -194,7 +194,11 @@ class TestAccumulateFailure:
         groups: dict = {}
         _accumulate_failure(
             groups,
-            {"error_type": "timeout", "error_message": "Timed out", "completed_at": "2026-01-01T00:00:00"},
+            {
+                "error_type": "timeout",
+                "error_message": "Timed out",
+                "completed_at": "2026-01-01T00:00:00",
+            },
             "acme/api",
         )
         assert len(groups) == 1
@@ -204,7 +208,11 @@ class TestAccumulateFailure:
 
     def test_duplicate_increments_count(self) -> None:
         groups: dict = {}
-        execution = {"error_type": "timeout", "error_message": "Timed out", "completed_at": "2026-01-01"}
+        execution = {
+            "error_type": "timeout",
+            "error_message": "Timed out",
+            "completed_at": "2026-01-01",
+        }
         _accumulate_failure(groups, execution, "acme/api")
         _accumulate_failure(groups, execution, "acme/worker")
         key = ("timeout", "Timed out")
@@ -256,16 +264,44 @@ class TestGroupsToPatterns:
 
     def test_sorted_by_count_descending(self) -> None:
         groups = {
-            ("e1", "m1"): {"error_type": "e1", "error_message": "m1", "count": 5, "repos": set(), "first_seen": "", "last_seen": ""},
-            ("e2", "m2"): {"error_type": "e2", "error_message": "m2", "count": 10, "repos": set(), "first_seen": "", "last_seen": ""},
-            ("e3", "m3"): {"error_type": "e3", "error_message": "m3", "count": 1, "repos": set(), "first_seen": "", "last_seen": ""},
+            ("e1", "m1"): {
+                "error_type": "e1",
+                "error_message": "m1",
+                "count": 5,
+                "repos": set(),
+                "first_seen": "",
+                "last_seen": "",
+            },
+            ("e2", "m2"): {
+                "error_type": "e2",
+                "error_message": "m2",
+                "count": 10,
+                "repos": set(),
+                "first_seen": "",
+                "last_seen": "",
+            },
+            ("e3", "m3"): {
+                "error_type": "e3",
+                "error_message": "m3",
+                "count": 1,
+                "repos": set(),
+                "first_seen": "",
+                "last_seen": "",
+            },
         }
         result = _groups_to_patterns(groups)
         assert [p.occurrence_count for p in result] == [10, 5, 1]
 
     def test_repos_alphabetically_sorted(self) -> None:
         groups = {
-            ("e", "m"): {"error_type": "e", "error_message": "m", "count": 1, "repos": {"z-repo", "a-repo", "m-repo"}, "first_seen": "", "last_seen": ""},
+            ("e", "m"): {
+                "error_type": "e",
+                "error_message": "m",
+                "count": 1,
+                "repos": {"z-repo", "a-repo", "m-repo"},
+                "first_seen": "",
+                "last_seen": "",
+            },
         }
         result = _groups_to_patterns(groups)
         assert result[0].affected_repos == ["a-repo", "m-repo", "z-repo"]
@@ -273,9 +309,12 @@ class TestGroupsToPatterns:
     def test_all_fields_mapped(self) -> None:
         groups = {
             ("timeout", "Timed out"): {
-                "error_type": "timeout", "error_message": "Timed out",
-                "count": 3, "repos": {"acme/api"},
-                "first_seen": "2026-01-01", "last_seen": "2026-01-10",
+                "error_type": "timeout",
+                "error_message": "Timed out",
+                "count": 3,
+                "repos": {"acme/api"},
+                "first_seen": "2026-01-01",
+                "last_seen": "2026-01-10",
             },
         }
         result = _groups_to_patterns(groups)

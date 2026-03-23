@@ -85,7 +85,9 @@ if TYPE_CHECKING:
 
 
 def _build_command_event(
-    workspace_id: str, command: list[str], result: ExecutionResult,
+    workspace_id: str,
+    command: list[str],
+    result: ExecutionResult,
 ) -> Any:
     """Build a CommandExecutedEvent or CommandFailedEvent from execution result."""
     from syn_domain.contexts.orchestration.domain.events.CommandExecutedEvent import (
@@ -386,9 +388,7 @@ class WorkspaceAggregate(AggregateRoot["WorkspaceCreatedEvent"]):
             msg = "Execution result is required (provided by application layer)"
             raise ValueError(msg)
 
-        self._apply(
-            _build_command_event(str(self._workspace_id), command.command, command.result)
-        )
+        self._apply(_build_command_event(str(self._workspace_id), command.command, command.result))
 
     @command_handler("TerminateWorkspaceCommand")
     def terminate_workspace(self, command: TerminateWorkspaceCommand) -> None:

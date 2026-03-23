@@ -102,7 +102,9 @@ class GetGlobalOverviewHandler:
         all_repos = await self._repo_projection.list_all()
         unassigned = await self._repo_projection.list_all(unassigned=True)
 
-        cost_by_repo = _build_index(await self._store.get_all(REPO_COST), "repo_full_name", RepoCost)
+        cost_by_repo = _build_index(
+            await self._store.get_all(REPO_COST), "repo_full_name", RepoCost
+        )
         health_by_repo = _build_index(
             await self._store.get_all(REPO_HEALTH), "repo_full_name", RepoHealth
         )
@@ -112,7 +114,9 @@ class GetGlobalOverviewHandler:
             repos_by_system.setdefault(repo.system_id or "", []).append(repo)
 
         entries = [
-            _compute_system_entry(system, repos_by_system.get(system.system_id, []), cost_by_repo, health_by_repo)  # type: ignore[arg-type]
+            _compute_system_entry(
+                system, repos_by_system.get(system.system_id, []), cost_by_repo, health_by_repo
+            )  # type: ignore[arg-type]
             for system in systems
         ]
 

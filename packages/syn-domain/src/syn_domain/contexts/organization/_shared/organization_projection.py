@@ -64,23 +64,33 @@ class OrganizationProjection:
     async def handle_organization_created(
         self, event: OrganizationCreatedEvent
     ) -> OrganizationSummary:
-        await self.on_organization_created({
-            "organization_id": event.organization_id,
-            "name": event.name,
-            "slug": event.slug,
-            "created_by": event.created_by,
-        })
+        await self.on_organization_created(
+            {
+                "organization_id": event.organization_id,
+                "name": event.name,
+                "slug": event.slug,
+                "created_by": event.created_by,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.organization_id)
-        return _org_from_dict(data) if data else OrganizationSummary(organization_id=event.organization_id, name=event.name, slug=event.slug)
+        return (
+            _org_from_dict(data)
+            if data
+            else OrganizationSummary(
+                organization_id=event.organization_id, name=event.name, slug=event.slug
+            )
+        )
 
     async def handle_organization_updated(
         self, event: OrganizationUpdatedEvent
     ) -> OrganizationSummary | None:
-        await self.on_organization_updated({
-            "organization_id": event.organization_id,
-            "name": event.name,
-            "slug": event.slug,
-        })
+        await self.on_organization_updated(
+            {
+                "organization_id": event.organization_id,
+                "name": event.name,
+                "slug": event.slug,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.organization_id)
         return _org_from_dict(data) if data else None
 

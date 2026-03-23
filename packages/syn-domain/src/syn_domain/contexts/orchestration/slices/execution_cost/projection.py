@@ -27,7 +27,9 @@ _CACHE_READ_PER_MILLION = Decimal("0.30")
 
 def _get_or_create(existing: dict[str, Any] | None, execution_id: str) -> ExecutionCost:
     """Load execution cost from existing dict or create a new one."""
-    return ExecutionCost.from_dict(existing) if existing else ExecutionCost(execution_id=execution_id)
+    return (
+        ExecutionCost.from_dict(existing) if existing else ExecutionCost(execution_id=execution_id)
+    )
 
 
 def _track_session(execution_cost: ExecutionCost, session_id: str | None) -> None:
@@ -48,7 +50,10 @@ def _update_started_at(execution_cost: ExecutionCost, ts: str | datetime | None)
 
 
 def _calculate_token_cost(
-    input_tokens: int, output_tokens: int, cache_creation: int, cache_read: int,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation: int,
+    cache_read: int,
 ) -> Decimal:
     """Calculate token cost from counts using default pricing."""
     return (
@@ -60,7 +65,9 @@ def _calculate_token_cost(
 
 
 def _apply_token_usage(
-    execution_cost: ExecutionCost, data: dict[str, Any], event_data: dict[str, Any],
+    execution_cost: ExecutionCost,
+    data: dict[str, Any],
+    event_data: dict[str, Any],
 ) -> None:
     """Apply TOKEN_USAGE observation to execution cost."""
     input_tokens = data.get("input_tokens") or 0

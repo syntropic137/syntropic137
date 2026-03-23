@@ -69,28 +69,40 @@ class RepoProjection:
         self._store = store
 
     async def handle_repo_registered(self, event: RepoRegisteredEvent) -> RepoSummary:
-        await self.on_repo_registered({
-            "repo_id": event.repo_id,
-            "organization_id": event.organization_id,
-            "provider": event.provider,
-            "provider_repo_id": event.provider_repo_id,
-            "full_name": event.full_name,
-            "owner": event.owner,
-            "default_branch": event.default_branch,
-            "installation_id": event.installation_id,
-            "is_private": event.is_private,
-            "created_by": event.created_by,
-        })
+        await self.on_repo_registered(
+            {
+                "repo_id": event.repo_id,
+                "organization_id": event.organization_id,
+                "provider": event.provider,
+                "provider_repo_id": event.provider_repo_id,
+                "full_name": event.full_name,
+                "owner": event.owner,
+                "default_branch": event.default_branch,
+                "installation_id": event.installation_id,
+                "is_private": event.is_private,
+                "created_by": event.created_by,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.repo_id)
-        return _repo_from_dict(data) if data else RepoSummary(repo_id=event.repo_id, organization_id=event.organization_id, full_name=event.full_name)
+        return (
+            _repo_from_dict(data)
+            if data
+            else RepoSummary(
+                repo_id=event.repo_id,
+                organization_id=event.organization_id,
+                full_name=event.full_name,
+            )
+        )
 
     async def handle_repo_assigned_to_system(
         self, event: RepoAssignedToSystemEvent
     ) -> RepoSummary | None:
-        await self.on_repo_assigned_to_system({
-            "repo_id": event.repo_id,
-            "system_id": event.system_id,
-        })
+        await self.on_repo_assigned_to_system(
+            {
+                "repo_id": event.repo_id,
+                "system_id": event.system_id,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.repo_id)
         return _repo_from_dict(data) if data else None
 

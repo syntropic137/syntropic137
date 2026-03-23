@@ -61,22 +61,32 @@ class SystemProjection:
         self._store = store
 
     async def handle_system_created(self, event: SystemCreatedEvent) -> SystemSummary:
-        await self.on_system_created({
-            "system_id": event.system_id,
-            "organization_id": event.organization_id,
-            "name": event.name,
-            "description": event.description,
-            "created_by": event.created_by,
-        })
+        await self.on_system_created(
+            {
+                "system_id": event.system_id,
+                "organization_id": event.organization_id,
+                "name": event.name,
+                "description": event.description,
+                "created_by": event.created_by,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.system_id)
-        return _sys_from_dict(data) if data else SystemSummary(system_id=event.system_id, organization_id=event.organization_id, name=event.name)
+        return (
+            _sys_from_dict(data)
+            if data
+            else SystemSummary(
+                system_id=event.system_id, organization_id=event.organization_id, name=event.name
+            )
+        )
 
     async def handle_system_updated(self, event: SystemUpdatedEvent) -> SystemSummary | None:
-        await self.on_system_updated({
-            "system_id": event.system_id,
-            "name": event.name,
-            "description": event.description,
-        })
+        await self.on_system_updated(
+            {
+                "system_id": event.system_id,
+                "name": event.name,
+                "description": event.description,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.system_id)
         return _sys_from_dict(data) if data else None
 

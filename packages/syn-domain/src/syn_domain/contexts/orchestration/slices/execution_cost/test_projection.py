@@ -280,6 +280,7 @@ class TestExtractedHelpers:
         cost = _calculate_token_cost(1_000_000, 1_000_000, 0, 0)
         # 1M input @ $3 + 1M output @ $15 = $18
         from decimal import Decimal
+
         assert cost == Decimal("18.00")
 
     def test_update_completed_at_sets_latest(self) -> None:
