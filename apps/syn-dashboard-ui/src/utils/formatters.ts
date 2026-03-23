@@ -50,3 +50,12 @@ export function formatTokens(count: number): string {
   }
   return String(count)
 }
+
+// Re-export date/time formatters for backwards compatibility
+export {
+  formatTime,
+  formatDate,
+  formatTimestamp,
+  formatDurationSeconds,
+  formatDurationFromRange,
+} from './dateFormatters'

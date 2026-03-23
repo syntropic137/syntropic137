@@ -1,0 +1,67 @@
+import { Activity, Container, FileText } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { StatusBadge } from '../../components'
+import type { SessionResponse } from '../../types'
+import { PROVIDER_ENVIRONMENTS } from './sessionConstants'
+
+function WorkspaceEnvironmentBadge({ provider }: { provider: string | null }) {
+  if (!provider) return null
+  const env = PROVIDER_ENVIRONMENTS[provider.toLowerCase()]
+  const label = env ? `${env.backend}:${env.image}` : provider
+  return (
+    <span className="flex items-center gap-1.5">
+      <Container className="h-3.5 w-3.5" />
+      <code className="font-mono">{label}</code>
+    </span>
+  )
+}
+
+export function SessionHeader({
+  session,
+  onViewConversationLog,
+}: {
+  session: SessionResponse
+  onViewConversationLog: () => void
+}) {
+  return (
+    <div>
+      <div className="flex items-start justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 to-teal-500/20">
+            <Activity className="h-6 w-6 text-emerald-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="font-mono text-xl font-bold text-[var(--color-text-primary)]">
+                {session.id.slice(0, 16)}...
+              </h1>
+              <StatusBadge status={session.status} size="lg" pulse />
+            </div>
+            <div className="mt-2 flex items-center gap-4 text-sm text-[var(--color-text-secondary)]">
+              {session.workflow_id && (
+                <Link
+                  to={`/workflows/${session.workflow_id}`}
+                  className="hover:text-[var(--color-accent)]"
+                >
+                  Workflow: {session.workflow_id.slice(0, 8)}...
+                </Link>
+              )}
+              {session.phase_id && <span>Phase: {session.phase_id}</span>}
+            </div>
+            <div className="mt-1 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+              <WorkspaceEnvironmentBadge provider={session.agent_provider} />
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={onViewConversationLog}
+          className="flex items-center gap-2 rounded-lg bg-[var(--color-surface-elevated)] px-4 py-2 text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-accent)] hover:text-white transition-colors"
+        >
+          <FileText className="h-4 w-4" />
+          View Conversation Log
+        </button>
+      </div>
+    </div>
+  )
+}
