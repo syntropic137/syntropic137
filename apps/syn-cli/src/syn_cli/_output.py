@@ -97,3 +97,9 @@ def status_style(status: str) -> str:
         "running": "blue",
         "pending": "dim",
     }.get(status, "")
+
+
+def format_status(status: str) -> str:
+    """Return a status string with Rich markup applied."""
+    style = status_style(status)
+    return f"[{style}]{status}[/{style}]" if style else status

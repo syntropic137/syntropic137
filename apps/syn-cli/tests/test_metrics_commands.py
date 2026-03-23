@@ -52,7 +52,7 @@ class TestMetrics:
             "phases": [],
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.metrics.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["metrics", "show"])
         assert result.exit_code == 0
         assert "$5.00" in result.stdout
@@ -79,13 +79,13 @@ class TestMetrics:
             ],
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.metrics.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["metrics", "show"])
         assert result.exit_code == 0
         assert "research" in result.stdout
 
     def test_metrics_connection_error(self) -> None:
-        with patch("syn_cli.commands.metrics.get_client", side_effect=Exception("conn")):
+        with patch("syn_cli.commands._api_helpers.get_client", side_effect=Exception("conn")):
             result = runner.invoke(app, ["metrics", "show"])
         assert result.exit_code == 1
         assert "Could not connect" in result.stdout

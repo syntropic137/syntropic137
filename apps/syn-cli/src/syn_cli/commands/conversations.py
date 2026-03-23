@@ -7,22 +7,14 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
-from syn_cli._output import console, format_timestamp, print_error
-from syn_cli.client import get_client
+from syn_cli._output import console, format_timestamp
+from syn_cli.commands._api_helpers import api_get
 
 app = typer.Typer(
     name="conversations",
     help="Inspect agent conversation logs",
     no_args_is_help=True,
 )
-
-
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
 
 
 @app.command("show")
@@ -32,24 +24,11 @@ def show(
     limit: Annotated[int, typer.Option(help="Max lines to show (max 500)")] = 100,
 ) -> None:
     """Show parsed conversation log lines for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(
-                f"/conversations/{session_id}",
-                params={"offset": offset, "limit": limit},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(
+        f"/conversations/{session_id}",
+        params={"offset": offset, "limit": limit},
+    )
 
-    if resp.status_code == 404:
-        print_error(f"Conversation not found: {session_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     lines = data.get("lines", [])
     total = data.get("total_lines", 0)
 
@@ -83,45 +62,46 @@ def show(
         console.print(f"[dim]More lines available. Use --offset {next_offset}.[/dim]")
 
 
+def _format_field(value: object, fmt: str) -> str:
+    """Format a metadata field value by format type."""
+    if fmt == "ts":
+        return format_timestamp(str(value))
+    if fmt == "bytes":
+        return f"{value:,} bytes"
+    if fmt == ":,":
+        return f"{value:,}"
+    return str(value)
+
+
+_METADATA_FIELDS: list[tuple[str, str, str]] = [
+    ("model", "Model", ""),
+    ("event_count", "Events", ":,"),
+    ("total_input_tokens", "Input tokens", ":,"),
+    ("total_output_tokens", "Output tokens", ":,"),
+    ("started_at", "Started", "ts"),
+    ("completed_at", "Completed", "ts"),
+    ("size_bytes", "Log size", "bytes"),
+]
+
+
 @app.command("metadata")
 def metadata(
     session_id: Annotated[str, typer.Argument(help="Session ID")],
 ) -> None:
     """Show metadata summary for a session's conversation."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/conversations/{session_id}/metadata")
-    except Exception:
-        _handle_connect_error()
-        return
+    m = api_get(f"/conversations/{session_id}/metadata")
 
-    if resp.status_code == 404:
-        print_error(f"Conversation not found: {session_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    m = resp.json()
     if m is None:
         console.print("[dim]No metadata recorded for this session.[/dim]")
         return
 
     console.print(f"[bold]Metadata:[/bold] {m.get('session_id', session_id)}")
-    if m.get("model"):
-        console.print(f"  Model:         {m['model']}")
-    if m.get("event_count") is not None:
-        console.print(f"  Events:        {m['event_count']:,}")
-    if m.get("total_input_tokens") is not None:
-        console.print(f"  Input tokens:  {m['total_input_tokens']:,}")
-    if m.get("total_output_tokens") is not None:
-        console.print(f"  Output tokens: {m['total_output_tokens']:,}")
-    if m.get("started_at"):
-        console.print(f"  Started:       {format_timestamp(m['started_at'])}")
-    if m.get("completed_at"):
-        console.print(f"  Completed:     {format_timestamp(m['completed_at'])}")
-    if m.get("size_bytes") is not None:
-        console.print(f"  Log size:      {m['size_bytes']:,} bytes")
+    for key, label, fmt in _METADATA_FIELDS:
+        value = m.get(key)
+        if value is None:
+            continue
+        console.print(f"  {label + ':':17s}{_format_field(value, fmt)}")
+
     if m.get("tool_counts"):
         console.print("  Tool counts:")
         for tool, count in sorted(m["tool_counts"].items(), key=lambda x: -x[1]):

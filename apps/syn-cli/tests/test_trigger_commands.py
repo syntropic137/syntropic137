@@ -61,7 +61,7 @@ class TestTriggerHelp:
 class TestTriggerList:
     def test_list_empty(self) -> None:
         client = _mock_client(_mock_response(200, {"triggers": []}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "list"])
         assert result.exit_code == 0
         assert "No triggers found" in result.stdout
@@ -78,7 +78,7 @@ class TestTriggerList:
             }
         ]
         client = _mock_client(_mock_response(200, {"triggers": triggers}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "list"])
         assert result.exit_code == 0
         assert "Self-Healing CI" in result.stdout
@@ -89,7 +89,7 @@ class TestTriggerList:
 class TestTriggerRegister:
     def test_register_success(self) -> None:
         client = _mock_client(_mock_response(200, {"trigger_id": "tr-new-001"}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(
                 app,
                 [
@@ -135,14 +135,14 @@ class TestTriggerRegister:
 class TestTriggerPauseResume:
     def test_pause_success(self) -> None:
         client = _mock_client(_mock_response(200, {}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "pause", "tr-001"])
         assert result.exit_code == 0
         assert "paused" in result.stdout.lower()
 
     def test_resume_success(self) -> None:
         client = _mock_client(_mock_response(200, {}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "resume", "tr-001"])
         assert result.exit_code == 0
         assert "resumed" in result.stdout.lower()
@@ -152,7 +152,7 @@ class TestTriggerPauseResume:
 class TestTriggerDelete:
     def test_delete_success(self) -> None:
         client = _mock_client(_mock_response(200, {}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "delete", "tr-001"])
         assert result.exit_code == 0
         assert "deleted" in result.stdout.lower()
@@ -162,14 +162,14 @@ class TestTriggerDelete:
 class TestTriggerDisable:
     def test_disable_none(self) -> None:
         client = _mock_client(_mock_response(200, {"count": 0}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "disable", "--repository", "o/r"])
         assert result.exit_code == 0
         assert "No active triggers" in result.stdout
 
     def test_disable_some(self) -> None:
         client = _mock_client(_mock_response(200, {"count": 3}))
-        with patch("syn_cli.commands.triggers.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["triggers", "disable", "--repository", "o/r"])
         assert result.exit_code == 0
         assert "3" in result.stdout

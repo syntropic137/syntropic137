@@ -41,18 +41,6 @@ issue = "#197"
 value = 30
 issue = "#197"
 
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.control::status"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.workflow::_parse_inputs"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.workflow::run_workflow"]
-value = 45
-issue = "#197"
-
 [max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.git.install::main"]
 value = 50
 issue = "#197"
@@ -381,18 +369,6 @@ issue = "#197"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.v1.workflows"]
 value = 145
-issue = "#197"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.control"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.triggers"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.workflow"]
-value = 135
 issue = "#197"
 
 [max-cognitive-file."packages.syn-adapters.src.syn_adapters.agents.claude"]
@@ -951,52 +927,12 @@ issue = "#274"
 value = 30
 issue = "#274"
 
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch::_render_event"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch::watch_execution"]
-value = 45
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch::watch_activity"]
-value = 35
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.execution::show_execution"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.insights::heatmap"]
-value = 50
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.sessions::list_sessions"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.sessions::show_session"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.conversations::metadata"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.artifacts::list_artifacts"]
-value = 30
-issue = "#274"
-
 [max-cognitive."python:apps.syn-api.src.syn_api.v1.workflows::get_workflow"]
 value = 50
 issue = "#274"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler"]
 value = 60
-issue = "#274"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.repo"]
-value = 145
 issue = "#274"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.projection"]
@@ -1009,14 +945,6 @@ issue = "#274"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.repos"]
 value = 70
-issue = "#274"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.system"]
-value = 145
-issue = "#274"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.events"]
-value = 75
 issue = "#274"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler"]
@@ -1035,14 +963,6 @@ issue = "#274"
 value = 160
 issue = "#274"
 
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.sessions"]
-value = 55
-issue = "#274"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.costs"]
-value = 80
-issue = "#274"
-
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_todo.projection"]
 value = 120
 issue = "#274"
@@ -1051,16 +971,8 @@ issue = "#274"
 value = 75
 issue = "#274"
 
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.artifacts"]
-value = 70
-issue = "#274"
-
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler"]
 value = 145
-issue = "#274"
-
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.watch"]
-value = 120
 issue = "#274"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.sse"]
@@ -1091,19 +1003,11 @@ issue = "#274"
 value = 270
 issue = "#274"
 
-[max-cognitive-file."apps.syn-cli.src.syn_cli.commands.insights"]
-value = 85
-issue = "#274"
-
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.models::_load_models"]
 value = 20
 issue = "#274"
 
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler::handle"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."python:apps.syn-cli.src.syn_cli.commands.insights::heatmap"]
 value = 20
 issue = "#274"
 

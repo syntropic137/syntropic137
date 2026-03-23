@@ -55,7 +55,7 @@ class TestConfigShow:
             "storage": {"type": "memory"},
         }
         client = _mock_client(_mock_response(200, snapshot))
-        with patch("syn_cli.commands.config.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["config", "show"])
         assert result.exit_code == 0
         assert "Application" in result.stdout
@@ -68,7 +68,7 @@ class TestConfigShow:
 class TestConfigValidate:
     def test_validate_no_issues(self) -> None:
         client = _mock_client(_mock_response(200, {"issues": []}))
-        with patch("syn_cli.commands.config.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["config", "validate"])
         assert result.exit_code == 0
         assert "No issues found" in result.stdout
@@ -78,7 +78,7 @@ class TestConfigValidate:
             {"level": "warning", "category": "agents", "message": "No API key set"},
         ]
         client = _mock_client(_mock_response(200, {"issues": issues}))
-        with patch("syn_cli.commands.config.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["config", "validate"])
         assert result.exit_code == 0
         assert "No API key" in result.stdout
@@ -88,7 +88,7 @@ class TestConfigValidate:
             {"level": "error", "category": "database", "message": "DB unreachable"},
         ]
         client = _mock_client(_mock_response(200, {"issues": issues}))
-        with patch("syn_cli.commands.config.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["config", "validate"])
         assert result.exit_code == 1
         assert "DB unreachable" in result.stdout
@@ -102,7 +102,7 @@ class TestConfigEnv:
                 200, {"template": "APP_ENVIRONMENT=development\nDATABASE_URL=sqlite:///:memory:"}
             )
         )
-        with patch("syn_cli.commands.config.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["config", "env"])
         assert result.exit_code == 0
         assert "APP_ENVIRONMENT" in result.stdout
