@@ -31,6 +31,54 @@ from syn_domain.contexts.organization.slices.list_systems.projection import (
 )
 
 
+def _accumulate_failure(
+    groups: dict[tuple[str, str], dict[str, Any]],
+    execution: dict[str, Any],
+    repo_name: str,
+) -> None:
+    """Accumulate one failed execution into failure groups."""
+    error_type = execution.get("error_type", "") or ""
+    error_message = execution.get("error_message", "") or ""
+    key = (error_type, error_message)
+    timestamp = str(execution.get("completed_at", ""))
+
+    if key not in groups:
+        groups[key] = {
+            "error_type": error_type,
+            "error_message": error_message,
+            "count": 0,
+            "repos": set(),
+            "first_seen": timestamp,
+            "last_seen": timestamp,
+        }
+
+    g = groups[key]
+    g["count"] += 1
+    if repo_name:
+        g["repos"].add(repo_name)
+    if timestamp and (not g["first_seen"] or timestamp < g["first_seen"]):
+        g["first_seen"] = timestamp
+    if timestamp and timestamp > g["last_seen"]:
+        g["last_seen"] = timestamp
+
+
+def _groups_to_patterns(
+    groups: dict[tuple[str, str], dict[str, Any]],
+) -> list[FailurePattern]:
+    """Convert failure groups to sorted FailurePattern list."""
+    return [
+        FailurePattern(
+            error_type=g["error_type"],
+            error_message=g["error_message"],
+            occurrence_count=g["count"],
+            affected_repos=sorted(g["repos"]),
+            first_seen=g["first_seen"],
+            last_seen=g["last_seen"],
+        )
+        for g in sorted(groups.values(), key=lambda x: x["count"], reverse=True)
+    ]
+
+
 class GetSystemPatternsHandler:
     """Query handler: get recurring failure and cost patterns for a system."""
 
@@ -64,50 +112,14 @@ class GetSystemPatternsHandler:
         all_executions = await self._store.get_all(WORKFLOW_EXECUTIONS)
         execution_ids = set(exec_to_repo.keys())
 
-        # Group by (error_type, error_message)
         groups: dict[tuple[str, str], dict[str, Any]] = {}
-
         for ex in all_executions:
             ex_id = ex.get("workflow_execution_id", "")
             if ex_id not in execution_ids or ex.get("status") != "failed":
                 continue
+            _accumulate_failure(groups, ex, exec_to_repo.get(ex_id, ""))
 
-            error_type = ex.get("error_type", "") or ""
-            error_message = ex.get("error_message", "") or ""
-            key = (error_type, error_message)
-            repo_name = exec_to_repo.get(ex_id, "")
-            timestamp = str(ex.get("completed_at", ""))
-
-            if key not in groups:
-                groups[key] = {
-                    "error_type": error_type,
-                    "error_message": error_message,
-                    "count": 0,
-                    "repos": set(),
-                    "first_seen": timestamp,
-                    "last_seen": timestamp,
-                }
-
-            g = groups[key]
-            g["count"] += 1
-            if repo_name:
-                g["repos"].add(repo_name)
-            if timestamp and (not g["first_seen"] or timestamp < g["first_seen"]):
-                g["first_seen"] = timestamp
-            if timestamp and timestamp > g["last_seen"]:
-                g["last_seen"] = timestamp
-
-        return [
-            FailurePattern(
-                error_type=g["error_type"],
-                error_message=g["error_message"],
-                occurrence_count=g["count"],
-                affected_repos=sorted(g["repos"]),
-                first_seen=g["first_seen"],
-                last_seen=g["last_seen"],
-            )
-            for g in sorted(groups.values(), key=lambda x: x["count"], reverse=True)
-        ]
+        return _groups_to_patterns(groups)
 
     async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:
         """Find repos with cost > 3x median."""

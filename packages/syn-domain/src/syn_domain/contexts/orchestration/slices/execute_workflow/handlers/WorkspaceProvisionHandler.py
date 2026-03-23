@@ -53,6 +53,27 @@ PromptBuilder = Callable[
 CommandBuilder = Callable[[ExecutablePhase, str], list[str]]
 
 
+def _build_agent_env(workspace: Any, session_id: str) -> dict[str, str]:
+    """Build agent environment with proxy-based auth (ISS-43).
+
+    Validates proxy is available (credentials live on the proxy container,
+    not in agent env vars). Routes Anthropic SDK via ANTHROPIC_BASE_URL
+    (not HTTP_PROXY — Node.js CONNECT tunneling breaks Envoy forward proxy).
+    """
+    proxy_url = getattr(workspace, "proxy_url", None)
+    if not proxy_url:
+        msg = (
+            "Shared Envoy proxy not available. "
+            "Ensure envoy-proxy service is running and sidecar is enabled."
+        )
+        raise RuntimeError(msg)
+    return {
+        ENV_CLAUDE_SESSION_ID: session_id,
+        ENV_ANTHROPIC_BASE_URL: proxy_url,
+        ENV_CLAUDE_CODE_OAUTH_TOKEN: "proxy-managed",
+    }
+
+
 class ProvisionResult:
     """Result of workspace provisioning."""
 
@@ -101,21 +122,7 @@ class WorkspaceProvisionHandler:
         phase_outputs: dict[str, str],
         inputs: dict[str, Any] | None = None,
     ) -> ProvisionResult:
-        """Provision workspace for a phase.
-
-        Args:
-            todo: The to-do item being processed
-            phase: Phase definition
-            workflow_id: Workflow ID
-            session_id: Session ID for observability
-            repo_url: Repository URL (if configured)
-            artifacts: Artifact collector for injection
-            completed_phase_ids: Previously completed phase IDs
-            phase_outputs: Phase output cache for injection
-
-        Returns:
-            ProvisionResult with workspace, env, command, and aggregate command
-        """
+        """Provision workspace for a phase."""
         from syn_adapters.workspace_backends.service import SetupPhaseSecrets
 
         assert todo.phase_id is not None
@@ -159,31 +166,7 @@ class WorkspaceProvisionHandler:
         )
         claude_cmd = self._command_builder(phase, prompt)
 
-        # Validate proxy is available — credentials live on the proxy container,
-        # not in agent env vars (ISS-43: API key security).
-        proxy_url = getattr(workspace, "proxy_url", None)
-        if not proxy_url:
-            msg = (
-                "Shared Envoy proxy not available. "
-                "Ensure envoy-proxy service is running and sidecar is enabled."
-            )
-            raise RuntimeError(msg)
-
-        agent_env: dict[str, str] = {
-            ENV_CLAUDE_SESSION_ID: session_id,
-            # Route Anthropic SDK calls directly to the Envoy proxy.
-            # Do NOT set HTTP_PROXY/HTTPS_PROXY — those cause Node.js to use
-            # CONNECT tunneling which Envoy's forward proxy doesn't support.
-            # ANTHROPIC_BASE_URL alone redirects the SDK without tunneling (ISS-43).
-            ENV_ANTHROPIC_BASE_URL: proxy_url,
-            # Placeholder so Claude Code will attempt API calls via OAuth Bearer auth.
-            # ANTHROPIC_API_KEY must NOT be set here — if it is, Claude Code uses
-            # x-api-key auth and the injected Authorization header is ignored by Anthropic.
-            # With only CLAUDE_CODE_OAUTH_TOKEN set, Claude Code sends
-            # "Authorization: Bearer proxy-managed", which the Envoy proxy (ext_authz)
-            # overwrites with the real token before the request reaches api.anthropic.com (ISS-43).
-            ENV_CLAUDE_CODE_OAUTH_TOKEN: "proxy-managed",
-        }
+        agent_env = _build_agent_env(workspace, session_id)
 
         workspace_id = getattr(workspace, "id", todo.phase_id)
 

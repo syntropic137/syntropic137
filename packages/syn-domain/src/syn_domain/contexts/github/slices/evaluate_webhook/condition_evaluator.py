@@ -14,50 +14,62 @@ if TYPE_CHECKING:
     )
 
 
+def _check_operator(operator: str, resolved: Any, value: Any) -> bool:
+    """Evaluate a single operator against resolved and expected values.
+
+    Returns True if the condition passes, False if it fails.
+    """
+    match operator:
+        case "eq":
+            return resolved == value
+        case "neq":
+            return resolved != value
+        case "not_empty":
+            return bool(resolved)
+        case "is_empty":
+            return not resolved
+        case "in":
+            return resolved in (value or [])
+        case "not_in":
+            return resolved not in (value or [])
+        case "contains":
+            return value in (resolved or "")  # type: ignore[operator]  # resolved is Any
+        case _:
+            raise ValueError(f"Unknown operator: {operator}")
+
+
+def _unpack_condition(condition: TriggerCondition | dict) -> tuple[str, str, Any]:
+    """Extract (field, operator, value) from a typed or dict condition."""
+    if isinstance(condition, dict):
+        return condition.get("field", ""), condition.get("operator", "eq"), condition.get("value")
+    return condition.field, condition.operator, condition.value
+
+
 def evaluate_conditions(
     conditions: list[TriggerCondition | dict],
     payload: dict[str, Any],
 ) -> bool:
     for condition in conditions:
-        if isinstance(condition, dict):
-            field = condition.get("field", "")
-            operator = condition.get("operator", "eq")
-            value = condition.get("value")
-        else:
-            field = condition.field
-            operator = condition.operator
-            value = condition.value
-
+        field, operator, value = _unpack_condition(condition)
         resolved = _resolve_field(payload, field)
-        match operator:
-            case "eq":
-                if resolved != value:
-                    return False
-            case "neq":
-                if resolved == value:
-                    return False
-            case "not_empty":
-                if not resolved:
-                    return False
-            case "is_empty":
-                if resolved:
-                    return False
-            case "in":
-                if resolved not in (value or []):
-                    return False
-            case "not_in":
-                if resolved in (value or []):
-                    return False
-            case "contains":
-                if value not in (resolved or ""):  # type: ignore[operator]  # resolved is Any from payload dict traversal
-                    return False
-            case _:
-                raise ValueError(f"Unknown operator: {operator}")
+        if not _check_operator(operator, resolved, value):
+            return False
     return True
 
 
 # Regex to match array index access like "pull_requests[0]"
 _ARRAY_INDEX_RE = re.compile(r"^(.+)\[(\d+)\]$")
+
+
+def _resolve_array_index(current: Any, key: str, index_str: str) -> Any:
+    """Resolve an array-indexed access like ``items[0]`` on *current*."""
+    if not isinstance(current, dict):
+        return None
+    current = current.get(key)
+    if not isinstance(current, (list, tuple)):
+        return None
+    idx = int(index_str)
+    return current[idx] if idx < len(current) else None
 
 
 def _resolve_field(payload: dict, field_path: str) -> Any:
@@ -70,23 +82,10 @@ def _resolve_field(payload: dict, field_path: str) -> Any:
     for part in parts:
         if current is None:
             return None
-
-        # Check for array index access
         match = _ARRAY_INDEX_RE.match(part)
         if match:
             key, index_str = match.groups()
-            if isinstance(current, dict):
-                current = current.get(key)
-            else:
-                return None
-            if isinstance(current, (list, tuple)):
-                idx = int(index_str)
-                if idx < len(current):
-                    current = current[idx]
-                else:
-                    return None
-            else:
-                return None
+            current = _resolve_array_index(current, key, index_str)
         elif isinstance(current, dict):
             current = current.get(part)
         else:
