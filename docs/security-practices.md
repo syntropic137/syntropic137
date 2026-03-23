@@ -2,6 +2,8 @@
 
 This document describes the supply chain and operational security controls in place for Syntropic137. It follows the internal supply-chain hardening playbook and is updated as controls are added or changed.
 
+> **Vulnerability reporting:** See [SECURITY.md](../SECURITY.md) at the repo root for the responsible disclosure policy and response timeline.
+
 ## Supply Chain Hardening
 
 ### GitHub Actions — SHA pinning
@@ -82,12 +84,66 @@ If a secret is accidentally committed:
 
 ---
 
+## Lock File Discipline
+
+All lock files (`uv.lock`, `package-lock.json`, `pnpm-lock.yaml`) are committed to the repository and enforced in CI:
+
+- **Python**: `uv sync --all-extras` (add `--frozen` to enforce lock — planned)
+- **npm**: `npm ci --ignore-scripts` — uses exact versions from `package-lock.json`, fails if stale
+- **pnpm**: `pnpm install --ignore-scripts` or `--frozen-lockfile` for strict enforcement
+
+`npm ci` vs `npm install`: `npm install` re-resolves dependencies and can silently pick up
+a newly published (potentially malicious) version of any package in the tree. `npm ci` enforces
+exact versions from the lock file and fails if `package-lock.json` is out of sync.
+
+---
+
+## CI/CD Security Scanning
+
+### SAST — Static Application Security Testing
+
+Not yet implemented. Planned controls:
+
+- **CodeQL** — GitHub-native SAST, free for public repos. Detects SQL injection, XSS,
+  path traversal, insecure deserialization across Python and JavaScript/TypeScript.
+- **Bandit** — Python-specific SAST for common security anti-patterns.
+
+### Container Scanning
+
+OSV Scanner covers app-layer dependencies (Python, npm, etc.) via lock files. OS-layer
+CVEs in base images are a separate concern. We are not currently using a dedicated
+container scanner.
+
+> **Why not Trivy?** Aquasecurity (the Trivy maintainer) has experienced multiple
+> security incidents affecting the integrity of their tooling. Using a compromised
+> security scanner is a meaningful supply chain risk — it creates a false sense of
+> coverage while potentially introducing attack surface. OSV Scanner (Google) covers
+> the dependency layer. Evaluate the container scanner ecosystem when ready to implement;
+> do not default to Trivy without first assessing its current security posture.
+
+### Secret Scanning
+
+Not yet implemented as a blocking gate. Planned controls:
+
+- **gitleaks** pre-commit hook — blocks commits containing secrets before they reach
+  git history (much cheaper than incident response after accidental push)
+- **gitleaks** in CI — scans full git history on push, catches anything that slipped
+  past the pre-commit hook
+- **GitHub secret scanning** — enable in Settings > Security > Secret scanning
+
+---
+
 ## Planned Controls (not yet implemented)
 
-- [ ] Pre-commit secret gate (`detect-secrets` or `gitleaks`) — ISS-259
+- [ ] Pre-commit secret gate (`gitleaks`) — ISS-259
 - [x] `dependency-review-action` — added; warn-only until repo goes public (requires GitHub Advanced Security, free for public repos)
 - [ ] Dependabot for Actions + npm — ISS-259
 - [ ] OSV Scanner switched to blocking mode (after baseline) — ISS-259 `TODO(#259)`
+- [ ] CodeQL SAST — post-launch
+- [ ] Container scanning — evaluate ecosystem before choosing tool (see Container Scanning note above)
+- [ ] gitleaks CI secret scanning — ISS-259
+- [ ] `uv sync --frozen` enforced in CI
 - [ ] Topology auto-snapshot on commit — ISS-260
 - [ ] Sigstore/cosign artifact signing — post-launch
 - [ ] OpenSSF Scorecard integration — post-launch
+- [ ] SBOM generation (syft/cyclonedx) — post-launch
