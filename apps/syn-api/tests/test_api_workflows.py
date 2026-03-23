@@ -1,4 +1,4 @@
-"""Tests for syn_api.v1.workflows — create, list, get cycle.
+"""Tests for syn_api.routes.workflows — create, list, get cycle.
 
 Uses APP_ENVIRONMENT=test for in-memory adapters.
 """
@@ -35,7 +35,7 @@ def _reset_storage():
 
 async def test_create_workflow():
     """Create a workflow and get back an ID."""
-    from syn_api.v1.workflows import create_workflow
+    from syn_api.routes.workflows import create_workflow
 
     result = await create_workflow(
         name="Test Research Workflow",
@@ -50,7 +50,7 @@ async def test_create_workflow():
 
 async def test_list_workflows_empty():
     """List workflows when none exist."""
-    from syn_api.v1.workflows import list_workflows
+    from syn_api.routes.workflows import list_workflows
 
     result = await list_workflows()
 
@@ -60,7 +60,7 @@ async def test_list_workflows_empty():
 
 async def test_create_and_list_workflows():
     """Create a workflow then list it."""
-    from syn_api.v1.workflows import create_workflow, list_workflows
+    from syn_api.routes.workflows import create_workflow, list_workflows
 
     create_result = await create_workflow(
         name="Listed Workflow",
@@ -77,7 +77,7 @@ async def test_create_and_list_workflows():
 
 async def test_create_and_get_workflow():
     """Create a workflow then get its details."""
-    from syn_api.v1.workflows import create_workflow, get_workflow
+    from syn_api.routes.workflows import create_workflow, get_workflow
 
     create_result = await create_workflow(
         name="Detail Workflow",
@@ -95,7 +95,7 @@ async def test_create_and_get_workflow():
 
 async def test_get_workflow_not_found():
     """Get a workflow that doesn't exist."""
-    from syn_api.v1.workflows import get_workflow
+    from syn_api.routes.workflows import get_workflow
 
     result = await get_workflow("nonexistent-id")
     assert isinstance(result, Err)
@@ -103,7 +103,7 @@ async def test_get_workflow_not_found():
 
 async def test_create_workflow_with_phases():
     """Create a workflow with custom phases."""
-    from syn_api.v1.workflows import create_workflow
+    from syn_api.routes.workflows import create_workflow
 
     result = await create_workflow(
         name="Multi-Phase Workflow",
@@ -119,7 +119,7 @@ async def test_create_workflow_with_phases():
 
 async def test_list_workflows_with_filter():
     """Create workflows of different types and filter."""
-    from syn_api.v1.workflows import create_workflow, list_workflows
+    from syn_api.routes.workflows import create_workflow, list_workflows
 
     await create_workflow(name="Research 1", workflow_type="research")
     await create_workflow(name="Custom 1", workflow_type="custom")
@@ -132,7 +132,7 @@ async def test_list_workflows_with_filter():
 
 async def test_list_executions_empty():
     """List executions when none exist."""
-    from syn_api.v1.executions import list_ as list_executions
+    from syn_api.routes.executions import list_ as list_executions
 
     result = await list_executions()
     assert isinstance(result, Ok)
@@ -141,7 +141,7 @@ async def test_list_executions_empty():
 
 async def test_validate_yaml_valid(tmp_path):
     """Validate a valid workflow YAML file."""
-    from syn_api.v1.workflows import validate_yaml
+    from syn_api.routes.workflows import validate_yaml
 
     yaml_content = """\
 id: test-workflow
@@ -166,7 +166,7 @@ phases:
 
 async def test_validate_yaml_invalid(tmp_path):
     """Validate an invalid workflow YAML file."""
-    from syn_api.v1.workflows import validate_yaml
+    from syn_api.routes.workflows import validate_yaml
 
     yaml_content = """\
 name: Missing Required Fields
@@ -182,7 +182,7 @@ name: Missing Required Fields
 
 async def test_validate_yaml_file_not_found():
     """Validate a non-existent YAML file."""
-    from syn_api.v1.workflows import validate_yaml
+    from syn_api.routes.workflows import validate_yaml
 
     result = await validate_yaml("/nonexistent/path/workflow.yaml")
     assert isinstance(result, Err)
