@@ -63,7 +63,7 @@ def _apply_finalized_costs(session_cost: SessionCost, event_data: dict[str, Any]
         ("compute_cost_usd", "compute_cost_usd"),
     ]:
         value = event_data.get(field)
-        if value:
+        if value is not None:
             setattr(session_cost, attr, Decimal(str(value)))
 
 
