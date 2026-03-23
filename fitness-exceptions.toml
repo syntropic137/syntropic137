@@ -1275,13 +1275,6 @@ issue = "#274"
 value = 45
 issue = "#274"
 
-[max-cognitive."tsx:apps/syn-docs/components/HeroScene::NetworkNodes"]
-value = 35
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-docs/components/diagrams/topology/TopologyDependencyGraph::TopologyDependencyGraph"]
-value = 55
-issue = "#274"
 
 [max-cognitive."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::SummaryStats"]
 value = 35
@@ -1319,9 +1312,6 @@ issue = "#274"
 value = 45
 issue = "#274"
 
-[max-cognitive."typescript:apps/syn-docs/app/api/docs-txt/[...slug]/route::renderOpenAPIPage"]
-value = 65
-issue = "#274"
 
 [max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/integrations/grpc-event-store::readEvents"]
 value = 35
@@ -1447,21 +1437,6 @@ issue = "#274"
 value = 90
 issue = "#274"
 
-[max-cognitive-file."apps/syn-docs/app/api/docs-txt/[...slug]/route"]
-value = 130
-issue = "#274"
-
-[max-cognitive-file."apps/syn-docs/app/llms-full.txt/route"]
-value = 75
-issue = "#274"
-
-[max-cognitive-file."apps/syn-docs/components/HeroScene"]
-value = 70
-issue = "#274"
-
-[max-cognitive-file."apps/syn-docs/components/diagrams/topology/TopologyDependencyGraph"]
-value = 110
-issue = "#274"
 
 [max-cognitive-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
 value = 120
@@ -1515,9 +1490,6 @@ issue = "#274"
 value = 20
 issue = "#274"
 
-[max-cyclomatic."tsx:apps/syn-docs/components/diagrams/topology/TopologyDependencyGraph::TopologyDependencyGraph"]
-value = 20
-issue = "#274"
 
 [max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
 value = 20
@@ -1547,9 +1519,6 @@ issue = "#274"
 value = 20
 issue = "#274"
 
-[max-cyclomatic."typescript:apps/syn-docs/app/api/docs-txt/[...slug]/route::renderOpenAPIPage"]
-value = 25
-issue = "#274"
 
 [max-cyclomatic."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/replay/state-assertions::createDiff"]
 value = 25
@@ -1591,9 +1560,6 @@ issue = "#274"
 value = 795
 issue = "#274"
 
-[max-loc-file."apps/syn-docs/components/diagrams/topology/TopologyDependencyGraph"]
-value = 505
-issue = "#274"
 
 [max-loc-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
 value = 580
@@ -1759,21 +1725,6 @@ issue = "#274"
 value = 165
 issue = "#274"
 
-[max-loc-function."tsx:apps/syn-docs/app/(home)/page::HomePage"]
-value = 140
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-docs/app/llms/page::LLMDocsPage"]
-value = 145
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-docs/components/HeroScene::NetworkNodes"]
-value = 110
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-docs/components/diagrams/topology/TopologyDependencyGraph::TopologyDependencyGraph"]
-value = 250
-issue = "#274"
 
 [max-loc-function."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::ContributionHeatmap"]
 value = 135
