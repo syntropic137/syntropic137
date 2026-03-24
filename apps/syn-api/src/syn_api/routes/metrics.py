@@ -1,16 +1,28 @@
-"""Metrics API endpoints — thin wrapper over v1."""
+"""Metrics API endpoints and service operations.
+
+Provides aggregated dashboard metrics with optional per-phase breakdown.
+"""
 
 from __future__ import annotations
 
 import logging
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 
-import syn_api.v1.metrics as met
 from syn_api._wiring import ensure_connected, get_projection_mgr
-from syn_api.types import Err
+from syn_api.types import (
+    DashboardMetrics,
+    Err,
+    MetricsError,
+    Ok,
+    Result,
+)
+
+if TYPE_CHECKING:
+    from syn_api.auth import AuthContext
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +65,49 @@ class MetricsResponse(BaseModel):
 
 
 # =============================================================================
-# Endpoints
+# Service functions (importable by tests)
+# =============================================================================
+
+
+async def get_dashboard_metrics(
+    workflow_id: str | None = None,  # noqa: ARG001
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[DashboardMetrics, MetricsError]:
+    """Get aggregated dashboard metrics.
+
+    Args:
+        workflow_id: Optional filter by workflow ID.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(DashboardMetrics) on success, Err(MetricsError) on failure.
+    """
+    await ensure_connected()
+    try:
+        manager = get_projection_mgr()
+        projection = manager.dashboard_metrics
+        data = await projection.get_metrics()
+
+        return Ok(
+            DashboardMetrics(
+                total_workflows=data.total_workflows,
+                completed_workflows=data.completed_workflows,
+                failed_workflows=data.failed_workflows,
+                total_sessions=data.total_sessions,
+                total_input_tokens=data.total_input_tokens,
+                total_output_tokens=data.total_output_tokens,
+                total_tokens=data.total_tokens,
+                total_cost_usd=Decimal(str(data.total_cost_usd)),
+                total_artifacts=data.total_artifacts,
+                total_artifact_bytes=data.total_artifact_bytes,
+            )
+        )
+    except Exception as e:
+        return Err(MetricsError.QUERY_FAILED, message=str(e))
+
+
+# =============================================================================
+# HTTP Endpoints
 # =============================================================================
 
 
@@ -83,11 +137,11 @@ async def _build_phase_metrics(workflow_id: str) -> list[PhaseMetrics]:
 
 
 @router.get("", response_model=MetricsResponse)
-async def get_metrics(
+async def get_metrics_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
 ) -> MetricsResponse:
     """Get aggregated metrics across all workflows or for a specific workflow."""
-    result = await met.get_dashboard_metrics(workflow_id=workflow_id)
+    result = await get_dashboard_metrics(workflow_id=workflow_id)
 
     if isinstance(result, Err):
         return MetricsResponse()

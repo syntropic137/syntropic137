@@ -326,7 +326,7 @@ async def _seed_offline_data() -> None:
             logger.debug("Skipped seeding workflow '%s' (may already exist)", wf_def["name"])
 
     # Seed trigger presets
-    import syn_api.v1.triggers as triggers_api
+    import syn_api.routes.triggers as triggers_api
 
     triggers_seeded = 0
     for preset_name in ("self-healing", "review-fix"):
