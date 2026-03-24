@@ -29,10 +29,6 @@ issue = "#313"
 value = 35
 issue = "#313"
 
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::startup"]
-value = 30
-issue = "#313"
-
 # Maximum Cognitive Complexity (file-level)
 
 [max-cognitive-file."apps.syn-api.src.syn_api._wiring"]
@@ -93,10 +89,6 @@ issue = "#313"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.webhooks"]
 value = 165
-issue = "#313"
-
-[max-cognitive-file."apps.syn-api.src.syn_api.services.lifecycle"]
-value = 125
 issue = "#313"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.projection"]
