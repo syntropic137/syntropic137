@@ -13,9 +13,8 @@ from syn_cli._output import (
     format_duration,
     format_timestamp,
     format_tokens,
-    print_error,
 )
-from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_get, api_get_list, build_params
 from syn_cli.commands._cost_models import (
     CostSummaryResponse,
     ExecutionCostResponse,
@@ -39,29 +38,11 @@ def _safe_format_cost(value: str) -> str:
         return value
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("summary")
 def cost_summary() -> None:
     """Show aggregated cost summary across all sessions and executions."""
-    try:
-        with get_client() as client:
-            resp = client.get("/costs/summary")
-    except Exception:
-        _handle_connect_error()
-        return
+    data = CostSummaryResponse(**api_get("/costs/summary"))
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = CostSummaryResponse(**resp.json())
     panel_text = (
         f"[bold]Total Cost:[/bold] {format_cost(data.total_cost_usd)}\n"
         f"[bold]Sessions:[/bold] {data.total_sessions}\n"
@@ -97,21 +78,9 @@ def list_session_costs(
     limit: int = typer.Option(50, "--limit", "-n", help="Max results", min=1, max=200),
 ) -> None:
     """List cost data for sessions."""
-    try:
-        with get_client() as client:
-            params: dict[str, str | int] = {"limit": limit}
-            if execution_id:
-                params["execution_id"] = execution_id
-            resp = client.get("/costs/sessions", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(execution_id=execution_id, limit=limit)
+    items = [SessionCostResponse(**s) for s in api_get_list("/costs/sessions", params=params)]
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    items = [SessionCostResponse(**s) for s in resp.json()]
     if not items:
         console.print("[dim]No session cost data found.[/dim]")
         return
@@ -139,18 +108,8 @@ def show_session_cost(
     session_id: str = typer.Argument(..., help="Session ID"),
 ) -> None:
     """Show detailed cost breakdown for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/costs/sessions/{session_id}")
-    except Exception:
-        _handle_connect_error()
-        return
+    s = SessionCostResponse(**api_get(f"/costs/sessions/{session_id}"))
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    s = SessionCostResponse(**resp.json())
     panel_text = (
         f"[bold]Session:[/bold] {s.session_id}\n"
         f"[bold]Cost:[/bold] {format_cost(s.total_cost_usd)}\n"
@@ -173,18 +132,11 @@ def list_execution_costs(
     limit: int = typer.Option(50, "--limit", "-n", help="Max results", min=1, max=200),
 ) -> None:
     """List cost data for workflow executions."""
-    try:
-        with get_client() as client:
-            resp = client.get("/costs/executions", params={"limit": limit})
-    except Exception:
-        _handle_connect_error()
-        return
+    items = [
+        ExecutionCostResponse(**e)
+        for e in api_get_list("/costs/executions", params={"limit": limit})
+    ]
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    items = [ExecutionCostResponse(**e) for e in resp.json()]
     if not items:
         console.print("[dim]No execution cost data found.[/dim]")
         return
@@ -210,18 +162,8 @@ def show_execution_cost(
     execution_id: str = typer.Argument(..., help="Execution ID"),
 ) -> None:
     """Show detailed cost breakdown for an execution."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/costs/executions/{execution_id}")
-    except Exception:
-        _handle_connect_error()
-        return
+    e = ExecutionCostResponse(**api_get(f"/costs/executions/{execution_id}"))
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    e = ExecutionCostResponse(**resp.json())
     panel_text = (
         f"[bold]Execution:[/bold] {e.execution_id}\n"
         f"[bold]Cost:[/bold] {format_cost(e.total_cost_usd)}\n"

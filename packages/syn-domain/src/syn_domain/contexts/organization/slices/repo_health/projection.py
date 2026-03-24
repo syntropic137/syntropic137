@@ -25,6 +25,44 @@ _SNAPSHOT_INTERVAL = 100
 _TREND_WINDOW = 10  # Last N executions for trend calculation
 
 
+def _update_execution_counts(health: dict[str, Any], success: bool) -> None:
+    """Update execution counts and success rate."""
+    health["total_executions"] = health.get("total_executions", 0) + 1
+    key = "successful_executions" if success else "failed_executions"
+    health[key] = health.get(key, 0) + 1
+    total = health["total_executions"]
+    if total > 0:
+        health["success_rate"] = health.get("successful_executions", 0) / total
+
+
+def _update_cost_tokens(health: dict[str, Any], cost_usd: str, tokens: int) -> None:
+    """Accumulate cost and token metrics."""
+    existing_cost = Decimal(str(health.get("window_cost_usd", "0")))
+    health["window_cost_usd"] = str(existing_cost + Decimal(cost_usd))
+    health["window_tokens"] = health.get("window_tokens", 0) + tokens
+
+
+def _update_trend(health: dict[str, Any], success: bool) -> None:
+    """Update trend based on recent outcomes vs overall success rate."""
+    recent: list[bool] = health.get("_recent_outcomes", [])
+    recent.append(success)
+    if len(recent) > _TREND_WINDOW:
+        recent = recent[-_TREND_WINDOW:]
+    health["_recent_outcomes"] = recent
+
+    if len(recent) < 3:
+        return
+
+    recent_rate = sum(1 for x in recent if x) / len(recent)
+    overall_rate = health.get("success_rate", 0)
+    if recent_rate > overall_rate + 0.05:
+        health["trend"] = "improving"
+    elif recent_rate < overall_rate - 0.05:
+        health["trend"] = "degrading"
+    else:
+        health["trend"] = "stable"
+
+
 class RepoHealthProjection(AutoDispatchProjection):
     """Per-repo health projection.
 
@@ -84,42 +122,13 @@ class RepoHealthProjection(AutoDispatchProjection):
         """Update a repo's health metrics for one execution outcome."""
         health = await self._get_or_create(repo_full_name)
 
-        health["total_executions"] = health.get("total_executions", 0) + 1
-        if success:
-            health["successful_executions"] = health.get("successful_executions", 0) + 1
-        else:
-            health["failed_executions"] = health.get("failed_executions", 0) + 1
-
-        total = health["total_executions"]
-        if total > 0:
-            health["success_rate"] = health.get("successful_executions", 0) / total
-
-        # Windowed cost/tokens (cumulative for now — future: sliding window)
-        existing_cost = Decimal(str(health.get("window_cost_usd", "0")))
-        health["window_cost_usd"] = str(existing_cost + Decimal(cost_usd))
-        health["window_tokens"] = health.get("window_tokens", 0) + tokens
+        _update_execution_counts(health, success)
+        _update_cost_tokens(health, cost_usd, tokens)
 
         if timestamp:
             health["last_execution_at"] = timestamp
 
-        # Trend: compare recent success rate vs overall
-        # Track recent outcomes in a list for trend calculation
-        recent: list[bool] = health.get("_recent_outcomes", [])
-        recent.append(success)
-        if len(recent) > _TREND_WINDOW:
-            recent = recent[-_TREND_WINDOW:]
-        health["_recent_outcomes"] = recent
-
-        if len(recent) >= 3:
-            recent_rate = sum(1 for x in recent if x) / len(recent)
-            overall_rate = health["success_rate"]
-            if recent_rate > overall_rate + 0.05:
-                health["trend"] = "improving"
-            elif recent_rate < overall_rate - 0.05:
-                health["trend"] = "degrading"
-            else:
-                health["trend"] = "stable"
-
+        _update_trend(health, success)
         await self._save(repo_full_name, health)
 
     async def on_workflow_completed(self, event_data: dict[str, Any]) -> None:

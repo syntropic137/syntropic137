@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from syn_perf.metrics import TimingStats
 
 if TYPE_CHECKING:
-    from syn_perf.benchmarks.compare import BackendComparisonResult
+    from syn_perf.benchmarks.compare_result import BackendComparisonResult
     from syn_perf.metrics import BenchmarkResult
 
 

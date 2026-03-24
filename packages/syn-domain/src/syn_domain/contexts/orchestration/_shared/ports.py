@@ -1,27 +1,6 @@
 """Port interfaces for workspace bounded context.
 
-This module defines the Dependency Injection (DI) boundaries for the workspace domain.
-All external dependencies are abstracted behind Protocol interfaces.
-
-Architecture (Hexagonal/Ports & Adapters):
-    - Ports = Interfaces (defined here)
-    - Adapters = Implementations (in syn_adapters.workspace_backends)
-
-Each port represents a capability that can be provided by different backends:
-    - IsolationBackendPort: Create/manage isolation (Docker, Firecracker, etc.)
-    - SidecarPort: Manage sidecar proxy (token injection, egress filtering)
-    - TokenVendingPort: Vend short-lived tokens (connects to syn-tokens)
-    - ArtifactCollectionPort: Collect artifacts from workspace
-    - EventStreamPort: Stream stdout from command execution
-
-Usage:
-    # In tests (with mocks)
-    mock_isolation = Mock(spec=IsolationBackendPort)
-    aggregate = WorkspaceAggregate(isolation_port=mock_isolation)
-
-    # In production (use WorkspaceService)
-    from syn_adapters.workspace_backends.service import WorkspaceService
-    service = WorkspaceService.create()  # Uses agentic_isolation
+Hexagonal/Ports & Adapters: Ports defined here, adapters in syn_adapters.
 """
 
 from __future__ import annotations
@@ -51,45 +30,14 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class IsolationBackendPort(Protocol):
-    """Port for creating/managing isolation environments.
-
-    Implementations:
-        - AgenticIsolationAdapter: Docker via agentic_isolation (recommended)
-        - FirecrackerAdapter: Firecracker MicroVMs (future)
-        - E2BAdapter: E2B cloud sandboxes (future)
-        - MemoryIsolationAdapter: In-memory for testing
-
-    Lifecycle:
-        1. create(config) -> IsolationHandle
-        2. execute(handle, command) -> ExecutionResult (repeatable)
-        3. destroy(handle)
-    """
+    """Port for creating/managing isolation environments."""
 
     async def create(self, config: IsolationConfig) -> IsolationHandle:
-        """Create isolation environment (container/VM).
-
-        Args:
-            config: Isolation configuration including backend, image, security policy
-
-        Returns:
-            IsolationHandle: Handle for subsequent operations
-
-        Raises:
-            IsolationCreationError: If creation fails
-        """
+        """Create isolation environment (container/VM)."""
         ...
 
     async def destroy(self, handle: IsolationHandle) -> None:
-        """Destroy isolation environment.
-
-        Cleans up all resources. Idempotent (safe to call multiple times).
-
-        Args:
-            handle: Handle from create()
-
-        Raises:
-            IsolationDestroyError: If destruction fails (resources may leak)
-        """
+        """Destroy isolation environment. Idempotent."""
         ...
 
     async def execute(
@@ -101,32 +49,11 @@ class IsolationBackendPort(Protocol):
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
     ) -> ExecutionResult:
-        """Execute command inside isolation.
-
-        Args:
-            handle: Handle from create()
-            command: Command to execute (e.g., ["python", "script.py"])
-            timeout_seconds: Max execution time (None = use config default)
-            working_directory: Working directory override
-            environment: Additional environment variables
-
-        Returns:
-            ExecutionResult: Exit code, stdout, stderr, timing
-
-        Raises:
-            IsolationExecutionError: If execution fails to start
-        """
+        """Execute command inside isolation."""
         ...
 
     async def health_check(self, handle: IsolationHandle) -> bool:
-        """Check if isolation is healthy and responsive.
-
-        Args:
-            handle: Handle from create()
-
-        Returns:
-            bool: True if isolation is healthy, False otherwise
-        """
+        """Check if isolation is healthy and responsive."""
         ...
 
     async def copy_to(
@@ -135,16 +62,7 @@ class IsolationBackendPort(Protocol):
         files: list[tuple[str, bytes]],
         base_path: str = "/workspace",
     ) -> None:
-        """Copy files into the isolation.
-
-        Args:
-            handle: Handle from create()
-            files: List of (relative_path, content) tuples
-            base_path: Base path inside isolation
-
-        Raises:
-            IsolationExecutionError: If copy fails
-        """
+        """Copy files into the isolation."""
         ...
 
     async def copy_from(
@@ -153,19 +71,7 @@ class IsolationBackendPort(Protocol):
         patterns: list[str],
         base_path: str = "/workspace",
     ) -> list[tuple[str, bytes]]:
-        """Copy files out of the isolation.
-
-        Args:
-            handle: Handle from create()
-            patterns: Glob patterns to match (e.g., ["artifacts/**/*"])
-            base_path: Base path inside isolation
-
-        Returns:
-            List of (relative_path, content) tuples
-
-        Raises:
-            IsolationExecutionError: If copy fails
-        """
+        """Copy files out of the isolation."""
         ...
 
 
@@ -176,48 +82,18 @@ class IsolationBackendPort(Protocol):
 
 @runtime_checkable
 class SidecarPort(Protocol):
-    """Port for managing sidecar proxy (1:1 with workspace).
-
-    The sidecar proxy handles:
-    - Token injection into outbound requests (ADR-022)
-    - Egress filtering (allowlist enforcement)
-    - Rate limiting
-    - Request/response logging for observability
-
-    Implementations:
-        - DockerSidecarAdapter: Docker-based Envoy sidecar
-        - MemorySidecarAdapter: Mock for testing
-    """
+    """Port for managing sidecar proxy (1:1 with workspace)."""
 
     async def start(
         self,
         config: SidecarConfig,
         isolation_handle: IsolationHandle,
     ) -> SidecarHandle:
-        """Start sidecar proxy container.
-
-        Creates a sidecar container networked with the isolation container.
-
-        Args:
-            config: Sidecar configuration
-            isolation_handle: Handle to the main isolation container
-
-        Returns:
-            SidecarHandle: Handle for managing the sidecar
-
-        Raises:
-            SidecarStartError: If sidecar fails to start
-        """
+        """Start sidecar proxy container."""
         ...
 
     async def stop(self, handle: SidecarHandle) -> None:
-        """Stop sidecar proxy.
-
-        Cleans up sidecar container. Idempotent.
-
-        Args:
-            handle: Handle from start()
-        """
+        """Stop sidecar proxy. Idempotent."""
         ...
 
     async def configure_tokens(
@@ -226,26 +102,11 @@ class SidecarPort(Protocol):
         tokens: dict[TokenType, str],
         ttl_seconds: int,
     ) -> None:
-        """Configure tokens for injection by sidecar.
-
-        Updates the sidecar's token store for request injection.
-
-        Args:
-            handle: Sidecar handle
-            tokens: Token type -> token value mapping
-            ttl_seconds: Token validity duration
-        """
+        """Configure tokens for injection by sidecar."""
         ...
 
     async def health_check(self, handle: SidecarHandle) -> bool:
-        """Check if sidecar is healthy.
-
-        Args:
-            handle: Sidecar handle
-
-        Returns:
-            bool: True if healthy
-        """
+        """Check if sidecar is healthy."""
         ...
 
 
@@ -256,21 +117,7 @@ class SidecarPort(Protocol):
 
 @runtime_checkable
 class TokenVendingPort(Protocol):
-    """Port for vending short-lived tokens.
-
-    Connects to the Token Vending Service (syn-tokens) to issue
-    scoped, time-limited tokens for workspace use.
-
-    Per ADR-022:
-    - Tokens are never stored in workspace
-    - Tokens are injected via sidecar proxy
-    - Tokens are scoped to specific operations
-    - Tokens have short TTL (minutes)
-
-    Implementations:
-        - TokenVendingServiceAdapter: Real service connection
-        - MockTokenVendingAdapter: For testing
-    """
+    """Port for vending short-lived tokens (ADR-022)."""
 
     async def vend_token(
         self,
@@ -280,30 +127,11 @@ class TokenVendingPort(Protocol):
         ttl_seconds: int = 300,
         scopes: list[str] | None = None,
     ) -> str:
-        """Vend a short-lived token for workspace use.
-
-        Args:
-            token_type: Type of token to vend (anthropic, github, etc.)
-            execution_id: Execution ID for audit trail
-            ttl_seconds: Token validity duration (default 5 minutes)
-            scopes: Optional scope restrictions
-
-        Returns:
-            str: The token value
-
-        Raises:
-            TokenVendingError: If token cannot be vended
-        """
+        """Vend a short-lived, scoped token for workspace use."""
         ...
 
     async def revoke_tokens(self, execution_id: str) -> None:
-        """Revoke all tokens for an execution.
-
-        Called during workspace cleanup.
-
-        Args:
-            execution_id: Execution ID
-        """
+        """Revoke all tokens for an execution."""
         ...
 
 
@@ -314,15 +142,7 @@ class TokenVendingPort(Protocol):
 
 @runtime_checkable
 class TokenInjectionPort(Protocol):
-    """Port for injecting tokens into workspace.
-
-    Combines TokenVendingPort and SidecarPort to inject tokens.
-
-    Implementations:
-        - SidecarTokenInjectionAdapter: Via sidecar proxy (preferred)
-        - DirectTokenInjectionAdapter: Via env vars (legacy, less secure)
-        - MockTokenInjectionAdapter: For testing
-    """
+    """Port for injecting tokens into workspace."""
 
     async def inject(
         self,
@@ -332,17 +152,7 @@ class TokenInjectionPort(Protocol):
         *,
         ttl_seconds: int = 300,
     ) -> TokenInjectionResult:
-        """Inject tokens into workspace.
-
-        Args:
-            handle: Isolation handle
-            execution_id: Execution ID for audit
-            token_types: Types of tokens to inject
-            ttl_seconds: Token validity duration
-
-        Returns:
-            TokenInjectionResult: Injection result with details
-        """
+        """Inject tokens into workspace."""
         ...
 
 
@@ -353,15 +163,7 @@ class TokenInjectionPort(Protocol):
 
 @runtime_checkable
 class ArtifactCollectionPort(Protocol):
-    """Port for collecting artifacts from workspace.
-
-    Collects files matching patterns from workspace for persistence.
-
-    Implementations:
-        - DockerArtifactAdapter: Collect via docker cp
-        - S3ArtifactAdapter: Direct S3 upload from workspace
-        - MemoryArtifactAdapter: In-memory for testing
-    """
+    """Port for collecting artifacts from workspace."""
 
     async def collect(
         self,
@@ -370,16 +172,7 @@ class ArtifactCollectionPort(Protocol):
         *,
         destination: str | None = None,
     ) -> ArtifactCollectionResult:
-        """Collect artifacts matching patterns.
-
-        Args:
-            handle: Isolation handle
-            patterns: Glob patterns for files to collect (e.g., ["*.log", "output/*"])
-            destination: Optional destination path/URL
-
-        Returns:
-            ArtifactCollectionResult: List of collected artifacts
-        """
+        """Collect artifacts matching patterns."""
         ...
 
     async def list_artifacts(
@@ -387,15 +180,7 @@ class ArtifactCollectionPort(Protocol):
         handle: IsolationHandle,
         path: str = "/workspace",
     ) -> list[Artifact]:
-        """List available artifacts in workspace.
-
-        Args:
-            handle: Isolation handle
-            path: Directory to list
-
-        Returns:
-            list[Artifact]: Available artifacts
-        """
+        """List available artifacts in workspace."""
         ...
 
 
@@ -406,15 +191,7 @@ class ArtifactCollectionPort(Protocol):
 
 @runtime_checkable
 class EventStreamPort(Protocol):
-    """Port for streaming events from workspace.
-
-    Streams stdout from command execution for real-time processing.
-    Used to capture agent runner events (JSONL format).
-
-    Implementations:
-        - AgenticEventStreamAdapter: Stream via agentic_isolation
-        - MemoryEventStreamAdapter: Mock for testing
-    """
+    """Port for streaming stdout from command execution (JSONL events)."""
 
     async def stream(
         self,
@@ -425,29 +202,12 @@ class EventStreamPort(Protocol):
         working_directory: str | None = None,
         environment: dict[str, str] | None = None,
     ) -> AsyncIterator[str]:
-        """Stream stdout lines from command execution.
-
-        Yields lines as they are produced by the command.
-
-        Args:
-            handle: Isolation handle
-            command: Command to execute
-            timeout_seconds: Max execution time
-
-        Yields:
-            str: Individual stdout lines
-
-        Raises:
-            StreamExecutionError: If streaming fails
-        """
+        """Stream stdout lines from command execution."""
         ...
 
     @property
     def last_exit_code(self) -> int | None:
-        """Exit code from the most recent stream() call.
-
-        Returns None if no stream has completed yet.
-        """
+        """Exit code from the most recent stream() call."""
         ...
 
 
@@ -458,15 +218,7 @@ class EventStreamPort(Protocol):
 
 @runtime_checkable
 class GitConfigurationPort(Protocol):
-    """Port for configuring Git in workspace.
-
-    Sets up git credentials, config, and clone operations.
-
-    Implementations:
-        - GitHubAppGitAdapter: Use GitHub App installation token
-        - PatGitAdapter: Use Personal Access Token
-        - MockGitAdapter: For testing
-    """
+    """Port for configuring Git in workspace."""
 
     async def configure(
         self,
@@ -477,17 +229,7 @@ class GitConfigurationPort(Protocol):
         user_name: str = "syn-agent",
         user_email: str = "agent@syntropic137.com",
     ) -> None:
-        """Configure git in workspace.
-
-        Sets up git config and credentials.
-
-        Args:
-            handle: Isolation handle
-            repo_url: Repository URL to clone (optional)
-            branch: Branch to checkout
-            user_name: Git user name
-            user_email: Git user email
-        """
+        """Configure git in workspace."""
         ...
 
     async def clone(
@@ -498,14 +240,7 @@ class GitConfigurationPort(Protocol):
         branch: str = "main",
         destination: str = "/workspace",
     ) -> None:
-        """Clone a repository into workspace.
-
-        Args:
-            handle: Isolation handle
-            repo_url: Repository URL
-            branch: Branch to checkout
-            destination: Destination directory
-        """
+        """Clone a repository into workspace."""
         ...
 
     async def push(
@@ -515,13 +250,7 @@ class GitConfigurationPort(Protocol):
         branch: str | None = None,
         message: str = "Agent commit",
     ) -> None:
-        """Push changes from workspace.
-
-        Args:
-            handle: Isolation handle
-            branch: Branch to push (None = current)
-            message: Commit message if uncommitted changes
-        """
+        """Push changes from workspace."""
         ...
 
 

@@ -16,23 +16,17 @@
  */
 
 import {
-  useCallback,
-  useEffect,
   useMemo,
-  useState,
   type CSSProperties,
   type ReactNode,
 } from 'react';
 import { FeedbackContext } from './FeedbackContext';
 import { useFeedbackApi } from './hooks/useFeedbackApi';
+import { useFeedbackState } from './hooks/useFeedbackState';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import type {
   FeedbackContextValue,
-  FeedbackCreate,
-  FeedbackItem,
   FeedbackProviderConfig,
-  FeedbackState,
-  LocationContext,
-  MediaUpload,
   Theme,
 } from './types';
 
@@ -58,214 +52,8 @@ function mergeTheme(custom?: Theme): Required<Theme> {
   return { ...DEFAULT_THEME, ...custom };
 }
 
-export function FeedbackProvider({
-  children,
-  apiUrl,
-  appName,
-  appVersion,
-  keyboardShortcut = 'Ctrl+Shift+F',
-  theme: customTheme,
-  classNames,
-  position = 'bottom-right',
-  disabled = false,
-  // Environment context
-  environment,
-  gitCommit,
-  gitBranch,
-  hostname,
-}: FeedbackProviderProps) {
-  const [state, setState] = useState<FeedbackState>({
-    isOpen: false,
-    isFeedbackMode: false,
-    locationContext: null,
-    pendingMedia: [],
-  });
-
-  const api = useFeedbackApi({ apiUrl });
-  const theme = useMemo(() => mergeTheme(customTheme), [customTheme]);
-
-  // Config object for context
-  const config: FeedbackProviderConfig = useMemo(
-    () => ({
-      apiUrl,
-      appName,
-      appVersion,
-      keyboardShortcut,
-      theme: customTheme,
-      classNames,
-      position,
-      disabled,
-      environment,
-      gitCommit,
-      gitBranch,
-      hostname,
-    }),
-    [apiUrl, appName, appVersion, keyboardShortcut, customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname]
-  );
-
-  // State management functions
-  const openFeedbackMode = useCallback(() => {
-    if (disabled) return;
-    setState((prev) => ({ ...prev, isFeedbackMode: true }));
-  }, [disabled]);
-
-  const closeFeedbackMode = useCallback(() => {
-    setState((prev) => ({ ...prev, isFeedbackMode: false }));
-  }, []);
-
-  const openModal = useCallback((context: LocationContext) => {
-    setState((prev) => ({
-      ...prev,
-      isOpen: true,
-      isFeedbackMode: false,
-      locationContext: context,
-    }));
-  }, []);
-
-  const closeModal = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      isOpen: false,
-      locationContext: null,
-      pendingMedia: [],
-    }));
-  }, []);
-
-  const addMedia = useCallback((media: MediaUpload) => {
-    setState((prev) => ({
-      ...prev,
-      pendingMedia: [...prev.pendingMedia, media],
-    }));
-  }, []);
-
-  const removeMedia = useCallback((index: number) => {
-    setState((prev) => ({
-      ...prev,
-      pendingMedia: prev.pendingMedia.filter((_, i) => i !== index),
-    }));
-  }, []);
-
-  const clearMedia = useCallback(() => {
-    setState((prev) => ({ ...prev, pendingMedia: [] }));
-  }, []);
-
-  const submitFeedback = useCallback(
-    async (
-      data: Omit<FeedbackCreate, 'app_name' | 'app_version' | 'user_agent' | 'environment' | 'git_commit' | 'git_branch' | 'hostname'>
-    ): Promise<FeedbackItem> => {
-      // Create feedback item with environment context
-      const feedbackData: FeedbackCreate = {
-        ...data,
-        app_name: appName,
-        app_version: appVersion,
-        user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : undefined,
-        environment,
-        git_commit: gitCommit,
-        git_branch: gitBranch,
-        hostname,
-      };
-
-      const item = await api.createFeedback(feedbackData);
-
-      // Upload any pending media
-      for (const media of state.pendingMedia) {
-        await api.uploadMedia(item.id, media);
-      }
-
-      // Clear state after successful submission
-      closeModal();
-
-      return item;
-    },
-    [api, appName, appVersion, environment, gitCommit, gitBranch, hostname, state.pendingMedia, closeModal]
-  );
-
-  // Keyboard shortcut handler
-  useEffect(() => {
-    if (disabled) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Parse shortcut like "Ctrl+Shift+F"
-      const parts = keyboardShortcut.split('+').map((p) => p.toLowerCase().trim());
-      const key = parts.pop();
-
-      const modifiers = {
-        ctrl: parts.includes('ctrl'),
-        shift: parts.includes('shift'),
-        alt: parts.includes('alt'),
-        meta: parts.includes('meta') || parts.includes('cmd'),
-      };
-
-      const match =
-        e.key.toLowerCase() === key &&
-        e.ctrlKey === modifiers.ctrl &&
-        e.shiftKey === modifiers.shift &&
-        e.altKey === modifiers.alt &&
-        e.metaKey === modifiers.meta;
-
-      if (match) {
-        e.preventDefault();
-        if (state.isFeedbackMode) {
-          closeFeedbackMode();
-        } else if (state.isOpen) {
-          closeModal();
-        } else {
-          openFeedbackMode();
-        }
-      }
-
-      // Escape to close
-      if (e.key === 'Escape') {
-        if (state.isFeedbackMode) {
-          closeFeedbackMode();
-        } else if (state.isOpen) {
-          closeModal();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    disabled,
-    keyboardShortcut,
-    state.isFeedbackMode,
-    state.isOpen,
-    openFeedbackMode,
-    closeFeedbackMode,
-    closeModal,
-  ]);
-
-  // Context value
-  const contextValue: FeedbackContextValue = useMemo(
-    () => ({
-      ...state,
-      config,
-      openFeedbackMode,
-      closeFeedbackMode,
-      openModal,
-      closeModal,
-      addMedia,
-      removeMedia,
-      clearMedia,
-      submitFeedback,
-    }),
-    [
-      state,
-      config,
-      openFeedbackMode,
-      closeFeedbackMode,
-      openModal,
-      closeModal,
-      addMedia,
-      removeMedia,
-      clearMedia,
-      submitFeedback,
-    ]
-  );
-
-  // CSS custom properties for theming
-  const cssVariables: CSSProperties = {
+function buildCssVariables(theme: Required<Theme>): CSSProperties {
+  return {
     '--feedback-primary': theme.primary,
     '--feedback-primary-hover': theme.primaryHover,
     '--feedback-background': theme.background,
@@ -278,11 +66,41 @@ export function FeedbackProvider({
     '--feedback-error': theme.error,
     '--feedback-warning': theme.warning,
   } as CSSProperties;
+}
+
+export function FeedbackProvider({
+  children, apiUrl, appName, appVersion,
+  keyboardShortcut = 'Ctrl+Shift+F',
+  theme: customTheme, classNames, position = 'bottom-right', disabled = false,
+  environment, gitCommit, gitBranch, hostname,
+}: FeedbackProviderProps) {
+  const api = useFeedbackApi({ apiUrl });
+  const theme = useMemo(() => mergeTheme(customTheme), [customTheme]);
+
+  const config: FeedbackProviderConfig = useMemo(
+    () => ({ apiUrl, appName, appVersion, keyboardShortcut, theme: customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname }),
+    [apiUrl, appName, appVersion, keyboardShortcut, customTheme, classNames, position, disabled, environment, gitCommit, gitBranch, hostname],
+  );
+
+  const {
+    state, openFeedbackMode, closeFeedbackMode, openModal, closeModal,
+    addMedia, removeMedia, clearMedia, submitFeedback,
+  } = useFeedbackState({ api, appName, appVersion, environment, gitCommit, gitBranch, hostname, disabled });
+
+  useKeyboardShortcuts({
+    disabled, keyboardShortcut,
+    isFeedbackMode: state.isFeedbackMode, isOpen: state.isOpen,
+    openFeedbackMode, closeFeedbackMode, closeModal,
+  });
+
+  const contextValue: FeedbackContextValue = useMemo(
+    () => ({ ...state, config, openFeedbackMode, closeFeedbackMode, openModal, closeModal, addMedia, removeMedia, clearMedia, submitFeedback }),
+    [state, config, openFeedbackMode, closeFeedbackMode, openModal, closeModal, addMedia, removeMedia, clearMedia, submitFeedback],
+  );
 
   return (
     <FeedbackContext.Provider value={contextValue}>
-      {/* Theme wrapper - just for CSS variables, NOT ui-feedback-root */}
-      <div style={cssVariables} className="ui-feedback-theme">
+      <div style={buildCssVariables(theme)} className="ui-feedback-theme">
         {children}
       </div>
     </FeedbackContext.Provider>

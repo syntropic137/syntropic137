@@ -11,10 +11,9 @@ from syn_cli._output import (
     format_cost,
     format_timestamp,
     format_tokens,
-    print_error,
     status_style,
 )
-from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_get, api_get_list, build_params
 from syn_cli.commands._session_models import SessionDetailResponse, SessionSummaryResponse
 
 app = typer.Typer(
@@ -24,14 +23,6 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("list")
 def list_sessions(
     workflow_id: str | None = typer.Option(None, "--workflow", "-w", help="Filter by workflow ID"),
@@ -39,23 +30,9 @@ def list_sessions(
     limit: int = typer.Option(50, "--limit", "-n", help="Max results", min=1, max=200),
 ) -> None:
     """List agent sessions."""
-    try:
-        with get_client() as client:
-            params: dict[str, str | int] = {"limit": limit}
-            if workflow_id:
-                params["workflow_id"] = workflow_id
-            if status:
-                params["status"] = status
-            resp = client.get("/sessions", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(workflow_id=workflow_id, status=status, limit=limit)
+    items = [SessionSummaryResponse(**s) for s in api_get_list("/sessions", params=params)]
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    items = [SessionSummaryResponse(**s) for s in resp.json()]
     if not items:
         console.print("[dim]No sessions found.[/dim]")
         return
@@ -81,27 +58,11 @@ def list_sessions(
     console.print(table)
 
 
-@app.command("show")
-def show_session(
-    session_id: str = typer.Argument(..., help="Session ID"),
-) -> None:
-    """Show detailed information for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/sessions/{session_id}")
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    s = SessionDetailResponse(**resp.json())
+def _build_session_panel(s: SessionDetailResponse) -> str:
+    """Build panel text for session detail view."""
     style = status_style(s.status)
     status_display = f"[{style}]{s.status}[/{style}]" if style else s.status
-
-    panel_text = (
+    text = (
         f"[bold]Session:[/bold] {s.id}\n"
         f"[bold]Status:[/bold] {status_display}\n"
         f"[bold]Provider:[/bold] {s.agent_provider or '-'} / {s.agent_model or '-'}\n"
@@ -112,9 +73,24 @@ def show_session(
         f"[bold]Started:[/bold] {format_timestamp(s.started_at)}"
     )
     if s.error_message:
-        panel_text += f"\n[bold red]Error:[/bold red] {s.error_message}"
+        text += f"\n[bold red]Error:[/bold red] {s.error_message}"
+    return text
 
-    console.print(Panel(panel_text, title="[cyan]Session Detail[/cyan]", border_style="cyan"))
+
+@app.command("show")
+def show_session(
+    session_id: str = typer.Argument(..., help="Session ID"),
+) -> None:
+    """Show detailed information for a session."""
+    s = SessionDetailResponse(**api_get(f"/sessions/{session_id}"))
+
+    console.print(
+        Panel(
+            _build_session_panel(s),
+            title="[cyan]Session Detail[/cyan]",
+            border_style="cyan",
+        )
+    )
 
     if s.operations:
         table = Table(title="Operations")
