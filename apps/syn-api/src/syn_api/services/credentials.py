@@ -1,4 +1,4 @@
-"""Credential validation for application startup."""
+"""Credential validation — exports API keys and validates GitHub App config."""
 
 from __future__ import annotations
 

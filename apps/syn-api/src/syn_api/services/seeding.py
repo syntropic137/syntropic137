@@ -1,4 +1,4 @@
-"""Seed demo data for offline development mode."""
+"""Offline demo data seeding — creates workflow templates and trigger presets."""
 
 from __future__ import annotations
 
