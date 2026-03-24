@@ -12,24 +12,15 @@ from syn_cli._output import (
     format_cost,
     format_timestamp,
     format_tokens,
-    print_error,
     status_style,
 )
-from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_get, build_params
 
 app = typer.Typer(
     name="execution",
     help="List and inspect workflow executions",
     no_args_is_help=True,
 )
-
-
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
 
 
 @app.command("list")
@@ -42,21 +33,9 @@ def list_executions(
     page_size: Annotated[int, typer.Option(help="Items per page (max 100)")] = 50,
 ) -> None:
     """List all workflow executions across every workflow."""
-    try:
-        with get_client() as client:
-            params: dict[str, str | int] = {"page": page, "page_size": page_size}
-            if status:
-                params["status"] = status
-            resp = client.get("/executions", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(status=status, page=page, page_size=page_size)
+    data = api_get("/executions", params=params)
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     executions = data.get("executions", [])
     total = data.get("total", 0)
 
@@ -92,26 +71,36 @@ def list_executions(
         console.print(f"[dim]Showing page {page}. Use --page {page + 1} for more.[/dim]")
 
 
+def _render_phases(phases: list[dict[str, object]]) -> None:
+    """Render phase table for execution detail view."""
+    table = Table(title="Phases", show_edge=False)
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Name")
+    table.add_column("Status")
+    table.add_column("Started")
+    table.add_column("Tokens", justify="right")
+    table.add_column("Cost", justify="right")
+    for i, ph in enumerate(phases, 1):
+        ps = str(ph.get("status", ""))
+        pstyle = status_style(ps)
+        table.add_row(
+            str(i),
+            str(ph.get("name", "")),
+            f"[{pstyle}]{ps}[/{pstyle}]" if pstyle else ps,
+            format_timestamp(str(ph.get("started_at") or "")),
+            format_tokens(int(str(ph.get("total_tokens", 0) or 0))),
+            format_cost(str(ph.get("cost_usd") or "0")),
+        )
+    console.print(table)
+
+
 @app.command("show")
 def show_execution(
     execution_id: Annotated[str, typer.Argument(help="Execution ID")],
 ) -> None:
     """Show detailed information about a single execution."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/executions/{execution_id}")
-    except Exception:
-        _handle_connect_error()
-        return
+    ex = api_get(f"/executions/{execution_id}")
 
-    if resp.status_code == 404:
-        print_error(f"Execution not found: {execution_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    ex = resp.json()
     s = ex.get("status", "")
     style = status_style(s)
 
@@ -129,22 +118,4 @@ def show_execution(
     phases = ex.get("phases", [])
     if phases:
         console.print()
-        table = Table(title="Phases", show_edge=False)
-        table.add_column("#", justify="right", style="dim")
-        table.add_column("Name")
-        table.add_column("Status")
-        table.add_column("Started")
-        table.add_column("Tokens", justify="right")
-        table.add_column("Cost", justify="right")
-        for i, ph in enumerate(phases, 1):
-            ps = ph.get("status", "")
-            pstyle = status_style(ps)
-            table.add_row(
-                str(i),
-                ph.get("name", ""),
-                f"[{pstyle}]{ps}[/{pstyle}]" if pstyle else ps,
-                format_timestamp(ph.get("started_at")),
-                format_tokens(ph.get("total_tokens") or 0),
-                format_cost(ph.get("cost_usd") or "0"),
-            )
-        console.print(table)
+        _render_phases(phases)

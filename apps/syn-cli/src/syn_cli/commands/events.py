@@ -7,8 +7,8 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
-from syn_cli._output import console, format_cost, format_duration, format_timestamp, print_error
-from syn_cli.client import get_client
+from syn_cli._output import console, format_cost, format_duration, format_timestamp
+from syn_cli.commands._api_helpers import api_get, api_get_list, build_params
 
 app = typer.Typer(
     name="events",
@@ -17,31 +17,13 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("recent")
 def recent(
     limit: Annotated[int, typer.Option(help="Max events to show (max 200)")] = 50,
 ) -> None:
     """Show recent domain events across all sessions."""
-    try:
-        with get_client() as client:
-            resp = client.get("/events/recent", params={"limit": limit})
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get("/events/recent", params={"limit": limit})
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     events = data.get("events", [])
     if not events:
         console.print("[dim]No recent events.[/dim]")
@@ -75,21 +57,9 @@ def session_events(
     offset: Annotated[int, typer.Option(help="Pagination offset")] = 0,
 ) -> None:
     """List events for a specific session."""
-    try:
-        with get_client() as client:
-            params: dict[str, str | int] = {"limit": limit, "offset": offset}
-            if event_type:
-                params["event_type"] = event_type
-            resp = client.get(f"/events/sessions/{session_id}", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(limit=limit, offset=offset, event_type=event_type)
+    data = api_get(f"/events/sessions/{session_id}", params=params)
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     events = data.get("events", [])
     if not events:
         console.print(f"[dim]No events for session {session_id}.[/dim]")
@@ -117,18 +87,8 @@ def timeline(
     limit: Annotated[int, typer.Option(help="Max entries (max 500)")] = 100,
 ) -> None:
     """Show a chronological tool-call timeline for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/events/sessions/{session_id}/timeline", params={"limit": limit})
-    except Exception:
-        _handle_connect_error()
-        return
+    entries = api_get_list(f"/events/sessions/{session_id}/timeline", params={"limit": limit})
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    entries = resp.json()
     if not entries:
         console.print("[dim]No timeline entries.[/dim]")
         return
@@ -158,18 +118,8 @@ def session_costs(
     session_id: Annotated[str, typer.Argument(help="Session ID")],
 ) -> None:
     """Show token usage and cost breakdown for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/events/sessions/{session_id}/costs")
-    except Exception:
-        _handle_connect_error()
-        return
+    d = api_get(f"/events/sessions/{session_id}/costs")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    d = resp.json()
     console.print(f"[bold]Session costs:[/bold] {d.get('session_id', session_id)}")
     console.print(f"  Input tokens:       {d.get('input_tokens', 0):,}")
     console.print(f"  Output tokens:      {d.get('output_tokens', 0):,}")
@@ -187,18 +137,8 @@ def session_tools(
     session_id: Annotated[str, typer.Argument(help="Session ID")],
 ) -> None:
     """Show tool usage summary for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/events/sessions/{session_id}/tools")
-    except Exception:
-        _handle_connect_error()
-        return
+    tools = api_get_list(f"/events/sessions/{session_id}/tools")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    tools = resp.json()
     if not tools:
         console.print("[dim]No tool usage recorded.[/dim]")
         return

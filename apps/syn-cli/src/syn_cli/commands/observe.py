@@ -6,8 +6,8 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from syn_cli._output import console, format_cost, format_duration, format_tokens, print_error
-from syn_cli.client import get_client
+from syn_cli._output import console, format_cost, format_duration, format_tokens
+from syn_cli.commands._api_helpers import api_get
 
 app = typer.Typer(
     name="observe",
@@ -16,37 +16,18 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("tools")
 def tool_timeline(
     session_id: str = typer.Argument(..., help="Session ID"),
     limit: int = typer.Option(100, "--limit", "-n", help="Max results", min=1, max=500),
 ) -> None:
     """Show tool execution timeline for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(
-                f"/observability/sessions/{session_id}/tools",
-                params={"limit": limit},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(
+        f"/observability/sessions/{session_id}/tools",
+        params={"limit": limit},
+    )
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     executions = data.get("executions", [])
-
     if not executions:
         console.print("[dim]No tool executions found for this session.[/dim]")
         return
@@ -78,18 +59,8 @@ def token_metrics(
     session_id: str = typer.Argument(..., help="Session ID"),
 ) -> None:
     """Show token breakdown for a session."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/observability/sessions/{session_id}/tokens")
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(f"/observability/sessions/{session_id}/tokens")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     panel_text = (
         f"[bold]Session:[/bold] {data.get('session_id', session_id)}\n"
         f"[bold]Input Tokens:[/bold] {format_tokens(data.get('input_tokens', 0))}\n"

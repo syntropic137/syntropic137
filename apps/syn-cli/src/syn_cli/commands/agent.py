@@ -9,6 +9,7 @@ from rich.table import Table
 
 from syn_cli._output import console, print_error
 from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_get_list, api_post
 
 app = typer.Typer(
     name="agent",
@@ -17,31 +18,10 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("list")
 def list_providers() -> None:
     """List available agent providers."""
-    try:
-        with get_client() as client:
-            resp = client.get("/agents/providers")
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    providers = resp.json()
-    if not isinstance(providers, list):
-        providers = providers.get("providers", [])
+    providers = api_get_list("/agents/providers")
 
     table = Table(title="Agent Providers")
     table.add_column("Provider", style="cyan")
@@ -76,22 +56,13 @@ def test_agent(
     ] = None,
 ) -> None:
     """Test an agent provider with a simple prompt."""
-    try:
-        with get_client() as client, console.status(f"Testing {provider}..."):
-            resp = client.post(
-                "/agents/test",
-                json={"provider": provider, "prompt": prompt, "model": model},
-                timeout=60.0,
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    with console.status(f"Testing {provider}..."):
+        result = api_post(
+            "/agents/test",
+            json={"provider": provider, "prompt": prompt, "model": model},
+            timeout=60.0,
+        )
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    result = resp.json()
     console.print(f"[green]Response from {result.get('provider', provider)}:[/green]")
     console.print(f"  Model: {result.get('model', 'unknown')}")
     console.print(f"  Response: {result.get('response_text', '')}")
