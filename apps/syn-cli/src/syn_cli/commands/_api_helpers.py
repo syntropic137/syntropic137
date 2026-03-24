@@ -19,13 +19,17 @@ def handle_connect_error() -> NoReturn:
 
 def _check_response(
     status_code: int,
-    json_data: dict[str, Any],
+    json_data: Any,
     *,
     expected: tuple[int, ...] = (200,),
 ) -> None:
     """Raise typer.Exit(1) if status code is unexpected."""
     if status_code not in expected:
-        detail = json_data.get("detail", f"HTTP {status_code}")
+        detail = (
+            json_data.get("detail", f"HTTP {status_code}")
+            if isinstance(json_data, dict)
+            else f"HTTP {status_code}"
+        )
         print_error(str(detail))
         raise typer.Exit(1)
 
@@ -62,7 +66,7 @@ def api_get_list(
         handle_connect_error()
 
     data: list[Any] = resp.json()
-    _check_response(resp.status_code, {} if isinstance(data, list) else data, expected=expected)
+    _check_response(resp.status_code, data, expected=expected)
     return data
 
 

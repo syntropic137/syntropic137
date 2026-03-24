@@ -12,7 +12,6 @@ from syn_cli.main import app
 runner = CliRunner()
 
 _HELPERS_CLIENT = "syn_cli.commands._api_helpers.get_client"
-_CONTROL_CLIENT = "syn_cli.commands.control.get_client"
 
 
 def _mock_response(status_code: int = 200, json_data: dict | None = None) -> MagicMock:
@@ -116,14 +115,14 @@ class TestControlCancel:
 class TestControlStatus:
     def test_status_running(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "running"}))
-        with patch(_CONTROL_CLIENT, return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "status", "exec-001"])
         assert result.exit_code == 0
         assert "running" in result.stdout
 
     def test_status_completed(self) -> None:
         client = _mock_client(_mock_response(200, {"state": "completed"}))
-        with patch(_CONTROL_CLIENT, return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["control", "status", "exec-001"])
         assert result.exit_code == 0
         assert "completed" in result.stdout

@@ -6,9 +6,8 @@ from typing import Annotated
 
 import typer
 
-from syn_cli._output import console, print_error
-from syn_cli.client import get_client
-from syn_cli.commands._api_helpers import api_post, handle_connect_error
+from syn_cli._output import console
+from syn_cli.commands._api_helpers import api_get, api_post
 
 app = typer.Typer(
     name="control",
@@ -79,24 +78,17 @@ def cancel(
     console.print(f"  State: {data.get('state', 'unknown')}")
 
 
-def _render_interrupted_detail(client: object, execution_id: str) -> None:
+def _render_interrupted_detail(execution_id: str) -> None:
     """Fetch and display additional context for interrupted executions."""
-    from syn_cli.client import get_client as _get_client
-
-    # Use the provided client reference (for type compatibility in caller)
-    _ = client
     try:
-        with _get_client() as c:
-            detail_resp = c.get(f"/api/executions/{execution_id}")
-        if detail_resp.status_code == 200:
-            detail = detail_resp.json()
-            if detail.get("error_message"):
-                console.print(f"  Reason: {detail['error_message']}")
-            if detail.get("completed_at"):
-                console.print(f"  Interrupted at: {detail['completed_at']}")
-            if detail.get("git_sha"):
-                console.print(f"  Git SHA: {detail['git_sha']}")
-    except Exception:
+        detail = api_get(f"/api/executions/{execution_id}")
+        if detail.get("error_message"):
+            console.print(f"  Reason: {detail['error_message']}")
+        if detail.get("completed_at"):
+            console.print(f"  Interrupted at: {detail['completed_at']}")
+        if detail.get("git_sha"):
+            console.print(f"  Git SHA: {detail['git_sha']}")
+    except SystemExit:
         pass
 
 
@@ -105,17 +97,7 @@ def status(
     execution_id: Annotated[str, typer.Argument(help="Execution ID to check")],
 ) -> None:
     """Get current execution control state."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/api/executions/{execution_id}/state")
-    except Exception:
-        handle_connect_error()
-
-    if resp.status_code != 200:
-        print_error("Failed to get status")
-        raise typer.Exit(1)
-
-    data = resp.json()
+    data = api_get(f"/api/executions/{execution_id}/state")
     state = data.get("state", "unknown")
     color = _STATE_COLORS.get(state, "white")
 
@@ -123,7 +105,7 @@ def status(
     console.print(f"State: [{color}]{state}[/{color}]")
 
     if state == "interrupted":
-        _render_interrupted_detail(None, execution_id)
+        _render_interrupted_detail(execution_id)
 
 
 @app.command()
