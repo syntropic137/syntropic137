@@ -14,6 +14,10 @@ from syn_adapters.storage import (
     reset_storage,
 )
 from syn_domain.contexts.orchestration.seed_workflow import WorkflowSeeder
+from syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService import (
+    _build_create_command,
+    _handle_seed_error,
+)
 from syn_domain.contexts.orchestration.slices.create_workflow_template.CreateWorkflowTemplateHandler import (
     CreateWorkflowTemplateHandler,
 )
@@ -203,3 +207,73 @@ phases:
         assert report.failed == 0
         assert report.skipped == 0
         assert len(report.results) == 3
+
+
+# =========================================================================
+# Extracted helper tests
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestBuildCreateCommand:
+    """Tests for _build_create_command helper."""
+
+    def test_builds_command_from_definition(self) -> None:
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        definition = WorkflowDefinition(
+            id="wf-1",
+            name="Test",
+            type="research",
+            classification="simple",
+            repository={"url": "https://github.com/test/repo", "ref": "main"},
+            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
+        )
+        cmd = _build_create_command(definition)
+        assert cmd.aggregate_id == "wf-1"
+        assert cmd.name == "Test"
+        assert cmd.repository_url == "https://github.com/test/repo"
+
+    def test_uses_placeholder_url_without_repository(self) -> None:
+        from syn_domain.contexts.orchestration._shared.workflow_definition import (
+            WorkflowDefinition,
+        )
+
+        definition = WorkflowDefinition(
+            id="wf-2",
+            name="No Repo",
+            phases=[{"id": "p-1", "name": "Phase 1", "order": 1}],
+        )
+        cmd = _build_create_command(definition)
+        assert "placeholder" in cmd.repository_url
+
+
+@pytest.mark.unit
+class TestHandleSeedError:
+    """Tests for _handle_seed_error helper."""
+
+    def test_duplicate_error_returns_exists(self) -> None:
+        existing: set[str] = set()
+        result = _handle_seed_error(
+            Exception("Precondition failed: stream exists"),
+            "wf-1",
+            "Test",
+            existing,
+        )
+        assert result.success is False
+        assert "already exists" in (result.error or "")
+        assert "wf-1" in existing
+
+    def test_real_error_returns_failure(self) -> None:
+        existing: set[str] = set()
+        result = _handle_seed_error(
+            RuntimeError("connection refused"),
+            "wf-1",
+            "Test",
+            existing,
+        )
+        assert result.success is False
+        assert "connection refused" in (result.error or "")
+        assert "wf-1" not in existing

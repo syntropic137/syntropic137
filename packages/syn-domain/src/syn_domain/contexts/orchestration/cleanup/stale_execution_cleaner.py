@@ -56,6 +56,26 @@ class ExecutionRepositoryProtocol(Protocol):
         ...
 
 
+def _is_past_expected_completion(summary: WorkflowExecutionSummary) -> bool:
+    """Check if an execution is past its expected completion time.
+
+    Returns True if no expected_completion_at is set (always considered stale)
+    or if the deadline has passed.
+    """
+    raw = summary.expected_completion_at
+    if not raw:
+        return True
+    expected_dt: datetime | None = None
+    if isinstance(raw, str):
+        try:
+            expected_dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+    elif isinstance(raw, datetime):
+        expected_dt = raw
+    return expected_dt is None or expected_dt <= datetime.now(UTC)
+
+
 class StaleExecutionCleaner:
     """Cleans up workflow executions stuck in "running" status.
 
@@ -130,25 +150,9 @@ class StaleExecutionCleaner:
         for summary in stale_executions[: self.MAX_BATCH_SIZE]:
             execution_id = summary.workflow_execution_id
 
-            # Also check expected_completion_at if set
-            if summary.expected_completion_at:
-                expected_raw = summary.expected_completion_at
-                expected_dt: datetime | None = None
-                if isinstance(expected_raw, str):
-                    try:
-                        expected_dt = datetime.fromisoformat(expected_raw.replace("Z", "+00:00"))
-                    except ValueError:
-                        expected_dt = None
-                elif isinstance(expected_raw, datetime):
-                    expected_dt = expected_raw
-
-                if expected_dt and expected_dt > datetime.now(UTC):
-                    # Not yet past expected completion - skip
-                    logger.debug(
-                        "Skipping %s - not past expected completion",
-                        execution_id,
-                    )
-                    continue
+            if not _is_past_expected_completion(summary):
+                logger.debug("Skipping %s - not past expected completion", execution_id)
+                continue
 
             if dry_run:
                 logger.info("[DRY RUN] Would clean up: %s", execution_id)

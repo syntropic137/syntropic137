@@ -64,7 +64,7 @@ class TestObserveTools:
             ],
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.observe.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["observe", "tools", "sess-abc"])
         assert result.exit_code == 0
         assert "read_file" in result.stdout
@@ -74,14 +74,14 @@ class TestObserveTools:
     def test_tool_timeline_empty(self) -> None:
         data = {"session_id": "sess-abc", "total_executions": 0, "executions": []}
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.observe.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["observe", "tools", "sess-abc"])
         assert result.exit_code == 0
         assert "No tool executions" in result.stdout
 
     def test_tool_timeline_not_found(self) -> None:
         client = _mock_client(_mock_response(404, {"detail": "Session not found"}))
-        with patch("syn_cli.commands.observe.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["observe", "tools", "bad-id"])
         assert result.exit_code == 1
         assert "Session not found" in result.stdout
@@ -100,14 +100,14 @@ class TestObserveTokens:
             "cache_read_tokens": 2000,
         }
         client = _mock_client(_mock_response(200, data))
-        with patch("syn_cli.commands.observe.get_client", return_value=client):
+        with patch("syn_cli.commands._api_helpers.get_client", return_value=client):
             result = runner.invoke(app, ["observe", "tokens", "sess-abc"])
         assert result.exit_code == 0
         assert "8.0K" in result.stdout
         assert "$0.50" in result.stdout
 
     def test_token_metrics_connection_error(self) -> None:
-        with patch("syn_cli.commands.observe.get_client", side_effect=Exception("conn")):
+        with patch("syn_cli.commands._api_helpers.get_client", side_effect=Exception("conn")):
             result = runner.invoke(app, ["observe", "tokens", "sess-abc"])
         assert result.exit_code == 1
         assert "Could not connect" in result.stdout

@@ -6,8 +6,8 @@ import typer
 from rich.panel import Panel
 from rich.table import Table
 
-from syn_cli._output import console, format_cost, format_tokens, print_error
-from syn_cli.client import get_client
+from syn_cli._output import console, format_cost, format_tokens
+from syn_cli.commands._api_helpers import api_get, build_params
 
 app = typer.Typer(
     name="metrics",
@@ -16,34 +16,14 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("show")
 def show_metrics(
     workflow_id: str | None = typer.Option(None, "--workflow", "-w", help="Filter by workflow ID"),
 ) -> None:
     """Show aggregated metrics (optionally filtered by workflow)."""
-    try:
-        with get_client() as client:
-            params: dict[str, str] = {}
-            if workflow_id:
-                params["workflow_id"] = workflow_id
-            resp = client.get("/metrics", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(workflow_id=workflow_id)
+    data = api_get("/metrics", params=params)
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     panel_text = (
         f"[bold]Workflows:[/bold] {data.get('total_workflows', 0)} "
         f"(completed: {data.get('completed_workflows', 0)}, failed: {data.get('failed_workflows', 0)})\n"

@@ -8,21 +8,13 @@ import typer
 from rich.table import Table
 
 from syn_cli._output import console, format_timestamp, print_error
-from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_delete, api_get, api_post, api_put, build_params
 
 app = typer.Typer(
     name="org",
     help="Manage organizations",
     no_args_is_help=True,
 )
-
-
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
 
 
 @app.command("create")
@@ -32,21 +24,10 @@ def create(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Create a new organization."""
-    try:
-        with get_client() as client:
-            resp = client.post(
-                "/organizations",
-                json={"name": name, "slug": slug, "created_by": created_by},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
+    data = api_post(
+        "/organizations",
+        json={"name": name, "slug": slug, "created_by": created_by},
+    )
     console.print(f"[green]Organization created:[/green] {data.get('organization_id', '')}")
     console.print(f"  Name: {name}  Slug: {slug}")
 
@@ -54,18 +35,8 @@ def create(
 @app.command("list")
 def list_orgs() -> None:
     """List all organizations."""
-    try:
-        with get_client() as client:
-            resp = client.get("/organizations")
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get("/organizations")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     orgs = data.get("organizations", [])
     if not orgs:
         console.print("[dim]No organizations found.[/dim]")
@@ -96,21 +67,8 @@ def show(
     organization_id: Annotated[str, typer.Argument(help="Organization ID")],
 ) -> None:
     """Show details of an organization."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/organizations/{organization_id}")
-    except Exception:
-        _handle_connect_error()
-        return
+    o = api_get(f"/organizations/{organization_id}")
 
-    if resp.status_code == 404:
-        print_error(f"Organization not found: {organization_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    o = resp.json()
     console.print(f"[bold]Organization:[/bold] {o.get('name', '')}")
     console.print(f"  ID:       {o.get('organization_id', '')}")
     console.print(f"  Slug:     {o.get('slug', '')}")
@@ -130,26 +88,8 @@ def update(
         print_error("Provide at least --name or --slug.")
         raise typer.Exit(1)
 
-    body: dict[str, str] = {}
-    if name:
-        body["name"] = name
-    if slug:
-        body["slug"] = slug
-
-    try:
-        with get_client() as client:
-            resp = client.put(f"/organizations/{organization_id}", json=body)
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code == 404:
-        print_error(f"Organization not found: {organization_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    body = build_params(name=name, slug=slug)
+    api_put(f"/organizations/{organization_id}", json=body)
     console.print(f"[green]Organization updated:[/green] {organization_id}")
 
 
@@ -163,21 +103,5 @@ def delete(
         console.print("[dim]Aborted.[/dim]")
         raise typer.Exit(0)
 
-    try:
-        with get_client() as client:
-            resp = client.delete(f"/organizations/{organization_id}")
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code == 404:
-        print_error(f"Organization not found: {organization_id}")
-        raise typer.Exit(1)
-    if resp.status_code == 409:
-        print_error(resp.json().get("detail", "Conflict — organization may have dependencies."))
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    api_delete(f"/organizations/{organization_id}")
     console.print(f"[red]Organization deleted:[/red] {organization_id}")
