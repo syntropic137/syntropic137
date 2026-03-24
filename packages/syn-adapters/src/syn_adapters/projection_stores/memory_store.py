@@ -13,6 +13,7 @@ from syn_adapters.projection_stores.memory_store_helpers import (
     apply_filters,
     apply_pagination,
     apply_sorting,
+    clear_projection as _clear_projection,
 )
 from syn_shared.settings import get_settings
 
@@ -131,7 +132,4 @@ class InMemoryProjectionStore:
 
     def clear_projection(self, projection: str) -> None:
         """Clear data for a specific projection."""
-        if projection in self._data:
-            del self._data[projection]
-        if projection in self._state:
-            del self._state[projection]
+        _clear_projection(self, projection)

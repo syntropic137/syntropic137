@@ -18,8 +18,8 @@ from agentic_isolation import (
 from syn_adapters.workspace_backends.agentic.stream_helpers import (
     _build_exec_command,
     _cleanup_process,
-    read_lines,
 )
+from syn_adapters.workspace_backends.agentic.stream_reader import read_lines
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator

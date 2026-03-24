@@ -1,12 +1,18 @@
-"""Event handler mapping and provenance for projection manager.
+"""Event handler mapping, provenance, and dispatch for projection manager.
 
 Extracted from manager.py to reduce module complexity.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from syn_adapters.projections.manager import ProjectionManager
+
+logger = logging.getLogger(__name__)
 
 from syn_shared.events import (
     SESSION_SUMMARY,
@@ -93,3 +99,36 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
     "CostRecorded": [("session_cost", "on_cost_recorded"), ("execution_cost", "on_cost_recorded")],
     "SessionCostFinalized": [("session_cost", "on_session_cost_finalized"), ("execution_cost", "on_session_cost_finalized")],
 }
+
+
+async def dispatch_to_handlers(
+    mgr: "ProjectionManager", event_type: str, event_data: dict[str, Any]
+) -> None:
+    """Internal: Dispatch event data to projection handlers.
+
+    DO NOT CALL DIRECTLY - use process_event_envelope() in manager_dispatch.py instead.
+    """
+    mgr._ensure_initialized()
+
+    handlers = EVENT_HANDLERS.get(event_type, [])
+    if not handlers:
+        logger.debug("No handlers registered for event type: %s", event_type)
+
+    for projection_name, method_name in handlers:
+        projection = mgr._projections.get(projection_name)
+        if projection:
+            handler = getattr(projection, method_name, None)
+            if handler:
+                try:
+                    await handler(event_data)
+                except Exception as e:
+                    logger.error(
+                        "Error in projection handler",
+                        extra={
+                            "projection": projection_name,
+                            "method": method_name,
+                            "event_type": event_type,
+                            "error": str(e),
+                        },
+                        exc_info=True,
+                    )

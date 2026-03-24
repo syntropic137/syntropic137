@@ -1,7 +1,8 @@
 """Stream helper functions for AgenticEventStreamAdapter.
 
 Extracted from stream_adapter.py to reduce module cognitive complexity.
-Handles process management and line-reading for docker exec streaming.
+Handles process management for docker exec streaming.
+Line-reading is in stream_reader.py.
 """
 
 from __future__ import annotations
@@ -9,10 +10,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -60,31 +57,3 @@ def _is_stream_timed_out(
     return False
 
 
-async def read_lines(
-    proc: asyncio.subprocess.Process,
-    stream_timeout: float | None,
-    start_time: float,
-) -> AsyncIterator[str]:
-    """Read and yield decoded lines from process stdout."""
-    while True:
-        if _is_stream_timed_out(stream_timeout, start_time):
-            break
-
-        if proc.stdout is None:
-            break
-
-        try:
-            line_bytes = await asyncio.wait_for(
-                proc.stdout.readline(), timeout=1.0,
-            )
-        except TimeoutError:
-            if proc.returncode is not None:
-                break
-            continue
-
-        if not line_bytes:
-            break
-
-        line = line_bytes.decode("utf-8", errors="replace").rstrip("\n\r")
-        if line:
-            yield line

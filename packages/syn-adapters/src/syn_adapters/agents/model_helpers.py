@@ -135,3 +135,87 @@ def list_aliases(
         Dict mapping alias -> resolved API name.
     """
     return {alias: resolve_fn(alias) for alias in aliases}
+
+
+def load_provider(
+    provider_dir: Path,
+    providers: dict[str, dict[str, Any]],
+    models: dict[str, dict[str, Any]],
+    aliases: dict[str, str],
+    model_id_to_api_name: dict[str, str],
+) -> None:
+    """Load a single provider directory's config and model files."""
+    provider_id = provider_dir.name
+    config_path = provider_dir / "config.yaml"
+    if config_path.exists():
+        providers[provider_id] = load_yaml(config_path)
+
+    for model_file in provider_dir.glob("*.yaml"):
+        if model_file.name == "config.yaml":
+            continue
+        register_model_file(model_file, models, aliases, model_id_to_api_name)
+
+
+def register_model_file(
+    model_file: Path,
+    models: dict[str, dict[str, Any]],
+    aliases: dict[str, str],
+    model_id_to_api_name: dict[str, str],
+) -> None:
+    """Register a single model YAML file."""
+    model_data = load_yaml(model_file)
+    if not model_data:
+        return
+
+    model_id = model_data.get("id", model_file.stem)
+    models[model_id] = model_data
+    register_model_aliases(model_id, model_data, aliases, model_id_to_api_name)
+
+
+def register_model_aliases(
+    model_id: str,
+    model_data: dict[str, Any],
+    aliases: dict[str, str],
+    model_id_to_api_name: dict[str, str],
+) -> None:
+    """Register aliases for a model if it has an api_name."""
+    api_name = model_data.get("api_name")
+    if not api_name:
+        return
+    aliases[model_id] = api_name
+    model_id_to_api_name[model_id] = api_name
+    if alias := model_data.get("alias"):
+        aliases[alias] = api_name
+
+
+def register_current_model_aliases(
+    providers: dict[str, dict[str, Any]],
+    aliases: dict[str, str],
+    model_id_to_api_name: dict[str, str],
+) -> None:
+    """Create shorthand aliases from provider current_models configs."""
+    for provider_id, config in providers.items():
+        for model_type, model_id in config.get("current_models", {}).items():
+            register_provider_alias(
+                provider_id,
+                str(model_type),
+                model_id_to_api_name.get(model_id, model_id),
+                aliases,
+            )
+
+
+def register_provider_alias(
+    provider_id: str,
+    model_type: str,
+    api_name: str | None,
+    aliases: dict[str, str],
+) -> None:
+    """Register aliases for a single provider/model-type combination."""
+    if api_name is None:
+        return
+    resolved = str(api_name)
+    if provider_id == "anthropic":
+        aliases[model_type] = resolved
+        aliases[f"claude-{model_type}"] = resolved
+    else:
+        aliases[f"{provider_id}/{model_type}"] = resolved

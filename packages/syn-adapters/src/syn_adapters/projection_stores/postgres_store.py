@@ -167,7 +167,7 @@ class PostgresProjectionStore:
         pool = await self._get_pool()
         table_name = self._table_name(projection)
 
-        from syn_adapters.projection_stores.postgres_helpers import build_query
+        from syn_adapters.projection_stores.postgres_query_builder import build_query
 
         query, params = build_query(table_name, filters, order_by, limit, offset)
 

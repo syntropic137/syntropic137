@@ -27,13 +27,15 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import logging
+import mimetypes
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from syn_adapters.object_storage.minio_helpers import (
     do_download as _do_download,
-    do_upload as _do_upload,
     get_object_info as _get_object_info,
     get_presigned_url as _get_presigned_url,
 )
@@ -56,6 +58,62 @@ if TYPE_CHECKING:
     from syn_shared.settings.storage import StorageProvider
 
 logger = logging.getLogger(__name__)
+
+
+def _do_upload(
+    client: "Minio",
+    bucket_name: str,
+    key: str,
+    content: bytes,
+    content_type: str | None,
+    metadata: dict[str, str] | None,
+) -> UploadResult:
+    """Synchronous upload body for MinIO (run in executor).
+
+    Handles content-type detection, put_object, and ETag computation.
+    Raises UploadError on failure so the async caller needs no try/except.
+
+    Args:
+        client: Minio client instance.
+        bucket_name: Storage bucket name.
+        key: Object key (path) within the bucket.
+        content: Raw bytes to store.
+        content_type: MIME type. Auto-detected if not provided.
+        metadata: Custom metadata.
+
+    Returns:
+        UploadResult with key, size, and ETag.
+
+    Raises:
+        UploadError: If upload fails.
+    """
+    try:
+        if content_type is None:
+            content_type, _ = mimetypes.guess_type(key)
+            content_type = content_type or "application/octet-stream"
+
+        result = client.put_object(
+            bucket_name,
+            key,
+            io.BytesIO(content),
+            len(content),
+            content_type=content_type,
+            metadata=cast("dict[str, Any]", metadata) if metadata else None,
+        )
+
+        etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
+
+        return UploadResult(
+            key=key,
+            size_bytes=len(content),
+            etag=result.etag if hasattr(result, "etag") else etag,
+            url=None,
+        )
+    except UploadError:
+        raise
+    except Exception as e:
+        logger.exception("Failed to upload to MinIO: %s", key)
+        raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
 
 
 class MinioStorage:
@@ -177,19 +235,13 @@ class MinioStorage:
         Raises:
             UploadError: If upload fails.
         """
-        try:
-            await self._ensure_bucket()
-            client = self._get_client()
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
-            )
-        except StorageConfigurationError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to upload to MinIO: %s", key)
-            raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
+        await self._ensure_bucket()
+        client = self._get_client()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
+        )
 
     async def download(self, key: str) -> bytes:
         """Download content from MinIO.
@@ -204,18 +256,12 @@ class MinioStorage:
             ObjectNotFoundError: If object doesn't exist.
             DownloadError: If download fails.
         """
-        try:
-            client = self._get_client()
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                None,
-                partial(_do_download, client, self._bucket_name, key),
-            )
-        except (ObjectNotFoundError, StorageConfigurationError):
-            raise
-        except Exception as e:
-            logger.exception("Failed to download from MinIO: %s", key)
-            raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
+        client = self._get_client()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(_do_download, client, self._bucket_name, key),
+        )
 
     async def delete(self, key: str) -> bool:
         """Delete an object from MinIO.

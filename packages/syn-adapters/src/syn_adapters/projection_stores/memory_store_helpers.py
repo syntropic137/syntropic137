@@ -5,7 +5,10 @@ Extracted from memory_store.py to reduce module complexity.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.memory_store import InMemoryProjectionStore
 
 
 def apply_filters(
@@ -41,3 +44,11 @@ def apply_pagination(
     if limit:
         results = results[:limit]
     return results
+
+
+def clear_projection(store: "InMemoryProjectionStore", projection: str) -> None:
+    """Clear data for a specific projection."""
+    if projection in store._data:
+        del store._data[projection]
+    if projection in store._state:
+        del store._state[projection]

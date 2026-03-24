@@ -24,7 +24,9 @@ from syn_adapters.agents.model_helpers import (
     list_aliases,
     list_models,
     load_fallback_aliases,
+    load_provider,
     load_yaml,
+    register_current_model_aliases,
 )
 from syn_shared.logging import get_logger
 
@@ -62,9 +64,17 @@ class ModelRegistry:
         for provider_dir in _PRIMITIVES_MODELS_PATH.iterdir():
             if not provider_dir.is_dir():
                 continue
-            self._load_provider(provider_dir, model_id_to_api_name)
+            load_provider(
+                provider_dir,
+                self._providers,
+                self._models,
+                self._aliases,
+                model_id_to_api_name,
+            )
 
-        self._register_current_model_aliases(model_id_to_api_name)
+        register_current_model_aliases(
+            self._providers, self._aliases, model_id_to_api_name
+        )
 
         logger.debug(
             "models_loaded",
@@ -72,71 +82,6 @@ class ModelRegistry:
             models=len(self._models),
             aliases=len(self._aliases),
         )
-
-    def _load_provider(
-        self, provider_dir: Path, model_id_to_api_name: dict[str, str]
-    ) -> None:
-        """Load a single provider directory's config and model files."""
-        provider_id = provider_dir.name
-        config_path = provider_dir / "config.yaml"
-        if config_path.exists():
-            self._providers[provider_id] = load_yaml(config_path)
-
-        for model_file in provider_dir.glob("*.yaml"):
-            if model_file.name == "config.yaml":
-                continue
-            self._register_model_file(model_file, model_id_to_api_name)
-
-    def _register_model_file(
-        self, model_file: Path, model_id_to_api_name: dict[str, str]
-    ) -> None:
-        """Register a single model YAML file."""
-        model_data = load_yaml(model_file)
-        if not model_data:
-            return
-
-        model_id = model_data.get("id", model_file.stem)
-        self._models[model_id] = model_data
-        self._register_model_aliases(model_id, model_data, model_id_to_api_name)
-
-    def _register_model_aliases(
-        self,
-        model_id: str,
-        model_data: dict[str, Any],
-        model_id_to_api_name: dict[str, str],
-    ) -> None:
-        """Register aliases for a model if it has an api_name."""
-        api_name = model_data.get("api_name")
-        if not api_name:
-            return
-        self._aliases[model_id] = api_name
-        model_id_to_api_name[model_id] = api_name
-        if alias := model_data.get("alias"):
-            self._aliases[alias] = api_name
-
-    def _register_current_model_aliases(
-        self, model_id_to_api_name: dict[str, str]
-    ) -> None:
-        """Create shorthand aliases from provider current_models configs."""
-        for provider_id, config in self._providers.items():
-            for model_type, model_id in config.get("current_models", {}).items():
-                self._register_provider_alias(
-                    provider_id, str(model_type),
-                    model_id_to_api_name.get(model_id, model_id),
-                )
-
-    def _register_provider_alias(
-        self, provider_id: str, model_type: str, api_name: str | None
-    ) -> None:
-        """Register aliases for a single provider/model-type combination."""
-        if api_name is None:
-            return
-        resolved = str(api_name)
-        if provider_id == "anthropic":
-            self._aliases[model_type] = resolved
-            self._aliases[f"claude-{model_type}"] = resolved
-        else:
-            self._aliases[f"{provider_id}/{model_type}"] = resolved
 
     def _load_fallback(self) -> None:
         """Load fallback model definitions if primitives not available."""

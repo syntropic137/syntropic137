@@ -5,19 +5,22 @@ Extracted from manager.py to reduce module complexity.
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
-from syn_adapters.projections.manager_event_map import EVENT_HANDLERS, EventProvenance
+from syn_adapters.projections.manager_event_map import (
+    EventProvenance,
+    dispatch_to_handlers,
+)
 
 if TYPE_CHECKING:
     from syn_adapters.projections.manager import ProjectionManager
 
-logger = logging.getLogger(__name__)
+# Re-exported for consumers that import dispatch_to_handlers from here
+__all__ = ["dispatch_to_handlers", "process_event_envelope"]
 
 
 async def process_event_envelope(
-    mgr: ProjectionManager, envelope: Any
+    mgr: "ProjectionManager", envelope: Any
 ) -> EventProvenance:
     """Process an event envelope from the event store.
 
@@ -52,36 +55,3 @@ async def process_event_envelope(
     await dispatch_to_handlers(mgr, provenance.event_type, event_data)
 
     return provenance
-
-
-async def dispatch_to_handlers(
-    mgr: ProjectionManager, event_type: str, event_data: dict
-) -> None:
-    """Internal: Dispatch event data to projection handlers.
-
-    DO NOT CALL DIRECTLY - use process_event_envelope() instead.
-    """
-    mgr._ensure_initialized()
-
-    handlers = EVENT_HANDLERS.get(event_type, [])
-    if not handlers:
-        logger.debug("No handlers registered for event type: %s", event_type)
-
-    for projection_name, method_name in handlers:
-        projection = mgr._projections.get(projection_name)
-        if projection:
-            handler = getattr(projection, method_name, None)
-            if handler:
-                try:
-                    await handler(event_data)
-                except Exception as e:
-                    logger.error(
-                        "Error in projection handler",
-                        extra={
-                            "projection": projection_name,
-                            "method": method_name,
-                            "event_type": event_type,
-                            "error": str(e),
-                        },
-                        exc_info=True,
-                    )

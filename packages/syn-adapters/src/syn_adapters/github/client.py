@@ -214,100 +214,35 @@ class GitHubAppClient:
     async def get_installation_token(
         self, installation_id: str | None = None, force_refresh: bool = False
     ) -> str:
-        """Get a valid installation access token.
-
-        Tokens are cached per installation_id and reused until expired.
-
-        Args:
-            installation_id: The installation to get a token for. Use
-                get_installation_for_repo() to resolve this from a repo name. Raises if not set.
-            force_refresh: If True, always fetch a new token.
-
-        Returns:
-            Installation access token string.
-
-        Raises:
-            GitHubAuthError: If token generation fails or no installation_id available.
-            GitHubRateLimitError: If rate limited.
-        """
+        """Get a valid installation access token. See client_token.get_installation_token."""
         return await _get_installation_token(self, installation_id, force_refresh)
 
     async def api_get(self, path: str, installation_id: str | None = None) -> dict:
-        """Make an authenticated GET request to the GitHub API.
-
-        Args:
-            path: API path (e.g., "/repos/owner/repo").
-            installation_id: Installation to authenticate as. Must be provided explicitly.
-
-        Returns:
-            Response JSON as dictionary.
-
-        Raises:
-            GitHubAppError: On API errors.
-        """
+        """Make an authenticated GET request. See client_api.api_get for details."""
         return await _api_get(self, path, installation_id)
 
     async def api_post(
         self, path: str, json: dict | None = None, installation_id: str | None = None
     ) -> dict:
-        """Make an authenticated POST request to the GitHub API.
-
-        Args:
-            path: API path.
-            json: Request body.
-            installation_id: Installation to authenticate as. Must be provided explicitly.
-
-        Returns:
-            Response JSON as dictionary.
-
-        Raises:
-            GitHubAppError: On API errors.
-        """
+        """Make an authenticated POST request. See client_api.api_post for details."""
         return await _api_post(self, path, json, installation_id)
 
     async def api_put(
         self, path: str, json: dict | None = None, installation_id: str | None = None
     ) -> dict:
-        """Make an authenticated PUT request to the GitHub API.
-
-        Args:
-            path: API path.
-            json: Request body.
-            installation_id: Installation to authenticate as. Must be provided explicitly.
-
-        Returns:
-            Response JSON as dictionary.
-
-        Raises:
-            GitHubAppError: On API errors.
-        """
+        """Make an authenticated PUT request. See client_api.api_put for details."""
         return await _api_put(self, path, json, installation_id)
 
     def _check_response(self, response: httpx.Response) -> None:
-        """Check response for errors.
-
-        Raises:
-            GitHubRateLimitError: If rate limited.
-            GitHubAppError: On other errors.
-        """
+        """Check response for errors. See client_api.check_response for details."""
         _check_response_fn(response)
 
     async def get_app_info(self) -> dict:
-        """Get information about the GitHub App.
-
-        Returns:
-            App metadata including name, ID, permissions.
-        """
+        """Get information about the GitHub App. See client_endpoints.get_app_info."""
         return await _get_app_info(self)
 
     async def get_webhook_config(self) -> dict:
-        """Get the GitHub App's webhook configuration.
-
-        Uses App-level JWT auth (not installation tokens).
-
-        Returns:
-            Webhook config including url, content_type, insecure_ssl, secret.
-        """
+        """Get the GitHub App's webhook configuration. See client_endpoints.get_webhook_config."""
         return await _get_webhook_config(self)
 
     async def update_webhook_config(
@@ -317,55 +252,19 @@ class GitHubAppClient:
         insecure_ssl: str = "0",
         secret: str | None = None,
     ) -> dict:
-        """Update the GitHub App's webhook configuration.
-
-        Uses App-level JWT auth (not installation tokens).
-
-        Args:
-            url: The webhook URL to receive events.
-            content_type: Payload content type ('json' or 'form').
-            insecure_ssl: '0' to verify SSL, '1' to skip verification.
-            secret: Webhook secret for payload signing. If None, keeps existing.
-
-        Returns:
-            Updated webhook config.
-        """
+        """Update the GitHub App's webhook configuration. See client_endpoints.update_webhook_config."""
         return await _update_webhook_config(self, url, content_type, insecure_ssl, secret)
 
     async def list_installations(self) -> list[dict]:
-        """List all installations of this GitHub App.
-
-        Returns:
-            List of installation metadata.
-        """
+        """List all installations of this GitHub App. See client_endpoints.list_installations."""
         return await _list_installations(self)
 
     async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]:
-        """List repositories accessible to an installation.
-
-        Args:
-            installation_id: The installation to list repos for. Must be provided explicitly.
-
-        Returns:
-            List of repository metadata.
-        """
+        """List accessible repositories. See client_endpoints.list_accessible_repos."""
         return await _list_accessible_repos(self, installation_id)
 
     async def get_installation_for_repo(self, repo_full_name: str) -> str:
-        """Look up the installation ID for a repository.
-
-        Calls GET /repos/{owner}/{repo}/installation with App JWT auth.
-        Requires the GitHub App to be installed on the repo's owner account.
-
-        Args:
-            repo_full_name: Repository in "{owner}/{repo}" format.
-
-        Returns:
-            Installation ID string.
-
-        Raises:
-            GitHubAuthError: If lookup fails or app not installed on repo.
-        """
+        """Look up the installation ID for a repository. See client_endpoints.get_installation_for_repo."""
         return await _get_installation_for_repo(self, repo_full_name)
 
 

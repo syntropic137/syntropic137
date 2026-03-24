@@ -38,17 +38,34 @@ if TYPE_CHECKING:
     from syn_shared.settings.storage import StorageProvider
 
 
-def _sync_write_file(file_path: Path, content: bytes) -> None:
-    """Write bytes to a file, creating parent directories as needed."""
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_bytes(content)
+def _sync_write_file(file_path: Path, content: bytes, key: str) -> UploadResult:
+    """Write bytes to a file; creates parent dirs; returns UploadResult.
+
+    Wraps failures in UploadError so the async caller needs no try/except.
+    """
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+        etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
+        return UploadResult(key=key, size_bytes=len(content), etag=etag, url=f"file://{file_path}")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
 
 
 def _sync_read_file(file_path: Path, key: str) -> bytes:
-    """Read bytes from a file, raising ObjectNotFoundError if missing."""
-    if not file_path.exists():
-        raise ObjectNotFoundError(key)
-    return file_path.read_bytes()
+    """Read bytes from a file; raises ObjectNotFoundError or DownloadError."""
+    try:
+        if not file_path.exists():
+            raise ObjectNotFoundError(key)
+        return file_path.read_bytes()
+    except ObjectNotFoundError:
+        raise
+    except ValueError as e:
+        raise ObjectNotFoundError(key) from e
+    except Exception as e:
+        raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
 
 
 def _sync_delete_file(file_path: Path) -> bool:
@@ -135,15 +152,8 @@ class LocalStorage:
         Returns:
             UploadResult with key and size.
         """
-        try:
-            file_path = self._resolve_path(key)
-            await asyncio.get_event_loop().run_in_executor(None, partial(_sync_write_file, file_path, content))
-            etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-            return UploadResult(key=key, size_bytes=len(content), etag=etag, url=f"file://{file_path}")
-        except ValueError:
-            raise
-        except Exception as e:
-            raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
+        file_path = self._resolve_path(key)
+        return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_write_file, file_path, content, key))
 
     async def download(self, key: str) -> bytes:
         """Download content from local filesystem.
@@ -157,15 +167,8 @@ class LocalStorage:
         Raises:
             ObjectNotFoundError: If file doesn't exist.
         """
-        try:
-            file_path = self._resolve_path(key)
-            return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_read_file, file_path, key))
-        except ObjectNotFoundError:
-            raise
-        except ValueError as e:
-            raise ObjectNotFoundError(key) from e
-        except Exception as e:
-            raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
+        file_path = self._resolve_path(key)
+        return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_read_file, file_path, key))
 
     async def delete(self, key: str) -> bool:
         """Delete a file from local filesystem.
@@ -178,11 +181,9 @@ class LocalStorage:
         """
         try:
             file_path = self._resolve_path(key)
-            return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_delete_file, file_path))
         except ValueError:
             return False
-        except Exception:
-            return False
+        return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_delete_file, file_path))
 
     async def exists(self, key: str) -> bool:
         """Check if a file exists.

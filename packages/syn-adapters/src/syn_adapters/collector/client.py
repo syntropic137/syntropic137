@@ -16,12 +16,12 @@ from typing import Any
 
 import httpx
 
+from syn_adapters.collector.client_batch import send_batch as _send_batch_fn
 from syn_adapters.collector.client_events import send_observation as _send_observation_fn
 from syn_adapters.collector.client_events import send_tool_blocked as _send_tool_blocked_fn
 from syn_adapters.collector.client_events import send_tool_completed as _send_tool_completed_fn
 from syn_adapters.collector.client_events import send_tool_started as _send_tool_started_fn
 from syn_adapters.collector.client_transport import attempt_send as _attempt_send_fn
-from syn_adapters.collector.client_transport import send_batch as _send_batch_fn
 from syn_adapters.collector.models import (
     BatchResponse,
     CollectorEvent,
@@ -162,34 +162,11 @@ class CollectorClient:
     async def _attempt_send(
         self, batch: EventBatch, headers: dict[str, str]
     ) -> BatchResponse:
-        """Attempt a single batch send (no retries).
-
-        Args:
-            batch: EventBatch to send
-            headers: HTTP headers for the request
-
-        Returns:
-            BatchResponse on success
-
-        Raises:
-            httpx.HTTPStatusError: On client errors (4xx) — not retryable.
-            httpx.HTTPStatusError: On server errors (5xx) — retryable.
-            httpx.RequestError: On connection/transport errors — retryable.
-        """
+        """Attempt a single batch send. See client_transport.attempt_send for details."""
         return await _attempt_send_fn(self, batch, headers)
 
     async def _send_batch(self, batch: EventBatch) -> BatchResponse:
-        """Send a batch with retries.
-
-        Args:
-            batch: EventBatch to send
-
-        Returns:
-            BatchResponse from Collector
-
-        Raises:
-            httpx.HTTPError: After all retries exhausted
-        """
+        """Send a batch with retries. See client_transport.send_batch for details."""
         return await _send_batch_fn(self, batch)
 
     def _build_auth_headers(self) -> dict[str, str]:
@@ -210,15 +187,7 @@ class CollectorClient:
         *,
         timestamp: datetime | None = None,
     ) -> None:
-        """Send a tool_execution_started event.
-
-        Args:
-            session_id: Agent session identifier
-            tool_name: Name of the tool being executed
-            tool_use_id: Claude's tool use identifier
-            tool_input: Tool input parameters
-            timestamp: Optional timestamp (defaults to now)
-        """
+        """Send a tool_execution_started event. See client_events.send_tool_started."""
         await _send_tool_started_fn(
             self, session_id, tool_name, tool_use_id, tool_input, timestamp=timestamp
         )
@@ -234,17 +203,7 @@ class CollectorClient:
         error_message: str | None = None,
         timestamp: datetime | None = None,
     ) -> None:
-        """Send a tool_execution_completed event.
-
-        Args:
-            session_id: Agent session identifier
-            tool_name: Name of the tool
-            tool_use_id: Claude's tool use identifier
-            duration_ms: Execution duration in milliseconds
-            success: Whether execution succeeded
-            error_message: Optional error message if failed
-            timestamp: Optional timestamp (defaults to now)
-        """
+        """Send a tool_execution_completed event. See client_events.send_tool_completed."""
         await _send_tool_completed_fn(
             self,
             session_id,
@@ -266,28 +225,13 @@ class CollectorClient:
         validator_name: str | None = None,
         timestamp: datetime | None = None,
     ) -> None:
-        """Send a tool_blocked event.
-
-        Args:
-            session_id: Agent session identifier
-            tool_name: Name of the tool
-            tool_use_id: Claude's tool use identifier
-            reason: Why the tool was blocked
-            validator_name: Name of the validator that blocked it
-            timestamp: Optional timestamp (defaults to now)
-        """
+        """Send a tool_blocked event. See client_events.send_tool_blocked."""
         await _send_tool_blocked_fn(
             self, session_id, tool_name, tool_use_id, reason, validator_name=validator_name, timestamp=timestamp
         )
 
     async def send_observation(self, event: dict[str, Any]) -> None:
-        """Send a generic observation event.
-
-        This is for custom events that don't fit the convenience methods.
-
-        Args:
-            event: Event dictionary with event_type, session_id, data, etc.
-        """
+        """Send a generic observation event. See client_events.send_observation."""
         await _send_observation_fn(self, event)
 
     @property

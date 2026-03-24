@@ -16,12 +16,22 @@ from syn_adapters.object_storage.protocol import (
     StorageObject,
 )
 from syn_adapters.object_storage.supabase_helpers import (
+    _storage_object_from_item,
     build_object_list,
-    find_matching_object,
     split_key,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def find_matching_object(
+    response: list[dict[str, Any]], filename: str, key: str
+) -> StorageObject | None:
+    """Find an exact filename match in a Supabase list response."""
+    for item in response:
+        if item.get("name") == filename:
+            return _storage_object_from_item(item, key)
+    return None
 
 
 async def get_object_info(

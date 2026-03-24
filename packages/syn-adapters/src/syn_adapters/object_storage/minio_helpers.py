@@ -8,17 +8,15 @@ List operations are in minio_queries.py.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import io
 import logging
-import mimetypes
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from syn_adapters.object_storage.protocol import (
+    DownloadError,
+    ObjectNotFoundError,
     StorageObject,
-    UploadResult,
 )
 
 if TYPE_CHECKING:
@@ -67,53 +65,6 @@ async def get_object_info(
         return None
 
 
-def do_upload(
-    client: "Minio",
-    bucket_name: str,
-    key: str,
-    content: bytes,
-    content_type: str | None,
-    metadata: dict[str, str] | None,
-) -> UploadResult:
-    """Synchronous upload body for MinIO (run in executor).
-
-    Args:
-        client: Minio client instance.
-        bucket_name: Storage bucket name.
-        key: Object key (path) within the bucket.
-        content: Raw bytes to store.
-        content_type: MIME type. Auto-detected if not provided.
-        metadata: Custom metadata.
-
-    Returns:
-        UploadResult with key, size, and ETag.
-
-    Raises:
-        UploadError: If upload fails.
-    """
-    if content_type is None:
-        content_type, _ = mimetypes.guess_type(key)
-        content_type = content_type or "application/octet-stream"
-
-    result = client.put_object(
-        bucket_name,
-        key,
-        io.BytesIO(content),
-        len(content),
-        content_type=content_type,
-        metadata=cast("dict[str, Any]", metadata) if metadata else None,
-    )
-
-    etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-    return UploadResult(
-        key=key,
-        size_bytes=len(content),
-        etag=result.etag if hasattr(result, "etag") else etag,
-        url=None,
-    )
-
-
 def do_download(
     client: "Minio",
     bucket_name: str,
@@ -121,8 +72,8 @@ def do_download(
 ) -> bytes:
     """Synchronous download body for MinIO (run in executor).
 
-    Raises ObjectNotFoundError for nosuchkey/not-found conditions so the
-    async caller does not need to inspect error messages.
+    Converts nosuchkey/not-found errors to ObjectNotFoundError and wraps
+    other failures in DownloadError so the async caller needs no try/except.
 
     Args:
         client: Minio client instance.
@@ -134,21 +85,23 @@ def do_download(
 
     Raises:
         ObjectNotFoundError: If object doesn't exist.
+        DownloadError: If download fails for other reasons.
     """
-    from syn_adapters.object_storage.protocol import ObjectNotFoundError
-
     try:
         response = client.get_object(bucket_name, key)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+    except (ObjectNotFoundError, DownloadError):
+        raise
     except Exception as exc:
         error_msg = str(exc).lower()
         if "nosuchkey" in error_msg or "not found" in error_msg:
             raise ObjectNotFoundError(key) from exc
-        raise
-    try:
-        return response.read()
-    finally:
-        response.close()
-        response.release_conn()
+        logger.exception("Failed to download from MinIO: %s", key)
+        raise DownloadError(f"Failed to download {key}: {exc}", key=key) from exc
 
 
 async def get_presigned_url(

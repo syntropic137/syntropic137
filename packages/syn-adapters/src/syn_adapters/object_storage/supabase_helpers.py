@@ -8,9 +8,7 @@ Query operations (list, get_object_info) are in supabase_queries.py.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-import mimetypes
 from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -19,8 +17,6 @@ from syn_adapters.object_storage.protocol import (
     DownloadError,
     ObjectNotFoundError,
     StorageObject,
-    UploadError,
-    UploadResult,
 )
 
 if TYPE_CHECKING:
@@ -60,16 +56,6 @@ def split_key(key: str) -> tuple[str, str]:
     return "", key
 
 
-def find_matching_object(
-    response: list[dict[str, Any]], filename: str, key: str
-) -> StorageObject | None:
-    """Find an exact filename match in a Supabase list response."""
-    for item in response:
-        if item.get("name") == filename:
-            return _storage_object_from_item(item, key)
-    return None
-
-
 def build_object_list(
     response: list[dict[str, Any]], prefix: str
 ) -> list[StorageObject]:
@@ -84,61 +70,6 @@ def build_object_list(
     return objects
 
 
-def do_upload(
-    client: Any,
-    bucket_name: str,
-    key: str,
-    content: bytes,
-    content_type: str | None,
-    metadata: dict[str, str] | None,
-) -> UploadResult:
-    """Synchronous upload body for Supabase Storage (run in executor).
-
-    Args:
-        client: Supabase client instance.
-        bucket_name: Storage bucket name.
-        key: Object key (path) within the bucket.
-        content: Raw bytes to store.
-        content_type: MIME type. Auto-detected if not provided.
-        metadata: Custom metadata (stored as custom headers).
-
-    Returns:
-        UploadResult with key, size, and URL.
-
-    Raises:
-        UploadError: If upload fails.
-    """
-    if content_type is None:
-        content_type, _ = mimetypes.guess_type(key)
-        content_type = content_type or "application/octet-stream"
-
-    file_options: dict[str, str] = {"content-type": content_type}
-    if metadata:
-        import json
-
-        file_options["x-upsert-metadata"] = json.dumps(metadata)
-
-    response = client.storage.from_(bucket_name).upload(
-        path=key,
-        file=content,
-        file_options=file_options,
-    )
-
-    if hasattr(response, "error") and response.error:
-        raise UploadError(f"Supabase upload failed: {response.error}", key=key)
-
-    etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-    url_response = client.storage.from_(bucket_name).get_public_url(key)
-
-    return UploadResult(
-        key=key,
-        size_bytes=len(content),
-        etag=etag,
-        url=url_response if isinstance(url_response, str) else None,
-    )
-
-
 def do_download(
     client: Any,
     bucket_name: str,
@@ -146,8 +77,8 @@ def do_download(
 ) -> bytes:
     """Synchronous download body for Supabase Storage (run in executor).
 
-    Raises ObjectNotFoundError for 404/not-found conditions so the
-    async caller does not need to inspect error messages.
+    Converts 404/not-found errors to ObjectNotFoundError and wraps
+    other failures in DownloadError so the async caller needs no try/except.
 
     Args:
         client: Supabase client instance.
@@ -163,16 +94,17 @@ def do_download(
     """
     try:
         response = client.storage.from_(bucket_name).download(key)
+        if response is None:
+            raise ObjectNotFoundError(key)
+        return response  # type: ignore[return-value]
+    except ObjectNotFoundError:
+        raise
     except Exception as exc:
         error_msg = str(exc).lower()
         if "not found" in error_msg or "404" in error_msg:
             raise ObjectNotFoundError(key) from exc
-        raise
-
-    if response is None:
-        raise ObjectNotFoundError(key)
-
-    return response  # type: ignore[return-value]
+        logger.exception("Failed to download from Supabase: %s", key)
+        raise DownloadError(f"Failed to download {key}: {exc}", key=key) from exc
 
 
 def do_delete(
@@ -190,12 +122,14 @@ def do_delete(
     Returns:
         True if object was deleted, False if it didn't exist.
     """
-    response = client.storage.from_(bucket_name).remove([key])
-
-    if response and isinstance(response, list):
-        return len(response) > 0
-
-    return False
+    try:
+        response = client.storage.from_(bucket_name).remove([key])
+        if response and isinstance(response, list):
+            return len(response) > 0
+        return False
+    except Exception as e:
+        logger.warning("Failed to delete from Supabase: %s - %s", key, e)
+        return False
 
 
 async def get_presigned_url(
