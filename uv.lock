@@ -41,7 +41,7 @@ dev = [
 
 [[package]]
 name = "agentic-isolation"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "lib/agentic-primitives/lib/python/agentic_isolation" }
 
 [package.metadata]
@@ -56,7 +56,7 @@ provides-extras = ["docker", "dev"]
 
 [[package]]
 name = "agentic-logging"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "lib/agentic-primitives/lib/python/agentic_logging" }
 dependencies = [
     { name = "python-json-logger" },
@@ -513,7 +513,7 @@ wheels = [
 
 [[package]]
 name = "event-sourcing-python"
-version = "0.7.0b0"
+version = "0.7.1b0"
 source = { editable = "lib/event-sourcing-platform/event-sourcing/python" }
 dependencies = [
     { name = "protobuf" },
