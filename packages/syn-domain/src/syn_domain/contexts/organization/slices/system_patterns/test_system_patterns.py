@@ -10,12 +10,15 @@ from syn_domain.contexts.organization._shared.projection_names import WORKFLOW_E
 from syn_domain.contexts.organization.domain.queries.get_system_patterns import (
     GetSystemPatternsQuery,
 )
+from syn_domain.contexts.organization.domain.read_models.system_patterns import FailurePattern
 from syn_domain.contexts.organization.slices.conftest import (
     FakeProjectionStore,
     _make_projections,
 )
 from syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler import (
     GetSystemPatternsHandler,
+    _accumulate_failure,
+    _groups_to_patterns,
 )
 
 
@@ -183,3 +186,142 @@ class TestGetSystemPatternsHandler:
         result = await handler.handle(GetSystemPatternsQuery(system_id="sys-1"))
 
         assert len(result.cost_outliers) == 0
+
+
+@pytest.mark.unit
+class TestAccumulateFailure:
+    def test_first_occurrence_creates_group(self) -> None:
+        groups: dict = {}
+        _accumulate_failure(
+            groups,
+            {
+                "error_type": "timeout",
+                "error_message": "Timed out",
+                "completed_at": "2026-01-01T00:00:00",
+            },
+            "acme/api",
+        )
+        assert len(groups) == 1
+        key = ("timeout", "Timed out")
+        assert groups[key]["count"] == 1
+        assert "acme/api" in groups[key]["repos"]
+
+    def test_duplicate_increments_count(self) -> None:
+        groups: dict = {}
+        execution = {
+            "error_type": "timeout",
+            "error_message": "Timed out",
+            "completed_at": "2026-01-01",
+        }
+        _accumulate_failure(groups, execution, "acme/api")
+        _accumulate_failure(groups, execution, "acme/worker")
+        key = ("timeout", "Timed out")
+        assert groups[key]["count"] == 2
+        assert groups[key]["repos"] == {"acme/api", "acme/worker"}
+
+    def test_repos_deduplicated(self) -> None:
+        groups: dict = {}
+        execution = {"error_type": "timeout", "error_message": "Timed out"}
+        _accumulate_failure(groups, execution, "acme/api")
+        _accumulate_failure(groups, execution, "acme/api")
+        key = ("timeout", "Timed out")
+        assert groups[key]["count"] == 2
+        assert len(groups[key]["repos"]) == 1
+
+    def test_timestamps_track_range(self) -> None:
+        groups: dict = {}
+        _accumulate_failure(
+            groups,
+            {"error_type": "e", "error_message": "m", "completed_at": "2026-01-05"},
+            "r1",
+        )
+        _accumulate_failure(
+            groups,
+            {"error_type": "e", "error_message": "m", "completed_at": "2026-01-01"},
+            "r2",
+        )
+        _accumulate_failure(
+            groups,
+            {"error_type": "e", "error_message": "m", "completed_at": "2026-01-10"},
+            "r3",
+        )
+        g = groups[("e", "m")]
+        assert g["first_seen"] == "2026-01-01"
+        assert g["last_seen"] == "2026-01-10"
+
+    def test_missing_fields_default_to_empty(self) -> None:
+        groups: dict = {}
+        _accumulate_failure(groups, {}, "")
+        key = ("", "")
+        assert groups[key]["count"] == 1
+        assert len(groups[key]["repos"]) == 0
+
+
+@pytest.mark.unit
+class TestGroupsToPatterns:
+    def test_empty_groups(self) -> None:
+        assert _groups_to_patterns({}) == []
+
+    def test_sorted_by_count_descending(self) -> None:
+        groups = {
+            ("e1", "m1"): {
+                "error_type": "e1",
+                "error_message": "m1",
+                "count": 5,
+                "repos": set(),
+                "first_seen": "",
+                "last_seen": "",
+            },
+            ("e2", "m2"): {
+                "error_type": "e2",
+                "error_message": "m2",
+                "count": 10,
+                "repos": set(),
+                "first_seen": "",
+                "last_seen": "",
+            },
+            ("e3", "m3"): {
+                "error_type": "e3",
+                "error_message": "m3",
+                "count": 1,
+                "repos": set(),
+                "first_seen": "",
+                "last_seen": "",
+            },
+        }
+        result = _groups_to_patterns(groups)
+        assert [p.occurrence_count for p in result] == [10, 5, 1]
+
+    def test_repos_alphabetically_sorted(self) -> None:
+        groups = {
+            ("e", "m"): {
+                "error_type": "e",
+                "error_message": "m",
+                "count": 1,
+                "repos": {"z-repo", "a-repo", "m-repo"},
+                "first_seen": "",
+                "last_seen": "",
+            },
+        }
+        result = _groups_to_patterns(groups)
+        assert result[0].affected_repos == ["a-repo", "m-repo", "z-repo"]
+
+    def test_all_fields_mapped(self) -> None:
+        groups = {
+            ("timeout", "Timed out"): {
+                "error_type": "timeout",
+                "error_message": "Timed out",
+                "count": 3,
+                "repos": {"acme/api"},
+                "first_seen": "2026-01-01",
+                "last_seen": "2026-01-10",
+            },
+        }
+        result = _groups_to_patterns(groups)
+        p = result[0]
+        assert isinstance(p, FailurePattern)
+        assert p.error_type == "timeout"
+        assert p.error_message == "Timed out"
+        assert p.occurrence_count == 3
+        assert p.first_seen == "2026-01-01"
+        assert p.last_seen == "2026-01-10"

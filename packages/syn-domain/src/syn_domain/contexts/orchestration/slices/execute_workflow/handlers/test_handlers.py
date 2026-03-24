@@ -340,3 +340,94 @@ class TestHandlerRegistry:
 
         assert TodoAction.COMPLETE_PHASE not in HANDLER_REGISTRY
         assert TodoAction.COMPLETE_EXECUTION not in HANDLER_REGISTRY
+
+
+# =========================================================================
+# Extracted helper functions
+# =========================================================================
+
+
+@pytest.mark.unit
+class TestDetectExitCode:
+    """Tests for _detect_exit_code helper."""
+
+    def test_interrupt_returns_1(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+            _detect_exit_code,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+            TokenAccumulator,
+        )
+
+        stream_result = StreamResult(
+            line_count=5,
+            interrupt_requested=True,
+            interrupt_reason="cancel",
+            agent_task_result=None,
+        )
+        workspace = MagicMock()
+        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 1
+
+    def test_nonzero_stream_exit_code(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+            _detect_exit_code,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+            TokenAccumulator,
+        )
+
+        stream_result = StreamResult(
+            line_count=5,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+        )
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 42
+        assert _detect_exit_code(stream_result, workspace, "p-1", TokenAccumulator()) == 42
+
+    def test_success_returns_0(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler import (
+            _detect_exit_code,
+        )
+        from syn_domain.contexts.orchestration.slices.execute_workflow.TokenAccumulator import (
+            TokenAccumulator,
+        )
+
+        stream_result = StreamResult(
+            line_count=10,
+            interrupt_requested=False,
+            interrupt_reason=None,
+            agent_task_result=None,
+        )
+        workspace = MagicMock()
+        workspace.last_stream_exit_code = 0
+        tokens = TokenAccumulator()
+        tokens.record(100, 50)
+        assert _detect_exit_code(stream_result, workspace, "p-1", tokens) == 0
+
+
+@pytest.mark.unit
+class TestBuildAgentEnv:
+    """Tests for _build_agent_env helper."""
+
+    def test_returns_env_with_proxy_url(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            _build_agent_env,
+        )
+
+        workspace = MagicMock()
+        workspace.proxy_url = "http://envoy:10000"
+        env = _build_agent_env(workspace, "sess-1")
+        assert env["CLAUDE_SESSION_ID"] == "sess-1"
+        assert env["ANTHROPIC_BASE_URL"] == "http://envoy:10000"
+        assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "proxy-managed"
+
+    def test_raises_without_proxy(self) -> None:
+        from syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler import (
+            _build_agent_env,
+        )
+
+        workspace = MagicMock(spec=[])  # no proxy_url attribute
+        with pytest.raises(RuntimeError, match="proxy not available"):
+            _build_agent_env(workspace, "sess-1")

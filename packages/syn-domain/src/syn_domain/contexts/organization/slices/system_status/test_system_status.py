@@ -7,12 +7,15 @@ import pytest
 from syn_domain.contexts.organization.domain.queries.get_system_status import (
     GetSystemStatusQuery,
 )
+from syn_domain.contexts.organization.domain.read_models.repo_health import RepoHealth
 from syn_domain.contexts.organization.slices.conftest import (
     FakeProjectionStore,
     _make_projections,
 )
 from syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler import (
     GetSystemStatusHandler,
+    _determine_overall_status,
+    _repo_status,
 )
 
 
@@ -146,3 +149,42 @@ class TestGetSystemStatusHandler:
         assert result.total_repos == 1
         assert result.repos[0].status == "inactive"
         assert result.overall_status == "healthy"
+
+
+@pytest.mark.unit
+class TestRepoStatus:
+    def test_inactive_when_no_executions(self) -> None:
+        assert _repo_status(RepoHealth(total_executions=0, success_rate=1.0)) == "inactive"
+
+    def test_healthy_at_90_percent(self) -> None:
+        assert _repo_status(RepoHealth(total_executions=10, success_rate=0.9)) == "healthy"
+
+    def test_healthy_above_90(self) -> None:
+        assert _repo_status(RepoHealth(total_executions=10, success_rate=1.0)) == "healthy"
+
+    def test_degraded_between_50_and_90(self) -> None:
+        assert _repo_status(RepoHealth(total_executions=10, success_rate=0.5)) == "degraded"
+
+    def test_failing_below_50(self) -> None:
+        assert _repo_status(RepoHealth(total_executions=10, success_rate=0.3)) == "failing"
+
+
+@pytest.mark.unit
+class TestDetermineOverallStatus:
+    def test_empty_counts(self) -> None:
+        assert _determine_overall_status({}) == "healthy"
+
+    def test_all_healthy(self) -> None:
+        assert _determine_overall_status({"healthy": 5}) == "healthy"
+
+    def test_majority_failing(self) -> None:
+        assert _determine_overall_status({"failing": 3, "healthy": 2}) == "failing"
+
+    def test_half_failing_is_degraded(self) -> None:
+        assert _determine_overall_status({"failing": 2, "healthy": 2}) == "degraded"
+
+    def test_any_failing_is_degraded(self) -> None:
+        assert _determine_overall_status({"failing": 1, "healthy": 10}) == "degraded"
+
+    def test_degraded_only(self) -> None:
+        assert _determine_overall_status({"degraded": 3}) == "degraded"

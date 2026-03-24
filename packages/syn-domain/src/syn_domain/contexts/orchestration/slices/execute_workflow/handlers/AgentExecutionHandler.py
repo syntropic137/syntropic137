@@ -37,6 +37,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _detect_exit_code(
+    stream_result: StreamResult,
+    workspace: Any,
+    phase_id: str,
+    tokens: TokenAccumulator,
+) -> int:
+    """Determine agent exit code from stream result and workspace state."""
+    if stream_result.interrupt_requested:
+        return 1
+    stream_exit_code = workspace.last_stream_exit_code
+    if stream_exit_code is not None and stream_exit_code != 0:
+        logger.error(
+            "Agent CLI exited with code %d (phase=%s, lines=%d)",
+            stream_exit_code,
+            phase_id,
+            stream_result.line_count,
+        )
+        return stream_exit_code
+    if tokens.input_tokens == 0 and tokens.output_tokens == 0:
+        logger.warning(
+            "Agent produced 0 tokens (phase=%s, lines=%d) — CLI may have failed to start",
+            phase_id,
+            stream_result.line_count,
+        )
+    return 0
+
+
 class AgentExecutionResult:
     """Result of agent execution."""
 
@@ -78,21 +105,7 @@ class AgentExecutionHandler:
         timeout_seconds: int,
         collector: ObservabilityCollector | None = None,
     ) -> AgentExecutionResult:
-        """Run agent in workspace and stream output.
-
-        Args:
-            todo: The to-do item being processed
-            workspace: Active workspace with stream() method
-            agent_env: Environment variables for the agent
-            claude_cmd: Claude CLI command to execute
-            session_id: Session ID for observability
-            agent_model: Agent model name
-            timeout_seconds: Phase timeout
-            collector: Observability collector for Lane 2 telemetry
-
-        Returns:
-            AgentExecutionResult with stream result, tokens, and aggregate command
-        """
+        """Run agent in workspace and stream output."""
         assert todo.phase_id is not None
 
         tokens = TokenAccumulator()
@@ -120,26 +133,7 @@ class AgentExecutionHandler:
             workspace,
         )
 
-        # Detect agent failure: CLI exited with non-zero, or produced no output
-        stream_exit_code = workspace.last_stream_exit_code
-        if stream_result.interrupt_requested:
-            exit_code = 1
-        elif stream_exit_code is not None and stream_exit_code != 0:
-            logger.error(
-                "Agent CLI exited with code %d (phase=%s, lines=%d)",
-                stream_exit_code,
-                todo.phase_id,
-                stream_result.line_count,
-            )
-            exit_code = stream_exit_code
-        else:
-            exit_code = 0
-            if tokens.input_tokens == 0 and tokens.output_tokens == 0:
-                logger.warning(
-                    "Agent produced 0 tokens (phase=%s, lines=%d) — CLI may have failed to start",
-                    todo.phase_id,
-                    stream_result.line_count,
-                )
+        exit_code = _detect_exit_code(stream_result, workspace, todo.phase_id, tokens)
 
         # ISS-217: Emit session_summary with authoritative CLI totals (Lane 2)
         if collector is not None:
