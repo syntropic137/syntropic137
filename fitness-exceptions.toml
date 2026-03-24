@@ -17,82 +17,6 @@ issue = "#197"
 value = 45
 issue = "#197"
 
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.prompt.pii::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.python::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::parse_env_file"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::sync_env_file"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.config::resolve_plugin_env"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.event_parser::parse_line"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker::execute"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker::stream"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.local::stream"]
-value = 45
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.formatters::format"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.observability.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.hooks.validators.prompt.pii::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.hooks.validators.security.python::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::parse_env_file"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::sync_env_file"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.scripts.capture_recording::capture_from_stream"]
-value = 30
-issue = "#197"
-
 [max-cognitive."python:lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.memory::read_all"]
 value = 30
 issue = "#197"
@@ -755,18 +679,6 @@ issue = "#274"
 value = 50
 issue = "#274"
 
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.retry::retry_async"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.env-management.references.python.generate_env_example::_parse_env"]
-value = 35
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.env-management.references.python.generate_env_example::sync_env"]
-value = 30
-issue = "#274"
-
 [max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch::_render_event"]
 value = 30
 issue = "#274"
@@ -927,14 +839,6 @@ issue = "#274"
 value = 1470
 issue = "#274"
 
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.env-management.references.python.generate_env_example::_parse_env"]
-value = 35
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.env-management.references.python.generate_env_example::sync_env"]
-value = 30
-issue = "#274"
-
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
 value = 55
 issue = "#274"
@@ -971,7 +875,6 @@ issue = "#274"
 value = 45
 issue = "#274"
 
-
 [max-cognitive."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::SummaryStats"]
 value = 35
 issue = "#274"
@@ -1007,7 +910,6 @@ issue = "#274"
 [max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
 value = 45
 issue = "#274"
-
 
 [max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/integrations/grpc-event-store::readEvents"]
 value = 35
@@ -1133,7 +1035,6 @@ issue = "#274"
 value = 90
 issue = "#274"
 
-
 [max-cognitive-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
 value = 120
 issue = "#274"
@@ -1186,7 +1087,6 @@ issue = "#274"
 value = 20
 issue = "#274"
 
-
 [max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
 value = 20
 issue = "#274"
@@ -1214,7 +1114,6 @@ issue = "#274"
 [max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
 value = 20
 issue = "#274"
-
 
 [max-cyclomatic."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/replay/state-assertions::createDiff"]
 value = 25
@@ -1256,17 +1155,8 @@ issue = "#274"
 value = 795
 issue = "#274"
 
-
 [max-loc-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
 value = 580
-issue = "#274"
-
-[max-loc-function."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.event_parser::_handle_assistant"]
-value = 110
-issue = "#274"
-
-[max-loc-function."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker::stream"]
-value = 110
 issue = "#274"
 
 [max-loc-function."python:lib.event-sourcing-platform.infra-as-code.tools.render_config::render_aws"]
@@ -1412,7 +1302,6 @@ issue = "#274"
 [max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 165
 issue = "#274"
-
 
 [max-loc-function."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::ContributionHeatmap"]
 value = 135
