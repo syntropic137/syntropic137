@@ -4,12 +4,12 @@ Extracted from ManagedWorkspace to reduce class complexity.
 Contains the setup phase runner and secrets cleanup logic.
 
 The setup phase:
-1. Runs the setup script with secrets available as env vars
-2. Clears all secrets from the container environment
-3. Removes any temporary files that might contain secrets
+1. Runs the setup script with secrets provided via process-scoped env vars
+2. Cleans up shell history and other artifacts that might contain secrets
+3. Removes any temporary files and setup artifacts used during the setup phase
 
 After the setup phase completes, the agent phase can safely run
-without access to raw secrets.
+without access to raw secrets or setup-time artifacts that may contain them.
 
 See ADR-024: Secure Token Architecture
 """
@@ -100,7 +100,8 @@ async def run_setup_phase(
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 
     ws = workspace
-    assert isinstance(ws, ManagedWorkspace)
+    if not isinstance(ws, ManagedWorkspace):
+        raise TypeError(f"Expected ManagedWorkspace, got {type(ws).__name__}")
 
     setup_env = _build_setup_env(secrets)
 
@@ -151,7 +152,8 @@ async def clear_secrets(workspace: object) -> None:
     from syn_adapters.workspace_backends.service.managed_workspace import ManagedWorkspace
 
     ws = workspace
-    assert isinstance(ws, ManagedWorkspace)
+    if not isinstance(ws, ManagedWorkspace):
+        raise TypeError(f"Expected ManagedWorkspace, got {type(ws).__name__}")
 
     # Clear shell history and temp files
     clear_script = """#!/bin/bash

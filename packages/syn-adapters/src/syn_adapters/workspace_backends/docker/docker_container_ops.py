@@ -56,8 +56,8 @@ async def wait_for_healthy(container_name: str, timeout: float = 30.0) -> None:
     """
     import time
 
-    start = time.time()
-    while time.time() - start < timeout:
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
         # Check if container is running
         proc = await asyncio.create_subprocess_exec(
             "docker",

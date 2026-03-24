@@ -37,10 +37,11 @@ async def _resolve_github_credentials(
         github_app_token = (
             await client.get_installation_token(installation_id) if installation_id else None
         )
-        logger.info(
-            "Generated GitHub App installation token (bot: %s)",
-            github_settings.bot_name,
-        )
+        if github_app_token:
+            logger.info(
+                "Generated GitHub App installation token (bot: %s)",
+                github_settings.bot_name,
+            )
         return github_app_token, github_settings.bot_name, github_settings.bot_email
     except Exception as e:
         logger.error("Failed to get GitHub App token: %s", e)

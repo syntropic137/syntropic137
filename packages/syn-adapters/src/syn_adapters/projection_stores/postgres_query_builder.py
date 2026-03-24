@@ -37,7 +37,7 @@ def build_query(
     else:
         query += " ORDER BY updated_at DESC"
 
-    if limit:
+    if limit is not None:
         query += f" LIMIT {limit}"
     if offset:
         query += f" OFFSET {offset}"

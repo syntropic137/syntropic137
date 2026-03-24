@@ -53,7 +53,7 @@ async def get_object_info(
         client = get_client()
         folder, filename = split_key(key)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             partial(client.storage.from_(bucket_name).list, folder),
@@ -93,7 +93,7 @@ async def list_objects(
         client = get_client()
         offset = int(continuation_token) if continuation_token else 0
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(
             None,
             partial(
