@@ -85,7 +85,7 @@ async def _seed(repositories: list[str], dry_run: bool) -> int:
         print(f"\nTotal: {len(PRESETS) * len(repositories)}  (dry run)")
         return 0
 
-    import syn_api.v1.triggers as tr
+    import syn_api.routes.triggers.commands as tr
     from syn_api._wiring import ensure_connected
     from syn_api.types import Err, Ok
 
