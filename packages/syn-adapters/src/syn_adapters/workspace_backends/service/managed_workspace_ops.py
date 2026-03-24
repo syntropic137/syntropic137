@@ -45,7 +45,7 @@ async def interrupt_container(isolation_handle: IsolationHandle) -> bool:
         )
         try:
             await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "interrupt(): docker exec timed out while sending SIGINT to %s, killing subprocess",
                 container_id,

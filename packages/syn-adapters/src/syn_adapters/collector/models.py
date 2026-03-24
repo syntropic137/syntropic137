@@ -9,7 +9,7 @@ See: ADR-017, ADR-018
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime  # noqa: TC003 - required at runtime for Pydantic
 from typing import Any
 
 from pydantic import BaseModel, Field

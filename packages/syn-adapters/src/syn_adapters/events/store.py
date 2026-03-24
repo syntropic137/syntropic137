@@ -32,7 +32,11 @@ from syn_adapters.events.store_helpers import (
 )
 from syn_adapters.events.store_write import (
     EventValidationError as EventValidationError,
+)
+from syn_adapters.events.store_write import (
     insert_batch as _insert_batch,
+)
+from syn_adapters.events.store_write import (
     insert_one as _insert_one,
 )
 
