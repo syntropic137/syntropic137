@@ -43,6 +43,13 @@ from syn_shared.settings.config import (
     get_settings,
     reset_settings,
 )
+from syn_shared.settings.git_identity import (
+    GitCredentialType,
+    GitIdentitySettings,
+)
+from syn_shared.settings.git_identity_resolver import (
+    GitIdentityResolver,
+)
 from syn_shared.settings.github import (
     GitHubAppSettings,
     get_github_settings,
@@ -55,14 +62,13 @@ from syn_shared.settings.storage import (
 )
 from syn_shared.settings.workspace import (
     CloudProvider,
-    ContainerLoggingSettings,
-    GitCredentialType,
-    GitIdentityResolver,
-    GitIdentitySettings,
     IsolationBackend,
-    WorkspaceSecuritySettings,
     WorkspaceSettings,
     get_default_isolation_backend,
+)
+from syn_shared.settings.workspace_security import (
+    ContainerLoggingSettings,
+    WorkspaceSecuritySettings,
 )
 
 __all__ = [

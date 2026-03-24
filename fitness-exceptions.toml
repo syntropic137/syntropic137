@@ -41,90 +41,6 @@ issue = "#197"
 value = 30
 issue = "#197"
 
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.observability.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.prompt.pii::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.hooks.validators.security.python::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::parse_env_file"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::sync_env_file"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.config::resolve_plugin_env"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.event_parser::parse_line"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker::execute"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker::stream"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.local::stream"]
-value = 45
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_logging.agentic_logging.formatters::format"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.observability.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.hooks.git.install::main"]
-value = 50
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.hooks.validators.prompt.pii::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.hooks.validators.security.python::validate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::parse_env_file"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.centralized-configuration.resources.python.generate_env::sync_env_file"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:lib.agentic-primitives.scripts.capture_recording::capture_from_stream"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.memory::read_all"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:lib.ui-feedback.backend.ui-feedback-api.src.ui_feedback.storage.memory::list_feedback"]
-value = 30
-issue = "#197"
-
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.models::_load_models"]
 value = 55
 issue = "#197"
@@ -183,82 +99,6 @@ issue = "#197"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets::create"]
 value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.cli::_run_watcher"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.client.http::_send_batch"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.hooks::_read_new_events"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.hooks::watch"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.transcript::_read_file"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.transcript::watch"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection::on_agent_observation"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection::on_session_cost_finalized"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query::calculate"]
-value = 60
-issue = "#274"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler::evaluate"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator::_resolve_field"]
-value = 45
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator::evaluate_conditions"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.safety_guards::check_all"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner::cleanup_stale_executions"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate::on_workflow_created"]
-value = 65
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection::on_agent_observation"]
-value = 45
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workspace_metrics.projection::get_summary"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-perf.src.syn_perf.benchmarks.throughput::run"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-shared.src.syn_shared.settings.op_resolver::resolve_op_secrets"]
-value = 30
 issue = "#197"
 
 # Maximum Cognitive Complexity (file-level)
@@ -499,165 +339,149 @@ issue = "#197"
 value = 55
 issue = "#197"
 
-[max-cognitive-file."packages.syn-collector.src.syn_collector.cli"]
-value = 110
-issue = "#197"
-
-[max-cognitive-file."packages.syn-collector.src.syn_collector.client.http"]
-value = 110
-issue = "#197"
-
-[max-cognitive-file."packages.syn-collector.src.syn_collector.watcher.hooks"]
-value = 245
-issue = "#197"
-
-[max-cognitive-file."packages.syn-collector.src.syn_collector.watcher.transcript"]
-value = 295
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.projection"]
-value = 220
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection"]
-value = 340
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query"]
-value = 175
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.tool_timeline.projection"]
-value = 55
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.artifacts.slices.list_artifacts.projection"]
-value = 100
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github._shared.github_client"]
-value = 95
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_query_store"]
-value = 105
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection"]
-value = 95
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler"]
-value = 120
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator"]
-value = 85
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.safety_guards"]
-value = 105
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.get_installation.projection"]
-value = 115
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler"]
-value = 85
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration._shared.value_objects"]
-value = 55
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner"]
-value = 150
-issue = "#197"
-
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate"]
-value = 135
-issue = "#196"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workspace.WorkspaceAggregate"]
-value = 55
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector"]
-value = 170
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor"]
-value = 620
-issue = "#138"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager"]
-value = 60
-issue = "#138"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection"]
-value = 260
-issue = "#197"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection"]
-value = 230
-issue = "#197"
+value = 70
+issue = "#275"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_executions.projection"]
 value = 130
-issue = "#197"
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.get_installation.projection"]
+value = 110
+issue = "#275"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workflow_phase_metrics.projection"]
 value = 80
-issue = "#197"
+issue = "#275"
 
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workspace_metrics.projection"]
-value = 190
-issue = "#197"
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection"]
+value = 230
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler"]
+value = 55
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector"]
+value = 165
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.tool_timeline.projection"]
+value = 55
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.projection"]
+value = 145
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser"]
+value = 65
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.dispatch_triggered_workflow.projection"]
+value = 90
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection"]
+value = 110
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection"]
+value = 150
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner"]
+value = 100
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_query_store"]
+value = 105
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService"]
+value = 75
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector"]
+value = 70
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.artifacts.slices.list_artifacts.projection"]
+value = 100
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
+value = 250
+issue = "#275"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_correlation.projection"]
 value = 65
-issue = "#197"
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.manage_trigger.ManageTriggerHandler"]
+value = 85
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.SessionLifecycleManager"]
+value = 60
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github._shared.github_client"]
+value = 95
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.projection"]
+value = 190
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler"]
+value = 105
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization._shared.organization_projection"]
+value = 140
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler"]
+value = 100
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workspace_metrics.projection"]
+value = 140
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler"]
+value = 75
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.list_systems.projection"]
+value = 150
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query"]
+value = 105
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_todo.projection"]
+value = 120
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor"]
+value = 320
+issue = "#275"
+
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.projection"]
+value = 95
+issue = "#275"
 
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.repo_health.projection"]
-value = 130
-issue = "#197"
+value = 80
+issue = "#275"
 
-[max-cognitive-file."packages.syn-perf.src.syn_perf.benchmarks.compare"]
-value = 65
-issue = "#197"
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.benchmarks.parallel"]
-value = 55
-issue = "#197"
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.benchmarks.throughput"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.reporters.console"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."packages.syn-shared.src.syn_shared.settings.op_resolver"]
-value = 60
-issue = "#197"
-
-[max-cognitive-file."packages.syn-shared.src.syn_shared.settings.workspace"]
-value = 100
-issue = "#197"
-
-[max-cognitive-file."packages.syn-tokens.src.syn_tokens.spend"]
-value = 110
-issue = "#197"
-
-[max-cognitive-file."packages.syn-tokens.src.syn_tokens.vending"]
-value = 180
-issue = "#197"
+[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.safety_guards"]
+value = 85
+issue = "#275"
 
 # Maximum Cyclomatic Complexity (function-level)
 
@@ -677,10 +501,6 @@ issue = "#197"
 value = 25
 issue = "#197"
 
-[max-cyclomatic."python:lib.event-sourcing-platform.event-sourcing.python.src.event_sourcing.client.memory::read_all"]
-value = 20
-issue = "#197"
-
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.events.models::from_dict"]
 value = 25
 issue = "#197"
@@ -693,62 +513,14 @@ issue = "#197"
 value = 40
 issue = "#197"
 
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection::on_agent_observation"]
-value = 20
-issue = "#197"
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection::on_session_cost_finalized"]
-value = 20
-issue = "#197"
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query::calculate"]
-value = 30
-issue = "#197"
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate::on_workflow_created"]
-value = 25
-issue = "#197"
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection::on_agent_observation"]
-value = 20
-issue = "#197"
-
 # Maximum Lines of Code (file-level)
 
 [max-loc-file."apps.syn-api.src.syn_api.v1.executions"]
 value = 885
 issue = "#197"
 
-[max-loc-file."apps.syn-api.src.syn_api.v1.github"]
-value = 575
-issue = "#197"
-
-[max-loc-file."apps.syn-api.src.syn_api.v1.lifecycle"]
-value = 625
-issue = "#197"
-
-[max-loc-file."apps.syn-api.src.syn_api.v1.repos"]
-value = 610
-issue = "#197"
-
-[max-loc-file."apps.syn-api.src.syn_api.v1.systems"]
-value = 655
-issue = "#197"
-
 [max-loc-file."apps.syn-api.src.syn_api.v1.triggers"]
 value = 970
-issue = "#197"
-
-[max-loc-file."apps.syn-api.src.syn_api.v1.workflows"]
-value = 560
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.agents.claude"]
-value = 675
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.artifacts.bundle"]
-value = 720
 issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.collector.client"]
@@ -757,10 +529,6 @@ issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.conversations.minio"]
 value = 765
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.events.buffer"]
-value = 505
 issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.events.store"]
@@ -783,24 +551,8 @@ issue = "#197"
 value = 1135
 issue = "#197"
 
-[max-loc-file."packages.syn-adapters.src.syn_adapters.projection_stores.postgres_store"]
-value = 750
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.projections.manager"]
-value = 560
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.projections.session_tools"]
-value = 670
-issue = "#197"
-
 [max-loc-file."packages.syn-adapters.src.syn_adapters.storage.in_memory"]
 value = 895
-issue = "#197"
-
-[max-loc-file."packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_service"]
-value = 750
 issue = "#197"
 
 [max-loc-file."packages.syn-adapters.src.syn_adapters.subscriptions.service"]
@@ -823,220 +575,36 @@ issue = "#197"
 value = 855
 issue = "#197"
 
-[max-loc-file."packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_service"]
-value = 610
-issue = "#197"
-
-[max-loc-file."packages.syn-collector.src.syn_collector.watcher.hooks"]
-value = 605
-issue = "#197"
-
-[max-loc-file."packages.syn-collector.src.syn_collector.watcher.transcript"]
-value = 590
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.list_sessions.projection"]
-value = 760
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.projection"]
-value = 860
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.github._shared.github_client"]
-value = 555
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.github._shared.trigger_query_store"]
-value = 525
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler"]
-value = 525
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration._shared.ports"]
-value = 955
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner"]
-value = 525
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate"]
-value = 870
-issue = "#196"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService"]
-value = 570
-issue = "#197"
-
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector"]
 value = 765
-issue = "#197"
+issue = "#275"
+
+[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
+value = 1360
+issue = "#275"
 
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor"]
-value = 1610
-issue = "#138"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_cost.projection"]
-value = 655
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection"]
-value = 740
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.list_executions.projection"]
-value = 615
-issue = "#197"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.workspace_metrics.projection"]
-value = 570
-issue = "#197"
-
-[max-loc-file."packages.syn-tokens.src.syn_tokens.spend"]
-value = 940
-issue = "#197"
-
-[max-loc-file."packages.syn-tokens.src.syn_tokens.vending"]
-value = 1025
-issue = "#197"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler::handle"]
-value = 35
-issue = "#274"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler::_find_failure_patterns"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler::handle"]
-value = 50
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.retry::retry_async"]
-value = 30
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.env-management.references.python.generate_env_example::_parse_env"]
-value = 35
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.plugins.sdlc.skills.env-management.references.python.generate_env_example::sync_env"]
-value = 30
-issue = "#274"
+value = 1100
+issue = "#275"
 
 [max-cognitive."python:apps.syn-api.src.syn_api.v1.workflows::get_workflow"]
 value = 50
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.contribution_heatmap.GetContributionHeatmapHandler"]
-value = 60
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.github.slices.list_triggers.projection"]
-value = 95
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate"]
-value = 70
 issue = "#274"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.repos"]
 value = 70
 issue = "#274"
 
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_status.GetSystemStatusHandler"]
-value = 110
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler"]
-value = 150
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler"]
-value = 60
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.list_systems.projection"]
-value = 160
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_todo.projection"]
-value = 120
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler"]
-value = 75
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler"]
-value = 145
-issue = "#274"
-
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.sse"]
 value = 180
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector"]
-value = 70
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.projection"]
-value = 140
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler"]
-value = 60
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.organization._shared.organization_projection"]
-value = 145
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.HookEventParser"]
-value = 65
-issue = "#274"
-
-[max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 270
 issue = "#274"
 
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.models::_load_models"]
 value = 20
 issue = "#274"
 
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.global_overview.GetGlobalOverviewHandler::handle"]
-value = 20
-issue = "#274"
-
 [max-cyclomatic."python:apps.syn-api.src.syn_api.v1.workflows::get_workflow"]
 value = 20
-issue = "#274"
-
-[max-loc-file."apps.syn-api.src.syn_api._wiring"]
-value = 595
-issue = "#274"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execution_todo.projection"]
-value = 535
-issue = "#274"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ObservabilityCollector"]
-value = 655
-issue = "#274"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 1470
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.env-management.references.python.generate_env_example::_parse_env"]
-value = 35
-issue = "#274"
-
-[max-cognitive."python:lib.agentic-primitives.build.claude-cli.plugins.sdlc.skills.env-management.references.python.generate_env_example::sync_env"]
-value = 30
 issue = "#274"
 
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
@@ -1073,120 +641,6 @@ issue = "#274"
 
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 45
-issue = "#274"
-
-
-[max-cognitive."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::SummaryStats"]
-value = 35
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
-value = 70
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::handleKeyDown"]
-value = 40
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackWidget::FeedbackWidget"]
-value = 150
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackDetail::FeedbackDetail"]
-value = 35
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackList::FeedbackList"]
-value = 60
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackModal::FeedbackModal"]
-value = 50
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/ScreenshotUploader::ScreenshotUploader"]
-value = 75
-issue = "#274"
-
-[max-cognitive."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
-value = 45
-issue = "#274"
-
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/integrations/grpc-event-store::readEvents"]
-value = 35
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/observability/metrics/metrics::getMetrics"]
-value = 35
-issue = "#281"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/projections/failure/error-handler::executeWithRetry"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/projections/health/projection-health::getHealthSummary"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/fixtures/fixture-types::validateFixture"]
-value = 40
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/fixtures/test-fixture::loadFixture"]
-value = 40
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/invariants/invariant-checker::verifyAfterEachEvent"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/replay/replay-tester::defaultStateExtractor"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/replay/state-assertions::createDiff"]
-value = 60
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/examples/004-cqrs-patterns-ts/src/slices/get-account-summary/AccountSummaryProjection::processEvents"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/aggregate-relationship-generator::renderEventFlows"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/flows-generator::generateFlowDiagram"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/vsa/vscode-extension/src/codeActions::registerCodeActionCommands"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/event-sourcing-platform/vsa/vscode-extension/src/validation::parseOutput"]
-value = 35
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useFeedbackApi::handleResponse"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useFeedbackApi::useFeedbackApi"]
-value = 35
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useScreenCapture::useScreenCapture"]
-value = 30
-issue = "#274"
-
-[max-cognitive."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
-value = 60
-issue = "#274"
-
-[max-cognitive."typescript:packages/openclaw-plugin/src/tools/observability::synGetSession"]
-value = 35
 issue = "#274"
 
 [max-cognitive-file."apps/syn-dashboard-ui/src/api/client"]
@@ -1237,23 +691,6 @@ issue = "#274"
 value = 90
 issue = "#274"
 
-
-[max-cognitive-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
-value = 120
-issue = "#274"
-
-[max-cognitive-file."packages/openclaw-plugin/src/tools/artifacts"]
-value = 70
-issue = "#274"
-
-[max-cognitive-file."packages/openclaw-plugin/src/tools/executions"]
-value = 65
-issue = "#274"
-
-[max-cognitive-file."packages/openclaw-plugin/src/tools/observability"]
-value = 125
-issue = "#274"
-
 [max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
 value = 30
 issue = "#274"
@@ -1290,79 +727,12 @@ issue = "#274"
 value = 20
 issue = "#274"
 
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackWidget::FeedbackWidget"]
-value = 65
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackDetail::FeedbackDetail"]
-value = 20
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackList::FeedbackList"]
-value = 25
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackModal::FeedbackModal"]
-value = 25
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/ScreenshotUploader::ScreenshotUploader"]
-value = 35
-issue = "#274"
-
-[max-cyclomatic."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
-value = 20
-issue = "#274"
-
-
-[max-cyclomatic."typescript:lib/event-sourcing-platform/event-sourcing/typescript/src/testing/replay/state-assertions::createDiff"]
-value = 25
-issue = "#274"
-
-[max-cyclomatic."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
-value = 25
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/api/client"]
-value = 520
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/ArtifactDetail"]
-value = 550
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/Dashboard"]
-value = 580
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/ExecutionDetail"]
-value = 745
-issue = "#274"
-
-[max-loc-file."apps/syn-dashboard-ui/src/pages/ExecutionList"]
-value = 505
-issue = "#274"
-
 [max-loc-file."apps/syn-dashboard-ui/src/pages/SessionDetail"]
 value = 990
 issue = "#274"
 
-[max-loc-file."apps/syn-dashboard-ui/src/pages/TriggerList"]
-value = 560
-issue = "#274"
-
 [max-loc-file."apps/syn-dashboard-ui/src/pages/WorkflowDetail"]
 value = 795
-issue = "#274"
-
-
-[max-loc-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
-value = 580
 issue = "#274"
 
 [max-loc-function."python:apps.syn-api.src.syn_api.v1.github::verify_and_process_webhook"]
@@ -1371,22 +741,6 @@ issue = "#274"
 
 [max-loc-function."python:apps.syn-api.src.syn_api.v1.workflows::create_workflow"]
 value = 105
-issue = "#274"
-
-[max-loc-function."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.claude_cli.event_parser::_handle_assistant"]
-value = 110
-issue = "#274"
-
-[max-loc-function."python:lib.agentic-primitives.lib.python.agentic_isolation.agentic_isolation.providers.docker::stream"]
-value = 110
-issue = "#274"
-
-[max-loc-function."python:lib.event-sourcing-platform.infra-as-code.tools.render_config::render_aws"]
-value = 120
-issue = "#274"
-
-[max-loc-function."python:lib.event-sourcing-platform.infra-as-code.tools.render_config::render_proxmox"]
-value = 110
 issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.artifacts.bundle::load_from_storage"]
@@ -1423,30 +777,6 @@ issue = "#274"
 
 [max-loc-function."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_service::create_workspace"]
 value = 170
-issue = "#274"
-
-[max-loc-function."python:packages.syn-collector.src.syn_collector.collector.service::create_app"]
-value = 105
-issue = "#274"
-
-[max-loc-function."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query::calculate"]
-value = 140
-issue = "#274"
-
-[max-loc-function."python:packages.syn-domain.src.syn_domain.contexts.orchestration.seed_workflow.SeedWorkflowService::_seed_workflow"]
-value = 115
-issue = "#274"
-
-[max-loc-function."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor::run"]
-value = 140
-issue = "#274"
-
-[max-loc-function."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.AgentExecutionHandler::handle"]
-value = 105
-issue = "#274"
-
-[max-loc-function."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.handlers.WorkspaceProvisionHandler::handle"]
-value = 115
 issue = "#274"
 
 [max-loc-function."tsx:apps/syn-dashboard-ui/src/components/ExecutionCostSummary::ExecutionCostSummary"]
@@ -1523,69 +853,4 @@ issue = "#274"
 
 [max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 165
-issue = "#274"
-
-
-[max-loc-function."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::ContributionHeatmap"]
-value = 135
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackProvider::FeedbackProvider"]
-value = 230
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/FeedbackWidget::FeedbackWidget"]
-value = 420
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackDetail::FeedbackDetail"]
-value = 285
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackList::FeedbackList"]
-value = 255
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/FeedbackModal::FeedbackModal"]
-value = 275
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/ScreenshotUploader::ScreenshotUploader"]
-value = 215
-issue = "#274"
-
-[max-loc-function."tsx:lib/ui-feedback/packages/ui-feedback-react/src/components/VoiceRecorder::VoiceRecorder"]
-value = 120
-issue = "#274"
-
-[max-loc-function."typescript:lib/event-sourcing-platform/examples/004-cqrs-patterns-ts/src/main::main"]
-value = 155
-issue = "#274"
-
-[max-loc-function."typescript:lib/event-sourcing-platform/examples/007-ecommerce-complete-ts/src/main::main"]
-value = 110
-issue = "#274"
-
-[max-loc-function."typescript:lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/aggregate-relationship-generator::renderAggregate"]
-value = 125
-issue = "#274"
-
-[max-loc-function."typescript:lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/architecture-svg-generator::renderContext"]
-value = 195
-issue = "#274"
-
-[max-loc-function."typescript:lib/event-sourcing-platform/vsa/vsa-visualizer/src/generators/architecture-svg-generator::renderEcosystemSidebar"]
-value = 110
-issue = "#274"
-
-[max-loc-function."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useFeedbackApi::useFeedbackApi"]
-value = 135
-issue = "#274"
-
-[max-loc-function."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useScreenCapture::useScreenCapture"]
-value = 110
-issue = "#274"
-
-[max-loc-function."typescript:lib/ui-feedback/packages/ui-feedback-react/src/hooks/useVoiceRecorder::useVoiceRecorder"]
-value = 145
 issue = "#274"
