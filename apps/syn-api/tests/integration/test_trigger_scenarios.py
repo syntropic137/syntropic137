@@ -118,8 +118,8 @@ def _load_fixture(filename: str) -> tuple[dict, str]:
 @pytest.mark.integration
 async def test_self_healing_check_run_failure():
     """Full loop: check_run failure → self-healing trigger fires."""
-    from syn_api.v1.github import verify_and_process_webhook
-    from syn_api.v1.triggers import enable_preset, list_triggers
+    from syn_api.routes.triggers import enable_preset, list_triggers
+    from syn_api.routes.webhooks import verify_and_process_webhook
 
     # Seed self-healing trigger preset
     result = await enable_preset(
@@ -169,8 +169,8 @@ async def test_self_healing_check_run_failure():
 @pytest.mark.integration
 async def test_issue_comment_trigger():
     """issue_comment.created → review-fix trigger fires."""
-    from syn_api.v1.github import verify_and_process_webhook
-    from syn_api.v1.triggers import enable_preset, list_triggers
+    from syn_api.routes.triggers import enable_preset, list_triggers
+    from syn_api.routes.webhooks import verify_and_process_webhook
 
     # Seed review-fix trigger preset
     result = await enable_preset(
@@ -204,7 +204,7 @@ async def test_issue_comment_trigger():
 @pytest.mark.integration
 async def test_installation_event_does_not_crash():
     """installation.created event is handled gracefully."""
-    from syn_api.v1.github import verify_and_process_webhook
+    from syn_api.routes.webhooks import verify_and_process_webhook
 
     payload, event_type = _load_fixture("installation_created.jsonl")
     body = json.dumps(payload).encode()
@@ -225,7 +225,7 @@ async def test_installation_event_does_not_crash():
 @pytest.mark.integration
 async def test_webhook_with_no_matching_triggers():
     """Webhook for a repo with no triggers returns empty triggers_fired."""
-    from syn_api.v1.github import verify_and_process_webhook
+    from syn_api.routes.webhooks import verify_and_process_webhook
 
     payload, event_type = _load_fixture("check_run_failure.jsonl")
     body = json.dumps(payload).encode()
@@ -245,7 +245,7 @@ async def test_webhook_with_no_matching_triggers():
 @pytest.mark.integration
 async def test_invalid_json_payload():
     """Invalid JSON payload returns error."""
-    from syn_api.v1.github import verify_and_process_webhook
+    from syn_api.routes.webhooks import verify_and_process_webhook
 
     body = b"not json"
     result = await verify_and_process_webhook(
@@ -261,7 +261,7 @@ async def test_invalid_json_payload():
 @pytest.mark.integration
 async def test_preset_dedup():
     """Enabling the same preset twice is idempotent (returns error, not duplicate)."""
-    from syn_api.v1.triggers import enable_preset, list_triggers
+    from syn_api.routes.triggers import enable_preset, list_triggers
 
     result1 = await enable_preset(preset_name="self-healing", repository="demo/offline-repo")
     assert isinstance(result1, Ok)

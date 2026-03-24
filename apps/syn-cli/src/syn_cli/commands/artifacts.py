@@ -8,22 +8,14 @@ import typer
 from rich.syntax import Syntax
 from rich.table import Table
 
-from syn_cli._output import console, format_timestamp, print_error
-from syn_cli.client import get_client
+from syn_cli._output import console, format_timestamp
+from syn_cli.commands._api_helpers import api_get, api_get_list, build_params
 
 app = typer.Typer(
     name="artifacts",
     help="Browse and retrieve workflow artifacts",
     no_args_is_help=True,
 )
-
-
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
 
 
 @app.command("list")
@@ -38,25 +30,14 @@ def list_artifacts(
     limit: Annotated[int, typer.Option(help="Max results (max 200)")] = 50,
 ) -> None:
     """List artifacts, optionally filtered by workflow or phase."""
-    try:
-        with get_client() as client:
-            params: dict[str, str | int] = {"limit": limit}
-            if workflow:
-                params["workflow_id"] = workflow
-            if phase:
-                params["phase_id"] = phase
-            if artifact_type:
-                params["artifact_type"] = artifact_type
-            resp = client.get("/artifacts", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(
+        workflow_id=workflow,
+        phase_id=phase,
+        artifact_type=artifact_type,
+        limit=limit,
+    )
+    items = api_get_list("/artifacts", params=params)
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    items = resp.json()
     if not items:
         console.print("[dim]No artifacts found.[/dim]")
         return
@@ -89,24 +70,8 @@ def show_artifact(
     ] = False,
 ) -> None:
     """Show artifact metadata and optionally its content."""
-    try:
-        with get_client() as client:
-            resp = client.get(
-                f"/artifacts/{artifact_id}",
-                params={"include_content": not no_content},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    a = api_get(f"/artifacts/{artifact_id}", params={"include_content": not no_content})
 
-    if resp.status_code == 404:
-        print_error(f"Artifact not found: {artifact_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    a = resp.json()
     console.print(f"[bold]Artifact:[/bold] {a.get('id', '')}")
     console.print(f"  Type:    {a.get('artifact_type', '')}")
     if a.get("title"):
@@ -122,7 +87,7 @@ def show_artifact(
 
     if not no_content and a.get("content"):
         content_type = a.get("content_type", "text/plain")
-        lexer = "markdown" if "markdown" in content_type else "text"
+        lexer = "markdown" if "markdown" in str(content_type) else "text"
         console.print()
         console.print(Syntax(a["content"], lexer, theme="github-dark", word_wrap=True))
 
@@ -136,21 +101,8 @@ def get_content(
     ] = False,
 ) -> None:
     """Print the raw content of an artifact."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/artifacts/{artifact_id}/content")
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(f"/artifacts/{artifact_id}/content")
 
-    if resp.status_code == 404:
-        print_error(f"Artifact not found: {artifact_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     content = data.get("content")
     if not content:
         console.print("[dim](no content)[/dim]")
@@ -160,5 +112,5 @@ def get_content(
         print(content)
     else:
         content_type = data.get("content_type", "text/plain")
-        lexer = "markdown" if "markdown" in content_type else "text"
+        lexer = "markdown" if "markdown" in str(content_type) else "text"
         console.print(Syntax(content, lexer, theme="github-dark", word_wrap=True))

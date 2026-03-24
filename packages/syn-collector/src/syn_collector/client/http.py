@@ -151,52 +151,63 @@ class EventCollectorClient:
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
-            try:
-                response = await self._client.post(
-                    f"{self.collector_url}/events",
-                    json=batch.model_dump(mode="json"),
-                    headers=headers,
-                )
-                response.raise_for_status()
-
-                result = BatchResponse(**response.json())
-
-                # Update stats
-                self._stats["events_sent"] += result.accepted
-                self._stats["batches_sent"] += 1
-
-                logger.debug(
-                    f"Batch {batch.batch_id} sent: {result.accepted} accepted, {result.duplicates} duplicates",
-                )
-
+            result, error = await self._attempt_send(batch, headers)
+            if result is not None:
                 return result
 
-            except httpx.HTTPStatusError as e:
-                last_error = e
-                if e.response.status_code < 500:
-                    # Client error, don't retry
-                    logger.error(f"Client error sending batch: {e}")
-                    raise
-
-                logger.warning(f"Server error sending batch (attempt {attempt + 1}): {e}")
-
-            except httpx.RequestError as e:
-                last_error = e
-                logger.warning(f"Request error sending batch (attempt {attempt + 1}): {e}")
-
-            # Exponential backoff
+            last_error = error
             if attempt < self.max_retries:
                 self._stats["retries"] += 1
                 delay = (2**attempt) * 0.1  # 0.1s, 0.2s, 0.4s, ...
                 await asyncio.sleep(delay)
 
-        # All retries exhausted
         self._stats["events_failed"] += len(batch.events)
         logger.error(f"Failed to send batch {batch.batch_id} after {self.max_retries + 1} attempts")
 
         if last_error:
             raise last_error
         raise RuntimeError("Failed to send batch")
+
+    async def _attempt_send(
+        self,
+        batch: EventBatch,
+        headers: dict[str, str],
+    ) -> tuple[BatchResponse | None, Exception | None]:
+        """Attempt a single batch send.
+
+        Returns:
+            Tuple of (result, error). On success result is set; on retryable
+            failure error is set. Non-retryable errors are raised directly.
+        """
+        assert self._client is not None
+
+        try:
+            response = await self._client.post(
+                f"{self.collector_url}/events",
+                json=batch.model_dump(mode="json"),
+                headers=headers,
+            )
+            response.raise_for_status()
+
+            result = BatchResponse(**response.json())
+            self._stats["events_sent"] += result.accepted
+            self._stats["batches_sent"] += 1
+
+            logger.debug(
+                f"Batch {batch.batch_id} sent: {result.accepted} accepted, {result.duplicates} duplicates",
+            )
+            return result, None
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code < 500:
+                logger.error(f"Client error sending batch: {e}")
+                raise
+            logger.warning(f"Server error sending batch: {e}")
+            return None, e
+
+        except httpx.RequestError as e:
+            logger.warning(f"Request error sending batch: {e}")
+            return None, e
 
     def _generate_agent_id(self) -> str:
         """Generate a unique agent ID.

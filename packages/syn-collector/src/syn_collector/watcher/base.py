@@ -7,13 +7,25 @@ different file formats (hook JSONL, transcript JSONL).
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator  # noqa: TC003 - used at runtime
+from dataclasses import dataclass
 from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from syn_collector.events.types import CollectedEvent
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class FileState:
+    """Per-file read state for multi-file watchers."""
+
+    position: int = 0
+    inode: int | None = None
 
 
 class BaseWatcher(ABC):
@@ -98,3 +110,47 @@ class BaseWatcher(ABC):
             position: Byte position to set
         """
         self._position = position
+
+
+def read_jsonl_lines(path: Path, position: int) -> tuple[list[str], int]:
+    """Read complete JSONL lines from *path* starting at *position*.
+
+    Partial (unterminated) lines are silently discarded so callers only
+    receive well-formed input.
+
+    Args:
+        path: File to read.
+        position: Byte offset to seek to before reading.
+
+    Returns:
+        Tuple of (complete_lines, new_position).
+    """
+    lines: list[str] = []
+    with path.open("r", encoding="utf-8") as f:
+        f.seek(position)
+        buffer = ""
+        for line in f:
+            buffer += line
+            if not buffer.endswith("\n"):
+                continue
+            content = buffer.strip()
+            buffer = ""
+            if content:
+                lines.append(content)
+        new_position = f.tell()
+    return lines, new_position
+
+
+def detect_rotation(path: Path, stored_inode: int | None) -> tuple[bool, int]:
+    """Compare current inode with a stored value to detect file rotation.
+
+    Args:
+        path: File to check.
+        stored_inode: Previously recorded inode (or None if first check).
+
+    Returns:
+        Tuple of (rotated, current_inode).
+    """
+    current_inode = path.stat().st_ino
+    rotated = stored_inode is not None and current_inode != stored_inode
+    return rotated, current_inode
