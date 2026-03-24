@@ -33,6 +33,14 @@ def mock_conversation_store():
     return store
 
 
+def _patch_store(store: AsyncMock):
+    """Patch get_conversation_store as an async function returning the mock store."""
+    return patch(
+        "syn_api.routes.conversations.get_conversation_store",
+        new=AsyncMock(return_value=store),
+    )
+
+
 async def test_get_conversation_log(mock_conversation_store):
     """Retrieve a conversation log with 3 JSONL lines."""
     mock_conversation_store.retrieve_session.return_value = [
@@ -41,9 +49,7 @@ async def test_get_conversation_log(mock_conversation_store):
         '{"type": "assistant", "content": "Done"}',
     ]
 
-    with patch(
-        "syn_api.routes.conversations.get_conversation_store", return_value=mock_conversation_store
-    ):
+    with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log
 
         result = await get_conversation_log("session-1")
@@ -61,9 +67,7 @@ async def test_get_conversation_log_not_found(mock_conversation_store):
     """Return Err NOT_FOUND when session has no log."""
     mock_conversation_store.retrieve_session.return_value = None
 
-    with patch(
-        "syn_api.routes.conversations.get_conversation_store", return_value=mock_conversation_store
-    ):
+    with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log
 
         result = await get_conversation_log("nonexistent")
@@ -82,9 +86,7 @@ async def test_get_conversation_log_pagination(mock_conversation_store):
         '{"type": "assistant", "content": "line5"}',
     ]
 
-    with patch(
-        "syn_api.routes.conversations.get_conversation_store", return_value=mock_conversation_store
-    ):
+    with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log
 
         result = await get_conversation_log("session-1", offset=2, limit=2)
@@ -104,9 +106,7 @@ async def test_get_conversation_log_parses_json(mock_conversation_store):
         '{"type": "assistant", "content": "Here are the files"}',
     ]
 
-    with patch(
-        "syn_api.routes.conversations.get_conversation_store", return_value=mock_conversation_store
-    ):
+    with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_log
 
         result = await get_conversation_log("session-1")
@@ -132,9 +132,7 @@ async def test_get_conversation_metadata(mock_conversation_store):
         "completed_at": "2026-03-23T10:05:00Z",
     }
 
-    with patch(
-        "syn_api.routes.conversations.get_conversation_store", return_value=mock_conversation_store
-    ):
+    with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_metadata
 
         result = await get_conversation_metadata("session-1")
@@ -154,9 +152,7 @@ async def test_get_conversation_metadata_not_found(mock_conversation_store):
     """Return Ok(None) when session metadata doesn't exist."""
     mock_conversation_store.get_session_metadata.return_value = None
 
-    with patch(
-        "syn_api.routes.conversations.get_conversation_store", return_value=mock_conversation_store
-    ):
+    with _patch_store(mock_conversation_store):
         from syn_api.routes.conversations import get_conversation_metadata
 
         result = await get_conversation_metadata("nonexistent")

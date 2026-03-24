@@ -50,8 +50,22 @@ class ExecuteWorkflowRequest(BaseModel):
         default=None,
         description="Primary task description -- substituted for $ARGUMENTS in phase prompts.",
     )
-    provider: str = Field(default="claude", description="Agent provider to use")
-    max_budget_usd: float | None = Field(default=None, description="Maximum budget in USD")
+    provider: str = Field(
+        default="claude",
+        description=(
+            "Agent provider to use. Currently ignored by execute(); "
+            "sending this field has no effect."
+        ),
+        deprecated=True,
+    )
+    max_budget_usd: float | None = Field(
+        default=None,
+        description=(
+            "Maximum budget in USD. Currently ignored by execute(); "
+            "sending this field has no effect."
+        ),
+        deprecated=True,
+    )
 
 
 class ExecuteWorkflowResponse(BaseModel):
@@ -81,11 +95,18 @@ class ExecutionStatusResponse(BaseModel):
 
 
 def _to_datetime(value: datetime | str | None) -> datetime | None:
-    """Convert datetime or ISO string to datetime."""
+    """Convert datetime or ISO string to datetime, handling common variants safely."""
     if value is None:
         return None
     if isinstance(value, str):
-        return datetime.fromisoformat(value)
+        raw = value.strip()
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            logger.warning("Failed to parse datetime from value %r", value)
+            return None
     return value
 
 
