@@ -69,46 +69,49 @@ class RepoProjection:
         self._store = store
 
     async def handle_repo_registered(self, event: RepoRegisteredEvent) -> RepoSummary:
-        summary = RepoSummary(
-            repo_id=event.repo_id,
-            organization_id=event.organization_id,
-            provider=event.provider,
-            provider_repo_id=event.provider_repo_id,
-            full_name=event.full_name,
-            owner=event.owner,
-            default_branch=event.default_branch,
-            installation_id=event.installation_id,
-            is_private=event.is_private,
-            created_by=event.created_by,
-            created_at=datetime.now(UTC),
+        await self.on_repo_registered(
+            {
+                "repo_id": event.repo_id,
+                "organization_id": event.organization_id,
+                "provider": event.provider,
+                "provider_repo_id": event.provider_repo_id,
+                "full_name": event.full_name,
+                "owner": event.owner,
+                "default_branch": event.default_branch,
+                "installation_id": event.installation_id,
+                "is_private": event.is_private,
+                "created_by": event.created_by,
+            }
         )
-        await self._store.save(PROJECTION_NAME, event.repo_id, _repo_to_dict(summary))
-        logger.info(f"Projected RepoRegistered: {event.repo_id} ({event.full_name})")
-        return summary
+        data = await self._store.get(PROJECTION_NAME, event.repo_id)
+        return (
+            _repo_from_dict(data)
+            if data
+            else RepoSummary(
+                repo_id=event.repo_id,
+                organization_id=event.organization_id,
+                full_name=event.full_name,
+            )
+        )
 
     async def handle_repo_assigned_to_system(
         self, event: RepoAssignedToSystemEvent
     ) -> RepoSummary | None:
+        await self.on_repo_assigned_to_system(
+            {
+                "repo_id": event.repo_id,
+                "system_id": event.system_id,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.repo_id)
-        if data is None:
-            logger.warning(f"RepoAssignedToSystem for unknown repo: {event.repo_id}")
-            return None
-        data["system_id"] = event.system_id
-        await self._store.save(PROJECTION_NAME, event.repo_id, data)
-        logger.info(f"Projected RepoAssignedToSystem: {event.repo_id} -> {event.system_id}")
-        return _repo_from_dict(data)
+        return _repo_from_dict(data) if data else None
 
     async def handle_repo_unassigned_from_system(
         self, event: RepoUnassignedFromSystemEvent
     ) -> RepoSummary | None:
+        await self.on_repo_unassigned_from_system({"repo_id": event.repo_id})
         data = await self._store.get(PROJECTION_NAME, event.repo_id)
-        if data is None:
-            logger.warning(f"RepoUnassignedFromSystem for unknown repo: {event.repo_id}")
-            return None
-        data["system_id"] = ""
-        await self._store.save(PROJECTION_NAME, event.repo_id, data)
-        logger.info(f"Projected RepoUnassignedFromSystem: {event.repo_id}")
-        return _repo_from_dict(data)
+        return _repo_from_dict(data) if data else None
 
     async def get(self, repo_id: str) -> RepoSummary | None:
         data = await self._store.get(PROJECTION_NAME, repo_id)

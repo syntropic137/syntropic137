@@ -61,40 +61,39 @@ class SystemProjection:
         self._store = store
 
     async def handle_system_created(self, event: SystemCreatedEvent) -> SystemSummary:
-        summary = SystemSummary(
-            system_id=event.system_id,
-            organization_id=event.organization_id,
-            name=event.name,
-            description=event.description,
-            created_by=event.created_by,
-            created_at=datetime.now(UTC),
+        await self.on_system_created(
+            {
+                "system_id": event.system_id,
+                "organization_id": event.organization_id,
+                "name": event.name,
+                "description": event.description,
+                "created_by": event.created_by,
+            }
         )
-        await self._store.save(PROJECTION_NAME, event.system_id, _sys_to_dict(summary))
-        logger.info(f"Projected SystemCreated: {event.system_id} ({event.name})")
-        return summary
+        data = await self._store.get(PROJECTION_NAME, event.system_id)
+        return (
+            _sys_from_dict(data)
+            if data
+            else SystemSummary(
+                system_id=event.system_id, organization_id=event.organization_id, name=event.name
+            )
+        )
 
     async def handle_system_updated(self, event: SystemUpdatedEvent) -> SystemSummary | None:
+        await self.on_system_updated(
+            {
+                "system_id": event.system_id,
+                "name": event.name,
+                "description": event.description,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.system_id)
-        if data is None:
-            logger.warning(f"SystemUpdated for unknown system: {event.system_id}")
-            return None
-        if event.name is not None:
-            data["name"] = event.name
-        if event.description is not None:
-            data["description"] = event.description
-        await self._store.save(PROJECTION_NAME, event.system_id, data)
-        logger.info(f"Projected SystemUpdated: {event.system_id}")
-        return _sys_from_dict(data)
+        return _sys_from_dict(data) if data else None
 
     async def handle_system_deleted(self, event: SystemDeletedEvent) -> SystemSummary | None:
+        await self.on_system_deleted({"system_id": event.system_id})
         data = await self._store.get(PROJECTION_NAME, event.system_id)
-        if data is None:
-            logger.warning(f"SystemDeleted for unknown system: {event.system_id}")
-            return None
-        data["is_deleted"] = True
-        await self._store.save(PROJECTION_NAME, event.system_id, data)
-        logger.info(f"Projected SystemDeleted: {event.system_id}")
-        return _sys_from_dict(data)
+        return _sys_from_dict(data) if data else None
 
     async def get(self, system_id: str) -> SystemSummary | None:
         data = await self._store.get(PROJECTION_NAME, system_id)

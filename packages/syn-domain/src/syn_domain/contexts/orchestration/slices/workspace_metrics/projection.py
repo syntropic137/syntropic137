@@ -3,6 +3,8 @@
 Uses CheckpointedProjection (ADR-014) for reliable position tracking.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +14,59 @@ from syn_domain.contexts.orchestration.domain.read_models.workspace_metrics impo
     WorkspaceMetrics,
     WorkspaceMetricsSummary,
 )
+
+
+def _avg(values: list[float]) -> float:
+    """Return the arithmetic mean of *values*, or 0.0 if empty."""
+    return sum(values) / len(values) if values else 0.0
+
+
+def _p95(values: list[float]) -> float:
+    """Return the 95th-percentile value, or 0.0 if empty."""
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    idx = int(len(sorted_values) * 0.95)
+    return sorted_values[min(idx, len(sorted_values) - 1)]
+
+
+def _aggregate_metrics(
+    all_metrics: list[WorkspaceMetrics],
+) -> dict[str, Any]:
+    """Aggregate raw workspace metrics into summary components."""
+    by_backend: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    create_times: list[float] = []
+    destroy_times: list[float] = []
+    lifetime_times: list[float] = []
+    error_count = 0
+    total_commands = 0
+    successful_commands = 0
+
+    for m in all_metrics:
+        by_backend[m.isolation_backend] = by_backend.get(m.isolation_backend, 0) + 1
+        by_status[m.status] = by_status.get(m.status, 0) + 1
+        if m.create_duration_ms is not None:
+            create_times.append(m.create_duration_ms)
+        if m.destroy_duration_ms is not None:
+            destroy_times.append(m.destroy_duration_ms)
+        if m.total_lifetime_ms is not None:
+            lifetime_times.append(m.total_lifetime_ms)
+        if m.status == "error":
+            error_count += 1
+        total_commands += m.commands_executed
+        successful_commands += m.commands_succeeded
+
+    return {
+        "by_backend": by_backend,
+        "by_status": by_status,
+        "create_times": create_times,
+        "destroy_times": destroy_times,
+        "lifetime_times": lifetime_times,
+        "error_count": error_count,
+        "total_commands": total_commands,
+        "successful_commands": successful_commands,
+    }
 
 
 class WorkspaceMetricsProjection(AutoDispatchProjection):
@@ -175,61 +230,26 @@ class WorkspaceMetricsProjection(AutoDispatchProjection):
     async def get_summary(self) -> WorkspaceMetricsSummary:
         """Get aggregated metrics summary."""
         all_metrics = await self.get_all()
-
         if not all_metrics:
             return WorkspaceMetricsSummary()
 
-        # Aggregate
-        by_backend: dict[str, int] = {}
-        by_status: dict[str, int] = {}
-        create_times: list[float] = []
-        destroy_times: list[float] = []
-        lifetime_times: list[float] = []
-        error_count = 0
-        total_commands = 0
-        successful_commands = 0
-
-        for m in all_metrics:
-            by_backend[m.isolation_backend] = by_backend.get(m.isolation_backend, 0) + 1
-            by_status[m.status] = by_status.get(m.status, 0) + 1
-
-            if m.create_duration_ms is not None:
-                create_times.append(m.create_duration_ms)
-            if m.destroy_duration_ms is not None:
-                destroy_times.append(m.destroy_duration_ms)
-            if m.total_lifetime_ms is not None:
-                lifetime_times.append(m.total_lifetime_ms)
-
-            if m.status == "error":
-                error_count += 1
-
-            total_commands += m.commands_executed
-            successful_commands += m.commands_succeeded
-
-        def avg(values: list[float]) -> float:
-            return sum(values) / len(values) if values else 0.0
-
-        def p95(values: list[float]) -> float:
-            if not values:
-                return 0.0
-            sorted_values = sorted(values)
-            idx = int(len(sorted_values) * 0.95)
-            return sorted_values[min(idx, len(sorted_values) - 1)]
-
+        agg = _aggregate_metrics(all_metrics)
         return WorkspaceMetricsSummary(
             total_workspaces=len(all_metrics),
-            workspaces_by_backend=by_backend,
-            workspaces_by_status=by_status,
-            avg_create_duration_ms=avg(create_times),
-            avg_destroy_duration_ms=avg(destroy_times),
-            avg_total_lifetime_ms=avg(lifetime_times),
-            p95_create_duration_ms=p95(create_times),
-            p95_destroy_duration_ms=p95(destroy_times),
-            error_count=error_count,
-            error_rate=error_count / len(all_metrics) if all_metrics else 0.0,
-            total_commands_executed=total_commands,
+            workspaces_by_backend=agg["by_backend"],
+            workspaces_by_status=agg["by_status"],
+            avg_create_duration_ms=_avg(agg["create_times"]),
+            avg_destroy_duration_ms=_avg(agg["destroy_times"]),
+            avg_total_lifetime_ms=_avg(agg["lifetime_times"]),
+            p95_create_duration_ms=_p95(agg["create_times"]),
+            p95_destroy_duration_ms=_p95(agg["destroy_times"]),
+            error_count=agg["error_count"],
+            error_rate=agg["error_count"] / len(all_metrics),
+            total_commands_executed=agg["total_commands"],
             command_success_rate=(
-                successful_commands / total_commands if total_commands > 0 else 1.0
+                agg["successful_commands"] / agg["total_commands"]
+                if agg["total_commands"] > 0
+                else 1.0
             ),
         )
 

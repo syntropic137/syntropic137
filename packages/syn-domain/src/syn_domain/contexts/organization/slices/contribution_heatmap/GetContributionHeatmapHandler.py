@@ -28,6 +28,41 @@ if TYPE_CHECKING:
     )
 
 
+_ZERO_BREAKDOWN: dict[str, float] = {
+    "sessions": 0.0,
+    "executions": 0.0,
+    "commits": 0.0,
+    "cost_usd": 0.0,
+    "tokens": 0.0,
+    "input_tokens": 0.0,
+    "output_tokens": 0.0,
+    "cache_creation_tokens": 0.0,
+    "cache_read_tokens": 0.0,
+}
+
+
+def _empty_result(
+    query: GetContributionHeatmapQuery,
+    filter_meta: dict[str, str | None],
+) -> ContributionHeatmapResult:
+    """Build a zero-filled result for a date range with no matching executions."""
+    days: list[HeatmapDayBucket] = []
+    current = query.start_date
+    while current <= query.end_date:
+        days.append(
+            HeatmapDayBucket(date=current.isoformat(), count=0.0, breakdown=dict(_ZERO_BREAKDOWN))
+        )
+        current += timedelta(days=1)
+    return ContributionHeatmapResult(
+        metric=query.metric,
+        start_date=query.start_date.isoformat(),
+        end_date=query.end_date.isoformat(),
+        total=0.0,
+        days=days,
+        filter=filter_meta,
+    )
+
+
 class GetContributionHeatmapHandler:
     """Query handler: get daily activity buckets for a contribution heatmap."""
 
@@ -41,79 +76,36 @@ class GetContributionHeatmapHandler:
         self._store = store
         self._repo_projection = repo_projection
 
-    async def _get_execution_ids_for_repo(self, repo_id: str) -> set[str]:
-        """Resolve execution IDs for a single repo."""
-        repo = await self._repo_projection.get(repo_id)
-        if not repo:
-            return set()
+    async def _resolve_repo_names(self, query: GetContributionHeatmapQuery) -> set[str] | None:
+        """Resolve repo full names from query filters, or None if no filter."""
+        if query.repo_id:
+            repo = await self._repo_projection.get(query.repo_id)
+            return {repo.full_name} if repo else set()
+        if query.system_id:
+            repos = await self._repo_projection.list_all(system_id=query.system_id)
+            return {r.full_name for r in repos}
+        if query.organization_id:
+            repos = await self._repo_projection.list_all(organization_id=query.organization_id)
+            return {r.full_name for r in repos}
+        return None
 
-        correlations = await self._store.get_all(REPO_CORRELATION)
-        return {
-            c["execution_id"] for c in correlations if c.get("repo_full_name") == repo.full_name
-        }
-
-    async def _get_execution_ids_for_system(self, system_id: str) -> set[str]:
-        """Resolve execution IDs for all repos in a system."""
-        repos = await self._repo_projection.list_all(system_id=system_id)
-        repo_names = {r.full_name for r in repos}
-
-        correlations = await self._store.get_all(REPO_CORRELATION)
-        return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
-
-    async def _get_execution_ids_for_organization(self, organization_id: str) -> set[str]:
-        """Resolve execution IDs for all repos in an organization."""
-        repos = await self._repo_projection.list_all(organization_id=organization_id)
-        repo_names = {r.full_name for r in repos}
-
+    async def _get_execution_ids(self, repo_names: set[str]) -> set[str]:
+        """Get execution IDs correlated with the given repo names."""
         correlations = await self._store.get_all(REPO_CORRELATION)
         return {c["execution_id"] for c in correlations if c.get("repo_full_name") in repo_names}
 
     async def handle(self, query: GetContributionHeatmapQuery) -> ContributionHeatmapResult:
         """Handle GetContributionHeatmapQuery."""
-        # Resolve execution_ids from the most specific filter
+        repo_names = await self._resolve_repo_names(query)
         execution_ids: set[str] | None = None
-        if query.repo_id:
-            execution_ids = await self._get_execution_ids_for_repo(query.repo_id)
-        elif query.system_id:
-            execution_ids = await self._get_execution_ids_for_system(query.system_id)
-        elif query.organization_id:
-            execution_ids = await self._get_execution_ids_for_organization(query.organization_id)
+        if repo_names is not None:
+            execution_ids = await self._get_execution_ids(repo_names)
 
-        # If a filter was applied but resolved to zero executions, return zero-filled buckets
         if execution_ids is not None and not execution_ids:
-            days: list[HeatmapDayBucket] = []
-            current = query.start_date
-            while current <= query.end_date:
-                days.append(
-                    HeatmapDayBucket(
-                        date=current.isoformat(),
-                        count=0.0,
-                        breakdown={
-                            "sessions": 0.0,
-                            "executions": 0.0,
-                            "commits": 0.0,
-                            "cost_usd": 0.0,
-                            "tokens": 0.0,
-                            "input_tokens": 0.0,
-                            "output_tokens": 0.0,
-                            "cache_creation_tokens": 0.0,
-                            "cache_read_tokens": 0.0,
-                        },
-                    )
-                )
-                current += timedelta(days=1)
-            return ContributionHeatmapResult(
-                metric=query.metric,
-                start_date=query.start_date.isoformat(),
-                end_date=query.end_date.isoformat(),
-                total=0.0,
-                days=days,
-                filter=self._build_filter(query),
-            )
+            return _empty_result(query, self._build_filter(query))
 
         buckets = await self._timescale.query(query.start_date, query.end_date, execution_ids)
 
-        # Set count from selected metric
         days = [
             HeatmapDayBucket(
                 date=b.date,
@@ -123,13 +115,11 @@ class GetContributionHeatmapHandler:
             for b in buckets
         ]
 
-        total = sum(d.count for d in days)
-
         return ContributionHeatmapResult(
             metric=query.metric,
             start_date=query.start_date.isoformat(),
             end_date=query.end_date.isoformat(),
-            total=total,
+            total=sum(d.count for d in days),
             days=days,
             filter=self._build_filter(query),
         )

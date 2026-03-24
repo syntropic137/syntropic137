@@ -17,7 +17,10 @@ from syn_domain.contexts.github.domain.commands.RegisterTriggerCommand import (
     RegisterTriggerCommand,
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator import (
+    _check_operator,
+    _resolve_array_index,
     _resolve_field,
+    _unpack_condition,
     evaluate_conditions,
 )
 from syn_domain.contexts.github.slices.evaluate_webhook.debouncer import (
@@ -568,3 +571,68 @@ class TestDebounceAndRetry:
         assert isinstance(results[0], TriggerMatchResult)
         assert debouncer.pending_count == 0
         debouncer.cancel_all()
+
+
+@pytest.mark.unit
+class TestExtractedHelpers:
+    """Tests for helpers extracted for complexity reduction."""
+
+    def test_check_operator_eq(self) -> None:
+        assert _check_operator("eq", "foo", "foo") is True
+        assert _check_operator("eq", "foo", "bar") is False
+
+    def test_check_operator_neq(self) -> None:
+        assert _check_operator("neq", "foo", "bar") is True
+        assert _check_operator("neq", "foo", "foo") is False
+
+    def test_check_operator_not_empty(self) -> None:
+        assert _check_operator("not_empty", "value", None) is True
+        assert _check_operator("not_empty", "", None) is False
+
+    def test_check_operator_is_empty(self) -> None:
+        assert _check_operator("is_empty", "", None) is True
+        assert _check_operator("is_empty", "value", None) is False
+
+    def test_check_operator_in(self) -> None:
+        assert _check_operator("in", "a", ["a", "b"]) is True
+        assert _check_operator("in", "c", ["a", "b"]) is False
+
+    def test_check_operator_not_in(self) -> None:
+        assert _check_operator("not_in", "c", ["a", "b"]) is True
+        assert _check_operator("not_in", "a", ["a", "b"]) is False
+
+    def test_check_operator_contains(self) -> None:
+        assert _check_operator("contains", "hello world", "world") is True
+        assert _check_operator("contains", "hello", "world") is False
+
+    def test_check_operator_unknown(self) -> None:
+        with pytest.raises(ValueError, match="Unknown operator"):
+            _check_operator("unknown_op", "a", "b")
+
+    def test_unpack_condition_dict(self) -> None:
+        field, op, val = _unpack_condition({"field": "action", "operator": "eq", "value": "opened"})
+        assert field == "action"
+        assert op == "eq"
+        assert val == "opened"
+
+    def test_unpack_condition_typed(self) -> None:
+        cond = TriggerCondition(field="action", operator="eq", value="closed")
+        field, op, val = _unpack_condition(cond)
+        assert field == "action"
+        assert op == "eq"
+        assert val == "closed"
+
+    def test_resolve_array_index_valid(self) -> None:
+        data = {"items": ["a", "b", "c"]}
+        assert _resolve_array_index(data, "items", "1") == "b"
+
+    def test_resolve_array_index_out_of_range(self) -> None:
+        data = {"items": ["a"]}
+        assert _resolve_array_index(data, "items", "5") is None
+
+    def test_resolve_array_index_not_list(self) -> None:
+        data = {"items": "not_a_list"}
+        assert _resolve_array_index(data, "items", "0") is None
+
+    def test_resolve_array_index_not_dict(self) -> None:
+        assert _resolve_array_index("not_dict", "items", "0") is None
