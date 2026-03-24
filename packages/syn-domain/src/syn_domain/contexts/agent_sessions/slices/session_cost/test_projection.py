@@ -7,7 +7,10 @@ from typing import Any
 import pytest
 
 from syn_domain.contexts.agent_sessions.domain.events.agent_observation import ObservationType
-from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
+from syn_domain.contexts.agent_sessions.slices.session_cost.projection import (
+    SessionCostProjection,
+    _parse_timestamp,
+)
 
 
 class MockProjectionStore:
@@ -520,3 +523,20 @@ class TestQueryOperations:
         session_ids = [s.session_id for s in sessions]
         assert "session-1" in session_ids
         assert "session-2" in session_ids
+
+
+@pytest.mark.unit
+class TestParseTimestamp:
+    def test_datetime_passthrough(self) -> None:
+        dt = datetime(2026, 1, 1, 12, 0, 0)
+        assert _parse_timestamp(dt) is dt
+
+    def test_iso_string_parsed(self) -> None:
+        result = _parse_timestamp("2026-01-01T12:00:00")
+        assert result == datetime(2026, 1, 1, 12, 0, 0)
+
+    def test_none_returns_none(self) -> None:
+        assert _parse_timestamp(None) is None
+
+    def test_non_string_non_datetime_returns_none(self) -> None:
+        assert _parse_timestamp(42) is None

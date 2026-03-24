@@ -24,6 +24,49 @@ if TYPE_CHECKING:
     )
 
 
+_EVENT_FIELDS = [
+    "name",
+    "workflow_type",
+    "classification",
+    "repository_url",
+    "repository_ref",
+    "phases",
+    "project_name",
+    "description",
+    "input_declarations",
+]
+
+
+def _normalize_event_data(event: Any) -> dict[str, Any]:
+    """Extract a flat dict from a typed event or GenericDomainEvent.
+
+    Handles both Pydantic-style events (with attributes) and dict-like
+    events from the gRPC event store.
+    """
+    data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+    # Ensure all expected keys exist
+    for field in _EVENT_FIELDS:
+        data.setdefault(field, [] if field in ("phases", "input_declarations") else None)
+    return data
+
+
+def _parse_enum(value: Any, enum_type: type) -> Any:
+    """Convert a string to an enum, or return as-is if already typed."""
+    return enum_type(value) if isinstance(value, str) else value
+
+
+def _parse_typed_list(raw: list, type_name: str) -> list:
+    """Convert a list of dicts to typed objects, or pass through if already typed."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        InputDeclaration,
+        PhaseDefinition,
+    )
+
+    type_map = {"PhaseDefinition": PhaseDefinition, "InputDeclaration": InputDeclaration}
+    cls = type_map[type_name]
+    return [cls(**item) if isinstance(item, dict) else item for item in (raw or [])]
+
+
 class WorkflowStatus(str, Enum):
     """Status of a workflow."""
 
@@ -146,84 +189,23 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         Note: When rehydrating from gRPC event store, event may be a GenericDomainEvent
         with dict attributes instead of proper typed objects. Handle both cases.
         """
+        data = _normalize_event_data(event)
+
         from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-            InputDeclaration,
-            PhaseDefinition,
             WorkflowClassification,
             WorkflowType,
         )
 
-        # Handle both typed events and GenericDomainEvent (dict-based)
-        workflow_type: Any
-        classification: Any
-        if hasattr(event, "model_dump"):
-            # It's a typed event, use attributes directly
-            self._name = event.name
-            workflow_type = event.workflow_type
-            classification = event.classification
-            phases_raw = event.phases
-        else:
-            # It's a GenericDomainEvent or dict-like object
-            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            self._name = event_data.get("name")
-            workflow_type = event_data.get("workflow_type")
-            classification = event_data.get("classification")
-            phases_raw = event_data.get("phases", [])
-
-        # Convert workflow_type to enum if it's a string
-        if isinstance(workflow_type, str):
-            self._workflow_type = WorkflowType(workflow_type)
-        else:
-            self._workflow_type = workflow_type
-
-        # Convert classification to enum if it's a string
-        if isinstance(classification, str):
-            self._classification = WorkflowClassification(classification)
-        else:
-            self._classification = classification
-
-        # Handle repository URL and ref
-        if hasattr(event, "repository_url"):
-            self._repository_url = event.repository_url
-            self._repository_ref = event.repository_ref
-        else:
-            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            self._repository_url = event_data.get("repository_url")
-            self._repository_ref = event_data.get("repository_ref")
-
-        # Convert phases - they may be dicts or PhaseDefinition objects
-        self._phases = []
-        for phase in phases_raw:
-            if isinstance(phase, dict):
-                self._phases.append(PhaseDefinition(**phase))
-            else:
-                self._phases.append(phase)
-
+        self._name = data["name"]
+        self._workflow_type = _parse_enum(data["workflow_type"], WorkflowType)
+        self._classification = _parse_enum(data["classification"], WorkflowClassification)
+        self._repository_url = data["repository_url"]
+        self._repository_ref = data["repository_ref"]
+        self._phases = _parse_typed_list(data["phases"], "PhaseDefinition")
         self._status = WorkflowStatus.PENDING
-
-        # Handle optional fields
-        if hasattr(event, "project_name"):
-            self._project_name = event.project_name
-            self._description = event.description
-        else:
-            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            self._project_name = event_data.get("project_name")
-            self._description = event_data.get("description")
-
-        # Rehydrate input declarations (ISS-211, backward compat: default [])
-        declarations_raw: list[object] = []
-        if hasattr(event, "input_declarations"):
-            declarations_raw = list(event.input_declarations or [])
-        else:
-            event_data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            declarations_raw = list(event_data.get("input_declarations", []))
-
-        self._input_declarations = []
-        for decl in declarations_raw:
-            if isinstance(decl, dict):
-                self._input_declarations.append(InputDeclaration(**decl))
-            else:
-                self._input_declarations.append(decl)  # type: ignore[arg-type]
+        self._project_name = data["project_name"]
+        self._description = data["description"]
+        self._input_declarations = _parse_typed_list(data["input_declarations"], "InputDeclaration")
 
     @event_sourcing_handler("WorkflowCreated")
     def on_workflow_created_legacy(self, event: WorkflowTemplateCreatedEvent) -> None:

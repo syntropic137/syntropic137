@@ -83,55 +83,74 @@ class EvaluateWebhookHandler:
 
         results: list[TriggerMatchResult | TriggerDeferredResult] = []
         for rule in rules:
-            if rule.status != "active":
-                continue
-
-            if not evaluate_conditions(rule.conditions, payload):
-                logger.debug(f"Trigger {rule.trigger_id} conditions not met for {event}")
-                continue
-
-            guard_result = await self._guards.check_all(rule, payload, self._store)
-
-            if not guard_result.passed:
-                # Retryable guard block + debouncer available → schedule retry
-                if guard_result.retryable and self._debouncer is not None:
-                    deferred = await self._schedule_deferred(
-                        rule=rule,
-                        event=event,
-                        repository=repository,
-                        installation_id=installation_id,
-                        payload=payload,
-                        delay=guard_result.retry_after_seconds,
-                        reason=guard_result.reason,
-                        key_suffix=":retry",
-                    )
-                    results.append(deferred)
-                else:
-                    logger.info(
-                        f"Trigger {rule.trigger_id} blocked by guard: {guard_result.reason}"
-                    )
-                continue
-
-            # Guards passed — check for debounce (0 = disabled)
-            if rule.config.debounce_seconds > 0 and self._debouncer is not None:
-                deferred = await self._schedule_deferred(
-                    rule=rule,
-                    event=event,
-                    repository=repository,
-                    installation_id=installation_id,
-                    payload=payload,
-                    delay=rule.config.debounce_seconds,
-                    reason=f"Debouncing for {rule.config.debounce_seconds}s",
-                    key_suffix="",
-                )
-                results.append(deferred)
-                continue
-
-            # Fire immediately
-            result = await self._fire_trigger(rule, event, repository, payload)
-            results.append(result)
-
+            result = await self._evaluate_rule(rule, event, repository, installation_id, payload)
+            if result is not None:
+                results.append(result)
         return results
+
+    async def _evaluate_rule(
+        self,
+        rule: Any,
+        event: str,
+        repository: str,
+        installation_id: str,
+        payload: dict[str, Any],
+    ) -> TriggerMatchResult | TriggerDeferredResult | None:
+        """Evaluate a single rule against the payload. Returns None if skipped."""
+        if rule.status != "active":
+            return None
+        if not evaluate_conditions(rule.conditions, payload):
+            logger.debug(f"Trigger {rule.trigger_id} conditions not met for {event}")
+            return None
+
+        guard_result = await self._guards.check_all(rule, payload, self._store)
+        if not guard_result.passed:
+            return await self._handle_guard_block(
+                rule,
+                guard_result,
+                event,
+                repository,
+                installation_id,
+                payload,
+            )
+
+        if rule.config.debounce_seconds > 0 and self._debouncer is not None:
+            return await self._schedule_deferred(
+                rule=rule,
+                event=event,
+                repository=repository,
+                installation_id=installation_id,
+                payload=payload,
+                delay=rule.config.debounce_seconds,
+                reason=f"Debouncing for {rule.config.debounce_seconds}s",
+                key_suffix="",
+            )
+
+        return await self._fire_trigger(rule, event, repository, payload)
+
+    async def _handle_guard_block(
+        self,
+        rule: Any,
+        guard_result: Any,
+        event: str,
+        repository: str,
+        installation_id: str,
+        payload: dict[str, Any],
+    ) -> TriggerDeferredResult | None:
+        """Handle a guard block — schedule retry if retryable, otherwise log."""
+        if guard_result.retryable and self._debouncer is not None:
+            return await self._schedule_deferred(
+                rule=rule,
+                event=event,
+                repository=repository,
+                installation_id=installation_id,
+                payload=payload,
+                delay=guard_result.retry_after_seconds,
+                reason=guard_result.reason,
+                key_suffix=":retry",
+            )
+        logger.info(f"Trigger {rule.trigger_id} blocked by guard: {guard_result.reason}")
+        return None
 
     async def _fire_trigger(
         self,

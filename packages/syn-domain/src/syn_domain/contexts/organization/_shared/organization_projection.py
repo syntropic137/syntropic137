@@ -64,43 +64,42 @@ class OrganizationProjection:
     async def handle_organization_created(
         self, event: OrganizationCreatedEvent
     ) -> OrganizationSummary:
-        summary = OrganizationSummary(
-            organization_id=event.organization_id,
-            name=event.name,
-            slug=event.slug,
-            created_by=event.created_by,
-            created_at=datetime.now(UTC),
+        await self.on_organization_created(
+            {
+                "organization_id": event.organization_id,
+                "name": event.name,
+                "slug": event.slug,
+                "created_by": event.created_by,
+            }
         )
-        await self._store.save(PROJECTION_NAME, event.organization_id, _org_to_dict(summary))
-        logger.info(f"Projected OrganizationCreated: {event.organization_id} ({event.name})")
-        return summary
+        data = await self._store.get(PROJECTION_NAME, event.organization_id)
+        return (
+            _org_from_dict(data)
+            if data
+            else OrganizationSummary(
+                organization_id=event.organization_id, name=event.name, slug=event.slug
+            )
+        )
 
     async def handle_organization_updated(
         self, event: OrganizationUpdatedEvent
     ) -> OrganizationSummary | None:
+        await self.on_organization_updated(
+            {
+                "organization_id": event.organization_id,
+                "name": event.name,
+                "slug": event.slug,
+            }
+        )
         data = await self._store.get(PROJECTION_NAME, event.organization_id)
-        if data is None:
-            logger.warning(f"OrganizationUpdated for unknown org: {event.organization_id}")
-            return None
-        if event.name is not None:
-            data["name"] = event.name
-        if event.slug is not None:
-            data["slug"] = event.slug
-        await self._store.save(PROJECTION_NAME, event.organization_id, data)
-        logger.info(f"Projected OrganizationUpdated: {event.organization_id}")
-        return _org_from_dict(data)
+        return _org_from_dict(data) if data else None
 
     async def handle_organization_deleted(
         self, event: OrganizationDeletedEvent
     ) -> OrganizationSummary | None:
+        await self.on_organization_deleted({"organization_id": event.organization_id})
         data = await self._store.get(PROJECTION_NAME, event.organization_id)
-        if data is None:
-            logger.warning(f"OrganizationDeleted for unknown org: {event.organization_id}")
-            return None
-        data["is_deleted"] = True
-        await self._store.save(PROJECTION_NAME, event.organization_id, data)
-        logger.info(f"Projected OrganizationDeleted: {event.organization_id}")
-        return _org_from_dict(data)
+        return _org_from_dict(data) if data else None
 
     async def get(self, organization_id: str) -> OrganizationSummary | None:
         data = await self._store.get(PROJECTION_NAME, organization_id)
