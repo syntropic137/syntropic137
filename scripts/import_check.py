@@ -146,7 +146,7 @@ def main() -> int:
             print(e)
         return 1
 
-    print(f"✅ All active scripts/ imports OK")
+    print("✅ All active scripts/ imports OK")
     return 0
 
 
