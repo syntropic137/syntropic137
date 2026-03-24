@@ -94,7 +94,15 @@ def main() -> int:
         for match in re.finditer(r"scripts/([a-z_]+\.py)", justfile.read_text()):
             active_scripts.add(match.group(1))
 
-    our_packages = ("syn_api", "syn_cli", "syn_domain", "syn_adapters", "syn_shared", "syn_collector", "syn_tokens")
+    our_packages = (
+        "syn_api",
+        "syn_cli",
+        "syn_domain",
+        "syn_adapters",
+        "syn_shared",
+        "syn_collector",
+        "syn_tokens",
+    )
 
     errors: list[str] = []
     warnings: list[str] = []
