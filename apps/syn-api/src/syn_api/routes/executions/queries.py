@@ -55,7 +55,7 @@ class PhaseExecutionInfo(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     error_message: str | None = None
-    operations: list[PhaseOperationInfo] = []
+    operations: list[PhaseOperationInfo] = Field(default_factory=list)
 
 
 class ExecutionDetailResponse(BaseModel):
@@ -101,6 +101,18 @@ class ExecutionListResponse(BaseModel):
 
 def _to_str(val: object | None) -> str | None:
     return str(val) if val is not None else None
+
+
+def _parse_iso(value: str) -> datetime | None:
+    """Parse an ISO datetime string, handling trailing 'Z' safely."""
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        logger.warning("Failed to parse datetime from value %r", value)
+        return None
 
 
 # -- Service functions --------------------------------------------------------
@@ -236,8 +248,8 @@ async def get_detail(
                     output_tokens=p.output_tokens,
                     cost_usd=Decimal(str(p.cost_usd)),
                     duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
-                    started_at=datetime.fromisoformat(_st) if isinstance(_st, str) else _st,
-                    completed_at=datetime.fromisoformat(_co) if isinstance(_co, str) else _co,
+                    started_at=_parse_iso(_st) if isinstance(_st, str) else _st,
+                    completed_at=_parse_iso(_co) if isinstance(_co, str) else _co,
                     operations=ops,
                 )
             )
