@@ -9,37 +9,32 @@ exceptions = "fitness-exceptions.toml"
 severity_default = "error"
 
 # ─── Cognitive Complexity ────────────────────────────────────────────────────
+# SonarQube default: 15. flake8-cognitive-complexity: 7. We use 15 as hard limit.
 
 [[rules.threshold]]
 id = "max-cognitive"
 name = "Maximum Cognitive Complexity (function)"
 source = "metrics/functions.json"
 field = "metrics.cognitive"
-max = 25
+max = 15
 scope = "function"
 severity = "error"
 # Entity IDs: "python:module.path::func_name" / "rust:crate::path::func_name"
 exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
 
-[[rules.threshold]]
-id = "max-cognitive-file"
-name = "Maximum Cognitive Complexity (file)"
-source = "metrics/modules.json"
-field = "metrics.total_cognitive"
-max = 50
-scope = "module"
-severity = "error"
-# Entity IDs: "module.path.name" or "lib::crate::path"
-exclude = ["infra*", "scripts*", "lib*", "ci*", "*conftest*"]
+# File-level cognitive complexity REMOVED — lean on LOC + fan-out for file health.
+# Per-function cognitive is the meaningful signal; file-level sums penalize
+# files with several moderate functions and cause unnecessary splitting.
 
 # ─── Cyclomatic Complexity ───────────────────────────────────────────────────
+# McCabe/NIST gold standard: 10.
 
 [[rules.threshold]]
 id = "max-cyclomatic"
 name = "Maximum Cyclomatic Complexity (function)"
 source = "metrics/functions.json"
 field = "metrics.cyclomatic"
-max = 15
+max = 10
 scope = "function"
 severity = "error"
 exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
