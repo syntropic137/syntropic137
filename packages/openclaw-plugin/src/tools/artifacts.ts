@@ -1,6 +1,11 @@
 import type { SyntropicClient } from "../client.js";
 import { formatError } from "../errors.js";
-import type { ArtifactDetail, ArtifactSummary } from "../types.js";
+import type { ArtifactSummary } from "../types.js";
+import { formatSize } from "./format.js";
+
+// Re-export extracted artifact detail function for backwards compatibility
+export { synGetArtifact } from "./artifact_detail.js";
+export type { GetArtifactArgs } from "./artifact_detail.js";
 
 // ---------------------------------------------------------------------------
 // syn_list_artifacts
@@ -31,65 +36,13 @@ export async function synListArtifacts(
     return { content: "No artifacts found." };
   }
 
-  const lines = artifacts.map((a: ArtifactSummary) => {
-    const size = a.size_bytes > 1024
-      ? `${(a.size_bytes / 1024).toFixed(1)} KB`
-      : `${a.size_bytes} bytes`;
-    return `- **${a.title ?? a.id}** (${a.artifact_type})\n  ID: ${a.id} · ${size}${a.created_at ? ` · ${a.created_at}` : ""}`;
-  });
+  const lines = artifacts.map((a: ArtifactSummary) =>
+    `- **${a.title ?? a.id}** (${a.artifact_type})\n  ID: ${a.id} · ${formatSize(a.size_bytes)}${a.created_at ? ` · ${a.created_at}` : ""}`,
+  );
 
   return {
     content: [`## Artifacts (${artifacts.length})`, "", ...lines].join("\n"),
   };
-}
-
-// ---------------------------------------------------------------------------
-// syn_get_artifact
-// ---------------------------------------------------------------------------
-
-export interface GetArtifactArgs {
-  artifact_id: string;
-}
-
-export async function synGetArtifact(
-  client: SyntropicClient,
-  args: GetArtifactArgs,
-): Promise<{ content: string; isError?: true }> {
-  const result = await client.get<ArtifactDetail>(
-    `/artifacts/${encodeURIComponent(args.artifact_id)}`,
-    { include_content: "true" },
-  );
-  if (!result.ok) return formatError(result.error);
-
-  const a = result.data;
-  const size = a.size_bytes > 1024
-    ? `${(a.size_bytes / 1024).toFixed(1)} KB`
-    : `${a.size_bytes} bytes`;
-
-  const sections = [
-    `## Artifact: ${a.title ?? a.id}`,
-    "",
-    `| Field | Value |`,
-    `|-------|-------|`,
-    `| ID | ${a.id} |`,
-    `| Type | ${a.artifact_type} |`,
-    `| Content Type | ${a.content_type} |`,
-    `| Size | ${size} |`,
-    `| Primary | ${a.is_primary_deliverable ? "Yes" : "No"} |`,
-  ];
-
-  if (a.created_at) sections.push(`| Created | ${a.created_at} |`);
-  if (a.created_by) sections.push(`| Created By | ${a.created_by} |`);
-  if (a.derived_from.length > 0) sections.push(`| Derived From | ${a.derived_from.join(", ")} |`);
-
-  if (a.content) {
-    const preview = a.content.length > 2000
-      ? a.content.slice(0, 2000) + "\n\n... (truncated)"
-      : a.content;
-    sections.push("", "### Content", "", preview);
-  }
-
-  return { content: sections.join("\n") };
 }
 
 /** Tool definitions for artifact tools. */

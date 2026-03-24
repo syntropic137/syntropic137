@@ -58,10 +58,20 @@ class ParallelBenchmark(BaseBenchmark):
         total_parallel_time_ms = (end_time - start_time) * 1000
         result.total_parallel_time_ms = total_parallel_time_ms
 
-        # Process results
+        self._process_results(timings, result)
+        self._calculate_speedup(result, total_parallel_time_ms, count)
+
+        result.complete()
+        return result
+
+    def _process_results(
+        self,
+        timings: list[WorkspaceTiming | BaseException],
+        result: BenchmarkResult,
+    ) -> None:
+        """Sort gather results into successful timings and error entries."""
         for timing in timings:
             if isinstance(timing, Exception):
-                # Handle exceptions from gather
                 result.add_timing(
                     WorkspaceTiming(
                         workspace_id="unknown",
@@ -76,15 +86,19 @@ class ParallelBenchmark(BaseBenchmark):
             elif isinstance(timing, WorkspaceTiming):
                 result.add_timing(timing)
 
-        # Calculate speedup
-        if result.total_times_ms:
-            sequential_estimate_ms = sum(result.total_times_ms)
-            speedup = (
-                sequential_estimate_ms / total_parallel_time_ms if total_parallel_time_ms > 0 else 0
-            )
-            result.metadata["sequential_estimate_ms"] = sequential_estimate_ms
-            result.metadata["speedup"] = round(speedup, 2)
-            result.metadata["avg_per_workspace_ms"] = total_parallel_time_ms / count
-
-        result.complete()
-        return result
+    @staticmethod
+    def _calculate_speedup(
+        result: BenchmarkResult,
+        total_parallel_time_ms: float,
+        count: int,
+    ) -> None:
+        """Compute parallel-vs-sequential speedup metadata."""
+        if not result.total_times_ms:
+            return
+        sequential_estimate_ms = sum(result.total_times_ms)
+        speedup = (
+            sequential_estimate_ms / total_parallel_time_ms if total_parallel_time_ms > 0 else 0
+        )
+        result.metadata["sequential_estimate_ms"] = sequential_estimate_ms
+        result.metadata["speedup"] = round(speedup, 2)
+        result.metadata["avg_per_workspace_ms"] = total_parallel_time_ms / count
