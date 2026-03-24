@@ -11,6 +11,9 @@ from syn_cli.main import app
 
 runner = CliRunner()
 
+_HELPERS_CLIENT = "syn_cli.commands._api_helpers.get_client"
+_AGENT_CLIENT = "syn_cli.commands.agent.get_client"
+
 
 def _mock_response(status_code: int = 200, json_data: dict | None = None) -> MagicMock:
     resp = MagicMock()
@@ -57,7 +60,7 @@ class TestAgentList:
             },
         ]
         client = _mock_client(_mock_response(200, providers))
-        with patch("syn_cli.commands.agent.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["agent", "list"])
         assert result.exit_code == 0
         assert "Claude" in result.stdout
@@ -74,7 +77,7 @@ class TestAgentTest:
             "output_tokens": 5,
         }
         client = _mock_client(_mock_response(200, test_result))
-        with patch("syn_cli.commands.agent.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["agent", "test", "--provider", "mock"])
         assert result.exit_code == 0
         assert "Hello, world!" in result.stdout
@@ -82,7 +85,7 @@ class TestAgentTest:
 
     def test_test_failure(self) -> None:
         client = _mock_client(_mock_response(400, {"detail": "Unknown provider: bad"}))
-        with patch("syn_cli.commands.agent.get_client", return_value=client):
+        with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(app, ["agent", "test", "--provider", "bad"])
         assert result.exit_code == 1
         assert "Unknown provider" in result.stdout

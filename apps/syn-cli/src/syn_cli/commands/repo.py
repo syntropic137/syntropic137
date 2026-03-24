@@ -10,26 +10,17 @@ from rich.table import Table
 from syn_cli._output import (
     console,
     format_cost,
+    format_status,
     format_timestamp,
     format_tokens,
-    print_error,
-    status_style,
 )
-from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_get, api_post, build_params
 
 app = typer.Typer(
     name="repo",
     help="Manage repositories and their observability",
     no_args_is_help=True,
 )
-
-
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
 
 
 @app.command("register")
@@ -45,46 +36,27 @@ def register(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Register a repository with an organization."""
-    try:
-        with get_client() as client:
-            resp = client.post(
-                "/repos",
-                json={
-                    "organization_id": org,
-                    "full_name": url,
-                    "provider": provider,
-                    "default_branch": branch,
-                    "is_private": private,
-                    "created_by": created_by,
-                },
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_post(
+        "/repos",
+        json={
+            "organization_id": org,
+            "full_name": url,
+            "provider": provider,
+            "default_branch": branch,
+            "is_private": private,
+            "created_by": created_by,
+        },
+    )
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     repo_id = data.get("repo_id", "")
     console.print(f"[green]Repo registered:[/green] {repo_id}")
     console.print(f"  Full name: {url}")
 
     if system:
         try:
-            with get_client() as client:
-                assign_resp = client.post(
-                    f"/repos/{repo_id}/assign",
-                    json={"system_id": system},
-                )
-            if assign_resp.status_code == 200:
-                console.print(f"  [green]Assigned to system:[/green] {system}")
-            else:
-                console.print(
-                    f"  [yellow]Assign failed:[/yellow] {assign_resp.json().get('detail', '')}"
-                )
-        except Exception:
+            api_post(f"/repos/{repo_id}/assign", json={"system_id": system})
+            console.print(f"  [green]Assigned to system:[/green] {system}")
+        except (typer.Exit, Exception):
             console.print("  [yellow]Could not assign to system.[/yellow]")
 
 
@@ -101,25 +73,11 @@ def list_repos(
     ] = False,
 ) -> None:
     """List registered repositories."""
-    try:
-        with get_client() as client:
-            params: dict[str, str | bool] = {}
-            if org:
-                params["organization_id"] = org
-            if system:
-                params["system_id"] = system
-            if unassigned:
-                params["unassigned"] = True
-            resp = client.get("/repos", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(organization_id=org, system_id=system)
+    if unassigned:
+        params["unassigned"] = True
+    data = api_get("/repos", params=params)
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     repos = data.get("repos", [])
     if not repos:
         console.print("[dim]No repos found.[/dim]")
@@ -150,21 +108,8 @@ def show(
     repo_id: Annotated[str, typer.Argument(help="Repo ID")],
 ) -> None:
     """Show repo details."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/repos/{repo_id}")
-    except Exception:
-        _handle_connect_error()
-        return
+    r = api_get(f"/repos/{repo_id}")
 
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    r = resp.json()
     console.print(f"[bold]Repo:[/bold] {r.get('full_name', '')}")
     console.print(f"  ID:           {r.get('repo_id', '')}")
     console.print(f"  Provider:     {r.get('provider', '')}")
@@ -182,23 +127,7 @@ def assign(
     system: Annotated[str, typer.Option("--system", "-s", help="System ID")],
 ) -> None:
     """Assign a repo to a system."""
-    try:
-        with get_client() as client:
-            resp = client.post(f"/repos/{repo_id}/assign", json={"system_id": system})
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code == 409:
-        print_error(resp.json().get("detail", "Repo already assigned."))
-        raise typer.Exit(1)
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    api_post(f"/repos/{repo_id}/assign", json={"system_id": system})
     console.print(f"[green]Repo assigned:[/green] {repo_id} → system {system}")
 
 
@@ -207,23 +136,7 @@ def unassign(
     repo_id: Annotated[str, typer.Argument(help="Repo ID")],
 ) -> None:
     """Remove a repo from its system."""
-    try:
-        with get_client() as client:
-            resp = client.post(f"/repos/{repo_id}/unassign")
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code == 409:
-        print_error(resp.json().get("detail", "Repo is not assigned to a system."))
-        raise typer.Exit(1)
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    api_post(f"/repos/{repo_id}/unassign")
     console.print(f"[yellow]Repo unassigned:[/yellow] {repo_id}")
 
 
@@ -232,23 +145,10 @@ def repo_health(
     repo_id: Annotated[str, typer.Argument(help="Repo ID")],
 ) -> None:
     """Show health metrics for a repo."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/repos/{repo_id}/health")
-    except Exception:
-        _handle_connect_error()
-        return
+    d = api_get(f"/repos/{repo_id}/health")
 
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    d = resp.json()
     trend = d.get("trend", "")
-    trend_icon = {"improving": "↑", "degrading": "↓", "stable": "→"}.get(trend, "")
+    trend_icon = {"improving": "↑", "degrading": "↓", "stable": "→"}.get(str(trend), "")
 
     console.print(f"[bold]{d.get('repo_full_name', repo_id)} — Health[/bold]")
     console.print(f"  Executions:   {d.get('total_executions', 0)}")
@@ -267,21 +167,8 @@ def repo_cost(
     repo_id: Annotated[str, typer.Argument(help="Repo ID")],
 ) -> None:
     """Show cost breakdown for a repo."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/repos/{repo_id}/cost")
-    except Exception:
-        _handle_connect_error()
-        return
+    d = api_get(f"/repos/{repo_id}/cost")
 
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    d = resp.json()
     console.print(f"[bold]{d.get('repo_full_name', repo_id)} — Cost[/bold]")
     console.print(f"  Total cost:    {format_cost(d.get('total_cost_usd') or '0')}")
     console.print(f"  Total tokens:  {format_tokens(d.get('total_tokens') or 0)}")
@@ -304,23 +191,8 @@ def repo_activity(
     offset: Annotated[int, typer.Option(help="Pagination offset")] = 0,
 ) -> None:
     """Show recent execution activity for a repo."""
-    try:
-        with get_client() as client:
-            resp = client.get(
-                f"/repos/{repo_id}/activity", params={"limit": limit, "offset": offset}
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(f"/repos/{repo_id}/activity", params={"limit": limit, "offset": offset})
 
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     entries = data.get("entries", [])
     if not entries:
         console.print("[dim]No activity found.[/dim]")
@@ -334,12 +206,10 @@ def repo_activity(
     table.add_column("Trigger")
 
     for e in entries:
-        s = e.get("status", "")
-        style = status_style(s)
         table.add_row(
             e.get("execution_id", "")[:12],
             e.get("workflow_name", ""),
-            f"[{style}]{s}[/{style}]" if style else s,
+            format_status(e.get("status", "")),
             format_timestamp(e.get("started_at")),
             e.get("trigger_source") or "—",
         )
@@ -352,21 +222,8 @@ def repo_failures(
     limit: Annotated[int, typer.Option(help="Max failures to show")] = 50,
 ) -> None:
     """Show recent execution failures for a repo."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/repos/{repo_id}/failures", params={"limit": limit})
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(f"/repos/{repo_id}/failures", params={"limit": limit})
 
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     failures = data.get("failures", [])
     if not failures:
         console.print("[green]No failures found.[/green]")
@@ -396,21 +253,8 @@ def repo_sessions(
     limit: Annotated[int, typer.Option(help="Max sessions to show")] = 50,
 ) -> None:
     """Show agent sessions associated with a repo."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/repos/{repo_id}/sessions", params={"limit": limit})
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(f"/repos/{repo_id}/sessions", params={"limit": limit})
 
-    if resp.status_code == 404:
-        print_error(f"Repo not found: {repo_id}")
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     sessions = data.get("sessions", [])
     if not sessions:
         console.print("[dim]No sessions found.[/dim]")
@@ -425,12 +269,10 @@ def repo_sessions(
     table.add_column("Cost", justify="right")
 
     for s in sessions:
-        ss = s.get("status", "")
-        style = status_style(ss)
         table.add_row(
             s.get("id", "")[:12],
             s.get("execution_id", "")[:12],
-            f"[{style}]{ss}[/{style}]" if style else ss,
+            format_status(s.get("status", "")),
             format_timestamp(s.get("started_at")),
             format_tokens(s.get("total_tokens") or 0),
             format_cost(s.get("total_cost_usd") or "0"),

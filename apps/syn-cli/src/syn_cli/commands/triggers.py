@@ -8,7 +8,7 @@ import typer
 from rich.table import Table
 
 from syn_cli._output import console, print_error, status_style
-from syn_cli.client import get_client
+from syn_cli.commands._api_helpers import api_delete, api_get, api_patch, api_post, build_params
 
 app = typer.Typer(
     name="triggers",
@@ -17,12 +17,20 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
+def _parse_conditions(condition: list[str] | None) -> list[dict[str, str]]:
+    """Parse condition strings into structured dicts."""
+    parsed = []
+    for cond_str in condition or []:
+        parts = cond_str.split(maxsplit=2)
+        if len(parts) < 2:
+            print_error(f"Invalid condition format: '{cond_str}'")
+            console.print("Expected: 'field operator [value]'")
+            raise typer.Exit(1)
+        cond: dict[str, str] = {"field": parts[0], "operator": parts[1]}
+        if len(parts) > 2:
+            cond["value"] = parts[2]
+        parsed.append(cond)
+    return parsed
 
 
 @app.command("register")
@@ -44,46 +52,26 @@ def register_trigger(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Register a new trigger rule."""
-    parsed_conditions = []
-    for cond_str in condition or []:
-        parts = cond_str.split(maxsplit=2)
-        if len(parts) < 2:
-            print_error(f"Invalid condition format: '{cond_str}'")
-            console.print("Expected: 'field operator [value]'")
-            raise typer.Exit(1)
-        cond = {"field": parts[0], "operator": parts[1]}
-        if len(parts) > 2:
-            cond["value"] = parts[2]
-        parsed_conditions.append(cond)
+    parsed_conditions = _parse_conditions(condition)
 
-    try:
-        with get_client() as client:
-            resp = client.post(
-                "/triggers",
-                json={
-                    "name": name,
-                    "event": event,
-                    "repository": repository,
-                    "workflow_id": workflow,
-                    "conditions": parsed_conditions or None,
-                    "installation_id": installation_id,
-                    "config": {
-                        "max_attempts": max_attempts,
-                        "budget_per_trigger_usd": budget,
-                        "daily_limit": daily_limit,
-                    },
-                    "created_by": created_by,
-                },
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_post(
+        "/triggers",
+        json={
+            "name": name,
+            "event": event,
+            "repository": repository,
+            "workflow_id": workflow,
+            "conditions": parsed_conditions or None,
+            "installation_id": installation_id,
+            "config": {
+                "max_attempts": max_attempts,
+                "budget_per_trigger_usd": budget,
+                "daily_limit": daily_limit,
+            },
+            "created_by": created_by,
+        },
+    )
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     console.print(f"[green]Trigger registered:[/green] {data.get('trigger_id', '')}")
     console.print(f"  Name: {name}")
     console.print(f"  Event: {event}")
@@ -99,25 +87,15 @@ def enable_preset(
     created_by: Annotated[str, typer.Option(help="Creator identifier")] = "cli",
 ) -> None:
     """Enable a built-in preset for a repository."""
-    try:
-        with get_client() as client:
-            resp = client.post(
-                f"/triggers/presets/{preset}",
-                json={
-                    "repository": repository,
-                    "installation_id": installation_id,
-                    "created_by": created_by,
-                },
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_post(
+        f"/triggers/presets/{preset}",
+        json={
+            "repository": repository,
+            "installation_id": installation_id,
+            "created_by": created_by,
+        },
+    )
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     console.print(f"[green]Preset '{preset}' enabled:[/green] {data.get('trigger_id', '')}")
     console.print(f"  Repository: {repository}")
 
@@ -130,25 +108,10 @@ def list_triggers(
     status: Annotated[str | None, typer.Option("--status", "-s", help="Filter by status")] = None,
 ) -> None:
     """List all registered triggers."""
-    try:
-        with get_client() as client:
-            params = {}
-            if repository:
-                params["repository"] = repository
-            if status:
-                params["status"] = status
-            resp = client.get("/triggers", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
+    params = build_params(repository=repository, status=status)
+    data = api_get("/triggers", params=params)
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     triggers = data.get("triggers", [])
-
     if not triggers:
         console.print("[dim]No triggers found.[/dim]")
         return
@@ -179,18 +142,8 @@ def show_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Show trigger details."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/triggers/{trigger_id}")
-    except Exception:
-        _handle_connect_error()
-        return
+    detail = api_get(f"/triggers/{trigger_id}")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    detail = resp.json()
     console.print(f"[bold]Trigger: {detail.get('name', '')}[/bold]")
     console.print(f"  ID: {detail.get('trigger_id', '')}")
     console.print(f"  Status: {detail.get('status', '')}")
@@ -218,20 +171,9 @@ def trigger_history(
     limit: Annotated[int, typer.Option(help="Max entries to show")] = 50,
 ) -> None:
     """Show trigger execution history."""
-    try:
-        with get_client() as client:
-            resp = client.get(f"/triggers/{trigger_id}/history", params={"limit": limit})
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_get(f"/triggers/{trigger_id}/history", params={"limit": limit})
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     entries = data.get("entries", [])
-
     if not entries:
         console.print(f"[dim]No history for trigger {trigger_id}.[/dim]")
         return
@@ -260,20 +202,10 @@ def pause_trigger(
     reason: Annotated[str | None, typer.Option(help="Reason for pausing")] = None,
 ) -> None:
     """Pause a trigger rule."""
-    try:
-        with get_client() as client:
-            resp = client.patch(
-                f"/triggers/{trigger_id}",
-                json={"action": "pause", "reason": reason, "paused_by": "cli"},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    api_patch(
+        f"/triggers/{trigger_id}",
+        json={"action": "pause", "reason": reason, "paused_by": "cli"},
+    )
     console.print(f"[yellow]Trigger paused:[/yellow] {trigger_id}")
 
 
@@ -282,20 +214,10 @@ def resume_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Resume a paused trigger rule."""
-    try:
-        with get_client() as client:
-            resp = client.patch(
-                f"/triggers/{trigger_id}",
-                json={"action": "resume", "resumed_by": "cli"},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    api_patch(
+        f"/triggers/{trigger_id}",
+        json={"action": "resume", "resumed_by": "cli"},
+    )
     console.print(f"[green]Trigger resumed:[/green] {trigger_id}")
 
 
@@ -304,17 +226,7 @@ def delete_trigger(
     trigger_id: Annotated[str, typer.Argument(help="Trigger ID")],
 ) -> None:
     """Delete a trigger rule."""
-    try:
-        with get_client() as client:
-            resp = client.delete(f"/triggers/{trigger_id}")
-    except Exception:
-        _handle_connect_error()
-        return
-
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
+    api_delete(f"/triggers/{trigger_id}")
     console.print(f"[red]Trigger deleted:[/red] {trigger_id}")
 
 
@@ -325,21 +237,11 @@ def disable_all(
     ],
 ) -> None:
     """Disable all triggers for a repository."""
-    try:
-        with get_client() as client:
-            resp = client.post(
-                "/triggers/disable",
-                json={"repository": repository, "paused_by": "cli"},
-            )
-    except Exception:
-        _handle_connect_error()
-        return
+    data = api_post(
+        "/triggers/disable",
+        json={"repository": repository, "paused_by": "cli"},
+    )
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    data = resp.json()
     count = data.get("count", 0)
     if count == 0:
         console.print(f"[dim]No active triggers for {repository}.[/dim]")
