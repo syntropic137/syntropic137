@@ -2,8 +2,13 @@
  * Parse a keyboard shortcut string (e.g., "Ctrl+Shift+F") into a matcher function.
  */
 export function parseShortcut(shortcut: string): (e: KeyboardEvent) => boolean {
-  const parts = shortcut.split('+').map((p) => p.toLowerCase().trim());
+  const parts = shortcut.split('+').map((p) => p.toLowerCase().trim()).filter(Boolean);
   const key = parts.pop();
+
+  if (!key) {
+    // Invalid shortcut — return a matcher that never fires
+    return () => false;
+  }
 
   const modifiers = {
     ctrl: parts.includes('ctrl'),

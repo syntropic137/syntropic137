@@ -2,6 +2,7 @@
  * Voice recorder component
  */
 
+import { useEffect, useRef } from 'react';
 import { formatDuration, useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { MicIcon, StopIcon, TrashIcon } from './icons';
 
@@ -16,10 +17,19 @@ export function VoiceRecorder({ onRecordingComplete, existingAudioUrl, onDelete,
   const { isRecording, duration, audioUrl, startRecording, stopRecording, clearRecording, audioBlob, isSupported, error } = useVoiceRecorder();
 
   const displayUrl = existingAudioUrl || audioUrl;
+  const pendingStopRef = useRef(false);
+
+  // Deliver blob via effect so we always see the updated audioBlob after onstop fires
+  useEffect(() => {
+    if (pendingStopRef.current && audioBlob) {
+      pendingStopRef.current = false;
+      onRecordingComplete(audioBlob);
+    }
+  }, [audioBlob, onRecordingComplete]);
 
   const handleStopAndSave = () => {
+    pendingStopRef.current = true;
     stopRecording();
-    setTimeout(() => { if (audioBlob) onRecordingComplete(audioBlob); }, 100);
   };
 
   const handleDelete = () => {

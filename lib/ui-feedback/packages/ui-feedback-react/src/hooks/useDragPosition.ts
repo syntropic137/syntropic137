@@ -66,7 +66,9 @@ function onDragEnd(
 ): void {
   if (!dragStartRef.current) return;
   setPosition((pos) => {
-    if (pos) localStorage.setItem(STORAGE_KEY, JSON.stringify(pos));
+    if (pos) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(pos)); } catch { /* storage unavailable */ }
+    }
     return pos;
   });
   dragStartRef.current = null;

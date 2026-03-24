@@ -41,7 +41,7 @@ export function FeedbackWidget() {
     openFeedbackMode, closeFeedbackMode, openModal, locationContext,
   } = useFeedback();
 
-  const { captureFromEvent } = useElementInfo();
+  const { captureFromEvent, captureFromElement } = useElementInfo();
   const api = useFeedbackApi({ apiUrl: config.apiUrl });
   const { position, isDragging, handleMouseDown, buttonRef } = useDragPosition();
   const hoverHighlight = useHoverHighlight(isFeedbackMode);
@@ -65,7 +65,7 @@ export function FeedbackWidget() {
     });
   }, [openModal]);
 
-  useFeedbackModeClick({ isFeedbackMode, captureFromEvent, openModal, openQuickFeedback });
+  useFeedbackModeClick({ isFeedbackMode, captureFromEvent, captureFromElement, openModal, openQuickFeedback });
   useClickOutside(buttonRef, () => setShowMenu(false), showMenu);
 
   useEffect(() => {

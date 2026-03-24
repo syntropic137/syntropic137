@@ -13,8 +13,8 @@ interface MediaLightboxProps {
 export function MediaLightbox({ src, alt, onClose }: MediaLightboxProps) {
   return (
     <div className="ui-feedback-lightbox" onClick={onClose}>
-      <img src={src} alt={alt} className="ui-feedback-lightbox-image" />
-      <button className="ui-feedback-lightbox-close" onClick={onClose}>
+      <img src={src} alt={alt} className="ui-feedback-lightbox-image" onClick={(e) => e.stopPropagation()} />
+      <button type="button" aria-label="Close lightbox" className="ui-feedback-lightbox-close" onClick={(e) => { e.stopPropagation(); onClose(); }}>
         <CloseIcon />
       </button>
     </div>

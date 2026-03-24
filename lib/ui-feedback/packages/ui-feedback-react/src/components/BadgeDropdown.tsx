@@ -42,17 +42,21 @@ export function BadgeDropdown({ options, value, onChange, className, onOpen }: B
         className={`ui-feedback-badge ${className || ''}`}
         style={{ backgroundColor: selected?.color }}
         onClick={handleToggle}
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
       >
         {selected?.emoji && <span>{selected.emoji}</span>}
         <span>{selected?.label || value}</span>
         <ChevronIcon />
       </button>
       {isOpen && (
-        <div className="ui-feedback-badge-dropdown">
+        <div className="ui-feedback-badge-dropdown" role="listbox">
           {options.map((option) => (
             <button
               key={option.value}
               type="button"
+              role="option"
+              aria-selected={value === option.value}
               className={`ui-feedback-badge-option ${value === option.value ? 'ui-feedback-badge-option--active' : ''}`}
               style={option.emoji ? undefined : { '--badge-color': option.color } as React.CSSProperties}
               onClick={() => handleSelect(option.value)}

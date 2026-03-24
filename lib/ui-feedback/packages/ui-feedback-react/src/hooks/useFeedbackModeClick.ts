@@ -9,6 +9,7 @@ import type { LocationContext } from '../types';
 interface UseFeedbackModeClickOptions {
   isFeedbackMode: boolean;
   captureFromEvent: (e: MouseEvent) => LocationContext;
+  captureFromElement: (el: Element, x?: number, y?: number) => LocationContext;
   openModal: (context: LocationContext) => void;
   openQuickFeedback: () => void;
 }
@@ -24,43 +25,65 @@ function getTarget(e: MouseEvent | TouchEvent): HTMLElement | null {
   return (e.target || (e as TouchEvent).touches?.[0]?.target) as HTMLElement | null;
 }
 
+function captureLocation(
+  e: MouseEvent | TouchEvent,
+  target: HTMLElement,
+  clientX: number,
+  clientY: number,
+  captureFromEvent: (e: MouseEvent) => LocationContext,
+  captureFromElement: (el: Element, x?: number, y?: number) => LocationContext,
+): LocationContext {
+  if (e instanceof MouseEvent) return captureFromEvent(e);
+  return captureFromElement(target, clientX, clientY);
+}
+
+function handlePageClick(
+  e: MouseEvent | TouchEvent,
+  captureFromEvent: (e: MouseEvent) => LocationContext,
+  captureFromElement: (el: Element, x?: number, y?: number) => LocationContext,
+  openModal: (context: LocationContext) => void,
+  openQuickFeedback: () => void,
+): void {
+  const target = getTarget(e);
+  if (target?.closest?.('.ui-feedback-root')) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (target?.classList?.contains('ui-feedback-mode-overlay')) {
+    openQuickFeedback();
+    return;
+  }
+
+  const { clientX, clientY } = getClientCoords(e);
+  if (clientX !== undefined && clientY !== undefined && target) {
+    openModal(captureLocation(e, target, clientX, clientY, captureFromEvent, captureFromElement));
+  } else {
+    openQuickFeedback();
+  }
+}
+
 export function useFeedbackModeClick({
   isFeedbackMode,
   captureFromEvent,
+  captureFromElement,
   openModal,
   openQuickFeedback,
 }: UseFeedbackModeClickOptions): void {
   useEffect(() => {
     if (!isFeedbackMode) return;
 
-    const handlePageClick = (e: MouseEvent | TouchEvent) => {
-      const target = getTarget(e);
-      if (target?.closest?.('.ui-feedback-root')) return;
+    const handler = (e: MouseEvent | TouchEvent) =>
+      handlePageClick(e, captureFromEvent, captureFromElement, openModal, openQuickFeedback);
 
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (target?.classList?.contains('ui-feedback-mode-overlay')) {
-        openQuickFeedback();
-        return;
-      }
-
-      const { clientX, clientY } = getClientCoords(e);
-      if (clientX !== undefined && clientY !== undefined) {
-        openModal(captureFromEvent(e as MouseEvent));
-      } else {
-        openQuickFeedback();
-      }
-    };
-
-    document.addEventListener('click', handlePageClick, true);
-    document.addEventListener('touchend', handlePageClick as EventListener, true);
+    document.addEventListener('click', handler, true);
+    document.addEventListener('touchend', handler as EventListener, true);
     document.body.classList.add('ui-feedback-mode-active');
 
     return () => {
-      document.removeEventListener('click', handlePageClick, true);
-      document.removeEventListener('touchend', handlePageClick as EventListener, true);
+      document.removeEventListener('click', handler, true);
+      document.removeEventListener('touchend', handler as EventListener, true);
       document.body.classList.remove('ui-feedback-mode-active');
     };
-  }, [isFeedbackMode, captureFromEvent, openModal, openQuickFeedback]);
+  }, [isFeedbackMode, captureFromEvent, captureFromElement, openModal, openQuickFeedback]);
 }
