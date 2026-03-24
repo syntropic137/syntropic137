@@ -643,6 +643,8 @@ issue = "#274"
 value = 45
 issue = "#274"
 
+
+
 [max-cognitive-file."apps/syn-dashboard-ui/src/api/client"]
 value = 175
 issue = "#274"
@@ -726,6 +728,8 @@ issue = "#274"
 [max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 20
 issue = "#274"
+
+
 
 [max-loc-file."apps/syn-dashboard-ui/src/pages/SessionDetail"]
 value = 990
@@ -854,3 +858,5 @@ issue = "#274"
 [max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 165
 issue = "#274"
+
+
