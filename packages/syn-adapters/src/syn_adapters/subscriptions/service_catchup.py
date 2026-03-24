@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # Re-export for backward compatibility
-__all__ = ["run_catchup", "process_catchup_batch"]
+__all__ = ["process_catchup_batch", "run_catchup"]
 
 
 async def run_catchup(svc: EventSubscriptionService) -> None:

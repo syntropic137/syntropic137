@@ -9,16 +9,15 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from syn_adapters.projections.session_tools_converters import (
+    row_to_git_operation,
+    row_to_subagent_operation,
+)
 from syn_shared.events import (
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
     TOOL_EXECUTION_COMPLETED,
     TOOL_EXECUTION_STARTED,
-)
-
-from syn_adapters.projections.session_tools_converters import (
-    row_to_git_operation,
-    row_to_subagent_operation,
 )
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)

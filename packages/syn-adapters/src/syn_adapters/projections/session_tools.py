@@ -14,6 +14,18 @@ from typing import TYPE_CHECKING, Any
 
 from agentic_events.types import ClaudeToolName
 
+from syn_adapters.projections.session_tools_helpers import (
+    get_pool as _get_pool_impl,
+)
+from syn_adapters.projections.session_tools_helpers import (
+    get_session_tools as _get_session_tools_impl,
+)
+from syn_adapters.projections.session_tools_helpers import (
+    query_session_tools as _query_session_tools_impl,
+)
+from syn_adapters.projections.session_tools_helpers import (
+    row_to_operation as _row_to_operation_impl,
+)
 from syn_shared.events import (
     COST_RECORDED,
     GIT_BRANCH_CHANGED,
@@ -27,12 +39,6 @@ from syn_shared.events import (
     TOKEN_USAGE,
     TOOL_EXECUTION_COMPLETED,
     TOOL_EXECUTION_STARTED,
-)
-from syn_adapters.projections.session_tools_helpers import (
-    get_pool as _get_pool_impl,
-    get_session_tools as _get_session_tools_impl,
-    query_session_tools as _query_session_tools_impl,
-    row_to_operation as _row_to_operation_impl,
 )
 
 if TYPE_CHECKING:

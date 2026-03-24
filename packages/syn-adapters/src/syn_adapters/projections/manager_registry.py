@@ -6,9 +6,8 @@ Extracted from manager.py to reduce module complexity.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from syn_adapters.projection_stores import ProjectionStoreProtocol
 from syn_adapters.projections.session_tools import SessionToolsProjection
 from syn_domain.contexts.agent_sessions.slices.list_sessions import SessionListProjection
 from syn_domain.contexts.agent_sessions.slices.session_cost.projection import SessionCostProjection
@@ -45,6 +44,9 @@ from syn_domain.contexts.organization.slices.repo_correlation import (
 from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
 from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores import ProjectionStoreProtocol
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,8 +75,7 @@ def create_session_cost_projection(store: ProjectionStoreProtocol) -> SessionCos
         return SessionCostProjection(store, pool=event_store.pool)
     except Exception as e:
         logger.warning(
-            "Could not connect to TimescaleDB for cost projection, "
-            "falling back to event store: %s",
+            "Could not connect to TimescaleDB for cost projection, falling back to event store: %s",
             e,
         )
         return SessionCostProjection(store)

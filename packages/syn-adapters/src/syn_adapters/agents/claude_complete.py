@@ -6,7 +6,7 @@ Extracted from claude_helpers.py to reduce module complexity.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from syn_adapters.agents.protocol import (
     AgentAuthenticationError,
@@ -19,9 +19,6 @@ from syn_adapters.agents.protocol import (
     AgentTimeoutError,
 )
 from syn_shared.logging import get_logger
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger(__name__)
 

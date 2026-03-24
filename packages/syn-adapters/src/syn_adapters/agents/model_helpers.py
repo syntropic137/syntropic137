@@ -5,13 +5,14 @@ Extracted from models.py to reduce module complexity.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from syn_shared.env_constants import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
 from syn_shared.logging import get_logger
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     pass
 
 logger = get_logger(__name__)
@@ -53,9 +54,7 @@ def load_fallback_aliases() -> dict[str, str]:
     return aliases
 
 
-def find_model_by_field(
-    models: dict[str, dict[str, Any]], model: str
-) -> dict[str, Any] | None:
+def find_model_by_field(models: dict[str, dict[str, Any]], model: str) -> dict[str, Any] | None:
     """Search models dict by api_name or alias fields."""
     for model_data in models.values():
         if model_data.get("api_name") == model or model_data.get("alias") == model:
@@ -63,9 +62,7 @@ def find_model_by_field(
     return None
 
 
-def get_model_info(
-    models: dict[str, dict[str, Any]], model: str
-) -> dict[str, Any] | None:
+def get_model_info(models: dict[str, dict[str, Any]], model: str) -> dict[str, Any] | None:
     """Get full model information by name, alias, or ID.
 
     Args:
@@ -115,9 +112,7 @@ def list_models(
         List of model IDs
     """
     if provider:
-        return [
-            m_id for m_id, m_data in models.items() if m_data.get("provider") == provider
-        ]
+        return [m_id for m_id, m_data in models.items() if m_data.get("provider") == provider]
     return list(models.keys())
 
 

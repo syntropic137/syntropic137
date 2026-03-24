@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _SUBAGENT_EVENT_TYPES = (SUBAGENT_STARTED, SUBAGENT_STOPPED)
 
-__all__ = ["get_pool", "get_session_tools", "row_to_operation", "query_session_tools"]
+__all__ = ["get_pool", "get_session_tools", "query_session_tools", "row_to_operation"]
 
 
 def get_pool(proj: SessionToolsProjection) -> asyncpg.Pool | None:

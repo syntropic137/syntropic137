@@ -10,6 +10,9 @@ from __future__ import annotations
 from typing import Any
 
 from syn_adapters.storage.in_memory import _assert_test_environment
+from syn_adapters.storage.in_memory_repo_repo import (
+    InMemoryRepoRepository as InMemoryRepoRepository,
+)
 
 
 class InMemoryOrganizationRepository:
@@ -105,8 +108,3 @@ class InMemorySystemRepository:
     def clear(self) -> None:
         """Clear all systems."""
         self._systems = {}
-
-
-
-# InMemoryRepoRepository moved to in_memory_repo_repo.py
-from syn_adapters.storage.in_memory_repo_repo import InMemoryRepoRepository as InMemoryRepoRepository

@@ -5,13 +5,14 @@ Extracted from service_catchup.py to reduce module complexity.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from syn_adapters.subscriptions.service import EventSubscriptionService
 
 logger = get_logger(__name__)

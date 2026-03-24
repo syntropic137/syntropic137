@@ -25,7 +25,6 @@ from syn_adapters.agents.model_helpers import (
     list_models,
     load_fallback_aliases,
     load_provider,
-    load_yaml,
     register_current_model_aliases,
 )
 from syn_shared.logging import get_logger
@@ -72,9 +71,7 @@ class ModelRegistry:
                 model_id_to_api_name,
             )
 
-        register_current_model_aliases(
-            self._providers, self._aliases, model_id_to_api_name
-        )
+        register_current_model_aliases(self._providers, self._aliases, model_id_to_api_name)
 
         logger.debug(
             "models_loaded",

@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from syn_adapters.events.parse import parse_jsonl_events as parse_jsonl_events  # noqa: F401
+from syn_adapters.events.parse import parse_jsonl_events as parse_jsonl_events
 
 if TYPE_CHECKING:
     from syn_adapters.events.buffer import EventBuffer
@@ -80,5 +80,3 @@ async def get_event_buffer() -> EventBuffer:
         await _event_buffer.start()
 
     return _event_buffer
-
-

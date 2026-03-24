@@ -55,5 +55,3 @@ def _is_stream_timed_out(
         logger.warning("Stream timed out after %.1fs", elapsed)
         return True
     return False
-
-

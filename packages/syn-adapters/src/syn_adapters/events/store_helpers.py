@@ -20,9 +20,7 @@ logger = logging.getLogger(__name__)
 
 def _event_to_copy_row(validated: AgentEvent) -> str:
     """Convert a validated AgentEvent to a tab-separated COPY row."""
-    time, event_type, session_id, exec_id, phase_id, data_json = (
-        validated.to_insert_tuple()
-    )
+    time, event_type, session_id, exec_id, phase_id, data_json = validated.to_insert_tuple()
     row = [
         time.isoformat() if isinstance(time, datetime) else time,
         event_type,
@@ -78,10 +76,10 @@ RESERVED_OBSERVATION_KEYS: frozenset[str] = frozenset(
 
 
 # Singleton instance (lazy-loaded)
-_event_store: "AgentEventStore | None" = None
+_event_store: AgentEventStore | None = None
 
 
-def get_event_store(connection_string: str | None = None) -> "AgentEventStore":
+def get_event_store(connection_string: str | None = None) -> AgentEventStore:
     """Get or create the AgentEventStore singleton.
 
     Uses SYN_OBSERVABILITY_DB_URL from settings (ADR-030 unified database).
@@ -120,7 +118,7 @@ def get_event_store(connection_string: str | None = None) -> "AgentEventStore":
 
 
 async def record_observation(
-    store: "AgentEventStore",
+    store: AgentEventStore,
     session_id: str,
     observation_type: str,
     data: dict[str, Any],

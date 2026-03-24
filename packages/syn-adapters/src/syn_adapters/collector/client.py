@@ -159,9 +159,7 @@ class CollectorClient:
 
         return await self._send_batch(batch)
 
-    async def _attempt_send(
-        self, batch: EventBatch, headers: dict[str, str]
-    ) -> BatchResponse:
+    async def _attempt_send(self, batch: EventBatch, headers: dict[str, str]) -> BatchResponse:
         """Attempt a single batch send. See client_transport.attempt_send for details."""
         return await _attempt_send_fn(self, batch, headers)
 
@@ -227,7 +225,13 @@ class CollectorClient:
     ) -> None:
         """Send a tool_blocked event. See client_events.send_tool_blocked."""
         await _send_tool_blocked_fn(
-            self, session_id, tool_name, tool_use_id, reason, validator_name=validator_name, timestamp=timestamp
+            self,
+            session_id,
+            tool_name,
+            tool_use_id,
+            reason,
+            validator_name=validator_name,
+            timestamp=timestamp,
         )
 
     async def send_observation(self, event: dict[str, Any]) -> None:

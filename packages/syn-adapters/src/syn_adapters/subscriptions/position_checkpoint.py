@@ -126,7 +126,11 @@ class PositionCheckpoint:
                 "This indicates the projection store was reset while event store wasn't. "
                 "Consider running 'just dev-fresh' to reset both stores, "
                 "or manually reset the subscription position to 0.",
-                extra={"saved_position": position, **counts, "action_required": "Operator intervention needed"},
+                extra={
+                    "saved_position": position,
+                    **counts,
+                    "action_required": "Operator intervention needed",
+                },
             )
         elif total > 0:
             logger.info(

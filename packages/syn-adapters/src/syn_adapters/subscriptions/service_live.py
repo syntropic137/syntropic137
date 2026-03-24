@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-__all__ = ["subscription_loop", "dispatch_event", "run_live_subscription"]
+__all__ = ["dispatch_event", "run_live_subscription", "subscription_loop"]
 
 
 async def run_live_subscription(svc: EventSubscriptionService) -> None:
@@ -52,7 +52,10 @@ async def run_live_subscription(svc: EventSubscriptionService) -> None:
 
         # Save position periodically
         now = datetime.now(UTC)
-        if events_since_save >= svc._batch_size or (now - last_save_time).total_seconds() >= svc._position_save_interval:
+        if (
+            events_since_save >= svc._batch_size
+            or (now - last_save_time).total_seconds() >= svc._position_save_interval
+        ):
             await svc._save_position()
             events_since_save = 0
             last_save_time = now

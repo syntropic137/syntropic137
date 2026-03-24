@@ -98,5 +98,3 @@ def row_to_git_operation(row: Any, data: dict[str, Any], event_type: str) -> Too
         git_branch=git_branch,
         git_repo=data.get("repo") or None,
     )
-
-

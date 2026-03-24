@@ -18,16 +18,15 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 
-from syn_shared.env_constants import (
-    ENV_SYN_AGENT_NETWORK,
-    ENV_SYN_WORKSPACE_CONTAINER_DIR,
-    ENV_SYN_WORKSPACE_HOST_DIR,
-)
-
 from syn_adapters.workspace_backends.agentic.adapter_copy import (
     check_workspace_health,
     copy_files_from_workspace,
     copy_files_to_workspace,
+)
+from syn_shared.env_constants import (
+    ENV_SYN_AGENT_NETWORK,
+    ENV_SYN_WORKSPACE_CONTAINER_DIR,
+    ENV_SYN_WORKSPACE_HOST_DIR,
 )
 
 if TYPE_CHECKING:

@@ -22,7 +22,11 @@ from typing import TYPE_CHECKING
 
 from syn_adapters.object_storage.local_helpers import (
     get_object_info as _get_object_info,
+)
+from syn_adapters.object_storage.local_helpers import (
     get_presigned_url as _get_presigned_url,
+)
+from syn_adapters.object_storage.local_helpers import (
     list_objects as _list_objects,
 )
 from syn_adapters.object_storage.protocol import (
@@ -153,7 +157,9 @@ class LocalStorage:
             UploadResult with key and size.
         """
         file_path = self._resolve_path(key)
-        return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_write_file, file_path, content, key))
+        return await asyncio.get_event_loop().run_in_executor(
+            None, partial(_sync_write_file, file_path, content, key)
+        )
 
     async def download(self, key: str) -> bytes:
         """Download content from local filesystem.
@@ -168,7 +174,9 @@ class LocalStorage:
             ObjectNotFoundError: If file doesn't exist.
         """
         file_path = self._resolve_path(key)
-        return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_read_file, file_path, key))
+        return await asyncio.get_event_loop().run_in_executor(
+            None, partial(_sync_read_file, file_path, key)
+        )
 
     async def delete(self, key: str) -> bool:
         """Delete a file from local filesystem.
@@ -183,7 +191,9 @@ class LocalStorage:
             file_path = self._resolve_path(key)
         except ValueError:
             return False
-        return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_delete_file, file_path))
+        return await asyncio.get_event_loop().run_in_executor(
+            None, partial(_sync_delete_file, file_path)
+        )
 
     async def exists(self, key: str) -> bool:
         """Check if a file exists.

@@ -20,9 +20,7 @@ def apply_filters(
     return [r for r in results if all(r.get(k) == v for k, v in filters.items())]
 
 
-def apply_sorting(
-    results: list[dict[str, Any]], order_by: str | None
-) -> list[dict[str, Any]]:
+def apply_sorting(results: list[dict[str, Any]], order_by: str | None) -> list[dict[str, Any]]:
     """Sort results by field name, with optional '-' prefix for descending."""
     if not order_by:
         return results
@@ -46,7 +44,7 @@ def apply_pagination(
     return results
 
 
-def clear_projection(store: "InMemoryProjectionStore", projection: str) -> None:
+def clear_projection(store: InMemoryProjectionStore, projection: str) -> None:
     """Clear data for a specific projection."""
     if projection in store._data:
         del store._data[projection]

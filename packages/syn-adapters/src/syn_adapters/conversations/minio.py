@@ -171,7 +171,9 @@ class MinioConversationStorage:
 
         from syn_adapters.conversations.minio_index import insert_index
 
-        await insert_index(self._pool, session_id, object_key, size_bytes, context, self.BUCKET_NAME)
+        await insert_index(
+            self._pool, session_id, object_key, size_bytes, context, self.BUCKET_NAME
+        )
 
     async def retrieve_session(
         self,

@@ -33,13 +33,16 @@ def resolve_workspace_path(handle: IsolationHandle) -> Path | None:
     workspace_path = Path(host_workspace)
     logger.info(
         "copy_from: Checking path %s (exists=%s, workspace=%s)",
-        workspace_path, workspace_path.exists(), handle.isolation_id,
+        workspace_path,
+        workspace_path.exists(),
+        handle.isolation_id,
     )
 
     if not workspace_path.exists():
         logger.warning(
             "copy_from: Workspace path does not exist (workspace=%s, path=%s)",
-            handle.isolation_id, workspace_path,
+            handle.isolation_id,
+            workspace_path,
         )
         return None
     return workspace_path
@@ -61,7 +64,8 @@ def log_workspace_contents(workspace_path: Path) -> None:
 
 
 def collect_matching_files(
-    workspace_path: Path, patterns: list[str],
+    workspace_path: Path,
+    patterns: list[str],
 ) -> list[tuple[str, bytes]]:
     """Glob patterns against workspace and read matching files."""
     results: list[tuple[str, bytes]] = []
@@ -70,7 +74,7 @@ def collect_matching_files(
     for pattern in patterns:
         clean_pattern = pattern.lstrip("/")
         if clean_pattern.startswith("workspace/"):
-            clean_pattern = clean_pattern[len("workspace/"):]
+            clean_pattern = clean_pattern[len("workspace/") :]
 
         for file_path in workspace_path.glob(clean_pattern):
             if not file_path.is_file():
@@ -84,12 +88,14 @@ def collect_matching_files(
                 results.append((relative_path, content))
                 logger.info(
                     "copy_from: Collected file %s (%d bytes)",
-                    relative_path, len(content),
+                    relative_path,
+                    len(content),
                 )
             except Exception as e:
                 logger.warning(
                     "copy_from: Failed to read file %s: %s",
-                    relative_path, e,
+                    relative_path,
+                    e,
                 )
     return results
 
@@ -133,7 +139,9 @@ async def copy_from_workspace(
 
     logger.info(
         "copy_from: Collected %d files matching patterns %s (workspace=%s)",
-        len(results), patterns, handle.isolation_id,
+        len(results),
+        patterns,
+        handle.isolation_id,
     )
     return results
 

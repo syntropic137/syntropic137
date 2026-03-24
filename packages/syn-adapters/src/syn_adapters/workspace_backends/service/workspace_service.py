@@ -449,7 +449,11 @@ class WorkspaceService:
         workspace_id = str(uuid.uuid4())
 
         aggregate, isolation_config = self._build_workspace_aggregate_and_config(
-            workspace_id, execution_id, workflow_id, phase_id, extra_environment,
+            workspace_id,
+            execution_id,
+            workflow_id,
+            phase_id,
+            extra_environment,
         )
 
         isolation_handle: IsolationHandle | None = None
@@ -457,7 +461,10 @@ class WorkspaceService:
 
         try:
             isolation_handle, sidecar_handle = await provision_workspace(
-                self, isolation_config, aggregate, workspace_id,
+                self,
+                isolation_config,
+                aggregate,
+                workspace_id,
                 with_sidecar=with_sidecar,
             )
 
@@ -484,7 +491,10 @@ class WorkspaceService:
 
         finally:
             await cleanup_workspace(
-                self, aggregate, workspace_id, execution_id,
+                self,
+                aggregate,
+                workspace_id,
+                execution_id,
                 isolation_handle=isolation_handle,
                 sidecar_handle=sidecar_handle,
                 inject_tokens=inject_tokens,

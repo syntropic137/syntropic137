@@ -13,6 +13,8 @@ from syn_adapters.projection_stores.memory_store_helpers import (
     apply_filters,
     apply_pagination,
     apply_sorting,
+)
+from syn_adapters.projection_stores.memory_store_helpers import (
     clear_projection as _clear_projection,
 )
 from syn_shared.settings import get_settings

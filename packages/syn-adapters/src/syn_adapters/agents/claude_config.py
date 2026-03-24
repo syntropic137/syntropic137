@@ -93,8 +93,7 @@ def get_anthropic_client(
 
     if not oauth_token and not api_key:
         msg = (
-            "No Claude authentication configured. "
-            "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
+            "No Claude authentication configured. Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
         )
         raise AgentAuthenticationError(msg, AgentProvider.CLAUDE)
 

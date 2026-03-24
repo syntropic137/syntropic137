@@ -15,13 +15,13 @@ import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
-# Import StorageResult from domain (not local definition)
-from syn_domain.contexts.artifacts.ports import StorageResult
-
 from syn_adapters.storage.artifact_storage.minio_helpers import (
     build_s3_metadata,
     parse_s3_key,
 )
+
+# Import StorageResult from domain (not local definition)
+from syn_domain.contexts.artifacts.ports import StorageResult
 
 if TYPE_CHECKING:
     from syn_adapters.object_storage.minio import MinioStorage
@@ -108,13 +108,14 @@ class MinioArtifactStorage:
         """Upload artifact content to MinIO."""
         key = self._build_key(artifact_id, workflow_id, execution_id)
         content_hash = hashlib.sha256(content).hexdigest()
-        s3_metadata = build_s3_metadata(
-            artifact_id, content_hash, phase_id, execution_id, metadata
-        )
+        s3_metadata = build_s3_metadata(artifact_id, content_hash, phase_id, execution_id, metadata)
 
         try:
             result = await self._storage.upload(
-                key, content, content_type=content_type, metadata=s3_metadata,
+                key,
+                content,
+                content_type=content_type,
+                metadata=s3_metadata,
             )
         except Exception as e:
             logger.error(
@@ -126,7 +127,11 @@ class MinioArtifactStorage:
         storage_uri = f"s3://{self._storage._bucket_name}/{key}"
         logger.info(
             "Artifact uploaded to MinIO",
-            extra={"artifact_id": artifact_id, "storage_uri": storage_uri, "size_bytes": len(content)},
+            extra={
+                "artifact_id": artifact_id,
+                "storage_uri": storage_uri,
+                "size_bytes": len(content),
+            },
         )
         return StorageResult(
             storage_uri=storage_uri,

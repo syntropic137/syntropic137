@@ -42,11 +42,6 @@ from syn_domain.contexts.orchestration.slices.list_workflows import WorkflowList
 from syn_domain.contexts.orchestration.slices.workflow_phase_metrics import (
     WorkflowPhaseMetricsProjection,
 )
-from syn_domain.contexts.organization._shared.organization_projection import (
-    OrganizationProjection,
-)
-from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
-from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
 from syn_domain.contexts.organization.slices.repo_correlation import (
     RepoCorrelationProjection,
 )
@@ -54,7 +49,6 @@ from syn_domain.contexts.organization.slices.repo_cost import RepoCostProjection
 from syn_domain.contexts.organization.slices.repo_health import RepoHealthProjection
 
 logger = logging.getLogger(__name__)
-
 
 
 class ProjectionManager:

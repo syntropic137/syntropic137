@@ -36,7 +36,10 @@ async def subscription_loop(svc: EventSubscriptionService) -> None:
             retry_delay = 1.0
             svc._caught_up = True
 
-            logger.info("[SUBSCRIPTION] Catch-up complete, starting live", extra={"position": svc._last_position})
+            logger.info(
+                "[SUBSCRIPTION] Catch-up complete, starting live",
+                extra={"position": svc._last_position},
+            )
             await svc._run_live_subscription()
 
             # Live subscription exited — reconnect
@@ -48,10 +51,17 @@ async def subscription_loop(svc: EventSubscriptionService) -> None:
         except Exception as e:
             consecutive_failures += 1
             svc._caught_up = False
-            logger.error("[SUBSCRIPTION] Loop failed", extra={"error": str(e), "retry_delay": retry_delay}, exc_info=True)
+            logger.error(
+                "[SUBSCRIPTION] Loop failed",
+                extra={"error": str(e), "retry_delay": retry_delay},
+                exc_info=True,
+            )
             if not svc._stop_event.is_set():
                 await asyncio.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, max_retry_delay)
 
-    logger.info("[SUBSCRIPTION] Main loop stopped", extra={"position": svc._last_position, "events": svc._events_processed})
+    logger.info(
+        "[SUBSCRIPTION] Main loop stopped",
+        extra={"position": svc._last_position, "events": svc._events_processed},
+    )
     svc._running = False

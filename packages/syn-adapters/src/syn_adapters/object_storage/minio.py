@@ -36,16 +36,18 @@ from typing import TYPE_CHECKING, Any, cast
 
 from syn_adapters.object_storage.minio_helpers import (
     do_download as _do_download,
+)
+from syn_adapters.object_storage.minio_helpers import (
     get_object_info as _get_object_info,
+)
+from syn_adapters.object_storage.minio_helpers import (
     get_presigned_url as _get_presigned_url,
 )
 from syn_adapters.object_storage.minio_queries import (
     list_objects as _list_objects,
 )
 from syn_adapters.object_storage.protocol import (
-    DownloadError,
     ListResult,
-    ObjectNotFoundError,
     StorageConfigurationError,
     StorageObject,
     UploadError,
@@ -61,7 +63,7 @@ logger = logging.getLogger(__name__)
 
 
 def _do_upload(
-    client: "Minio",
+    client: Minio,
     bucket_name: str,
     key: str,
     content: bytes,

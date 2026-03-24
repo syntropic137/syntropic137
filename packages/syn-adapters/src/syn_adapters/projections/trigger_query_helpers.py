@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from event_sourcing import EventEnvelope
-
 if TYPE_CHECKING:
+    from event_sourcing import EventEnvelope
+
     from syn_adapters.projections.trigger_query_projection import TriggerQueryProjection
 
 NS_TRIGGER_INDEX = "trigger_index"

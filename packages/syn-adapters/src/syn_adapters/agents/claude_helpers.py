@@ -7,8 +7,6 @@ stream_request has been moved to claude_stream.py.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from syn_adapters.agents.claude_complete import complete_request
 from syn_adapters.agents.claude_stream import stream_request
 from syn_adapters.agents.protocol import (
@@ -17,12 +15,15 @@ from syn_adapters.agents.protocol import (
 )
 from syn_shared.logging import get_logger
 
-if TYPE_CHECKING:
-    pass
-
 logger = get_logger(__name__)
 
-__all__ = ["convert_messages", "resolve_model", "get_context_window", "complete_request", "stream_request"]
+__all__ = [
+    "complete_request",
+    "convert_messages",
+    "get_context_window",
+    "resolve_model",
+    "stream_request",
+]
 
 
 def convert_messages(

@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from syn_adapters.artifacts.bundle import ArtifactBundle
+if TYPE_CHECKING:
+    from syn_adapters.artifacts.bundle import ArtifactBundle
 
 
 def create_context_summary(

@@ -11,16 +11,13 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from syn_adapters.object_storage.protocol import (
     DownloadError,
     ObjectNotFoundError,
     StorageObject,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +53,7 @@ def split_key(key: str) -> tuple[str, str]:
     return "", key
 
 
-def build_object_list(
-    response: list[dict[str, Any]], prefix: str
-) -> list[StorageObject]:
+def build_object_list(response: list[dict[str, Any]], prefix: str) -> list[StorageObject]:
     """Convert a Supabase list response into StorageObject instances, skipping folders."""
     objects: list[StorageObject] = []
     for item in response:

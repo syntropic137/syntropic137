@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -49,6 +48,8 @@ from syn_shared.events import (
     EventType,
 )
 
+if TYPE_CHECKING:
+    from uuid import UUID
 
 # Map Claude CLI event types to normalized types.
 # Output values use constants from syn_shared.events for type safety.

@@ -30,7 +30,6 @@ def json_serializer(obj: Any) -> Any:
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
-
 async def ensure_projection_table(
     pool: asyncpg.Pool,
     projection: str,

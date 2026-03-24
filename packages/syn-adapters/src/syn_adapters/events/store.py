@@ -23,11 +23,15 @@ import asyncpg
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
+)
+from syn_adapters.events.store_helpers import (
     get_event_store as get_event_store,
+)
+from syn_adapters.events.store_helpers import (
     record_observation as _record_observation,
 )
 from syn_adapters.events.store_write import (
-    EventValidationError,
+    EventValidationError as EventValidationError,
     insert_batch as _insert_batch,
     insert_one as _insert_one,
 )

@@ -141,7 +141,11 @@ class DockerSidecarAdapter:
         network_name = await get_container_network(isolation_handle.isolation_id)
 
         docker_cmd = build_sidecar_docker_cmd(
-            config, container_name, network_name, self._token_service_url, self._default_image,
+            config,
+            container_name,
+            network_name,
+            self._token_service_url,
+            self._default_image,
         )
 
         logger.info(
@@ -257,4 +261,3 @@ class DockerSidecarAdapter:
             return stdout.decode().strip().lower() == "true"
         except Exception:
             return False
-

@@ -20,6 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from pathlib import Path
 
+    from syn_adapters.workspace_backends.service.setup_phase_secrets import (
+        SetupPhaseSecrets,
+    )
     from syn_adapters.workspace_backends.service.workspace_service import WorkspaceService
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         ExecutionResult,
@@ -36,10 +39,9 @@ from syn_adapters.workspace_backends.service.managed_workspace_ops import (
 )
 from syn_adapters.workspace_backends.service.setup_phase import (
     clear_secrets,
-    run_setup_phase as _run_setup_phase,
 )
-from syn_adapters.workspace_backends.service.setup_phase_secrets import (
-    SetupPhaseSecrets,
+from syn_adapters.workspace_backends.service.setup_phase import (
+    run_setup_phase as _run_setup_phase,
 )
 
 logger = logging.getLogger(__name__)

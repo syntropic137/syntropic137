@@ -147,7 +147,9 @@ class ClaudeAgent(AgentProtocol):
         """
         if self._client is None:
             self._client = get_anthropic_client(
-                self._auth_mode, self._oauth_token, self._api_key,
+                self._auth_mode,
+                self._oauth_token,
+                self._api_key,
             )
         return self._client
 

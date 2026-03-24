@@ -19,9 +19,7 @@ if TYPE_CHECKING:
 __all__ = ["dispatch_to_handlers", "process_event_envelope"]
 
 
-async def process_event_envelope(
-    mgr: "ProjectionManager", envelope: Any
-) -> EventProvenance:
+async def process_event_envelope(mgr: ProjectionManager, envelope: Any) -> EventProvenance:
     """Process an event envelope from the event store.
 
     This is the ONLY correct way to dispatch events to projections.

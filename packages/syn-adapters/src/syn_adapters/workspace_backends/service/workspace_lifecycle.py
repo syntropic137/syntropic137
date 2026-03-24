@@ -27,16 +27,15 @@ from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand
 )
 
 if TYPE_CHECKING:
+    from syn_adapters.workspace_backends.service.workspace_service import (
+        WorkspaceService,
+        WorkspaceServiceConfig,
+    )
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         CapabilityType,
         IsolationBackendType,
         IsolationHandle,
         SidecarHandle,
-    )
-
-    from syn_adapters.workspace_backends.service.workspace_service import (
-        WorkspaceService,
-        WorkspaceServiceConfig,
     )
 
 logger = logging.getLogger(__name__)

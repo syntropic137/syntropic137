@@ -35,7 +35,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-
 class CoordinatorSubscriptionService:
     """Subscription service using SubscriptionCoordinator (ADR-014).
 
@@ -153,7 +152,6 @@ class CoordinatorSubscriptionService:
         from syn_adapters.subscriptions.coordinator_helpers import stop_coordinator_service
 
         await stop_coordinator_service(self)
-
 
 
 def create_coordinator_service(

@@ -66,7 +66,7 @@ async def get_object_info(
 
 
 def do_download(
-    client: "Minio",
+    client: Minio,
     bucket_name: str,
     key: str,
 ) -> bytes:

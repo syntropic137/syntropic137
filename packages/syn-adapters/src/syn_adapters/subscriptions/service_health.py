@@ -61,9 +61,7 @@ async def health_check(svc: EventSubscriptionService) -> dict:
         if svc._last_event_time:
             time_since_event = (datetime.now(UTC) - svc._last_event_time).total_seconds()
             if time_since_event > 60:  # No events for 60+ seconds
-                warnings_list.append(
-                    f"Running but no events processed for {time_since_event:.0f}s"
-                )
+                warnings_list.append(f"Running but no events processed for {time_since_event:.0f}s")
 
     # Check reconnect count (many reconnects might indicate problems)
     if svc._reconnect_count > 10:

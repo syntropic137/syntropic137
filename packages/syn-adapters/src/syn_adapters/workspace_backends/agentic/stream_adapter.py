@@ -11,10 +11,6 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from agentic_isolation import (
-    WorkspaceDockerProvider,
-)
-
 from syn_adapters.workspace_backends.agentic.stream_helpers import (
     _build_exec_command,
     _cleanup_process,
@@ -23,6 +19,10 @@ from syn_adapters.workspace_backends.agentic.stream_reader import read_lines
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from agentic_isolation import (
+        WorkspaceDockerProvider,
+    )
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
@@ -105,12 +105,17 @@ class AgenticEventStreamAdapter:
 
         container_name = f"agentic-ws-{handle.isolation_id.split('-')[1]}"
         exec_cmd = _build_exec_command(
-            container_name, command, working_directory, environment,
+            container_name,
+            command,
+            working_directory,
+            environment,
         )
 
         logger.debug(
             "Starting stream (container=%s, cmd=%s, timeout=%s)",
-            container_name, command, stream_timeout,
+            container_name,
+            command,
+            stream_timeout,
         )
 
         start_time = time.monotonic()
@@ -130,5 +135,6 @@ class AgenticEventStreamAdapter:
             if exit_code and exit_code != 0:
                 logger.warning(
                     "Stream process exited with code %d (container=%s)",
-                    exit_code, container_name,
+                    exit_code,
+                    container_name,
                 )

@@ -15,7 +15,6 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from agentic_logging import get_logger
@@ -29,6 +28,8 @@ from syn_adapters.subscriptions.service_live import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from event_sourcing import EventStoreClient
 
     from syn_adapters.projection_stores import ProjectionStoreProtocol

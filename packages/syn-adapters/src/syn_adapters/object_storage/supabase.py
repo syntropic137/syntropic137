@@ -29,9 +29,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.object_storage.protocol import (
-    DownloadError,
     ListResult,
-    ObjectNotFoundError,
     StorageConfigurationError,
     StorageObject,
     UploadError,
@@ -39,11 +37,17 @@ from syn_adapters.object_storage.protocol import (
 )
 from syn_adapters.object_storage.supabase_helpers import (
     do_delete as _do_delete,
+)
+from syn_adapters.object_storage.supabase_helpers import (
     do_download as _do_download,
+)
+from syn_adapters.object_storage.supabase_helpers import (
     get_presigned_url as _get_presigned_url,
 )
 from syn_adapters.object_storage.supabase_queries import (
     get_object_info as _get_object_info,
+)
+from syn_adapters.object_storage.supabase_queries import (
     list_objects as _list_objects,
 )
 

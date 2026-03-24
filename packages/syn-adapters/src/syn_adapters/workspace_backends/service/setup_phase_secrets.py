@@ -20,7 +20,6 @@ async def _resolve_github_credentials(
     require_github: bool,
 ) -> tuple[str | None, str | None, str | None]:
     """Resolve GitHub App credentials, returning (token, name, email)."""
-    from syn_adapters.github.client import GitHubAuthError
     from syn_shared.settings.github import GitHubAppSettings
 
     github_settings = GitHubAppSettings()
@@ -34,13 +33,9 @@ async def _resolve_github_credentials(
         from syn_adapters.github import GitHubAppClient
 
         client = GitHubAppClient(github_settings)
-        installation_id = await _resolve_installation_id(
-            client, repository, require_github
-        )
+        installation_id = await _resolve_installation_id(client, repository, require_github)
         github_app_token = (
-            await client.get_installation_token(installation_id)
-            if installation_id
-            else None
+            await client.get_installation_token(installation_id) if installation_id else None
         )
         logger.info(
             "Generated GitHub App installation token (bot: %s)",
@@ -84,9 +79,7 @@ def _resolve_claude_credentials() -> tuple[str | None, str | None]:
         else None
     )
     anthropic_api_key = (
-        settings.anthropic_api_key.get_secret_value()
-        if settings.anthropic_api_key
-        else None
+        settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
     )
 
     if claude_code_oauth_token and anthropic_api_key:
@@ -166,8 +159,8 @@ class SetupPhaseSecrets:
         Raises:
             GitHubAppNotConfiguredError: If require_github=True and App not configured
         """
-        github_app_token, git_author_name, git_author_email = (
-            await _resolve_github_credentials(repository, require_github)
+        github_app_token, git_author_name, git_author_email = await _resolve_github_credentials(
+            repository, require_github
         )
         claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
 
