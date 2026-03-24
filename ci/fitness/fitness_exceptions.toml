@@ -22,6 +22,7 @@
 [bounded_context_isolation]
 # path = { max_contexts = N, issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/projections/manager.py" = { max_contexts = 4, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/projections/manager_registry.py" = { max_contexts = 4, issue = "#276" }
 
 [event_sourcing_handle_command]
 # Production files calling _handle_command() directly (anti-pattern).
@@ -40,3 +41,4 @@
 # Legitimate uses: deserialization / rehydration from stored data.
 # path = { max_constructions = N, issue = "#NNN" }
 "packages/syn-adapters/src/syn_adapters/storage/in_memory.py" = { max_constructions = 2, issue = "#197" }
+"packages/syn-adapters/src/syn_adapters/storage/in_memory_workflow_repo_queries.py" = { max_constructions = 2, issue = "#276" }

@@ -7,20 +7,20 @@ ANTHROPIC_API_KEY environment variable. OAuth token takes priority when both are
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.agents.claude_config import (
+    determine_auth_mode,
+    get_anthropic_client,
+    get_context_window,
+    resolve_model,
+)
 from syn_adapters.agents.protocol import (
-    AgentAuthenticationError,
     AgentConfig,
-    AgentError,
     AgentMessage,
     AgentProtocol,
     AgentProvider,
-    AgentRateLimitError,
     AgentResponse,
-    AgentRole,
-    AgentTimeoutError,
 )
 from syn_shared import get_settings
 from syn_shared.env_constants import MODEL_SONNET
@@ -59,8 +59,8 @@ class ClaudeAgent(AgentProtocol):
     # Use "sonnet" alias which maps to latest Claude Sonnet
     DEFAULT_MODEL = MODEL_SONNET
 
-    @classmethod
-    def resolve_model(cls, model: str) -> str:
+    @staticmethod
+    def resolve_model(model: str) -> str:
         """Resolve model alias to specific API version.
 
         Loads model definitions from agentic-primitives YAML files.
@@ -71,12 +71,10 @@ class ClaudeAgent(AgentProtocol):
         Returns:
             Specific API model name (e.g., "claude-sonnet-4-5-20250929")
         """
-        from syn_adapters.agents.models import resolve_model
-
         return resolve_model(model)
 
-    @classmethod
-    def get_context_window(cls, model: str) -> int:
+    @staticmethod
+    def get_context_window(model: str) -> int:
         """Get context window size for a model.
 
         Args:
@@ -85,9 +83,7 @@ class ClaudeAgent(AgentProtocol):
         Returns:
             Context window in tokens
         """
-        from syn_adapters.agents.models import get_model_registry
-
-        return get_model_registry().get_context_window(model)
+        return get_context_window(model)
 
     def __init__(
         self,
@@ -114,20 +110,7 @@ class ClaudeAgent(AgentProtocol):
             settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
         )
 
-        # OAuth token takes priority over API key
-        if self._oauth_token:
-            if self._api_key:
-                logger.warning(
-                    "claude_auth_precedence",
-                    msg="Both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set. "
-                    "Using CLAUDE_CODE_OAUTH_TOKEN. Remove ANTHROPIC_API_KEY to silence this warning.",
-                )
-            self._auth_mode: str = "oauth"
-        elif self._api_key:
-            self._auth_mode = "api_key"
-        else:
-            self._auth_mode = "none"
-
+        self._auth_mode: str = determine_auth_mode(self._oauth_token, self._api_key)
         self._client: Any | None = None
 
     @property
@@ -163,26 +146,11 @@ class ClaudeAgent(AgentProtocol):
         Uses OAuth token (auth_token) when available, otherwise falls back to API key.
         """
         if self._client is None:
-            if not self._oauth_token and not self._api_key:
-                msg = (
-                    "No Claude authentication configured. "
-                    "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
-                )
-                raise AgentAuthenticationError(msg, AgentProvider.CLAUDE)
-
-            try:
-                from anthropic import AsyncAnthropic
-            except ImportError as e:
-                msg = "anthropic package not installed. Run: uv add anthropic"
-                raise AgentError(msg, AgentProvider.CLAUDE) from e
-
-            if self._auth_mode == "oauth":
-                logger.info("claude_client_init", auth_mode="oauth")
-                self._client = AsyncAnthropic(auth_token=self._oauth_token)
-            else:
-                logger.info("claude_client_init", auth_mode="api_key")
-                self._client = AsyncAnthropic(api_key=self._api_key)
-
+            self._client = get_anthropic_client(
+                self._auth_mode,
+                self._oauth_token,
+                self._api_key,
+            )
         return self._client
 
     def _convert_messages(
@@ -193,22 +161,9 @@ class ClaudeAgent(AgentProtocol):
         Returns:
             Tuple of (system_prompt, messages_list).
         """
-        system_prompt: str | None = None
-        converted: list[dict[str, str]] = []
+        from syn_adapters.agents.claude_helpers import convert_messages
 
-        for msg in messages:
-            if msg.role == AgentRole.SYSTEM:
-                # Anthropic handles system as a separate parameter
-                system_prompt = msg.content
-            else:
-                converted.append(
-                    {
-                        "role": msg.role.value,
-                        "content": msg.content,
-                    }
-                )
-
-        return system_prompt, converted
+        return convert_messages(messages)
 
     async def complete(
         self,
@@ -227,79 +182,9 @@ class ClaudeAgent(AgentProtocol):
         Raises:
             AgentError: If the request fails.
         """
-        client = self._get_client()
-        raw_model = config.model or self.DEFAULT_MODEL
-        model = self.resolve_model(raw_model)  # Resolve alias to API model name
+        from syn_adapters.agents.claude_helpers import complete_request
 
-        logger.debug(
-            "model_resolved",
-            raw_model=raw_model,
-            resolved_model=model,
-        )
-
-        system_prompt, converted_messages = self._convert_messages(messages)
-
-        # Use config system prompt if no system message in conversation
-        if system_prompt is None and config.system_prompt:
-            system_prompt = config.system_prompt
-
-        logger.debug(
-            "claude_request",
-            model=model,
-            message_count=len(converted_messages),
-            max_tokens=config.max_tokens,
-        )
-
-        try:
-            response = await asyncio.wait_for(
-                client.messages.create(
-                    model=model,
-                    max_tokens=config.max_tokens,
-                    temperature=config.temperature,
-                    system=system_prompt or "",
-                    messages=converted_messages,
-                ),
-                timeout=config.timeout_seconds,
-            )
-
-            content = response.content[0].text if response.content else ""
-            result = AgentResponse(
-                content=content,
-                model=response.model,
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.input_tokens + response.usage.output_tokens,
-                stop_reason=response.stop_reason,
-            )
-
-            logger.info(
-                "claude_response",
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                stop_reason=result.stop_reason,
-            )
-
-            return result
-
-        except TimeoutError as e:
-            msg = f"Claude request timed out after {config.timeout_seconds}s"
-            logger.error("claude_timeout", timeout=config.timeout_seconds)
-            raise AgentTimeoutError(msg, AgentProvider.CLAUDE) from e
-        except Exception as e:
-            error_msg = str(e)
-
-            # Check for specific error types
-            if "rate_limit" in error_msg.lower():
-                logger.warning("claude_rate_limit", error=error_msg)
-                raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from e
-
-            if "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
-                logger.error("claude_auth_error", error=error_msg)
-                raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from e
-
-            logger.error("claude_error", error=error_msg, error_type=type(e).__name__)
-            raise AgentError(error_msg, AgentProvider.CLAUDE) from e
+        return await complete_request(self._get_client(), messages, config, self.DEFAULT_MODEL)
 
     async def stream(
         self,
@@ -318,39 +203,7 @@ class ClaudeAgent(AgentProtocol):
         Raises:
             AgentError: If the request fails.
         """
-        client = self._get_client()
-        raw_model = config.model or self.DEFAULT_MODEL
-        model = self.resolve_model(raw_model)  # Resolve alias to specific version
+        from syn_adapters.agents.claude_helpers import stream_request
 
-        system_prompt, converted_messages = self._convert_messages(messages)
-
-        if system_prompt is None and config.system_prompt:
-            system_prompt = config.system_prompt
-
-        logger.debug(
-            "claude_stream_request",
-            model=model,
-            message_count=len(converted_messages),
-        )
-
-        try:
-            async with client.messages.stream(
-                model=model,
-                max_tokens=config.max_tokens,
-                temperature=config.temperature,
-                system=system_prompt or "",
-                messages=converted_messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error("claude_stream_error", error=error_msg)
-
-            if "rate_limit" in error_msg.lower():
-                raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from e
-            if "authentication" in error_msg.lower():
-                raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from e
-
-            raise AgentError(error_msg, AgentProvider.CLAUDE) from e
+        async for chunk in stream_request(self._get_client(), messages, config, self.DEFAULT_MODEL):
+            yield chunk

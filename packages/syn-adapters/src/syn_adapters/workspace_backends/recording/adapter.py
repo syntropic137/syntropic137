@@ -35,25 +35,42 @@ class RecordingAdapterTestOnlyError(RuntimeError):
     pass
 
 
+def _is_test_environment() -> bool:
+    """Return True if running in a test environment."""
+    if os.environ.get("PYTEST_CURRENT_TEST") is not None:
+        return True
+    return os.environ.get("APP_ENVIRONMENT", "").lower() in ("test", "testing", "offline")
+
+
 def _assert_test_environment() -> None:
     """Raise if not in test environment.
 
     Recording adapters should only be used in tests to prevent
     accidental use of recorded data in production.
     """
-    # Check for pytest
-    if os.environ.get("PYTEST_CURRENT_TEST") is not None:
-        return
+    if not _is_test_environment():
+        raise RecordingAdapterTestOnlyError(
+            "RecordingEventStreamAdapter can only be used in tests. "
+            "Either run via pytest or set APP_ENVIRONMENT=test."
+        )
 
-    # Check for APP_ENVIRONMENT
-    app_env = os.environ.get("APP_ENVIRONMENT", "").lower()
-    if app_env in ("test", "testing", "offline"):
-        return
 
-    raise RecordingAdapterTestOnlyError(
-        "RecordingEventStreamAdapter can only be used in tests. "
-        "Either run via pytest or set APP_ENVIRONMENT=test."
-    )
+def _resolve_player(recording: Recording | str | Path | SessionPlayer) -> SessionPlayer:
+    """Resolve a recording input into a SessionPlayer instance."""
+    from agentic_events import Recording, SessionPlayer, load_recording
+
+    if isinstance(recording, SessionPlayer):
+        return recording
+    if isinstance(recording, Path):
+        return SessionPlayer(recording)
+    if isinstance(recording, Recording):
+        return load_recording(recording)
+    return load_recording(str(recording))
+
+
+def _matches_any_pattern(file_path: str, patterns: list[str]) -> bool:
+    """Return True if file_path matches any of the glob patterns."""
+    return any(fnmatch.fnmatch(file_path, p) for p in patterns)
 
 
 class RecordingEventStreamAdapter:
@@ -145,20 +162,7 @@ class RecordingEventStreamAdapter:
         """
         _assert_test_environment()
 
-        # Import here to avoid import errors when agentic-events not installed
-        from agentic_events import Recording, SessionPlayer, load_recording
-
-        if isinstance(recording, SessionPlayer):
-            self._player = recording
-        elif isinstance(recording, Path):
-            self._player = SessionPlayer(recording)
-        elif isinstance(recording, Recording):
-            # Type-safe enum - use directly
-            self._player = load_recording(recording)
-        else:
-            # Assume it's a task name string
-            self._player = load_recording(str(recording))
-
+        self._player = _resolve_player(recording)
         self._realtime = realtime
         self._speed = speed
         self._last_exit_code: int | None = None
@@ -275,12 +279,8 @@ class RecordingEventStreamAdapter:
         """
         pats = patterns or ["artifacts/**/*"]
         workspace_files = self.get_workspace_files()
-
-        results: list[tuple[str, bytes]] = []
-        for file_path, content in workspace_files.items():
-            for pattern in pats:
-                if fnmatch.fnmatch(file_path, pattern):
-                    results.append((file_path, content))
-                    break  # Don't add same file twice
-
-        return results
+        return [
+            (fp, content)
+            for fp, content in workspace_files.items()
+            if _matches_any_pattern(fp, pats)
+        ]

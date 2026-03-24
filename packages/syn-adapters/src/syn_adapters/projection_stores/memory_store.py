@@ -9,6 +9,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from syn_adapters.projection_stores.memory_store_helpers import (
+    apply_filters,
+    apply_pagination,
+    apply_sorting,
+)
+from syn_adapters.projection_stores.memory_store_helpers import (
+    clear_projection as _clear_projection,
+)
 from syn_shared.settings import get_settings
 
 
@@ -55,10 +63,7 @@ class InMemoryProjectionStore:
 
     async def save(self, projection: str, key: str, data: dict[str, Any]) -> None:
         """Save or update a projection record."""
-        if projection not in self._data:
-            self._data[projection] = {}
-
-        self._data[projection][key] = data.copy()
+        self._data.setdefault(projection, {})[key] = data.copy()
         self._update_state(projection)
 
     async def get(self, projection: str, key: str) -> dict[str, Any] | None:
@@ -92,29 +97,9 @@ class InMemoryProjectionStore:
             return []
 
         results = list(self._data[projection].values())
-
-        # Apply filters
-        if filters:
-            results = [r for r in results if all(r.get(k) == v for k, v in filters.items())]
-
-        # Apply sorting
-        if order_by:
-            descending = order_by.startswith("-")
-            field_name = order_by.lstrip("-")
-            # Handle None values by putting them at the end
-            results = sorted(
-                results,
-                key=lambda x: (x.get(field_name) is None, x.get(field_name) or ""),
-                reverse=descending,
-            )
-
-        # Apply pagination
-        if offset:
-            results = results[offset:]
-        if limit:
-            results = results[:limit]
-
-        return results
+        results = apply_filters(results, filters)
+        results = apply_sorting(results, order_by)
+        return apply_pagination(results, offset, limit)
 
     async def get_position(self, projection: str) -> int | None:
         """Get the last processed event position for a projection."""
@@ -123,10 +108,9 @@ class InMemoryProjectionStore:
 
     async def set_position(self, projection: str, position: int) -> None:
         """Update the last processed event position for a projection."""
-        if projection not in self._state:
-            self._state[projection] = ProjectionState()
-        self._state[projection].last_position = position
-        self._state[projection].last_updated = datetime.now(UTC)
+        state = self._ensure_state(projection)
+        state.last_position = position
+        state.last_updated = datetime.now(UTC)
 
     async def get_last_updated(self, projection: str) -> datetime | None:
         """Get the last update timestamp for a projection."""
@@ -135,9 +119,13 @@ class InMemoryProjectionStore:
 
     def _update_state(self, projection: str) -> None:
         """Update the state timestamp for a projection."""
+        self._ensure_state(projection).last_updated = datetime.now(UTC)
+
+    def _ensure_state(self, projection: str) -> ProjectionState:
+        """Get or create the ProjectionState for a projection."""
         if projection not in self._state:
             self._state[projection] = ProjectionState()
-        self._state[projection].last_updated = datetime.now(UTC)
+        return self._state[projection]
 
     def clear(self) -> None:
         """Clear all data (useful for test setup/teardown)."""
@@ -146,7 +134,4 @@ class InMemoryProjectionStore:
 
     def clear_projection(self, projection: str) -> None:
         """Clear data for a specific projection."""
-        if projection in self._data:
-            del self._data[projection]
-        if projection in self._state:
-            del self._state[projection]
+        _clear_projection(self, projection)
