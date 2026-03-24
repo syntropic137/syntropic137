@@ -33,7 +33,7 @@
 "packages/syn-domain/src/syn_domain/contexts/orchestration/cleanup/stale_execution_cleaner.py" = { max_calls = 1, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/create_workflow_template/CreateWorkflowTemplateHandler.py" = { max_calls = 1, issue = "#197" }
 "packages/syn-domain/src/syn_domain/contexts/orchestration/slices/execute_workflow/WorkflowExecutionProcessor.py" = { max_calls = 8, issue = "#196" }
-"apps/syn-api/src/syn_api/v1/artifacts.py" = { max_calls = 1, issue = "#197" }
+"apps/syn-api/src/syn_api/routes/artifacts.py" = { max_calls = 1, issue = "#277" }
 
 [event_construction_outside_aggregate]
 # Production files that construct DomainEvent subclasses outside aggregate_*/ dirs.
