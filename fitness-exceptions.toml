@@ -1,4 +1,4 @@
-# Grandfathered violations. Every entry MUST reference a GitHub issue.
+# Grandfathered fitness violations. Every entry MUST reference a GitHub issue.
 # This file should SHRINK over time — each entry is tech debt.
 #
 # Budgets are set to current value rounded up to nearest multiple of 5.
