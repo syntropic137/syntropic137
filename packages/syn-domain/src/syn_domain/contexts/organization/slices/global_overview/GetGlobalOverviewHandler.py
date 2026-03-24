@@ -7,7 +7,7 @@ in-memory projections and projection stores.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from syn_domain.contexts.organization._shared.projection_names import (
     REPO_COST,
@@ -26,21 +26,24 @@ if TYPE_CHECKING:
         GetGlobalOverviewQuery,
     )
     from syn_domain.contexts.organization.domain.read_models.repo_summary import RepoSummary
+    from syn_domain.contexts.organization.domain.read_models.system_summary import SystemSummary
     from syn_domain.contexts.organization.slices.list_repos.projection import RepoProjection
     from syn_domain.contexts.organization.slices.list_systems.projection import SystemProjection
 
+_T = TypeVar("_T")
 
-def _build_index(
+
+def _build_index(  # noqa: UP047 - PEP 695 conflicts with `from __future__ import annotations`
     records: list[dict[str, Any]],
     key_field: str,
-    model_class: type[RepoCost] | type[RepoHealth],
-) -> dict[str, RepoCost | RepoHealth]:
+    model_class: type[_T],
+) -> dict[str, _T]:
     """Build a lookup dict from projection store records."""
-    result: dict[str, Any] = {}
+    result: dict[str, _T] = {}
     for record in records:
         name = record.get(key_field, "")
         if name:
-            result[name] = model_class.from_dict(record)
+            result[name] = model_class.from_dict(record)  # type: ignore[attr-error]
     return result
 
 
@@ -54,7 +57,7 @@ def _determine_system_status(failing: int, total: int) -> str:
 
 
 def _compute_system_entry(
-    system: Any,
+    system: SystemSummary,
     repos: list[RepoSummary],
     cost_by_repo: dict[str, RepoCost],
     health_by_repo: dict[str, RepoHealth],
@@ -116,7 +119,7 @@ class GetGlobalOverviewHandler:
         entries = [
             _compute_system_entry(
                 system, repos_by_system.get(system.system_id, []), cost_by_repo, health_by_repo
-            )  # type: ignore[arg-type]
+            )
             for system in systems
         ]
 
