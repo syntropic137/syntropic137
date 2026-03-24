@@ -22,10 +22,11 @@ import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from syn_adapters.object_storage.protocol import StorageProtocol
 
 
@@ -300,42 +301,9 @@ class ArtifactBundle:
             keys = await bundle.save_to_storage(storage)
             # keys = ['workflows/123/bundles/abc/report.md', ...]
         """
+        from syn_adapters.artifacts.bundle_storage import save_bundle_to_storage
 
-        storage_prefix = prefix or self.get_storage_prefix()
-        uploaded_keys: list[str] = []
-
-        # Upload each file
-        for artifact_file in self.files:
-            key = storage_prefix + str(artifact_file.path).replace("\\", "/")
-
-            # Determine content type from extension
-            import mimetypes
-
-            content_type, _ = mimetypes.guess_type(str(artifact_file.path))
-
-            await storage.upload(
-                key,
-                artifact_file.content,
-                content_type=content_type,
-                metadata={
-                    "artifact_type": artifact_file.metadata.artifact_type.value,
-                    "bundle_id": self.bundle_id,
-                    "phase_id": self.phase_id,
-                    "content_hash": artifact_file.content_hash,
-                },
-            )
-            uploaded_keys.append(key)
-
-        # Upload bundle manifest
-        manifest_key = storage_prefix + "manifest.json"
-        await storage.upload(
-            manifest_key,
-            self.to_json().encode("utf-8"),
-            content_type="application/json",
-        )
-        uploaded_keys.append(manifest_key)
-
-        return uploaded_keys
+        return await save_bundle_to_storage(self, storage, prefix=prefix)
 
     @classmethod
     async def load_from_storage(
@@ -374,75 +342,11 @@ class ArtifactBundle:
                 workflow_id="123"
             )
         """
-        from syn_adapters.object_storage.protocol import DownloadError, ObjectNotFoundError
+        from syn_adapters.artifacts.bundle_storage import load_bundle_from_storage
 
-        # Construct prefix
-        if prefix:
-            storage_prefix = prefix
-        else:
-            parts = []
-            if workflow_id:
-                parts.append(f"workflows/{workflow_id}")
-            if session_id:
-                parts.append(f"sessions/{session_id}")
-            parts.append(f"bundles/{bundle_id}")
-            storage_prefix = "/".join(parts) + "/"
-
-        # Load manifest
-        manifest_key = storage_prefix + "manifest.json"
-        try:
-            manifest_bytes = await storage.download(manifest_key)
-        except ObjectNotFoundError:
-            raise
-        except (DownloadError, OSError) as e:
-            raise ObjectNotFoundError(manifest_key) from e
-
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
-
-        # Reconstruct bundle
-        bundle = cls(
-            bundle_id=manifest["bundle_id"],
-            phase_id=manifest["phase_id"],
-            session_id=manifest.get("session_id"),
-            workflow_id=manifest.get("workflow_id"),
-            title=manifest.get("title"),
-            description=manifest.get("description"),
-            is_primary=manifest.get("is_primary", True),
-            created_at=datetime.fromisoformat(manifest["created_at"]),
+        return await load_bundle_from_storage(
+            storage, bundle_id, prefix=prefix, workflow_id=workflow_id, session_id=session_id
         )
-
-        # Load each file
-        for file_info in manifest.get("files", []):
-            file_path = file_info["path"]
-            file_key = storage_prefix + file_path
-
-            content = await storage.download(file_key)
-
-            # Reconstruct metadata
-            meta_dict = file_info.get("metadata", {})
-            metadata = ArtifactMetadata(
-                workflow_id=meta_dict.get("workflow_id"),
-                phase_id=meta_dict.get("phase_id"),
-                session_id=meta_dict.get("session_id"),
-                artifact_type=ArtifactType(meta_dict.get("artifact_type", "other")),
-                title=meta_dict.get("title"),
-                description=meta_dict.get("description"),
-                is_primary=meta_dict.get("is_primary", False),
-                derived_from=tuple(meta_dict.get("derived_from", [])),
-                extra=meta_dict.get("extra", {}),
-            )
-
-            artifact_file = ArtifactFile(
-                path=Path(file_path),
-                content=content,
-                content_hash=file_info.get("content_hash", ""),
-                metadata=metadata,
-                created_at=datetime.fromisoformat(file_info["created_at"]),
-            )
-
-            bundle.files.append(artifact_file)
-
-        return bundle
 
 
 @dataclass
@@ -478,50 +382,26 @@ class PhaseContext:
         Returns list of (relative_path, content) tuples ready for
         workspace injection.
         """
-        files: list[tuple[Path, bytes]] = []
+        from syn_adapters.artifacts.bundle_storage import build_context_files
 
-        # Add artifact files under .context/artifacts/{bundle_id}/
-        for bundle in self.artifacts:
-            bundle_dir = Path(".context") / "artifacts" / bundle.bundle_id
-
-            for artifact_file in bundle.files:
-                context_path = bundle_dir / artifact_file.path
-                files.append((context_path, artifact_file.content))
-
-            # Add bundle manifest
-            manifest_path = bundle_dir / "manifest.json"
-            manifest_content = bundle.to_json().encode("utf-8")
-            files.append((manifest_path, manifest_content))
-
-        # Add any additional context files
-        for path, content in self.context_files:
-            context_path = Path(".context") / path
-            files.append((context_path, content))
-
-        # Add phase context summary
-        summary = self._create_context_summary()
-        summary_path = Path(".context") / "context.json"
-        files.append((summary_path, summary.encode("utf-8")))
-
-        return files
+        return build_context_files(
+            self.artifacts,
+            self.context_files,
+            self.phase_id,
+            self.workflow_id,
+            self.task,
+            self.system_prompt,
+        )
 
     def _create_context_summary(self) -> str:
         """Create a JSON summary of the phase context."""
-        summary = {
-            "phase_id": self.phase_id,
-            "workflow_id": self.workflow_id,
-            "task": self.task,
-            "system_prompt": self.system_prompt,
-            "artifacts": [
-                {
-                    "bundle_id": b.bundle_id,
-                    "phase_id": b.phase_id,
-                    "title": b.title,
-                    "file_count": b.file_count,
-                    "files": [str(f.path) for f in b.files],
-                }
-                for b in self.artifacts
-            ],
-            "context_files": [str(p) for p, _ in self.context_files],
-        }
-        return json.dumps(summary, indent=2)
+        from syn_adapters.artifacts.bundle_storage import create_context_summary
+
+        return create_context_summary(
+            self.phase_id,
+            self.workflow_id,
+            self.task,
+            self.system_prompt,
+            self.artifacts,
+            self.context_files,
+        )

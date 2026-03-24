@@ -17,7 +17,16 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from syn_shared.env_constants import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
+from syn_adapters.agents.model_helpers import (
+    find_model_by_field,
+    get_context_window,
+    get_model_info,
+    list_aliases,
+    list_models,
+    load_fallback_aliases,
+    load_provider,
+    register_current_model_aliases,
+)
 from syn_shared.logging import get_logger
 
 logger = get_logger(__name__)
@@ -28,22 +37,6 @@ logger = get_logger(__name__)
 _PRIMITIVES_MODELS_PATH = (
     Path(__file__).parents[5] / "lib" / "agentic-primitives" / "providers" / "models"
 )
-
-
-def _load_yaml(path: Path) -> dict[str, Any]:
-    """Load a YAML file safely."""
-    try:
-        import yaml
-    except ImportError:
-        logger.warning("pyyaml_not_installed")
-        return {}
-
-    try:
-        with path.open() as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning("failed_to_load_yaml", path=str(path), error=str(e))
-        return {}
 
 
 class ModelRegistry:
@@ -66,63 +59,19 @@ class ModelRegistry:
             self._load_fallback()
             return
 
-        # First pass: Load all individual model files to get api_names
         model_id_to_api_name: dict[str, str] = {}
-
         for provider_dir in _PRIMITIVES_MODELS_PATH.iterdir():
             if not provider_dir.is_dir():
                 continue
+            load_provider(
+                provider_dir,
+                self._providers,
+                self._models,
+                self._aliases,
+                model_id_to_api_name,
+            )
 
-            provider_id = provider_dir.name
-
-            # Load provider config
-            config_path = provider_dir / "config.yaml"
-            if config_path.exists():
-                config = _load_yaml(config_path)
-                self._providers[provider_id] = config
-
-            # Load individual model files
-            for model_file in provider_dir.glob("*.yaml"):
-                if model_file.name == "config.yaml":
-                    continue
-
-                model_data = _load_yaml(model_file)
-                if not model_data:
-                    continue
-
-                model_id = model_data.get("id", model_file.stem)
-                self._models[model_id] = model_data
-
-                # Register model aliases
-                if api_name := model_data.get("api_name"):
-                    # Map model_id to api_name
-                    self._aliases[model_id] = api_name
-                    model_id_to_api_name[model_id] = api_name
-                    # Map explicit alias if present
-                    if alias := model_data.get("alias"):
-                        self._aliases[alias] = api_name
-
-        # Second pass: Create simple aliases from current_models that resolve to API names
-        for provider_id, config in self._providers.items():
-            current_models = config.get("current_models", {})
-            for model_type, model_id in current_models.items():
-                # Get the API name for this model
-                api_name = model_id_to_api_name.get(model_id, model_id)
-
-                # Simple aliases that work across versions:
-                # - "sonnet" -> latest sonnet API name
-                # - "claude-sonnet" -> latest sonnet API name
-                # - "opus" -> latest opus API name
-                # - "claude-opus" -> latest opus API name
-                if api_name is not None and model_type is not None:
-                    if provider_id == "anthropic":
-                        # Short alias (e.g., "sonnet")
-                        self._aliases[str(model_type)] = str(api_name)
-                        # Claude-prefixed alias (e.g., "claude-sonnet")
-                        self._aliases[f"claude-{model_type}"] = str(api_name)
-                    else:
-                        # Other providers: use provider/type format
-                        self._aliases[f"{provider_id}/{model_type}"] = str(api_name)
+        register_current_model_aliases(self._providers, self._aliases, model_id_to_api_name)
 
         logger.debug(
             "models_loaded",
@@ -133,21 +82,7 @@ class ModelRegistry:
 
     def _load_fallback(self) -> None:
         """Load fallback model definitions if primitives not available."""
-        # Minimal fallback - uses actual existing API model names
-        # Update these when new model versions are released
-        # TODO: hardcoded values. Not maintainable. Should come from a central config.
-        self._aliases = {
-            # Sonnet aliases
-            MODEL_SONNET: "claude-sonnet-4-5-20250514",
-            "claude-sonnet": "claude-sonnet-4-5-20250514",
-            # Opus aliases
-            MODEL_OPUS: "claude-3-opus-20240229",
-            "claude-opus": "claude-3-opus-20240229",
-            # Haiku aliases - uses Claude 3.5 Haiku (current available)
-            MODEL_HAIKU: "claude-3-5-haiku-20241022",
-            "claude-haiku": "claude-3-5-haiku-20241022",
-        }
-        logger.warning("using_fallback_models", aliases=list(self._aliases.keys()))
+        self._aliases = load_fallback_aliases()
 
     def resolve(self, model: str) -> str:
         """Resolve a model alias to its API name.
@@ -180,16 +115,13 @@ class ModelRegistry:
         Returns:
             Model configuration dict or None if not found
         """
-        # Try direct lookup
-        if model in self._models:
-            return self._models[model]
+        return get_model_info(self._models, model)
 
-        # Try resolving alias to model ID
-        for _model_id, model_data in self._models.items():
-            if model_data.get("api_name") == model or model_data.get("alias") == model:
-                return model_data
+    def _find_model_by_field(self, model: str) -> dict[str, Any] | None:
+        """Search models by api_name or alias fields."""
+        return find_model_by_field(self._models, model)
 
-        return None
+    _DEFAULT_CONTEXT_WINDOW = 200_000
 
     def get_context_window(self, model: str) -> int:
         """Get the context window size for a model.
@@ -200,10 +132,7 @@ class ModelRegistry:
         Returns:
             Context window size in tokens (default 200000)
         """
-        info = self.get_model_info(model)
-        if info:
-            return info.get("capabilities", {}).get("context_window", 200_000)
-        return 200_000
+        return get_context_window(self._models, model, self._DEFAULT_CONTEXT_WINDOW)
 
     def list_models(self, provider: str | None = None) -> list[str]:
         """List available model IDs.
@@ -214,15 +143,11 @@ class ModelRegistry:
         Returns:
             List of model IDs
         """
-        if provider:
-            return [
-                m_id for m_id, m_data in self._models.items() if m_data.get("provider") == provider
-            ]
-        return list(self._models.keys())
+        return list_models(self._models, provider)
 
     def list_aliases(self) -> dict[str, str]:
         """Get all registered aliases and their resolved API names."""
-        return {alias: self.resolve(alias) for alias in self._aliases}
+        return list_aliases(self._aliases, self.resolve)
 
 
 @lru_cache(maxsize=1)

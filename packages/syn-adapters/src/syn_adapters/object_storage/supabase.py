@@ -25,24 +25,99 @@ import asyncio
 import hashlib
 import logging
 import mimetypes
-from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.object_storage.protocol import (
-    DownloadError,
     ListResult,
-    ObjectNotFoundError,
     StorageConfigurationError,
     StorageObject,
     UploadError,
     UploadResult,
+)
+from syn_adapters.object_storage.supabase_helpers import (
+    do_delete as _do_delete,
+)
+from syn_adapters.object_storage.supabase_helpers import (
+    do_download as _do_download,
+)
+from syn_adapters.object_storage.supabase_helpers import (
+    get_presigned_url as _get_presigned_url,
+)
+from syn_adapters.object_storage.supabase_queries import (
+    get_object_info as _get_object_info,
+)
+from syn_adapters.object_storage.supabase_queries import (
+    list_objects as _list_objects,
 )
 
 if TYPE_CHECKING:
     from syn_shared.settings.storage import StorageProvider
 
 logger = logging.getLogger(__name__)
+
+
+def _do_upload(
+    client: Any,
+    bucket_name: str,
+    key: str,
+    content: bytes,
+    content_type: str | None,
+    metadata: dict[str, str] | None,
+) -> UploadResult:
+    """Synchronous upload body for Supabase Storage (run in executor).
+
+    Handles content-type detection, metadata encoding, upload, and URL retrieval.
+    Raises UploadError on failure so the async caller needs no try/except.
+
+    Args:
+        client: Supabase client instance.
+        bucket_name: Storage bucket name.
+        key: Object key (path) within the bucket.
+        content: Raw bytes to store.
+        content_type: MIME type. Auto-detected if not provided.
+        metadata: Custom metadata (stored as custom headers).
+
+    Returns:
+        UploadResult with key, size, and URL.
+
+    Raises:
+        UploadError: If upload fails.
+    """
+    try:
+        if content_type is None:
+            content_type, _ = mimetypes.guess_type(key)
+            content_type = content_type or "application/octet-stream"
+
+        file_options: dict[str, str] = {"content-type": content_type}
+        if metadata:
+            import json
+
+            file_options["x-upsert-metadata"] = json.dumps(metadata)
+
+        response = client.storage.from_(bucket_name).upload(
+            path=key,
+            file=content,
+            file_options=file_options,
+        )
+
+        if hasattr(response, "error") and response.error:
+            raise UploadError(f"Supabase upload failed: {response.error}", key=key)
+
+        etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
+        url_response = client.storage.from_(bucket_name).get_public_url(key)
+
+        return UploadResult(
+            key=key,
+            size_bytes=len(content),
+            etag=etag,
+            url=url_response if isinstance(url_response, str) else None,
+        )
+    except UploadError:
+        raise
+    except Exception as e:
+        logger.exception("Failed to upload to Supabase: %s", key)
+        raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
 
 
 class SupabaseStorage:
@@ -134,60 +209,12 @@ class SupabaseStorage:
         Raises:
             UploadError: If upload fails.
         """
-        try:
-            client = self._get_client()
-
-            # Auto-detect content type if not provided
-            if content_type is None:
-                content_type, _ = mimetypes.guess_type(key)
-                content_type = content_type or "application/octet-stream"
-
-            # Prepare file options
-            file_options: dict[str, str] = {"content-type": content_type}
-            if metadata:
-                # Supabase supports custom metadata via x-upsert-metadata header
-                import json
-
-                file_options["x-upsert-metadata"] = json.dumps(metadata)
-
-            # Upload to Supabase Storage
-            # Note: Supabase Storage uses upsert by default
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(
-                    client.storage.from_(self._bucket_name).upload,
-                    path=key,
-                    file=content,
-                    file_options=file_options,
-                ),
-            )
-
-            # Check for errors
-            if hasattr(response, "error") and response.error:
-                raise UploadError(f"Supabase upload failed: {response.error}", key=key)
-
-            # Compute ETag
-            etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-            # Get public URL
-            url_response = await loop.run_in_executor(
-                None,
-                partial(client.storage.from_(self._bucket_name).get_public_url, key),
-            )
-
-            return UploadResult(
-                key=key,
-                size_bytes=len(content),
-                etag=etag,
-                url=url_response if isinstance(url_response, str) else None,
-            )
-
-        except StorageConfigurationError:
-            raise
-        except Exception as e:
-            logger.exception("Failed to upload to Supabase: %s", key)
-            raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
+        client = self._get_client()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
+        )
 
     async def download(self, key: str) -> bytes:
         """Download content from Supabase Storage.
@@ -202,31 +229,12 @@ class SupabaseStorage:
             ObjectNotFoundError: If object doesn't exist.
             DownloadError: If download fails.
         """
-        try:
-            client = self._get_client()
-
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(client.storage.from_(self._bucket_name).download, key),
-            )
-
-            if response is None:
-                raise ObjectNotFoundError(key)
-
-            return response
-
-        except ObjectNotFoundError:
-            raise
-        except StorageConfigurationError:
-            raise
-        except Exception as e:
-            # Supabase returns 404 for not found
-            error_msg = str(e).lower()
-            if "not found" in error_msg or "404" in error_msg:
-                raise ObjectNotFoundError(key) from e
-            logger.exception("Failed to download from Supabase: %s", key)
-            raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
+        client = self._get_client()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(_do_download, client, self._bucket_name, key),
+        )
 
     async def delete(self, key: str) -> bool:
         """Delete an object from Supabase Storage.
@@ -237,24 +245,12 @@ class SupabaseStorage:
         Returns:
             True if object was deleted, False if it didn't exist.
         """
-        try:
-            client = self._get_client()
-
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(client.storage.from_(self._bucket_name).remove, [key]),
-            )
-
-            # Supabase returns list of deleted files
-            if response and isinstance(response, list):
-                return len(response) > 0
-
-            return False
-
-        except Exception as e:
-            logger.warning("Failed to delete from Supabase: %s - %s", key, e)
-            return False
+        client = self._get_client()
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(_do_delete, client, self._bucket_name, key),
+        )
 
     async def exists(self, key: str) -> bool:
         """Check if an object exists in Supabase Storage.
@@ -280,60 +276,7 @@ class SupabaseStorage:
         Returns:
             StorageObject with metadata, or None if not found.
         """
-        try:
-            client = self._get_client()
-
-            # Supabase doesn't have a direct HEAD method, so we list with prefix
-            # and filter for exact match
-            parts = key.rsplit("/", 1)
-            if len(parts) == 2:
-                folder, filename = parts
-            else:
-                folder = ""
-                filename = key
-
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(client.storage.from_(self._bucket_name).list, folder),
-            )
-
-            if not response:
-                return None
-
-            # Find exact match
-            for item in response:
-                if item.get("name") == filename:
-                    # Parse metadata
-                    metadata = item.get("metadata", {})
-                    size = metadata.get("size", 0)
-                    content_type = metadata.get("mimetype")
-
-                    # Parse last modified
-                    last_modified_str = item.get("updated_at") or item.get("created_at")
-                    if last_modified_str:
-                        try:
-                            last_modified = datetime.fromisoformat(
-                                last_modified_str.replace("Z", "+00:00")
-                            )
-                        except (ValueError, TypeError):
-                            last_modified = datetime.now(UTC)
-                    else:
-                        last_modified = datetime.now(UTC)
-
-                    return StorageObject(
-                        key=key,
-                        size_bytes=size,
-                        content_type=content_type,
-                        etag=item.get("id"),
-                        last_modified=last_modified,
-                    )
-
-            return None
-
-        except Exception as e:
-            logger.warning("Failed to get object info from Supabase: %s - %s", key, e)
-            return None
+        return await _get_object_info(self._get_client, self._bucket_name, key)
 
     async def list_objects(
         self,
@@ -352,74 +295,13 @@ class SupabaseStorage:
         Returns:
             ListResult with matching objects.
         """
-        try:
-            client = self._get_client()
-
-            # Parse offset from continuation token
-            offset = int(continuation_token) if continuation_token else 0
-
-            # Supabase list returns files in a folder
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(
-                    client.storage.from_(self._bucket_name).list,
-                    prefix,
-                    {"limit": max_keys, "offset": offset},
-                ),
-            )
-
-            if not response:
-                return ListResult(objects=[], prefix=prefix if prefix else None)
-
-            objects: list[StorageObject] = []
-            for item in response:
-                # Skip folders
-                if item.get("id") is None:
-                    continue
-
-                name = item.get("name", "")
-                full_key = f"{prefix}/{name}" if prefix else name
-
-                metadata = item.get("metadata", {})
-                size = metadata.get("size", 0)
-                content_type = metadata.get("mimetype")
-
-                # Parse last modified
-                last_modified_str = item.get("updated_at") or item.get("created_at")
-                if last_modified_str:
-                    try:
-                        last_modified = datetime.fromisoformat(
-                            last_modified_str.replace("Z", "+00:00")
-                        )
-                    except (ValueError, TypeError):
-                        last_modified = datetime.now(UTC)
-                else:
-                    last_modified = datetime.now(UTC)
-
-                objects.append(
-                    StorageObject(
-                        key=full_key,
-                        size_bytes=size,
-                        content_type=content_type,
-                        etag=item.get("id"),
-                        last_modified=last_modified,
-                    )
-                )
-
-            # Check if truncated
-            is_truncated = len(response) >= max_keys
-
-            return ListResult(
-                objects=objects,
-                is_truncated=is_truncated,
-                next_continuation_token=str(offset + max_keys) if is_truncated else None,
-                prefix=prefix if prefix else None,
-            )
-
-        except Exception as e:
-            logger.warning("Failed to list objects from Supabase: %s - %s", prefix, e)
-            return ListResult(objects=[], prefix=prefix if prefix else None)
+        return await _list_objects(
+            self._get_client,
+            self._bucket_name,
+            prefix,
+            max_keys=max_keys,
+            continuation_token=continuation_token,
+        )
 
     async def get_presigned_url(
         self,
@@ -441,27 +323,10 @@ class SupabaseStorage:
         Raises:
             NotImplementedError: If for_upload is True.
         """
-        if for_upload:
-            raise NotImplementedError("Supabase presigned upload URLs not yet implemented")
-
-        client = self._get_client()
-
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            partial(
-                client.storage.from_(self._bucket_name).create_signed_url,
-                key,
-                expires_in,
-            ),
+        return await _get_presigned_url(
+            self._get_client,
+            self._bucket_name,
+            key,
+            expires_in=expires_in,
+            for_upload=for_upload,
         )
-
-        if isinstance(response, dict) and "signedURL" in response:
-            return response["signedURL"]
-
-        # Fallback to public URL
-        public_url = await loop.run_in_executor(
-            None,
-            partial(client.storage.from_(self._bucket_name).get_public_url, key),
-        )
-        return public_url

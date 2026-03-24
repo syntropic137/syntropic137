@@ -15,6 +15,83 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_github_credentials(
+    repository: str | None,
+    require_github: bool,
+) -> tuple[str | None, str | None, str | None]:
+    """Resolve GitHub App credentials, returning (token, name, email)."""
+    from syn_shared.settings.github import GitHubAppSettings
+
+    github_settings = GitHubAppSettings()
+
+    if not github_settings.is_configured:
+        if require_github:
+            raise GitHubAppNotConfiguredError()
+        return None, None, None
+
+    try:
+        from syn_adapters.github import GitHubAppClient
+
+        client = GitHubAppClient(github_settings)
+        installation_id = await _resolve_installation_id(client, repository, require_github)
+        github_app_token = (
+            await client.get_installation_token(installation_id) if installation_id else None
+        )
+        if github_app_token:
+            logger.info(
+                "Generated GitHub App installation token (bot: %s)",
+                github_settings.bot_name,
+            )
+        return github_app_token, github_settings.bot_name, github_settings.bot_email
+    except Exception as e:
+        logger.error("Failed to get GitHub App token: %s", e)
+        if require_github:
+            raise
+        return None, None, None
+
+
+async def _resolve_installation_id(
+    client: object,
+    repository: str | None,
+    require_github: bool,
+) -> str | None:
+    """Resolve the GitHub App installation ID for a repository."""
+    from syn_adapters.github.client import GitHubAuthError
+
+    if repository:
+        return await client.get_installation_for_repo(repository)  # type: ignore[union-attr]
+    if require_github:
+        msg = (
+            "Cannot generate GitHub App token: no repository provided. "
+            "Pass repository='{owner}/{repo}' to SetupPhaseSecrets.create()."
+        )
+        raise GitHubAuthError(msg)
+    return None
+
+
+def _resolve_claude_credentials() -> tuple[str | None, str | None]:
+    """Resolve Claude API credentials from settings."""
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+    claude_code_oauth_token = (
+        settings.claude_code_oauth_token.get_secret_value()
+        if settings.claude_code_oauth_token
+        else None
+    )
+    anthropic_api_key = (
+        settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
+    )
+
+    if claude_code_oauth_token and anthropic_api_key:
+        logger.warning(
+            "Both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set. "
+            "Using CLAUDE_CODE_OAUTH_TOKEN."
+        )
+
+    return claude_code_oauth_token, anthropic_api_key
+
+
 class GitHubAppNotConfiguredError(Exception):
     """Raised when GitHub App is required but not configured."""
 
@@ -83,65 +160,10 @@ class SetupPhaseSecrets:
         Raises:
             GitHubAppNotConfiguredError: If require_github=True and App not configured
         """
-        from syn_adapters.github.client import GitHubAuthError
-        from syn_shared.settings.github import GitHubAppSettings
-
-        github_app_token = None
-        git_author_name = None
-        git_author_email = None
-
-        # GitHub App is the ONLY supported method for GitHub auth
-        github_settings = GitHubAppSettings()
-        if github_settings.is_configured:
-            try:
-                from syn_adapters.github import GitHubAppClient
-
-                client = GitHubAppClient(github_settings)
-                if repository:
-                    installation_id = await client.get_installation_for_repo(repository)
-                elif require_github:
-                    msg = (
-                        "Cannot generate GitHub App token: no repository provided. "
-                        "Pass repository='{owner}/{repo}' to SetupPhaseSecrets.create()."
-                    )
-                    raise GitHubAuthError(msg)
-                else:
-                    installation_id = None
-                if installation_id:
-                    github_app_token = await client.get_installation_token(installation_id)
-                # Use GitHub App bot identity for commits
-                git_author_name = github_settings.bot_name
-                git_author_email = github_settings.bot_email
-                logger.info(
-                    "Generated GitHub App installation token (bot: %s)",
-                    github_settings.bot_name,
-                )
-            except Exception as e:
-                logger.error("Failed to get GitHub App token: %s", e)
-                if require_github:
-                    raise
-        elif require_github:
-            raise GitHubAppNotConfiguredError()
-
-        # Get Claude auth from Settings (validated by pydantic-settings at startup)
-        # CLAUDE_CODE_OAUTH_TOKEN takes priority over ANTHROPIC_API_KEY
-        from syn_shared.settings import get_settings
-
-        settings = get_settings()
-        claude_code_oauth_token = (
-            settings.claude_code_oauth_token.get_secret_value()
-            if settings.claude_code_oauth_token
-            else None
+        github_app_token, git_author_name, git_author_email = await _resolve_github_credentials(
+            repository, require_github
         )
-        anthropic_api_key = (
-            settings.anthropic_api_key.get_secret_value() if settings.anthropic_api_key else None
-        )
-
-        if claude_code_oauth_token and anthropic_api_key:
-            logger.warning(
-                "Both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set. "
-                "Using CLAUDE_CODE_OAUTH_TOKEN."
-            )
+        claude_code_oauth_token, anthropic_api_key = _resolve_claude_credentials()
 
         return cls(
             github_app_token=github_app_token,

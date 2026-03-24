@@ -75,8 +75,10 @@ class TestEnvironmentEnforcement:
     def test_memory_sidecar_adapter_fails_outside_test(self) -> None:
         """Test that MemorySidecarAdapter fails outside test environment."""
         from syn_adapters.workspace_backends.memory.memory_adapter import (
-            MemorySidecarAdapter,
             TestEnvironmentRequiredError,
+        )
+        from syn_adapters.workspace_backends.memory.memory_sidecar import (
+            MemorySidecarAdapter,
         )
 
         with (
@@ -88,8 +90,10 @@ class TestEnvironmentEnforcement:
     def test_memory_token_injection_adapter_fails_outside_test(self) -> None:
         """Test that MemoryTokenInjectionAdapter fails outside test environment."""
         from syn_adapters.workspace_backends.memory.memory_adapter import (
-            MemoryTokenInjectionAdapter,
             TestEnvironmentRequiredError,
+        )
+        from syn_adapters.workspace_backends.memory.memory_token import (
+            MemoryTokenInjectionAdapter,
         )
 
         with (
@@ -101,8 +105,10 @@ class TestEnvironmentEnforcement:
     def test_memory_artifact_adapter_fails_outside_test(self) -> None:
         """Test that MemoryArtifactAdapter fails outside test environment."""
         from syn_adapters.workspace_backends.memory.memory_adapter import (
-            MemoryArtifactAdapter,
             TestEnvironmentRequiredError,
+        )
+        from syn_adapters.workspace_backends.memory.memory_artifact import (
+            MemoryArtifactAdapter,
         )
 
         with (
@@ -114,8 +120,10 @@ class TestEnvironmentEnforcement:
     def test_memory_event_stream_adapter_fails_outside_test(self) -> None:
         """Test that MemoryEventStreamAdapter fails outside test environment."""
         from syn_adapters.workspace_backends.memory.memory_adapter import (
-            MemoryEventStreamAdapter,
             TestEnvironmentRequiredError,
+        )
+        from syn_adapters.workspace_backends.memory.memory_stream import (
+            MemoryEventStreamAdapter,
         )
 
         with (

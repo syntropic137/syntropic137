@@ -7,5 +7,19 @@ See: ADR-017, ADR-018
 """
 
 from syn_adapters.collector.client import CollectorClient
+from syn_adapters.collector.models import (
+    BatchResponse,
+    CollectorEvent,
+    EventBatch,
+    generate_event_id,
+    generate_tool_event_id,
+)
 
-__all__ = ["CollectorClient"]
+__all__ = [
+    "BatchResponse",
+    "CollectorClient",
+    "CollectorEvent",
+    "EventBatch",
+    "generate_event_id",
+    "generate_tool_event_id",
+]

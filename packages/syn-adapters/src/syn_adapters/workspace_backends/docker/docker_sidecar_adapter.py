@@ -42,6 +42,16 @@ if TYPE_CHECKING:
         TokenType,
     )
 
+from syn_adapters.workspace_backends.docker.docker_container_ops import (
+    cleanup_container,
+    get_container_network,
+    wait_for_healthy,
+)
+from syn_adapters.workspace_backends.docker.docker_sidecar_helpers import (
+    build_sidecar_docker_cmd,
+    run_sidecar_container,
+)
+
 logger = logging.getLogger(__name__)
 
 # Default sidecar image
@@ -126,47 +136,17 @@ class DockerSidecarAdapter:
             SidecarHandle,
         )
 
-        # Generate unique names
         short_id = uuid.uuid4().hex[:8]
         container_name = f"syn-sidecar-{config.workspace_id[:8]}-{short_id}"
+        network_name = await get_container_network(isolation_handle.isolation_id)
 
-        # Get network from workspace (they must be on same network)
-        network_name = await self._get_container_network(isolation_handle.isolation_id)
-
-        # Build environment variables for sidecar
-        env_vars = [
-            f"SYN_WORKSPACE_ID={config.workspace_id}",
-            f"SYN_TOKEN_SERVICE_URL={self._token_service_url}",
-            f"SYN_ALLOWED_HOSTS={','.join(config.allowed_hosts)}",
-            f"SYN_LISTEN_PORT={config.listen_port}",
-        ]
-
-        # Build docker run command
-        docker_cmd = [
-            "docker",
-            "run",
-            "-d",
-            "--rm",
-            f"--name={container_name}",
-            f"--network={network_name}",
-            "--memory=128m",
-            "--cpus=0.25",
-        ]
-
-        # Add environment variables
-        for env in env_vars:
-            docker_cmd.extend(["-e", env])
-
-        # Add labels
-        docker_cmd.extend(
-            [
-                f"--label=syn.workspace_id={config.workspace_id}",
-                "--label=syn.component=sidecar",
-            ]
+        docker_cmd = build_sidecar_docker_cmd(
+            config,
+            container_name,
+            network_name,
+            self._token_service_url,
+            self._default_image,
         )
-
-        # Add image
-        docker_cmd.append(config.proxy_image or self._default_image)
 
         logger.info(
             "Starting sidecar (name=%s, workspace=%s)",
@@ -175,27 +155,10 @@ class DockerSidecarAdapter:
         )
 
         try:
-            # Start container
-            proc = await asyncio.create_subprocess_exec(
-                *docker_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
+            container_id = await run_sidecar_container(docker_cmd)
+            await wait_for_healthy(container_name, timeout=30.0)
 
-            if proc.returncode != 0:
-                error_msg = stderr.decode().strip() if stderr else "Unknown error"
-                raise RuntimeError(f"Failed to start sidecar: {error_msg}")
-
-            container_id = stdout.decode().strip()
-
-            # Wait for sidecar to be healthy
-            await self._wait_for_healthy(container_name, timeout=30.0)
-
-            # Build proxy URL (container name is DNS name on Docker network)
             proxy_url = f"http://{container_name}:{config.listen_port}"
-
-            # Store state
             state = DockerSidecarState(
                 container_id=container_id,
                 container_name=container_name,
@@ -208,11 +171,7 @@ class DockerSidecarAdapter:
             async with self._lock:
                 self._sidecars[container_id] = state
 
-            logger.info(
-                "Sidecar started (id=%s, proxy=%s)",
-                container_id[:12],
-                proxy_url,
-            )
+            logger.info("Sidecar started (id=%s, proxy=%s)", container_id[:12], proxy_url)
 
             return SidecarHandle(
                 sidecar_id=container_id,
@@ -222,7 +181,7 @@ class DockerSidecarAdapter:
 
         except Exception as e:
             logger.exception("Failed to start sidecar: %s", e)
-            await self._cleanup_container(container_name)
+            await cleanup_container(container_name)
             raise
 
     async def stop(self, handle: SidecarHandle) -> None:
@@ -239,7 +198,7 @@ class DockerSidecarAdapter:
             return
 
         logger.info("Stopping sidecar (id=%s)", handle.sidecar_id[:12])
-        await self._cleanup_container(state.container_name)
+        await cleanup_container(state.container_name)
 
     async def configure_tokens(
         self,
@@ -302,74 +261,3 @@ class DockerSidecarAdapter:
             return stdout.decode().strip().lower() == "true"
         except Exception:
             return False
-
-    async def _get_container_network(self, container_id: str) -> str:
-        """Get the Docker network a container is attached to."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "inspect",
-                "-f",
-                "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}",
-                container_id,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            network = stdout.decode().strip()
-            if network:
-                return network
-        except Exception:
-            pass
-
-        # Fallback to default network
-        return "syn-workspace-net"
-
-    async def _wait_for_healthy(self, container_name: str, timeout: float = 30.0) -> None:
-        """Wait for sidecar to be healthy."""
-        import time
-
-        start = time.time()
-        while time.time() - start < timeout:
-            # Check if container is running
-            proc = await asyncio.create_subprocess_exec(
-                "docker",
-                "inspect",
-                "-f",
-                "{{.State.Running}}",
-                container_name,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            if stdout.decode().strip().lower() == "true":
-                # TODO: Also check sidecar health endpoint
-                return
-            await asyncio.sleep(0.1)
-
-        raise RuntimeError(f"Sidecar {container_name} did not start within {timeout}s")
-
-    async def _cleanup_container(self, container_name: str) -> None:
-        """Stop and remove a container."""
-        # Stop with short timeout
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "stop",
-            "-t",
-            "2",
-            container_name,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
-
-        # Force remove
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "rm",
-            "-f",
-            container_name,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()

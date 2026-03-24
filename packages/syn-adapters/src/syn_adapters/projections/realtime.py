@@ -124,9 +124,7 @@ class RealTimeProjection:
         """
         queue: SSEQueue = asyncio.Queue()
         async with self._lock:
-            if channel not in self._queues:
-                self._queues[channel] = set()
-            self._queues[channel].add(queue)
+            self._queues.setdefault(channel, set()).add(queue)
 
         logger.debug(
             "SSE client connected",
@@ -142,12 +140,17 @@ class RealTimeProjection:
             queue: The queue returned by :meth:`connect`.
         """
         async with self._lock:
-            if channel in self._queues:
-                self._queues[channel].discard(queue)
-                if not self._queues[channel]:
-                    del self._queues[channel]
+            self._remove_queue(channel, queue)
 
         logger.debug("SSE client disconnected", extra={"channel": channel})
+
+    def _remove_queue(self, channel: str, queue: SSEQueue) -> None:
+        """Remove a queue from a channel, cleaning up empty channels."""
+        if channel not in self._queues:
+            return
+        self._queues[channel].discard(queue)
+        if not self._queues[channel]:
+            del self._queues[channel]
 
     # ------------------------------------------------------------------
     # Broadcasting
@@ -191,9 +194,14 @@ class RealTimeProjection:
             queues = list(self._queues.get(channel, set()))
 
         for queue in queues:
-            await queue.put(frame)
-            if terminal:
-                await queue.put(None)  # sentinel — closes the SSE stream
+            await self._enqueue_frame(queue, frame, terminal=terminal)
+
+    @staticmethod
+    async def _enqueue_frame(queue: SSEQueue, frame: SSEEventFrame, *, terminal: bool) -> None:
+        """Put a frame onto a single subscriber queue, adding sentinel if terminal."""
+        await queue.put(frame)
+        if terminal:
+            await queue.put(None)  # sentinel — closes the SSE stream
 
     async def broadcast_global(
         self,
@@ -215,71 +223,61 @@ class RealTimeProjection:
     # Event handlers — called by ProjectionManager / RealTimeProjectionAdapter
     # ------------------------------------------------------------------
 
-    async def on_workflow_execution_started(self, event: dict[str, JsonValue]) -> None:
-        """Handle WorkflowExecutionStarted event."""
+    async def _forward_event(
+        self,
+        event: dict[str, JsonValue],
+        event_type: str,
+        *,
+        terminal: bool = False,
+    ) -> None:
+        """Forward a domain event to SSE subscribers if execution_id is present."""
         execution_id = event.get("execution_id")
         if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "WorkflowExecutionStarted", event)
+            await self.broadcast(execution_id, event_type, event, terminal=terminal)
+
+    async def on_workflow_execution_started(self, event: dict[str, JsonValue]) -> None:
+        """Handle WorkflowExecutionStarted event."""
+        await self._forward_event(event, "WorkflowExecutionStarted")
 
     async def on_phase_started(self, event: dict[str, JsonValue]) -> None:
         """Handle PhaseStarted event."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "PhaseStarted", event)
+        await self._forward_event(event, "PhaseStarted")
 
     async def on_phase_completed(self, event: dict[str, JsonValue]) -> None:
         """Handle PhaseCompleted event."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "PhaseCompleted", event)
+        await self._forward_event(event, "PhaseCompleted")
 
     async def on_workflow_completed(self, event: dict[str, JsonValue]) -> None:
         """Handle WorkflowCompleted event — sends terminal sentinel."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "WorkflowCompleted", event, terminal=True)
+        await self._forward_event(event, "WorkflowCompleted", terminal=True)
 
     async def on_workflow_failed(self, event: dict[str, JsonValue]) -> None:
         """Handle WorkflowFailed event — sends terminal sentinel."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "WorkflowFailed", event, terminal=True)
+        await self._forward_event(event, "WorkflowFailed", terminal=True)
 
     async def on_session_started(self, event: dict[str, JsonValue]) -> None:
         """Handle SessionStarted event."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "SessionStarted", event)
+        await self._forward_event(event, "SessionStarted")
 
     async def on_session_completed(self, event: dict[str, JsonValue]) -> None:
         """Handle SessionCompleted event."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "SessionCompleted", event)
+        await self._forward_event(event, "SessionCompleted")
 
     async def on_operation_recorded(self, event: dict[str, JsonValue]) -> None:
         """Handle OperationRecorded event (tool calls, messages, etc.)."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "OperationRecorded", event)
+        await self._forward_event(event, "OperationRecorded")
 
     async def on_artifact_created(self, event: dict[str, JsonValue]) -> None:
         """Handle ArtifactCreated event."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "ArtifactCreated", event)
+        await self._forward_event(event, "ArtifactCreated")
 
     async def on_subagent_started(self, event: dict[str, JsonValue]) -> None:
         """Handle SubagentStarted event — subagent spawned via Task tool."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "SubagentStarted", event)
+        await self._forward_event(event, "SubagentStarted")
 
     async def on_subagent_stopped(self, event: dict[str, JsonValue]) -> None:
         """Handle SubagentStopped event — subagent completed."""
-        execution_id = event.get("execution_id")
-        if isinstance(execution_id, str):
-            await self.broadcast(execution_id, "SubagentStopped", event)
+        await self._forward_event(event, "SubagentStopped")
 
 
 # ---------------------------------------------------------------------------

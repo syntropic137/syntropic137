@@ -11,6 +11,25 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.events.buffer_add import (
+    add as _add_impl,
+)
+from syn_adapters.events.buffer_add import (
+    add_many as _add_many_impl,
+)
+from syn_adapters.events.buffer_flush import (
+    flush_locked as _flush_locked_impl,
+)
+from syn_adapters.events.buffer_flush import (
+    get_event_buffer as get_event_buffer,
+)
+from syn_adapters.events.buffer_flush import (
+    parse_jsonl_events as parse_jsonl_events,
+)
+from syn_adapters.events.buffer_flush import (
+    periodic_flush as _periodic_flush_impl,
+)
+
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
 
@@ -98,16 +117,7 @@ class EventBuffer:
             execution_id: Optional execution ID to add
             phase_id: Optional phase ID to add
         """
-        # Add context if provided
-        if execution_id:
-            event = {**event, "execution_id": execution_id}
-        if phase_id:
-            event = {**event, "phase_id": phase_id}
-
-        async with self._lock:
-            self._buffer.append(event)
-            if len(self._buffer) >= self._flush_size:
-                await self._flush_locked()
+        await _add_impl(self, event, execution_id, phase_id)
 
     async def add_many(
         self,
@@ -122,22 +132,7 @@ class EventBuffer:
             execution_id: Optional execution ID to add to all events
             phase_id: Optional phase ID to add to all events
         """
-        # Add context if provided
-        if execution_id or phase_id:
-            enriched_events = []
-            for event in events:
-                enriched = event.copy()
-                if execution_id:
-                    enriched["execution_id"] = execution_id
-                if phase_id:
-                    enriched["phase_id"] = phase_id
-                enriched_events.append(enriched)
-            events = enriched_events
-
-        async with self._lock:
-            self._buffer.extend(events)
-            while len(self._buffer) >= self._flush_size:
-                await self._flush_locked()
+        await _add_many_impl(self, events, execution_id, phase_id)
 
     async def flush(self) -> int:
         """Flush all buffered events to the store.
@@ -154,23 +149,7 @@ class EventBuffer:
         Returns:
             Number of events flushed
         """
-        if not self._buffer:
-            return 0
-
-        events = self._buffer
-        self._buffer = []
-
-        try:
-            count = await self._store.insert_batch(events)
-            self._total_events += count
-            self._total_flushes += 1
-            logger.debug("Flushed %d events (total: %d)", count, self._total_events)
-            return count
-        except Exception:
-            # Put events back on failure
-            self._buffer = events + self._buffer
-            logger.exception("Failed to flush events, will retry")
-            raise
+        return await _flush_locked_impl(self)
 
     async def start(self) -> None:
         """Start the periodic flush task."""
@@ -206,67 +185,4 @@ class EventBuffer:
 
     async def _periodic_flush(self) -> None:
         """Periodically flush the buffer."""
-        while self._running:
-            await asyncio.sleep(self._flush_interval)
-            if self._buffer:  # Only flush if there are events
-                try:
-                    await self.flush()
-                except Exception:
-                    # Log but don't crash the flush loop
-                    logger.exception("Periodic flush failed")
-
-
-# Singleton event buffer
-_event_buffer: EventBuffer | None = None
-
-
-async def get_event_buffer() -> EventBuffer:
-    """Get or create singleton EventBuffer.
-
-    Creates and starts an EventBuffer connected to the singleton AgentEventStore.
-    The buffer is started automatically on first access.
-
-    Returns:
-        Singleton EventBuffer instance
-    """
-    global _event_buffer
-
-    if _event_buffer is None:
-        from syn_adapters.events.store import get_event_store
-
-        store = get_event_store()
-        await store.initialize()
-        _event_buffer = EventBuffer(store)
-        await _event_buffer.start()
-
-    return _event_buffer
-
-
-def parse_jsonl_events(stdout: str) -> list[dict[str, Any]]:
-    """Parse JSONL events from agent stdout.
-
-    Args:
-        stdout: Raw stdout from agent execution
-
-    Returns:
-        List of parsed event dicts
-    """
-    import json
-
-    events = []
-    for line in stdout.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            # Accept events with either 'type' or 'event_type'
-            if isinstance(data, dict) and ("type" in data or "event_type" in data):
-                # Normalize to event_type
-                if "type" in data and "event_type" not in data:
-                    data["event_type"] = data.pop("type")
-                events.append(data)
-        except json.JSONDecodeError:
-            continue
-
-    return events
+        await _periodic_flush_impl(self)

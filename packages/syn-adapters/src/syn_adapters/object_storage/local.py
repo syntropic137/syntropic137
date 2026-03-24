@@ -16,11 +16,19 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import mimetypes
-from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import TYPE_CHECKING
 
+from syn_adapters.object_storage.local_helpers import (
+    get_object_info as _get_object_info,
+)
+from syn_adapters.object_storage.local_helpers import (
+    get_presigned_url as _get_presigned_url,
+)
+from syn_adapters.object_storage.local_helpers import (
+    list_objects as _list_objects,
+)
 from syn_adapters.object_storage.protocol import (
     DownloadError,
     ListResult,
@@ -32,6 +40,44 @@ from syn_adapters.object_storage.protocol import (
 
 if TYPE_CHECKING:
     from syn_shared.settings.storage import StorageProvider
+
+
+def _sync_write_file(file_path: Path, content: bytes, key: str) -> UploadResult:
+    """Write bytes to a file; creates parent dirs; returns UploadResult.
+
+    Wraps failures in UploadError so the async caller needs no try/except.
+    """
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_bytes(content)
+        etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
+        return UploadResult(key=key, size_bytes=len(content), etag=etag, url=f"file://{file_path}")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
+
+
+def _sync_read_file(file_path: Path, key: str) -> bytes:
+    """Read bytes from a file; raises ObjectNotFoundError or DownloadError."""
+    try:
+        if not file_path.exists():
+            raise ObjectNotFoundError(key)
+        return file_path.read_bytes()
+    except ObjectNotFoundError:
+        raise
+    except ValueError as e:
+        raise ObjectNotFoundError(key) from e
+    except Exception as e:
+        raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
+
+
+def _sync_delete_file(file_path: Path) -> bool:
+    """Delete a file; returns True if deleted, False if it did not exist."""
+    if not file_path.exists():
+        return False
+    file_path.unlink()
+    return True
 
 
 class LocalStorage:
@@ -110,31 +156,10 @@ class LocalStorage:
         Returns:
             UploadResult with key and size.
         """
-        try:
-            file_path = self._resolve_path(key)
-
-            # Create parent directories
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Write file in executor to avoid blocking
-            def write_file() -> None:
-                file_path.write_bytes(content)
-
-            await asyncio.get_event_loop().run_in_executor(None, write_file)
-
-            # Compute ETag (content hash)
-            etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-            return UploadResult(
-                key=key,
-                size_bytes=len(content),
-                etag=etag,
-                url=f"file://{file_path}",
-            )
-        except ValueError:
-            raise
-        except Exception as e:
-            raise UploadError(f"Failed to upload {key}: {e}", key=key) from e
+        file_path = self._resolve_path(key)
+        return await asyncio.get_event_loop().run_in_executor(
+            None, partial(_sync_write_file, file_path, content, key)
+        )
 
     async def download(self, key: str) -> bytes:
         """Download content from local filesystem.
@@ -148,23 +173,10 @@ class LocalStorage:
         Raises:
             ObjectNotFoundError: If file doesn't exist.
         """
-        try:
-            file_path = self._resolve_path(key)
-
-            if not file_path.exists():
-                raise ObjectNotFoundError(key)
-
-            # Read file in executor to avoid blocking
-            def read_file() -> bytes:
-                return file_path.read_bytes()
-
-            return await asyncio.get_event_loop().run_in_executor(None, read_file)
-        except ObjectNotFoundError:
-            raise
-        except ValueError as e:
-            raise ObjectNotFoundError(key) from e
-        except Exception as e:
-            raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
+        file_path = self._resolve_path(key)
+        return await asyncio.get_event_loop().run_in_executor(
+            None, partial(_sync_read_file, file_path, key)
+        )
 
     async def delete(self, key: str) -> bool:
         """Delete a file from local filesystem.
@@ -177,19 +189,11 @@ class LocalStorage:
         """
         try:
             file_path = self._resolve_path(key)
-
-            if not file_path.exists():
-                return False
-
-            def remove_file() -> None:
-                file_path.unlink()
-
-            await asyncio.get_event_loop().run_in_executor(None, remove_file)
-            return True
         except ValueError:
             return False
-        except Exception:
-            return False
+        return await asyncio.get_event_loop().run_in_executor(
+            None, partial(_sync_delete_file, file_path)
+        )
 
     async def exists(self, key: str) -> bool:
         """Check if a file exists.
@@ -215,25 +219,7 @@ class LocalStorage:
         Returns:
             StorageObject with metadata, or None if not found.
         """
-        try:
-            file_path = self._resolve_path(key)
-
-            if not file_path.exists() or not file_path.is_file():
-                return None
-
-            stat = file_path.stat()
-            content_type, _ = mimetypes.guess_type(str(file_path))
-
-            return StorageObject(
-                key=key,
-                size_bytes=stat.st_size,
-                content_type=content_type,
-                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-            )
-        except ValueError:
-            return None
-        except Exception:
-            return None
+        return await _get_object_info(self._resolve_path, key)
 
     async def list_objects(
         self,
@@ -252,58 +238,12 @@ class LocalStorage:
         Returns:
             ListResult with matching files.
         """
-        try:
-            # Resolve prefix path
-            if prefix:
-                search_path = self._resolve_path(prefix)
-                # If prefix doesn't end with /, treat as directory
-                if not prefix.endswith("/"):
-                    search_path = search_path.parent
-                    pattern = prefix.split("/")[-1] + "*"
-                else:
-                    pattern = "*"
-            else:
-                search_path = self._base_path
-                pattern = "**/*"
-
-            objects: list[StorageObject] = []
-
-            def collect_files() -> list[StorageObject]:
-                result: list[StorageObject] = []
-                if not search_path.exists():
-                    return result
-
-                # Use rglob for recursive search
-                for file_path in search_path.rglob(pattern):
-                    if file_path.is_file() and len(result) < max_keys:
-                        # Convert path back to key
-                        relative_path = file_path.relative_to(self._base_path)
-                        key = str(relative_path).replace("\\", "/")
-
-                        stat = file_path.stat()
-                        content_type, _ = mimetypes.guess_type(str(file_path))
-
-                        result.append(
-                            StorageObject(
-                                key=key,
-                                size_bytes=stat.st_size,
-                                content_type=content_type,
-                                last_modified=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
-                            )
-                        )
-                return result
-
-            objects = await asyncio.get_event_loop().run_in_executor(None, collect_files)
-
-            return ListResult(
-                objects=objects,
-                is_truncated=len(objects) >= max_keys,
-                prefix=prefix if prefix else None,
-            )
-        except ValueError:
-            return ListResult(objects=[], prefix=prefix if prefix else None)
-        except Exception:
-            return ListResult(objects=[], prefix=prefix if prefix else None)
+        return await _list_objects(
+            self._base_path,
+            self._resolve_path,
+            prefix,
+            max_keys=max_keys,
+        )
 
     async def get_presigned_url(
         self,
@@ -325,5 +265,4 @@ class LocalStorage:
         Returns:
             file:// URL to the local file.
         """
-        file_path = self._resolve_path(key)
-        return f"file://{file_path}"
+        return await _get_presigned_url(self._resolve_path, key)

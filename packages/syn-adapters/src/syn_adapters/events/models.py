@@ -16,11 +16,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from syn_adapters.events.model_extractors import (
+    _extract_tool_result,
+    _extract_tool_use,
+)
 from syn_shared.events import (
     AGENT_STOPPED,
     CONTEXT_COMPACTED,
@@ -44,6 +47,104 @@ from syn_shared.events import (
     USER_PROMPT_SUBMITTED,
     EventType,
 )
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+# Map Claude CLI event types to normalized types.
+# Output values use constants from syn_shared.events for type safety.
+_EVENT_TYPE_MAPPING: dict[str, str] = {
+    # Tool events (inner content type takes precedence)
+    "tool_started": TOOL_EXECUTION_STARTED,
+    "tool_use": TOOL_EXECUTION_STARTED,
+    # Tool results
+    "tool_result": TOOL_EXECUTION_COMPLETED,
+    "tool_completed": TOOL_EXECUTION_COMPLETED,
+    # Session lifecycle
+    "system.init": SESSION_STARTED,
+    "system": SESSION_STARTED,
+    "result": SESSION_COMPLETED,
+    # Content events map to token_usage (only if not tool events)
+    "assistant": TOKEN_USAGE,
+    "user": TOKEN_USAGE,
+    # Subagent lifecycle events (from EventParser, pass through as-is)
+    SUBAGENT_STARTED: SUBAGENT_STARTED,
+    SUBAGENT_STOPPED: SUBAGENT_STOPPED,
+    # Git observability events (from agentic-primitives observability plugin)
+    GIT_COMMIT: GIT_COMMIT,
+    GIT_PUSH: GIT_PUSH,
+    GIT_BRANCH_CHANGED: GIT_BRANCH_CHANGED,
+    GIT_OPERATION: GIT_OPERATION,
+    # Claude Code hook events (observability plugin)
+    TOOL_EXECUTION_FAILED: TOOL_EXECUTION_FAILED,
+    TEAMMATE_IDLE: TEAMMATE_IDLE,
+    TASK_COMPLETED: TASK_COMPLETED,
+    # Security / permission events (from agentic_events.EventType)
+    SECURITY_DECISION: SECURITY_DECISION,
+    PERMISSION_REQUESTED: PERMISSION_REQUESTED,
+    # Agent control events (from agentic_events.EventType)
+    AGENT_STOPPED: AGENT_STOPPED,
+    # Context management events (from agentic_events.EventType)
+    CONTEXT_COMPACTED: CONTEXT_COMPACTED,
+    # System / notification events (from agentic_events.EventType)
+    SYSTEM_NOTIFICATION: SYSTEM_NOTIFICATION,
+    # User interaction events (from agentic_events.EventType)
+    USER_PROMPT_SUBMITTED: USER_PROMPT_SUBMITTED,
+}
+
+# Fields excluded from the data dict (they go in top-level AgentEvent fields)
+_EXCLUDED_KEYS = {
+    "time",
+    "timestamp",
+    "event_type",
+    "type",
+    "session_id",
+    "execution_id",
+    "phase_id",
+    "id",
+}
+
+
+def _detect_inner_type(content: list[Any]) -> str | None:
+    """Detect tool event type from nested message content.
+
+    Claude CLI nests tool_use/tool_result inside message content arrays.
+    Returns the inner type if found, None otherwise.
+    """
+    for item in content:
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type in ("tool_use", "tool_result"):
+                return item_type
+    return None
+
+
+_TOOL_CONTENT_EXTRACTORS: dict[str, Any] = {
+    "tool_use": _extract_tool_use,
+    "tool_result": _extract_tool_result,
+}
+
+
+def _extract_tool_data(content: list[Any], event_data: dict[str, Any]) -> None:
+    """Extract tool info from nested Claude CLI message content.
+
+    Handles both tool_use (assistant messages) and tool_result (user messages).
+    Mutates event_data in place with extracted fields.
+    """
+    for item in content:
+        if isinstance(item, dict):
+            extractor = _TOOL_CONTENT_EXTRACTORS.get(item.get("type", ""))
+            if extractor:
+                extractor(item, event_data)
+
+
+def _resolve_event_type(data: dict[str, Any], raw_type: str) -> str:
+    """Resolve raw event type to normalized type, checking nested content first."""
+    message = data.get("message", {})
+    content = message.get("content", [])
+    inner_type = _detect_inner_type(content) if isinstance(content, list) else None
+    type_to_map = inner_type if inner_type else raw_type
+    return _EVENT_TYPE_MAPPING.get(type_to_map, raw_type)
 
 
 class AgentEvent(BaseModel):
@@ -83,11 +184,7 @@ class AgentEvent(BaseModel):
         """Convert UUID objects to strings if needed."""
         if v is None:
             return None
-        if isinstance(v, UUID):
-            return str(v)
-        if isinstance(v, str):
-            return v
-        return str(v)
+        return v if isinstance(v, str) else str(v)
 
     @field_validator("data", mode="before")
     @classmethod
@@ -129,129 +226,27 @@ class AgentEvent(BaseModel):
         - 'result' -> 'session_completed'
         - 'assistant' / 'user' -> 'token_usage' (they contain content)
         """
-        from datetime import datetime
-
-        # Get time from data or use default
         time_value = data.get("time") or data.get("timestamp") or datetime.now()
-
-        # Get raw event type
         raw_type = data.get("event_type") or data.get("type", "error")
-
-        # Detect tool events from message content (Claude CLI nests them)
-        # assistant + tool_use → tool_execution_started
-        # user + tool_result → tool_execution_completed
-        message = data.get("message", {})
-        content = message.get("content", [])
-        inner_type = None
-        if isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    item_type = item.get("type")
-                    if item_type in ("tool_use", "tool_result"):
-                        inner_type = item_type
-                        break
-
-        # Map Claude CLI event types to normalized types
-        # Output values use constants from syn_shared.events for type safety
-        event_type_mapping = {
-            # Tool events (inner content type takes precedence)
-            "tool_started": TOOL_EXECUTION_STARTED,
-            "tool_use": TOOL_EXECUTION_STARTED,
-            # Tool results
-            "tool_result": TOOL_EXECUTION_COMPLETED,
-            "tool_completed": TOOL_EXECUTION_COMPLETED,
-            # Session lifecycle
-            "system.init": SESSION_STARTED,
-            "system": SESSION_STARTED,
-            "result": SESSION_COMPLETED,
-            # Content events map to token_usage (only if not tool events)
-            "assistant": TOKEN_USAGE,
-            "user": TOKEN_USAGE,
-            # Subagent lifecycle events (from EventParser, pass through as-is)
-            SUBAGENT_STARTED: SUBAGENT_STARTED,
-            SUBAGENT_STOPPED: SUBAGENT_STOPPED,
-            # Git observability events (from agentic-primitives observability plugin)
-            GIT_COMMIT: GIT_COMMIT,
-            GIT_PUSH: GIT_PUSH,
-            GIT_BRANCH_CHANGED: GIT_BRANCH_CHANGED,
-            GIT_OPERATION: GIT_OPERATION,
-            # Claude Code hook events (observability plugin)
-            TOOL_EXECUTION_FAILED: TOOL_EXECUTION_FAILED,
-            TEAMMATE_IDLE: TEAMMATE_IDLE,
-            TASK_COMPLETED: TASK_COMPLETED,
-            # Security / permission events (from agentic_events.EventType)
-            SECURITY_DECISION: SECURITY_DECISION,
-            PERMISSION_REQUESTED: PERMISSION_REQUESTED,
-            # Agent control events (from agentic_events.EventType)
-            AGENT_STOPPED: AGENT_STOPPED,
-            # Context management events (from agentic_events.EventType)
-            CONTEXT_COMPACTED: CONTEXT_COMPACTED,
-            # System / notification events (from agentic_events.EventType)
-            SYSTEM_NOTIFICATION: SYSTEM_NOTIFICATION,
-            # User interaction events (from agentic_events.EventType)
-            USER_PROMPT_SUBMITTED: USER_PROMPT_SUBMITTED,
-        }
-
-        # Use inner_type if it's a tool event, otherwise use raw_type
-        type_to_map = inner_type if inner_type else raw_type
-        normalized_type = event_type_mapping.get(type_to_map, raw_type)
+        normalized_type = _resolve_event_type(data, raw_type)
 
         # Build data dict from remaining fields
-        excluded_keys = {
-            "time",
-            "timestamp",
-            "event_type",
-            "type",
-            "session_id",
-            "execution_id",
-            "phase_id",
-            "id",
-        }
-        event_data: dict[str, Any] = {k: v for k, v in data.items() if k not in excluded_keys}
+        event_data: dict[str, Any] = {k: v for k, v in data.items() if k not in _EXCLUDED_KEYS}
 
-        # Extract tool info from nested Claude CLI message content
-        # This handles both tool_use (assistant) and tool_result (user) events
-        # Note: message and content were already extracted above for type detection
+        # Extract tool info from nested content
+        content = data.get("message", {}).get("content", [])
         if isinstance(content, list):
-            for item in content:
-                if isinstance(item, dict):
-                    item_type = item.get("type")
-                    # Extract from tool_use (in assistant messages)
-                    if item_type == "tool_use":
-                        if "tool_name" not in event_data:
-                            event_data["tool_name"] = item.get("name")
-                        if "tool_use_id" not in event_data:
-                            event_data["tool_use_id"] = item.get("id")
-                        if "input_preview" not in event_data:
-                            # Store tool input as preview
-                            tool_input = item.get("input")
-                            if tool_input:
-                                event_data["input_preview"] = json.dumps(tool_input)[:500]
-                    # Extract from tool_result (in user messages)
-                    elif item_type == "tool_result":
-                        if "tool_use_id" not in event_data:
-                            event_data["tool_use_id"] = item.get("tool_use_id")
-                        # tool_name may have been added by enrichment
-                        if "tool_name" not in event_data and "tool_name" in item:
-                            event_data["tool_name"] = item["tool_name"]
-                        # Check success from is_error field
-                        if "success" not in event_data:
-                            event_data["success"] = not item.get("is_error", False)
+            _extract_tool_data(content, event_data)
 
-        # Normalize field names (only include optional fields if set)
         normalized: dict[str, Any] = {
             "time": time_value,
             "event_type": normalized_type,
             "data": event_data,
         }
-
-        # Only include optional UUID fields if they're set
-        if data.get("session_id"):
-            normalized["session_id"] = data["session_id"]
-        if data.get("execution_id"):
-            normalized["execution_id"] = data["execution_id"]
-        if data.get("phase_id"):
-            normalized["phase_id"] = data["phase_id"]
+        # Only include optional UUID fields if set
+        for field in ("session_id", "execution_id", "phase_id"):
+            if data.get(field):
+                normalized[field] = data[field]
 
         return cls(**normalized)
 

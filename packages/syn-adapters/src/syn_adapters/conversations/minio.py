@@ -9,11 +9,19 @@ See ADR-035: Agent Output Data Model and Storage.
 from __future__ import annotations
 
 import io
-import json
 import logging
 from typing import TYPE_CHECKING, Any
 
 import asyncpg
+
+from syn_adapters.conversations.minio_session import (
+    create_conversation_storage as _create_conversation_storage,
+)
+from syn_adapters.conversations.minio_session import get_session_metadata as _get_session_metadata
+from syn_adapters.conversations.minio_session import (
+    list_sessions_for_execution as _list_sessions_for_execution,
+)
+from syn_adapters.conversations.minio_session import retrieve_session as _retrieve_session
 
 if TYPE_CHECKING:
     from syn_adapters.conversations.protocol import SessionContext
@@ -161,41 +169,11 @@ class MinioConversationStorage:
         if self._pool is None:
             raise RuntimeError("Storage not initialized")
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO session_conversations (
-                    session_id, bucket, object_key, size_bytes,
-                    execution_id, phase_id, workflow_id,
-                    event_count, total_input_tokens, total_output_tokens, tool_counts,
-                    started_at, completed_at, model, success
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-                ON CONFLICT (session_id) DO UPDATE SET
-                    object_key = EXCLUDED.object_key,
-                    size_bytes = EXCLUDED.size_bytes,
-                    completed_at = EXCLUDED.completed_at,
-                    event_count = EXCLUDED.event_count,
-                    total_input_tokens = EXCLUDED.total_input_tokens,
-                    total_output_tokens = EXCLUDED.total_output_tokens,
-                    tool_counts = EXCLUDED.tool_counts,
-                    success = EXCLUDED.success
-                """,
-                session_id,
-                self.BUCKET_NAME,
-                object_key,
-                size_bytes,
-                context.execution_id,
-                context.phase_id,
-                context.workflow_id,
-                context.event_count,
-                context.total_input_tokens,
-                context.total_output_tokens,
-                json.dumps(context.tool_counts) if context.tool_counts else None,
-                context.started_at,
-                context.completed_at,
-                context.model,
-                context.success,
-            )
+        from syn_adapters.conversations.minio_index import insert_index
+
+        await insert_index(
+            self._pool, session_id, object_key, size_bytes, context, self.BUCKET_NAME
+        )
 
     async def retrieve_session(
         self,
@@ -209,20 +187,7 @@ class MinioConversationStorage:
         Returns:
             List of JSONL lines, or None if not found
         """
-        if not self._initialized:
-            await self.initialize()
-
-        object_key = f"sessions/{session_id}/conversation.jsonl"
-
-        try:
-            response = self._client.get_object(self.BUCKET_NAME, object_key)
-            content = response.read().decode("utf-8")
-            response.close()
-            response.release_conn()
-            return content.strip().split("\n")
-        except Exception as e:
-            logger.debug("Session not found: %s (%s)", session_id, e)
-            return None
+        return await _retrieve_session(self, session_id)
 
     async def get_session_metadata(
         self,
@@ -236,24 +201,7 @@ class MinioConversationStorage:
         Returns:
             Session metadata dict, or None if not found
         """
-        if not self._initialized:
-            await self.initialize()
-
-        if self._pool is None:
-            return None
-
-        async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                SELECT * FROM session_conversations WHERE session_id = $1
-                """,
-                session_id,
-            )
-
-        if row is None:
-            return None
-
-        return dict(row)
+        return await _get_session_metadata(self, session_id)
 
     async def list_sessions_for_execution(
         self,
@@ -267,23 +215,7 @@ class MinioConversationStorage:
         Returns:
             List of session IDs
         """
-        if not self._initialized:
-            await self.initialize()
-
-        if self._pool is None:
-            return []
-
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT session_id FROM session_conversations
-                WHERE execution_id = $1
-                ORDER BY started_at
-                """,
-                execution_id,
-            )
-
-        return [row["session_id"] for row in rows]
+        return await _list_sessions_for_execution(self, execution_id)
 
 
 # Factory function for easy creation
@@ -306,26 +238,7 @@ async def create_conversation_storage(
     Returns:
         Initialized MinioConversationStorage
     """
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
-    storage_settings = settings.storage
-
-    storage = MinioConversationStorage(
-        endpoint=endpoint or storage_settings.minio_endpoint or "localhost:9000",
-        access_key=access_key or storage_settings.minio_access_key or "minioadmin",
-        secret_key=secret_key
-        or storage_settings.minio_secret_key.get_secret_value()
-        or "minioadmin",
-        db_url=db_url
-        or str(
-            settings.syn_observability_db_url
-            or "postgresql://syn:syn_dev_password@localhost:5432/syn"
-        ),
-        secure=storage_settings.minio_secure,
-    )
-    await storage.initialize()
-    return storage
+    return await _create_conversation_storage(endpoint, access_key, secret_key, db_url)
 
 
 # Singleton instance

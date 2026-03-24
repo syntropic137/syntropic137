@@ -8,8 +8,10 @@ Syn137 just orchestrates and captures observability.
 """
 
 from syn_adapters.workspace_backends.agentic.adapter import (
-    AgenticEventStreamAdapter,
     AgenticIsolationAdapter,
+)
+from syn_adapters.workspace_backends.agentic.stream_adapter import (
+    AgenticEventStreamAdapter,
 )
 
 __all__ = [
