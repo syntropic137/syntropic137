@@ -1,4 +1,4 @@
-"""Tests for syn_api.v1.sessions — start, list, complete cycle.
+"""Tests for syn_api.routes.sessions — start, list, complete cycle.
 
 Uses APP_ENVIRONMENT=test for in-memory adapters.
 """
@@ -34,7 +34,7 @@ def _reset_storage():
 
 async def test_list_sessions_empty():
     """List sessions when none exist."""
-    from syn_api.v1.sessions import list_sessions
+    from syn_api.routes.sessions import list_sessions
 
     result = await list_sessions()
 
@@ -44,7 +44,7 @@ async def test_list_sessions_empty():
 
 async def test_start_session():
     """Start a new session."""
-    from syn_api.v1.sessions import start_session
+    from syn_api.routes.sessions import start_session
 
     result = await start_session(
         workflow_id="wf-test-123",
@@ -65,7 +65,7 @@ async def test_start_and_list_sessions():
     service running). The list query returns Ok but may not contain the
     session. Full round-trip is verified in integration tests.
     """
-    from syn_api.v1.sessions import list_sessions, start_session
+    from syn_api.routes.sessions import list_sessions, start_session
 
     start_result = await start_session(
         workflow_id="wf-test-456",
@@ -81,7 +81,7 @@ async def test_start_and_list_sessions():
 
 async def test_complete_session():
     """Start then complete a session."""
-    from syn_api.v1.sessions import complete_session, start_session
+    from syn_api.routes.sessions import complete_session, start_session
 
     start_result = await start_session(
         workflow_id="wf-test-789",

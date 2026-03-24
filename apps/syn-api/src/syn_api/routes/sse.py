@@ -37,7 +37,7 @@ from agentic_logging import get_logger
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-import syn_api.v1.realtime as rt
+import syn_api.services.realtime as rt
 from syn_api.types import Err
 
 if TYPE_CHECKING:

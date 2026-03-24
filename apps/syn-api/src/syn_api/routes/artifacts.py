@@ -1,14 +1,36 @@
-"""Artifact API endpoints — thin wrapper over v1."""
+"""Artifact API endpoints and service operations.
+
+Provides listing, retrieving, creating, and uploading artifacts.
+"""
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-import syn_api.v1.artifacts as art
-from syn_api.types import Err
+from syn_api._wiring import (
+    ensure_connected,
+    get_artifact_repo,
+    get_projection_mgr,
+    sync_published_events_to_projections,
+)
+from syn_api.types import (
+    ArtifactDetail,
+    ArtifactError,
+    ArtifactSummary,
+    Err,
+    Ok,
+    Result,
+)
+
+if TYPE_CHECKING:
+    from syn_api.auth import AuthContext
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
@@ -51,19 +73,240 @@ class ArtifactResponse(BaseModel):
 
 
 # =============================================================================
-# Endpoints
+# Service functions (importable by tests)
+# =============================================================================
+
+
+async def list_artifacts(
+    workflow_id: str | None = None,
+    session_id: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[list[ArtifactSummary], ArtifactError]:
+    """List artifacts, optionally filtered by workflow or session.
+
+    Args:
+        workflow_id: Filter by workflow ID.
+        session_id: Filter by session ID.
+        limit: Maximum results to return.
+        offset: Pagination offset.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(list[ArtifactSummary]) on success, Err(ArtifactError) on failure.
+    """
+    await ensure_connected()
+    try:
+        manager = get_projection_mgr()
+        projection = manager.artifact_list
+        domain_artifacts = await projection.query(
+            workflow_id=workflow_id,
+            session_id=session_id,
+            limit=limit,
+            offset=offset,
+        )
+        return Ok(
+            [
+                ArtifactSummary(
+                    id=a.id,
+                    workflow_id=a.workflow_id,
+                    phase_id=a.phase_id,
+                    artifact_type=a.artifact_type,
+                    title=a.name,
+                    size_bytes=a.size_bytes,
+                    created_at=datetime.fromisoformat(a.created_at)
+                    if isinstance(a.created_at, str)
+                    else a.created_at,
+                )
+                for a in domain_artifacts
+            ]
+        )
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+async def get_artifact(
+    artifact_id: str,
+    include_content: bool = False,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[ArtifactDetail, ArtifactError]:
+    """Get detailed artifact information, optionally with content.
+
+    Args:
+        artifact_id: The artifact ID.
+        include_content: Whether to include the artifact content.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(ArtifactDetail) on success, Err(ArtifactError) on failure.
+    """
+    await ensure_connected()
+    try:
+        manager = get_projection_mgr()
+        projection = manager.artifact_list
+
+        # Look up from projection
+        all_artifacts = await projection.query(limit=10000)
+        artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+
+        if artifact is None:
+            return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
+
+        content = None
+        content_type = None
+        if include_content:
+            try:
+                from syn_adapters.storage.artifact_storage import get_artifact_storage
+
+                storage = await get_artifact_storage()
+                raw = await storage.download(artifact_id)
+                content = raw.decode("utf-8", errors="replace")
+                content_type = "text/plain"
+            except Exception:
+                logger.exception("Failed to load artifact content for %s", artifact_id)
+
+            # Fall back to projection content if storage download failed
+            if content is None:
+                content = artifact.content
+                content_type = "text/plain"
+
+        return Ok(
+            ArtifactDetail(
+                id=artifact.id,
+                workflow_id=artifact.workflow_id,
+                phase_id=artifact.phase_id,
+                session_id=artifact.session_id,
+                artifact_type=artifact.artifact_type,
+                title=artifact.name,
+                content=content,
+                content_type=content_type,
+                content_hash=artifact.content_hash,
+                size_bytes=artifact.size_bytes,
+                created_at=datetime.fromisoformat(artifact.created_at)
+                if isinstance(artifact.created_at, str)
+                else artifact.created_at,
+            )
+        )
+    except Exception as e:
+        if "not found" in str(e).lower():
+            return Err(ArtifactError.NOT_FOUND, message=str(e))
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+async def create_artifact(
+    workflow_id: str,
+    artifact_type: str,
+    title: str,
+    content: str,
+    phase_id: str | None = None,
+    session_id: str | None = None,  # noqa: ARG001
+    content_type: str = "text/markdown",  # noqa: ARG001
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[str, ArtifactError]:
+    """Create a new artifact.
+
+    Args:
+        workflow_id: The workflow this artifact belongs to.
+        artifact_type: Type of artifact (e.g., "code", "document", "report").
+        title: Human-readable title.
+        content: Artifact content.
+        phase_id: Optional phase within the workflow.
+        session_id: Optional session that created this artifact.
+        content_type: MIME type of the content.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(artifact_id) on success, Err(ArtifactError) on failure.
+    """
+    from uuid import uuid4
+
+    await ensure_connected()
+    try:
+        from syn_domain.contexts.artifacts._shared.value_objects import ArtifactType
+        from syn_domain.contexts.artifacts.domain.aggregate_artifact.ArtifactAggregate import (
+            ArtifactAggregate,
+        )
+        from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
+            CreateArtifactCommand,
+        )
+
+        type_map = {
+            "research_summary": ArtifactType.RESEARCH_SUMMARY,
+            "code": ArtifactType.CODE,
+            "document": ArtifactType.DOCUMENTATION,
+        }
+        art_type = type_map.get(artifact_type.lower(), ArtifactType.RESEARCH_SUMMARY)
+
+        artifact_id = str(uuid4())
+        command = CreateArtifactCommand(
+            aggregate_id=artifact_id,
+            workflow_id=workflow_id,
+            phase_id=phase_id or "",
+            artifact_type=art_type,
+            content=content,
+            title=title,
+        )
+
+        repo = get_artifact_repo()
+        aggregate = ArtifactAggregate()
+        aggregate._handle_command(command)
+        await repo.save(aggregate)
+        await sync_published_events_to_projections()
+
+        return Ok(artifact_id)
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+async def upload_artifact(
+    artifact_id: str,
+    data: bytes,
+    filename: str,  # noqa: ARG001
+    content_type: str = "application/octet-stream",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[str, ArtifactError]:
+    """Upload binary content for an existing artifact.
+
+    Args:
+        artifact_id: The artifact to upload content for.
+        data: Binary content to upload.
+        filename: Original filename.
+        content_type: MIME type of the uploaded content.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(storage_url) on success, Err(ArtifactError) on failure.
+    """
+    await ensure_connected()
+    try:
+        from syn_adapters.storage.artifact_storage import get_artifact_storage
+
+        storage = await get_artifact_storage()
+        result = await storage.upload(
+            artifact_id=artifact_id,
+            content=data,
+            content_type=content_type,
+        )
+        return Ok(result.storage_uri if hasattr(result, "storage_uri") else str(result))
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+# =============================================================================
+# HTTP Endpoints
 # =============================================================================
 
 
 @router.get("", response_model=list[ArtifactSummaryResponse])
-async def list_artifacts(
+async def list_artifacts_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
     phase_id: str | None = Query(None, description="Filter by phase ID"),
     artifact_type: str | None = Query(None, description="Filter by artifact type"),
     limit: int = Query(50, ge=1, le=200, description="Max items to return"),
 ) -> list[ArtifactSummaryResponse]:
     """List artifacts with optional filtering."""
-    result = await art.list_artifacts(
+    result = await list_artifacts(
         workflow_id=workflow_id,
         session_id=None,
         limit=limit,
@@ -94,12 +337,12 @@ async def list_artifacts(
 
 
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
-async def get_artifact(
+async def get_artifact_endpoint(
     artifact_id: str,
     include_content: bool = Query(True, description="Include artifact content in response"),
 ) -> ArtifactResponse:
     """Get artifact details by ID."""
-    result = await art.get_artifact(artifact_id, include_content=include_content)
+    result = await get_artifact(artifact_id, include_content=include_content)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
@@ -131,9 +374,9 @@ async def get_artifact(
 
 
 @router.get("/{artifact_id}/content")
-async def get_artifact_content(artifact_id: str) -> dict[str, str | int | None]:
+async def get_artifact_content_endpoint(artifact_id: str) -> dict[str, str | int | None]:
     """Get artifact content only (for large artifacts)."""
-    result = await art.get_artifact(artifact_id, include_content=True)
+    result = await get_artifact(artifact_id, include_content=True)
 
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
