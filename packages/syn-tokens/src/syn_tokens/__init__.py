@@ -16,8 +16,9 @@ See Also:
 """
 
 from syn_tokens.models import ScopedToken, SpendBudget, TokenScope, TokenType, WorkflowType
-from syn_tokens.spend import SpendTracker, get_spend_tracker
-from syn_tokens.vending import TokenVendingService, get_token_vending_service
+from syn_tokens.singletons import get_spend_tracker, get_token_vending_service
+from syn_tokens.spend import SpendTracker
+from syn_tokens.vending import TokenVendingService
 
 __all__ = [
     "ScopedToken",

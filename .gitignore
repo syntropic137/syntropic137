@@ -182,8 +182,10 @@ RESEARCH-PHASE_*.md
 .context/
 DEEP-DIVE_*.md
 
-# Topology visualizations (derived — regenerate with `just topology-viz`)
-.topology/viz/
+# Topology artifacts (derived — regenerate with `just topology-analyze`)
+# CI runs `just fitness-check` which regenerates before validating.
+# Local comparison: `just topology-diff <base> <head>` (planned)
+.topology/
 
 # Browser testing screenshots
 /assets/

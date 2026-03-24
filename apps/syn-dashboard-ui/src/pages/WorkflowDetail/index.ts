@@ -1,0 +1,1 @@
+export { WorkflowDetail } from './WorkflowDetail'

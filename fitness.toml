@@ -19,7 +19,7 @@ max = 25
 scope = "function"
 severity = "error"
 # Entity IDs: "python:module.path::func_name" / "rust:crate::path::func_name"
-exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*"]
+exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
 
 [[rules.threshold]]
 id = "max-cognitive-file"
@@ -42,7 +42,7 @@ field = "metrics.cyclomatic"
 max = 15
 scope = "function"
 severity = "error"
-exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*"]
+exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
 
 # ─── Lines of Code ───────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ field = "metrics.loc"
 max = 100
 scope = "function"
 severity = "warning"
-exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*"]
+exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
 
 [[rules.threshold]]
 id = "max-loc-file"

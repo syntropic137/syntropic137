@@ -12,16 +12,26 @@ See Also:
 
 from __future__ import annotations
 
-import json
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from syn_tokens.models import ScopedToken, TokenScope, TokenType
+from syn_tokens.singletons import configure_redis_token_vending as configure_redis  # noqa: F401
+from syn_tokens.singletons import (
+    get_token_vending_service as get_token_vending_service,
+)
+from syn_tokens.singletons import (
+    reset_token_vending_service as reset_token_vending_service,
+)
+from syn_tokens.token_stores import InMemoryTokenStore as InMemoryTokenStore
+from syn_tokens.token_stores import RedisTokenStore as RedisTokenStore
 
 if TYPE_CHECKING:
-    from redis.asyncio import Redis
+    from syn_tokens.token_stores import (
+        TokenStore,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -30,158 +40,6 @@ DEFAULT_TOKEN_TTL_SECONDS = 5 * 60
 
 # Token ID prefix for easy identification
 TOKEN_ID_PREFIX = "syn-tok-"
-
-# Redis key prefixes
-REDIS_TOKEN_PREFIX = "syn:token:"
-REDIS_EXECUTION_TOKENS_PREFIX = "syn:exec-tokens:"
-
-
-class TokenStore(Protocol):
-    """Protocol for token storage backends."""
-
-    async def store(self, token: ScopedToken) -> None:
-        """Store a token with TTL."""
-        ...
-
-    async def get(self, token_id: str) -> ScopedToken | None:
-        """Get a token by ID."""
-        ...
-
-    async def delete(self, token_id: str) -> bool:
-        """Delete a token. Returns True if deleted."""
-        ...
-
-    async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
-        """Get all token IDs for an execution."""
-        ...
-
-    async def delete_tokens_for_execution(self, execution_id: str) -> int:
-        """Delete all tokens for an execution. Returns count deleted."""
-        ...
-
-
-class InMemoryTokenStore:
-    """In-memory token store for testing."""
-
-    def __init__(self) -> None:
-        self._tokens: dict[str, ScopedToken] = {}
-        self._execution_tokens: dict[str, set[str]] = {}
-
-    async def store(self, token: ScopedToken) -> None:
-        """Store a token."""
-        self._tokens[token.token_id] = token
-        if token.execution_id not in self._execution_tokens:
-            self._execution_tokens[token.execution_id] = set()
-        self._execution_tokens[token.execution_id].add(token.token_id)
-
-    async def get(self, token_id: str) -> ScopedToken | None:
-        """Get a token by ID (returns None if expired)."""
-        token = self._tokens.get(token_id)
-        if token and token.is_expired:
-            del self._tokens[token_id]
-            return None
-        return token
-
-    async def delete(self, token_id: str) -> bool:
-        """Delete a token."""
-        if token_id in self._tokens:
-            token = self._tokens.pop(token_id)
-            if token.execution_id in self._execution_tokens:
-                self._execution_tokens[token.execution_id].discard(token_id)
-            return True
-        return False
-
-    async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
-        """Get all token IDs for an execution."""
-        return list(self._execution_tokens.get(execution_id, set()))
-
-    async def delete_tokens_for_execution(self, execution_id: str) -> int:
-        """Delete all tokens for an execution."""
-        token_ids = self._execution_tokens.pop(execution_id, set())
-        for token_id in token_ids:
-            self._tokens.pop(token_id, None)
-        return len(token_ids)
-
-    def clear(self) -> None:
-        """Clear all tokens (for testing)."""
-        self._tokens.clear()
-        self._execution_tokens.clear()
-
-
-class RedisTokenStore:
-    """Redis-backed token store with automatic TTL expiry."""
-
-    def __init__(self, redis: Redis) -> None:
-        self._redis = redis
-
-    async def store(self, token: ScopedToken) -> None:
-        """Store a token with TTL."""
-        key = f"{REDIS_TOKEN_PREFIX}{token.token_id}"
-        exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{token.execution_id}"
-
-        # Store token data with TTL
-        await self._redis.setex(
-            key,
-            token.ttl_seconds,
-            json.dumps(token.to_dict()),
-        )
-
-        # Add to execution's token set
-        await self._redis.sadd(exec_key, token.token_id)  # type: ignore[misc]
-        # Set expiry on the set slightly longer than token TTL
-        await self._redis.expire(exec_key, token.ttl_seconds + 60)
-
-        logger.debug(
-            "Token stored (token_id=%s, execution_id=%s, ttl=%ds)",
-            token.token_id,
-            token.execution_id,
-            token.ttl_seconds,
-        )
-
-    async def get(self, token_id: str) -> ScopedToken | None:
-        """Get a token by ID."""
-        key = f"{REDIS_TOKEN_PREFIX}{token_id}"
-        data = await self._redis.get(key)
-
-        if data is None:
-            return None
-
-        return ScopedToken.from_dict(json.loads(data))
-
-    async def delete(self, token_id: str) -> bool:
-        """Delete a token."""
-        key = f"{REDIS_TOKEN_PREFIX}{token_id}"
-        deleted = await self._redis.delete(key)
-        return deleted > 0
-
-    async def get_tokens_for_execution(self, execution_id: str) -> list[str]:
-        """Get all token IDs for an execution."""
-        exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{execution_id}"
-        members = await self._redis.smembers(exec_key)  # type: ignore[misc]
-        return [m.decode() if isinstance(m, bytes) else m for m in members]
-
-    async def delete_tokens_for_execution(self, execution_id: str) -> int:
-        """Delete all tokens for an execution."""
-        token_ids = await self.get_tokens_for_execution(execution_id)
-
-        if not token_ids:
-            return 0
-
-        # Delete all tokens
-        keys = [f"{REDIS_TOKEN_PREFIX}{tid}" for tid in token_ids]
-        await self._redis.delete(*keys)
-
-        # Delete the execution's token set
-        exec_key = f"{REDIS_EXECUTION_TOKENS_PREFIX}{execution_id}"
-        await self._redis.delete(exec_key)
-
-        logger.info(
-            "Tokens revoked for execution (execution_id=%s, count=%d)",
-            execution_id,
-            len(token_ids),
-        )
-
-        return len(token_ids)
 
 
 class TokenVendingService:
@@ -315,60 +173,16 @@ class TokenVendingService:
         return tokens
 
     async def get_tokens_by_tenant(self, tenant_id: str) -> list[ScopedToken]:
-        """Get all active tokens for a tenant.
+        """Get all active tokens for a tenant."""
+        from syn_tokens.tenant_ops import get_tokens_by_tenant
 
-        Used for tenant-level monitoring and cleanup.
-
-        Args:
-            tenant_id: The tenant ID to query
-
-        Returns:
-            List of active tokens for this tenant
-        """
-        # Note: This requires scanning, which is O(n). For production,
-        # consider adding a tenant index to the store.
-        # For now, this is only used for admin/monitoring purposes.
-        if isinstance(self._store, InMemoryTokenStore):
-            return [
-                token
-                for token in self._store._tokens.values()
-                if token.tenant_id == tenant_id and not token.is_expired
-            ]
-        else:
-            # Redis implementation would need SCAN with pattern matching
-            # or a separate tenant index. For now, return empty.
-            logger.warning("get_tokens_by_tenant not fully implemented for Redis store")
-            return []
+        return await get_tokens_by_tenant(self._store, tenant_id)
 
     async def revoke_tokens_for_tenant(self, tenant_id: str) -> int:
-        """Revoke all tokens for a tenant.
+        """Revoke all tokens for a tenant."""
+        from syn_tokens.tenant_ops import revoke_tokens_for_tenant
 
-        Used when:
-        - Tenant is suspended
-        - Tenant exceeds limits
-        - Admin intervention
-
-        Args:
-            tenant_id: The tenant to revoke tokens for
-
-        Returns:
-            Number of tokens revoked
-        """
-        tokens = await self.get_tokens_by_tenant(tenant_id)
-        count = 0
-
-        for token in tokens:
-            if await self.revoke_token(token.token_id):
-                count += 1
-
-        if count > 0:
-            logger.info(
-                "Tokens revoked for tenant (tenant_id=%s, count=%d)",
-                tenant_id,
-                count,
-            )
-
-        return count
+        return await revoke_tokens_for_tenant(self._store, tenant_id)
 
     async def get_token(self, token_id: str) -> ScopedToken | None:
         """Get a token by ID.
@@ -431,56 +245,3 @@ class TokenVendingService:
     def _generate_token_id(self) -> str:
         """Generate a unique token ID."""
         return f"{TOKEN_ID_PREFIX}{secrets.token_urlsafe(24)}"
-
-
-# Singleton instance
-_token_vending_service: TokenVendingService | None = None
-_token_store: InMemoryTokenStore | RedisTokenStore | None = None
-
-
-def get_token_vending_service() -> TokenVendingService:
-    """Get the singleton token vending service.
-
-    Uses in-memory store by default. Call configure_redis()
-    to use Redis backend.
-    """
-    global _token_vending_service, _token_store
-
-    if _token_vending_service is not None:
-        return _token_vending_service
-
-    # Default to in-memory store
-    if _token_store is None:
-        _token_store = InMemoryTokenStore()
-
-    _token_vending_service = TokenVendingService(_token_store)
-    logger.info("Token vending service initialized (in-memory)")
-
-    return _token_vending_service
-
-
-async def configure_redis(redis: Redis) -> TokenVendingService:
-    """Configure the token vending service to use Redis.
-
-    Args:
-        redis: Redis async client
-
-    Returns:
-        Configured TokenVendingService
-    """
-    global _token_vending_service, _token_store
-
-    _token_store = RedisTokenStore(redis)
-    _token_vending_service = TokenVendingService(_token_store)
-    logger.info("Token vending service initialized (Redis)")
-
-    return _token_vending_service
-
-
-def reset_token_vending_service() -> None:
-    """Reset the singleton (for testing)."""
-    global _token_vending_service, _token_store
-    _token_vending_service = None
-    if isinstance(_token_store, InMemoryTokenStore):
-        _token_store.clear()
-    _token_store = None

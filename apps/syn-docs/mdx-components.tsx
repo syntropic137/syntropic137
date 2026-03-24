@@ -11,8 +11,6 @@ import {
   EventSourcingFlowDiagram, TwoEventTypesDiagram, CQRSDiagram,
   DomainModelDiagram, StateMachineDiagram,
   DeploymentArchitectureDiagram, WorkspaceIsolationDiagram, ScalingDiagram,
-  // Topology visualization
-  TopologyDependencyGraph,
   // Interactive React Flow diagrams
   SystemArchitectureFlow, EventSourcingFlow, TwoEventTypesFlow,
   CQRSFlow, DomainModelFlow, StateMachineFlow,
@@ -48,8 +46,6 @@ export function getMDXComponents(components: MDXComponents): MDXComponents {
     DeploymentArchitectureDiagram,
     WorkspaceIsolationDiagram,
     ScalingDiagram,
-    // Topology visualization
-    TopologyDependencyGraph,
     // Interactive React Flow diagrams
     SystemArchitectureFlow,
     EventSourcingFlow,

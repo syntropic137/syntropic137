@@ -13,27 +13,30 @@ import {
 } from '../utils/captureArea';
 
 export interface UseScreenCaptureResult {
-  /** Whether area selection mode is active */
   isSelectingArea: boolean;
-  /** Start area selection mode */
   startAreaSelection: () => void;
-  /** Cancel area selection */
   cancelAreaSelection: () => void;
-  /** Complete area selection with bounds */
   completeAreaSelection: (bounds: AreaBounds) => Promise<MediaUpload>;
-  /** Capture full page screenshot */
   captureFullPageScreenshot: () => Promise<MediaUpload>;
-  /** Process a dropped/pasted file */
   processImageFile: (file: File) => Promise<MediaUpload>;
-  /** Processing state */
   isProcessing: boolean;
-  /** Error message */
   error: string | null;
 }
 
-/**
- * Hook for managing screen capture
- */
+type ScreenshotWithPreview = MediaUpload & { _previewUrl: string };
+
+async function createScreenshotUpload(blob: Blob, fileName: string): Promise<ScreenshotWithPreview> {
+  const resizedBlob = await resizeImage(blob);
+  const previewUrl = await blobToDataUrl(resizedBlob);
+  return {
+    mediaType: 'screenshot', mimeType: resizedBlob.type, fileName, blob: resizedBlob, _previewUrl: previewUrl,
+  } as ScreenshotWithPreview;
+}
+
+function extractErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
 export function useScreenCapture(): UseScreenCaptureResult {
   const [isSelectingArea, setIsSelectingArea] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -48,55 +51,29 @@ export function useScreenCapture(): UseScreenCaptureResult {
     setIsSelectingArea(false);
   }, []);
 
-  const completeAreaSelection = useCallback(
-    async (bounds: AreaBounds): Promise<MediaUpload> => {
-      setIsSelectingArea(false);
-      setIsProcessing(true);
-      setError(null);
-
-      try {
-        const blob = await captureArea(bounds);
-        const resizedBlob = await resizeImage(blob);
-        const previewUrl = await blobToDataUrl(resizedBlob);
-
-        return {
-          mediaType: 'screenshot',
-          mimeType: resizedBlob.type,
-          fileName: `screenshot-${Date.now()}.png`,
-          blob: resizedBlob,
-          // Store preview URL for display (not part of MediaUpload type but useful)
-          _previewUrl: previewUrl,
-        } as MediaUpload & { _previewUrl: string };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to capture area';
-        setError(message);
-        throw err;
-      } finally {
-        setIsProcessing(false);
-      }
-    },
-    []
-  );
+  const completeAreaSelection = useCallback(async (bounds: AreaBounds): Promise<MediaUpload> => {
+    setIsSelectingArea(false);
+    setIsProcessing(true);
+    setError(null);
+    try {
+      const blob = await captureArea(bounds);
+      return await createScreenshotUpload(blob, `screenshot-${Date.now()}.png`);
+    } catch (err) {
+      setError(extractErrorMessage(err, 'Failed to capture area'));
+      throw err;
+    } finally {
+      setIsProcessing(false);
+    }
+  }, []);
 
   const captureFullPageScreenshot = useCallback(async (): Promise<MediaUpload> => {
     setIsProcessing(true);
     setError(null);
-
     try {
       const blob = await captureFullPage();
-      const resizedBlob = await resizeImage(blob);
-      const previewUrl = await blobToDataUrl(resizedBlob);
-
-      return {
-        mediaType: 'screenshot',
-        mimeType: resizedBlob.type,
-        fileName: `screenshot-${Date.now()}.png`,
-        blob: resizedBlob,
-        _previewUrl: previewUrl,
-      } as MediaUpload & { _previewUrl: string };
+      return await createScreenshotUpload(blob, `screenshot-${Date.now()}.png`);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to capture page';
-      setError(message);
+      setError(extractErrorMessage(err, 'Failed to capture page'));
       throw err;
     } finally {
       setIsProcessing(false);
@@ -106,27 +83,11 @@ export function useScreenCapture(): UseScreenCaptureResult {
   const processImageFile = useCallback(async (file: File): Promise<MediaUpload> => {
     setIsProcessing(true);
     setError(null);
-
     try {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        throw new Error('File must be an image');
-      }
-
-      // Resize if needed
-      const resizedBlob = await resizeImage(file);
-      const previewUrl = await blobToDataUrl(resizedBlob);
-
-      return {
-        mediaType: 'screenshot',
-        mimeType: resizedBlob.type,
-        fileName: file.name,
-        blob: resizedBlob,
-        _previewUrl: previewUrl,
-      } as MediaUpload & { _previewUrl: string };
+      if (!file.type.startsWith('image/')) throw new Error('File must be an image');
+      return await createScreenshotUpload(file, file.name);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to process image';
-      setError(message);
+      setError(extractErrorMessage(err, 'Failed to process image'));
       throw err;
     } finally {
       setIsProcessing(false);
@@ -134,13 +95,8 @@ export function useScreenCapture(): UseScreenCaptureResult {
   }, []);
 
   return {
-    isSelectingArea,
-    startAreaSelection,
-    cancelAreaSelection,
-    completeAreaSelection,
-    captureFullPageScreenshot,
-    processImageFile,
-    isProcessing,
-    error,
+    isSelectingArea, startAreaSelection, cancelAreaSelection,
+    completeAreaSelection, captureFullPageScreenshot, processImageFile,
+    isProcessing, error,
   };
 }

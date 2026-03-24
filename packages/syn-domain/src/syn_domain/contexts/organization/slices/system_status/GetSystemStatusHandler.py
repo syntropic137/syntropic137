@@ -4,22 +4,29 @@ Lazy handler: aggregates repo health snapshots from the repo_health
 store, using in-memory projections for system→repo membership.
 """
 
-from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from syn_domain.contexts.organization._shared.projection_names import REPO_HEALTH
-from syn_domain.contexts.organization.domain.queries.get_system_status import (
-    GetSystemStatusQuery,
-)
 from syn_domain.contexts.organization.domain.read_models.repo_health import RepoHealth
 from syn_domain.contexts.organization.domain.read_models.system_status import (
     RepoStatusEntry,
     SystemStatus,
 )
-from syn_domain.contexts.organization.slices.list_repos.projection import (
-    RepoProjection,
-)
-from syn_domain.contexts.organization.slices.list_systems.projection import (
-    SystemProjection,
-)
+
+if TYPE_CHECKING:
+    from syn_adapters.projection_stores.protocol import ProjectionStoreProtocol
+    from syn_domain.contexts.organization.domain.queries.get_system_status import (
+        GetSystemStatusQuery,
+    )
+    from syn_domain.contexts.organization.domain.read_models.repo_summary import RepoSummary
+    from syn_domain.contexts.organization.slices.list_repos.projection import (
+        RepoProjection,
+    )
+    from syn_domain.contexts.organization.slices.list_systems.projection import (
+        SystemProjection,
+    )
 
 
 def _repo_status(health: RepoHealth) -> str:
@@ -31,6 +38,53 @@ def _repo_status(health: RepoHealth) -> str:
     if health.success_rate >= 0.5:
         return "degraded"
     return "failing"
+
+
+def _build_health_index(all_health_data: list[dict[str, Any]]) -> dict[str, RepoHealth]:
+    """Build repo_full_name → RepoHealth lookup from raw store data."""
+    result: dict[str, RepoHealth] = {}
+    for hd in all_health_data:
+        name = hd.get("repo_full_name", "")
+        if name:
+            result[name] = RepoHealth.from_dict(hd)
+    return result
+
+
+def _build_repo_entry(
+    repo: RepoSummary,
+    health_by_repo: dict[str, RepoHealth],
+) -> RepoStatusEntry:
+    """Build a RepoStatusEntry for one repo."""
+    health = health_by_repo.get(repo.full_name, RepoHealth())
+    return RepoStatusEntry(
+        repo_id=repo.repo_id,
+        repo_full_name=repo.full_name,
+        status=_repo_status(health),
+        success_rate=health.success_rate,
+        last_execution_at=health.last_execution_at,
+    )
+
+
+def _count_statuses(entries: list[RepoStatusEntry]) -> dict[str, int]:
+    """Count occurrences of each status in repo entries."""
+    counts: dict[str, int] = {}
+    for entry in entries:
+        counts[entry.status] = counts.get(entry.status, 0) + 1
+    return counts
+
+
+def _determine_overall_status(counts: dict[str, int]) -> str:
+    """Determine overall system status from status counts."""
+    total = sum(counts.values())
+    failing = counts.get("failing", 0)
+    degraded = counts.get("degraded", 0)
+    if total == 0:
+        return "healthy"
+    if failing > total / 2:
+        return "failing"
+    if failing > 0 or degraded > 0:
+        return "degraded"
+    return "healthy"
 
 
 class GetSystemStatusHandler:
@@ -53,59 +107,19 @@ class GetSystemStatusHandler:
         organization_id = system.organization_id if system else ""
 
         repos = await self._repo_projection.list_all(system_id=query.system_id)
+        health_by_repo = _build_health_index(await self._store.get_all(REPO_HEALTH))
 
-        # Batch-load all health data — avoid N+1
-        all_health_data = await self._store.get_all(REPO_HEALTH)
-        health_by_repo: dict[str, RepoHealth] = {}
-        for hd in all_health_data:
-            name = hd.get("repo_full_name", "")
-            if name:
-                health_by_repo[name] = RepoHealth.from_dict(hd)
-
-        repo_entries: list[RepoStatusEntry] = []
-        healthy = 0
-        degraded = 0
-        failing = 0
-
-        for repo in repos:
-            health = health_by_repo.get(repo.full_name, RepoHealth())
-            status = _repo_status(health)
-
-            if status == "healthy":
-                healthy += 1
-            elif status == "degraded":
-                degraded += 1
-            elif status == "failing":
-                failing += 1
-
-            repo_entries.append(
-                RepoStatusEntry(
-                    repo_id=repo.repo_id,
-                    repo_full_name=repo.full_name,
-                    status=status,
-                    success_rate=health.success_rate,
-                    last_execution_at=health.last_execution_at,
-                )
-            )
-
-        total = len(repo_entries)
-        if total == 0:
-            overall = "healthy"
-        elif failing > total / 2:
-            overall = "failing"
-        elif failing > 0 or degraded > 0:
-            overall = "degraded"
-        else:
-            overall = "healthy"
+        repo_entries = [_build_repo_entry(repo, health_by_repo) for repo in repos]
+        counts = _count_statuses(repo_entries)
 
         return SystemStatus(
             system_id=query.system_id,
             system_name=system_name,
             organization_id=organization_id,
-            overall_status=overall,
-            total_repos=total,
-            healthy_repos=healthy,
-            degraded_repos=degraded,
-            failing_repos=failing,
+            overall_status=_determine_overall_status(counts),
+            total_repos=len(repo_entries),
+            healthy_repos=counts.get("healthy", 0),
+            degraded_repos=counts.get("degraded", 0),
+            failing_repos=counts.get("failing", 0),
             repos=repo_entries,
         )

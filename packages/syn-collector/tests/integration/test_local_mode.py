@@ -283,9 +283,7 @@ class TestLocalModeIntegration:
         # Read from current position (should only get new events)
         # Note: read_existing resets position, so we use internal method
         watcher._position = position_after_first
-        events2: list = []
-        async for event in watcher._read_new_events():
-            events2.append(event)
+        events2 = watcher._read_new_events()
 
         assert len(events2) == 1
         assert events2[0].data["tool_name"] == "Write"

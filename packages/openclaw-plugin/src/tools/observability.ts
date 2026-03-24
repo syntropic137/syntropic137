@@ -1,75 +1,11 @@
 import type { SyntropicClient } from "../client.js";
 import { formatError } from "../errors.js";
-import type {
-  ExecutionCost,
-  MetricsResponse,
-  OperationInfo,
-  SessionDetail,
-} from "../types.js";
+import type { ExecutionCost, MetricsResponse } from "../types.js";
+import { buildBreakdownSection, buildMarkdownTable } from "./format.js";
 
-// ---------------------------------------------------------------------------
-// syn_get_session
-// ---------------------------------------------------------------------------
-
-export interface GetSessionArgs {
-  session_id: string;
-}
-
-export async function synGetSession(
-  client: SyntropicClient,
-  args: GetSessionArgs,
-): Promise<{ content: string; isError?: true }> {
-  const result = await client.get<SessionDetail>(
-    `/sessions/${encodeURIComponent(args.session_id)}`,
-  );
-  if (!result.ok) return formatError(result.error);
-
-  const s = result.data;
-  const sections = [
-    `## Session: ${s.id}`,
-    "",
-    `| Field | Value |`,
-    `|-------|-------|`,
-    `| Status | ${s.status} |`,
-    `| Agent | ${s.agent_provider ?? "—"}${s.agent_model ? ` (${s.agent_model})` : ""} |`,
-    `| Tokens | ${s.total_tokens.toLocaleString()} (in: ${s.input_tokens.toLocaleString()}, out: ${s.output_tokens.toLocaleString()}) |`,
-    `| Cost | $${s.total_cost_usd} |`,
-  ];
-
-  if (s.workflow_name) sections.push(`| Workflow | ${s.workflow_name} |`);
-  if (s.execution_id) sections.push(`| Execution | ${s.execution_id} |`);
-  if (s.duration_seconds != null) sections.push(`| Duration | ${s.duration_seconds.toFixed(1)}s |`);
-  if (s.error_message) sections.push(`| Error | ${s.error_message} |`);
-
-  if (s.operations.length > 0) {
-    sections.push("", "### Operations");
-    const toolOps = s.operations.filter((o: OperationInfo) => o.tool_name);
-    const gitOps = s.operations.filter((o: OperationInfo) => o.git_sha);
-
-    if (toolOps.length > 0) {
-      sections.push(
-        "",
-        "**Tool calls:**",
-        ...toolOps.slice(0, 20).map((o: OperationInfo) =>
-          `- ${o.tool_name} — ${o.success ? "✓" : "✗"}${o.duration_seconds != null ? ` (${o.duration_seconds.toFixed(1)}s)` : ""}`,
-        ),
-      );
-      if (toolOps.length > 20) sections.push(`  ... and ${toolOps.length - 20} more`);
-    }
-
-    if (gitOps.length > 0) {
-      sections.push(
-        "",
-        "**Git operations:**",
-        ...gitOps.slice(0, 10).map((o: OperationInfo) =>
-          `- ${o.git_sha?.slice(0, 7)} ${o.git_message ?? ""}`,
-        ),
-      );
-    }
-  }
-
-  return { content: sections.join("\n") };
-}
+// Re-export extracted session functions for backwards compatibility
+export { synGetSession, formatOperations } from "./observability_session.js";
+export type { GetSessionArgs } from "./observability_session.js";
 
 // ---------------------------------------------------------------------------
 // syn_get_execution_cost
@@ -91,43 +27,20 @@ export async function synGetExecutionCost(
 
   const c = result.data;
   const sections = [
-    `## Cost: Execution ${c.execution_id}`,
-    "",
-    `| Metric | Value |`,
-    `|--------|-------|`,
-    `| Total Cost | $${c.total_cost_usd} |`,
-    `| Token Cost | $${c.token_cost_usd} |`,
-    `| Tokens | ${c.total_tokens.toLocaleString()} (in: ${c.input_tokens.toLocaleString()}, out: ${c.output_tokens.toLocaleString()}) |`,
-    `| Cache | ${c.cache_creation_tokens.toLocaleString()} created, ${c.cache_read_tokens.toLocaleString()} read |`,
-    `| Tool Calls | ${c.tool_calls} |`,
-    `| Turns | ${c.turns} |`,
-    `| Sessions | ${c.session_count} |`,
-    `| Complete | ${c.is_complete ? "Yes" : "No"} |`,
+    ...buildMarkdownTable(`Cost: Execution ${c.execution_id}`, [
+      ["Total Cost", `$${c.total_cost_usd}`],
+      ["Token Cost", `$${c.token_cost_usd}`],
+      ["Tokens", `${c.total_tokens.toLocaleString()} (in: ${c.input_tokens.toLocaleString()}, out: ${c.output_tokens.toLocaleString()})`],
+      ["Cache", `${c.cache_creation_tokens.toLocaleString()} created, ${c.cache_read_tokens.toLocaleString()} read`],
+      ["Tool Calls", String(c.tool_calls)],
+      ["Turns", String(c.turns)],
+      ["Sessions", String(c.session_count)],
+      ["Complete", c.is_complete ? "Yes" : "No"],
+    ]),
+    ...buildBreakdownSection("Cost by Phase", Object.entries(c.cost_by_phase)),
+    ...buildBreakdownSection("Cost by Model", Object.entries(c.cost_by_model)),
+    ...buildBreakdownSection("Cost by Tool", Object.entries(c.cost_by_tool)),
   ];
-
-  const phaseEntries = Object.entries(c.cost_by_phase);
-  if (phaseEntries.length > 0) {
-    sections.push("", "### Cost by Phase");
-    for (const [phase, cost] of phaseEntries) {
-      sections.push(`- ${phase}: $${cost}`);
-    }
-  }
-
-  const modelEntries = Object.entries(c.cost_by_model);
-  if (modelEntries.length > 0) {
-    sections.push("", "### Cost by Model");
-    for (const [model, cost] of modelEntries) {
-      sections.push(`- ${model}: $${cost}`);
-    }
-  }
-
-  const toolEntries = Object.entries(c.cost_by_tool);
-  if (toolEntries.length > 0) {
-    sections.push("", "### Cost by Tool");
-    for (const [tool, cost] of toolEntries) {
-      sections.push(`- ${tool}: $${cost}`);
-    }
-  }
 
   return { content: sections.join("\n") };
 }
@@ -152,15 +65,13 @@ export async function synGetMetrics(
 
   const m = result.data;
   const sections = [
-    `## Platform Metrics`,
-    "",
-    `| Metric | Value |`,
-    `|--------|-------|`,
-    `| Workflows | ${m.total_workflows} (${m.completed_workflows} completed, ${m.failed_workflows} failed) |`,
-    `| Sessions | ${m.total_sessions} |`,
-    `| Tokens | ${m.total_tokens.toLocaleString()} (in: ${m.total_input_tokens.toLocaleString()}, out: ${m.total_output_tokens.toLocaleString()}) |`,
-    `| Total Cost | $${m.total_cost_usd} |`,
-    `| Artifacts | ${m.total_artifacts} (${(m.total_artifact_bytes / 1024).toFixed(1)} KB) |`,
+    ...buildMarkdownTable("Platform Metrics", [
+      ["Workflows", `${m.total_workflows} (${m.completed_workflows} completed, ${m.failed_workflows} failed)`],
+      ["Sessions", String(m.total_sessions)],
+      ["Tokens", `${m.total_tokens.toLocaleString()} (in: ${m.total_input_tokens.toLocaleString()}, out: ${m.total_output_tokens.toLocaleString()})`],
+      ["Total Cost", `$${m.total_cost_usd}`],
+      ["Artifacts", `${m.total_artifacts} (${(m.total_artifact_bytes / 1024).toFixed(1)} KB)`],
+    ]),
   ];
 
   if (m.phases.length > 0) {

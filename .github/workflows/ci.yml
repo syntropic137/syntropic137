@@ -103,6 +103,12 @@ jobs:
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
 
+      - name: Cache APS CLI binary
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: lib/agent-paradise-standards-system/target/release
+          key: aps-cli-${{ runner.os }}-${{ hashFiles('lib/agent-paradise-standards-system/Cargo.lock') }}
+
       - name: Install just
         uses: extractions/setup-just@dd310ad5a97d8e7b41793f8ef055398d51ad4de6 # v2
 
@@ -111,9 +117,6 @@ jobs:
 
       - name: Structural & ES invariants
         run: just fitness-invariants
-
-      - name: Topology validation
-        run: just topology-check
 
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push

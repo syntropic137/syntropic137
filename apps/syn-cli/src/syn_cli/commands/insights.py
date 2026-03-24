@@ -7,8 +7,8 @@ from typing import Annotated
 import typer
 from rich.table import Table
 
-from syn_cli._output import console, format_cost, format_tokens, print_error, status_style
-from syn_cli.client import get_client
+from syn_cli._output import console, format_cost, format_tokens, status_style
+from syn_cli.commands._api_helpers import api_get, build_params
 
 app = typer.Typer(
     name="insights",
@@ -17,29 +17,11 @@ app = typer.Typer(
 )
 
 
-def _handle_connect_error() -> None:
-    from syn_cli.client import get_api_url
-
-    print_error(f"Could not connect to API at {get_api_url()}")
-    console.print("[dim]Make sure the API server is running.[/dim]")
-    raise typer.Exit(1)
-
-
 @app.command("overview")
 def overview() -> None:
     """Show a global overview of all systems and their health."""
-    try:
-        with get_client() as client:
-            resp = client.get("/insights/overview")
-    except Exception:
-        _handle_connect_error()
-        return
+    d = api_get("/insights/overview")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    d = resp.json()
     console.print("[bold]Global Overview[/bold]")
     console.print(f"  Systems:            {d.get('total_systems', 0)}")
     console.print(f"  Repos:              {d.get('total_repos', 0)}")
@@ -78,18 +60,8 @@ def overview() -> None:
 @app.command("cost")
 def cost() -> None:
     """Show global cost breakdown across repos, workflows, and models."""
-    try:
-        with get_client() as client:
-            resp = client.get("/insights/cost")
-    except Exception:
-        _handle_connect_error()
-        return
+    d = api_get("/insights/cost")
 
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
-
-    d = resp.json()
     console.print("[bold]Global Cost Summary[/bold]")
     console.print(f"  Total cost:      {format_cost(d.get('total_cost_usd') or '0')}")
     console.print(f"  Total tokens:    {format_tokens(d.get('total_tokens') or 0)}")
@@ -116,6 +88,36 @@ def cost() -> None:
         console.print(table)
 
 
+def _render_heatmap(days: list[dict[str, object]], total: object) -> None:
+    """Render sparkline and top-5 table for heatmap data."""
+    console.print(f"  Total: {total}")
+    console.print()
+
+    def _count(day: dict[str, object]) -> int:
+        c = day.get("count")
+        return int(c) if isinstance(c, (int, float)) else 0
+
+    max_count = max(_count(day) for day in days) or 1
+    blocks = " ░▒▓█"
+    line = ""
+    for day in days:
+        idx = min(int(_count(day) / max_count * (len(blocks) - 1)), len(blocks) - 1)
+        line += blocks[idx]
+    console.print(line)
+    console.print(f"[dim]  {days[0].get('date', '')} … {days[-1].get('date', '')}[/dim]")
+
+    top = sorted(days, key=_count, reverse=True)[:5]
+    if any(_count(d) for d in top):
+        console.print()
+        table = Table(title="Top Days", show_edge=False)
+        table.add_column("Date", style="cyan")
+        table.add_column("Count", justify="right")
+        for day in top:
+            if _count(day):
+                table.add_row(str(day.get("date", "")), str(_count(day)))
+        console.print(table)
+
+
 @app.command("heatmap")
 def heatmap(
     org: Annotated[str | None, typer.Option("--org", help="Filter by organization ID")] = None,
@@ -128,66 +130,27 @@ def heatmap(
     ] = "sessions",
 ) -> None:
     """Show a contribution heatmap of activity over time."""
-    # Accept "cost" as an alias for "cost_usd"
     if metric == "cost":
         metric = "cost_usd"
-    try:
-        with get_client() as client:
-            params: dict[str, str] = {"metric": metric}
-            if org:
-                params["organization_id"] = org
-            if system:
-                params["system_id"] = system
-            if repo:
-                params["repo_id"] = repo
-            if start:
-                params["start_date"] = start
-            if end:
-                params["end_date"] = end
-            resp = client.get("/insights/contribution-heatmap", params=params)
-    except Exception:
-        _handle_connect_error()
-        return
 
-    if resp.status_code == 400:
-        print_error(resp.json().get("detail", "Invalid metric value."))
-        raise typer.Exit(1)
-    if resp.status_code != 200:
-        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-        raise typer.Exit(1)
+    params = build_params(
+        metric=metric,
+        organization_id=org,
+        system_id=system,
+        repo_id=repo,
+        start_date=start,
+        end_date=end,
+    )
+    d = api_get("/insights/contribution-heatmap", params=params)
 
-    d = resp.json()
     console.print(
         f"[bold]Heatmap:[/bold] {d.get('metric', metric)}  "
         f"[dim]{d.get('start_date', '')} → {d.get('end_date', '')}[/dim]"
     )
-    console.print(f"  Total: {d.get('total', 0)}")
-    console.print()
 
     days = d.get("days", [])
     if not days:
         console.print("[dim]No data in this range.[/dim]")
         return
 
-    # ASCII sparkline-style heatmap — one row, colour intensity by count
-    max_count = max((day.get("count") or 0) for day in days) or 1
-    blocks = " ░▒▓█"
-    line = ""
-    for day in days:
-        count = day.get("count") or 0
-        idx = min(int(count / max_count * (len(blocks) - 1)), len(blocks) - 1)
-        line += blocks[idx]
-    console.print(line)
-    console.print(f"[dim]  {days[0].get('date', '')} … {days[-1].get('date', '')}[/dim]")
-
-    # Top 5 days
-    top = sorted(days, key=lambda x: x.get("count") or 0, reverse=True)[:5]
-    if any(d.get("count") for d in top):
-        console.print()
-        table = Table(title="Top Days", show_edge=False)
-        table.add_column("Date", style="cyan")
-        table.add_column("Count", justify="right")
-        for day in top:
-            if day.get("count"):
-                table.add_row(day.get("date", ""), str(day.get("count", 0)))
-        console.print(table)
+    _render_heatmap(days, d.get("total", 0))
