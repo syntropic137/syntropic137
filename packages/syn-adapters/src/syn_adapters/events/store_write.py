@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from syn_adapters.events.models import AgentEvent
+from syn_adapters.events.store_helpers import _build_copy_buffer
 
 if TYPE_CHECKING:
     from syn_adapters.events.store import AgentEventStore
@@ -82,3 +83,48 @@ async def insert_one(
             ph_id,
             data_json,
         )
+
+
+async def insert_batch(
+    store: AgentEventStore,
+    events: list[dict[str, Any]],
+    execution_id: str | None = None,
+    phase_id: str | None = None,
+) -> int:
+    """Insert a batch of events using COPY for maximum throughput.
+
+    Args:
+        store: AgentEventStore instance
+        events: List of event dicts with at least 'event_type' and 'session_id'
+        execution_id: Optional execution ID to add to all events
+        phase_id: Optional phase ID to add to all events
+
+    Returns:
+        Number of events inserted
+    """
+    if not events:
+        return 0
+
+    if not store._initialized:
+        await store.initialize()
+
+    if store.pool is None:
+        raise RuntimeError("AgentEventStore pool is not initialized")
+
+    buffer = _build_copy_buffer(events, execution_id, phase_id)
+
+    async with store.pool.acquire() as conn:
+        result = await conn.copy_to_table(
+            "agent_events",
+            source=buffer,
+            columns=["time", "event_type", "session_id", "execution_id", "phase_id", "data"],
+            format="text",
+        )
+
+    if isinstance(result, str) and result.startswith("COPY"):
+        count = int(result.split()[1])
+    else:
+        count = len(events)
+
+    logger.debug("Inserted %d events", count)
+    return count

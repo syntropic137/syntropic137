@@ -14,10 +14,8 @@ if TYPE_CHECKING:
 
     from syn_adapters.projections.session_tools import SessionToolsProjection
 
-from syn_adapters.projections.session_tools_converters import (
-    query_session_tools,
-    row_to_operation,
-)
+from syn_adapters.projections.session_tools_dispatch import row_to_operation
+from syn_adapters.projections.session_tools_queries import query_session_tools
 from syn_shared.events import (
     SUBAGENT_STARTED,
     SUBAGENT_STOPPED,
