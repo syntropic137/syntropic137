@@ -76,11 +76,11 @@ class TestResolveOpSecretsEnvGuard:
 
         return (
             patch(
-                "syn_shared.settings.op_resolver._op_available",
+                "syn_shared.settings.op_resolver.op_available",
                 return_value=True,
             ),
             patch(
-                "syn_shared.settings.op_resolver.subprocess.run",
+                "syn_shared.settings.op_client.subprocess.run",
                 return_value=run_result,
             ),
             patch.dict(os.environ, {"APP_ENVIRONMENT": app_env}, clear=False),
@@ -125,10 +125,10 @@ class TestResolveOpSecretsEnvGuard:
         run_result.stdout = "{}"
         env_without = {k: v for k, v in os.environ.items() if k != "APP_ENVIRONMENT"}
         with (
-            patch("syn_shared.settings.op_resolver._parse_env_file", return_value={}),
-            patch("syn_shared.settings.op_resolver._op_available", return_value=True),
+            patch("syn_shared.settings.op_resolver.parse_env_file", return_value={}),
+            patch("syn_shared.settings.op_resolver.op_available", return_value=True),
             patch(
-                "syn_shared.settings.op_resolver.subprocess.run", return_value=run_result
+                "syn_shared.settings.op_client.subprocess.run", return_value=run_result
             ) as mock_run,
             patch.dict(os.environ, env_without, clear=True),
         ):

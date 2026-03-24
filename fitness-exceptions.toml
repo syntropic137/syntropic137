@@ -113,39 +113,6 @@ issue = "#197"
 value = 40
 issue = "#197"
 
-[max-cognitive."python:packages.syn-collector.src.syn_collector.cli::_run_watcher"]
-value = 35
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.client.http::_send_batch"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.hooks::_read_new_events"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.hooks::watch"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.transcript::_read_file"]
-value = 40
-issue = "#197"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.transcript::watch"]
-value = 40
-issue = "#197"
-
-
-[max-cognitive."python:packages.syn-perf.src.syn_perf.benchmarks.throughput::run"]
-value = 30
-issue = "#197"
-
-[max-cognitive."python:packages.syn-shared.src.syn_shared.settings.op_resolver::resolve_op_secrets"]
-value = 30
-issue = "#197"
-
 # Maximum Cognitive Complexity (file-level)
 
 [max-cognitive-file."apps.syn-api.src.syn_api._wiring"]
@@ -396,55 +363,6 @@ issue = "#197"
 value = 55
 issue = "#197"
 
-[max-cognitive-file."packages.syn-collector.src.syn_collector.cli"]
-value = 110
-issue = "#197"
-
-[max-cognitive-file."packages.syn-collector.src.syn_collector.client.http"]
-value = 110
-issue = "#197"
-
-[max-cognitive-file."packages.syn-collector.src.syn_collector.watcher.hooks"]
-value = 245
-issue = "#197"
-
-[max-cognitive-file."packages.syn-collector.src.syn_collector.watcher.transcript"]
-value = 295
-issue = "#197"
-
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.benchmarks.compare"]
-value = 65
-issue = "#197"
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.benchmarks.parallel"]
-value = 55
-issue = "#197"
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.benchmarks.throughput"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."packages.syn-perf.src.syn_perf.reporters.console"]
-value = 90
-issue = "#197"
-
-[max-cognitive-file."packages.syn-shared.src.syn_shared.settings.op_resolver"]
-value = 60
-issue = "#197"
-
-[max-cognitive-file."packages.syn-shared.src.syn_shared.settings.workspace"]
-value = 100
-issue = "#197"
-
-[max-cognitive-file."packages.syn-tokens.src.syn_tokens.spend"]
-value = 110
-issue = "#197"
-
-[max-cognitive-file."packages.syn-tokens.src.syn_tokens.vending"]
-value = 180
-issue = "#197"
-
 [max-cognitive-file."packages.syn-domain.src.syn_domain.contexts.orchestration.domain.aggregate_execution.WorkflowExecutionAggregate"]
 value = 70
 issue = "#275"
@@ -619,7 +537,6 @@ issue = "#197"
 value = 40
 issue = "#197"
 
-
 # Maximum Lines of Code (file-level)
 
 [max-loc-file."apps.syn-api.src.syn_api.v1.executions"]
@@ -682,7 +599,6 @@ issue = "#197"
 value = 855
 issue = "#197"
 
-
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector"]
 value = 765
 issue = "#275"
@@ -694,14 +610,6 @@ issue = "#275"
 [max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor"]
 value = 1100
 issue = "#275"
-
-[max-loc-file."packages.syn-tokens.src.syn_tokens.spend"]
-value = 940
-issue = "#197"
-
-[max-loc-file."packages.syn-tokens.src.syn_tokens.vending"]
-value = 1025
-issue = "#197"
 
 [max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch::_render_event"]
 value = 30
@@ -767,7 +675,6 @@ issue = "#274"
 value = 80
 issue = "#274"
 
-
 [max-cognitive-file."apps.syn-cli.src.syn_cli.commands.artifacts"]
 value = 70
 issue = "#274"
@@ -779,7 +686,6 @@ issue = "#274"
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.sse"]
 value = 180
 issue = "#274"
-
 
 [max-cognitive-file."apps.syn-cli.src.syn_cli.commands.insights"]
 value = 85
@@ -796,7 +702,6 @@ issue = "#274"
 [max-cyclomatic."python:apps.syn-api.src.syn_api.v1.workflows::get_workflow"]
 value = 20
 issue = "#274"
-
 
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
 value = 55
@@ -832,14 +737,6 @@ issue = "#274"
 
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 45
-issue = "#274"
-
-[max-cognitive."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::SummaryStats"]
-value = 35
-issue = "#274"
-
-[max-cognitive."typescript:packages/openclaw-plugin/src/tools/observability::synGetSession"]
-value = 35
 issue = "#274"
 
 [max-cognitive-file."apps/syn-dashboard-ui/src/api/client"]
@@ -888,22 +785,6 @@ issue = "#274"
 
 [max-cognitive-file."apps/syn-dashboard-ui/src/pages/WorkflowRuns"]
 value = 90
-issue = "#274"
-
-[max-cognitive-file."apps/syn-pulse-ui/src/components/ContributionHeatmap"]
-value = 120
-issue = "#274"
-
-[max-cognitive-file."packages/openclaw-plugin/src/tools/artifacts"]
-value = 70
-issue = "#274"
-
-[max-cognitive-file."packages/openclaw-plugin/src/tools/executions"]
-value = 65
-issue = "#274"
-
-[max-cognitive-file."packages/openclaw-plugin/src/tools/observability"]
-value = 125
 issue = "#274"
 
 [max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ArtifactDetail::ArtifactDetail"]
@@ -994,11 +875,6 @@ issue = "#274"
 value = 170
 issue = "#274"
 
-[max-loc-function."python:packages.syn-collector.src.syn_collector.collector.service::create_app"]
-value = 105
-issue = "#274"
-
-
 [max-loc-function."tsx:apps/syn-dashboard-ui/src/components/ExecutionCostSummary::ExecutionCostSummary"]
 value = 180
 issue = "#274"
@@ -1073,8 +949,4 @@ issue = "#274"
 
 [max-loc-function."tsx:apps/syn-dashboard-ui/src/pages/WorkflowRuns::WorkflowRuns"]
 value = 165
-issue = "#274"
-
-[max-loc-function."tsx:apps/syn-pulse-ui/src/components/ContributionHeatmap::ContributionHeatmap"]
-value = 135
 issue = "#274"
