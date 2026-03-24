@@ -381,50 +381,26 @@ class PhaseContext:
         Returns list of (relative_path, content) tuples ready for
         workspace injection.
         """
-        files: list[tuple[Path, bytes]] = []
+        from syn_adapters.artifacts.bundle_storage import build_context_files
 
-        # Add artifact files under .context/artifacts/{bundle_id}/
-        for bundle in self.artifacts:
-            bundle_dir = Path(".context") / "artifacts" / bundle.bundle_id
-
-            for artifact_file in bundle.files:
-                context_path = bundle_dir / artifact_file.path
-                files.append((context_path, artifact_file.content))
-
-            # Add bundle manifest
-            manifest_path = bundle_dir / "manifest.json"
-            manifest_content = bundle.to_json().encode("utf-8")
-            files.append((manifest_path, manifest_content))
-
-        # Add any additional context files
-        for path, content in self.context_files:
-            context_path = Path(".context") / path
-            files.append((context_path, content))
-
-        # Add phase context summary
-        summary = self._create_context_summary()
-        summary_path = Path(".context") / "context.json"
-        files.append((summary_path, summary.encode("utf-8")))
-
-        return files
+        return build_context_files(
+            self.artifacts,
+            self.context_files,
+            self.phase_id,
+            self.workflow_id,
+            self.task,
+            self.system_prompt,
+        )
 
     def _create_context_summary(self) -> str:
         """Create a JSON summary of the phase context."""
-        summary = {
-            "phase_id": self.phase_id,
-            "workflow_id": self.workflow_id,
-            "task": self.task,
-            "system_prompt": self.system_prompt,
-            "artifacts": [
-                {
-                    "bundle_id": b.bundle_id,
-                    "phase_id": b.phase_id,
-                    "title": b.title,
-                    "file_count": b.file_count,
-                    "files": [str(f.path) for f in b.files],
-                }
-                for b in self.artifacts
-            ],
-            "context_files": [str(p) for p, _ in self.context_files],
-        }
-        return json.dumps(summary, indent=2)
+        from syn_adapters.artifacts.bundle_storage import create_context_summary
+
+        return create_context_summary(
+            self.phase_id,
+            self.workflow_id,
+            self.task,
+            self.system_prompt,
+            self.artifacts,
+            self.context_files,
+        )

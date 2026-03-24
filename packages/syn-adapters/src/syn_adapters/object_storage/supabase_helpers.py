@@ -1,19 +1,26 @@
 """Helper functions and mixin methods for Supabase Storage adapter.
 
 Extracted from supabase.py to reduce per-file cognitive complexity.
+Contains sync helper utilities and presigned-URL support.
+Query operations (list, get_object_info) are in supabase_queries.py.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import mimetypes
 from datetime import UTC, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.object_storage.protocol import (
-    ListResult,
+    DownloadError,
+    ObjectNotFoundError,
     StorageObject,
+    UploadError,
+    UploadResult,
 )
 
 if TYPE_CHECKING:
@@ -77,91 +84,118 @@ def build_object_list(
     return objects
 
 
-async def get_object_info(
-    get_client: Any,
+def do_upload(
+    client: Any,
     bucket_name: str,
     key: str,
-) -> StorageObject | None:
-    """Get object metadata without downloading content.
+    content: bytes,
+    content_type: str | None,
+    metadata: dict[str, str] | None,
+) -> UploadResult:
+    """Synchronous upload body for Supabase Storage (run in executor).
 
     Args:
-        get_client: Callable returning the Supabase client.
+        client: Supabase client instance.
         bucket_name: Storage bucket name.
-        key: Object key (path) to get info for.
+        key: Object key (path) within the bucket.
+        content: Raw bytes to store.
+        content_type: MIME type. Auto-detected if not provided.
+        metadata: Custom metadata (stored as custom headers).
 
     Returns:
-        StorageObject with metadata, or None if not found.
+        UploadResult with key, size, and URL.
+
+    Raises:
+        UploadError: If upload fails.
     """
-    try:
-        client = get_client()
-        folder, filename = split_key(key)
+    if content_type is None:
+        content_type, _ = mimetypes.guess_type(key)
+        content_type = content_type or "application/octet-stream"
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            partial(client.storage.from_(bucket_name).list, folder),
-        )
+    file_options: dict[str, str] = {"content-type": content_type}
+    if metadata:
+        import json
 
-        if not response:
-            return None
+        file_options["x-upsert-metadata"] = json.dumps(metadata)
 
-        return find_matching_object(response, filename, key)
+    response = client.storage.from_(bucket_name).upload(
+        path=key,
+        file=content,
+        file_options=file_options,
+    )
 
-    except Exception as e:
-        logger.warning("Failed to get object info from Supabase: %s - %s", key, e)
-        return None
+    if hasattr(response, "error") and response.error:
+        raise UploadError(f"Supabase upload failed: {response.error}", key=key)
+
+    etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
+
+    url_response = client.storage.from_(bucket_name).get_public_url(key)
+
+    return UploadResult(
+        key=key,
+        size_bytes=len(content),
+        etag=etag,
+        url=url_response if isinstance(url_response, str) else None,
+    )
 
 
-async def list_objects(
-    get_client: Any,
+def do_download(
+    client: Any,
     bucket_name: str,
-    prefix: str = "",
-    *,
-    max_keys: int = 1000,
-    continuation_token: str | None = None,
-) -> ListResult:
-    """List objects matching a prefix in Supabase Storage.
+    key: str,
+) -> bytes:
+    """Synchronous download body for Supabase Storage (run in executor).
+
+    Raises ObjectNotFoundError for 404/not-found conditions so the
+    async caller does not need to inspect error messages.
 
     Args:
-        get_client: Callable returning the Supabase client.
+        client: Supabase client instance.
         bucket_name: Storage bucket name.
-        prefix: Key prefix to filter by.
-        max_keys: Maximum objects to return.
-        continuation_token: Offset for pagination.
+        key: Object key (path) to download.
 
     Returns:
-        ListResult with matching objects.
+        Raw bytes of the object content.
+
+    Raises:
+        ObjectNotFoundError: If object doesn't exist.
+        DownloadError: If download fails for other reasons.
     """
     try:
-        client = get_client()
-        offset = int(continuation_token) if continuation_token else 0
+        response = client.storage.from_(bucket_name).download(key)
+    except Exception as exc:
+        error_msg = str(exc).lower()
+        if "not found" in error_msg or "404" in error_msg:
+            raise ObjectNotFoundError(key) from exc
+        raise
 
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            partial(
-                client.storage.from_(bucket_name).list,
-                prefix,
-                {"limit": max_keys, "offset": offset},
-            ),
-        )
+    if response is None:
+        raise ObjectNotFoundError(key)
 
-        if not response:
-            return ListResult(objects=[], prefix=prefix or None)
+    return response  # type: ignore[return-value]
 
-        objects = build_object_list(response, prefix)
-        is_truncated = len(response) >= max_keys
 
-        return ListResult(
-            objects=objects,
-            is_truncated=is_truncated,
-            next_continuation_token=str(offset + max_keys) if is_truncated else None,
-            prefix=prefix or None,
-        )
+def do_delete(
+    client: Any,
+    bucket_name: str,
+    key: str,
+) -> bool:
+    """Synchronous delete body for Supabase Storage (run in executor).
 
-    except Exception as e:
-        logger.warning("Failed to list objects from Supabase: %s - %s", prefix, e)
-        return ListResult(objects=[], prefix=prefix or None)
+    Args:
+        client: Supabase client instance.
+        bucket_name: Storage bucket name.
+        key: Object key (path) to delete.
+
+    Returns:
+        True if object was deleted, False if it didn't exist.
+    """
+    response = client.storage.from_(bucket_name).remove([key])
+
+    if response and isinstance(response, list):
+        return len(response) > 0
+
+    return False
 
 
 async def get_presigned_url(

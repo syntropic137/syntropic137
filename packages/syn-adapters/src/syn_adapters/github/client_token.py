@@ -1,7 +1,7 @@
 """GitHub App installation token management.
 
 Extracted from client.py to reduce module complexity.
-Handles token response validation, parsing, and caching.
+Handles token response validation, parsing, caching, and retrieval.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import httpx
 
 if TYPE_CHECKING:
-    from syn_adapters.github.client import InstallationToken
+    from syn_adapters.github.client import GitHubAppClient, InstallationToken
 
 logger = logging.getLogger(__name__)
 
@@ -87,3 +87,65 @@ def parse_installation_token(
     )
 
     return token
+
+
+async def get_installation_token(
+    client: GitHubAppClient,
+    installation_id: str | None = None,
+    force_refresh: bool = False,
+) -> str:
+    """Get a valid installation access token.
+
+    Tokens are cached per installation_id and reused until expired.
+
+    Args:
+        client: GitHubAppClient instance.
+        installation_id: The installation to get a token for. Use
+            get_installation_for_repo() to resolve this from a repo name. Raises if not set.
+        force_refresh: If True, always fetch a new token.
+
+    Returns:
+        Installation access token string.
+
+    Raises:
+        GitHubAuthError: If token generation fails or no installation_id available.
+        GitHubRateLimitError: If rate limited.
+    """
+    from syn_adapters.github.client import GitHubAuthError
+
+    if not installation_id:
+        msg = (
+            "No installation_id provided. Use get_installation_for_repo() to resolve it "
+            "from a repository name, or pass it explicitly (e.g. from a webhook payload)."
+        )
+        raise GitHubAuthError(msg)
+    iid = installation_id
+
+    # Return cached token if valid
+    cached = client._cached_tokens.get(iid)
+    if not force_refresh and cached and not cached.is_expired:
+        logger.debug(
+            "Using cached installation token (installation_id=%s, expires_in=%ss)",
+            iid,
+            f"{cached.seconds_until_expiry:.0f}",
+        )
+        return cached.token
+
+    logger.info("Generating new installation token for installation_id=%s", iid)
+
+    jwt_token = client._generate_jwt()
+
+    try:
+        response = await client._http.post(
+            f"/app/installations/{iid}/access_tokens",
+            headers={"Authorization": f"Bearer {jwt_token}"},
+        )
+
+        check_token_response(response, iid)
+
+        token = parse_installation_token(response.json(), iid, client._cached_tokens)
+        return token.token
+
+    except httpx.HTTPError as e:
+        msg = f"HTTP error generating token: {e}"
+        raise GitHubAuthError(msg) from e

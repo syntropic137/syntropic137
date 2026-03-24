@@ -29,6 +29,9 @@ from syn_shared.events import (
     TOOL_EXECUTION_STARTED,
 )
 from syn_adapters.projections.session_tools_helpers import (
+    get_pool as _get_pool_impl,
+    get_session_tools as _get_session_tools_impl,
+    query_session_tools as _query_session_tools_impl,
     row_to_operation as _row_to_operation_impl,
 )
 
@@ -112,25 +115,7 @@ class SessionToolsProjection:
 
     def _get_pool(self) -> asyncpg.Pool | None:
         """Get the database pool, lazily loading from event store if needed."""
-        if self._pool is not None:
-            logger.debug("Using cached pool")
-            return self._pool
-
-        # Try to get pool from initialized event store
-        try:
-            from syn_adapters.events import get_event_store
-
-            store = get_event_store()
-            logger.debug("Got event store, pool is %s", "available" if store.pool else "None")
-            if store.pool is not None:
-                self._pool = store.pool
-                logger.info("SessionToolsProjection: Acquired pool from event store")
-                return self._pool
-        except Exception as e:
-            logger.warning("Could not get pool from event store: %s", e)
-
-        logger.debug("No pool available for SessionToolsProjection")
-        return None
+        return _get_pool_impl(self)
 
     async def get(self, session_id: str) -> list[ToolOperation]:
         """Get all tool operations for a session.
@@ -141,58 +126,15 @@ class SessionToolsProjection:
         Returns:
             List of tool operations ordered by timestamp
         """
-        pool = self._get_pool()
-        if pool is None:
-            logger.debug("No pool available, returning empty list")
-            return []
-
-        try:
-            async with pool.acquire() as conn:
-                # Query with LEFT JOIN to get tool_name from started events
-                # for completed events that don't have it (Claude PostToolUse
-                # hook doesn't receive tool_name, only tool_use_id)
-                rows = await conn.fetch(
-                    """
-                    WITH tool_names AS (
-                        -- Get tool_name -> tool_use_id mapping from started events
-                        SELECT
-                            data->>'tool_use_id' as tool_use_id,
-                            data->>'tool_name' as tool_name
-                        FROM agent_events
-                        WHERE session_id = $1
-                          AND event_type = $2
-                          AND data->>'tool_name' IS NOT NULL
-                    )
-                    SELECT
-                        e.event_type,
-                        e.time,
-                        -- Merge tool_name from started event into data for completed
-                        CASE
-                            WHEN e.event_type = $3 AND e.data->>'tool_name' IS NULL
-                            THEN jsonb_set(
-                                e.data::jsonb,
-                                '{tool_name}',
-                                to_jsonb(COALESCE(tn.tool_name, 'unknown'))
-                            )
-                            ELSE e.data::jsonb
-                        END as data
-                    FROM agent_events e
-                    LEFT JOIN tool_names tn ON tn.tool_use_id = e.data->>'tool_use_id'
-                    WHERE e.session_id = $1
-                      AND e.event_type != ALL($4)
-                    ORDER BY e.time ASC
-                    """,
-                    session_id,
-                    TOOL_EXECUTION_STARTED,
-                    TOOL_EXECUTION_COMPLETED,
-                    list(_TIMELINE_EXCLUDE),
-                )
-
-                logger.info("SessionToolsProjection.get(%s): found %d rows", session_id, len(rows))
-                return [op for row in rows if (op := self._row_to_operation(row)) is not None]
-        except Exception as e:
-            logger.error("Failed to query tool operations for %s: %s", session_id, e)
-            return []
+        return await _get_session_tools_impl(
+            self,
+            session_id,
+            _TIMELINE_EXCLUDE,
+            TOOL_EXECUTION_STARTED,
+            TOOL_EXECUTION_COMPLETED,
+            _SUBAGENT_TOOL_NAMES,
+            _GIT_EVENT_TYPES,
+        )
 
     async def query(
         self,
@@ -213,50 +155,16 @@ class SessionToolsProjection:
         Returns:
             List of matching tool operations
         """
-        pool = self._get_pool()
-        if pool is None:
-            return []
-
-        # Exclude high-volume, non-activity events (same logic as get())
-        conditions = [f"event_type != ALL(${1})"]
-        params: list[Any] = [list(_TIMELINE_EXCLUDE)]
-        param_idx = 2
-
-        if execution_id:
-            conditions.append(f"execution_id = ${param_idx}")
-            params.append(execution_id)
-            param_idx += 1
-
-        if phase_id:
-            conditions.append(f"phase_id = ${param_idx}")
-            params.append(phase_id)
-            param_idx += 1
-
-        if tool_name:
-            conditions.append(f"data->>'tool_name' = ${param_idx}")
-            params.append(tool_name)
-            param_idx += 1
-
-        params.append(limit)
-
-        query = f"""
-            SELECT
-                event_type,
-                time,
-                data
-            FROM agent_events
-            WHERE {" AND ".join(conditions)}
-            ORDER BY time ASC
-            LIMIT ${param_idx}
-        """
-
-        try:
-            async with pool.acquire() as conn:
-                rows = await conn.fetch(query, *params)
-                return [op for row in rows if (op := self._row_to_operation(row)) is not None]
-        except Exception as e:
-            logger.error("Failed to query tool operations: %s", e)
-            return []
+        return await _query_session_tools_impl(
+            self,
+            _TIMELINE_EXCLUDE,
+            _SUBAGENT_TOOL_NAMES,
+            _GIT_EVENT_TYPES,
+            execution_id=execution_id,
+            phase_id=phase_id,
+            tool_name=tool_name,
+            limit=limit,
+        )
 
     def _row_to_operation(self, row: Any) -> ToolOperation | None:
         """Convert a database row to a ToolOperation.

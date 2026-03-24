@@ -18,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 # Import StorageResult from domain (not local definition)
 from syn_domain.contexts.artifacts.ports import StorageResult
 
+from syn_adapters.storage.artifact_storage.minio_helpers import (
+    build_s3_metadata,
+    parse_s3_key,
+)
+
 if TYPE_CHECKING:
     from syn_adapters.object_storage.minio import MinioStorage
 
@@ -35,14 +40,6 @@ class ArtifactNotFoundError(Exception):
 
     def __init__(self, artifact_id: str) -> None:
         super().__init__(f"Artifact not found: {artifact_id}")
-
-
-def _parse_s3_key(uri: str) -> str | None:
-    """Extract the object key from an s3://bucket/key URI, or return None."""
-    if not uri.startswith("s3://"):
-        return None
-    parts = uri[5:].split("/", 1)
-    return parts[1] if len(parts) == 2 else None
 
 
 class MinioArtifactStorage:
@@ -111,7 +108,7 @@ class MinioArtifactStorage:
         """Upload artifact content to MinIO."""
         key = self._build_key(artifact_id, workflow_id, execution_id)
         content_hash = hashlib.sha256(content).hexdigest()
-        s3_metadata = self._build_s3_metadata(
+        s3_metadata = build_s3_metadata(
             artifact_id, content_hash, phase_id, execution_id, metadata
         )
 
@@ -138,28 +135,6 @@ class MinioArtifactStorage:
             metadata={"key": result.key, "etag": result.etag, **s3_metadata},
         )
 
-    @staticmethod
-    def _build_s3_metadata(
-        artifact_id: str,
-        content_hash: str,
-        phase_id: str | None,
-        execution_id: str | None,
-        metadata: dict[str, Any] | None,
-    ) -> dict[str, str]:
-        """Assemble S3 metadata dict from artifact fields."""
-        s3_metadata: dict[str, str] = {
-            "artifact_id": artifact_id,
-            "content_hash": content_hash,
-        }
-        if phase_id:
-            s3_metadata["phase_id"] = phase_id
-        if execution_id:
-            s3_metadata["execution_id"] = execution_id
-        if metadata:
-            for k, v in metadata.items():
-                s3_metadata[k] = str(v)
-        return s3_metadata
-
     async def download(self, artifact_id: str) -> bytes:
         """Download artifact content from MinIO.
 
@@ -183,7 +158,7 @@ class MinioArtifactStorage:
         Returns:
             Artifact content as bytes
         """
-        key = _parse_s3_key(storage_uri)
+        key = parse_s3_key(storage_uri)
         if key is None:
             raise ArtifactNotFoundError(storage_uri)
         return await self._storage.download(key)

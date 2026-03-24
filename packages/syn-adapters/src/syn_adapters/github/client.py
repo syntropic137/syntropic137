@@ -23,12 +23,26 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from syn_adapters.github.client_api import api_get as _api_get
+from syn_adapters.github.client_api import api_post as _api_post
+from syn_adapters.github.client_api import api_put as _api_put
+from syn_adapters.github.client_api import check_response as _check_response_fn
+from syn_adapters.github.client_endpoints import get_app_info as _get_app_info
+from syn_adapters.github.client_endpoints import (
+    get_installation_for_repo as _get_installation_for_repo,
+)
+from syn_adapters.github.client_endpoints import get_webhook_config as _get_webhook_config
+from syn_adapters.github.client_endpoints import list_accessible_repos as _list_accessible_repos
+from syn_adapters.github.client_endpoints import list_installations as _list_installations
+from syn_adapters.github.client_endpoints import update_webhook_config as _update_webhook_config
 from syn_adapters.github.client_jwt import (
     JWT_ALGORITHM as JWT_ALGORITHM,
+)
+from syn_adapters.github.client_jwt import (
     decode_private_key,
     generate_jwt,
 )
-from syn_adapters.github.client_token import check_token_response, parse_installation_token
+from syn_adapters.github.client_token import get_installation_token as _get_installation_token
 
 if TYPE_CHECKING:
     from syn_shared.settings.github import GitHubAppSettings
@@ -216,42 +230,7 @@ class GitHubAppClient:
             GitHubAuthError: If token generation fails or no installation_id available.
             GitHubRateLimitError: If rate limited.
         """
-        if not installation_id:
-            msg = (
-                "No installation_id provided. Use get_installation_for_repo() to resolve it "
-                "from a repository name, or pass it explicitly (e.g. from a webhook payload)."
-            )
-            raise GitHubAuthError(msg)
-        iid = installation_id
-
-        # Return cached token if valid
-        cached = self._cached_tokens.get(iid)
-        if not force_refresh and cached and not cached.is_expired:
-            logger.debug(
-                "Using cached installation token (installation_id=%s, expires_in=%ss)",
-                iid,
-                f"{cached.seconds_until_expiry:.0f}",
-            )
-            return cached.token
-
-        logger.info("Generating new installation token for installation_id=%s", iid)
-
-        jwt_token = self._generate_jwt()
-
-        try:
-            response = await self._http.post(
-                f"/app/installations/{iid}/access_tokens",
-                headers={"Authorization": f"Bearer {jwt_token}"},
-            )
-
-            check_token_response(response, iid)
-
-            token = parse_installation_token(response.json(), iid, self._cached_tokens)
-            return token.token
-
-        except httpx.HTTPError as e:
-            msg = f"HTTP error generating token: {e}"
-            raise GitHubAuthError(msg) from e
+        return await _get_installation_token(self, installation_id, force_refresh)
 
     async def api_get(self, path: str, installation_id: str | None = None) -> dict:
         """Make an authenticated GET request to the GitHub API.
@@ -266,15 +245,7 @@ class GitHubAppClient:
         Raises:
             GitHubAppError: On API errors.
         """
-        token = await self.get_installation_token(installation_id)
-
-        response = await self._http.get(
-            path,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _api_get(self, path, installation_id)
 
     async def api_post(
         self, path: str, json: dict | None = None, installation_id: str | None = None
@@ -292,16 +263,7 @@ class GitHubAppClient:
         Raises:
             GitHubAppError: On API errors.
         """
-        token = await self.get_installation_token(installation_id)
-
-        response = await self._http.post(
-            path,
-            headers={"Authorization": f"Bearer {token}"},
-            json=json,
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _api_post(self, path, json, installation_id)
 
     async def api_put(
         self, path: str, json: dict | None = None, installation_id: str | None = None
@@ -319,16 +281,7 @@ class GitHubAppClient:
         Raises:
             GitHubAppError: On API errors.
         """
-        token = await self.get_installation_token(installation_id)
-
-        response = await self._http.put(
-            path,
-            headers={"Authorization": f"Bearer {token}"},
-            json=json,
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _api_put(self, path, json, installation_id)
 
     def _check_response(self, response: httpx.Response) -> None:
         """Check response for errors.
@@ -337,16 +290,7 @@ class GitHubAppClient:
             GitHubRateLimitError: If rate limited.
             GitHubAppError: On other errors.
         """
-        if response.status_code == 403 and "rate limit" in response.text.lower():
-            reset_header = response.headers.get("X-RateLimit-Reset")
-            reset_at = None
-            if reset_header:
-                reset_at = datetime.fromtimestamp(int(reset_header), tz=UTC)
-            raise GitHubRateLimitError("Rate limit exceeded", reset_at=reset_at)
-
-        if response.status_code >= 400:
-            msg = f"GitHub API error {response.status_code}: {response.text}"
-            raise GitHubAppError(msg)
+        _check_response_fn(response)
 
     async def get_app_info(self) -> dict:
         """Get information about the GitHub App.
@@ -354,15 +298,7 @@ class GitHubAppClient:
         Returns:
             App metadata including name, ID, permissions.
         """
-        jwt_token = self._generate_jwt()
-
-        response = await self._http.get(
-            "/app",
-            headers={"Authorization": f"Bearer {jwt_token}"},
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _get_app_info(self)
 
     async def get_webhook_config(self) -> dict:
         """Get the GitHub App's webhook configuration.
@@ -372,15 +308,7 @@ class GitHubAppClient:
         Returns:
             Webhook config including url, content_type, insecure_ssl, secret.
         """
-        jwt_token = self._generate_jwt()
-
-        response = await self._http.get(
-            "/app/hook/config",
-            headers={"Authorization": f"Bearer {jwt_token}"},
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _get_webhook_config(self)
 
     async def update_webhook_config(
         self,
@@ -402,24 +330,7 @@ class GitHubAppClient:
         Returns:
             Updated webhook config.
         """
-        jwt_token = self._generate_jwt()
-
-        payload: dict[str, str] = {
-            "url": url,
-            "content_type": content_type,
-            "insecure_ssl": insecure_ssl,
-        }
-        if secret is not None:
-            payload["secret"] = secret
-
-        response = await self._http.patch(
-            "/app/hook/config",
-            headers={"Authorization": f"Bearer {jwt_token}"},
-            json=payload,
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _update_webhook_config(self, url, content_type, insecure_ssl, secret)
 
     async def list_installations(self) -> list[dict]:
         """List all installations of this GitHub App.
@@ -427,15 +338,7 @@ class GitHubAppClient:
         Returns:
             List of installation metadata.
         """
-        jwt_token = self._generate_jwt()
-
-        response = await self._http.get(
-            "/app/installations",
-            headers={"Authorization": f"Bearer {jwt_token}"},
-        )
-
-        self._check_response(response)
-        return response.json()
+        return await _list_installations(self)
 
     async def list_accessible_repos(self, installation_id: str | None = None) -> list[dict]:
         """List repositories accessible to an installation.
@@ -446,15 +349,7 @@ class GitHubAppClient:
         Returns:
             List of repository metadata.
         """
-        token = await self.get_installation_token(installation_id)
-
-        response = await self._http.get(
-            "/installation/repositories",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-        self._check_response(response)
-        return response.json().get("repositories", [])
+        return await _list_accessible_repos(self, installation_id)
 
     async def get_installation_for_repo(self, repo_full_name: str) -> str:
         """Look up the installation ID for a repository.
@@ -471,18 +366,7 @@ class GitHubAppClient:
         Raises:
             GitHubAuthError: If lookup fails or app not installed on repo.
         """
-        jwt_token = self._generate_jwt()
-        response = await self._http.get(
-            f"/repos/{repo_full_name}/installation",
-            headers={"Authorization": f"Bearer {jwt_token}"},
-        )
-        if response.status_code == 404:
-            msg = f"GitHub App not installed on repository: {repo_full_name}"
-            raise GitHubAuthError(msg)
-        self._check_response(response)
-        installation_id = str(response.json()["id"])
-        logger.debug("Resolved installation_id=%s for repo %s", installation_id, repo_full_name)
-        return installation_id
+        return await _get_installation_for_repo(self, repo_full_name)
 
 
 # Singleton instance

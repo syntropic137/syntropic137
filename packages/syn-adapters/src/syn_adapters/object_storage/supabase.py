@@ -22,9 +22,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-import mimetypes
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -38,8 +36,13 @@ from syn_adapters.object_storage.protocol import (
     UploadResult,
 )
 from syn_adapters.object_storage.supabase_helpers import (
-    get_object_info as _get_object_info,
+    do_delete as _do_delete,
+    do_download as _do_download,
+    do_upload as _do_upload,
     get_presigned_url as _get_presigned_url,
+)
+from syn_adapters.object_storage.supabase_queries import (
+    get_object_info as _get_object_info,
     list_objects as _list_objects,
 )
 
@@ -140,53 +143,11 @@ class SupabaseStorage:
         """
         try:
             client = self._get_client()
-
-            # Auto-detect content type if not provided
-            if content_type is None:
-                content_type, _ = mimetypes.guess_type(key)
-                content_type = content_type or "application/octet-stream"
-
-            # Prepare file options
-            file_options: dict[str, str] = {"content-type": content_type}
-            if metadata:
-                # Supabase supports custom metadata via x-upsert-metadata header
-                import json
-
-                file_options["x-upsert-metadata"] = json.dumps(metadata)
-
-            # Upload to Supabase Storage
-            # Note: Supabase Storage uses upsert by default
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
+            return await loop.run_in_executor(
                 None,
-                partial(
-                    client.storage.from_(self._bucket_name).upload,
-                    path=key,
-                    file=content,
-                    file_options=file_options,
-                ),
+                partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
             )
-
-            # Check for errors
-            if hasattr(response, "error") and response.error:
-                raise UploadError(f"Supabase upload failed: {response.error}", key=key)
-
-            # Compute ETag
-            etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-            # Get public URL
-            url_response = await loop.run_in_executor(
-                None,
-                partial(client.storage.from_(self._bucket_name).get_public_url, key),
-            )
-
-            return UploadResult(
-                key=key,
-                size_bytes=len(content),
-                etag=etag,
-                url=url_response if isinstance(url_response, str) else None,
-            )
-
         except StorageConfigurationError:
             raise
         except Exception as e:
@@ -208,27 +169,14 @@ class SupabaseStorage:
         """
         try:
             client = self._get_client()
-
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
+            return await loop.run_in_executor(
                 None,
-                partial(client.storage.from_(self._bucket_name).download, key),
+                partial(_do_download, client, self._bucket_name, key),
             )
-
-            if response is None:
-                raise ObjectNotFoundError(key)
-
-            return response
-
-        except ObjectNotFoundError:
-            raise
-        except StorageConfigurationError:
+        except (ObjectNotFoundError, StorageConfigurationError):
             raise
         except Exception as e:
-            # Supabase returns 404 for not found
-            error_msg = str(e).lower()
-            if "not found" in error_msg or "404" in error_msg:
-                raise ObjectNotFoundError(key) from e
             logger.exception("Failed to download from Supabase: %s", key)
             raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
 
@@ -243,19 +191,11 @@ class SupabaseStorage:
         """
         try:
             client = self._get_client()
-
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
+            return await loop.run_in_executor(
                 None,
-                partial(client.storage.from_(self._bucket_name).remove, [key]),
+                partial(_do_delete, client, self._bucket_name, key),
             )
-
-            # Supabase returns list of deleted files
-            if response and isinstance(response, list):
-                return len(response) > 0
-
-            return False
-
         except Exception as e:
             logger.warning("Failed to delete from Supabase: %s - %s", key, e)
             return False

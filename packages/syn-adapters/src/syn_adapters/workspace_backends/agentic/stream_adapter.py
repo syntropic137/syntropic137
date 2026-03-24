@@ -15,6 +15,12 @@ from agentic_isolation import (
     WorkspaceDockerProvider,
 )
 
+from syn_adapters.workspace_backends.agentic.stream_helpers import (
+    _build_exec_command,
+    _cleanup_process,
+    read_lines,
+)
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -23,35 +29,6 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
-
-
-def _build_exec_command(
-    container_name: str,
-    command: list[str],
-    working_directory: str | None,
-    environment: dict[str, str] | None,
-) -> list[str]:
-    """Build the docker exec command list."""
-    exec_cmd = ["docker", "exec", "-i", "-w", working_directory or "/workspace"]
-    if environment:
-        for key, value in environment.items():
-            exec_cmd.extend(["-e", f"{key}={value}"])
-    exec_cmd.append(container_name)
-    exec_cmd.extend(command)
-    return exec_cmd
-
-
-async def _cleanup_process(proc: asyncio.subprocess.Process) -> int | None:
-    """Terminate/kill process and return exit code."""
-    if proc.returncode is None:
-        try:
-            proc.terminate()
-            await asyncio.wait_for(proc.wait(), timeout=5.0)
-        except (TimeoutError, ProcessLookupError):
-            proc.kill()
-    if proc.returncode is None:
-        await proc.wait()
-    return proc.returncode
 
 
 class AgenticEventStreamAdapter:
@@ -145,7 +122,7 @@ class AgenticEventStreamAdapter:
         )
 
         try:
-            async for line in self._read_lines(proc, stream_timeout, start_time):
+            async for line in read_lines(proc, stream_timeout, start_time):
                 yield line
         finally:
             exit_code = await _cleanup_process(proc)
@@ -155,36 +132,3 @@ class AgenticEventStreamAdapter:
                     "Stream process exited with code %d (container=%s)",
                     exit_code, container_name,
                 )
-
-    @staticmethod
-    async def _read_lines(
-        proc: asyncio.subprocess.Process,
-        stream_timeout: float | None,
-        start_time: float,
-    ) -> AsyncIterator[str]:
-        """Read and yield decoded lines from process stdout."""
-        while True:
-            if stream_timeout is not None:
-                elapsed = time.monotonic() - start_time
-                if elapsed >= stream_timeout:
-                    logger.warning("Stream timed out after %.1fs", elapsed)
-                    break
-
-            if proc.stdout is None:
-                break
-
-            try:
-                line_bytes = await asyncio.wait_for(
-                    proc.stdout.readline(), timeout=1.0,
-                )
-            except TimeoutError:
-                if proc.returncode is not None:
-                    break
-                continue
-
-            if not line_bytes:
-                break
-
-            line = line_bytes.decode("utf-8", errors="replace").rstrip("\n\r")
-            if line:
-                yield line

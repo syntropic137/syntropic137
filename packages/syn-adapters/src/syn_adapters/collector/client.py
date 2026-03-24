@@ -16,6 +16,12 @@ from typing import Any
 
 import httpx
 
+from syn_adapters.collector.client_events import send_observation as _send_observation_fn
+from syn_adapters.collector.client_events import send_tool_blocked as _send_tool_blocked_fn
+from syn_adapters.collector.client_events import send_tool_completed as _send_tool_completed_fn
+from syn_adapters.collector.client_events import send_tool_started as _send_tool_started_fn
+from syn_adapters.collector.client_transport import attempt_send as _attempt_send_fn
+from syn_adapters.collector.client_transport import send_batch as _send_batch_fn
 from syn_adapters.collector.models import (
     BatchResponse,
     CollectorEvent,
@@ -170,27 +176,7 @@ class CollectorClient:
             httpx.HTTPStatusError: On server errors (5xx) — retryable.
             httpx.RequestError: On connection/transport errors — retryable.
         """
-        assert self._client is not None
-        response = await self._client.post(
-            f"{self.collector_url}/events",
-            json=batch.model_dump(mode="json"),
-            headers=headers,
-        )
-        response.raise_for_status()
-
-        result = BatchResponse(**response.json())
-
-        self._stats["events_sent"] += result.accepted
-        self._stats["batches_sent"] += 1
-
-        logger.debug(
-            "Batch %s sent: %d accepted, %d duplicates",
-            batch.batch_id,
-            result.accepted,
-            result.duplicates,
-        )
-
-        return result
+        return await _attempt_send_fn(self, batch, headers)
 
     async def _send_batch(self, batch: EventBatch) -> BatchResponse:
         """Send a batch with retries.
@@ -204,37 +190,7 @@ class CollectorClient:
         Raises:
             httpx.HTTPError: After all retries exhausted
         """
-        if self._client is None:
-            await self.start()
-            assert self._client is not None
-
-        headers = self._build_auth_headers()
-        last_error: Exception | None = None
-
-        for attempt in range(self.max_retries + 1):
-            try:
-                return await self._attempt_send(batch, headers)
-            except httpx.HTTPStatusError as e:
-                last_error = e
-                if e.response.status_code < 500:
-                    logger.error("Client error sending batch: %s", e)
-                    raise
-                logger.warning("Server error sending batch (attempt %d): %s", attempt + 1, e)
-            except httpx.RequestError as e:
-                last_error = e
-                logger.warning("Request error sending batch (attempt %d): %s", attempt + 1, e)
-
-            if attempt < self.max_retries:
-                self._stats["retries"] += 1
-                await asyncio.sleep((2**attempt) * 0.1)
-
-        self._stats["events_failed"] += len(batch.events)
-        logger.error(
-            "Failed to send batch %s after %d attempts", batch.batch_id, self.max_retries + 1
-        )
-        if last_error:
-            raise last_error
-        raise RuntimeError("Failed to send batch")
+        return await _send_batch_fn(self, batch)
 
     def _build_auth_headers(self) -> dict[str, str]:
         """Build HTTP headers with optional auth."""
@@ -263,26 +219,8 @@ class CollectorClient:
             tool_input: Tool input parameters
             timestamp: Optional timestamp (defaults to now)
         """
-        ts = timestamp or datetime.now(UTC)
-        event = CollectorEvent(
-            event_id=generate_tool_event_id(
-                session_id, "tool_execution_started", ts, tool_name, tool_use_id
-            ),
-            event_type="tool_execution_started",
-            session_id=session_id,
-            timestamp=ts,
-            data={
-                "tool_name": tool_name,
-                "tool_use_id": tool_use_id,
-                "tool_input": tool_input,
-            },
-        )
-        await self.emit(event)
-        logger.debug(
-            "Queued tool_execution_started: session=%s, tool=%s, tool_use_id=%s",
-            session_id,
-            tool_name,
-            tool_use_id,
+        await _send_tool_started_fn(
+            self, session_id, tool_name, tool_use_id, tool_input, timestamp=timestamp
         )
 
     async def send_tool_completed(
@@ -307,29 +245,15 @@ class CollectorClient:
             error_message: Optional error message if failed
             timestamp: Optional timestamp (defaults to now)
         """
-        ts = timestamp or datetime.now(UTC)
-        event = CollectorEvent(
-            event_id=generate_tool_event_id(
-                session_id, "tool_execution_completed", ts, tool_name, tool_use_id
-            ),
-            event_type="tool_execution_completed",
-            session_id=session_id,
-            timestamp=ts,
-            data={
-                "tool_name": tool_name,
-                "tool_use_id": tool_use_id,
-                "duration_ms": duration_ms,
-                "success": success,
-                "error_message": error_message,
-            },
-        )
-        await self.emit(event)
-        logger.debug(
-            "Queued tool_execution_completed: session=%s, tool=%s, duration=%dms, success=%s",
+        await _send_tool_completed_fn(
+            self,
             session_id,
             tool_name,
+            tool_use_id,
             duration_ms,
             success,
+            error_message=error_message,
+            timestamp=timestamp,
         )
 
     async def send_tool_blocked(
@@ -352,25 +276,8 @@ class CollectorClient:
             validator_name: Name of the validator that blocked it
             timestamp: Optional timestamp (defaults to now)
         """
-        ts = timestamp or datetime.now(UTC)
-        event = CollectorEvent(
-            event_id=generate_tool_event_id(session_id, "tool_blocked", ts, tool_name, tool_use_id),
-            event_type="tool_blocked",
-            session_id=session_id,
-            timestamp=ts,
-            data={
-                "tool_name": tool_name,
-                "tool_use_id": tool_use_id,
-                "reason": reason,
-                "validator_name": validator_name,
-            },
-        )
-        await self.emit(event)
-        logger.debug(
-            "Queued tool_blocked: session=%s, tool=%s, reason=%s",
-            session_id,
-            tool_name,
-            reason,
+        await _send_tool_blocked_fn(
+            self, session_id, tool_name, tool_use_id, reason, validator_name=validator_name, timestamp=timestamp
         )
 
     async def send_observation(self, event: dict[str, Any]) -> None:
@@ -381,24 +288,7 @@ class CollectorClient:
         Args:
             event: Event dictionary with event_type, session_id, data, etc.
         """
-        ts = event.get("timestamp") or datetime.now(UTC)
-        if isinstance(ts, str):
-            ts = datetime.fromisoformat(ts)
-
-        collector_event = CollectorEvent(
-            event_id=event.get("event_id")
-            or generate_event_id(
-                event.get("session_id", "unknown"),
-                event.get("event_type", "unknown"),
-                ts,
-                None,
-            ),
-            event_type=event.get("event_type", "unknown"),
-            session_id=event.get("session_id", "unknown"),
-            timestamp=ts,
-            data=event.get("data", {}),
-        )
-        await self.emit(collector_event)
+        await _send_observation_fn(self, event)
 
     @property
     def buffer_size(self) -> int:

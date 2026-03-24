@@ -7,7 +7,6 @@ ANTHROPIC_API_KEY environment variable. OAuth token takes priority when both are
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 from syn_adapters.agents.claude_config import (
@@ -17,15 +16,11 @@ from syn_adapters.agents.claude_config import (
     resolve_model,
 )
 from syn_adapters.agents.protocol import (
-    AgentAuthenticationError,
     AgentConfig,
-    AgentError,
     AgentMessage,
     AgentProtocol,
     AgentProvider,
-    AgentRateLimitError,
     AgentResponse,
-    AgentTimeoutError,
 )
 from syn_shared import get_settings
 from syn_shared.env_constants import MODEL_SONNET
@@ -185,79 +180,9 @@ class ClaudeAgent(AgentProtocol):
         Raises:
             AgentError: If the request fails.
         """
-        client = self._get_client()
-        raw_model = config.model or self.DEFAULT_MODEL
-        model = self.resolve_model(raw_model)  # Resolve alias to API model name
+        from syn_adapters.agents.claude_helpers import complete_request
 
-        logger.debug(
-            "model_resolved",
-            raw_model=raw_model,
-            resolved_model=model,
-        )
-
-        system_prompt, converted_messages = self._convert_messages(messages)
-
-        # Use config system prompt if no system message in conversation
-        if system_prompt is None and config.system_prompt:
-            system_prompt = config.system_prompt
-
-        logger.debug(
-            "claude_request",
-            model=model,
-            message_count=len(converted_messages),
-            max_tokens=config.max_tokens,
-        )
-
-        try:
-            response = await asyncio.wait_for(
-                client.messages.create(
-                    model=model,
-                    max_tokens=config.max_tokens,
-                    temperature=config.temperature,
-                    system=system_prompt or "",
-                    messages=converted_messages,
-                ),
-                timeout=config.timeout_seconds,
-            )
-
-            content = response.content[0].text if response.content else ""
-            result = AgentResponse(
-                content=content,
-                model=response.model,
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-                total_tokens=response.usage.input_tokens + response.usage.output_tokens,
-                stop_reason=response.stop_reason,
-            )
-
-            logger.info(
-                "claude_response",
-                model=result.model,
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                stop_reason=result.stop_reason,
-            )
-
-            return result
-
-        except TimeoutError as e:
-            msg = f"Claude request timed out after {config.timeout_seconds}s"
-            logger.error("claude_timeout", timeout=config.timeout_seconds)
-            raise AgentTimeoutError(msg, AgentProvider.CLAUDE) from e
-        except Exception as e:
-            error_msg = str(e)
-
-            # Check for specific error types
-            if "rate_limit" in error_msg.lower():
-                logger.warning("claude_rate_limit", error=error_msg)
-                raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from e
-
-            if "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
-                logger.error("claude_auth_error", error=error_msg)
-                raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from e
-
-            logger.error("claude_error", error=error_msg, error_type=type(e).__name__)
-            raise AgentError(error_msg, AgentProvider.CLAUDE) from e
+        return await complete_request(self._get_client(), messages, config, self.DEFAULT_MODEL)
 
     async def stream(
         self,
@@ -276,39 +201,7 @@ class ClaudeAgent(AgentProtocol):
         Raises:
             AgentError: If the request fails.
         """
-        client = self._get_client()
-        raw_model = config.model or self.DEFAULT_MODEL
-        model = self.resolve_model(raw_model)  # Resolve alias to specific version
+        from syn_adapters.agents.claude_helpers import stream_request
 
-        system_prompt, converted_messages = self._convert_messages(messages)
-
-        if system_prompt is None and config.system_prompt:
-            system_prompt = config.system_prompt
-
-        logger.debug(
-            "claude_stream_request",
-            model=model,
-            message_count=len(converted_messages),
-        )
-
-        try:
-            async with client.messages.stream(
-                model=model,
-                max_tokens=config.max_tokens,
-                temperature=config.temperature,
-                system=system_prompt or "",
-                messages=converted_messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield text
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error("claude_stream_error", error=error_msg)
-
-            if "rate_limit" in error_msg.lower():
-                raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from e
-            if "authentication" in error_msg.lower():
-                raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from e
-
-            raise AgentError(error_msg, AgentProvider.CLAUDE) from e
+        async for chunk in stream_request(self._get_client(), messages, config, self.DEFAULT_MODEL):
+            yield chunk

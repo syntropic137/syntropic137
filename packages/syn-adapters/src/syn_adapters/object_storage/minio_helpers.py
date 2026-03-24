@@ -1,19 +1,24 @@
 """Helper functions for MinIO Storage adapter.
 
 Extracted from minio.py to reduce per-file cognitive complexity.
+Contains metadata queries and sync upload/download helpers.
+List operations are in minio_queries.py.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import io
 import logging
+import mimetypes
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from syn_adapters.object_storage.protocol import (
-    ListResult,
     StorageObject,
+    UploadResult,
 )
 
 if TYPE_CHECKING:
@@ -62,56 +67,88 @@ async def get_object_info(
         return None
 
 
-async def list_objects(
-    get_client: object,
+def do_upload(
+    client: "Minio",
     bucket_name: str,
-    prefix: str = "",
-    *,
-    max_keys: int = 1000,
-) -> ListResult:
-    """List objects matching a prefix in MinIO.
+    key: str,
+    content: bytes,
+    content_type: str | None,
+    metadata: dict[str, str] | None,
+) -> UploadResult:
+    """Synchronous upload body for MinIO (run in executor).
 
     Args:
-        get_client: Callable returning the Minio client.
+        client: Minio client instance.
         bucket_name: Storage bucket name.
-        prefix: Key prefix to filter by.
-        max_keys: Maximum objects to return.
+        key: Object key (path) within the bucket.
+        content: Raw bytes to store.
+        content_type: MIME type. Auto-detected if not provided.
+        metadata: Custom metadata.
 
     Returns:
-        ListResult with matching objects.
+        UploadResult with key, size, and ETag.
+
+    Raises:
+        UploadError: If upload fails.
     """
+    if content_type is None:
+        content_type, _ = mimetypes.guess_type(key)
+        content_type = content_type or "application/octet-stream"
+
+    result = client.put_object(
+        bucket_name,
+        key,
+        io.BytesIO(content),
+        len(content),
+        content_type=content_type,
+        metadata=cast("dict[str, Any]", metadata) if metadata else None,
+    )
+
+    etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
+
+    return UploadResult(
+        key=key,
+        size_bytes=len(content),
+        etag=result.etag if hasattr(result, "etag") else etag,
+        url=None,
+    )
+
+
+def do_download(
+    client: "Minio",
+    bucket_name: str,
+    key: str,
+) -> bytes:
+    """Synchronous download body for MinIO (run in executor).
+
+    Raises ObjectNotFoundError for nosuchkey/not-found conditions so the
+    async caller does not need to inspect error messages.
+
+    Args:
+        client: Minio client instance.
+        bucket_name: Storage bucket name.
+        key: Object key (path) to download.
+
+    Returns:
+        Raw bytes of the object content.
+
+    Raises:
+        ObjectNotFoundError: If object doesn't exist.
+    """
+    from syn_adapters.object_storage.protocol import ObjectNotFoundError
+
     try:
-        client: Minio = get_client()  # type: ignore[operator]
-
-        loop = asyncio.get_event_loop()
-
-        def list_objects_sync() -> list[StorageObject]:
-            objects: list[StorageObject] = []
-            for obj in client.list_objects(bucket_name, prefix=prefix):
-                if len(objects) >= max_keys:
-                    break
-                objects.append(
-                    StorageObject(
-                        key=obj.object_name or "",
-                        size_bytes=obj.size or 0,
-                        content_type=None,
-                        etag=obj.etag,
-                        last_modified=obj.last_modified or datetime.now(UTC),
-                    )
-                )
-            return objects
-
-        objects = await loop.run_in_executor(None, list_objects_sync)
-
-        return ListResult(
-            objects=objects,
-            is_truncated=len(objects) >= max_keys,
-            prefix=prefix if prefix else None,
-        )
-
-    except Exception as e:
-        logger.warning("Failed to list objects from MinIO: %s - %s", prefix, e)
-        return ListResult(objects=[], prefix=prefix if prefix else None)
+        response = client.get_object(bucket_name, key)
+    except Exception as exc:
+        error_msg = str(exc).lower()
+        if "nosuchkey" in error_msg or "not found" in error_msg:
+            raise ObjectNotFoundError(key) from exc
+        raise
+    try:
+        return response.read()
+    finally:
+        response.close()
+        response.release_conn()
 
 
 async def get_presigned_url(

@@ -14,7 +14,6 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from typing import TYPE_CHECKING, Any
 
 import asyncpg
@@ -144,61 +143,16 @@ class CoordinatorSubscriptionService:
         )
 
     async def _run_coordinator(self) -> None:
-        """Run the coordinator with exponential-backoff reconnect on error.
+        """Run the coordinator with exponential-backoff reconnect on error."""
+        from syn_adapters.subscriptions.coordinator_helpers import run_coordinator
 
-        The gRPC subscription can die on startup (event store not ready) or
-        mid-run (GOAWAY / RST_STREAM). Rather than letting the task crash and
-        leaving projections stale forever, we reset coordinator state and retry
-        with backoff (1 s → 2 s → 4 s … capped at 60 s).
-        """
-        assert self._coordinator is not None, "Coordinator not initialized"
-        delay = 1.0
-        max_delay = 60.0
-
-        while self._running:
-            try:
-                await self._coordinator.start()
-                delay = 1.0  # reset backoff on clean exit
-            except asyncio.CancelledError:
-                logger.info("Coordinator subscription cancelled")
-                raise
-            except Exception as e:
-                if not self._running:
-                    break
-                logger.error(
-                    "Coordinator subscription error — retrying in %.0fs",
-                    delay,
-                    extra={"error": str(e)},
-                    exc_info=True,
-                )
-                # coordinator.start() sets _running=True early; reset via stop()
-                # so the next call to start() doesn't return "already running".
-                await self._coordinator.stop()
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, max_delay)
+        await run_coordinator(self)
 
     async def stop(self) -> None:
         """Stop the coordinator subscription service gracefully."""
-        if not self._running:
-            return
+        from syn_adapters.subscriptions.coordinator_helpers import stop_coordinator_service
 
-        logger.info("Stopping coordinator subscription service...")
-        self._running = False
-
-        if self._coordinator:
-            await self._coordinator.stop()
-
-        if self._subscription_task:
-            self._subscription_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._subscription_task
-
-        # Close database pool
-        if self._db_pool:
-            await self._db_pool.close()
-            logger.info("Checkpoint database pool closed")
-
-        logger.info("Coordinator subscription service stopped")
+        await stop_coordinator_service(self)
 
 
 

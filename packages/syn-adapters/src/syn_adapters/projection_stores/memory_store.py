@@ -9,6 +9,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from syn_adapters.projection_stores.memory_store_helpers import (
+    apply_filters,
+    apply_pagination,
+    apply_sorting,
+)
 from syn_shared.settings import get_settings
 
 
@@ -26,41 +31,6 @@ def _assert_test_environment() -> None:
             "For local development, use PostgresProjectionStore. "
             "Set APP_ENVIRONMENT=test to use in-memory storage for unit tests."
         )
-
-
-def _apply_filters(
-    results: list[dict[str, Any]], filters: dict[str, Any] | None
-) -> list[dict[str, Any]]:
-    """Filter results by matching all key-value pairs."""
-    if not filters:
-        return results
-    return [r for r in results if all(r.get(k) == v for k, v in filters.items())]
-
-
-def _apply_sorting(
-    results: list[dict[str, Any]], order_by: str | None
-) -> list[dict[str, Any]]:
-    """Sort results by field name, with optional '-' prefix for descending."""
-    if not order_by:
-        return results
-    descending = order_by.startswith("-")
-    field_name = order_by.lstrip("-")
-    return sorted(
-        results,
-        key=lambda x: (x.get(field_name) is None, x.get(field_name) or ""),
-        reverse=descending,
-    )
-
-
-def _apply_pagination(
-    results: list[dict[str, Any]], offset: int, limit: int | None
-) -> list[dict[str, Any]]:
-    """Apply offset and limit to results."""
-    if offset:
-        results = results[offset:]
-    if limit:
-        results = results[:limit]
-    return results
 
 
 @dataclass
@@ -124,9 +94,9 @@ class InMemoryProjectionStore:
             return []
 
         results = list(self._data[projection].values())
-        results = _apply_filters(results, filters)
-        results = _apply_sorting(results, order_by)
-        return _apply_pagination(results, offset, limit)
+        results = apply_filters(results, filters)
+        results = apply_sorting(results, order_by)
+        return apply_pagination(results, offset, limit)
 
     async def get_position(self, projection: str) -> int | None:
         """Get the last processed event position for a projection."""

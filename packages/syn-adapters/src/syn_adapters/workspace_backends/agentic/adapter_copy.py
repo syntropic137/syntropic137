@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from agentic_isolation import WorkspaceDockerProvider
+    from agentic_isolation import AgenticWorkspace, WorkspaceDockerProvider
 
     from syn_domain.contexts.orchestration.domain.aggregate_workspace.value_objects import (
         IsolationHandle,
@@ -136,3 +136,63 @@ async def copy_from_workspace(
         len(results), patterns, handle.isolation_id,
     )
     return results
+
+
+def check_workspace_health(
+    workspaces: dict[str, AgenticWorkspace],
+    handle: IsolationHandle,
+) -> bool:
+    """Check if workspace is healthy (present in active workspaces dict).
+
+    Args:
+        workspaces: Active workspaces keyed by isolation_id
+        handle: Handle from create()
+
+    Returns:
+        True if workspace is running
+    """
+    return handle.isolation_id in workspaces
+
+
+async def copy_files_to_workspace(
+    workspaces: dict[str, AgenticWorkspace],
+    provider: WorkspaceDockerProvider,
+    handle: IsolationHandle,
+    files: list[tuple[str, bytes]],
+    base_path: str = "/workspace",  # noqa: ARG001 - interface param
+) -> None:
+    """Copy files into workspace.
+
+    Args:
+        workspaces: Active workspaces keyed by isolation_id
+        provider: The workspace docker provider
+        handle: Handle from create()
+        files: List of (path, content) tuples
+        base_path: Base path (interface param, docker uses mounted volume)
+    """
+    workspace = workspaces.get(handle.isolation_id)
+    if workspace is None:
+        raise RuntimeError(f"Workspace not found: {handle.isolation_id}")
+
+    await copy_to_workspace(provider, workspace, files)
+
+
+async def copy_files_from_workspace(
+    handle: IsolationHandle,
+    patterns: list[str],
+    base_path: str = "/workspace",  # noqa: ARG001 - used for container path mapping
+) -> list[tuple[str, bytes]]:
+    """Copy files from workspace via mounted volume.
+
+    The Docker provider mounts the workspace directory, so files created
+    inside the container are accessible on the host at host_workspace_path.
+
+    Args:
+        handle: Handle from create()
+        patterns: Glob patterns to match (e.g., ["artifacts/output/**/*"])
+        base_path: Base path inside container (not used - we read from host mount)
+
+    Returns:
+        List of (relative_path, content) tuples for matching files
+    """
+    return await copy_from_workspace(handle, patterns)

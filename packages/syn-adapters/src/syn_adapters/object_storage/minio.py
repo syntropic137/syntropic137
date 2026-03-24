@@ -27,16 +27,17 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import io
 import logging
-import mimetypes
 from functools import partial
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from syn_adapters.object_storage.minio_helpers import (
+    do_download as _do_download,
+    do_upload as _do_upload,
     get_object_info as _get_object_info,
     get_presigned_url as _get_presigned_url,
+)
+from syn_adapters.object_storage.minio_queries import (
     list_objects as _list_objects,
 )
 from syn_adapters.object_storage.protocol import (
@@ -179,37 +180,11 @@ class MinioStorage:
         try:
             await self._ensure_bucket()
             client = self._get_client()
-
-            # Auto-detect content type if not provided
-            if content_type is None:
-                content_type, _ = mimetypes.guess_type(key)
-                content_type = content_type or "application/octet-stream"
-
             loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
+            return await loop.run_in_executor(
                 None,
-                partial(
-                    client.put_object,
-                    self._bucket_name,
-                    key,
-                    io.BytesIO(content),
-                    len(content),
-                    content_type=content_type,
-                    # Minio expects dict[str, str | list[str] | tuple[str]] but we only use str values
-                    metadata=cast("dict[str, Any]", metadata) if metadata else None,
-                ),
+                partial(_do_upload, client, self._bucket_name, key, content, content_type, metadata),
             )
-
-            # Compute ETag
-            etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-            return UploadResult(
-                key=key,
-                size_bytes=len(content),
-                etag=result.etag if hasattr(result, "etag") else etag,
-                url=None,  # MinIO doesn't provide public URLs by default
-            )
-
         except StorageConfigurationError:
             raise
         except Exception as e:
@@ -231,25 +206,14 @@ class MinioStorage:
         """
         try:
             client = self._get_client()
-
             loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
+            return await loop.run_in_executor(
                 None,
-                partial(client.get_object, self._bucket_name, key),
+                partial(_do_download, client, self._bucket_name, key),
             )
-
-            try:
-                return response.read()
-            finally:
-                response.close()
-                response.release_conn()
-
-        except StorageConfigurationError:
+        except (ObjectNotFoundError, StorageConfigurationError):
             raise
         except Exception as e:
-            error_msg = str(e).lower()
-            if "nosuchkey" in error_msg or "not found" in error_msg:
-                raise ObjectNotFoundError(key) from e
             logger.exception("Failed to download from MinIO: %s", key)
             raise DownloadError(f"Failed to download {key}: {e}", key=key) from e
 

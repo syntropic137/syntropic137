@@ -14,6 +14,15 @@ from typing import TYPE_CHECKING, Any
 
 import asyncpg
 
+from syn_adapters.conversations.minio_session import (
+    create_conversation_storage as _create_conversation_storage,
+)
+from syn_adapters.conversations.minio_session import get_session_metadata as _get_session_metadata
+from syn_adapters.conversations.minio_session import (
+    list_sessions_for_execution as _list_sessions_for_execution,
+)
+from syn_adapters.conversations.minio_session import retrieve_session as _retrieve_session
+
 if TYPE_CHECKING:
     from syn_adapters.conversations.protocol import SessionContext
 
@@ -176,20 +185,7 @@ class MinioConversationStorage:
         Returns:
             List of JSONL lines, or None if not found
         """
-        if not self._initialized:
-            await self.initialize()
-
-        object_key = f"sessions/{session_id}/conversation.jsonl"
-
-        try:
-            response = self._client.get_object(self.BUCKET_NAME, object_key)
-            content = response.read().decode("utf-8")
-            response.close()
-            response.release_conn()
-            return content.strip().split("\n")
-        except Exception as e:
-            logger.debug("Session not found: %s (%s)", session_id, e)
-            return None
+        return await _retrieve_session(self, session_id)
 
     async def get_session_metadata(
         self,
@@ -203,15 +199,7 @@ class MinioConversationStorage:
         Returns:
             Session metadata dict, or None if not found
         """
-        if not self._initialized:
-            await self.initialize()
-
-        if self._pool is None:
-            return None
-
-        from syn_adapters.conversations.minio_index import get_session_metadata
-
-        return await get_session_metadata(self._pool, session_id)
+        return await _get_session_metadata(self, session_id)
 
     async def list_sessions_for_execution(
         self,
@@ -225,15 +213,7 @@ class MinioConversationStorage:
         Returns:
             List of session IDs
         """
-        if not self._initialized:
-            await self.initialize()
-
-        if self._pool is None:
-            return []
-
-        from syn_adapters.conversations.minio_index import list_sessions_for_execution
-
-        return await list_sessions_for_execution(self._pool, execution_id)
+        return await _list_sessions_for_execution(self, execution_id)
 
 
 # Factory function for easy creation
@@ -256,26 +236,7 @@ async def create_conversation_storage(
     Returns:
         Initialized MinioConversationStorage
     """
-    from syn_shared.settings import get_settings
-
-    settings = get_settings()
-    storage_settings = settings.storage
-
-    storage = MinioConversationStorage(
-        endpoint=endpoint or storage_settings.minio_endpoint or "localhost:9000",
-        access_key=access_key or storage_settings.minio_access_key or "minioadmin",
-        secret_key=secret_key
-        or storage_settings.minio_secret_key.get_secret_value()
-        or "minioadmin",
-        db_url=db_url
-        or str(
-            settings.syn_observability_db_url
-            or "postgresql://syn:syn_dev_password@localhost:5432/syn"
-        ),
-        secure=storage_settings.minio_secure,
-    )
-    await storage.initialize()
-    return storage
+    return await _create_conversation_storage(endpoint, access_key, secret_key, db_url)
 
 
 # Singleton instance

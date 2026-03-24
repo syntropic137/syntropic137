@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from functools import partial
 from pathlib import Path  # noqa: TC003 - used at runtime
 from typing import TYPE_CHECKING
 
@@ -35,6 +36,27 @@ from syn_adapters.object_storage.protocol import (
 
 if TYPE_CHECKING:
     from syn_shared.settings.storage import StorageProvider
+
+
+def _sync_write_file(file_path: Path, content: bytes) -> None:
+    """Write bytes to a file, creating parent directories as needed."""
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_bytes(content)
+
+
+def _sync_read_file(file_path: Path, key: str) -> bytes:
+    """Read bytes from a file, raising ObjectNotFoundError if missing."""
+    if not file_path.exists():
+        raise ObjectNotFoundError(key)
+    return file_path.read_bytes()
+
+
+def _sync_delete_file(file_path: Path) -> bool:
+    """Delete a file; returns True if deleted, False if it did not exist."""
+    if not file_path.exists():
+        return False
+    file_path.unlink()
+    return True
 
 
 class LocalStorage:
@@ -115,25 +137,9 @@ class LocalStorage:
         """
         try:
             file_path = self._resolve_path(key)
-
-            # Create parent directories
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Write file in executor to avoid blocking
-            def write_file() -> None:
-                file_path.write_bytes(content)
-
-            await asyncio.get_event_loop().run_in_executor(None, write_file)
-
-            # Compute ETag (content hash)
+            await asyncio.get_event_loop().run_in_executor(None, partial(_sync_write_file, file_path, content))
             etag = hashlib.md5(content, usedforsecurity=False).hexdigest()
-
-            return UploadResult(
-                key=key,
-                size_bytes=len(content),
-                etag=etag,
-                url=f"file://{file_path}",
-            )
+            return UploadResult(key=key, size_bytes=len(content), etag=etag, url=f"file://{file_path}")
         except ValueError:
             raise
         except Exception as e:
@@ -153,15 +159,7 @@ class LocalStorage:
         """
         try:
             file_path = self._resolve_path(key)
-
-            if not file_path.exists():
-                raise ObjectNotFoundError(key)
-
-            # Read file in executor to avoid blocking
-            def read_file() -> bytes:
-                return file_path.read_bytes()
-
-            return await asyncio.get_event_loop().run_in_executor(None, read_file)
+            return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_read_file, file_path, key))
         except ObjectNotFoundError:
             raise
         except ValueError as e:
@@ -180,15 +178,7 @@ class LocalStorage:
         """
         try:
             file_path = self._resolve_path(key)
-
-            if not file_path.exists():
-                return False
-
-            def remove_file() -> None:
-                file_path.unlink()
-
-            await asyncio.get_event_loop().run_in_executor(None, remove_file)
-            return True
+            return await asyncio.get_event_loop().run_in_executor(None, partial(_sync_delete_file, file_path))
         except ValueError:
             return False
         except Exception:

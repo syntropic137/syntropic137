@@ -22,6 +22,13 @@ from event_sourcing import (
     ProjectionResult,
 )
 
+from syn_adapters.projections.trigger_query_helpers import (
+    NS_DELIVERIES,
+    NS_FIRE_RECORDS,
+    NS_TRIGGER_INDEX,
+    dispatch_trigger_event,
+)
+
 logger = logging.getLogger(__name__)
 
 _SUBSCRIBED_EVENTS = {
@@ -31,10 +38,6 @@ _SUBSCRIBED_EVENTS = {
     "github.TriggerDeleted",
     "github.TriggerFired",
 }
-
-NS_TRIGGER_INDEX = "trigger_index"
-NS_FIRE_RECORDS = "trigger_fire_records"
-NS_DELIVERIES = "trigger_deliveries"
 
 
 class TriggerQueryProjection(CheckpointedProjection):
@@ -91,13 +94,7 @@ class TriggerQueryProjection(CheckpointedProjection):
         self, event_type: str, envelope: EventEnvelope[Any]
     ) -> None:
         """Route an event to the appropriate handler."""
-        event_data = envelope.event.model_dump()
-        if event_type == "github.TriggerRegistered":
-            await self._on_trigger_registered(event_data)
-        elif event_type == "github.TriggerFired":
-            await self._on_trigger_fired(event_data, envelope)
-        elif event_type in self._STATUS_UPDATES:
-            await self._update_trigger_status(event_data, self._STATUS_UPDATES[event_type])
+        await dispatch_trigger_event(self, event_type, envelope)
 
     async def _save_checkpoint(
         self,
@@ -123,80 +120,33 @@ class TriggerQueryProjection(CheckpointedProjection):
             await self._store.delete_all(NS_DELIVERIES)
 
     async def _on_trigger_registered(self, data: dict[str, Any]) -> None:
-        trigger_id = data.get("trigger_id", "")
-        await self._store.save(
-            NS_TRIGGER_INDEX,
-            trigger_id,
-            {
-                "trigger_id": trigger_id,
-                "name": data.get("name", ""),
-                "event": data.get("event", ""),
-                "repository": data.get("repository", ""),
-                "workflow_id": data.get("workflow_id", ""),
-                "conditions": list(data.get("conditions", ())),
-                "input_mapping": data.get("input_mapping", {}),
-                "config": data.get("config", {}),
-                "installation_id": data.get("installation_id", ""),
-                "created_by": data.get("created_by", ""),
-                "status": "active",
-                "fire_count": 0,
-            },
-        )
+        from syn_adapters.projections.trigger_query_helpers import on_trigger_registered
+        await on_trigger_registered(self, data)
 
     async def _update_trigger_status(self, data: dict[str, Any], status: str) -> None:
         """Update a trigger's status in the index."""
-        trigger_id = data.get("trigger_id", "")
-        existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
-        if existing:
-            existing["status"] = status
-            await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
+        from syn_adapters.projections.trigger_query_helpers import update_trigger_status
+        await update_trigger_status(self, data, status)
 
     async def _on_trigger_fired(self, data: dict[str, Any], envelope: EventEnvelope[Any]) -> None:
-        trigger_id = data.get("trigger_id", "")
-        execution_id = data.get("execution_id", "")
-        delivery_id = data.get("webhook_delivery_id", "")
-        pr_number = data.get("pr_number")
-        fired_at = envelope.metadata.timestamp.isoformat()
-
-        await self._record_fire(trigger_id, execution_id, pr_number, fired_at)
-        await self._record_delivery(delivery_id, trigger_id, fired_at)
-        await self._increment_fire_count(trigger_id)
+        from syn_adapters.projections.trigger_query_helpers import on_trigger_fired
+        await on_trigger_fired(self, data, envelope)
 
     async def _record_fire(
         self, trigger_id: str, execution_id: str, pr_number: Any, fired_at: str
     ) -> None:
         """Record a fire event in the fire records namespace."""
-        fire_key = f"{trigger_id}#{execution_id}"
-        await self._store.save(
-            NS_FIRE_RECORDS,
-            fire_key,
-            {
-                "trigger_id": trigger_id,
-                "execution_id": execution_id,
-                "pr_number": str(pr_number) if pr_number is not None else "",
-                "fired_at": fired_at,
-            },
-        )
+        from syn_adapters.projections.trigger_query_helpers import record_fire
+        await record_fire(self, trigger_id, execution_id, pr_number, fired_at)
 
     async def _record_delivery(
         self, delivery_id: str, trigger_id: str, fired_at: str
     ) -> None:
         """Record delivery for idempotency (no-op if delivery_id is empty)."""
-        if not delivery_id:
-            return
-        await self._store.save(
-            NS_DELIVERIES,
-            delivery_id,
-            {
-                "delivery_id": delivery_id,
-                "trigger_id": trigger_id,
-                "processed_at": fired_at,
-            },
-        )
+        from syn_adapters.projections.trigger_query_helpers import record_delivery
+        await record_delivery(self, delivery_id, trigger_id, fired_at)
 
     async def _increment_fire_count(self, trigger_id: str) -> None:
         """Increment the fire count on the trigger index entry."""
-        existing = await self._store.get(NS_TRIGGER_INDEX, trigger_id)
-        if existing:
-            existing["fire_count"] = existing.get("fire_count", 0) + 1
-            await self._store.save(NS_TRIGGER_INDEX, trigger_id, existing)
+        from syn_adapters.projections.trigger_query_helpers import increment_fire_count
+        await increment_fire_count(self, trigger_id)

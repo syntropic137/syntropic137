@@ -11,6 +11,10 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
+from syn_adapters.events.buffer_add import (
+    add as _add_impl,
+    add_many as _add_many_impl,
+)
 from syn_adapters.events.buffer_flush import (
     flush_locked as _flush_locked_impl,
     get_event_buffer as get_event_buffer,
@@ -105,16 +109,7 @@ class EventBuffer:
             execution_id: Optional execution ID to add
             phase_id: Optional phase ID to add
         """
-        # Add context if provided
-        if execution_id:
-            event = {**event, "execution_id": execution_id}
-        if phase_id:
-            event = {**event, "phase_id": phase_id}
-
-        async with self._lock:
-            self._buffer.append(event)
-            if len(self._buffer) >= self._flush_size:
-                await self._flush_locked()
+        await _add_impl(self, event, execution_id, phase_id)
 
     async def add_many(
         self,
@@ -129,22 +124,7 @@ class EventBuffer:
             execution_id: Optional execution ID to add to all events
             phase_id: Optional phase ID to add to all events
         """
-        # Add context if provided
-        if execution_id or phase_id:
-            enriched_events = []
-            for event in events:
-                enriched = event.copy()
-                if execution_id:
-                    enriched["execution_id"] = execution_id
-                if phase_id:
-                    enriched["phase_id"] = phase_id
-                enriched_events.append(enriched)
-            events = enriched_events
-
-        async with self._lock:
-            self._buffer.extend(events)
-            while len(self._buffer) >= self._flush_size:
-                await self._flush_locked()
+        await _add_many_impl(self, events, execution_id, phase_id)
 
     async def flush(self) -> int:
         """Flush all buffered events to the store.

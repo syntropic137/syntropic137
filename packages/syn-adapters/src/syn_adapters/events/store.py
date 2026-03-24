@@ -16,32 +16,23 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC, datetime
 from typing import Any
 
 import asyncpg
-from pydantic import ValidationError
 
-from syn_adapters.events.models import AgentEvent
-from syn_adapters.events.queries import (
-    query_execution_events,
-    query_recent_by_types as _query_recent_by_types,
-    query_session_events,
-)
 from syn_adapters.events.schema import EventStoreSchema, SchemaValidationError  # noqa: F401
 from syn_adapters.events.store_helpers import (
     RESERVED_OBSERVATION_KEYS,
-    _build_copy_buffer,
     get_event_store as get_event_store,
+)
+from syn_adapters.events.store_write import (
+    EventValidationError,
+    insert_batch as _insert_batch,
+    insert_one as _insert_one,
+    record_observation as _record_observation,
 )
 
 logger = logging.getLogger(__name__)
-
-
-class EventValidationError(Exception):
-    """Raised when event data fails validation."""
-
-    pass
 
 
 class AgentEventStore:
@@ -114,32 +105,7 @@ class AgentEventStore:
         Returns:
             Number of events inserted
         """
-        if not events:
-            return 0
-
-        if not self._initialized:
-            await self.initialize()
-
-        if self.pool is None:
-            raise RuntimeError("AgentEventStore pool is not initialized")
-
-        buffer = _build_copy_buffer(events, execution_id, phase_id)
-
-        async with self.pool.acquire() as conn:
-            result = await conn.copy_to_table(
-                "agent_events",
-                source=buffer,
-                columns=["time", "event_type", "session_id", "execution_id", "phase_id", "data"],
-                format="text",
-            )
-
-        if isinstance(result, str) and result.startswith("COPY"):
-            count = int(result.split()[1])
-        else:
-            count = len(events)
-
-        logger.debug("Inserted %d events", count)
-        return count
+        return await _insert_batch(self, events, execution_id, phase_id)
 
     async def insert_one(
         self,
@@ -162,41 +128,7 @@ class AgentEventStore:
         Raises:
             EventValidationError: If event data fails validation
         """
-        if not self._initialized:
-            await self.initialize()
-
-        if self.pool is None:
-            raise RuntimeError("AgentEventStore pool is not initialized")
-
-        # Add context IDs if not present
-        if execution_id and "execution_id" not in event:
-            event["execution_id"] = execution_id
-        if phase_id and "phase_id" not in event:
-            event["phase_id"] = phase_id
-
-        # Validate through model (type-safe!)
-        try:
-            validated = AgentEvent.from_dict(event)
-        except ValidationError as e:
-            raise EventValidationError(f"Event validation failed: {e}") from e
-
-        # Get insert tuple from validated model
-        time, event_type, session_id, exec_id, ph_id, data_json = validated.to_insert_tuple()
-
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO agent_events
-                (time, event_type, session_id, execution_id, phase_id, data)
-                VALUES ($1, $2, $3, $4, $5, $6)
-                """,
-                time,
-                event_type,
-                session_id,
-                exec_id,
-                ph_id,
-                data_json,
-            )
+        await _insert_one(self, event, execution_id, phase_id)
 
     async def query(
         self,
@@ -216,6 +148,8 @@ class AgentEventStore:
         Returns:
             List of event dicts with 'time', 'event_type', 'session_id', etc.
         """
+        from syn_adapters.events.queries import query_session_events
+
         if not self._initialized:
             await self.initialize()
 
@@ -242,6 +176,8 @@ class AgentEventStore:
         Returns:
             List of event dicts
         """
+        from syn_adapters.events.queries import query_execution_events
+
         if not self._initialized:
             await self.initialize()
 
@@ -268,6 +204,8 @@ class AgentEventStore:
         Returns:
             List of event dicts ordered by time DESC.
         """
+        from syn_adapters.events.queries import query_recent_by_types as _query_recent_by_types
+
         if not self._initialized:
             await self.initialize()
 
@@ -303,26 +241,8 @@ class AgentEventStore:
             phase_id: Optional phase ID
             workspace_id: Optional workspace ID
         """
-        if conflicting := (data.keys() & self._RESERVED_OBSERVATION_KEYS):
-            logger.warning(
-                "record_observation(%s): data contains reserved keys %s — "
-                "they will be ignored to prevent event corruption. "
-                "Rename the field(s) in the caller.",
-                observation_type,
-                sorted(conflicting),
-            )
-        safe_data = {k: v for k, v in data.items() if k not in self._RESERVED_OBSERVATION_KEYS}
-        event = {
-            "event_type": observation_type,
-            "session_id": session_id,
-            "timestamp": datetime.now(UTC),
-            "workspace_id": workspace_id,
-            **safe_data,
-        }
-        await self.insert_one(
-            event=event,
-            execution_id=execution_id,
-            phase_id=phase_id,
+        await _record_observation(
+            self, session_id, observation_type, data, execution_id, phase_id, workspace_id
         )
 
     async def close(self) -> None:

@@ -111,53 +111,18 @@ class ProjectionManager:
         Raises:
             ValueError: If envelope is not from event store.
         """
-        # Validate provenance - ensures event came from event store
-        # O(1) check, ~50ns overhead - NOT a performance concern
-        provenance = EventProvenance.from_envelope(envelope)
+        from syn_adapters.projections.manager_dispatch import process_event_envelope
 
-        # Extract event data
-        event = envelope.event
-        if hasattr(event, "to_dict"):
-            event_data = event.to_dict()
-        elif hasattr(event, "model_dump"):
-            event_data = event.model_dump()
-        else:
-            event_data = vars(event) if hasattr(event, "__dict__") else {}
-
-        # Dispatch to handlers
-        await self._dispatch_to_handlers(provenance.event_type, event_data)
-
-        return provenance
+        return await process_event_envelope(self, envelope)
 
     async def _dispatch_to_handlers(self, event_type: str, event_data: dict) -> None:
         """Internal: Dispatch event data to projection handlers.
 
         DO NOT CALL DIRECTLY - use process_event_envelope() instead.
         """
-        self._ensure_initialized()
+        from syn_adapters.projections.manager_dispatch import dispatch_to_handlers
 
-        handlers = EVENT_HANDLERS.get(event_type, [])
-        if not handlers:
-            logger.debug("No handlers registered for event type: %s", event_type)
-
-        for projection_name, method_name in handlers:
-            projection = self._projections.get(projection_name)
-            if projection:
-                handler = getattr(projection, method_name, None)
-                if handler:
-                    try:
-                        await handler(event_data)
-                    except Exception as e:
-                        logger.error(
-                            "Error in projection handler",
-                            extra={
-                                "projection": projection_name,
-                                "method": method_name,
-                                "event_type": event_type,
-                                "error": str(e),
-                            },
-                            exc_info=True,
-                        )
+        await dispatch_to_handlers(self, event_type, event_data)
 
     async def dispatch_event(self, event_type: str, event_data: dict) -> None:
         """DEPRECATED: Use process_event_envelope() instead.
