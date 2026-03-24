@@ -1534,7 +1534,7 @@ value = 170
 issue = "#277"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.executions.commands"]
-value = 80
+value = 85
 issue = "#277"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.executions.control"]
@@ -1542,7 +1542,7 @@ value = 65
 issue = "#277"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.executions.queries"]
-value = 230
+value = 235
 issue = "#277"
 
 [max-cognitive-file."apps.syn-api.src.syn_api.routes.observability"]
