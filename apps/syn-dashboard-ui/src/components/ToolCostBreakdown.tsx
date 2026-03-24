@@ -9,6 +9,48 @@ interface ToolCostBreakdownProps {
   maxTools?: number
 }
 
+// Color palette for tool visualization (14 colors for good diversity)
+const TOOL_COLOR_PALETTE = [
+  'bg-blue-500',
+  'bg-green-500',
+  'bg-orange-500',
+  'bg-purple-500',
+  'bg-pink-500',
+  'bg-cyan-500',
+  'bg-indigo-500',
+  'bg-yellow-500',
+  'bg-red-500',
+  'bg-teal-500',
+  'bg-lime-500',
+  'bg-amber-500',
+  'bg-fuchsia-500',
+  'bg-rose-500',
+]
+
+// Semantic color overrides for specific tools (intuitive associations)
+const SEMANTIC_TOOL_COLORS: Record<string, string> = {
+  Delete: 'bg-red-500',
+  Read: 'bg-green-500',
+  Write: 'bg-blue-500',
+}
+
+// Hash function for consistent color assignment
+function hashStringToIndex(str: string, mod: number): number {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff
+  }
+  return Math.abs(hash) % mod
+}
+
+// Get tool color - semantic override or hash-based
+function getToolColor(toolName: string): string {
+  return (
+    SEMANTIC_TOOL_COLORS[toolName] ??
+    TOOL_COLOR_PALETTE[hashStringToIndex(toolName, TOOL_COLOR_PALETTE.length)]
+  )
+}
+
 /**
  * Component to display per-tool token and cost breakdown.
  *
@@ -32,48 +74,6 @@ export function ToolCostBreakdown({
 
   // Calculate max for bar width percentage
   const maxTokens = Math.max(...sortedTools.map(([, tokens]) => tokens))
-
-  // Color palette for tool visualization (14 colors for good diversity)
-  const TOOL_COLOR_PALETTE = [
-    'bg-blue-500',
-    'bg-green-500',
-    'bg-orange-500',
-    'bg-purple-500',
-    'bg-pink-500',
-    'bg-cyan-500',
-    'bg-indigo-500',
-    'bg-yellow-500',
-    'bg-red-500',
-    'bg-teal-500',
-    'bg-lime-500',
-    'bg-amber-500',
-    'bg-fuchsia-500',
-    'bg-rose-500',
-  ]
-
-  // Semantic color overrides for specific tools (intuitive associations)
-  const SEMANTIC_TOOL_COLORS: Record<string, string> = {
-    Delete: 'bg-red-500',
-    Read: 'bg-green-500',
-    Write: 'bg-blue-500',
-  }
-
-  // Hash function for consistent color assignment
-  const hashStringToIndex = (str: string, mod: number): number => {
-    let hash = 0
-    for (let i = 0; i < str.length; i++) {
-      hash = (hash * 31 + str.charCodeAt(i)) & 0xffffffff
-    }
-    return Math.abs(hash) % mod
-  }
-
-  // Get tool color - semantic override or hash-based
-  const getToolColor = (toolName: string): string => {
-    return (
-      SEMANTIC_TOOL_COLORS[toolName] ??
-      TOOL_COLOR_PALETTE[hashStringToIndex(toolName, TOOL_COLOR_PALETTE.length)]
-    )
-  }
 
   return (
     <div className={clsx('space-y-3', className)}>

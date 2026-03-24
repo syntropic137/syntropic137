@@ -1,9 +1,8 @@
 import { ChevronRight, FileCode, FileText, Image, Search } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 
-import { listArtifacts } from '../api/client'
 import { Card, CardContent, EmptyState, PageLoader } from '../components'
+import { useArtifactList } from '../hooks/useArtifactList'
 import type { ArtifactSummary } from '../types'
 
 const artifactIcons: Record<string, typeof FileText> = {
@@ -20,39 +19,53 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function ArtifactCard({ artifact, idx }: { artifact: ArtifactSummary; idx: number }) {
+  const Icon = artifactIcons[artifact.artifact_type] ?? FileText
+
+  return (
+    <Link
+      to={`/artifacts/${artifact.id}`}
+      className="animate-fade-in"
+      style={{ animationDelay: `${idx * 20}ms` }}
+    >
+      <Card hover className="h-full">
+        <CardContent className="flex flex-col h-full">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface-elevated)]">
+              <Icon className="h-5 w-5 text-amber-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
+                {artifact.title || `Artifact ${artifact.id.slice(0, 8)}`}
+              </p>
+              <p className="text-xs text-[var(--color-text-muted)]">
+                {artifact.artifact_type} &bull; {formatSize(artifact.size_bytes)}
+              </p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-[var(--color-text-muted)] flex-shrink-0" />
+          </div>
+          <div className="mt-3 flex items-center gap-3 text-xs text-[var(--color-text-secondary)]">
+            {artifact.workflow_id && <span>wf:{artifact.workflow_id.slice(0, 8)}</span>}
+            {artifact.phase_id && <span>{artifact.phase_id}</span>}
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
+  )
+}
+
 export function ArtifactList() {
-  const [searchParams] = useSearchParams()
-  const workflowIdFilter = searchParams.get('workflow_id') ?? ''
-  const phaseIdFilter = searchParams.get('phase_id') ?? ''
-
-  const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([])
-  const [loading, setLoading] = useState(true)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState<string>('')
-
-  useEffect(() => {
-    let cancelled = false
-    listArtifacts({
-      workflow_id: workflowIdFilter || undefined,
-      phase_id: phaseIdFilter || undefined,
-      artifact_type: typeFilter || undefined,
-      limit: 100,
-    })
-      .then((data) => { if (!cancelled) { setArtifacts(data); setLoading(false) } })
-      .catch((err) => { if (!cancelled) { console.error(err); setLoading(false) } })
-    return () => { cancelled = true }
-  }, [workflowIdFilter, phaseIdFilter, typeFilter])
-
-  const filteredArtifacts = searchQuery
-    ? artifacts.filter((a) =>
-        a.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.title?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : artifacts
+  const {
+    filteredArtifacts,
+    loading,
+    searchQuery,
+    setSearchQuery,
+    typeFilter,
+    setTypeFilter,
+  } = useArtifactList()
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">Artifacts</h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
@@ -60,7 +73,6 @@ export function ArtifactList() {
         </p>
       </div>
 
-      {/* Filters */}
       <div className="flex items-center gap-4">
         <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-text-muted)]" />
@@ -87,7 +99,6 @@ export function ArtifactList() {
         </select>
       </div>
 
-      {/* Artifact grid */}
       {loading ? (
         <PageLoader />
       ) : filteredArtifacts.length === 0 ? (
@@ -104,43 +115,9 @@ export function ArtifactList() {
         </Card>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredArtifacts.map((artifact, idx) => {
-            const Icon = artifactIcons[artifact.artifact_type] ?? FileText
-
-            return (
-              <Link
-                key={artifact.id}
-                to={`/artifacts/${artifact.id}`}
-                className="animate-fade-in"
-                style={{ animationDelay: `${idx * 20}ms` }}
-              >
-                <Card hover className="h-full">
-                  <CardContent className="flex flex-col h-full">
-                    <div className="flex items-start gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--color-surface-elevated)]">
-                        <Icon className="h-5 w-5 text-amber-400" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[var(--color-text-primary)] truncate">
-                          {artifact.title || `Artifact ${artifact.id.slice(0, 8)}`}
-                        </p>
-                        <p className="text-xs text-[var(--color-text-muted)]">
-                          {artifact.artifact_type} • {formatSize(artifact.size_bytes)}
-                        </p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-[var(--color-text-muted)] flex-shrink-0" />
-                    </div>
-                    <div className="mt-3 flex items-center gap-3 text-xs text-[var(--color-text-secondary)]">
-                      {artifact.workflow_id && (
-                        <span>wf:{artifact.workflow_id.slice(0, 8)}</span>
-                      )}
-                      {artifact.phase_id && <span>{artifact.phase_id}</span>}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            )
-          })}
+          {filteredArtifacts.map((artifact, idx) => (
+            <ArtifactCard key={artifact.id} artifact={artifact} idx={idx} />
+          ))}
         </div>
       )}
     </div>
