@@ -16,6 +16,13 @@ NS_TRIGGER_INDEX = "trigger_index"
 NS_FIRE_RECORDS = "trigger_fire_records"
 NS_DELIVERIES = "trigger_deliveries"
 
+# Status-update events: event_type -> new status value
+_STATUS_UPDATES: dict[str, str] = {
+    "github.TriggerPaused": "paused",
+    "github.TriggerResumed": "active",
+    "github.TriggerDeleted": "deleted",
+}
+
 
 async def dispatch_trigger_event(
     proj: TriggerQueryProjection, event_type: str, envelope: EventEnvelope[Any]
@@ -26,8 +33,8 @@ async def dispatch_trigger_event(
         await on_trigger_registered(proj, event_data)
     elif event_type == "github.TriggerFired":
         await on_trigger_fired(proj, event_data, envelope)
-    elif event_type in proj._STATUS_UPDATES:
-        await update_trigger_status(proj, event_data, proj._STATUS_UPDATES[event_type])
+    elif event_type in _STATUS_UPDATES:
+        await update_trigger_status(proj, event_data, _STATUS_UPDATES[event_type])
 
 
 async def on_trigger_registered(proj: TriggerQueryProjection, data: dict[str, Any]) -> None:
