@@ -4,6 +4,52 @@ import { CheckCircle2, ChevronDown, ChevronRight, Copy, Wrench } from 'lucide-re
 import type { ConversationLogResponse } from '../../api/observability'
 import { conversationEventColors } from './sessionConstants'
 
+type LogLine = ConversationLogResponse['lines'][number]
+
+function tryFormatJson(raw: string, parsed: Record<string, unknown> | null): string {
+  if (parsed) return JSON.stringify(parsed, null, 2)
+  try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
+}
+
+function CopyButton({
+  line,
+  copiedLine,
+  onCopy,
+}: {
+  line: LogLine
+  copiedLine: number | null
+  onCopy: (text: string, lineNumber: number) => void
+}) {
+  const isCopied = copiedLine === line.line_number
+
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+        onCopy(tryFormatJson(line.raw, line.parsed), line.line_number)
+      }}
+      className={clsx(
+        'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+        isCopied
+          ? 'bg-emerald-500/20 text-emerald-400'
+          : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-accent)] hover:text-white',
+      )}
+    >
+      {isCopied ? (
+        <>
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          Copied!
+        </>
+      ) : (
+        <>
+          <Copy className="h-3.5 w-3.5" />
+          Copy
+        </>
+      )}
+    </button>
+  )
+}
+
 export function ConversationLogLine({
   line,
   isExpanded,
@@ -11,7 +57,7 @@ export function ConversationLogLine({
   onToggle,
   onCopy,
 }: {
-  line: ConversationLogResponse['lines'][number]
+  line: LogLine
   isExpanded: boolean
   copiedLine: number | null
   onToggle: (lineNumber: number) => void
@@ -55,41 +101,10 @@ export function ConversationLogLine({
       {isExpanded && (
         <div className="border-t border-[var(--color-border)] p-4">
           <div className="flex justify-end mb-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                let parsed = line.parsed
-                if (!parsed) {
-                  try { parsed = JSON.parse(line.raw) } catch { parsed = null }
-                }
-                const content = parsed ? JSON.stringify(parsed, null, 2) : line.raw
-                onCopy(content, line.line_number)
-              }}
-              className={clsx(
-                'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
-                copiedLine === line.line_number
-                  ? 'bg-emerald-500/20 text-emerald-400'
-                  : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-accent)] hover:text-white',
-              )}
-            >
-              {copiedLine === line.line_number ? (
-                <>
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy
-                </>
-              )}
-            </button>
+            <CopyButton line={line} copiedLine={copiedLine} onCopy={onCopy} />
           </div>
           <pre className="max-h-96 overflow-auto whitespace-pre-wrap font-mono text-xs text-[var(--color-text-secondary)]">
-            {(() => {
-              if (line.parsed) return JSON.stringify(line.parsed, null, 2)
-              try { return JSON.stringify(JSON.parse(line.raw), null, 2) } catch { return line.raw }
-            })()}
+            {tryFormatJson(line.raw, line.parsed)}
           </pre>
         </div>
       )}
