@@ -124,32 +124,6 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-# --- syn-domain: orchestration (ISS-318: EventStreamProcessor) ---
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor::process_stream"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor::_track_subagent_from_hook"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
-value = 25
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor::_save_and_sync"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector::inject_from_previous_phases"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector::inject_from_previous_phases_explicit"]
-value = 20
-issue = "#318"
-
 [max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection::on_phase_completed"]
 value = 20
 issue = "#320"
@@ -510,10 +484,6 @@ issue = "#320"
 value = 15
 issue = "#320"
 
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
-value = 15
-issue = "#318"
-
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.claude_complete::complete_request"]
 value = 15
 issue = "#320"
@@ -578,14 +548,3 @@ issue = "#315"
 value = 845
 issue = "#320"
 
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 1360
-issue = "#318"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector"]
-value = 765
-issue = "#318"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor"]
-value = 1100
-issue = "#318"
