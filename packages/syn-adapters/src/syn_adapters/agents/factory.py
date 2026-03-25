@@ -6,6 +6,8 @@ Supports automatic selection of available agents.
 
 from __future__ import annotations
 
+from pydantic import SecretStr
+
 from syn_adapters.agents.protocol import (
     AgentError,
     AgentProtocol,
@@ -45,6 +47,11 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
     raise AgentError(msg, AgentProvider.MOCK)
 
 
+def _has_secret(val: SecretStr | None) -> bool:
+    """Check if a SecretStr has a non-empty value."""
+    return val is not None and bool(val.get_secret_value())
+
+
 def _create_mock() -> AgentProtocol:
     """Create a mock agent instance."""
     from syn_adapters.agents.mock import MockAgent
@@ -70,7 +77,7 @@ def _auto_select() -> AgentProtocol:
     """Auto-select the best available agent provider."""
     settings = get_settings()
 
-    if settings.claude_code_oauth_token or settings.anthropic_api_key:
+    if _has_secret(settings.claude_code_oauth_token) or _has_secret(settings.anthropic_api_key):
         from syn_adapters.agents.claude import ClaudeAgent
 
         claude_agent = ClaudeAgent()
@@ -98,7 +105,7 @@ def get_available_agents() -> list[AgentProvider]:
     settings = get_settings()
     available: list[AgentProvider] = []
 
-    if settings.claude_code_oauth_token or settings.anthropic_api_key:
+    if _has_secret(settings.claude_code_oauth_token) or _has_secret(settings.anthropic_api_key):
         available.append(AgentProvider.CLAUDE)
 
     # Mock is always available in test mode

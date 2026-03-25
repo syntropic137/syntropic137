@@ -134,16 +134,18 @@ class GetSystemPatternsHandler:
         if med <= 0:
             return []
 
-        outliers = [
-            CostOutlier(
-                repo_full_name=repo_name,
-                cost_usd=cost,
-                median_cost_usd=med,
-                deviation_factor=float(cost / med),
-            )
-            for repo_name, cost in costs
-            if float(cost / med) > 3.0
-        ]
+        outliers = []
+        for repo_name, cost in costs:
+            factor = float(cost / med)
+            if factor > 3.0:
+                outliers.append(
+                    CostOutlier(
+                        repo_full_name=repo_name,
+                        cost_usd=cost,
+                        median_cost_usd=med,
+                        deviation_factor=factor,
+                    )
+                )
         return sorted(outliers, key=lambda o: o.deviation_factor, reverse=True)
 
     async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:

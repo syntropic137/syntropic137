@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import SecretStr
+
 from syn_api.types import (
     ConfigError,
     ConfigIssue,
@@ -61,11 +63,18 @@ LOG_FORMAT=json
 """
 
 
-def _mask_secret(val: object, *, show: bool) -> str:
-    """Mask a secret value, showing only the first 4 characters."""
+def _secret_value(val: SecretStr | str | None) -> str:
+    """Extract the plain string from a SecretStr or plain value."""
     if val is None:
         return ""
-    s = str(val)
+    if isinstance(val, SecretStr):
+        return val.get_secret_value()
+    return str(val)
+
+
+def _mask_secret(val: SecretStr | str | None, *, show: bool) -> str:
+    """Mask a secret value, showing only the first 4 characters."""
+    s = _secret_value(val)
     if not s:
         return ""
     if show:
@@ -73,9 +82,10 @@ def _mask_secret(val: object, *, show: bool) -> str:
     return s[:4] + "****" if len(s) > 4 else "****"
 
 
-def _mask_optional(val: object, *, show: bool) -> str:
+def _mask_optional(val: SecretStr | str | None, *, show: bool) -> str:
     """Mask an optional secret — return empty string when unset."""
-    if not val:
+    s = _secret_value(val)
+    if not s:
         return ""
     return _mask_secret(val, show=show)
 
@@ -159,7 +169,8 @@ async def get_config(
 
 def _validate_agent_keys(settings: object) -> list[ConfigIssue]:
     """Check agent API key configuration."""
-    if not settings.anthropic_api_key:  # type: ignore[attr-defined]
+    api_key: SecretStr | None = settings.anthropic_api_key  # type: ignore[attr-defined]
+    if not api_key or not api_key.get_secret_value():
         return [
             ConfigIssue(
                 level="warning",
