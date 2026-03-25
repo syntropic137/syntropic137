@@ -394,15 +394,7 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
-value = 20
-issue = "#320"
-
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/ConversationLogViewer::ConversationLogViewer"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/OperationDetails::OperationDetails"]
 value = 20
 issue = "#320"
 
@@ -414,15 +406,7 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowExecutionForm::WorkflowExecutionForm"]
-value = 20
-issue = "#320"
-
 [max-cognitive."tsx:apps/syn-docs/components/hero/NetworkNodes::NetworkNodes"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-pulse-ui/src/components/FilterBar::FilterBar"]
 value = 20
 issue = "#320"
 
@@ -566,26 +550,3 @@ issue = "#320"
 # Maximum LOC (file-level, threshold: 750)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-[max-loc-file."apps.syn-api.src.syn_api.routes.repos"]
-value = 825
-issue = "#320"
-
-[max-loc-file."apps.syn-api.src.syn_api.routes.webhooks"]
-value = 775
-issue = "#315"
-
-[max-loc-file."apps.syn-api.src.syn_api.routes.systems"]
-value = 845
-issue = "#320"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor"]
-value = 1360
-issue = "#318"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector"]
-value = 765
-issue = "#318"
-
-[max-loc-file."packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor"]
-value = 1100
-issue = "#318"
