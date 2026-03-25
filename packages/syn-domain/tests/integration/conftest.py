@@ -21,6 +21,8 @@ from uuid import uuid4
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from event_sourcing import EventStoreRepository, GrpcEventStoreClient, RepositoryFactory
 
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
@@ -36,17 +38,26 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-async def grpc_client(test_infrastructure) -> GrpcEventStoreClient:
+async def grpc_client(test_infrastructure) -> AsyncGenerator[GrpcEventStoreClient]:
     """Create gRPC client using shared test infrastructure.
 
     Note: scope="function" due to pytest-asyncio event loop constraints.
     Each test gets a fresh connection.
 
-    If event store is unavailable, the test will fail with a clear connection error.
+    Skips the test if the event store is not reachable (e.g. container not
+    published yet — TODO(#62)).
     """
+    from syn_tests.fixtures.infrastructure import _check_port_open
+
+    host = test_infrastructure.eventstore_host
+    port = test_infrastructure.eventstore_port
+
+    if port == 0 or not _check_port_open(host, port):
+        pytest.skip(f"Event store not available at {host}:{port} (TODO(#62))")
+
     from event_sourcing import GrpcEventStoreClient
 
-    address = f"{test_infrastructure.eventstore_host}:{test_infrastructure.eventstore_port}"
+    address = f"{host}:{port}"
     client = GrpcEventStoreClient(address=address)
     await client.connect()
     yield client
