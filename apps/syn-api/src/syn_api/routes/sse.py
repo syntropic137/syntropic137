@@ -67,15 +67,21 @@ _SSE_HEADERS = {
 # ---------------------------------------------------------------------------
 
 _KEEPALIVE = ": keepalive\n\n"
-_SENTINEL = object()
 
 
-async def _next_frame(queue: SSEQueue) -> SSEEventFrame | None | object:
-    """Read next frame, returning ``_SENTINEL`` on keepalive timeout."""
+class _KeepAlive:
+    """Typed sentinel returned by ``_next_frame`` on keepalive timeout."""
+
+
+_KEEPALIVE_SENTINEL = _KeepAlive()
+
+
+async def _next_frame(queue: SSEQueue) -> SSEEventFrame | None | _KeepAlive:
+    """Read next frame, returning ``_KEEPALIVE_SENTINEL`` on timeout."""
     try:
         return await asyncio.wait_for(queue.get(), timeout=30.0)
     except TimeoutError:
-        return _SENTINEL
+        return _KEEPALIVE_SENTINEL
 
 
 def _handshake_line(execution_id: str | None, data: dict[str, JsonValue]) -> str:
@@ -96,12 +102,12 @@ async def _stream_frames(request: Request, queue: SSEQueue) -> AsyncGenerator[st
     """Yield SSE data lines from *queue* until disconnect or terminal sentinel."""
     while not await request.is_disconnected():
         result = await _next_frame(queue)
-        if result is _SENTINEL:
+        if isinstance(result, _KeepAlive):
             yield _KEEPALIVE
         elif result is None:
             return
         else:
-            yield f"data: {result.model_dump_json()}\n\n"  # type: ignore[union-attr]
+            yield f"data: {result.model_dump_json()}\n\n"
 
 
 async def _sse_stream(
