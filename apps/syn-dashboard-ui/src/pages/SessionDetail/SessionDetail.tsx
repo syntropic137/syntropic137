@@ -40,13 +40,10 @@ function SessionErrorCard({ message }: { message: string }) {
   )
 }
 
-export function SessionDetail() {
-  const { sessionId } = useParams<{ sessionId: string }>()
-  const { session, loading, error, now, showConversationLog, setShowConversationLog } =
-    useSessionData(sessionId)
-
+function useScrollAnchor(dependency: number | undefined) {
   const timelineRef = useRef<HTMLDivElement>(null)
   const prevScrollHeightRef = useRef(0)
+
   useLayoutEffect(() => {
     const el = timelineRef.current
     if (!el) return
@@ -54,10 +51,36 @@ export function SessionDetail() {
     const currentHeight = el.scrollHeight
     prevScrollHeightRef.current = currentHeight
     const heightDiff = currentHeight - prevHeight
-    if (prevHeight > 0 && heightDiff > 0 && window.scrollY > 50) {
+    const shouldScroll = prevHeight > 0 && heightDiff > 0 && window.scrollY > 50
+    if (shouldScroll) {
       window.scrollBy({ top: heightDiff, behavior: 'auto' })
     }
-  }, [session?.operations?.length])
+  }, [dependency])
+
+  return timelineRef
+}
+
+function SubagentsSection({ subagents }: { subagents: SessionResponse['subagents'] }) {
+  const list = subagents ?? []
+  if (list.length === 0) return null
+  return (
+    <Card>
+      <CardHeader
+        title="Subagents"
+        subtitle={`${list.length} subagents spawned via Task tool`}
+      />
+      <CardContent>
+        <SubagentList subagents={list} title="" />
+      </CardContent>
+    </Card>
+  )
+}
+
+export function SessionDetail() {
+  const { sessionId } = useParams<{ sessionId: string }>()
+  const { session, loading, error, now, showConversationLog, setShowConversationLog } =
+    useSessionData(sessionId)
+  const timelineRef = useScrollAnchor(session?.operations?.length)
 
   if (loading) return <PageLoader />
 
@@ -85,17 +108,7 @@ export function SessionDetail() {
 
       {session.error_message && <SessionErrorCard message={session.error_message} />}
 
-      {(session.subagents?.length ?? 0) > 0 && (
-        <Card>
-          <CardHeader
-            title="Subagents"
-            subtitle={`${session.subagents?.length ?? 0} subagents spawned via Task tool`}
-          />
-          <CardContent>
-            <SubagentList subagents={session.subagents ?? []} title="" />
-          </CardContent>
-        </Card>
-      )}
+      <SubagentsSection subagents={session.subagents} />
 
       <OperationTimeline ref={timelineRef} operations={session.operations} />
     </div>

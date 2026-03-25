@@ -63,25 +63,36 @@ def row_to_subagent_operation(row: Any, data: dict[str, Any], event_type: str) -
     )
 
 
+def _resolve_git_branch(data: dict[str, Any], event_type: str) -> str | None:
+    """Extract the git branch from event data, falling back to command parsing."""
+    branch = data.get("branch") or data.get("to_branch") or None
+    if branch or event_type != "git_operation":
+        return branch
+    cmd = data.get("command", "")
+    _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
+    return _m.group(1) if _m else None
+
+
+def _resolve_git_sha(data: dict[str, Any]) -> str | None:
+    """Extract git SHA from event data, trying multiple field names."""
+    return data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None
+
+
+def _resolve_git_message(data: dict[str, Any]) -> str | None:
+    """Extract git commit message from event data, trying multiple field names."""
+    return data.get("message") or data.get("message_preview") or data.get("commit_message") or None
+
+
 def row_to_git_operation(row: Any, data: dict[str, Any], event_type: str) -> ToolOperation:
     """Convert a git event row into a ToolOperation."""
     from syn_adapters.projections.session_tools import ToolOperation
 
-    obs_id = f"git-{event_type}-{row['time'].isoformat()}"
     git_subcmd = data.get("operation", "")
-    git_branch = data.get("branch") or data.get("to_branch") or None
-
-    if not git_branch and event_type == "git_operation":
-        cmd = data.get("command", "")
-        _m = _re.search(r"git\s+checkout\s+(?:-b\s+)?(\S+)", cmd)
-        if _m:
-            git_branch = _m.group(1)
-
     if event_type == GIT_REWRITE and not git_subcmd:
         git_subcmd = data.get("operation", "rebase")
 
     return ToolOperation(
-        observation_id=obs_id,
+        observation_id=f"git-{event_type}-{row['time'].isoformat()}",
         tool_name=git_subcmd,
         tool_use_id=None,
         operation_type=event_type,
@@ -90,11 +101,8 @@ def row_to_git_operation(row: Any, data: dict[str, Any], event_type: str) -> Too
         input_preview=None,
         output_preview=None,
         duration_ms=None,
-        git_sha=data.get("sha") or data.get("commit_hash") or data.get("merge_sha") or None,
-        git_message=data.get("message")
-        or data.get("message_preview")
-        or data.get("commit_message")
-        or None,
-        git_branch=git_branch,
+        git_sha=_resolve_git_sha(data),
+        git_message=_resolve_git_message(data),
+        git_branch=_resolve_git_branch(data, event_type),
         git_repo=data.get("repo") or None,
     )

@@ -37,6 +37,33 @@ export interface FilterOptions {
   colorOverrides?: Record<string, string>;
 }
 
+function filterModules(
+  modules: ModuleMetric[],
+  excludePrefixes: string[],
+  minLoc: number,
+): Map<string, ModuleMetric> {
+  const moduleMap = new Map<string, ModuleMetric>();
+  for (const m of modules) {
+    if (excludePrefixes.some((p) => m.id.startsWith(p))) continue;
+    if (m.metrics.lines_of_code < minLoc) continue;
+    moduleMap.set(m.id, m);
+  }
+  return moduleMap;
+}
+
+function toTopoNode(id: string, m: ModuleMetric, colorOverrides?: Record<string, string>): TopoNode {
+  return {
+    id,
+    name: shortName(id),
+    loc: m.metrics.lines_of_code,
+    color: getContextColor(id, colorOverrides),
+    context: inferContext(id),
+    functionCount: m.metrics.function_count,
+    avgCyclomatic: m.metrics.avg_cyclomatic,
+    instability: m.metrics.martin?.instability ?? 0.5,
+  };
+}
+
 export function buildTopologyGraph(
   modules: ModuleMetric[],
   edges: DependencyEdge[],
@@ -48,27 +75,13 @@ export function buildTopologyGraph(
     colorOverrides,
   } = options;
 
-  const moduleMap = new Map<string, ModuleMetric>();
-  for (const m of modules) {
-    if (excludePrefixes.some((p) => m.id.startsWith(p))) continue;
-    if (m.metrics.lines_of_code < minLoc) continue;
-    moduleMap.set(m.id, m);
-  }
+  const moduleMap = filterModules(modules, excludePrefixes, minLoc);
 
   const nodes: TopoNode[] = [];
   const nodeIds = new Set<string>();
   for (const [id, m] of moduleMap) {
     nodeIds.add(id);
-    nodes.push({
-      id,
-      name: shortName(id),
-      loc: m.metrics.lines_of_code,
-      color: getContextColor(id, colorOverrides),
-      context: inferContext(id),
-      functionCount: m.metrics.function_count,
-      avgCyclomatic: m.metrics.avg_cyclomatic,
-      instability: m.metrics.martin?.instability ?? 0.5,
-    });
+    nodes.push(toTopoNode(id, m, colorOverrides));
   }
 
   const links: TopoLink[] = [];

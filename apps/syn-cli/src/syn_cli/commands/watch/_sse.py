@@ -11,6 +11,25 @@ from syn_cli.client import get_api_url, get_streaming_client
 from syn_cli.commands.watch._render import app, parse_sse_line, render_event
 
 
+def _handle_frame(
+    frame: dict[str, Any],
+    connected_msg: str,
+    *,
+    handle_terminal: bool,
+) -> bool:
+    """Handle a single SSE frame. Returns True if the stream should stop."""
+    frame_type = str(frame.get("type", ""))
+    if frame_type == "connected":
+        console.print(f"[green]{connected_msg}[/green]")
+    elif frame_type == "terminal" and handle_terminal:
+        render_event(frame)
+        console.print("[dim]Stream ended.[/dim]")
+        return True
+    elif frame_type == "event":
+        render_event(frame)
+    return False
+
+
 def _process_sse_lines(response: Any, connected_msg: str, *, handle_terminal: bool) -> None:
     """Process SSE lines from a streaming response."""
     for line in response.iter_lines():
@@ -19,15 +38,17 @@ def _process_sse_lines(response: Any, connected_msg: str, *, handle_terminal: bo
         frame = parse_sse_line(line)
         if frame is None:
             continue
-        frame_type = str(frame.get("type", ""))
-        if frame_type == "connected":
-            console.print(f"[green]{connected_msg}[/green]")
-        elif frame_type == "terminal" and handle_terminal:
-            render_event(frame)
-            console.print("[dim]Stream ended.[/dim]")
+        if _handle_frame(frame, connected_msg, handle_terminal=handle_terminal):
             return
-        elif frame_type == "event":
-            render_event(frame)
+
+
+def _check_sse_response(response: Any, url: str) -> None:
+    """Validate SSE response status, raising typer.Exit on failure."""
+    if response.status_code == 200:
+        return
+    msg = f"Not found: {url}" if response.status_code == 404 else f"HTTP {response.status_code}"
+    print_error(msg)
+    raise typer.Exit(1)
 
 
 def _stream_sse(
@@ -44,14 +65,7 @@ def _stream_sse(
 
     try:
         with get_streaming_client() as client, client.stream("GET", url) as response:
-            if response.status_code not in (200,):
-                msg = (
-                    f"Not found: {url}"
-                    if response.status_code == 404
-                    else f"HTTP {response.status_code}"
-                )
-                print_error(msg)
-                raise typer.Exit(1)
+            _check_sse_response(response, url)
             _process_sse_lines(response, connected_msg, handle_terminal=handle_terminal)
     except KeyboardInterrupt:
         console.print("\n[dim]Stopped.[/dim]")

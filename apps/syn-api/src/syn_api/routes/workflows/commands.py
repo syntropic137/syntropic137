@@ -25,6 +25,66 @@ from syn_api.types import (
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
+        PhaseDefinition,
+        WorkflowClassification,
+        WorkflowType,
+    )
+
+
+def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
+    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
+        WorkflowType,
+    )
+
+    type_map: dict[str, WorkflowType] = {
+        "research": WorkflowType.RESEARCH,
+        "planning": WorkflowType.PLANNING,
+        "implementation": WorkflowType.IMPLEMENTATION,
+        "review": WorkflowType.REVIEW,
+        "deployment": WorkflowType.DEPLOYMENT,
+        "custom": WorkflowType.CUSTOM,
+    }
+    return type_map.get(workflow_type.lower(), WorkflowType.CUSTOM)
+
+
+def _resolve_classification(classification: str) -> WorkflowClassification:
+    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
+        WorkflowClassification,
+    )
+
+    classification_map: dict[str, WorkflowClassification] = {
+        "simple": WorkflowClassification.SIMPLE,
+        "standard": WorkflowClassification.STANDARD,
+        "complex": WorkflowClassification.COMPLEX,
+        "epic": WorkflowClassification.EPIC,
+    }
+    return classification_map.get(classification.lower(), WorkflowClassification.STANDARD)
+
+
+def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
+    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
+        PhaseDefinition,
+    )
+
+    if phases:
+        return [
+            PhaseDefinition(
+                phase_id=p.get("phase_id", str(uuid4())),
+                name=p["name"],
+                order=p.get("order", i + 1),
+                description=p.get("description", ""),
+            )
+            for i, p in enumerate(phases)
+        ]
+    return [
+        PhaseDefinition(
+            phase_id=str(uuid4()),
+            name="Initial Phase",
+            order=1,
+            description="Default initial phase",
+        )
+    ]
 
 
 async def create_workflow(
@@ -52,11 +112,6 @@ async def create_workflow(
     Returns:
         Ok(workflow_id) on success, Err(WorkflowError) on failure.
     """
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
-        PhaseDefinition,
-        WorkflowClassification,
-        WorkflowType,
-    )
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
         CreateWorkflowTemplateCommand,
     )
@@ -64,55 +119,15 @@ async def create_workflow(
         CreateWorkflowTemplateHandler,
     )
 
-    type_map: dict[str, WorkflowType] = {
-        "research": WorkflowType.RESEARCH,
-        "planning": WorkflowType.PLANNING,
-        "implementation": WorkflowType.IMPLEMENTATION,
-        "review": WorkflowType.REVIEW,
-        "deployment": WorkflowType.DEPLOYMENT,
-        "custom": WorkflowType.CUSTOM,
-    }
-    wf_type = type_map.get(workflow_type.lower(), WorkflowType.CUSTOM)
-
-    classification_map: dict[str, WorkflowClassification] = {
-        "simple": WorkflowClassification.SIMPLE,
-        "standard": WorkflowClassification.STANDARD,
-        "complex": WorkflowClassification.COMPLEX,
-        "epic": WorkflowClassification.EPIC,
-    }
-    wf_classification = classification_map.get(
-        classification.lower(), WorkflowClassification.STANDARD
-    )
-
-    if phases:
-        phase_defs = [
-            PhaseDefinition(
-                phase_id=p.get("phase_id", str(uuid4())),
-                name=p["name"],
-                order=p.get("order", i + 1),
-                description=p.get("description", ""),
-            )
-            for i, p in enumerate(phases)
-        ]
-    else:
-        phase_defs = [
-            PhaseDefinition(
-                phase_id=str(uuid4()),
-                name="Initial Phase",
-                order=1,
-                description="Default initial phase",
-            )
-        ]
-
     command = CreateWorkflowTemplateCommand(
         aggregate_id=str(uuid4()),
         name=name,
         description=description or f"Workflow: {name}",
-        workflow_type=wf_type,
-        classification=wf_classification,
+        workflow_type=_resolve_workflow_type(workflow_type),
+        classification=_resolve_classification(classification),
         repository_url=repository_url,
         repository_ref=repository_ref,
-        phases=phase_defs,
+        phases=_build_phase_defs(phases),
     )
 
     await ensure_connected()

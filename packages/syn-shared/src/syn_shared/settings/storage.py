@@ -250,35 +250,49 @@ class StorageSettings(BaseSettings):
                 )
         return self
 
+    @staticmethod
+    def _check_required_fields(
+        provider_name: str,
+        fields: dict[str, str | SecretStr],
+        env_names: dict[str, str],
+    ) -> None:
+        """Raise ``ValueError`` if any required field is empty."""
+        missing = [
+            env_names[name]
+            for name, value in fields.items()
+            if not (value.get_secret_value() if isinstance(value, SecretStr) else value)
+        ]
+        if missing:
+            msg = (
+                f"{provider_name} storage requires: {', '.join(missing)}. "
+                "Set these environment variables or use provider='local'."
+            )
+            raise ValueError(msg)
+
     @model_validator(mode="after")
     def validate_provider_config(self) -> StorageSettings:
         """Ensure provider-specific settings are complete."""
         if self.provider == StorageProvider.SUPABASE:
-            missing = []
-            if not self.supabase_url:
-                missing.append("SYN_STORAGE_SUPABASE_URL")
-            if not self.supabase_key.get_secret_value():
-                missing.append("SYN_STORAGE_SUPABASE_KEY")
-            if missing:
-                msg = (
-                    f"Supabase storage requires: {', '.join(missing)}. "
-                    "Set these environment variables or use provider='local'."
-                )
-                raise ValueError(msg)
-
-        if self.provider == StorageProvider.MINIO:
-            missing = []
-            if not self.minio_endpoint:
-                missing.append("SYN_STORAGE_MINIO_ENDPOINT")
-            if not self.minio_access_key:
-                missing.append("SYN_STORAGE_MINIO_ACCESS_KEY")
-            if not self.minio_secret_key.get_secret_value():
-                missing.append("SYN_STORAGE_MINIO_SECRET_KEY")
-            if missing:
-                msg = (
-                    f"MinIO storage requires: {', '.join(missing)}. "
-                    "Set these environment variables or use provider='local'."
-                )
-                raise ValueError(msg)
-
+            self._check_required_fields(
+                "Supabase",
+                {"supabase_url": self.supabase_url, "supabase_key": self.supabase_key},
+                {
+                    "supabase_url": "SYN_STORAGE_SUPABASE_URL",
+                    "supabase_key": "SYN_STORAGE_SUPABASE_KEY",
+                },
+            )
+        elif self.provider == StorageProvider.MINIO:
+            self._check_required_fields(
+                "MinIO",
+                {
+                    "minio_endpoint": self.minio_endpoint,
+                    "minio_access_key": self.minio_access_key,
+                    "minio_secret_key": self.minio_secret_key,
+                },
+                {
+                    "minio_endpoint": "SYN_STORAGE_MINIO_ENDPOINT",
+                    "minio_access_key": "SYN_STORAGE_MINIO_ACCESS_KEY",
+                    "minio_secret_key": "SYN_STORAGE_MINIO_SECRET_KEY",
+                },
+            )
         return self

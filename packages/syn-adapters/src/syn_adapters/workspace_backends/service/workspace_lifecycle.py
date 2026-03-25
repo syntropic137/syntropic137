@@ -173,6 +173,30 @@ async def provision_workspace(
     return isolation_handle, sidecar_handle
 
 
+async def _revoke_tokens(service: WorkspaceService, execution_id: str) -> None:
+    """Revoke injected tokens, logging on failure."""
+    try:
+        await service._token_injection.revoke(execution_id)
+    except Exception as e:
+        logger.warning("Failed to revoke tokens: %s", e)
+
+
+async def _stop_sidecar(service: WorkspaceService, sidecar_handle: SidecarHandle) -> None:
+    """Stop sidecar proxy, logging on failure."""
+    try:
+        await service._sidecar.stop(sidecar_handle)
+    except Exception as e:
+        logger.warning("Failed to stop sidecar: %s", e)
+
+
+async def _destroy_isolation(service: WorkspaceService, isolation_handle: IsolationHandle) -> None:
+    """Destroy isolation container, logging on failure."""
+    try:
+        await service._isolation.destroy(isolation_handle)
+    except Exception as e:
+        logger.warning("Failed to destroy isolation: %s", e)
+
+
 async def cleanup_workspace(
     service: WorkspaceService,
     aggregate: WorkspaceAggregate,
@@ -196,26 +220,12 @@ async def cleanup_workspace(
     """
     logger.info("Cleaning up workspace (id=%s)", workspace_id)
 
-    # Revoke tokens
     if inject_tokens:
-        try:
-            await service._token_injection.revoke(execution_id)
-        except Exception as e:
-            logger.warning("Failed to revoke tokens: %s", e)
-
-    # Stop sidecar
+        await _revoke_tokens(service, execution_id)
     if sidecar_handle:
-        try:
-            await service._sidecar.stop(sidecar_handle)
-        except Exception as e:
-            logger.warning("Failed to stop sidecar: %s", e)
-
-    # Destroy isolation
+        await _stop_sidecar(service, sidecar_handle)
     if isolation_handle:
-        try:
-            await service._isolation.destroy(isolation_handle)
-        except Exception as e:
-            logger.warning("Failed to destroy isolation: %s", e)
+        await _destroy_isolation(service, isolation_handle)
 
     # Emit termination event
     terminate_cmd = TerminateWorkspaceCommand(

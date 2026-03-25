@@ -5,7 +5,7 @@ Extracted from claude_helpers.py to reduce module complexity.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from syn_adapters.agents.protocol import (
     AgentAuthenticationError,
@@ -21,6 +21,20 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 logger = get_logger(__name__)
+
+
+def _classify_and_raise(exc: Exception) -> NoReturn:
+    """Classify an exception from Claude API and raise the appropriate AgentError subtype."""
+    error_msg = str(exc)
+    lower = error_msg.lower()
+
+    if "rate_limit" in lower:
+        raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from exc
+
+    if "authentication" in lower:
+        raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from exc
+
+    raise AgentError(error_msg, AgentProvider.CLAUDE) from exc
 
 
 async def stream_request(
@@ -71,12 +85,5 @@ async def stream_request(
                 yield text
 
     except Exception as e:
-        error_msg = str(e)
-        logger.error("claude_stream_error", error=error_msg)
-
-        if "rate_limit" in error_msg.lower():
-            raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from e
-        if "authentication" in error_msg.lower():
-            raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from e
-
-        raise AgentError(error_msg, AgentProvider.CLAUDE) from e
+        logger.error("claude_stream_error", error=str(e))
+        _classify_and_raise(e)

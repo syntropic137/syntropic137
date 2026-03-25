@@ -137,6 +137,30 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
             existing["phases"] = phases
             await self._store.save(self.PROJECTION_NAME, execution_id, existing)
 
+    @staticmethod
+    def _update_phase_metrics(phase: dict[str, Any], event_data: dict) -> None:
+        """Apply completion metrics from event data onto a phase dict."""
+        phase["status"] = "completed"
+        if event_data.get("session_id"):
+            phase["session_id"] = event_data["session_id"]
+        phase["artifact_id"] = event_data.get("artifact_id")
+        phase["input_tokens"] = event_data.get("input_tokens", 0)
+        phase["output_tokens"] = event_data.get("output_tokens", 0)
+        phase["total_tokens"] = event_data.get("total_tokens", 0)
+        phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
+        phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
+        phase["completed_at"] = event_data.get("completed_at")
+
+    @staticmethod
+    def _track_artifact(existing: dict[str, Any], artifact_id: str | None) -> None:
+        """Add an artifact ID to the execution detail if not already tracked."""
+        if not artifact_id:
+            return
+        artifact_ids = existing.get("artifact_ids", [])
+        if artifact_id not in artifact_ids:
+            artifact_ids.append(artifact_id)
+        existing["artifact_ids"] = artifact_ids
+
     async def on_phase_completed(self, event_data: dict) -> None:
         """Handle PhaseCompleted event.
 
@@ -156,16 +180,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         found = self._find_phase(phases, phase_id or "")
         if found:
             _, phase = found
-            phase["status"] = "completed"
-            if event_data.get("session_id"):
-                phase["session_id"] = event_data["session_id"]
-            phase["artifact_id"] = event_data.get("artifact_id")
-            phase["input_tokens"] = event_data.get("input_tokens", 0)
-            phase["output_tokens"] = event_data.get("output_tokens", 0)
-            phase["total_tokens"] = event_data.get("total_tokens", 0)
-            phase["duration_seconds"] = event_data.get("duration_seconds", 0.0)
-            phase["cost_usd"] = str(event_data.get("cost_usd", "0"))
-            phase["completed_at"] = event_data.get("completed_at")
+            self._update_phase_metrics(phase, event_data)
         else:
             new_phase = PhaseDetail.completed(phase_id or "", phase_id or "", event_data)
             phases.append(new_phase.to_dict())
@@ -177,13 +192,7 @@ class WorkflowExecutionDetailProjection(AutoDispatchProjection):
         cost = Decimal(str(event_data.get("cost_usd", "0")))
         self._aggregate_totals(existing, input_tokens, output_tokens, duration, cost)
 
-        # Add artifact ID if present
-        artifact_id = event_data.get("artifact_id")
-        if artifact_id:
-            artifact_ids = existing.get("artifact_ids", [])
-            if artifact_id not in artifact_ids:
-                artifact_ids.append(artifact_id)
-            existing["artifact_ids"] = artifact_ids
+        self._track_artifact(existing, event_data.get("artifact_id"))
 
         existing["phases"] = phases
         await self._store.save(self.PROJECTION_NAME, execution_id, existing)

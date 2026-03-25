@@ -39,6 +39,20 @@ async def add(
             await buffer._flush_locked()
 
 
+def _enrich_event(
+    event: dict[str, Any],
+    execution_id: str | None,
+    phase_id: str | None,
+) -> dict[str, Any]:
+    """Return a copy of *event* with execution/phase context added."""
+    enriched = event.copy()
+    if execution_id:
+        enriched["execution_id"] = execution_id
+    if phase_id:
+        enriched["phase_id"] = phase_id
+    return enriched
+
+
 async def add_many(
     buffer: EventBuffer,
     events: list[dict[str, Any]],
@@ -53,17 +67,8 @@ async def add_many(
         execution_id: Optional execution ID to add to all events
         phase_id: Optional phase ID to add to all events
     """
-    # Add context if provided
     if execution_id or phase_id:
-        enriched_events = []
-        for event in events:
-            enriched = event.copy()
-            if execution_id:
-                enriched["execution_id"] = execution_id
-            if phase_id:
-                enriched["phase_id"] = phase_id
-            enriched_events.append(enriched)
-        events = enriched_events
+        events = [_enrich_event(e, execution_id, phase_id) for e in events]
 
     async with buffer._lock:
         buffer._buffer.extend(events)

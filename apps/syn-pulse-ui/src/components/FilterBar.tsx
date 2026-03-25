@@ -10,6 +10,11 @@ interface FilterBarProps {
   }) => void
 }
 
+/** Convert empty string to undefined for filter payloads. */
+function toFilterId(id: string): string | undefined {
+  return id || undefined
+}
+
 function Select({ label, value, options, onChange }: {
   label: string
   value: string
@@ -40,11 +45,10 @@ function Select({ label, value, options, onChange }: {
   )
 }
 
-export function FilterBar({ onFilterChange }: FilterBarProps) {
+function useCascadingFilters(onFilterChange: FilterBarProps['onFilterChange']) {
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
   const [systems, setSystems] = useState<SystemSummary[]>([])
   const [repos, setRepos] = useState<RepoSummary[]>([])
-
   const [orgId, setOrgId] = useState('')
   const [systemId, setSystemId] = useState('')
   const [repoId, setRepoId] = useState('')
@@ -53,39 +57,40 @@ export function FilterBar({ onFilterChange }: FilterBarProps) {
     listOrganizations().then(setOrgs).catch(() => {/* no orgs available */})
   }, [])
 
-  const handleOrgChange = useCallback((id: string) => {
-    setOrgId(id)
-    setSystems([])
-    setSystemId('')
+  const resetChildren = useCallback((level: 'org' | 'system') => {
+    if (level === 'org') {
+      setSystems([])
+      setSystemId('')
+    }
     setRepos([])
     setRepoId('')
-    onFilterChange({ organization_id: id || undefined })
-    if (id) {
-      listSystems(id).then(setSystems).catch(() => {/* no systems */})
-    }
-  }, [onFilterChange])
+  }, [])
+
+  const handleOrgChange = useCallback((id: string) => {
+    setOrgId(id)
+    resetChildren('org')
+    onFilterChange({ organization_id: toFilterId(id) })
+    if (id) listSystems(id).then(setSystems).catch(() => {/* ignored */})
+  }, [onFilterChange, resetChildren])
 
   const handleSystemChange = useCallback((id: string) => {
     setSystemId(id)
-    setRepos([])
-    setRepoId('')
-    onFilterChange({
-      organization_id: orgId || undefined,
-      system_id: id || undefined,
-    })
-    if (id) {
-      listRepos(id).then(setRepos).catch(() => {/* no repos */})
-    }
-  }, [orgId, onFilterChange])
+    resetChildren('system')
+    onFilterChange({ organization_id: toFilterId(orgId), system_id: toFilterId(id) })
+    if (id) listRepos(id).then(setRepos).catch(() => {/* ignored */})
+  }, [orgId, onFilterChange, resetChildren])
 
   const handleRepoChange = useCallback((id: string) => {
     setRepoId(id)
-    onFilterChange({
-      organization_id: orgId || undefined,
-      system_id: systemId || undefined,
-      repo_id: id || undefined,
-    })
+    onFilterChange({ organization_id: toFilterId(orgId), system_id: toFilterId(systemId), repo_id: toFilterId(id) })
   }, [orgId, systemId, onFilterChange])
+
+  return { orgs, systems, repos, orgId, systemId, repoId, handleOrgChange, handleSystemChange, handleRepoChange }
+}
+
+export function FilterBar({ onFilterChange }: FilterBarProps) {
+  const { orgs, systems, repos, orgId, systemId, repoId, handleOrgChange, handleSystemChange, handleRepoChange } =
+    useCascadingFilters(onFilterChange)
 
   return (
     <div className="flex flex-wrap gap-4">

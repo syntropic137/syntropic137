@@ -71,6 +71,43 @@ def test_agent(
     )
 
 
+def _get_user_input() -> str | None:
+    """Prompt for user input. Returns None to exit, empty string to skip."""
+    try:
+        user_input = console.input("[bold blue]You:[/bold blue] ")
+    except (EOFError, KeyboardInterrupt):
+        console.print("\n[dim]Goodbye![/dim]")
+        return None
+    if user_input.strip().lower() in ("exit", "quit", "q"):
+        console.print("[dim]Goodbye![/dim]")
+        return None
+    return user_input
+
+
+def _send_chat_message(
+    provider: str,
+    messages: list[dict[str, str]],
+    model: str | None,
+) -> str | None:
+    """Send a chat message and return the response text, or None on failure."""
+    try:
+        with get_client() as client, console.status("Thinking..."):
+            resp = client.post(
+                "/agents/chat",
+                json={"provider": provider, "messages": messages, "model": model},
+                timeout=120.0,
+            )
+    except Exception:
+        print_error("Lost connection to API server")
+        return None
+
+    if resp.status_code != 200:
+        print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
+        return None
+
+    return resp.json().get("response_text", "")
+
+
 @app.command("chat")
 def chat_session(
     provider: Annotated[
@@ -94,37 +131,15 @@ def chat_session(
         messages.append({"role": "system", "content": system})
 
     while True:
-        try:
-            user_input = console.input("[bold blue]You:[/bold blue] ")
-        except (EOFError, KeyboardInterrupt):
-            console.print("\n[dim]Goodbye![/dim]")
+        user_input = _get_user_input()
+        if user_input is None:
             break
-
-        if user_input.strip().lower() in ("exit", "quit", "q"):
-            console.print("[dim]Goodbye![/dim]")
-            break
-
         if not user_input.strip():
             continue
 
         messages.append({"role": "user", "content": user_input})
-
-        try:
-            with get_client() as client, console.status("Thinking..."):
-                resp = client.post(
-                    "/agents/chat",
-                    json={"provider": provider, "messages": messages, "model": model},
-                    timeout=120.0,
-                )
-        except Exception:
-            print_error("Lost connection to API server")
+        response_text = _send_chat_message(provider, messages, model)
+        if response_text is None:
             break
-
-        if resp.status_code != 200:
-            print_error(resp.json().get("detail", f"HTTP {resp.status_code}"))
-            break
-
-        result = resp.json()
-        response_text = result.get("response_text", "")
         console.print(f"[bold green]Agent:[/bold green] {response_text}\n")
         messages.append({"role": "assistant", "content": response_text})

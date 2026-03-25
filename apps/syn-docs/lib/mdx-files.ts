@@ -1,19 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export function collectMdxFiles(dir: string): { filepath: string; content: string }[] {
-  const results: { filepath: string; content: string }[] = [];
+interface MdxFile {
+  filepath: string;
+  content: string;
+}
 
-  function walk(d: string) {
-    for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
-      const full = path.join(d, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith('.mdx')) {
-        results.push({ filepath: full, content: fs.readFileSync(full, 'utf-8') });
-      }
+function walkDirectory(dir: string, results: MdxFile[]): void {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkDirectory(full, results);
+    } else if (entry.name.endsWith('.mdx')) {
+      results.push({ filepath: full, content: fs.readFileSync(full, 'utf-8') });
     }
   }
+}
 
-  walk(dir);
+export function collectMdxFiles(dir: string): MdxFile[] {
+  const results: MdxFile[] = [];
+  walkDirectory(dir, results);
   return results;
 }

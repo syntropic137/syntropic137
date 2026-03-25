@@ -6,6 +6,8 @@ Supports automatic selection of available agents.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from syn_adapters.agents.protocol import (
     AgentError,
     AgentProtocol,
@@ -13,6 +15,9 @@ from syn_adapters.agents.protocol import (
 )
 from syn_shared import get_settings
 from syn_shared.logging import get_logger
+
+if TYPE_CHECKING:
+    from pydantic import SecretStr
 
 logger = get_logger(__name__)
 
@@ -32,50 +37,65 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
     Raises:
         AgentError: If no agent is available or configured.
     """
-    settings = get_settings()
-
     if provider == AgentProvider.MOCK:
-        from syn_adapters.agents.mock import MockAgent
-
-        return MockAgent()
+        return _create_mock()
 
     if provider == AgentProvider.CLAUDE:
-        from syn_adapters.agents.claude import ClaudeAgent
+        return _create_claude_or_raise()
 
-        claude = ClaudeAgent()
-        if not claude.is_available:
-            msg = (
-                "Claude agent not available. "
-                "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
-            )
-            raise AgentError(msg, AgentProvider.CLAUDE)
-        return claude
-
-    # Auto-select: try Claude first
     if provider is None:
-        # Check Claude (OAuth token or API key)
-        if settings.claude_code_oauth_token or settings.anthropic_api_key:
-            from syn_adapters.agents.claude import ClaudeAgent
-
-            claude_agent = ClaudeAgent()
-            if claude_agent.is_available:
-                logger.debug("auto_selected_agent", provider="claude")
-                return claude_agent
-
-        # Use mock in test mode
-        if settings.is_test:
-            from syn_adapters.agents.mock import MockAgent
-
-            logger.debug("auto_selected_agent", provider="mock", reason="test_mode")
-            return MockAgent()
-
-        msg = (
-            "No agent provider configured. Set one of: "
-            "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude)"
-        )
-        raise AgentError(msg, AgentProvider.MOCK)
+        return _auto_select()
 
     msg = f"Unknown agent provider: {provider}"
+    raise AgentError(msg, AgentProvider.MOCK)
+
+
+def _has_secret(val: SecretStr | None) -> bool:
+    """Check if a SecretStr has a non-empty value."""
+    return val is not None and bool(val.get_secret_value())
+
+
+def _create_mock() -> AgentProtocol:
+    """Create a mock agent instance."""
+    from syn_adapters.agents.mock import MockAgent
+
+    return MockAgent()
+
+
+def _create_claude_or_raise() -> AgentProtocol:
+    """Create a Claude agent, raising if unavailable."""
+    from syn_adapters.agents.claude import ClaudeAgent
+
+    claude = ClaudeAgent()
+    if not claude.is_available:
+        msg = (
+            "Claude agent not available. "
+            "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+        )
+        raise AgentError(msg, AgentProvider.CLAUDE)
+    return claude
+
+
+def _auto_select() -> AgentProtocol:
+    """Auto-select the best available agent provider."""
+    settings = get_settings()
+
+    if _has_secret(settings.claude_code_oauth_token) or _has_secret(settings.anthropic_api_key):
+        from syn_adapters.agents.claude import ClaudeAgent
+
+        claude_agent = ClaudeAgent()
+        if claude_agent.is_available:
+            logger.debug("auto_selected_agent", provider="claude")
+            return claude_agent
+
+    if settings.is_test:
+        logger.debug("auto_selected_agent", provider="mock", reason="test_mode")
+        return _create_mock()
+
+    msg = (
+        "No agent provider configured. Set one of: "
+        "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude)"
+    )
     raise AgentError(msg, AgentProvider.MOCK)
 
 
@@ -88,7 +108,7 @@ def get_available_agents() -> list[AgentProvider]:
     settings = get_settings()
     available: list[AgentProvider] = []
 
-    if settings.claude_code_oauth_token or settings.anthropic_api_key:
+    if _has_secret(settings.claude_code_oauth_token) or _has_secret(settings.anthropic_api_key):
         available.append(AgentProvider.CLAUDE)
 
     # Mock is always available in test mode

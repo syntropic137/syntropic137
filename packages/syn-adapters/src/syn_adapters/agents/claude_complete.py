@@ -6,7 +6,7 @@ Extracted from claude_helpers.py to reduce module complexity.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, NoReturn
 
 from syn_adapters.agents.protocol import (
     AgentAuthenticationError,
@@ -21,6 +21,23 @@ from syn_adapters.agents.protocol import (
 from syn_shared.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _classify_and_raise(exc: Exception) -> NoReturn:
+    """Classify an exception from Claude API and raise the appropriate AgentError subtype."""
+    error_msg = str(exc)
+    lower = error_msg.lower()
+
+    if "rate_limit" in lower:
+        logger.warning("claude_rate_limit", error=error_msg)
+        raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from exc
+
+    if "authentication" in lower or "api_key" in lower:
+        logger.error("claude_auth_error", error=error_msg)
+        raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from exc
+
+    logger.error("claude_error", error=error_msg, error_type=type(exc).__name__)
+    raise AgentError(error_msg, AgentProvider.CLAUDE) from exc
 
 
 async def complete_request(
@@ -103,15 +120,4 @@ async def complete_request(
         logger.error("claude_timeout", timeout=config.timeout_seconds)
         raise AgentTimeoutError(msg, AgentProvider.CLAUDE) from e
     except Exception as e:
-        error_msg = str(e)
-
-        if "rate_limit" in error_msg.lower():
-            logger.warning("claude_rate_limit", error=error_msg)
-            raise AgentRateLimitError(error_msg, AgentProvider.CLAUDE) from e
-
-        if "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
-            logger.error("claude_auth_error", error=error_msg)
-            raise AgentAuthenticationError(error_msg, AgentProvider.CLAUDE) from e
-
-        logger.error("claude_error", error=error_msg, error_type=type(e).__name__)
-        raise AgentError(error_msg, AgentProvider.CLAUDE) from e
+        _classify_and_raise(e)

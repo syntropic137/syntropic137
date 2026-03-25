@@ -68,6 +68,44 @@ async def get_tool_timeline(
         return Err(ObservabilityError.QUERY_FAILED, message=str(e))
 
 
+async def _get_session_token_metrics(
+    manager: Any, session_id: str
+) -> Result[dict[str, Any], ObservabilityError]:
+    """Build token metrics dict for a single session."""
+    cost = await manager.session_cost.get_session_cost(session_id)
+    if cost is None:
+        return Err(ObservabilityError.NOT_FOUND, message=f"Session {session_id} not found")
+    return Ok(
+        {
+            "session_id": session_id,
+            "input_tokens": cost.input_tokens,
+            "output_tokens": cost.output_tokens,
+            "total_tokens": cost.total_tokens,
+            "total_cost_usd": str(cost.total_cost_usd),
+            "cache_creation_tokens": cost.cache_creation_tokens,
+            "cache_read_tokens": cost.cache_read_tokens,
+        }
+    )
+
+
+async def _get_execution_token_metrics(
+    manager: Any, execution_id: str
+) -> Result[dict[str, Any], ObservabilityError]:
+    """Build token metrics dict for a single execution."""
+    exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
+    if exec_cost is None:
+        return Err(ObservabilityError.NOT_FOUND, message=f"Execution {execution_id} not found")
+    return Ok(
+        {
+            "execution_id": execution_id,
+            "input_tokens": exec_cost.input_tokens,
+            "output_tokens": exec_cost.output_tokens,
+            "total_tokens": exec_cost.total_tokens,
+            "total_cost_usd": str(exec_cost.total_cost_usd),
+        }
+    )
+
+
 async def get_token_metrics(
     execution_id: str | None = None,
     session_id: str | None = None,
@@ -88,40 +126,10 @@ async def get_token_metrics(
         manager = get_projection_mgr()
 
         if session_id:
-            cost = await manager.session_cost.get_session_cost(session_id)
-            if cost is None:
-                return Err(
-                    ObservabilityError.NOT_FOUND,
-                    message=f"Session {session_id} not found",
-                )
-            return Ok(
-                {
-                    "session_id": session_id,
-                    "input_tokens": cost.input_tokens,
-                    "output_tokens": cost.output_tokens,
-                    "total_tokens": cost.total_tokens,
-                    "total_cost_usd": str(cost.total_cost_usd),
-                    "cache_creation_tokens": cost.cache_creation_tokens,
-                    "cache_read_tokens": cost.cache_read_tokens,
-                }
-            )
+            return await _get_session_token_metrics(manager, session_id)
 
         if execution_id:
-            exec_cost = await manager.execution_cost.get_execution_cost(execution_id)
-            if exec_cost is None:
-                return Err(
-                    ObservabilityError.NOT_FOUND,
-                    message=f"Execution {execution_id} not found",
-                )
-            return Ok(
-                {
-                    "execution_id": execution_id,
-                    "input_tokens": exec_cost.input_tokens,
-                    "output_tokens": exec_cost.output_tokens,
-                    "total_tokens": exec_cost.total_tokens,
-                    "total_cost_usd": str(exec_cost.total_cost_usd),
-                }
-            )
+            return await _get_execution_token_metrics(manager, execution_id)
 
         return Err(
             ObservabilityError.QUERY_FAILED,

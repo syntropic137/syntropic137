@@ -22,6 +22,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _list_objects_sync(
+    client: Minio,
+    bucket_name: str,
+    prefix: str,
+    max_keys: int,
+) -> list[StorageObject]:
+    """Synchronous helper to collect StorageObjects from MinIO iterator."""
+    objects: list[StorageObject] = []
+    for obj in client.list_objects(bucket_name, prefix=prefix):
+        if len(objects) >= max_keys:
+            break
+        objects.append(
+            StorageObject(
+                key=obj.object_name or "",
+                size_bytes=obj.size or 0,
+                content_type=None,
+                etag=obj.etag,
+                last_modified=obj.last_modified or datetime.now(UTC),
+            )
+        )
+    return objects
+
+
 async def list_objects(
     get_client: object,
     bucket_name: str,
@@ -42,26 +65,11 @@ async def list_objects(
     """
     try:
         client: Minio = get_client()  # type: ignore[operator]
-
         loop = asyncio.get_event_loop()
 
-        def list_objects_sync() -> list[StorageObject]:
-            objects: list[StorageObject] = []
-            for obj in client.list_objects(bucket_name, prefix=prefix):
-                if len(objects) >= max_keys:
-                    break
-                objects.append(
-                    StorageObject(
-                        key=obj.object_name or "",
-                        size_bytes=obj.size or 0,
-                        content_type=None,
-                        etag=obj.etag,
-                        last_modified=obj.last_modified or datetime.now(UTC),
-                    )
-                )
-            return objects
-
-        objects = await loop.run_in_executor(None, list_objects_sync)
+        objects = await loop.run_in_executor(
+            None, _list_objects_sync, client, bucket_name, prefix, max_keys
+        )
 
         return ListResult(
             objects=objects,

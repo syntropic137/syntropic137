@@ -121,19 +121,11 @@ class GetSystemPatternsHandler:
 
         return _groups_to_patterns(groups)
 
-    async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:
-        """Find repos with cost > 3x median."""
-        repos = await self._repo_projection.list_all(system_id=system_id)
-        costs: list[tuple[str, Decimal]] = []
-
-        for repo in repos:
-            cost_data = await self._store.get(REPO_COST, repo.full_name)
-            if not cost_data:
-                continue
-            rc = RepoCost.from_dict(cost_data)
-            if rc.total_cost_usd > 0:
-                costs.append((repo.full_name, rc.total_cost_usd))
-
+    @staticmethod
+    def _detect_outliers(
+        costs: list[tuple[str, Decimal]],
+    ) -> list[CostOutlier]:
+        """Return repos whose cost exceeds 3x the median."""
         if len(costs) < 2:
             return []
 
@@ -154,8 +146,22 @@ class GetSystemPatternsHandler:
                         deviation_factor=factor,
                     )
                 )
-
         return sorted(outliers, key=lambda o: o.deviation_factor, reverse=True)
+
+    async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:
+        """Find repos with cost > 3x median."""
+        repos = await self._repo_projection.list_all(system_id=system_id)
+        costs: list[tuple[str, Decimal]] = []
+
+        for repo in repos:
+            cost_data = await self._store.get(REPO_COST, repo.full_name)
+            if not cost_data:
+                continue
+            rc = RepoCost.from_dict(cost_data)
+            if rc.total_cost_usd > 0:
+                costs.append((repo.full_name, rc.total_cost_usd))
+
+        return self._detect_outliers(costs)
 
     async def handle(self, query: GetSystemPatternsQuery) -> SystemPatterns:
         """Handle GetSystemPatternsQuery."""

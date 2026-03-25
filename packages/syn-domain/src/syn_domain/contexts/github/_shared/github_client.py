@@ -134,42 +134,18 @@ class GitHubAppClient:
         except Exception as e:
             raise JWTGenerationError(f"Failed to generate JWT: {e}") from e
 
-    async def get_installation_token(
-        self, installation_id: str | None = None, force_refresh: bool = False
-    ) -> TokenResponse:
-        """Get an installation access token.
-
-        Tokens are cached per installation_id and reused until they expire or
-        are about to expire (within 5 minutes).
-
-        Args:
-            installation_id: The installation to get a token for. Must be provided explicitly
-                (e.g. from a webhook payload or via get_installation_for_repo()).
-            force_refresh: Force a new token even if cached token is valid.
-
-        Returns:
-            TokenResponse with the access token and metadata.
-
-        Raises:
-            TokenFetchError: If token fetch fails or no installation_id available.
-        """
-        iid = installation_id
-        if not iid:
-            raise TokenFetchError(
-                "No installation_id provided. Pass it explicitly (e.g. from a webhook payload)."
-            )
-
-        # Check cache
+    def _get_cached_token(self, iid: str) -> TokenResponse | None:
+        """Return cached token if still valid (with 5-minute buffer), else None."""
         from datetime import timedelta
 
         cached = self._cached_tokens.get(iid)
-        if not force_refresh and cached:
-            buffer = timedelta(minutes=5)
-            if datetime.now(UTC) + buffer < cached.expires_at:
-                logger.debug("Using cached installation token for %s", iid)
-                return cached
+        if cached and datetime.now(UTC) + timedelta(minutes=5) < cached.expires_at:
+            logger.debug("Using cached installation token for %s", iid)
+            return cached
+        return None
 
-        # Fetch new token
+    async def _fetch_installation_token(self, iid: str) -> TokenResponse:
+        """Fetch a fresh installation token from GitHub API."""
         try:
             import httpx
         except ImportError as e:
@@ -198,7 +174,6 @@ class GitHubAppClient:
         except httpx.RequestError as e:
             raise TokenFetchError(f"Network error fetching token: {e}") from e
 
-        # Parse response
         expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
         token_response = TokenResponse(
             token=data["token"],
@@ -207,11 +182,41 @@ class GitHubAppClient:
             repository_selection=data.get("repository_selection", "all"),
         )
 
-        # Cache the token per installation
         self._cached_tokens[iid] = token_response
         logger.info(f"Fetched new installation token for {iid} (expires: {expires_at.isoformat()})")
-
         return token_response
+
+    async def get_installation_token(
+        self, installation_id: str | None = None, force_refresh: bool = False
+    ) -> TokenResponse:
+        """Get an installation access token.
+
+        Tokens are cached per installation_id and reused until they expire or
+        are about to expire (within 5 minutes).
+
+        Args:
+            installation_id: The installation to get a token for. Must be provided explicitly
+                (e.g. from a webhook payload or via get_installation_for_repo()).
+            force_refresh: Force a new token even if cached token is valid.
+
+        Returns:
+            TokenResponse with the access token and metadata.
+
+        Raises:
+            TokenFetchError: If token fetch fails or no installation_id available.
+        """
+        iid = installation_id
+        if not iid:
+            raise TokenFetchError(
+                "No installation_id provided. Pass it explicitly (e.g. from a webhook payload)."
+            )
+
+        if not force_refresh:
+            cached = self._get_cached_token(iid)
+            if cached:
+                return cached
+
+        return await self._fetch_installation_token(iid)
 
     async def get_accessible_repositories(self, installation_id: str | None = None) -> list[dict]:
         """List repositories accessible to an installation.
