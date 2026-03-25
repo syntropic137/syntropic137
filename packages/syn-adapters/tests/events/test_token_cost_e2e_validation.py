@@ -294,12 +294,26 @@ class TestCollectorIntegration:
 
     @pytest.fixture
     def collector_url(self, test_infrastructure: Any) -> str | None:
-        """Get collector URL from test infrastructure."""
-        from syn_tests.fixtures.infrastructure import TestInfrastructure
+        """Get collector URL from test infrastructure, with reachability check."""
+        from urllib.parse import urlparse
 
-        if isinstance(test_infrastructure, TestInfrastructure):
-            return test_infrastructure.collector_url
-        return None
+        from syn_tests.fixtures.infrastructure import TestInfrastructure, _check_port_open
+
+        if not isinstance(test_infrastructure, TestInfrastructure):
+            return None
+
+        url = test_infrastructure.collector_url
+        if not url:
+            return None
+
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 18080
+        if not _check_port_open(host, port):
+            # TODO(#343): Remove skip once collector service is in CI
+            pytest.skip(f"Collector not reachable at {host}:{port} (TODO(#343))")
+
+        return url
 
     @pytest.mark.asyncio
     async def test_collector_accepts_token_usage_events(

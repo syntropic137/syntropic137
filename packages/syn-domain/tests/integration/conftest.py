@@ -45,7 +45,7 @@ async def grpc_client(test_infrastructure) -> AsyncGenerator[GrpcEventStoreClien
     Each test gets a fresh connection.
 
     Skips the test if the event store is not reachable (e.g. container not
-    published yet — TODO(#62)).
+    published yet — TODO(#343)).
     """
     from syn_tests.fixtures.infrastructure import _check_port_open
 
@@ -53,7 +53,7 @@ async def grpc_client(test_infrastructure) -> AsyncGenerator[GrpcEventStoreClien
     port = test_infrastructure.eventstore_port
 
     if port == 0 or not _check_port_open(host, port):
-        pytest.skip(f"Event store not available at {host}:{port} (TODO(#62))")
+        pytest.skip(f"Event store not available at {host}:{port} (TODO(#343))")
 
     from event_sourcing import GrpcEventStoreClient
 
