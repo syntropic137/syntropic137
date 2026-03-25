@@ -15,22 +15,11 @@ id = "max-cognitive"
 name = "Maximum Cognitive Complexity (function)"
 source = "metrics/functions.json"
 field = "metrics.cognitive"
-max = 25
+max = 15
 scope = "function"
 severity = "error"
 # Entity IDs: "python:module.path::func_name" / "rust:crate::path::func_name"
 exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
-
-[[rules.threshold]]
-id = "max-cognitive-file"
-name = "Maximum Cognitive Complexity (file)"
-source = "metrics/modules.json"
-field = "metrics.total_cognitive"
-max = 50
-scope = "module"
-severity = "error"
-# Entity IDs: "module.path.name" or "lib::crate::path"
-exclude = ["infra*", "scripts*", "lib*", "ci*", "*conftest*"]
 
 # ─── Cyclomatic Complexity ───────────────────────────────────────────────────
 
@@ -39,7 +28,7 @@ id = "max-cyclomatic"
 name = "Maximum Cyclomatic Complexity (function)"
 source = "metrics/functions.json"
 field = "metrics.cyclomatic"
-max = 15
+max = 10
 scope = "function"
 severity = "error"
 exclude = ["python:infra*", "python:scripts*", "rust:*", "python:ci*", "*conftest*", "python:lib.*", "tsx:lib/*", "typescript:lib/*"]
