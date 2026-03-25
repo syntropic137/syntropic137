@@ -10,18 +10,6 @@
 
 # --- syn-api routes (ISS-315: webhooks, ISS-317: executions) ---
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
-value = 55
-issue = "#317"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::get_execution_endpoint"]
-value = 30
-issue = "#317"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::list_"]
-value = 25
-issue = "#317"
-
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.commands::get_execution_status_endpoint"]
 value = 20
 issue = "#317"
@@ -431,14 +419,6 @@ issue = "#320"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
-value = 20
-issue = "#317"
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.executions.queries::get_execution_endpoint"]
-value = 20
-issue = "#317"
 
 [max-cyclomatic."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
 value = 15
