@@ -8,7 +8,7 @@
 # Maximum Cognitive Complexity (function-level, threshold: 15)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --- syn-api routes (ISS-315: webhooks, ISS-317: executions, ISS-319: sse) ---
+# --- syn-api routes (ISS-315: webhooks, ISS-317: executions) ---
 
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::github_webhook_endpoint"]
 value = 35
@@ -37,18 +37,6 @@ issue = "#317"
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.commands::get_execution_status_endpoint"]
 value = 20
 issue = "#317"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::activity_sse"]
-value = 25
-issue = "#319"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::execution_sse"]
-value = 25
-issue = "#319"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::generate"]
-value = 20
-issue = "#319"
 
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
 value = 35
