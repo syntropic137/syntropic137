@@ -1384,7 +1384,7 @@ wheels = [
 
 [[package]]
 name = "syn-adapters"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "packages/syn-adapters" }
 dependencies = [
     { name = "agentic-events" },
@@ -1446,7 +1446,7 @@ provides-extras = ["postgres", "claude", "agents", "minio", "all"]
 
 [[package]]
 name = "syn-api"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "apps/syn-api" }
 dependencies = [
     { name = "agentic-logging" },
@@ -1475,7 +1475,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-cli"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "apps/syn-cli" }
 dependencies = [
     { name = "httpx" },
@@ -1494,7 +1494,7 @@ requires-dist = [
 
 [[package]]
 name = "syn-collector"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "packages/syn-collector" }
 dependencies = [
     { name = "click" },
@@ -1534,7 +1534,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-domain"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "packages/syn-domain" }
 dependencies = [
     { name = "agentic-events" },
@@ -1583,7 +1583,7 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "syn-shared"
-version = "0.15.1"
+version = "0.15.2"
 source = { editable = "packages/syn-shared" }
 dependencies = [
     { name = "pydantic" },

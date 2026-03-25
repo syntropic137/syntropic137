@@ -1,6 +1,6 @@
 [project]
 name = "syn-shared"
-version = "0.15.1"
+version = "0.15.2"
 description = "Shared utilities for Syntropic137"
 requires-python = ">=3.12"
 
