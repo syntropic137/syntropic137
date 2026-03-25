@@ -146,7 +146,8 @@ class RepoProjection:
         records = await self._store.get_all(PROJECTION_NAME)
         repos = [_repo_from_dict(r) for r in records]
         return [
-            r for r in repos
+            r
+            for r in repos
             if self._matches_filters(r, organization_id, system_id, provider, unassigned)
         ]
 

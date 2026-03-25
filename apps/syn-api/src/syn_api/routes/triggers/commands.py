@@ -113,7 +113,11 @@ async def _check_preset_duplicate(
         return Ok(None)
 
     for t in existing.value:
-        if t.name == command_name and t.event == command_event and t.status != TriggerStatus.DELETED:
+        if (
+            t.name == command_name
+            and t.event == command_event
+            and t.status != TriggerStatus.DELETED
+        ):
             return Err(
                 TriggerError.INVALID_INPUT,
                 message=f"Trigger '{command_name}' already exists for {repository}",

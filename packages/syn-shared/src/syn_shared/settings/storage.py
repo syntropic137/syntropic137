@@ -276,7 +276,10 @@ class StorageSettings(BaseSettings):
             self._check_required_fields(
                 "Supabase",
                 {"supabase_url": self.supabase_url, "supabase_key": self.supabase_key},
-                {"supabase_url": "SYN_STORAGE_SUPABASE_URL", "supabase_key": "SYN_STORAGE_SUPABASE_KEY"},
+                {
+                    "supabase_url": "SYN_STORAGE_SUPABASE_URL",
+                    "supabase_key": "SYN_STORAGE_SUPABASE_KEY",
+                },
             )
         elif self.provider == StorageProvider.MINIO:
             self._check_required_fields(

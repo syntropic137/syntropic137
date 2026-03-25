@@ -255,15 +255,11 @@ class _CostData:
     duration_seconds: float | None = None
 
 
-async def _load_tool_operations(
-    manager: Any, session_id: str
-) -> list[ToolOperation]:
+async def _load_tool_operations(manager: Any, session_id: str) -> list[ToolOperation]:
     """Load tool operations for a session from the projection."""
     try:
         tool_data = await manager.session_tools.get(session_id)
-        return [
-            ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])
-        ]
+        return [ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])]
     except Exception:
         logger.exception("Failed to load tool operations for session %s", session_id)
         return []
@@ -319,9 +315,7 @@ async def get_session(
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
 
     operations = await _load_tool_operations(manager, session_id)
-    cd = await _load_cost_data(
-        manager, session_id, session.total_tokens, session.total_cost_usd
-    )
+    cd = await _load_cost_data(manager, session_id, session.total_tokens, session.total_cost_usd)
 
     return Ok(
         SessionDetail(

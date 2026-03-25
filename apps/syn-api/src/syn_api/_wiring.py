@@ -192,9 +192,7 @@ async def _build_workspace_prompt(
         SYN_WORKSPACE_PROMPT,
     )
 
-    phase_prompt = _substitute_builtins(
-        phase.prompt_template, execution_id, workflow_id, repo_url
-    )
+    phase_prompt = _substitute_builtins(phase.prompt_template, execution_id, workflow_id, repo_url)
     phase_prompt = _substitute_inputs(phase_prompt, phase, inputs, phase_outputs)
 
     prompt_parts = [SYN_WORKSPACE_PROMPT, f"\n## Task\n{phase_prompt}"]

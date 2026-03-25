@@ -53,7 +53,9 @@ async def _ensure_client(client: CollectorClient) -> None:
         assert client._client is not None
 
 
-def _raise_after_exhausted(client: CollectorClient, batch: EventBatch, last_error: Exception | None) -> None:
+def _raise_after_exhausted(
+    client: CollectorClient, batch: EventBatch, last_error: Exception | None
+) -> None:
     """Record failure stats and raise after all retries are exhausted."""
     client._stats["events_failed"] += len(batch.events)
     logger.error(

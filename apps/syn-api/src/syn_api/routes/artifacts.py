@@ -126,7 +126,9 @@ async def list_artifacts(
         return Err(ArtifactError.STORAGE_ERROR, message=str(e))
 
 
-async def _load_artifact_content(artifact_id: str, fallback_content: str | None) -> tuple[str | None, str | None]:
+async def _load_artifact_content(
+    artifact_id: str, fallback_content: str | None
+) -> tuple[str | None, str | None]:
     """Download artifact content from storage, falling back to projection content.
 
     Returns:

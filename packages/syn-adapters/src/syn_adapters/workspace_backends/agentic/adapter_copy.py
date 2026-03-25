@@ -67,7 +67,7 @@ def _normalize_pattern(pattern: str) -> str:
     """Strip leading slashes and 'workspace/' prefix from a glob pattern."""
     clean = pattern.lstrip("/")
     if clean.startswith("workspace/"):
-        clean = clean[len("workspace/"):]
+        clean = clean[len("workspace/") :]
     return clean
 
 

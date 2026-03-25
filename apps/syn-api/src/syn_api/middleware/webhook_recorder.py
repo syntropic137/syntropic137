@@ -131,9 +131,7 @@ class WebhookRecorderMiddleware:
         payload = _parse_payload(body)
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-        filepath, metadata, event_entry = _build_recording(
-            headers, payload, start_ts, elapsed_ms
-        )
+        filepath, metadata, event_entry = _build_recording(headers, payload, start_ts, elapsed_ms)
 
         with filepath.open("w") as f:
             f.write(json.dumps(metadata) + "\n")

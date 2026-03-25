@@ -141,10 +141,7 @@ async def get_conversation_log(
 
         total = len(raw_lines)
         page = raw_lines[offset : offset + limit]
-        lines = [
-            _parse_conversation_line(i, raw)
-            for i, raw in enumerate(page, start=offset + 1)
-        ]
+        lines = [_parse_conversation_line(i, raw) for i, raw in enumerate(page, start=offset + 1)]
 
         return Ok(
             ConversationLog(
