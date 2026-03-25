@@ -90,6 +90,21 @@ def list_workflows() -> None:
     console.print(table)
 
 
+def _render_workflow_detail(detail: WorkflowDetail) -> None:
+    """Print workflow detail to console."""
+    console.print("\n[bold]Workflow Details[/bold]")
+    console.print(f"  [dim]ID:[/dim] {detail.id}")
+    console.print(f"  [dim]Name:[/dim] [cyan]{detail.name}[/cyan]")
+    console.print(f"  [dim]Type:[/dim] {detail.workflow_type}")
+    console.print(f"  [dim]Classification:[/dim] {detail.classification}")
+    if detail.phases:
+        console.print(f"\n  [bold]Phases ({len(detail.phases)}):[/bold]")
+        for phase in detail.phases:
+            console.print(f"    - {phase.get('name', 'unnamed')}")
+    else:
+        console.print("\n  [dim]No phases defined[/dim]")
+
+
 @app.command("show")
 def show_workflow(
     workflow_id: Annotated[str, typer.Argument(help="Workflow ID (partial match supported)")],
@@ -108,18 +123,7 @@ def show_workflow(
         print_error(f"Workflow not found: {resp.json().get('detail', '')}")
         raise typer.Exit(1)
 
-    detail = WorkflowDetail(**resp.json())
-    console.print("\n[bold]Workflow Details[/bold]")
-    console.print(f"  [dim]ID:[/dim] {detail.id}")
-    console.print(f"  [dim]Name:[/dim] [cyan]{detail.name}[/cyan]")
-    console.print(f"  [dim]Type:[/dim] {detail.workflow_type}")
-    console.print(f"  [dim]Classification:[/dim] {detail.classification}")
-    if detail.phases:
-        console.print(f"\n  [bold]Phases ({len(detail.phases)}):[/bold]")
-        for phase in detail.phases:
-            console.print(f"    - {phase.get('name', 'unnamed')}")
-    else:
-        console.print("\n  [dim]No phases defined[/dim]")
+    _render_workflow_detail(WorkflowDetail(**resp.json()))
 
 
 @app.command("validate")

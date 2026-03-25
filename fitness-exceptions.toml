@@ -318,32 +318,6 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-# --- syn-cli ---
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands._workflow_models::parse_inputs"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.agent::chat_session"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch._sse::_process_sse_lines"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch._sse::_stream_sse"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.workflow._crud::show_workflow"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-cli.src.syn_cli.main::health"]
-value = 20
-issue = "#320"
-
 # --- syn-shared ---
 
 # --- TSX/TypeScript ---
