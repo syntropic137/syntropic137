@@ -105,12 +105,12 @@ def _build_database_section(settings: object, *, show_secrets: bool) -> dict[str
     """Build the 'database' config section."""
     return {
         "esp_event_store_db_url": _mask_optional(
-            settings.esp_event_store_db_url,
-            show=show_secrets,  # type: ignore[attr-defined]
+            settings.esp_event_store_db_url,  # type: ignore[attr-defined]
+            show=show_secrets,
         ),
         "syn_observability_db_url": _mask_optional(
-            settings.syn_observability_db_url,
-            show=show_secrets,  # type: ignore[attr-defined]
+            settings.syn_observability_db_url,  # type: ignore[attr-defined]
+            show=show_secrets,
         ),
         "event_store_host": settings.event_store_host,  # type: ignore[attr-defined]
         "event_store_port": settings.event_store_port,  # type: ignore[attr-defined]
@@ -122,8 +122,8 @@ def _build_agents_section(settings: object, *, show_secrets: bool) -> dict[str, 
     """Build the 'agents' config section."""
     return {
         "anthropic_api_key": _mask_optional(
-            settings.anthropic_api_key,
-            show=show_secrets,  # type: ignore[attr-defined]
+            settings.anthropic_api_key,  # type: ignore[attr-defined]
+            show=show_secrets,
         ),
         "default_agent_timeout_seconds": settings.default_agent_timeout_seconds,  # type: ignore[attr-defined]
         "default_max_tokens": settings.default_max_tokens,  # type: ignore[attr-defined]

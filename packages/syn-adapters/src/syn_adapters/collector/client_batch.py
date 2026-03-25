@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import httpx
 
@@ -55,7 +55,7 @@ async def _ensure_client(client: CollectorClient) -> None:
 
 def _raise_after_exhausted(
     client: CollectorClient, batch: EventBatch, last_error: Exception | None
-) -> None:
+) -> NoReturn:
     """Record failure stats and raise after all retries are exhausted."""
     client._stats["events_failed"] += len(batch.events)
     logger.error(

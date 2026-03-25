@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from uuid import UUID
 
     from event_sourcing import EventEnvelope
@@ -62,7 +63,7 @@ async def get_workflow_by_id(
 
 
 def _build_envelopes(
-    stored_events: list[object],
+    stored_events: Sequence[object],
 ) -> list[EventEnvelope[Any]]:
     """Build EventEnvelope list from stored events for a single aggregate."""
     from event_sourcing import EventEnvelope, EventMetadata
