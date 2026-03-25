@@ -1,18 +1,18 @@
 # Grandfathered violations. Every entry MUST reference a GitHub issue.
 # This file should SHRINK over time — each entry is tech debt.
 #
-# Budgets are set to current value rounded up to nearest multiple of 5.
+# Budgets ratcheted to actual value rounded up to nearest multiple of 5.
 # Thresholds: cognitive ≤ 15, cyclomatic ≤ 10, LOC function ≤ 100, LOC file ≤ 750
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cognitive Complexity (function-level, threshold: 15)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --- syn-api routes (ISS-315: webhooks, ISS-317: executions) ---
+# --- syn-api routes ---
 
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.commands::get_execution_status_endpoint"]
 value = 20
-issue = "#317"
+issue = "#320"
 
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
 value = 35
@@ -58,7 +58,7 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-# --- syn-api services (ISS-316: extracted from lifecycle, pre-existing complexity) ---
+# --- syn-api services ---
 
 [max-cognitive."python:apps.syn-api.src.syn_api.services.credentials::validate_credentials"]
 value = 20
@@ -84,11 +84,17 @@ issue = "#320"
 value = 20
 issue = "#320"
 
+# --- syn-domain: orchestration ---
+
 [max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection::on_phase_completed"]
 value = 20
 issue = "#320"
 
 [max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner::cleanup_stale_executions"]
+value = 20
+issue = "#320"
+
+[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.execution_cost::from_dict"]
 value = 20
 issue = "#320"
 
@@ -131,10 +137,6 @@ value = 20
 issue = "#320"
 
 [max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler::_find_cost_outliers"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.execution_cost::from_dict"]
 value = 20
 issue = "#320"
 
@@ -328,15 +330,7 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
-value = 20
-issue = "#320"
-
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/ConversationLogViewer::ConversationLogViewer"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/OperationDetails::OperationDetails"]
 value = 20
 issue = "#320"
 
@@ -348,15 +342,7 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowExecutionForm::WorkflowExecutionForm"]
-value = 20
-issue = "#320"
-
 [max-cognitive."tsx:apps/syn-docs/components/hero/NetworkNodes::NetworkNodes"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-pulse-ui/src/components/FilterBar::FilterBar"]
 value = 20
 issue = "#320"
 
@@ -452,7 +438,7 @@ issue = "#320"
 value = 15
 issue = "#320"
 
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
+[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowExecutionForm::WorkflowExecutionForm"]
 value = 15
 issue = "#320"
 
@@ -464,7 +450,7 @@ issue = "#320"
 value = 15
 issue = "#320"
 
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowExecutionForm::WorkflowExecutionForm"]
+[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
 value = 15
 issue = "#320"
 
@@ -479,16 +465,3 @@ issue = "#320"
 [max-loc-function."python:apps.syn-api.src.syn_api.routes.workflows.commands::create_workflow"]
 value = 105
 issue = "#320"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# Maximum LOC (file-level, threshold: 750)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-[max-loc-file."apps.syn-api.src.syn_api.routes.repos"]
-value = 825
-issue = "#320"
-
-[max-loc-file."apps.syn-api.src.syn_api.routes.systems"]
-value = 845
-issue = "#320"
-
