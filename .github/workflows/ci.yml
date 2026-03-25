@@ -243,42 +243,40 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: apps/syn-dashboard-ui/package-lock.json
-
       - name: Setup pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
           version: 9
 
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
       # ISS-259: --ignore-scripts prevents postinstall hooks from executing
-      # arbitrary code during npm install — a common npm supply chain vector.
+      # arbitrary code during install — a common npm supply chain vector.
       - name: Install ui-feedback-react dependencies
         working-directory: lib/ui-feedback/packages/ui-feedback-react
         run: pnpm install --ignore-scripts
 
-      # ISS-259: --ignore-scripts blocks postinstall hooks (Shai Hulud/event-stream
-      # style attacks). Vite 7.x sources esbuild via optional platform packages,
-      # not postinstall, so no explicit binary restore is needed.
+      # Standardized on pnpm across all frontend apps (was npm, creating duplicate
+      # lock files and inconsistent audit coverage). --frozen-lockfile ensures CI
+      # installs exactly what's locked. --ignore-scripts blocks postinstall hooks.
       - name: Install dashboard dependencies
         working-directory: apps/syn-dashboard-ui
-        run: npm ci --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Link ui-feedback-react
         working-directory: apps/syn-dashboard-ui
-        run: npm link ../../lib/ui-feedback/packages/ui-feedback-react
+        run: pnpm link ../../lib/ui-feedback/packages/ui-feedback-react
 
       - name: Lint
         working-directory: apps/syn-dashboard-ui
-        run: npm run lint
+        run: pnpm run lint
 
       - name: Build
         working-directory: apps/syn-dashboard-ui
-        run: npm run build
+        run: pnpm run build
 
   #############################################################################
   # DOCS SITE - Fumadocs build check
@@ -368,7 +366,6 @@ jobs:
           scan-args: |-
             --lockfile=uv.lock
             --lockfile=pnpm-lock.yaml
-            --lockfile=apps/syn-dashboard-ui/package-lock.json
             --lockfile=apps/syn-dashboard-ui/pnpm-lock.yaml
             --lockfile=apps/syn-pulse-ui/pnpm-lock.yaml
             --lockfile=packages/openclaw-plugin/package-lock.json
@@ -397,8 +394,11 @@ jobs:
       # pip-audit is installed as an isolated tool — not a project dependency.
       # This keeps it out of the project's own dependency tree, preventing any
       # circular trust issues (auditor can't be poisoned by the auditee).
+      # Pin pip-audit version — ironic to leave a security tool unpinned in a
+      # supply-chain hardening job. uv tool run invokes it without relying on
+      # the tool bin dir being on PATH.
       - name: Install pip-audit
-        run: uv tool install pip-audit
+        run: uv tool install pip-audit==2.7.3
 
       # Export locked deps from uv.lock → requirements.txt format, then pipe
       # to pip-audit. --disable-pip queries the PyPI JSON API directly instead
@@ -406,7 +406,7 @@ jobs:
       - name: Audit Python dependencies
         run: |
           uv export --format requirements-txt --no-hashes --frozen --quiet \
-            | pip-audit --disable-pip -r /dev/stdin
+            | uv tool run pip-audit --disable-pip -r /dev/stdin
         continue-on-error: true  # TODO(#259): remove after first clean baseline
 
   #############################################################################

@@ -1398,11 +1398,11 @@ deps-audit-py:
     set -euo pipefail
     if ! command -v pip-audit &>/dev/null; then
         echo "Installing pip-audit..."
-        uv tool install pip-audit
+        uv tool install pip-audit==2.7.3
     fi
     echo "=== Python Dependency Audit ==="
     uv export --format requirements-txt --no-hashes --frozen --quiet \
-        | pip-audit --disable-pip -r /dev/stdin
+        | uv tool run pip-audit --disable-pip -r /dev/stdin
 
 # Audit Node.js dependencies via OSV Scanner (same tool as CI)
 deps-audit-npm:
@@ -1410,7 +1410,13 @@ deps-audit-npm:
     set -euo pipefail
     echo "=== Node.js Dependency Audit (OSV) ==="
     exit_code=0
-    for lockfile in apps/syn-dashboard-ui/pnpm-lock.yaml apps/syn-pulse-ui/pnpm-lock.yaml; do
+    # Scan the same lock files as CI's OSV Scanner job.
+    # All frontend apps standardized on pnpm.
+    for lockfile in \
+        pnpm-lock.yaml \
+        apps/syn-dashboard-ui/pnpm-lock.yaml \
+        apps/syn-pulse-ui/pnpm-lock.yaml \
+        packages/openclaw-plugin/package-lock.json; do
         if [ -f "$lockfile" ]; then
             echo "--- $lockfile ---"
             if command -v osv-scanner &>/dev/null; then
@@ -1437,10 +1443,7 @@ deps-tree:
     for dir in apps/syn-dashboard-ui apps/syn-pulse-ui apps/syn-docs; do
         if [ -f "$dir/pnpm-lock.yaml" ]; then
             count=$(grep -c 'resolution:' "$dir/pnpm-lock.yaml" 2>/dev/null || echo "?")
-            echo "  $dir: ~$count packages"
-        elif [ -f "$dir/package-lock.json" ]; then
-            count=$(grep -c '"resolved":' "$dir/package-lock.json" 2>/dev/null || echo "?")
-            echo "  $dir: ~$count packages"
+            echo "  $dir: ~$count packages (pnpm)"
         fi
     done
 
