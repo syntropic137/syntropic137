@@ -58,17 +58,13 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-# --- syn-api services (ISS-316: lifecycle) ---
+# --- syn-api services (ISS-316: extracted from lifecycle, pre-existing complexity) ---
 
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::startup"]
-value = 30
+[max-cognitive."python:apps.syn-api.src.syn_api.services.credentials::validate_credentials"]
+value = 20
 issue = "#316"
 
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::health_check"]
-value = 25
-issue = "#316"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::_seed_offline_data"]
+[max-cognitive."python:apps.syn-api.src.syn_api.services.reconciliation::_docker_rm"]
 value = 20
 issue = "#316"
 
