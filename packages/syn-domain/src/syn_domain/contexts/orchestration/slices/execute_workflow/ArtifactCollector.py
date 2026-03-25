@@ -111,44 +111,14 @@ class ArtifactCollector:
         """Inject input artifacts from previous phases into workspace.
 
         Writes files to artifacts/input/ in the workspace (ADR-036).
-        Uses in-memory cache first, falls back to projection query.
+        Delegates to inject_from_previous_phases_explicit.
         """
-        if not ctx.completed_phase_ids:
-            return
-
-        phase_outputs: dict[str, str] = {}
-
-        # 1. Get from in-memory cache (immediate, no eventual consistency)
-        for pid in ctx.completed_phase_ids:
-            if pid in ctx.phase_outputs:
-                phase_outputs[pid] = ctx.phase_outputs[pid]
-
-        # 2. Query projection for any missing phases
-        missing_phases = [pid for pid in ctx.completed_phase_ids if pid not in phase_outputs]
-        if missing_phases and self._query_service:
-            projection_outputs = await self._query_service.get_for_phase_injection(
-                execution_id=ctx.execution_id,
-                completed_phase_ids=missing_phases,
-            )
-            phase_outputs.update(projection_outputs)
-
-        # Write artifacts to /workspace/artifacts/input/
-        files_to_inject = [
-            (f"artifacts/input/{prev_phase_id}.md", content.encode())
-            for prev_phase_id, content in phase_outputs.items()
-        ]
-        if files_to_inject:
-            await workspace.inject_files(files_to_inject)
-            logger.info(
-                "Injected %d artifact(s) from previous phases: %s",
-                len(files_to_inject),
-                list(phase_outputs.keys()),
-            )
-        elif ctx.completed_phase_ids:
-            logger.warning(
-                "No artifacts found for completed phases: %s",
-                ctx.completed_phase_ids,
-            )
+        await self.inject_from_previous_phases_explicit(
+            workspace=workspace,
+            completed_phase_ids=ctx.completed_phase_ids,
+            phase_outputs=ctx.phase_outputs,
+            execution_id=ctx.execution_id,
+        )
 
     async def inject_from_previous_phases_explicit(
         self,
@@ -159,38 +129,50 @@ class ArtifactCollector:
     ) -> None:
         """Inject artifacts using explicit parameters (ISS-196).
 
-        Same logic as inject_from_previous_phases but without ExecutionContext.
         Used by WorkspaceProvisionHandler in the Processor To-Do List pattern.
         """
         if not completed_phase_ids:
             return
 
-        outputs: dict[str, str] = {}
+        resolved = await self._resolve_phase_outputs(
+            completed_phase_ids, phase_outputs, execution_id
+        )
+        await self._inject_and_log(workspace, resolved, completed_phase_ids)
 
-        # 1. Get from in-memory cache
-        for pid in completed_phase_ids:
-            if pid in phase_outputs:
-                outputs[pid] = phase_outputs[pid]
-
-        # 2. Query projection for missing
-        missing = [pid for pid in completed_phase_ids if pid not in outputs]
+    async def _resolve_phase_outputs(
+        self,
+        completed_phase_ids: list[str],
+        phase_outputs: dict[str, str],
+        execution_id: str,
+    ) -> dict[str, str]:
+        """Resolve phase outputs from cache, falling back to projection query."""
+        resolved = {pid: phase_outputs[pid] for pid in completed_phase_ids if pid in phase_outputs}
+        missing = [pid for pid in completed_phase_ids if pid not in resolved]
         if missing and self._query_service:
             projection_outputs = await self._query_service.get_for_phase_injection(
                 execution_id=execution_id,
                 completed_phase_ids=missing,
             )
-            outputs.update(projection_outputs)
+            resolved.update(projection_outputs)
+        return resolved
 
+    @staticmethod
+    async def _inject_and_log(
+        workspace: ArtifactWorkspace,
+        resolved_outputs: dict[str, str],
+        completed_phase_ids: list[str],
+    ) -> None:
+        """Inject resolved outputs into workspace and log the result."""
         files_to_inject = [
-            (f"artifacts/input/{prev_id}.md", content.encode())
-            for prev_id, content in outputs.items()
+            (f"artifacts/input/{phase_id}.md", content.encode())
+            for phase_id, content in resolved_outputs.items()
         ]
         if files_to_inject:
             await workspace.inject_files(files_to_inject)
             logger.info(
                 "Injected %d artifact(s) from previous phases: %s",
                 len(files_to_inject),
-                list(outputs.keys()),
+                list(resolved_outputs.keys()),
             )
         elif completed_phase_ids:
             logger.warning(

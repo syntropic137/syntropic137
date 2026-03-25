@@ -1,116 +1,32 @@
 # Grandfathered violations. Every entry MUST reference a GitHub issue.
 # This file should SHRINK over time — each entry is tech debt.
 #
-# Budgets are set to current value rounded up to nearest multiple of 5.
+# Budgets ratcheted to actual value rounded up to nearest multiple of 5.
 # Thresholds: cognitive ≤ 15, cyclomatic ≤ 10, LOC function ≤ 100, LOC file ≤ 750
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cognitive Complexity (function-level, threshold: 15)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# --- syn-api routes (ISS-315: webhooks, ISS-317: executions, ISS-319: sse) ---
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::github_webhook_endpoint"]
-value = 35
-issue = "#315"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::list_repos"]
-value = 35
-issue = "#315"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::_evaluate_triggers"]
-value = 20
-issue = "#315"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
-value = 55
-issue = "#317"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::get_execution_endpoint"]
-value = 30
-issue = "#317"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::list_"]
-value = 25
-issue = "#317"
+# --- syn-api routes ---
 
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.commands::get_execution_status_endpoint"]
 value = 20
 issue = "#317"
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::activity_sse"]
-value = 25
-issue = "#319"
+# --- syn-api services ---
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::execution_sse"]
-value = 25
-issue = "#319"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::generate"]
-value = 20
-issue = "#319"
-
-# --- syn-api services (ISS-316: lifecycle) ---
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::startup"]
-value = 30
-issue = "#316"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::health_check"]
-value = 25
-issue = "#316"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::_seed_offline_data"]
+[max-cognitive."python:apps.syn-api.src.syn_api.services.credentials::validate_credentials"]
 value = 20
 issue = "#316"
 
-# --- syn-domain: orchestration (ISS-318: EventStreamProcessor) ---
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor::process_stream"]
+[max-cognitive."python:apps.syn-api.src.syn_api.services.reconciliation::_docker_rm"]
 value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.EventStreamProcessor::_track_subagent_from_hook"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
-value = 25
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.WorkflowExecutionProcessor::_save_and_sync"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector::inject_from_previous_phases"]
-value = 20
-issue = "#318"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ArtifactCollector::inject_from_previous_phases_explicit"]
-value = 20
-issue = "#318"
-
-# --- syn-shared ---
+issue = "#316"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
-value = 20
-issue = "#317"
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.executions.queries::get_execution_endpoint"]
-value = 20
-issue = "#317"
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.webhooks::github_webhook_endpoint"]
-value = 15
-issue = "#315"
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
-value = 15
-issue = "#318"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (function-level, threshold: 100)
@@ -119,4 +35,3 @@ issue = "#318"
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (file-level, threshold: 750)
 # ═══════════════════════════════════════════════════════════════════════════════
-
