@@ -138,7 +138,7 @@ def _substitute_inputs(
     inputs: dict[str, Any] | None,
     phase_outputs: dict[str, str],
 ) -> str:
-    """Layers 2a–2d: Replace workflow inputs, phase inputs, outputs, and $ARGUMENTS."""
+    """Layers 2a-2d: Replace workflow inputs, phase inputs, outputs, and $ARGUMENTS."""
     result = template
 
     # Layer 2a: Workflow inputs

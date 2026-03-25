@@ -7,7 +7,7 @@ Uses ports for I/O - no direct dependencies on storage or messaging.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from syn_adapters.control.commands import (
     CancelExecution,
@@ -41,7 +41,7 @@ class ExecutionController:
         self._state_port = state_port
         self._signal_port = signal_port
 
-    _COMMAND_DISPATCH: dict[type[ControlCommand], str] = {
+    _COMMAND_DISPATCH: ClassVar[dict[type[ControlCommand], str]] = {
         PauseExecution: "_handle_pause",
         ResumeExecution: "_handle_resume",
         CancelExecution: "_handle_cancel",

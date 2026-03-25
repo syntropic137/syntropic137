@@ -132,9 +132,7 @@ class RepoProjection:
             return False
         if provider and repo.provider != provider:
             return False
-        if unassigned and repo.system_id:
-            return False
-        return True
+        return not (unassigned and repo.system_id)
 
     async def list_all(
         self,

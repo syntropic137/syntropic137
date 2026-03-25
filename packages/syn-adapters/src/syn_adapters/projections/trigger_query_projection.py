@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 
 from event_sourcing import (
     CheckpointedProjection,
@@ -62,7 +62,7 @@ class TriggerQueryProjection(CheckpointedProjection):
     def get_subscribed_event_types(self) -> set[str] | None:
         return _SUBSCRIBED_EVENTS
 
-    _EVENT_DISPATCH: dict[str, str] = {
+    _EVENT_DISPATCH: ClassVar[dict[str, str]] = {
         "github.TriggerRegistered": "_on_trigger_registered",
         "github.TriggerPaused": "_on_trigger_paused",
         "github.TriggerResumed": "_on_trigger_resumed",

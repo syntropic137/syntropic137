@@ -6,7 +6,7 @@ Supports automatic selection of available agents.
 
 from __future__ import annotations
 
-from pydantic import SecretStr
+from typing import TYPE_CHECKING
 
 from syn_adapters.agents.protocol import (
     AgentError,
@@ -15,6 +15,9 @@ from syn_adapters.agents.protocol import (
 )
 from syn_shared import get_settings
 from syn_shared.logging import get_logger
+
+if TYPE_CHECKING:
+    from pydantic import SecretStr
 
 logger = get_logger(__name__)
 

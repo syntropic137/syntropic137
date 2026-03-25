@@ -24,13 +24,12 @@ from syn_api.types import (
 )
 
 if TYPE_CHECKING:
+    from syn_api.auth import AuthContext
     from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
         PhaseDefinition,
         WorkflowClassification,
         WorkflowType,
     )
-
-    from syn_api.auth import AuthContext
 
 
 def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
