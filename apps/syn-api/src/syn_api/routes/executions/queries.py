@@ -8,7 +8,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
 
 from syn_api._wiring import ensure_connected, get_projection_mgr
 from syn_api.types import (
@@ -23,77 +22,23 @@ from syn_api.types import (
     ToolOperation,
 )
 
+from .models import (
+    ExecutionDetailResponse,
+    ExecutionListResponse,
+    ExecutionSummaryResponse,
+    PhaseExecutionInfo,
+    PhaseOperationInfo,
+)
+
 if TYPE_CHECKING:
+    from syn_adapters.projections.manager import ProjectionManager
     from syn_api.auth import AuthContext
+    from syn_domain.contexts.orchestration.domain.read_models.workflow_execution_detail import (
+        PhaseExecutionDetail,
+    )
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["executions"])
-
-# -- Response Models ----------------------------------------------------------
-
-
-class PhaseOperationInfo(BaseModel):
-    operation_id: str
-    operation_type: str
-    timestamp: str | None = None
-    tool_name: str | None = None
-    tool_use_id: str | None = None
-    success: bool = True
-
-
-class PhaseExecutionInfo(BaseModel):
-    phase_id: str
-    name: str
-    status: str
-    session_id: str | None = None
-    artifact_id: str | None = None
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    duration_seconds: float = 0.0
-    cost_usd: Decimal = Decimal("0")
-    started_at: str | None = None
-    completed_at: str | None = None
-    error_message: str | None = None
-    operations: list[PhaseOperationInfo] = Field(default_factory=list)
-
-
-class ExecutionDetailResponse(BaseModel):
-    workflow_execution_id: str
-    workflow_id: str
-    workflow_name: str
-    status: str
-    started_at: str | None = None
-    completed_at: str | None = None
-    phases: list[PhaseExecutionInfo] = Field(default_factory=list)
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    total_tokens: int = 0
-    total_cost_usd: Decimal = Decimal("0")
-    total_duration_seconds: float = 0.0
-    artifact_ids: list[str] = Field(default_factory=list)
-    error_message: str | None = None
-
-
-class ExecutionSummaryResponse(BaseModel):
-    workflow_execution_id: str
-    workflow_id: str
-    workflow_name: str
-    status: str
-    started_at: str | None = None
-    completed_at: str | None = None
-    completed_phases: int = 0
-    total_phases: int = 0
-    total_tokens: int = 0
-    total_cost_usd: Decimal = Decimal("0")
-    tool_call_count: int = 0
-
-
-class ExecutionListResponse(BaseModel):
-    executions: list[ExecutionSummaryResponse]
-    total: int
-    page: int = 1
-    page_size: int = 50
 
 
 # -- Helpers ------------------------------------------------------------------
@@ -113,6 +58,113 @@ def _parse_iso(value: str) -> datetime | None:
     except ValueError:
         logger.warning("Failed to parse datetime from value %r", value)
         return None
+
+
+def _parse_dt(value: datetime | str | None) -> datetime | None:
+    """Normalise a datetime-or-string field to datetime."""
+    if value is None:
+        return None
+    return _parse_iso(value) if isinstance(value, str) else value
+
+
+async def _load_phase_operations(
+    manager: ProjectionManager,
+    session_id: str,
+) -> list[ToolOperation]:
+    """Load tool operations for a session, returning [] on failure."""
+    try:
+        tool_data = await manager.session_tools.get(session_id)
+        return [
+            ToolOperation(
+                observation_id=op.observation_id,
+                operation_type=op.operation_type,
+                timestamp=op.timestamp,
+                duration_ms=op.duration_ms,
+                success=op.success,
+                tool_name=op.tool_name,
+                tool_use_id=op.tool_use_id,
+            )
+            for op in (tool_data or [])
+        ]
+    except Exception:
+        logger.exception("Failed to load tool ops for session %s", session_id)
+        return []
+
+
+async def _map_phase_detail(
+    phase: PhaseExecutionDetail,
+    manager: ProjectionManager,
+) -> PhaseExecution:
+    """Map a domain phase to an API PhaseExecution."""
+    ops = await _load_phase_operations(manager, phase.session_id) if phase.session_id else []
+    return PhaseExecution(
+        phase_id=phase.workflow_phase_id,
+        name=phase.name,
+        status=phase.status,
+        session_id=phase.session_id,
+        artifact_id=phase.artifact_id,
+        input_tokens=phase.input_tokens,
+        output_tokens=phase.output_tokens,
+        cost_usd=Decimal(str(phase.cost_usd)),
+        duration_seconds=phase.duration_seconds,
+        started_at=_parse_dt(phase.started_at),
+        completed_at=_parse_dt(phase.completed_at),
+        operations=ops,
+    )
+
+
+def _map_phase_to_response(phase: PhaseExecution) -> PhaseExecutionInfo:
+    """Map an API PhaseExecution to an HTTP response model."""
+    operations = [
+        PhaseOperationInfo(
+            operation_id=op.observation_id,
+            operation_type=op.operation_type,
+            timestamp=str(op.timestamp) if op.timestamp else None,
+            tool_name=op.tool_name,
+            tool_use_id=op.tool_use_id,
+            success=op.success if op.success is not None else True,
+        )
+        for op in (phase.operations or [])
+    ]
+    return PhaseExecutionInfo(
+        phase_id=phase.phase_id,
+        name=phase.name,
+        status=phase.status,
+        session_id=phase.session_id,
+        artifact_id=phase.artifact_id,
+        input_tokens=phase.input_tokens,
+        output_tokens=phase.output_tokens,
+        total_tokens=phase.input_tokens + phase.output_tokens,
+        duration_seconds=phase.duration_seconds or 0.0,
+        cost_usd=Decimal(str(phase.cost_usd)),
+        started_at=str(phase.started_at) if phase.started_at else None,
+        completed_at=str(phase.completed_at) if phase.completed_at else None,
+        operations=operations,
+    )
+
+
+async def _fetch_tool_counts(execution_ids: list[str]) -> dict[str, int]:
+    """Query tool_execution_completed counts from agent_events."""
+    try:
+        from syn_api._wiring import get_event_store_instance
+
+        event_store = get_event_store_instance()
+        pool = event_store.pool
+        if pool is None:
+            return {}
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT execution_id, COUNT(*) AS cnt "
+                "FROM agent_events "
+                "WHERE execution_id = ANY($1) "
+                "  AND event_type = 'tool_execution_completed' "
+                "GROUP BY execution_id",
+                execution_ids,
+            )
+        return {row["execution_id"]: row["cnt"] for row in rows}
+    except Exception:
+        logger.debug("Could not query tool counts from agent_events", exc_info=True)
+        return {}
 
 
 # -- Service functions --------------------------------------------------------
@@ -136,27 +188,11 @@ async def list_(
             offset=offset,
             status_filter=status,
         )
-    tool_counts: dict[str, int] = {}
-    if domain_summaries:
-        try:
-            from syn_api._wiring import get_event_store_instance
-
-            event_store = get_event_store_instance()
-            pool = event_store.pool
-            if pool is not None:
-                exec_ids = [s.workflow_execution_id for s in domain_summaries]
-                async with pool.acquire() as conn:
-                    rows = await conn.fetch(
-                        "SELECT execution_id, COUNT(*) AS cnt "
-                        "FROM agent_events "
-                        "WHERE execution_id = ANY($1) "
-                        "  AND event_type = 'tool_execution_completed' "
-                        "GROUP BY execution_id",
-                        exec_ids,
-                    )
-                tool_counts = {row["execution_id"]: row["cnt"] for row in rows}
-        except Exception:
-            logger.debug("Could not query tool counts from agent_events", exc_info=True)
+    tool_counts = (
+        await _fetch_tool_counts([s.workflow_execution_id for s in domain_summaries])
+        if domain_summaries
+        else {}
+    )
     return Ok(
         [
             ExecutionSummary(
@@ -213,46 +249,7 @@ async def get_detail(
     detail = await manager.workflow_execution_detail.get_by_id(execution_id)
     if detail is None:
         return Err(ExecutionError.NOT_FOUND, message=f"Execution {execution_id} not found")
-    phases: list[PhaseExecution] = []
-    if hasattr(detail, "phases") and detail.phases:
-        for p in detail.phases:
-            ops: list[ToolOperation] = []
-            session_id = p.session_id if hasattr(p, "session_id") else None
-            if session_id:
-                try:
-                    tool_data = await manager.session_tools.get(session_id)
-                    ops = [
-                        ToolOperation(
-                            observation_id=op.observation_id,
-                            operation_type=op.operation_type,
-                            timestamp=op.timestamp,
-                            duration_ms=op.duration_ms,
-                            success=op.success,
-                            tool_name=op.tool_name,
-                            tool_use_id=op.tool_use_id,
-                        )
-                        for op in (tool_data or [])
-                    ]
-                except Exception:
-                    logger.exception("Failed to load tool ops for session %s", session_id)
-            _st = p.started_at if hasattr(p, "started_at") else None
-            _co = p.completed_at if hasattr(p, "completed_at") else None
-            phases.append(
-                PhaseExecution(
-                    phase_id=p.workflow_phase_id,
-                    name=p.name,
-                    status=p.status,
-                    session_id=session_id,
-                    artifact_id=p.artifact_id if hasattr(p, "artifact_id") else None,
-                    input_tokens=p.input_tokens,
-                    output_tokens=p.output_tokens,
-                    cost_usd=Decimal(str(p.cost_usd)),
-                    duration_seconds=p.duration_seconds if hasattr(p, "duration_seconds") else None,
-                    started_at=_parse_iso(_st) if isinstance(_st, str) else _st,
-                    completed_at=_parse_iso(_co) if isinstance(_co, str) else _co,
-                    operations=ops,
-                )
-            )
+    phases = [await _map_phase_detail(p, manager) for p in detail.phases]
     return Ok(
         ExecutionDetailFull(
             workflow_execution_id=detail.workflow_execution_id,
@@ -344,36 +341,7 @@ async def get_execution_endpoint(execution_id: str) -> ExecutionDetailResponse:
     if isinstance(result, Err):
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
     detail = result.value
-    phases = []
-    for p in detail.phases or []:
-        operations = [
-            PhaseOperationInfo(
-                operation_id=op.observation_id,
-                operation_type=op.operation_type,
-                timestamp=str(op.timestamp) if op.timestamp else None,
-                tool_name=op.tool_name,
-                tool_use_id=op.tool_use_id,
-                success=op.success if op.success is not None else True,
-            )
-            for op in (p.operations or [])
-        ]
-        phases.append(
-            PhaseExecutionInfo(
-                phase_id=p.phase_id,
-                name=p.name,
-                status=p.status,
-                session_id=p.session_id,
-                artifact_id=p.artifact_id,
-                input_tokens=p.input_tokens,
-                output_tokens=p.output_tokens,
-                total_tokens=p.input_tokens + p.output_tokens,
-                duration_seconds=p.duration_seconds or 0.0,
-                cost_usd=Decimal(str(p.cost_usd)),
-                started_at=str(p.started_at) if p.started_at else None,
-                completed_at=str(p.completed_at) if p.completed_at else None,
-                operations=operations,
-            )
-        )
+    phases = [_map_phase_to_response(p) for p in detail.phases or []]
     total_input = sum(p.input_tokens for p in detail.phases or [])
     total_output = sum(p.output_tokens for p in detail.phases or [])
     artifact_ids = [p.artifact_id for p in phases if p.artifact_id]
