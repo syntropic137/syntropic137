@@ -23,6 +23,21 @@ logger = get_logger(__name__)
 __all__ = ["dispatch_event", "run_live_subscription", "subscription_loop"]
 
 
+async def _handle_live_event(
+    svc: EventSubscriptionService,
+    envelope: object,
+) -> None:
+    """Dispatch a single live event, advancing position or raising on failure."""
+    dispatch_success = await svc._dispatch_event(envelope)
+
+    if dispatch_success:
+        if envelope.metadata.global_nonce is not None:  # type: ignore[union-attr]
+            svc._last_position = envelope.metadata.global_nonce  # type: ignore[union-attr]
+    else:
+        nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+        raise RuntimeError(f"Event dispatch failed at position {nonce}. Triggering reconnect.")
+
+
 async def run_live_subscription(svc: EventSubscriptionService) -> None:
     """Run live subscription for real-time events.
 
@@ -39,16 +54,8 @@ async def run_live_subscription(svc: EventSubscriptionService) -> None:
             return
 
         svc._last_event_time = datetime.now(UTC)
-        dispatch_success = await svc._dispatch_event(envelope)
-
-        # CRITICAL: Only advance position if dispatch succeeded
-        if dispatch_success:
-            events_since_save += 1
-            if envelope.metadata.global_nonce is not None:
-                svc._last_position = envelope.metadata.global_nonce
-        else:
-            nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-            raise RuntimeError(f"Event dispatch failed at position {nonce}. Triggering reconnect.")
+        await _handle_live_event(svc, envelope)
+        events_since_save += 1
 
         # Save position periodically
         now = datetime.now(UTC)

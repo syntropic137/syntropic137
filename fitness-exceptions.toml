@@ -150,72 +150,6 @@ issue = "#318"
 value = 20
 issue = "#318"
 
-# --- syn-adapters ---
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.artifacts.bundle_storage::load_bundle_from_storage"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.minio::_do_upload"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.minio_queries::list_objects"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.supabase::_do_upload"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.storage.in_memory_factories::reset_storage"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.storage.in_memory_workflow_repo_queries::get_all_workflows"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.coordinator_helpers::run_coordinator"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_catchup_batch::process_catchup_batch"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_health::health_check"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_live::run_live_subscription"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_loop::subscription_loop"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.adapter_copy::collect_matching_files"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.agentic.stream_reader::read_lines"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.managed_workspace_ops::interrupt_container"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.setup_phase_secrets::_resolve_github_credentials"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.workspace_backends.service.workspace_lifecycle::cleanup_workspace"]
-value = 20
-issue = "#320"
-
 # --- syn-shared ---
 
 # --- TSX/TypeScript ---
@@ -327,10 +261,6 @@ issue = "#320"
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
 value = 15
 issue = "#318"
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_health::health_check"]
-value = 15
-issue = "#320"
 
 [max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
 value = 15

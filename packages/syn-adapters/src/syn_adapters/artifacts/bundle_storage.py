@@ -68,6 +68,41 @@ async def save_bundle_to_storage(
     return uploaded_keys
 
 
+def _resolve_storage_prefix(
+    bundle_id: str,
+    prefix: str | None,
+    workflow_id: str | None,
+    session_id: str | None,
+) -> str:
+    """Build the storage prefix from explicit prefix or component IDs."""
+    if prefix:
+        return prefix
+    parts: list[str] = []
+    if workflow_id:
+        parts.append(f"workflows/{workflow_id}")
+    if session_id:
+        parts.append(f"sessions/{session_id}")
+    parts.append(f"bundles/{bundle_id}")
+    return "/".join(parts) + "/"
+
+
+def _parse_artifact_file(file_info: dict[str, object]) -> tuple[str, ArtifactMetadata]:
+    """Parse a single file entry from the manifest into path and metadata."""
+    meta_dict: dict[str, object] = file_info.get("metadata", {})  # type: ignore[assignment]
+    metadata = ArtifactMetadata(
+        workflow_id=meta_dict.get("workflow_id"),  # type: ignore[arg-type]
+        phase_id=meta_dict.get("phase_id"),  # type: ignore[arg-type]
+        session_id=meta_dict.get("session_id"),  # type: ignore[arg-type]
+        artifact_type=ArtifactType(meta_dict.get("artifact_type", "other")),  # type: ignore[arg-type]
+        title=meta_dict.get("title"),  # type: ignore[arg-type]
+        description=meta_dict.get("description"),  # type: ignore[arg-type]
+        is_primary=meta_dict.get("is_primary", False),  # type: ignore[arg-type]
+        derived_from=tuple(meta_dict.get("derived_from", [])),  # type: ignore[arg-type]
+        extra=meta_dict.get("extra", {}),  # type: ignore[arg-type]
+    )
+    return str(file_info["path"]), metadata
+
+
 async def load_bundle_from_storage(
     storage: StorageProtocol,
     bundle_id: str,
@@ -79,16 +114,7 @@ async def load_bundle_from_storage(
     """Load a bundle from object storage."""
     from syn_adapters.object_storage.protocol import DownloadError, ObjectNotFoundError
 
-    if prefix:
-        storage_prefix = prefix
-    else:
-        parts = []
-        if workflow_id:
-            parts.append(f"workflows/{workflow_id}")
-        if session_id:
-            parts.append(f"sessions/{session_id}")
-        parts.append(f"bundles/{bundle_id}")
-        storage_prefix = "/".join(parts) + "/"
+    storage_prefix = _resolve_storage_prefix(bundle_id, prefix, workflow_id, session_id)
     manifest_key = storage_prefix + "manifest.json"
     try:
         manifest_bytes = await storage.download(manifest_key)
@@ -108,21 +134,9 @@ async def load_bundle_from_storage(
         created_at=datetime.fromisoformat(manifest["created_at"]),
     )
     for file_info in manifest.get("files", []):
-        file_path = file_info["path"]
+        file_path, metadata = _parse_artifact_file(file_info)
         file_key = storage_prefix + file_path
         content = await storage.download(file_key)
-        meta_dict = file_info.get("metadata", {})
-        metadata = ArtifactMetadata(
-            workflow_id=meta_dict.get("workflow_id"),
-            phase_id=meta_dict.get("phase_id"),
-            session_id=meta_dict.get("session_id"),
-            artifact_type=ArtifactType(meta_dict.get("artifact_type", "other")),
-            title=meta_dict.get("title"),
-            description=meta_dict.get("description"),
-            is_primary=meta_dict.get("is_primary", False),
-            derived_from=tuple(meta_dict.get("derived_from", [])),
-            extra=meta_dict.get("extra", {}),
-        )
         artifact_file = ArtifactFile(
             path=Path(file_path),
             content=content,

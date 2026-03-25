@@ -61,15 +61,35 @@ async def get_workflow_by_id(
     return aggregate
 
 
-def get_all_workflows(event_store: InMemoryEventStore) -> list[WorkflowTemplateAggregate]:
-    """Get all workflows."""
+def _build_envelopes(
+    stored_events: list[object],
+) -> list[EventEnvelope[Any]]:
+    """Build EventEnvelope list from stored events for a single aggregate."""
     from event_sourcing import EventEnvelope, EventMetadata
 
-    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
-        WorkflowTemplateAggregate,
-    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
+    )
+
+    envelopes: list[EventEnvelope[Any]] = []
+    for stored_event in stored_events:
+        if stored_event.event_type != "WorkflowTemplateCreated":  # type: ignore[union-attr]
+            continue
+        workflow_event = WorkflowTemplateCreatedEvent(**stored_event.event_data)  # type: ignore[union-attr]
+        metadata = EventMetadata(
+            event_id=f"evt-{stored_event.sequence}",  # type: ignore[union-attr]
+            aggregate_id=stored_event.aggregate_id,  # type: ignore[union-attr]
+            aggregate_type=stored_event.aggregate_type,  # type: ignore[union-attr]
+            aggregate_nonce=stored_event.version,  # type: ignore[union-attr]
+        )
+        envelopes.append(EventEnvelope(event=workflow_event, metadata=metadata))
+    return envelopes
+
+
+def get_all_workflows(event_store: InMemoryEventStore) -> list[WorkflowTemplateAggregate]:
+    """Get all workflows."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
+        WorkflowTemplateAggregate,
     )
 
     # Get unique aggregate IDs
@@ -84,23 +104,9 @@ def get_all_workflows(event_store: InMemoryEventStore) -> list[WorkflowTemplateA
         if not stored_events:
             continue
 
-        aggregate = WorkflowTemplateAggregate()
-        envelopes: list[EventEnvelope[Any]] = []
-        for stored_event in stored_events:
-            if stored_event.event_type == "WorkflowTemplateCreated":
-                workflow_event = WorkflowTemplateCreatedEvent(**stored_event.event_data)
-                metadata = EventMetadata(
-                    event_id=f"evt-{stored_event.sequence}",
-                    aggregate_id=stored_event.aggregate_id,
-                    aggregate_type=stored_event.aggregate_type,
-                    aggregate_nonce=stored_event.version,
-                )
-                envelope: EventEnvelope[Any] = EventEnvelope(
-                    event=workflow_event, metadata=metadata
-                )
-                envelopes.append(envelope)
-
+        envelopes = _build_envelopes(stored_events)
         if envelopes:
+            aggregate = WorkflowTemplateAggregate()
             aggregate.rehydrate(envelopes)
             workflows.append(aggregate)
 

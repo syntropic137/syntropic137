@@ -63,6 +63,36 @@ def log_workspace_contents(workspace_path: Path) -> None:
         logger.debug("copy_from: Failed to list files: %s", e)
 
 
+def _normalize_pattern(pattern: str) -> str:
+    """Strip leading slashes and 'workspace/' prefix from a glob pattern."""
+    clean = pattern.lstrip("/")
+    if clean.startswith("workspace/"):
+        clean = clean[len("workspace/"):]
+    return clean
+
+
+def _try_read_file(
+    file_path: Path,
+    relative_path: str,
+    results: list[tuple[str, bytes]],
+) -> None:
+    """Read a single file, appending to results on success."""
+    try:
+        content = file_path.read_bytes()
+        results.append((relative_path, content))
+        logger.info(
+            "copy_from: Collected file %s (%d bytes)",
+            relative_path,
+            len(content),
+        )
+    except Exception as e:
+        logger.warning(
+            "copy_from: Failed to read file %s: %s",
+            relative_path,
+            e,
+        )
+
+
 def collect_matching_files(
     workspace_path: Path,
     patterns: list[str],
@@ -72,9 +102,7 @@ def collect_matching_files(
     seen_paths: set[str] = set()
 
     for pattern in patterns:
-        clean_pattern = pattern.lstrip("/")
-        if clean_pattern.startswith("workspace/"):
-            clean_pattern = clean_pattern[len("workspace/") :]
+        clean_pattern = _normalize_pattern(pattern)
 
         for file_path in workspace_path.glob(clean_pattern):
             if not file_path.is_file():
@@ -83,20 +111,7 @@ def collect_matching_files(
             if relative_path in seen_paths:
                 continue
             seen_paths.add(relative_path)
-            try:
-                content = file_path.read_bytes()
-                results.append((relative_path, content))
-                logger.info(
-                    "copy_from: Collected file %s (%d bytes)",
-                    relative_path,
-                    len(content),
-                )
-            except Exception as e:
-                logger.warning(
-                    "copy_from: Failed to read file %s: %s",
-                    relative_path,
-                    e,
-                )
+            _try_read_file(file_path, relative_path, results)
     return results
 
 
