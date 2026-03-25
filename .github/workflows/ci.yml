@@ -368,7 +368,6 @@ jobs:
             --lockfile=pnpm-lock.yaml
             --lockfile=apps/syn-dashboard-ui/pnpm-lock.yaml
             --lockfile=apps/syn-pulse-ui/pnpm-lock.yaml
-            --lockfile=packages/openclaw-plugin/package-lock.json
 
   #############################################################################
   # PIP-AUDIT - Python dependency audit against PyPI advisory database

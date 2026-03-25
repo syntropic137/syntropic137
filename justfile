@@ -1408,12 +1408,11 @@ deps-audit-npm:
     echo "=== Node.js Dependency Audit (OSV) ==="
     exit_code=0
     # Scan the same lock files as CI's OSV Scanner job.
-    # Frontend apps use pnpm; openclaw-plugin still uses npm.
+    # All Node packages standardized on pnpm — single root lock file.
     for lockfile in \
         pnpm-lock.yaml \
         apps/syn-dashboard-ui/pnpm-lock.yaml \
-        apps/syn-pulse-ui/pnpm-lock.yaml \
-        packages/openclaw-plugin/package-lock.json; do
+        apps/syn-pulse-ui/pnpm-lock.yaml; do
         if [ -f "$lockfile" ]; then
             echo "--- $lockfile ---"
             if command -v osv-scanner &>/dev/null; then
