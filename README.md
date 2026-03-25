@@ -1,10 +1,20 @@
 <p align="center">
-  <img src="./docs/banner-syntropic137.png" alt="Syntropic137 Banner" width="100%" />
+  <img src="./public/assets/syn137-banner.png" alt="Syntropic137 Banner" width="100%" />
 </p>
 
 # Syntropic137
 
 Orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability.
+
+> **Using Claude Code?** Install the plugin and let it set everything up for you:
+>
+> ```bash
+> /plugin marketplace add syntropic137/syntropic137-claude-plugin
+> /plugin install syntropic137
+> /syn-setup
+> ```
+>
+> The setup wizard detects your environment, installs prerequisites, and walks you through the full bootstrap — no manual steps needed.
 
 ## Quick Start: Dev Mode
 
