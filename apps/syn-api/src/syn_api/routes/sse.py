@@ -43,7 +43,12 @@ from syn_api.types import Err
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from syn_adapters.projections.realtime import SSEEventFrame, SSEQueue
+    from syn_adapters.projections.realtime import (
+        JsonValue,
+        RealTimeProjection,
+        SSEEventFrame,
+        SSEQueue,
+    )
 
 logger = get_logger(__name__)
 
@@ -58,13 +63,72 @@ _SSE_HEADERS = {
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Shared SSE stream helpers
 # ---------------------------------------------------------------------------
 
+_KEEPALIVE = ": keepalive\n\n"
 
-def _data_line(frame: SSEEventFrame) -> str:
-    """Render *frame* as a single SSE ``data:`` line (terminated by \\n\\n)."""
+
+class _KeepAlive:
+    """Typed sentinel returned by ``_next_frame`` on keepalive timeout."""
+
+
+_KEEPALIVE_SENTINEL = _KeepAlive()
+
+
+async def _next_frame(queue: SSEQueue) -> SSEEventFrame | None | _KeepAlive:
+    """Read next frame, returning ``_KEEPALIVE_SENTINEL`` on timeout."""
+    try:
+        return await asyncio.wait_for(queue.get(), timeout=30.0)
+    except TimeoutError:
+        return _KEEPALIVE_SENTINEL
+
+
+def _handshake_line(execution_id: str | None, data: dict[str, JsonValue]) -> str:
+    """Build the initial ``connected`` SSE data line."""
+    from syn_adapters.projections.realtime import SSEEventFrame as _Frame
+
+    frame = _Frame(
+        type="connected",
+        event_type="connected",
+        execution_id=execution_id,
+        data=data,
+        timestamp=datetime.now(UTC).isoformat(),
+    )
     return f"data: {frame.model_dump_json()}\n\n"
+
+
+async def _stream_frames(request: Request, queue: SSEQueue) -> AsyncGenerator[str, None]:
+    """Yield SSE data lines from *queue* until disconnect or terminal sentinel."""
+    while not await request.is_disconnected():
+        result = await _next_frame(queue)
+        if isinstance(result, _KeepAlive):
+            yield _KEEPALIVE
+        elif result is None:
+            return
+        else:
+            yield f"data: {result.model_dump_json()}\n\n"
+
+
+async def _sse_stream(
+    *,
+    request: Request,
+    channel: str,
+    queue: SSEQueue,
+    realtime: RealTimeProjection,
+    handshake_data: dict[str, JsonValue],
+    execution_id: str | None,
+) -> AsyncGenerator[str, None]:
+    """Yield SSE frames: handshake, then forwarded domain events with keepalive."""
+    try:
+        yield _handshake_line(execution_id, handshake_data)
+        async for line in _stream_frames(request, queue):
+            yield line
+    except Exception:
+        logger.exception("SSE stream error", extra={"channel": channel})
+    finally:
+        with contextlib.suppress(Exception):
+            await realtime.disconnect(channel, queue)
 
 
 # ---------------------------------------------------------------------------
@@ -83,45 +147,15 @@ async def execution_sse(execution_id: str, request: Request) -> StreamingRespons
     """
     realtime = rt.get_realtime_projection_ref()
     queue: SSEQueue = await realtime.connect(execution_id)
-
-    async def generate() -> AsyncGenerator[str, None]:
-        try:
-            from syn_adapters.projections.realtime import SSEEventFrame as _Frame
-
-            connected = _Frame(
-                type="connected",
-                event_type="connected",
-                execution_id=execution_id,
-                data={},
-                timestamp=datetime.now(UTC).isoformat(),
-            )
-            yield _data_line(connected)
-
-            while True:
-                if await request.is_disconnected():
-                    logger.debug("SSE client disconnected", extra={"execution_id": execution_id})
-                    break
-
-                try:
-                    frame: SSEEventFrame | None = await asyncio.wait_for(queue.get(), timeout=30.0)
-                except TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
-
-                if frame is None:
-                    # Terminal sentinel — stream ends after last real frame
-                    # was already delivered before the sentinel was enqueued.
-                    break
-
-                yield _data_line(frame)
-
-        except Exception:
-            logger.exception("SSE stream error", extra={"execution_id": execution_id})
-        finally:
-            with contextlib.suppress(Exception):
-                await realtime.disconnect(execution_id, queue)
-
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    stream = _sse_stream(
+        request=request,
+        channel=execution_id,
+        queue=queue,
+        realtime=realtime,
+        handshake_data={},
+        execution_id=execution_id,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -138,42 +172,15 @@ async def activity_sse(request: Request) -> StreamingResponse:
     """
     realtime = rt.get_realtime_projection_ref()
     queue: SSEQueue = await realtime.connect(_ACTIVITY_CHANNEL)
-
-    async def generate() -> AsyncGenerator[str, None]:
-        try:
-            from syn_adapters.projections.realtime import SSEEventFrame as _Frame
-
-            connected = _Frame(
-                type="connected",
-                event_type="connected",
-                execution_id=None,
-                data={"channel": "activity"},
-                timestamp=datetime.now(UTC).isoformat(),
-            )
-            yield _data_line(connected)
-
-            while True:
-                if await request.is_disconnected():
-                    break
-
-                try:
-                    frame: SSEEventFrame | None = await asyncio.wait_for(queue.get(), timeout=30.0)
-                except TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
-
-                if frame is None:
-                    break
-
-                yield _data_line(frame)
-
-        except Exception:
-            logger.exception("SSE activity stream error")
-        finally:
-            with contextlib.suppress(Exception):
-                await realtime.disconnect(_ACTIVITY_CHANNEL, queue)
-
-    return StreamingResponse(generate(), media_type="text/event-stream", headers=_SSE_HEADERS)
+    stream = _sse_stream(
+        request=request,
+        channel=_ACTIVITY_CHANNEL,
+        queue=queue,
+        realtime=realtime,
+        handshake_data={"channel": "activity"},
+        execution_id=None,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 # ---------------------------------------------------------------------------

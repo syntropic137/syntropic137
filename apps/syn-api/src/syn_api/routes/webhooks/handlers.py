@@ -1,0 +1,83 @@
+"""Installation event handling and trigger evaluation."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from syn_api._wiring import get_trigger_repo, get_trigger_store
+
+logger = logging.getLogger(__name__)
+
+
+async def _apply_installation_created(payload: dict[str, Any]) -> None:
+    """Create and persist an AppInstalledEvent from webhook payload."""
+    from syn_domain.contexts.github.domain.events import AppInstalledEvent
+    from syn_domain.contexts.github.slices.get_installation.projection import (
+        get_installation_projection,
+    )
+
+    event = AppInstalledEvent.from_webhook(payload)
+    projection = get_installation_projection()
+    await projection.handle_app_installed(event)
+
+
+async def _handle_installation_event(event_type: str, action: str, payload: dict[str, Any]) -> None:
+    """Process installation created/deleted events (best-effort)."""
+    if event_type not in ("installation", "installation_repositories"):
+        return
+
+    try:
+        if event_type == "installation" and action == "created":
+            await _apply_installation_created(payload)
+    except Exception:
+        logger.exception("Failed to handle installation event")
+
+
+def _classify_trigger_results(results: list[Any]) -> tuple[list[str], list[str]]:
+    """Separate trigger evaluation results into (fired, deferred) ID lists."""
+    from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+        TriggerDeferredResult,
+        TriggerMatchResult,
+    )
+
+    fired: list[str] = []
+    deferred: list[str] = []
+    for r in results:
+        if isinstance(r, TriggerMatchResult):
+            fired.append(r.trigger_id)
+        elif isinstance(r, TriggerDeferredResult):
+            deferred.append(r.trigger_id)
+    return fired, deferred
+
+
+async def _evaluate_triggers(
+    event_type: str,
+    action: str,
+    payload: dict[str, Any],
+    installation_id: str,
+) -> tuple[list[str], list[str]]:
+    """Evaluate webhook triggers and return (fired, deferred) trigger ID lists."""
+    compound_event = f"{event_type}.{action}" if action else event_type
+    repository = payload.get("repository", {}).get("full_name", "")
+
+    try:
+        from syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler import (
+            EvaluateWebhookHandler,
+        )
+
+        handler = EvaluateWebhookHandler(
+            store=get_trigger_store(),
+            repository=get_trigger_repo(),
+        )
+        results = await handler.evaluate(
+            event=compound_event,
+            repository=repository,
+            installation_id=installation_id,
+            payload=payload,
+        )
+        return _classify_trigger_results(results)
+    except Exception:
+        logger.exception("Failed to evaluate webhook triggers")
+
+    return [], []
