@@ -367,9 +367,47 @@ jobs:
         with:
           scan-args: |-
             --lockfile=uv.lock
+            --lockfile=pnpm-lock.yaml
             --lockfile=apps/syn-dashboard-ui/package-lock.json
+            --lockfile=apps/syn-dashboard-ui/pnpm-lock.yaml
             --lockfile=apps/syn-pulse-ui/pnpm-lock.yaml
             --lockfile=packages/openclaw-plugin/package-lock.json
+
+  #############################################################################
+  # PIP-AUDIT - Python dependency audit against PyPI advisory database
+  #
+  # Complements OSV Scanner — pip-audit catches PyPI-specific advisories that
+  # OSV may not yet index. Uses uv to export the locked dependency list, then
+  # audits each package against known vulnerabilities.
+  #
+  # Context: litellm supply chain attack (2026-03-24) demonstrated that a single
+  # compromised PyPI package can exfiltrate SSH keys, cloud creds, and more from
+  # every downstream consumer — including transitive dependents.
+  #############################################################################
+
+  pip-audit:
+    name: Python Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      # Need uv to export the locked dependency list from uv.lock.
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      # pip-audit is installed as an isolated tool — not a project dependency.
+      # This keeps it out of the project's own dependency tree, preventing any
+      # circular trust issues (auditor can't be poisoned by the auditee).
+      - name: Install pip-audit
+        run: uv tool install pip-audit
+
+      # Export locked deps from uv.lock → requirements.txt format, then pipe
+      # to pip-audit. --disable-pip queries the PyPI JSON API directly instead
+      # of shelling out to pip (faster, fewer moving parts).
+      - name: Audit Python dependencies
+        run: |
+          uv export --format requirements-txt --no-hashes --frozen --quiet \
+            | pip-audit --disable-pip -r /dev/stdin
+        continue-on-error: true  # TODO(#259): remove after first clean baseline
 
   #############################################################################
   # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)
@@ -410,6 +448,7 @@ jobs:
       - docs-site
       - submodule-check
       - osv-scan
+      - pip-audit
       - dependency-review
     runs-on: ubuntu-latest
     steps:
