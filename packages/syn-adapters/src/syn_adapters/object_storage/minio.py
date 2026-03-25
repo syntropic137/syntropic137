@@ -62,6 +62,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _resolve_content_type(key: str, content_type: str | None) -> str:
+    """Resolve content type, auto-detecting from key if not provided."""
+    if content_type is not None:
+        return content_type
+    guessed, _ = mimetypes.guess_type(key)
+    return guessed or "application/octet-stream"
+
+
 def _do_upload(
     client: Minio,
     bucket_name: str,
@@ -90,16 +98,14 @@ def _do_upload(
         UploadError: If upload fails.
     """
     try:
-        if content_type is None:
-            content_type, _ = mimetypes.guess_type(key)
-            content_type = content_type or "application/octet-stream"
+        resolved_type = _resolve_content_type(key, content_type)
 
         result = client.put_object(
             bucket_name,
             key,
             io.BytesIO(content),
             len(content),
-            content_type=content_type,
+            content_type=resolved_type,
             metadata=cast("dict[str, Any]", metadata) if metadata else None,
         )
 

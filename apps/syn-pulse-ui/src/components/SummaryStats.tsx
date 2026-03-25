@@ -6,33 +6,42 @@ interface SummaryStatsProps {
   days: HeatmapDayBucket[]
 }
 
-function calculateStreak(days: HeatmapDayBucket[]): number {
-  const now = new Date()
-  const today = now.toISOString().slice(0, 10)
-  const yd = new Date(now)
-  yd.setDate(yd.getDate() - 1)
-  const yesterday = yd.toISOString().slice(0, 10)
+function toDateString(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
 
+function previousDay(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() - 1)
+  return toDateString(d)
+}
+
+function collectActiveDates(days: HeatmapDayBucket[]): Set<string> {
   const activeDates = new Set<string>()
   for (const d of days) {
     if (d.breakdown.sessions > 0) activeDates.add(d.date)
   }
+  return activeDates
+}
 
-  let current: string
-  if (activeDates.has(today)) {
-    current = today
-  } else if (activeDates.has(yesterday)) {
-    current = yesterday
-  } else {
-    return 0
-  }
+function findStreakStart(activeDates: Set<string>): string | null {
+  const now = new Date()
+  const today = toDateString(now)
+  if (activeDates.has(today)) return today
+  const yesterday = previousDay(today)
+  if (activeDates.has(yesterday)) return yesterday
+  return null
+}
+
+function calculateStreak(days: HeatmapDayBucket[]): number {
+  const activeDates = collectActiveDates(days)
+  let current = findStreakStart(activeDates)
+  if (!current) return 0
 
   let count = 0
   while (activeDates.has(current)) {
     count++
-    const d = new Date(current + 'T00:00:00')
-    d.setDate(d.getDate() - 1)
-    current = d.toISOString().slice(0, 10)
+    current = previousDay(current)
   }
   return count
 }

@@ -61,24 +61,10 @@ app.add_typer(triggers.app, name="triggers")
 app.add_typer(watch.app, name="watch")
 
 
-@app.command()
-def health() -> None:
-    """Check API server health status."""
-    from syn_cli._output import console, print_error
+def _render_health_status(data: dict) -> None:  # type: ignore[type-arg]
+    """Render health status to console, raising typer.Exit on unhealthy."""
+    from syn_cli._output import console
 
-    try:
-        with get_client() as client:
-            resp = client.get("/health")
-    except Exception:
-        print_error(f"Could not connect to API at {get_api_url()}")
-        console.print("[dim]Make sure the API server is running.[/dim]")
-        raise typer.Exit(1) from None
-
-    if resp.status_code != 200:
-        print_error(f"Health check failed: HTTP {resp.status_code}")
-        raise typer.Exit(1)
-
-    data = resp.json()
     status = data.get("status", "unknown")
     mode = data.get("mode", "unknown")
 
@@ -96,6 +82,26 @@ def health() -> None:
     if sub:
         console.print("  [dim]Event store: connected[/dim]")
         console.print(f"  [dim]Subscription: {sub.get('status', 'unknown')}[/dim]")
+
+
+@app.command()
+def health() -> None:
+    """Check API server health status."""
+    from syn_cli._output import console, print_error
+
+    try:
+        with get_client() as client:
+            resp = client.get("/health")
+    except Exception:
+        print_error(f"Could not connect to API at {get_api_url()}")
+        console.print("[dim]Make sure the API server is running.[/dim]")
+        raise typer.Exit(1) from None
+
+    if resp.status_code != 200:
+        print_error(f"Health check failed: HTTP {resp.status_code}")
+        raise typer.Exit(1)
+
+    _render_health_status(resp.json())
 
 
 @app.command()

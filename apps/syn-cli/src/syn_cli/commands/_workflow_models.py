@@ -48,6 +48,20 @@ _TYPE_COERCIONS: list[tuple[re.Pattern[str], type]] = [
 ]
 
 
+def _is_quoted(value: str) -> bool:
+    """Check if value is wrapped in matching quotes."""
+    return len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'")
+
+
+def _parse_single_value(value: str) -> str | int | float | bool:
+    """Parse a single input value with type coercion."""
+    if _is_quoted(value):
+        return value[1:-1]
+    if value.lower() in ("true", "false"):
+        return value.lower() == "true"
+    return _coerce_value(value)
+
+
 def parse_inputs(inputs: list[str] | None) -> dict[str, Any]:
     """Parse key=value input pairs into a typed dictionary."""
     if not inputs:
@@ -60,18 +74,8 @@ def parse_inputs(inputs: list[str] | None) -> dict[str, Any]:
                 f"[yellow]Warning: Ignoring invalid input '{item}' (expected key=value)[/yellow]"
             )
             continue
-
         key, value = item.split("=", 1)
-        key = key.strip()
-
-        if (value.startswith('"') and value.endswith('"')) or (
-            value.startswith("'") and value.endswith("'")
-        ):
-            result[key] = value[1:-1]
-        elif value.lower() in ("true", "false"):
-            result[key] = value.lower() == "true"
-        else:
-            result[key] = _coerce_value(value)
+        result[key.strip()] = _parse_single_value(value)
 
     return result
 

@@ -57,6 +57,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _build_file_options(
+    key: str,
+    content_type: str | None,
+    metadata: dict[str, str] | None,
+) -> tuple[str, dict[str, str]]:
+    """Resolve content type and build Supabase file_options dict.
+
+    Returns (resolved_content_type, file_options).
+    """
+    if content_type is None:
+        guessed, _ = mimetypes.guess_type(key)
+        content_type = guessed or "application/octet-stream"
+
+    file_options: dict[str, str] = {"content-type": content_type}
+    if metadata:
+        import json
+
+        file_options["x-upsert-metadata"] = json.dumps(metadata)
+
+    return content_type, file_options
+
+
 def _do_upload(
     client: Any,
     bucket_name: str,
@@ -85,15 +107,7 @@ def _do_upload(
         UploadError: If upload fails.
     """
     try:
-        if content_type is None:
-            content_type, _ = mimetypes.guess_type(key)
-            content_type = content_type or "application/octet-stream"
-
-        file_options: dict[str, str] = {"content-type": content_type}
-        if metadata:
-            import json
-
-            file_options["x-upsert-metadata"] = json.dumps(metadata)
+        _, file_options = _build_file_options(key, content_type, metadata)
 
         response = client.storage.from_(bucket_name).upload(
             path=key,

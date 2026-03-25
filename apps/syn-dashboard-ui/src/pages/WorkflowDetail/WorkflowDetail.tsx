@@ -6,11 +6,74 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { Card, EmptyState, PageLoader } from '../../components'
 import { useWorkflowData } from '../../hooks'
+import type { WorkflowResponse } from '../../types'
 import { PhaseMetricsChart } from './PhaseMetricsChart'
 import { PhasePipeline } from './PhasePipeline'
 import { WorkflowArtifactsList } from './WorkflowArtifactsList'
 import { WorkflowExecutionForm } from './WorkflowExecutionForm'
 import { WorkflowMetrics } from './WorkflowMetrics'
+
+const STATUS_COLORS: Record<string, string> = {
+  completed: '#22c55e',
+  failed: '#ef4444',
+}
+const DEFAULT_STATUS_COLOR = '#6366f1'
+
+function truncatePhaseName(name: string, maxLen: number = 15): string {
+  return name.length > maxLen ? name.slice(0, maxLen - 3) + '...' : name
+}
+
+function buildPhaseChartData(phases: { phase_name: string; total_tokens: number; cost_usd: number; status: string }[]) {
+  return phases.map((p) => ({
+    name: truncatePhaseName(p.phase_name),
+    tokens: p.total_tokens,
+    cost: p.cost_usd,
+    fill: STATUS_COLORS[p.status] ?? DEFAULT_STATUS_COLOR,
+  }))
+}
+
+function WorkflowDetailHeader({ workflow, workflowId }: { workflow: WorkflowResponse; workflowId: string }) {
+  return (
+    <div>
+      <Link
+        to="/workflows"
+        className="inline-flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to Workflows
+      </Link>
+      <div className="mt-4 flex items-start justify-between">
+        <div className="flex items-start gap-4">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20">
+            <GitBranch className="h-6 w-6 text-indigo-400" />
+          </div>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+                {workflow.name}
+              </h1>
+              <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/20 text-indigo-400 ring-1 ring-inset ring-indigo-500/30">
+                Template
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              {workflow.description || `${workflow.workflow_type} workflow`}
+            </p>
+            <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
+              <span className="font-mono">{workflow.id}</span>
+              <span>&bull;</span>
+              <span>{workflow.classification}</span>
+            </div>
+          </div>
+        </div>
+        <WorkflowExecutionForm
+          workflowId={workflowId}
+          declarations={workflow.input_declarations ?? []}
+        />
+      </div>
+    </div>
+  )
+}
 
 export function WorkflowDetail() {
   const { workflowId } = useParams<{ workflowId: string }>()
@@ -32,54 +95,11 @@ export function WorkflowDetail() {
     )
   }
 
-  const phaseChartData = metrics?.phases.map((p) => ({
-    name: p.phase_name.length > 15 ? p.phase_name.slice(0, 12) + '...' : p.phase_name,
-    tokens: p.total_tokens,
-    cost: p.cost_usd,
-    fill: p.status === 'completed' ? '#22c55e' : p.status === 'failed' ? '#ef4444' : '#6366f1',
-  })) ?? []
+  const phaseChartData = buildPhaseChartData(metrics?.phases ?? [])
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <Link
-          to="/workflows"
-          className="inline-flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back to Workflows
-        </Link>
-        <div className="mt-4 flex items-start justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20">
-              <GitBranch className="h-6 w-6 text-indigo-400" />
-            </div>
-            <div>
-              <div className="flex items-center gap-3">
-                <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
-                  {workflow.name}
-                </h1>
-                <span className="px-2 py-1 text-xs rounded-full bg-indigo-500/20 text-indigo-400 ring-1 ring-inset ring-indigo-500/30">
-                  Template
-                </span>
-              </div>
-              <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-                {workflow.description || `${workflow.workflow_type} workflow`}
-              </p>
-              <div className="mt-2 flex items-center gap-4 text-xs text-[var(--color-text-muted)]">
-                <span className="font-mono">{workflow.id}</span>
-                <span>&bull;</span>
-                <span>{workflow.classification}</span>
-              </div>
-            </div>
-          </div>
-          <WorkflowExecutionForm
-            workflowId={workflowId!}
-            declarations={workflow.input_declarations ?? []}
-          />
-        </div>
-      </div>
+      <WorkflowDetailHeader workflow={workflow} workflowId={workflowId!} />
 
       <WorkflowMetrics
         workflow={workflow}

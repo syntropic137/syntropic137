@@ -44,43 +44,49 @@ class ServiceEntry:
     header_value: str
 
 
+_ANTHROPIC_HOSTS = (
+    "api.anthropic.com",
+    "claude.ai",
+    # When agents use ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081,
+    # requests arrive with Host: syn-envoy-proxy (ISS-43).
+    "syn-envoy-proxy",
+)
+
+_GITHUB_HOSTS = ("api.github.com", "github.com")
+
+
+def _build_anthropic_entry() -> ServiceEntry | None:
+    """Resolve Anthropic credential, preferring API key over OAuth token.
+
+    Priority matters: agent containers are started with ANTHROPIC_API_KEY=proxy-managed
+    so Claude Code sends x-api-key requests. The injected credential must also use
+    x-api-key so Envoy overwrites the placeholder with the real key (ISS-43).
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if api_key:
+        return ServiceEntry("anthropic", "x-api-key", api_key)
+
+    oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
+    if oauth_token:
+        return ServiceEntry("anthropic", "Authorization", f"Bearer {oauth_token}")
+
+    logger.warning("No Anthropic credential (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)")
+    return None
+
+
 def _build_registry() -> dict[str, ServiceEntry]:
     """Build host → ServiceEntry mapping from environment variables."""
     registry: dict[str, ServiceEntry] = {}
 
-    # Anthropic: prefer API key, fall back to OAuth token.
-    #
-    # Priority matters: agent containers are started with ANTHROPIC_API_KEY=proxy-managed
-    # so Claude Code sends x-api-key requests. The injected credential must also use
-    # x-api-key so Envoy overwrites the placeholder with the real key (ISS-43).
-    # If only CLAUDE_CODE_OAUTH_TOKEN is available (no API key), use Bearer auth —
-    # but then agent env must not set ANTHROPIC_API_KEY (different placeholder strategy).
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-    oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "").strip()
+    anthropic_entry = _build_anthropic_entry()
+    if anthropic_entry:
+        for host in _ANTHROPIC_HOSTS:
+            registry[host] = anthropic_entry
 
-    if api_key:
-        entry: ServiceEntry | None = ServiceEntry("anthropic", "x-api-key", api_key)
-    elif oauth_token:
-        entry = ServiceEntry("anthropic", "Authorization", f"Bearer {oauth_token}")
-    else:
-        logger.warning("No Anthropic credential (set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)")
-        entry = None
-
-    if entry:
-        for host in (
-            "api.anthropic.com",
-            "claude.ai",
-            # When agents use ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081,
-            # requests arrive with Host: syn-envoy-proxy (ISS-43).
-            "syn-envoy-proxy",
-        ):
-            registry[host] = entry
-
-    # GitHub: private key / installation token
     github_key = os.environ.get("SYN_GITHUB_PRIVATE_KEY", "").strip()
     if github_key:
         gh_entry = ServiceEntry("github", "Authorization", f"Bearer {github_key}")
-        for host in ("api.github.com", "github.com"):
+        for host in _GITHUB_HOSTS:
             registry[host] = gh_entry
 
     return registry

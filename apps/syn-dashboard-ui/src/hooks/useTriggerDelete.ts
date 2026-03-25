@@ -1,6 +1,18 @@
 import { useCallback } from 'react'
 import { deleteTrigger, type TriggerSummary } from '../api/triggers'
 
+function markAsDeleted(triggers: TriggerSummary[], triggerId: string): TriggerSummary[] {
+  return triggers.map((t) => (t.trigger_id === triggerId ? { ...t, status: 'deleted' } : t))
+}
+
+function removeById(triggers: TriggerSummary[], triggerId: string): TriggerSummary[] {
+  return triggers.filter((t) => t.trigger_id !== triggerId)
+}
+
+function extractErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Failed to delete trigger'
+}
+
 export function useTriggerDelete(
   setTriggers: React.Dispatch<React.SetStateAction<TriggerSummary[]>>,
   fetchTriggers: (showLoader?: boolean) => void,
@@ -12,13 +24,13 @@ export function useTriggerDelete(
     if (!confirm('Delete this trigger?')) return
     setActionError(null)
     addBusy(triggerId)
-    setTriggers((prev) => prev.map((t) => (t.trigger_id === triggerId ? { ...t, status: 'deleted' } : t)))
+    setTriggers((prev) => markAsDeleted(prev, triggerId))
     try {
       await deleteTrigger(triggerId)
-      setTriggers((prev) => prev.filter((t) => t.trigger_id !== triggerId))
+      setTriggers((prev) => removeById(prev, triggerId))
     } catch (err) {
       fetchTriggers(false)
-      setActionError(err instanceof Error ? err.message : 'Failed to delete trigger')
+      setActionError(extractErrorMessage(err))
     } finally {
       removeBusy(triggerId)
     }

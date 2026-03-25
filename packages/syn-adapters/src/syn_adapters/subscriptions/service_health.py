@@ -19,6 +19,53 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+async def _get_saved_position(
+    svc: EventSubscriptionService,
+    warnings_list: list[str],
+) -> int:
+    """Read saved position from the projection store, appending warnings on failure."""
+    try:
+        saved = await svc._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
+        return saved if saved is not None else 0
+    except Exception as e:
+        warnings_list.append(f"Failed to read saved position: {e}")
+        return -1
+
+
+def _check_position_gap(
+    svc: EventSubscriptionService,
+    saved_position: int,
+    warnings_list: list[str],
+) -> int:
+    """Check for large gaps between saved and in-memory positions."""
+    position_gap = abs(svc._last_position - (saved_position or 0))
+    if position_gap > svc._batch_size * 2:
+        warnings_list.append(
+            f"Large gap between saved position ({saved_position}) "
+            f"and in-memory position ({svc._last_position})"
+        )
+    return position_gap
+
+
+def _check_event_staleness(svc: EventSubscriptionService, warnings_list: list[str]) -> None:
+    """Warn if the service is running but hasn't processed events recently."""
+    if not (svc._running and not svc._caught_up):
+        return
+    if svc._last_event_time:
+        time_since = (datetime.now(UTC) - svc._last_event_time).total_seconds()
+        if time_since > 60:
+            warnings_list.append(f"Running but no events processed for {time_since:.0f}s")
+
+
+def _check_reconnect_count(svc: EventSubscriptionService, warnings_list: list[str]) -> None:
+    """Warn if the reconnect count is suspiciously high."""
+    if svc._reconnect_count > 10:
+        warnings_list.append(
+            f"High reconnect count ({svc._reconnect_count}) - "
+            "possible connectivity or event store issues"
+        )
+
+
 async def health_check(svc: EventSubscriptionService) -> dict:
     """Perform health check for subscription service.
 
@@ -36,39 +83,10 @@ async def health_check(svc: EventSubscriptionService) -> dict:
     """
     warnings_list: list[str] = []
 
-    # Get saved position from store
-    try:
-        saved_position = await svc._projection_store.get_position(SUBSCRIPTION_POSITION_KEY)
-        if saved_position is None:
-            saved_position = 0
-    except Exception as e:
-        saved_position = -1
-        warnings_list.append(f"Failed to read saved position: {e}")
-
-    # Check for position gaps
-    position_gap = abs(svc._last_position - (saved_position or 0))
-
-    # If there's a large gap between memory and saved, something might be wrong
-    if position_gap > svc._batch_size * 2:
-        warnings_list.append(
-            f"Large gap between saved position ({saved_position}) "
-            f"and in-memory position ({svc._last_position})"
-        )
-
-    # Check if service is running but not processing
-    if svc._running and not svc._caught_up:
-        time_since_event = None
-        if svc._last_event_time:
-            time_since_event = (datetime.now(UTC) - svc._last_event_time).total_seconds()
-            if time_since_event > 60:  # No events for 60+ seconds
-                warnings_list.append(f"Running but no events processed for {time_since_event:.0f}s")
-
-    # Check reconnect count (many reconnects might indicate problems)
-    if svc._reconnect_count > 10:
-        warnings_list.append(
-            f"High reconnect count ({svc._reconnect_count}) - "
-            "possible connectivity or event store issues"
-        )
+    saved_position = await _get_saved_position(svc, warnings_list)
+    position_gap = _check_position_gap(svc, saved_position, warnings_list)
+    _check_event_staleness(svc, warnings_list)
+    _check_reconnect_count(svc, warnings_list)
 
     health_status = {
         "healthy": len(warnings_list) == 0,

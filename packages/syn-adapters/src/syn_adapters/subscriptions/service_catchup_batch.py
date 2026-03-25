@@ -18,6 +18,22 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _advance_position(svc: EventSubscriptionService, envelope: object) -> None:
+    """Advance the service position from the envelope's global nonce."""
+    nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+    if nonce is not None:
+        svc._last_position = nonce
+
+
+def _raise_dispatch_failure(envelope: object) -> None:
+    """Raise RuntimeError for a failed dispatch to trigger reconnect."""
+    nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
+    raise RuntimeError(
+        f"Event dispatch failed at position {nonce}. "
+        "Stopping to prevent position drift. Will retry on reconnect."
+    )
+
+
 async def process_catchup_batch(
     svc: EventSubscriptionService,
     events: Sequence[object],
@@ -38,13 +54,8 @@ async def process_catchup_batch(
         # CRITICAL: Only advance position if dispatch succeeded
         if dispatch_success:
             events_in_batch += 1
-            if envelope.metadata.global_nonce is not None:  # type: ignore[union-attr]
-                svc._last_position = envelope.metadata.global_nonce  # type: ignore[union-attr]
+            _advance_position(svc, envelope)
         else:
-            nonce = getattr(getattr(envelope, "metadata", None), "global_nonce", None)
-            raise RuntimeError(
-                f"Event dispatch failed at position {nonce}. "
-                "Stopping to prevent position drift. Will retry on reconnect."
-            )
+            _raise_dispatch_failure(envelope)
 
     return events_in_batch

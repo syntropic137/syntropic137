@@ -42,6 +42,55 @@ _GITHUB_HEADERS = frozenset(
 _OUTPUT_DIR = Path("fixtures/webhooks")
 
 
+def _filter_github_headers(scope: Scope) -> dict[str, str]:
+    """Extract only GitHub-relevant headers from the ASGI scope."""
+    headers: dict[str, str] = {}
+    for key_bytes, val_bytes in scope.get("headers", []):
+        key = key_bytes.decode("latin-1").lower()
+        if key in _GITHUB_HEADERS:
+            headers[key] = val_bytes.decode("latin-1")
+    return headers
+
+
+def _parse_payload(body: bytes) -> dict[str, object]:
+    """Parse request body as JSON, falling back to raw string."""
+    try:
+        return json.loads(body)  # type: ignore[no-any-return]
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return {"_raw": body.decode("utf-8", errors="replace")}
+
+
+def _build_recording(
+    headers: dict[str, str],
+    payload: dict[str, object],
+    start_ts: datetime,
+    elapsed_ms: int,
+) -> tuple[Path, dict[str, object], dict[str, object]]:
+    """Build the JSONL filepath, metadata line, and event entry."""
+    event_type = headers.get("x-github-event", "unknown")
+    delivery_id = headers.get("x-github-delivery", "")
+    action = payload.get("action", "")
+    compound_event = f"{event_type}.{action}" if action else event_type
+
+    date_str = start_ts.strftime("%Y%m%d_%H%M%S")
+    filename = f"webhooks_{date_str}_{compound_event.replace('.', '_')}.jsonl"
+
+    metadata: dict[str, object] = {
+        "_type": "metadata",
+        "recorded_at": start_ts.isoformat(),
+        "event_type": event_type,
+        "compound_event": compound_event,
+        "delivery_id": delivery_id,
+        "source": "webhook_recorder",
+    }
+    event_entry: dict[str, object] = {
+        "_offset_ms": elapsed_ms,
+        "headers": headers,
+        "body": payload,
+    }
+    return _OUTPUT_DIR / filename, metadata, event_entry
+
+
 class WebhookRecorderMiddleware:
     """ASGI middleware to record GitHub webhook requests to JSONL.
 
@@ -64,7 +113,6 @@ class WebhookRecorderMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Collect request body
         body_chunks: list[bytes] = []
 
         async def recording_receive() -> Message:
@@ -73,51 +121,17 @@ class WebhookRecorderMiddleware:
                 body_chunks.append(message.get("body", b""))
             return message
 
-        # Extract headers
-        raw_headers: dict[str, str] = {}
-        for key_bytes, val_bytes in scope.get("headers", []):
-            key = key_bytes.decode("latin-1").lower()
-            if key in _GITHUB_HEADERS:
-                raw_headers[key] = val_bytes.decode("latin-1")
-
+        headers = _filter_github_headers(scope)
         start_time = time.monotonic()
         start_ts = datetime.now(tz=UTC)
 
-        # Pass through to the real app
         await self.app(scope, recording_receive, send)
 
-        # Record after the request completes
         body = b"".join(body_chunks)
-        event_type = raw_headers.get("x-github-event", "unknown")
-        delivery_id = raw_headers.get("x-github-delivery", "")
+        payload = _parse_payload(body)
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
 
-        try:
-            payload = json.loads(body)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            payload = {"_raw": body.decode("utf-8", errors="replace")}
-
-        action = payload.get("action", "")
-        compound_event = f"{event_type}.{action}" if action else event_type
-
-        # Build JSONL file
-        date_str = start_ts.strftime("%Y%m%d_%H%M%S")
-        filename = f"webhooks_{date_str}_{compound_event.replace('.', '_')}.jsonl"
-        filepath = _OUTPUT_DIR / filename
-
-        metadata = {
-            "_type": "metadata",
-            "recorded_at": start_ts.isoformat(),
-            "event_type": event_type,
-            "compound_event": compound_event,
-            "delivery_id": delivery_id,
-            "source": "webhook_recorder",
-        }
-
-        event_entry = {
-            "_offset_ms": int((time.monotonic() - start_time) * 1000),
-            "headers": raw_headers,
-            "body": payload,
-        }
+        filepath, metadata, event_entry = _build_recording(headers, payload, start_ts, elapsed_ms)
 
         with filepath.open("w") as f:
             f.write(json.dumps(metadata) + "\n")

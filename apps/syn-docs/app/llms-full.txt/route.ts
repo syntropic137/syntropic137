@@ -4,41 +4,46 @@ import { stripFrontmatter, stripJSX, parseFrontmatter } from '@/lib/mdx-text';
 
 export const revalidate = false;
 
+const SECTION_ORDER = ['index.mdx', 'guide/', 'api/', 'cli/'];
+
+function sectionSortKey(relPath: string): number {
+  const idx = SECTION_ORDER.findIndex((p) => relPath === p || relPath.startsWith(p));
+  return idx === -1 ? 99 : idx;
+}
+
+function renderFileSection(content: string, relPath: string): string[] {
+  const fm = parseFrontmatter(content);
+  const body = stripJSX(stripFrontmatter(content));
+  if (!body) return [];
+
+  const lines: string[] = [`## ${fm.title || relPath}`];
+  if (fm.description) lines.push(`> ${fm.description}`);
+  lines.push('', body, '', '---', '');
+  return lines;
+}
+
 export function GET() {
   const contentDir = path.join(process.cwd(), 'content/docs');
   const files = collectMdxFiles(contentDir);
-  const sections: string[] = [];
 
-  sections.push('# Syntropic137 — Complete Documentation');
-  sections.push('');
-  sections.push('> Agentic Engineering platform. Orchestrate AI agents with event-sourced workflows.');
-  sections.push('');
-  sections.push('---');
-  sections.push('');
-
-  const order = ['index.mdx', 'guide/', 'api/', 'cli/'];
   files.sort((a, b) => {
     const relA = path.relative(contentDir, a.filepath);
     const relB = path.relative(contentDir, b.filepath);
-    const idxA = order.findIndex((p) => relA === p || relA.startsWith(p));
-    const idxB = order.findIndex((p) => relB === p || relB.startsWith(p));
-    return (idxA === -1 ? 99 : idxA) - (idxB === -1 ? 99 : idxB);
+    return sectionSortKey(relA) - sectionSortKey(relB);
   });
 
+  const sections: string[] = [
+    '# Syntropic137 — Complete Documentation',
+    '',
+    '> Agentic Engineering platform. Orchestrate AI agents with event-sourced workflows.',
+    '',
+    '---',
+    '',
+  ];
+
   for (const file of files) {
-    const fm = parseFrontmatter(file.content);
-    const body = stripJSX(stripFrontmatter(file.content));
     const rel = path.relative(contentDir, file.filepath);
-
-    if (!body) continue;
-
-    sections.push(`## ${fm.title || rel}`);
-    if (fm.description) sections.push(`> ${fm.description}`);
-    sections.push('');
-    sections.push(body);
-    sections.push('');
-    sections.push('---');
-    sections.push('');
+    sections.push(...renderFileSection(file.content, rel));
   }
 
   return new Response(sections.join('\n'), {

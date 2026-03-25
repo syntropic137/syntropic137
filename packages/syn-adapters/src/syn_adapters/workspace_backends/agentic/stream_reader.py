@@ -14,6 +14,28 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
 
+async def _read_next_line(
+    proc: asyncio.subprocess.Process,
+) -> bytes | None:
+    """Read the next line from stdout, returning None on EOF or process exit.
+
+    Returns empty bytes sentinel (b"") when a timeout occurs but the process
+    is still running (caller should continue). Returns None to signal stop.
+    """
+    if proc.stdout is None:
+        return None
+    try:
+        line_bytes = await asyncio.wait_for(
+            proc.stdout.readline(),
+            timeout=1.0,
+        )
+    except TimeoutError:
+        if proc.returncode is not None:
+            return None
+        return b""  # sentinel: timeout but process alive — keep going
+    return line_bytes if line_bytes else None
+
+
 async def read_lines(
     proc: asyncio.subprocess.Process,
     stream_timeout: float | None,
@@ -24,22 +46,12 @@ async def read_lines(
         if _is_stream_timed_out(stream_timeout, start_time):
             break
 
-        if proc.stdout is None:
+        raw = await _read_next_line(proc)
+        if raw is None:
             break
+        if raw == b"":
+            continue  # timeout but process still running
 
-        try:
-            line_bytes = await asyncio.wait_for(
-                proc.stdout.readline(),
-                timeout=1.0,
-            )
-        except TimeoutError:
-            if proc.returncode is not None:
-                break
-            continue
-
-        if not line_bytes:
-            break
-
-        line = line_bytes.decode("utf-8", errors="replace").rstrip("\n\r")
+        line = raw.decode("utf-8", errors="replace").rstrip("\n\r")
         if line:
             yield line

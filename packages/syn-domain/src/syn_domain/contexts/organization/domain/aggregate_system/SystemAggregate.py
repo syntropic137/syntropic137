@@ -152,19 +152,23 @@ class SystemAggregate(AggregateRoot["SystemCreatedEvent"]):
             self._created_by = data.get("created_by", "")
         self._is_deleted = False
 
+    @staticmethod
+    def _extract_optional_fields(
+        event: SystemUpdatedEvent,
+    ) -> tuple[str | None, str | None]:
+        """Extract (name, description) from typed or dict-based update event."""
+        if hasattr(event, "name"):
+            return event.name, event.description
+        data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+        return data.get("name"), data.get("description")
+
     @event_sourcing_handler("organization.SystemUpdated")
     def on_system_updated(self, event: SystemUpdatedEvent) -> None:
-        if hasattr(event, "name"):
-            if event.name is not None:
-                self._name = event.name
-            if event.description is not None:
-                self._description = event.description
-        else:
-            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            if data.get("name") is not None:
-                self._name = data["name"]
-            if data.get("description") is not None:
-                self._description = data["description"]
+        name, description = self._extract_optional_fields(event)
+        if name is not None:
+            self._name = name
+        if description is not None:
+            self._description = description
 
     @event_sourcing_handler("organization.SystemDeleted")
     def on_system_deleted(self, _event: SystemDeletedEvent) -> None:

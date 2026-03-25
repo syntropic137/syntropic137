@@ -15,6 +15,21 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 
+async def _fetch_app_token(
+    repository: str | None,
+    require_github: bool,
+    github_settings: object,
+) -> str | None:
+    """Create a GitHubAppClient and fetch an installation token."""
+    from syn_adapters.github import GitHubAppClient
+
+    client = GitHubAppClient(github_settings)  # type: ignore[arg-type]
+    installation_id = await _resolve_installation_id(client, repository, require_github)
+    if not installation_id:
+        return None
+    return await client.get_installation_token(installation_id)
+
+
 async def _resolve_github_credentials(
     repository: str | None,
     require_github: bool,
@@ -30,13 +45,7 @@ async def _resolve_github_credentials(
         return None, None, None
 
     try:
-        from syn_adapters.github import GitHubAppClient
-
-        client = GitHubAppClient(github_settings)
-        installation_id = await _resolve_installation_id(client, repository, require_github)
-        github_app_token = (
-            await client.get_installation_token(installation_id) if installation_id else None
-        )
+        github_app_token = await _fetch_app_token(repository, require_github, github_settings)
         if github_app_token:
             logger.info(
                 "Generated GitHub App installation token (bot: %s)",

@@ -84,6 +84,34 @@ BUILTIN_SERVICES: tuple[ServiceCredentialConfig, ...] = (
 )
 
 
+def _load_extra_services(registry: dict[str, ServiceCredentialConfig]) -> None:
+    """Parse SYN_PROXY_EXTRA_SERVICES env var and add entries to *registry*."""
+    extra_json = os.getenv("SYN_PROXY_EXTRA_SERVICES", "")
+    if not extra_json.strip():
+        return
+    try:
+        extras = json.loads(extra_json)
+    except (json.JSONDecodeError, TypeError):
+        logger.warning("Failed to parse SYN_PROXY_EXTRA_SERVICES — ignoring extra services")
+        return
+
+    for entry in extras:
+        try:
+            svc = ServiceCredentialConfig(
+                service_name=entry["service_name"],
+                hosts=tuple(entry["hosts"]),
+                header_name=entry["header_name"],
+                header_template=entry.get("header_template", "{value}"),
+                env_var=entry["env_var"],
+                oauth_env_var=entry.get("oauth_env_var"),
+                oauth_header_template=entry.get("oauth_header_template"),
+            )
+            for host in svc.hosts:
+                registry[host] = svc
+        except (KeyError, TypeError):
+            logger.warning("Skipping malformed extra service entry: %s", entry)
+
+
 def get_service_registry() -> dict[str, ServiceCredentialConfig]:
     """Build host → ServiceCredentialConfig mapping from built-in + extra services.
 
@@ -96,29 +124,10 @@ def get_service_registry() -> dict[str, ServiceCredentialConfig]:
     """
     registry: dict[str, ServiceCredentialConfig] = {}
 
-    # Register built-in services
     for service in BUILTIN_SERVICES:
         for host in service.hosts:
             registry[host] = service
 
-    # Register user-defined extra services
-    extra_json = os.getenv("SYN_PROXY_EXTRA_SERVICES", "")
-    if extra_json.strip():
-        try:
-            extras = json.loads(extra_json)
-            for entry in extras:
-                svc = ServiceCredentialConfig(
-                    service_name=entry["service_name"],
-                    hosts=tuple(entry["hosts"]),
-                    header_name=entry["header_name"],
-                    header_template=entry.get("header_template", "{value}"),
-                    env_var=entry["env_var"],
-                    oauth_env_var=entry.get("oauth_env_var"),
-                    oauth_header_template=entry.get("oauth_header_template"),
-                )
-                for host in svc.hosts:
-                    registry[host] = svc
-        except (json.JSONDecodeError, KeyError, TypeError):
-            logger.warning("Failed to parse SYN_PROXY_EXTRA_SERVICES — ignoring extra services")
+    _load_extra_services(registry)
 
     return registry

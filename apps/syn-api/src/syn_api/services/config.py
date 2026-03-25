@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import SecretStr
+
 from syn_api.types import (
     ConfigError,
     ConfigIssue,
@@ -61,6 +63,83 @@ LOG_FORMAT=json
 """
 
 
+def _secret_value(val: SecretStr | str | None) -> str:
+    """Extract the plain string from a SecretStr or plain value."""
+    if val is None:
+        return ""
+    if isinstance(val, SecretStr):
+        return val.get_secret_value()
+    return str(val)
+
+
+def _mask_secret(val: SecretStr | str | None, *, show: bool) -> str:
+    """Mask a secret value, showing only the first 4 characters."""
+    s = _secret_value(val)
+    if not s:
+        return ""
+    if show:
+        return s
+    return s[:4] + "****" if len(s) > 4 else "****"
+
+
+def _mask_optional(val: SecretStr | str | None, *, show: bool) -> str:
+    """Mask an optional secret — return empty string when unset."""
+    s = _secret_value(val)
+    if not s:
+        return ""
+    return _mask_secret(val, show=show)
+
+
+def _build_app_section(settings: object) -> dict[str, object]:
+    """Build the 'app' config section."""
+    return {
+        "app_name": settings.app_name,  # type: ignore[attr-defined]
+        "app_environment": settings.app_environment.value,  # type: ignore[attr-defined]
+        "debug": settings.debug,  # type: ignore[attr-defined]
+        "log_level": settings.log_level,  # type: ignore[attr-defined]
+        "log_format": settings.log_format,  # type: ignore[attr-defined]
+    }
+
+
+def _build_database_section(settings: object, *, show_secrets: bool) -> dict[str, object]:
+    """Build the 'database' config section."""
+    return {
+        "esp_event_store_db_url": _mask_optional(
+            settings.esp_event_store_db_url,  # type: ignore[attr-defined]
+            show=show_secrets,
+        ),
+        "syn_observability_db_url": _mask_optional(
+            settings.syn_observability_db_url,  # type: ignore[attr-defined]
+            show=show_secrets,
+        ),
+        "event_store_host": settings.event_store_host,  # type: ignore[attr-defined]
+        "event_store_port": settings.event_store_port,  # type: ignore[attr-defined]
+        "event_store_tenant_id": settings.event_store_tenant_id,  # type: ignore[attr-defined]
+    }
+
+
+def _build_agents_section(settings: object, *, show_secrets: bool) -> dict[str, object]:
+    """Build the 'agents' config section."""
+    return {
+        "anthropic_api_key": _mask_optional(
+            settings.anthropic_api_key,  # type: ignore[attr-defined]
+            show=show_secrets,
+        ),
+        "default_agent_timeout_seconds": settings.default_agent_timeout_seconds,  # type: ignore[attr-defined]
+        "default_max_tokens": settings.default_max_tokens,  # type: ignore[attr-defined]
+    }
+
+
+def _build_storage_section(settings: object) -> dict[str, object]:
+    """Build the 'storage' config section."""
+    return {
+        "artifact_storage_type": settings.artifact_storage_type,  # type: ignore[attr-defined]
+        "s3_bucket_name": settings.s3_bucket_name or "",  # type: ignore[attr-defined]
+        "dashboard_host": settings.dashboard_host,  # type: ignore[attr-defined]
+        "dashboard_port": settings.dashboard_port,  # type: ignore[attr-defined]
+    }
+
+
 async def get_config(
     show_secrets: bool = False,
     auth: AuthContext | None = None,  # noqa: ARG001
@@ -81,52 +160,86 @@ async def get_config(
     except Exception as e:
         return Err(ConfigError.LOAD_FAILED, message=str(e))
 
-    def _mask(val: object) -> str:
-        if val is None:
-            return ""
-        s = str(val)
-        if not s:
-            return ""
-        if show_secrets:
-            return s
-        return s[:4] + "****" if len(s) > 4 else "****"
+    return Ok(
+        ConfigSnapshot(
+            app=_build_app_section(settings),
+            database=_build_database_section(settings, show_secrets=show_secrets),
+            agents=_build_agents_section(settings, show_secrets=show_secrets),
+            storage=_build_storage_section(settings),
+        )
+    )
 
-    app = {
-        "app_name": settings.app_name,
-        "app_environment": settings.app_environment.value,
-        "debug": settings.debug,
-        "log_level": settings.log_level,
-        "log_format": settings.log_format,
-    }
 
-    database = {
-        "esp_event_store_db_url": _mask(settings.esp_event_store_db_url)
-        if settings.esp_event_store_db_url
-        else "",
-        "syn_observability_db_url": _mask(settings.syn_observability_db_url)
-        if settings.syn_observability_db_url
-        else "",
-        "event_store_host": settings.event_store_host,
-        "event_store_port": settings.event_store_port,
-        "event_store_tenant_id": settings.event_store_tenant_id,
-    }
+def _validate_agent_keys(settings: object) -> list[ConfigIssue]:
+    """Check agent API key configuration."""
+    api_key: SecretStr | None = settings.anthropic_api_key  # type: ignore[attr-defined]
+    if not api_key or not api_key.get_secret_value():
+        return [
+            ConfigIssue(
+                level="warning",
+                category="agents",
+                message="ANTHROPIC_API_KEY not set — Claude provider unavailable",
+            )
+        ]
+    return []
 
-    agents = {
-        "anthropic_api_key": _mask(settings.anthropic_api_key)
-        if settings.anthropic_api_key
-        else "",
-        "default_agent_timeout_seconds": settings.default_agent_timeout_seconds,
-        "default_max_tokens": settings.default_max_tokens,
-    }
 
-    storage = {
-        "artifact_storage_type": settings.artifact_storage_type,
-        "s3_bucket_name": settings.s3_bucket_name or "",
-        "dashboard_host": settings.dashboard_host,
-        "dashboard_port": settings.dashboard_port,
-    }
+def _validate_database(settings: object) -> list[ConfigIssue]:
+    """Check database configuration."""
+    if not settings.esp_event_store_db_url:  # type: ignore[attr-defined]
+        return [
+            ConfigIssue(
+                level="warning",
+                category="database",
+                message="ESP_EVENT_STORE_DB_URL not set — using in-memory event store",
+            )
+        ]
+    return []
 
-    return Ok(ConfigSnapshot(app=app, database=database, agents=agents, storage=storage))
+
+def _validate_environment(settings: object) -> list[ConfigIssue]:
+    """Check environment-specific constraints."""
+    if settings.is_production and settings.debug:  # type: ignore[attr-defined]
+        return [
+            ConfigIssue(
+                level="error",
+                category="app",
+                message="DEBUG=true in production environment",
+            )
+        ]
+    return []
+
+
+def _validate_agent_availability() -> list[ConfigIssue]:
+    """Check which agent providers are available."""
+    try:
+        from syn_adapters.agents import get_available_agents
+
+        available = get_available_agents()
+    except Exception:
+        return [
+            ConfigIssue(
+                level="warning",
+                category="agents",
+                message="Could not check agent provider availability",
+            )
+        ]
+
+    if not available:
+        return [
+            ConfigIssue(
+                level="error",
+                category="agents",
+                message="No agent providers available — at least one API key required",
+            )
+        ]
+    return [
+        ConfigIssue(
+            level="info",
+            category="agents",
+            message=f"Available providers: {', '.join(p.value for p in available)}",
+        )
+    ]
 
 
 async def validate_config(
@@ -149,66 +262,12 @@ async def validate_config(
     except Exception as e:
         return Err(ConfigError.LOAD_FAILED, message=str(e))
 
-    issues: list[ConfigIssue] = []
-
-    # Check agent keys
-    if not settings.anthropic_api_key:
-        issues.append(
-            ConfigIssue(
-                level="warning",
-                category="agents",
-                message="ANTHROPIC_API_KEY not set — Claude provider unavailable",
-            )
-        )
-    # Check database
-    if not settings.esp_event_store_db_url:
-        issues.append(
-            ConfigIssue(
-                level="warning",
-                category="database",
-                message="ESP_EVENT_STORE_DB_URL not set — using in-memory event store",
-            )
-        )
-
-    # Check environment
-    if settings.is_production and settings.debug:
-        issues.append(
-            ConfigIssue(
-                level="error",
-                category="app",
-                message="DEBUG=true in production environment",
-            )
-        )
-
-    # Check agent availability
-    try:
-        from syn_adapters.agents import get_available_agents
-
-        available = get_available_agents()
-        if not available:
-            issues.append(
-                ConfigIssue(
-                    level="error",
-                    category="agents",
-                    message="No agent providers available — at least one API key required",
-                )
-            )
-        else:
-            issues.append(
-                ConfigIssue(
-                    level="info",
-                    category="agents",
-                    message=f"Available providers: {', '.join(p.value for p in available)}",
-                )
-            )
-    except Exception:
-        issues.append(
-            ConfigIssue(
-                level="warning",
-                category="agents",
-                message="Could not check agent provider availability",
-            )
-        )
+    issues: list[ConfigIssue] = [
+        *_validate_agent_keys(settings),
+        *_validate_database(settings),
+        *_validate_environment(settings),
+        *_validate_agent_availability(),
+    ]
 
     return Ok(issues)
 

@@ -119,6 +119,57 @@ def _build_claude_command(
     return cmd
 
 
+def _substitute_builtins(
+    template: str,
+    execution_id: str,
+    workflow_id: str,
+    repo_url: str | None,
+) -> str:
+    """Layer 1: Replace built-in variables in the prompt template."""
+    result = template.replace("{{execution_id}}", execution_id)
+    result = result.replace("{{workflow_id}}", workflow_id)
+    result = result.replace("{{repo_url}}", repo_url or "")
+    return result
+
+
+def _substitute_inputs(
+    template: str,
+    phase: ExecutablePhase,
+    inputs: dict[str, Any] | None,
+    phase_outputs: dict[str, str],
+) -> str:
+    """Layers 2a-2d: Replace workflow inputs, phase inputs, outputs, and $ARGUMENTS."""
+    result = template
+
+    # Layer 2a: Workflow inputs
+    if inputs:
+        for key, value in inputs.items():
+            result = result.replace(f"{{{{{key}}}}}", str(value))
+
+    # Layer 2b: Phase-level static inputs
+    for phase_input in phase.inputs:
+        if phase_input.value is not None:
+            result = result.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
+
+    # Layer 2c: Phase outputs inline
+    for pid, content in phase_outputs.items():
+        result = result.replace(f"{{{{{pid}}}}}", content[:2000])
+
+    # Layer 2d: $ARGUMENTS substitution (ISS-211 CC command pattern)
+    task = (inputs or {}).get("task", "")
+    result = result.replace("$ARGUMENTS", str(task))
+
+    return result
+
+
+def _build_context_appendix(phase_outputs: dict[str, str]) -> str:
+    """Layer 3: Build the context appendix from previous phase outputs."""
+    parts = ["\n## Context from Previous Phases"]
+    for pid, content in phase_outputs.items():
+        parts.append(f"\n### Phase {pid}\n{content[:2000]}")
+    return "\n".join(parts)
+
+
 async def _build_workspace_prompt(
     phase: ExecutablePhase,
     execution_id: str,
@@ -141,44 +192,13 @@ async def _build_workspace_prompt(
         SYN_WORKSPACE_PROMPT,
     )
 
-    # Start with the base workspace prompt
-    prompt_parts = [SYN_WORKSPACE_PROMPT]
+    phase_prompt = _substitute_builtins(phase.prompt_template, execution_id, workflow_id, repo_url)
+    phase_prompt = _substitute_inputs(phase_prompt, phase, inputs, phase_outputs)
 
-    # Add the phase-specific prompt with input substitution
-    phase_prompt = phase.prompt_template
+    prompt_parts = [SYN_WORKSPACE_PROMPT, f"\n## Task\n{phase_prompt}"]
 
-    # Layer 1: Built-in variables
-    phase_prompt = phase_prompt.replace("{{execution_id}}", execution_id)
-    phase_prompt = phase_prompt.replace("{{workflow_id}}", workflow_id)
-    phase_prompt = phase_prompt.replace("{{repo_url}}", repo_url or "")
-
-    # Layer 2: Workflow inputs
-    if inputs:
-        for key, value in inputs.items():
-            phase_prompt = phase_prompt.replace(f"{{{{{key}}}}}", str(value))
-
-    # Layer 2b: Phase-level inputs (static values from workflow definition)
-    for phase_input in phase.inputs:
-        if phase_input.value is not None:
-            phase_prompt = phase_prompt.replace(f"{{{{{phase_input.name}}}}}", phase_input.value)
-
-    # Layer 2c: Phase outputs — substitute {{phase-id}} placeholders inline
     if phase_outputs:
-        for pid, content in phase_outputs.items():
-            phase_prompt = phase_prompt.replace(f"{{{{{pid}}}}}", content[:2000])
-
-    # Layer 2d: $ARGUMENTS substitution (ISS-211 CC command pattern)
-    task = (inputs or {}).get("task", "")
-    phase_prompt = phase_prompt.replace("$ARGUMENTS", str(task))
-
-    prompt_parts.append(f"\n## Task\n{phase_prompt}")
-
-    # Layer 3: Context from previous phases (appended as fallback for
-    # any phase output not consumed by {{phase-id}} placeholders above)
-    if phase_outputs:
-        prompt_parts.append("\n## Context from Previous Phases")
-        for pid, content in phase_outputs.items():
-            prompt_parts.append(f"\n### Phase {pid}\n{content[:2000]}")
+        prompt_parts.append(_build_context_appendix(phase_outputs))
 
     return "\n".join(prompt_parts)
 

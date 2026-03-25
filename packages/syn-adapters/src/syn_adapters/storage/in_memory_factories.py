@@ -146,19 +146,16 @@ def reset_storage() -> None:
 
     Clears all in-memory stores if they have been initialized.
     """
-    if _event_store is not None:
-        _event_store.clear()
-    if _event_publisher is not None:
-        _event_publisher.clear()
-    if _session_repository is not None:
-        _session_repository.clear()
-    if _artifact_repository is not None:
-        _artifact_repository.clear()
-    if _workflow_execution_repository is not None:
-        _workflow_execution_repository.clear()
-    if _organization_repository is not None:
-        _organization_repository.clear()
-    if _system_repository is not None:
-        _system_repository.clear()
-    if _repo_repository is not None:
-        _repo_repository.clear()
+    _stores: tuple[object | None, ...] = (
+        _event_store,
+        _event_publisher,
+        _session_repository,
+        _artifact_repository,
+        _workflow_execution_repository,
+        _organization_repository,
+        _system_repository,
+        _repo_repository,
+    )
+    for store in _stores:
+        if store is not None:
+            store.clear()  # type: ignore[union-attr]

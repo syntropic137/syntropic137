@@ -117,6 +117,23 @@ class RepoProjection:
         data = await self._store.get(PROJECTION_NAME, repo_id)
         return _repo_from_dict(data) if data else None
 
+    @staticmethod
+    def _matches_filters(
+        repo: RepoSummary,
+        organization_id: str | None,
+        system_id: str | None,
+        provider: str | None,
+        unassigned: bool,
+    ) -> bool:
+        """Check if a repo matches all active filter criteria."""
+        if organization_id and repo.organization_id != organization_id:
+            return False
+        if system_id and repo.system_id != system_id:
+            return False
+        if provider and repo.provider != provider:
+            return False
+        return not (unassigned and repo.system_id)
+
     async def list_all(
         self,
         organization_id: str | None = None,
@@ -125,16 +142,12 @@ class RepoProjection:
         unassigned: bool = False,
     ) -> list[RepoSummary]:
         records = await self._store.get_all(PROJECTION_NAME)
-        results = [_repo_from_dict(r) for r in records]
-        if organization_id:
-            results = [r for r in results if r.organization_id == organization_id]
-        if system_id:
-            results = [r for r in results if r.system_id == system_id]
-        if provider:
-            results = [r for r in results if r.provider == provider]
-        if unassigned:
-            results = [r for r in results if not r.system_id]
-        return results
+        repos = [_repo_from_dict(r) for r in records]
+        return [
+            r
+            for r in repos
+            if self._matches_filters(r, organization_id, system_id, provider, unassigned)
+        ]
 
     async def clear_all_data(self) -> None:
         """Clear all projection data (for rebuild)."""

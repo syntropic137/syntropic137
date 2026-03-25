@@ -17,6 +17,28 @@ mermaid.initialize({
     fontFamily: 'JetBrains Mono, monospace',
 });
 
+function generateMermaidId(): string {
+    return `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+async function renderMermaidSvg(code: string): Promise<{ svg: string; error: null } | { svg: ''; error: string }> {
+    try {
+        const { svg } = await mermaid.render(generateMermaidId(), code);
+        return { svg, error: null };
+    } catch (err) {
+        return { svg: '', error: err instanceof Error ? err.message : 'Failed to render diagram' };
+    }
+}
+
+function MermaidError({ error, code }: { error: string; code: string }) {
+    return (
+        <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4 my-4">
+            <p className="text-red-400 text-sm font-mono">Mermaid Error: {error}</p>
+            <pre className="text-zinc-400 text-xs mt-2 overflow-x-auto">{code}</pre>
+        </div>
+    );
+}
+
 // Mermaid diagram component
 function MermaidDiagram({ code }: { code: string }) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -24,31 +46,14 @@ function MermaidDiagram({ code }: { code: string }) {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        const renderDiagram = async () => {
-            if (!containerRef.current) return;
-
-            try {
-                const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
-                const { svg } = await mermaid.render(id, code);
-                setSvg(svg);
-                setError(null);
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to render diagram');
-                setSvg('');
-            }
-        };
-
-        renderDiagram();
+        if (!containerRef.current) return;
+        renderMermaidSvg(code).then((result) => {
+            setSvg(result.svg);
+            setError(result.error);
+        });
     }, [code]);
 
-    if (error) {
-        return (
-            <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4 my-4">
-                <p className="text-red-400 text-sm font-mono">Mermaid Error: {error}</p>
-                <pre className="text-zinc-400 text-xs mt-2 overflow-x-auto">{code}</pre>
-            </div>
-        );
-    }
+    if (error) return <MermaidError error={error} code={code} />;
 
     return (
         <div
