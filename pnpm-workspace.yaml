@@ -1,2 +1,5 @@
 packages:
+  - 'apps/syn-dashboard-ui'
   - 'apps/syn-docs'
+  - 'apps/syn-pulse-ui'
+  - 'packages/openclaw-plugin'

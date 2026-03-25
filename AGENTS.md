@@ -215,6 +215,7 @@ Rule: If you need it after a restart, it must be an event. If it's only needed d
 ## Tooling
 
 - **uv** for Python package management (workspaces)
+- **pnpm** for Node.js package management (all frontend apps — never npm or yarn)
 - **just** for task running
 - **Docker Compose** for local and selfhost deployment
 - QA: `just qa` runs lint, format, typecheck, test, coverage, vsa-validate
