@@ -1381,9 +1381,67 @@ github-reconfigure:
     @echo "Reconfiguring GitHub App..."
     @uv run python infra/scripts/setup.py --stage configure_github_app
 
-# Run security audit to check posture
+# --- Security & Audit ---
+
+# Run all security and dependency audits
+audit: security-audit deps-audit-py deps-audit-npm
+    @echo ""
+    @echo "✅ All security audits complete"
+
+# Run infrastructure security audit (env vars, secrets, network)
 security-audit:
     @uv run python infra/scripts/setup.py --stage security_audit
+
+# Audit Python dependencies against PyPI advisory database
+deps-audit-py:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Python Dependency Audit ==="
+    uv tool install pip-audit==2.7.3 --quiet
+    uv export --format requirements-txt --no-hashes --frozen --quiet \
+        | uv tool run pip-audit --disable-pip -r /dev/stdin
+
+# Audit Node.js dependencies via OSV Scanner (same tool as CI)
+deps-audit-npm:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Node.js Dependency Audit (OSV) ==="
+    exit_code=0
+    # Scan the same lock files as CI's OSV Scanner job.
+    # All Node packages standardized on pnpm — single root lock file.
+    for lockfile in \
+        pnpm-lock.yaml \
+        apps/syn-dashboard-ui/pnpm-lock.yaml \
+        apps/syn-pulse-ui/pnpm-lock.yaml; do
+        if [ -f "$lockfile" ]; then
+            echo "--- $lockfile ---"
+            if command -v osv-scanner &>/dev/null; then
+                osv-scanner --lockfile="$lockfile" || exit_code=1
+            else
+                echo "⚠️  osv-scanner not installed. Install: brew install osv-scanner"
+                exit_code=1
+            fi
+        fi
+    done
+    exit $exit_code
+
+# Show dependency trees to identify reduction targets
+deps-tree:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "=== Python Dependency Tree ==="
+    uv tree --depth 2
+    echo ""
+    echo "=== Python: total packages ==="
+    echo "  $(grep -c '^\[\[package\]\]' uv.lock) packages in uv.lock"
+    echo ""
+    echo "=== Node.js: package counts ==="
+    for dir in apps/syn-dashboard-ui apps/syn-pulse-ui apps/syn-docs; do
+        if [ -f "$dir/pnpm-lock.yaml" ]; then
+            count=$(grep -c 'resolution:' "$dir/pnpm-lock.yaml" 2>/dev/null || echo "?")
+            echo "  $dir: ~$count packages (pnpm)"
+        fi
+    done
 
 # Build the egress proxy image
 proxy-build:

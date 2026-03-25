@@ -1,70 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
 import type { Components } from 'react-markdown';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import mermaid from 'mermaid';
 
 interface MarkdownViewerProps {
     content: string;
     className?: string;
 }
 
-// Initialize mermaid with dark theme
-mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    securityLevel: 'loose',
-    fontFamily: 'JetBrains Mono, monospace',
-});
-
-function generateMermaidId(): string {
-    return `mermaid-${Math.random().toString(36).substr(2, 9)}`;
-}
-
-async function renderMermaidSvg(code: string): Promise<{ svg: string; error: null } | { svg: ''; error: string }> {
-    try {
-        const { svg } = await mermaid.render(generateMermaidId(), code);
-        return { svg, error: null };
-    } catch (err) {
-        return { svg: '', error: err instanceof Error ? err.message : 'Failed to render diagram' };
-    }
-}
-
-function MermaidError({ error, code }: { error: string; code: string }) {
-    return (
-        <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4 my-4">
-            <p className="text-red-400 text-sm font-mono">Mermaid Error: {error}</p>
-            <pre className="text-zinc-400 text-xs mt-2 overflow-x-auto">{code}</pre>
-        </div>
-    );
-}
-
-// Mermaid diagram component
-function MermaidDiagram({ code }: { code: string }) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const [svg, setSvg] = useState<string>('');
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        if (!containerRef.current) return;
-        renderMermaidSvg(code).then((result) => {
-            setSvg(result.svg);
-            setError(result.error);
-        });
-    }, [code]);
-
-    if (error) return <MermaidError error={error} code={code} />;
-
-    return (
-        <div
-            ref={containerRef}
-            className="my-4 flex justify-center bg-zinc-900/50 rounded-lg p-4 overflow-x-auto"
-            dangerouslySetInnerHTML={{ __html: svg }}
-        />
-    );
-}
-
-// Code block component with Mermaid support
+// Code block component
 function CodeBlock({
     className,
     children
@@ -76,9 +19,20 @@ function CodeBlock({
     const language = match ? match[1] : '';
     const code = String(children).replace(/\n$/, '');
 
-    // Render Mermaid diagrams
+    // Display mermaid source as a labeled code block
     if (language === 'mermaid') {
-        return <MermaidDiagram code={code} />;
+        return (
+            <div className="relative group my-4">
+                <span className="absolute top-2 right-2 text-xs text-zinc-500 font-mono">
+                    Diagram source (mermaid)
+                </span>
+                <pre className="bg-zinc-900 border border-zinc-700 rounded-lg p-4 overflow-x-auto">
+                    <code className="text-sm font-mono text-zinc-300">
+                        {code}
+                    </code>
+                </pre>
+            </div>
+        );
     }
 
     // Regular code block
