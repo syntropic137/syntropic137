@@ -6,6 +6,7 @@ import {
   Tooltip,
 } from 'recharts'
 
+import type { ValueType } from 'recharts/types/component/DefaultTooltipContent'
 import type { MetricsResponse } from '../../types'
 
 interface ChartDataItem {
@@ -45,7 +46,7 @@ function DonutChart({
 }: {
   data: ChartDataItem[]
   emptyMessage: string
-  tooltipFormatter?: (value: number | string | undefined) => [string, string]
+  tooltipFormatter?: (value: ValueType | undefined) => [string, string]
 }) {
   if (!data.some((d) => d.value > 0)) {
     return (
@@ -100,7 +101,7 @@ export function DashboardCharts({ metrics }: DashboardChartsProps) {
     <DonutChart
       data={tokenDistribution}
       emptyMessage="No token data yet"
-      tooltipFormatter={(value) => [Number(value ?? 0).toLocaleString(), 'tokens']}
+      tooltipFormatter={(value) => [Number(Array.isArray(value) ? value[0] : value ?? 0).toLocaleString(), 'tokens']}
     />
   )
 }
