@@ -41,24 +41,26 @@ class ExecutionController:
         self._state_port = state_port
         self._signal_port = signal_port
 
+    _COMMAND_DISPATCH: dict[type[ControlCommand], str] = {
+        PauseExecution: "_handle_pause",
+        ResumeExecution: "_handle_resume",
+        CancelExecution: "_handle_cancel",
+        InjectContext: "_handle_inject",
+    }
+
     async def handle_command(self, cmd: ControlCommand) -> ControlResult:
         """Handle a control command and return result."""
         try:
-            if isinstance(cmd, PauseExecution):
-                return await self._handle_pause(cmd)
-            elif isinstance(cmd, ResumeExecution):
-                return await self._handle_resume(cmd)
-            elif isinstance(cmd, CancelExecution):
-                return await self._handle_cancel(cmd)
-            elif isinstance(cmd, InjectContext):
-                return await self._handle_inject(cmd)
-            else:
+            handler_name = self._COMMAND_DISPATCH.get(type(cmd))
+            if handler_name is None:
                 return ControlResult(
                     success=False,
                     execution_id=getattr(cmd, "execution_id", "unknown"),
                     new_state="unknown",
                     error=f"Unknown command type: {type(cmd).__name__}",
                 )
+            handler = getattr(self, handler_name)
+            return await handler(cmd)
         except Exception as e:
             logger.exception("Error handling control command")
             return ControlResult(

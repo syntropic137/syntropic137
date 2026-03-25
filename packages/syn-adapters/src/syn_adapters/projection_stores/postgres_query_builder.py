@@ -6,6 +6,28 @@ Extracted from postgres_helpers.py to reduce module cognitive complexity.
 from typing import Any
 
 
+def _build_where_clause(
+    filters: dict[str, Any],
+    start_idx: int,
+) -> tuple[str, list[Any]]:
+    """Build a WHERE clause from filters, returning SQL fragment and params."""
+    conditions: list[str] = []
+    params: list[Any] = []
+    for idx, (key, value) in enumerate(filters.items(), start=start_idx):
+        conditions.append(f"data->>'{key}' = ${idx}")
+        params.append(str(value))
+    return " WHERE " + " AND ".join(conditions), params
+
+
+def _build_order_clause(order_by: str | None) -> str:
+    """Build an ORDER BY clause from an optional sort specifier."""
+    if not order_by:
+        return " ORDER BY updated_at DESC"
+    if order_by.startswith("-"):
+        return f" ORDER BY data->>'{order_by[1:]}' DESC"
+    return f" ORDER BY data->>'{order_by}' ASC"
+
+
 def build_query(
     table_name: str,
     filters: dict[str, Any] | None = None,
@@ -16,26 +38,12 @@ def build_query(
     """Build a parameterized query for projection records."""
     query = f"SELECT data FROM {table_name}"
     params: list[Any] = []
-    param_idx = 1
 
     if filters:
-        conditions = []
-        for key, value in filters.items():
-            conditions.append(f"data->>'{key}' = ${param_idx}")
-            params.append(str(value))
-            param_idx += 1
-        query += " WHERE " + " AND ".join(conditions)
+        where_sql, params = _build_where_clause(filters, start_idx=1)
+        query += where_sql
 
-    if order_by:
-        if order_by.startswith("-"):
-            field = order_by[1:]
-            direction = "DESC"
-        else:
-            field = order_by
-            direction = "ASC"
-        query += f" ORDER BY data->>'{field}' {direction}"
-    else:
-        query += " ORDER BY updated_at DESC"
+    query += _build_order_clause(order_by)
 
     if limit is not None:
         query += f" LIMIT {limit}"

@@ -9,6 +9,27 @@ import json
 from typing import Any
 
 
+def _parse_line(line: str) -> dict[str, Any] | None:
+    """Parse a single JSONL line, returning a normalized event dict or None."""
+    line = line.strip()
+    if not line:
+        return None
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+    if "type" not in data and "event_type" not in data:
+        return None
+
+    # Normalize to event_type
+    if "type" in data and "event_type" not in data:
+        data["event_type"] = data.pop("type")
+    return data
+
+
 def parse_jsonl_events(stdout: str) -> list[dict[str, Any]]:
     """Parse JSONL events from agent stdout.
 
@@ -18,20 +39,9 @@ def parse_jsonl_events(stdout: str) -> list[dict[str, Any]]:
     Returns:
         List of parsed event dicts
     """
-    events = []
+    events: list[dict[str, Any]] = []
     for line in stdout.split("\n"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-            # Accept events with either 'type' or 'event_type'
-            if isinstance(data, dict) and ("type" in data or "event_type" in data):
-                # Normalize to event_type
-                if "type" in data and "event_type" not in data:
-                    data["event_type"] = data.pop("type")
-                events.append(data)
-        except json.JSONDecodeError:
-            continue
-
+        parsed = _parse_line(line)
+        if parsed is not None:
+            events.append(parsed)
     return events

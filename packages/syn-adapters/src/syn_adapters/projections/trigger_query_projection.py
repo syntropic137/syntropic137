@@ -62,6 +62,25 @@ class TriggerQueryProjection(CheckpointedProjection):
     def get_subscribed_event_types(self) -> set[str] | None:
         return _SUBSCRIBED_EVENTS
 
+    _EVENT_DISPATCH: dict[str, str] = {
+        "github.TriggerRegistered": "_on_trigger_registered",
+        "github.TriggerPaused": "_on_trigger_paused",
+        "github.TriggerResumed": "_on_trigger_resumed",
+        "github.TriggerDeleted": "_on_trigger_deleted",
+    }
+
+    async def _dispatch_event(
+        self, event_type: str, event_data: dict[str, Any], envelope: EventEnvelope[Any]
+    ) -> None:
+        """Route an event to the appropriate handler method."""
+        if event_type == "github.TriggerFired":
+            await self._on_trigger_fired(event_data, envelope)
+            return
+        handler_name = self._EVENT_DISPATCH.get(event_type)
+        if handler_name is not None:
+            handler = getattr(self, handler_name)
+            await handler(event_data)
+
     async def handle_event(
         self,
         envelope: EventEnvelope[Any],
@@ -72,16 +91,7 @@ class TriggerQueryProjection(CheckpointedProjection):
         global_nonce = envelope.metadata.global_nonce or 0
 
         try:
-            if event_type == "github.TriggerRegistered":
-                await self._on_trigger_registered(event_data)
-            elif event_type == "github.TriggerPaused":
-                await self._on_trigger_paused(event_data)
-            elif event_type == "github.TriggerResumed":
-                await self._on_trigger_resumed(event_data)
-            elif event_type == "github.TriggerDeleted":
-                await self._on_trigger_deleted(event_data)
-            elif event_type == "github.TriggerFired":
-                await self._on_trigger_fired(event_data, envelope)
+            await self._dispatch_event(event_type, event_data, envelope)
 
             await checkpoint_store.save_checkpoint(
                 ProjectionCheckpoint(

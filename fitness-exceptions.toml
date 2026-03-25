@@ -152,36 +152,8 @@ issue = "#318"
 
 # --- syn-adapters ---
 
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.claude_complete::complete_request"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.claude_stream::stream_request"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.factory::get_agent"]
-value = 20
-issue = "#320"
-
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.artifacts.bundle_storage::load_bundle_from_storage"]
 value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.collector.client_batch::send_batch"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.control.controller::handle_command"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.events.buffer_add::add_many"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.events.parse::parse_jsonl_events"]
-value = 25
 issue = "#320"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.minio::_do_upload"]
@@ -194,26 +166,6 @@ issue = "#320"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.object_storage.supabase::_do_upload"]
 value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.projection_stores.postgres_query_builder::build_query"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.projections.manager_event_map::dispatch_to_handlers"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.projections.session_tools_converters::row_to_git_operation"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.projections.session_tools_dispatch::row_to_operation"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-adapters.src.syn_adapters.projections.trigger_query_projection::handle_event"]
-value = 25
 issue = "#320"
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.storage.in_memory_factories::reset_storage"]
@@ -375,18 +327,6 @@ issue = "#320"
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
 value = 15
 issue = "#318"
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.claude_complete::complete_request"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.projections.session_tools_converters::row_to_git_operation"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.projections.session_tools_dispatch::row_to_operation"]
-value = 15
-issue = "#320"
 
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_health::health_check"]
 value = 15

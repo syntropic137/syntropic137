@@ -204,6 +204,32 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
 }
 
 
+async def _invoke_handler(
+    projection: Projection,
+    projection_name: str,
+    method_name: str,
+    event_type: str,
+    event_data: dict[str, Any],
+) -> None:
+    """Invoke a single projection handler method, logging errors."""
+    handler = getattr(projection, method_name, None)
+    if handler is None:
+        return
+    try:
+        await handler(event_data)
+    except Exception as e:
+        logger.error(
+            "Error in projection handler",
+            extra={
+                "projection": projection_name,
+                "method": method_name,
+                "event_type": event_type,
+                "error": str(e),
+            },
+            exc_info=True,
+        )
+
+
 async def dispatch_to_handlers(
     mgr: ProjectionManager, event_type: str, event_data: dict[str, Any]
 ) -> None:
@@ -220,18 +246,4 @@ async def dispatch_to_handlers(
     for projection_name, method_name in handlers:
         projection = mgr._projections.get(projection_name)
         if projection:
-            handler = getattr(projection, method_name, None)
-            if handler:
-                try:
-                    await handler(event_data)
-                except Exception as e:
-                    logger.error(
-                        "Error in projection handler",
-                        extra={
-                            "projection": projection_name,
-                            "method": method_name,
-                            "event_type": event_type,
-                            "error": str(e),
-                        },
-                        exc_info=True,
-                    )
+            await _invoke_handler(projection, projection_name, method_name, event_type, event_data)

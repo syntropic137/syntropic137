@@ -32,50 +32,60 @@ def get_agent(provider: AgentProvider | None = None) -> AgentProtocol:
     Raises:
         AgentError: If no agent is available or configured.
     """
-    settings = get_settings()
-
     if provider == AgentProvider.MOCK:
-        from syn_adapters.agents.mock import MockAgent
-
-        return MockAgent()
+        return _create_mock()
 
     if provider == AgentProvider.CLAUDE:
-        from syn_adapters.agents.claude import ClaudeAgent
+        return _create_claude_or_raise()
 
-        claude = ClaudeAgent()
-        if not claude.is_available:
-            msg = (
-                "Claude agent not available. "
-                "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
-            )
-            raise AgentError(msg, AgentProvider.CLAUDE)
-        return claude
-
-    # Auto-select: try Claude first
     if provider is None:
-        # Check Claude (OAuth token or API key)
-        if settings.claude_code_oauth_token or settings.anthropic_api_key:
-            from syn_adapters.agents.claude import ClaudeAgent
-
-            claude_agent = ClaudeAgent()
-            if claude_agent.is_available:
-                logger.debug("auto_selected_agent", provider="claude")
-                return claude_agent
-
-        # Use mock in test mode
-        if settings.is_test:
-            from syn_adapters.agents.mock import MockAgent
-
-            logger.debug("auto_selected_agent", provider="mock", reason="test_mode")
-            return MockAgent()
-
-        msg = (
-            "No agent provider configured. Set one of: "
-            "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude)"
-        )
-        raise AgentError(msg, AgentProvider.MOCK)
+        return _auto_select()
 
     msg = f"Unknown agent provider: {provider}"
+    raise AgentError(msg, AgentProvider.MOCK)
+
+
+def _create_mock() -> AgentProtocol:
+    """Create a mock agent instance."""
+    from syn_adapters.agents.mock import MockAgent
+
+    return MockAgent()
+
+
+def _create_claude_or_raise() -> AgentProtocol:
+    """Create a Claude agent, raising if unavailable."""
+    from syn_adapters.agents.claude import ClaudeAgent
+
+    claude = ClaudeAgent()
+    if not claude.is_available:
+        msg = (
+            "Claude agent not available. "
+            "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in environment."
+        )
+        raise AgentError(msg, AgentProvider.CLAUDE)
+    return claude
+
+
+def _auto_select() -> AgentProtocol:
+    """Auto-select the best available agent provider."""
+    settings = get_settings()
+
+    if settings.claude_code_oauth_token or settings.anthropic_api_key:
+        from syn_adapters.agents.claude import ClaudeAgent
+
+        claude_agent = ClaudeAgent()
+        if claude_agent.is_available:
+            logger.debug("auto_selected_agent", provider="claude")
+            return claude_agent
+
+    if settings.is_test:
+        logger.debug("auto_selected_agent", provider="mock", reason="test_mode")
+        return _create_mock()
+
+    msg = (
+        "No agent provider configured. Set one of: "
+        "CLAUDE_CODE_OAUTH_TOKEN (Claude OAuth), ANTHROPIC_API_KEY (Claude)"
+    )
     raise AgentError(msg, AgentProvider.MOCK)
 
 
