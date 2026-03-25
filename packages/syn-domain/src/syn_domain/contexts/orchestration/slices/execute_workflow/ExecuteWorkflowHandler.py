@@ -6,7 +6,8 @@ Delegates to WorkflowExecutionProcessor (ISS-196 Processor To-Do List pattern).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol
+import re
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
@@ -73,36 +74,10 @@ class ExecuteWorkflowHandler:
             raise WorkflowNotFoundError(command.aggregate_id)
 
         phases = self._get_executable_phases(workflow)
+        merged_inputs = self._merge_inputs(command, workflow)
+        repo_url = self._resolve_repo_url(workflow, merged_inputs)
 
-        # Apply defaults from input_declarations for any missing inputs
-        merged_inputs = dict(command.inputs)
-        for decl in workflow.input_declarations:
-            if decl.default is not None and decl.name not in merged_inputs:
-                merged_inputs[decl.name] = decl.default
-
-        # Merge task into inputs so $ARGUMENTS and {{task}} both work.
-        # Explicit task field wins over inputs["task"] for $ARGUMENTS.
-        if command.task is not None:
-            merged_inputs["task"] = command.task
-
-        # Resolve placeholders in repo_url from inputs (e.g., {{repository}} → owner/repo)
-        repo_url = getattr(workflow, "_repository_url", None)
-        if repo_url and merged_inputs:
-            for key, value in merged_inputs.items():
-                repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
-
-        # Guard: fail fast if repo_url still contains unresolved placeholders
-        if repo_url and "{{" in repo_url:
-            import re
-
-            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
-            msg = (
-                f"Repository URL contains unresolved placeholders: {unresolved}. "
-                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
-            )
-            raise ValueError(msg)
-
-        result = await self._processor.run(
+        return await self._processor.run(
             workflow_id=command.aggregate_id,
             workflow_name=workflow.name or "",
             phases=phases,
@@ -111,7 +86,39 @@ class ExecuteWorkflowHandler:
             repo_url=repo_url,
         )
 
-        return result
+    @staticmethod
+    def _merge_inputs(
+        command: ExecuteWorkflowCommand,
+        workflow: WorkflowTemplateAggregate,
+    ) -> dict[str, Any]:
+        """Merge input_declarations defaults and task field into command inputs."""
+        merged = dict(command.inputs)
+        for decl in workflow.input_declarations:
+            if decl.default is not None and decl.name not in merged:
+                merged[decl.name] = decl.default
+        if command.task is not None:
+            merged["task"] = command.task
+        return merged
+
+    @staticmethod
+    def _resolve_repo_url(
+        workflow: WorkflowTemplateAggregate,
+        merged_inputs: dict[str, Any],
+    ) -> str | None:
+        """Resolve placeholders in repo_url and guard against unresolved ones."""
+        repo_url: str | None = getattr(workflow, "_repository_url", None)
+        if not repo_url:
+            return repo_url
+        for key, value in merged_inputs.items():
+            repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
+        if "{{" in repo_url:
+            unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
+            msg = (
+                f"Repository URL contains unresolved placeholders: {unresolved}. "
+                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
+            )
+            raise ValueError(msg)
+        return repo_url
 
     @staticmethod
     def _get_executable_phases(
@@ -120,12 +127,10 @@ class ExecuteWorkflowHandler:
         """Convert workflow template phases to executable phases."""
         executable_phases = []
         for phase in workflow.phases:
-            # Build agent config with per-phase model override if specified
-            agent_config = AgentConfiguration()
             phase_model = getattr(phase, "model", None)
-            if phase_model:
-                agent_config = AgentConfiguration(model=phase_model)
-
+            agent_config = (
+                AgentConfiguration(model=phase_model) if phase_model else AgentConfiguration()
+            )
             executable_phases.append(
                 ExecutablePhase(
                     phase_id=phase.phase_id,

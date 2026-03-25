@@ -544,16 +544,20 @@ class WorkflowExecutionProcessor:
         for envelope in uncommitted:
             event = envelope.event
             event_type = getattr(event, "event_type", type(event).__name__)
-            if hasattr(event, "model_dump"):
-                event_data = event.model_dump()
-            elif hasattr(event, "to_dict"):
-                event_data = event.to_dict()  # type: ignore[attr-defined]
-            else:
-                event_data = vars(event)
+            event_data = self._serialize_event(event)
             handler_name = self._event_type_to_handler(event_type)
             handler = getattr(self._todo_projection, handler_name, None)
             if handler:
                 await handler(event_data)
+
+    @staticmethod
+    def _serialize_event(event: object) -> dict[str, Any]:
+        """Serialize a domain event to a dict for projection handlers."""
+        if hasattr(event, "model_dump"):
+            return event.model_dump()  # type: ignore[union-attr]
+        if hasattr(event, "to_dict"):
+            return event.to_dict()  # type: ignore[union-attr]
+        return vars(event)
 
     @staticmethod
     def _event_type_to_handler(event_type: str) -> str:
