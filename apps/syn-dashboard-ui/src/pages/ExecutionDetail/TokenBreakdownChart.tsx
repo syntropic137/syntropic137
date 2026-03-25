@@ -36,7 +36,7 @@ export function TokenBreakdownChart({ inputTokens, outputTokens }: TokenBreakdow
                 borderRadius: '8px',
                 fontSize: '12px',
               }}
-              formatter={(value: number | string | undefined) => [Number(value ?? 0).toLocaleString(), 'tokens']}
+              formatter={(value) => [Number(Array.isArray(value) ? value[0] : value ?? 0).toLocaleString(), 'tokens']}
             />
             <Bar dataKey="tokens" radius={[4, 4, 0, 0]}>
               {tokenChartData.map((entry, index) => (
