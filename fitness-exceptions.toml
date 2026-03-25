@@ -360,34 +360,6 @@ issue = "#320"
 
 # --- syn-shared ---
 
-[max-cognitive."python:packages.syn-shared.src.syn_shared.settings.credentials::get_service_registry"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-shared.src.syn_shared.settings.env_file::parse_env_file"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-shared.src.syn_shared.settings.storage::validate_provider_config"]
-value = 25
-issue = "#320"
-
-# --- syn-perf ---
-
-[max-cognitive."python:packages.syn-perf.src.syn_perf.reporters.comparison_report::report_comparison"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-perf.src.syn_perf.reporters.json_report::generate_comparison_report"]
-value = 20
-issue = "#320"
-
-# --- docker ---
-
-[max-cognitive."python:docker.token-injector.token_injector::_build_registry"]
-value = 20
-issue = "#320"
-
 # --- TSX/TypeScript ---
 
 [max-cognitive."tsx:apps/syn-dashboard-ui/src/components/MarkdownViewer::MermaidDiagram"]

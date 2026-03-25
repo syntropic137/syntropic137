@@ -45,6 +45,36 @@ class JSONReporter:
 
         return report
 
+    @staticmethod
+    def _build_backend_entry(
+        bench_result: BenchmarkResult,
+        stats: dict[str, TimingStats] | None,
+        include_timings: bool,
+    ) -> dict[str, Any]:
+        """Build a single backend entry for the comparison report."""
+        empty: dict[str, Any] = {}
+        entry: dict[str, Any] = {
+            "iterations": bench_result.iterations,
+            "success_rate": bench_result.success_rate,
+            "statistics": {
+                "create": stats["create"].to_dict() if stats else empty,
+                "destroy": stats["destroy"].to_dict() if stats else empty,
+                "total": stats["total"].to_dict() if stats else empty,
+            },
+        }
+        if include_timings:
+            entry["timings"] = [
+                {
+                    "workspace_id": t.workspace_id,
+                    "create_time_ms": t.create_time_ms,
+                    "destroy_time_ms": t.destroy_time_ms,
+                    "total_time_ms": t.total_time_ms,
+                    "success": t.success,
+                }
+                for t in bench_result.timings
+            ]
+        return entry
+
     def generate_comparison_report(
         self,
         result: BackendComparisonResult,
@@ -68,29 +98,9 @@ class JSONReporter:
 
         for backend, bench_result in result.results.items():
             stats = result.get_stats(backend)
-            backend_report = {
-                "iterations": bench_result.iterations,
-                "success_rate": bench_result.success_rate,
-                "statistics": {
-                    "create": stats["create"].to_dict() if stats else {},
-                    "destroy": stats["destroy"].to_dict() if stats else {},
-                    "total": stats["total"].to_dict() if stats else {},
-                },
-            }
-
-            if include_timings:
-                backend_report["timings"] = [
-                    {
-                        "workspace_id": t.workspace_id,
-                        "create_time_ms": t.create_time_ms,
-                        "destroy_time_ms": t.destroy_time_ms,
-                        "total_time_ms": t.total_time_ms,
-                        "success": t.success,
-                    }
-                    for t in bench_result.timings
-                ]
-
-            report["backends"][backend] = backend_report
+            report["backends"][backend] = self._build_backend_entry(
+                bench_result, stats, include_timings
+            )
 
         return report
 
