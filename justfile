@@ -1396,11 +1396,8 @@ security-audit:
 deps-audit-py:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v pip-audit &>/dev/null; then
-        echo "Installing pip-audit..."
-        uv tool install pip-audit==2.7.3
-    fi
     echo "=== Python Dependency Audit ==="
+    uv tool install pip-audit==2.7.3 --quiet
     uv export --format requirements-txt --no-hashes --frozen --quiet \
         | uv tool run pip-audit --disable-pip -r /dev/stdin
 
@@ -1411,7 +1408,7 @@ deps-audit-npm:
     echo "=== Node.js Dependency Audit (OSV) ==="
     exit_code=0
     # Scan the same lock files as CI's OSV Scanner job.
-    # All frontend apps standardized on pnpm.
+    # Frontend apps use pnpm; openclaw-plugin still uses npm.
     for lockfile in \
         pnpm-lock.yaml \
         apps/syn-dashboard-ui/pnpm-lock.yaml \
