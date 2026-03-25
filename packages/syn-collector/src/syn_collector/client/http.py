@@ -128,6 +128,13 @@ class EventCollectorClient:
 
         return await self._send_batch(batch)
 
+    def _build_request_headers(self) -> dict[str, str]:
+        """Build HTTP headers for a batch request."""
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
     async def _send_batch(self, batch: EventBatch) -> BatchResponse:
         """Send a batch with retries.
 
@@ -144,29 +151,21 @@ class EventCollectorClient:
             await self.start()
             assert self._client is not None
 
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
+        headers = self._build_request_headers()
         last_error: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
             result, error = await self._attempt_send(batch, headers)
             if result is not None:
                 return result
-
             last_error = error
             if attempt < self.max_retries:
                 self._stats["retries"] += 1
-                delay = (2**attempt) * 0.1  # 0.1s, 0.2s, 0.4s, ...
-                await asyncio.sleep(delay)
+                await asyncio.sleep((2**attempt) * 0.1)
 
         self._stats["events_failed"] += len(batch.events)
         logger.error(f"Failed to send batch {batch.batch_id} after {self.max_retries + 1} attempts")
-
-        if last_error:
-            raise last_error
-        raise RuntimeError("Failed to send batch")
+        raise last_error if last_error else RuntimeError("Failed to send batch")
 
     async def _attempt_send(
         self,

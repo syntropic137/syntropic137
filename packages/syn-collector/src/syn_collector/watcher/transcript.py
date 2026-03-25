@@ -37,17 +37,21 @@ class TranscriptWatcher(BaseWatcher):
         self._session_id_override = session_id_override
         self._file_state: dict[Path, FileState] = {}
 
+    def _process_all_files(self, from_end: bool) -> list[CollectedEvent]:
+        """Read new events from all transcript files."""
+        events: list[CollectedEvent] = []
+        for file_path in self._get_transcript_files():
+            self._ensure_file_state(file_path, from_end)
+            events.extend(self._read_file(file_path))
+        return events
+
     async def watch(self, *, from_end: bool = True) -> AsyncIterator[CollectedEvent]:
         """Watch for new token usage events."""
         while True:
             try:
-                for file_path in self._get_transcript_files():
-                    self._ensure_file_state(file_path, from_end)
-                    for event in self._read_file(file_path):
-                        yield event
-
+                for event in self._process_all_files(from_end):
+                    yield event
                 await asyncio.sleep(self._poll_interval)
-
             except asyncio.CancelledError:
                 break
             except Exception as e:

@@ -344,20 +344,6 @@ issue = "#320"
 value = 20
 issue = "#320"
 
-# --- syn-collector ---
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.client.http::_send_batch"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.hooks::watch"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.transcript::watch"]
-value = 20
-issue = "#320"
-
 # --- syn-shared ---
 
 # --- TSX/TypeScript ---

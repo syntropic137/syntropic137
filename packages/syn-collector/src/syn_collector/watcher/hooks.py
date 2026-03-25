@@ -36,36 +36,43 @@ class HookWatcher(BaseWatcher):
         super().__init__(path, poll_interval=poll_interval)
         self._session_id_override = session_id_override
 
+    def _init_end_position(self) -> None:
+        """Seek to end of file so only new events are emitted."""
+        if self.path.exists():
+            stat = self.path.stat()
+            self._position = stat.st_size
+            self._inode = stat.st_ino
+
+    def _check_rotation_and_read(self) -> list[CollectedEvent]:
+        """Handle file rotation then read new events from current position."""
+        rotated, current_inode = detect_rotation(self.path, self._inode)
+        if rotated:
+            logger.info("Hook file rotated, resetting position", extra={"path": str(self.path)})
+            self._position = 0
+        self._inode = current_inode
+        return self._read_new_events()
+
+    def _poll_once(self) -> list[CollectedEvent]:
+        """Run a single poll cycle: check file existence, rotation, and read."""
+        if not self.path.exists():
+            return []
+        return self._check_rotation_and_read()
+
     async def watch(self, *, from_end: bool = True) -> AsyncIterator[CollectedEvent]:
-        """Watch for new hook events."""
-        if from_end and self.path.exists():
-            self._position = self.path.stat().st_size
-            self._inode = self.path.stat().st_ino
+        """Watch for new hook events.
+
+        CancelledError (BaseException) propagates naturally to stop the generator.
+        """
+        if from_end:
+            self._init_end_position()
 
         while True:
             try:
-                if not self.path.exists():
-                    await asyncio.sleep(self._poll_interval)
-                    continue
-
-                rotated, current_inode = detect_rotation(self.path, self._inode)
-                if rotated:
-                    logger.info(
-                        "Hook file rotated, resetting position", extra={"path": str(self.path)}
-                    )
-                    self._position = 0
-                self._inode = current_inode
-
-                for event in self._read_new_events():
+                for event in self._poll_once():
                     yield event
-
-                await asyncio.sleep(self._poll_interval)
-
-            except asyncio.CancelledError:
-                break
             except Exception as e:
                 logger.error(f"Error reading hook file: {e}", extra={"path": str(self.path)})
-                await asyncio.sleep(self._poll_interval)
+            await asyncio.sleep(self._poll_interval)
 
     async def read_existing(self) -> list[CollectedEvent]:
         """Read all existing events from file."""
