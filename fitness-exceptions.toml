@@ -463,6 +463,10 @@ issue = "#315"
 value = 15
 issue = "#315"
 
+[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_health::health_check"]
+value = 15
+issue = "#315"
+
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
 value = 15
 issue = "#315"
