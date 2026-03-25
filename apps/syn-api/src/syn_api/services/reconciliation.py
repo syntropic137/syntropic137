@@ -39,7 +39,10 @@ async def cleanup_orphaned_containers() -> None:
 
 
 async def _docker_rm(filter_arg: str, label: str) -> None:
-    """Find and force-remove Docker containers matching *filter_arg*."""
+    """Find and force-remove Docker containers matching *filter_arg*.
+
+    On timeout, kills the subprocess to avoid leaking processes.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "docker",
