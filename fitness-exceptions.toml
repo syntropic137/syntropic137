@@ -5,9 +5,37 @@
 
 # Maximum Cognitive Complexity (function-level) — threshold: 15
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
+[max-cognitive."python:apps.syn-api.src.syn_api._wiring::_build_workspace_prompt"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.middleware.webhook_recorder::__call__"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.artifacts::get_artifact"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.artifacts::list_artifacts_endpoint"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.conversations::get_conversation_log"]
 value = 35
 issue = "#313"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.events::get_session_tool_summary"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.events::get_token_metrics"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.commands::get_execution_status_endpoint"]
+value = 20
+issue = "#315"
 
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
 value = 55
@@ -17,15 +45,187 @@ issue = "#313"
 value = 30
 issue = "#313"
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.conversations::get_conversation_log"]
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::list_"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.observability::get_token_metrics"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
 value = 35
 issue = "#313"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::activity_sse"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::execution_sse"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.sse::generate"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.triggers.commands::enable_preset"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_all_history_endpoint"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_trigger"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.services.config::get_config"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.services.config::validate_config"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::_seed_offline_data"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::health_check"]
+value = 25
+issue = "#315"
 
 [max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::startup"]
 value = 30
 issue = "#313"
 
+[max-cognitive."python:apps.syn-cli.src.syn_cli.commands._workflow_models::parse_inputs"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.agent::chat_session"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch._sse::_process_sse_lines"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.watch._sse::_stream_sse"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-cli.src.syn_cli.commands.workflow._crud::show_workflow"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:apps.syn-cli.src.syn_cli.main::health"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.hooks::watch"]
+value = 25
+issue = "#315"
+
+[max-cognitive."python:packages.syn-collector.src.syn_collector.watcher.transcript::watch"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:packages.syn-perf.src.syn_perf.reporters.comparison_report::report_comparison"]
+value = 20
+issue = "#315"
+
+[max-cognitive."python:packages.syn-perf.src.syn_perf.reporters.json_report::generate_comparison_report"]
+value = 20
+issue = "#315"
+
+[max-cognitive."tsx:apps/syn-dashboard-ui/src/components/MarkdownViewer::MermaidDiagram"]
+value = 20
+issue = "#315"
+
+[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/ConversationLogViewer::ConversationLogViewer"]
+value = 20
+issue = "#315"
+
+[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/SessionDetail::SessionDetail"]
+value = 20
+issue = "#315"
+
+[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowDetail::WorkflowDetail"]
+value = 20
+issue = "#315"
+
+[max-cognitive."tsx:apps/syn-docs/components/hero/NetworkNodes::NetworkNodes"]
+value = 20
+issue = "#315"
+
+[max-cognitive."tsx:apps/syn-pulse-ui/src/components/SummaryStats::calculateStreak"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useExecutionData::useExecutionData"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useTriggerData::useTriggerData"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useTriggerDelete::useTriggerDelete"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useTriggerToggle::useTriggerToggle"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-dashboard-ui/src/pages/WorkflowDetail/useExecutionSubmit::useExecutionSubmit"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-docs/app/api/docs-txt/[...slug]/route::GET"]
+value = 25
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-docs/app/llms-full.txt/route::GET"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-docs/components/diagrams/topology/shared/filters::buildTopologyGraph"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:apps/syn-docs/lib/mdx-files::collectMdxFiles"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:packages/openclaw-plugin/src/client::request"]
+value = 25
+issue = "#315"
+
+[max-cognitive."typescript:packages/openclaw-plugin/src/tools/execution_detail::synGetExecution"]
+value = 20
+issue = "#315"
+
+[max-cognitive."typescript:packages/openclaw-plugin/src/tools/observability_session::formatOperations"]
+value = 25
+issue = "#315"
+
 # Maximum Cyclomatic Complexity (function-level) — threshold: 10
+
+[max-cyclomatic."python:apps.syn-api.src.syn_api._wiring::_build_workspace_prompt"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.conversations::get_conversation_log"]
+value = 15
+issue = "#315"
 
 [max-cyclomatic."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
 value = 20
@@ -34,6 +234,54 @@ issue = "#313"
 [max-cyclomatic."python:apps.syn-api.src.syn_api.routes.executions.queries::get_execution_endpoint"]
 value = 20
 issue = "#313"
+
+[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_trigger"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.agents.claude_complete::complete_request"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.projections.session_tools_converters::row_to_git_operation"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.projections.session_tools_dispatch::row_to_operation"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection::on_phase_completed"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/OperationDetails::OperationDetails"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/SessionDetail::SessionDetail"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowExecutionForm::WorkflowExecutionForm"]
+value = 15
+issue = "#315"
+
+[max-cyclomatic."tsx:apps/syn-pulse-ui/src/components/FilterBar::FilterBar"]
+value = 15
+issue = "#315"
 
 # Maximum Lines of Code (function-level)
 

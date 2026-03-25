@@ -49,12 +49,15 @@ async def test_handle_installation_unrelated_event_noop() -> None:
 
 @pytest.mark.anyio
 async def test_handle_installation_exception_swallowed() -> None:
-    with patch(
-        "syn_domain.contexts.github.domain.events.AppInstalledEvent",
-        side_effect=RuntimeError("boom"),
-    ), patch(
-        "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
-        return_value=AsyncMock(),
+    with (
+        patch(
+            "syn_domain.contexts.github.domain.events.AppInstalledEvent",
+            side_effect=RuntimeError("boom"),
+        ),
+        patch(
+            "syn_domain.contexts.github.slices.get_installation.projection.get_installation_projection",
+            return_value=AsyncMock(),
+        ),
     ):
         # Should not raise
         await _handle_installation_event("installation", "created", {})
@@ -75,12 +78,15 @@ def test_classify_trigger_results_mixed() -> None:
 
         results = [TriggerMatchResult(), TriggerDeferredResult(), TriggerMatchResult()]
         # Need to patch the imports inside the function
-        with patch(
-            "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.TriggerMatchResult",
-            TriggerMatchResult,
-        ), patch(
-            "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.TriggerDeferredResult",
-            TriggerDeferredResult,
+        with (
+            patch(
+                "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.TriggerMatchResult",
+                TriggerMatchResult,
+            ),
+            patch(
+                "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.TriggerDeferredResult",
+                TriggerDeferredResult,
+            ),
         ):
             fired, deferred = _classify_trigger_results(results)
 
@@ -94,7 +100,9 @@ def test_classify_trigger_results_mixed() -> None:
 @pytest.mark.anyio
 async def test_evaluate_triggers_exception_returns_empty() -> None:
     with (
-        patch("syn_api.routes.webhooks.handlers.get_trigger_store", side_effect=RuntimeError("boom")),
+        patch(
+            "syn_api.routes.webhooks.handlers.get_trigger_store", side_effect=RuntimeError("boom")
+        ),
         patch("syn_api.routes.webhooks.handlers.get_trigger_repo", return_value=MagicMock()),
         patch(
             "syn_domain.contexts.github.slices.evaluate_webhook.EvaluateWebhookHandler.EvaluateWebhookHandler",

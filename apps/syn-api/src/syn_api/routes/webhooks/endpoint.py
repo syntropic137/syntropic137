@@ -22,7 +22,7 @@ def _handle_ping(body: bytes) -> dict[str, Any]:
     """Handle a GitHub ping event and return the pong response."""
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         payload = {}
     return {"status": "pong", "zen": payload.get("zen", "")}
 

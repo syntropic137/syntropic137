@@ -11,9 +11,7 @@ from syn_api._wiring import get_event_store_instance, get_realtime
 logger = logging.getLogger(__name__)
 
 
-def _build_commit_data(
-    commit: dict[str, Any], repo: str, branch: str
-) -> dict[str, Any] | None:
+def _build_commit_data(commit: dict[str, Any], repo: str, branch: str) -> dict[str, Any] | None:
     """Build observability data dict for a single commit, or None if no hash."""
     commit_hash: str = commit.get("id", "")
     if not commit_hash:

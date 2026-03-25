@@ -60,7 +60,9 @@ async def test_record_push_commits_multiple_commits() -> None:
     mock_realtime = AsyncMock()
 
     with (
-        patch("syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store),
+        patch(
+            "syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store
+        ),
         patch("syn_api.routes.webhooks.push_events.get_realtime", return_value=mock_realtime),
     ):
         await _record_push_commits(payload, delivery_id="d1")
@@ -74,7 +76,9 @@ async def test_record_push_commits_empty_list_noop() -> None:
     payload = {"commits": [], "repository": {"full_name": "org/repo"}, "ref": "refs/heads/main"}
     mock_store = AsyncMock()
 
-    with patch("syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store):
+    with patch(
+        "syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store
+    ):
         await _record_push_commits(payload, delivery_id="d1")
 
     mock_store.insert_one.assert_not_called()
@@ -91,7 +95,9 @@ async def test_record_push_commits_skips_hashless() -> None:
     mock_realtime = AsyncMock()
 
     with (
-        patch("syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store),
+        patch(
+            "syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store
+        ),
         patch("syn_api.routes.webhooks.push_events.get_realtime", return_value=mock_realtime),
     ):
         await _record_push_commits(payload, delivery_id="d1")
@@ -110,7 +116,9 @@ async def test_record_push_commits_extracts_branch_from_ref() -> None:
     mock_realtime = AsyncMock()
 
     with (
-        patch("syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store),
+        patch(
+            "syn_api.routes.webhooks.push_events.get_event_store_instance", return_value=mock_store
+        ),
         patch("syn_api.routes.webhooks.push_events.get_realtime", return_value=mock_realtime),
     ):
         await _record_push_commits(payload, delivery_id="d1")

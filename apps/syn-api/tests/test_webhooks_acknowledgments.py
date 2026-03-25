@@ -61,16 +61,20 @@ async def test_post_trigger_acknowledgments_issue_comment_posts_reaction() -> No
     mock_client = AsyncMock()
 
     with (
-        patch("syn_api.routes.webhooks.acknowledgments.get_github_client", return_value=mock_client, create=True),
+        patch(
+            "syn_api.routes.webhooks.acknowledgments.get_github_client",
+            return_value=mock_client,
+            create=True,
+        ),
         patch("syn_adapters.github.client.get_github_client", return_value=mock_client),
     ):
         await _post_trigger_acknowledgments(
-                event_type="issue_comment",
-                payload=payload,
-                triggers_fired=["t1"],
-                compound_event="issue_comment.created",
-                installation_id="inst-1",
-            )
+            event_type="issue_comment",
+            payload=payload,
+            triggers_fired=["t1"],
+            compound_event="issue_comment.created",
+            installation_id="inst-1",
+        )
 
     # Should have posted both a reaction and a comment
     assert mock_client.api_post.call_count == 2
