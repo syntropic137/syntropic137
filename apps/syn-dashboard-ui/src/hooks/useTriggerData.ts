@@ -14,6 +14,10 @@ export interface UseTriggerDataResult {
   error: string | null
 }
 
+function extractErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : 'Failed to load trigger'
+}
+
 /**
  * Fetch trigger detail and firing history for a given trigger ID.
  */
@@ -27,18 +31,26 @@ export function useTriggerData(triggerId: string | undefined): UseTriggerDataRes
     if (!triggerId) return
 
     let cancelled = false
+
+    const applyResult = ([t, h]: [TriggerDetail, { entries: TriggerHistoryEntry[] }]) => {
+      if (cancelled) return
+      setTrigger(t)
+      setHistory(h.entries)
+    }
+
+    const applyError = (err: unknown) => {
+      if (!cancelled) setError(extractErrorMessage(err))
+    }
+
+    const applyFinally = () => {
+      if (!cancelled) setLoading(false)
+    }
+
     Promise.all([getTrigger(triggerId), getTriggerHistory(triggerId)])
-      .then(([t, h]) => {
-        if (cancelled) return
-        setTrigger(t)
-        setHistory(h.entries)
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load trigger')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+      .then(applyResult)
+      .catch(applyError)
+      .finally(applyFinally)
+
     return () => { cancelled = true }
   }, [triggerId])
 

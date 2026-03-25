@@ -55,6 +55,17 @@ export class SyntropicClient {
     return url.toString();
   }
 
+  private static parseErrorMessage(status: number, statusText: string, body: string): string {
+    const fallback = `${status} ${statusText}`;
+    if (!body) return fallback;
+    try {
+      const json = JSON.parse(body) as { detail?: string };
+      return json.detail || fallback;
+    } catch {
+      return body;
+    }
+  }
+
   private async request<T>(url: string, init: RequestInit): Promise<ApiResult<T>> {
     try {
       const response = await fetch(url, {
@@ -64,13 +75,7 @@ export class SyntropicClient {
 
       if (!response.ok) {
         const text = await response.text().catch(() => "");
-        let message = `${response.status} ${response.statusText}`;
-        try {
-          const json = JSON.parse(text) as { detail?: string };
-          if (json.detail) message = json.detail;
-        } catch {
-          if (text) message = text;
-        }
+        const message = SyntropicClient.parseErrorMessage(response.status, response.statusText, text);
         return { ok: false, error: new ApiError(response.status, message) };
       }
 

@@ -38,28 +38,32 @@ export async function synGetSession(
   return { content: sections.join("\n") };
 }
 
+function formatToolOps(ops: OperationInfo[]): string[] {
+  if (ops.length === 0) return [];
+  const lines = ["", "**Tool calls:**"];
+  for (const o of ops.slice(0, 20)) {
+    const dur = o.duration_seconds != null ? ` (${o.duration_seconds.toFixed(1)}s)` : "";
+    lines.push(`- ${o.tool_name} — ${o.success ? "✓" : "✗"}${dur}`);
+  }
+  if (ops.length > 20) lines.push(`  ... and ${ops.length - 20} more`);
+  return lines;
+}
+
+function formatGitOps(ops: OperationInfo[]): string[] {
+  if (ops.length === 0) return [];
+  const lines = ["", "**Git operations:**"];
+  for (const o of ops.slice(0, 10)) {
+    lines.push(`- ${o.git_sha?.slice(0, 7)} ${o.git_message ?? ""}`);
+  }
+  return lines;
+}
+
 export function formatOperations(operations: OperationInfo[]): string[] {
   if (operations.length === 0) return [];
 
-  const sections = ["", "### Operations"];
-  const toolOps = operations.filter((o) => o.tool_name);
-  const gitOps = operations.filter((o) => o.git_sha);
-
-  if (toolOps.length > 0) {
-    sections.push("", "**Tool calls:**");
-    for (const o of toolOps.slice(0, 20)) {
-      const dur = o.duration_seconds != null ? ` (${o.duration_seconds.toFixed(1)}s)` : "";
-      sections.push(`- ${o.tool_name} — ${o.success ? "✓" : "✗"}${dur}`);
-    }
-    if (toolOps.length > 20) sections.push(`  ... and ${toolOps.length - 20} more`);
-  }
-
-  if (gitOps.length > 0) {
-    sections.push("", "**Git operations:**");
-    for (const o of gitOps.slice(0, 10)) {
-      sections.push(`- ${o.git_sha?.slice(0, 7)} ${o.git_message ?? ""}`);
-    }
-  }
-
-  return sections;
+  return [
+    "", "### Operations",
+    ...formatToolOps(operations.filter((o) => o.tool_name)),
+    ...formatGitOps(operations.filter((o) => o.git_sha)),
+  ];
 }

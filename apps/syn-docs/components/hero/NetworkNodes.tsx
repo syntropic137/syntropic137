@@ -42,6 +42,32 @@ function createNetworkGeometry(nodeCount: number, threshold: number) {
   return [pos, new Float32Array(linePositions)] as const;
 }
 
+interface ThemeColors {
+  agent: string;
+  command: string;
+  skill: string;
+  tool: string;
+  hook: string;
+  line: string;
+}
+
+function buildNodeColors(theme: ThemeColors, count: number): Float32Array {
+  const cols = new Float32Array(count * 3);
+  const colorKeys = [theme.agent, theme.command, theme.skill, theme.tool, theme.hook];
+  for (let i = 0; i < count; i++) {
+    const color = new THREE.Color(colorKeys[Math.floor(Math.random() * colorKeys.length)]);
+    cols[i * 3] = color.r;
+    cols[i * 3 + 1] = color.g;
+    cols[i * 3 + 2] = color.b;
+  }
+  return cols;
+}
+
+function applyRotation(obj: THREE.Object3D, t: number): void {
+  obj.rotation.y = t * 0.06;
+  obj.rotation.x = Math.sin(t * 0.04) * 0.1;
+}
+
 export function NetworkNodes({ isDark }: { isDark: boolean }) {
   const ref = useRef<THREE.Points>(null);
   const linesRef = useRef<THREE.LineSegments>(null);
@@ -50,18 +76,7 @@ export function NetworkNodes({ isDark }: { isDark: boolean }) {
 
   const [[positions, connections]] = useState(() => createNetworkGeometry(NODE_COUNT, CONNECTION_THRESHOLD));
 
-  const colors = useMemo(() => {
-    const cols = new Float32Array(NODE_COUNT * 3);
-    const colorKeys = [theme.agent, theme.command, theme.skill, theme.tool, theme.hook];
-
-    for (let i = 0; i < NODE_COUNT; i++) {
-      const color = new THREE.Color(colorKeys[Math.floor(Math.random() * colorKeys.length)]);
-      cols[i * 3] = color.r;
-      cols[i * 3 + 1] = color.g;
-      cols[i * 3 + 2] = color.b;
-    }
-    return cols;
-  }, [theme]);
+  const colors = useMemo(() => buildNodeColors(theme, NODE_COUNT), [theme]);
 
   useEffect(() => {
     if (lineMaterialRef.current) {
@@ -71,14 +86,8 @@ export function NetworkNodes({ isDark }: { isDark: boolean }) {
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    if (ref.current) {
-      ref.current.rotation.y = t * 0.06;
-      ref.current.rotation.x = Math.sin(t * 0.04) * 0.1;
-    }
-    if (linesRef.current) {
-      linesRef.current.rotation.y = t * 0.06;
-      linesRef.current.rotation.x = Math.sin(t * 0.04) * 0.1;
-    }
+    if (ref.current) applyRotation(ref.current, t);
+    if (linesRef.current) applyRotation(linesRef.current, t);
   });
 
   return (

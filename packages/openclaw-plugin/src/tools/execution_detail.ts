@@ -11,22 +11,13 @@ export interface GetExecutionArgs {
   execution_id: string;
 }
 
-export async function synGetExecution(
-  client: SyntropicClient,
-  args: GetExecutionArgs,
-): Promise<{ content: string; isError?: true }> {
-  const result = await client.get<ExecutionDetail>(
-    `/executions/${encodeURIComponent(args.execution_id)}`,
-  );
-  if (!result.ok) return formatError(result.error);
+function formatPhaseLine(p: PhaseExecutionInfo): string {
+  const dur = p.duration_seconds > 0 ? ` · ${p.duration_seconds.toFixed(1)}s` : "";
+  const cost = p.cost_usd !== "0" ? ` · $${p.cost_usd}` : "";
+  return `  - **${p.name}** — ${p.status}${dur}${cost}`;
+}
 
-  const d = result.data;
-  const phaseLines = d.phases.map((p: PhaseExecutionInfo) => {
-    const dur = p.duration_seconds > 0 ? ` · ${p.duration_seconds.toFixed(1)}s` : "";
-    const cost = p.cost_usd !== "0" ? ` · $${p.cost_usd}` : "";
-    return `  - **${p.name}** — ${p.status}${dur}${cost}`;
-  });
-
+function buildExecutionRows(d: ExecutionDetail): [string, string][] {
   const rows: [string, string][] = [
     ["ID", d.workflow_execution_id],
     ["Workflow", d.workflow_id],
@@ -38,9 +29,22 @@ export async function synGetExecution(
   if (d.started_at) rows.push(["Started", d.started_at]);
   if (d.completed_at) rows.push(["Completed", d.completed_at]);
   if (d.error_message) rows.push(["Error", d.error_message]);
+  return rows;
+}
 
-  const sections = [...buildMarkdownTable(`Execution: ${d.workflow_name}`, rows)];
+export async function synGetExecution(
+  client: SyntropicClient,
+  args: GetExecutionArgs,
+): Promise<{ content: string; isError?: true }> {
+  const result = await client.get<ExecutionDetail>(
+    `/executions/${encodeURIComponent(args.execution_id)}`,
+  );
+  if (!result.ok) return formatError(result.error);
 
+  const d = result.data;
+  const sections = [...buildMarkdownTable(`Execution: ${d.workflow_name}`, buildExecutionRows(d))];
+
+  const phaseLines = d.phases.map(formatPhaseLine);
   if (phaseLines.length > 0) {
     sections.push("", "### Phases", ...phaseLines);
   }

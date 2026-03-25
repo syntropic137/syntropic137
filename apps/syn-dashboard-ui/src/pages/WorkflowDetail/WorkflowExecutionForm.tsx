@@ -13,6 +13,34 @@ interface WorkflowExecutionFormProps {
   onExecutionStarted?: () => void
 }
 
+function SubmitButton({ disabled, isExecuting }: { disabled: boolean; isExecuting: boolean }) {
+  return (
+    <button
+      type="submit"
+      disabled={disabled}
+      className={clsx(
+        'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
+        disabled
+          ? 'bg-slate-600 text-slate-300 cursor-not-allowed'
+          : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40'
+      )}
+    >
+      <Play className={clsx('h-4 w-4', isExecuting && 'animate-pulse')} />
+      {isExecuting ? 'Running...' : 'Run Workflow'}
+    </button>
+  )
+}
+
+function ExecutionMessage({ message }: { message: string | null }) {
+  if (!message) return null
+  const isError = message.startsWith('Error')
+  return (
+    <span className={clsx('text-xs', isError ? 'text-red-400' : 'text-emerald-400')}>
+      {message}
+    </span>
+  )
+}
+
 export function WorkflowExecutionForm({ workflowId, declarations, onExecutionStarted }: WorkflowExecutionFormProps) {
   const [taskInput, setTaskInput] = useState('')
   const [formInputs, setFormInputs] = useState<Record<string, string>>({})
@@ -55,24 +83,8 @@ export function WorkflowExecutionForm({ workflowId, declarations, onExecutionSta
         />
       ))}
 
-      <button
-        type="submit"
-        disabled={disabled}
-        className={clsx(
-          'inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all',
-          disabled
-            ? 'bg-slate-600 text-slate-300 cursor-not-allowed'
-            : 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white hover:from-emerald-600 hover:to-teal-600 shadow-lg shadow-emerald-500/25 hover:shadow-emerald-500/40'
-        )}
-      >
-        <Play className={clsx('h-4 w-4', isExecuting && 'animate-pulse')} />
-        {isExecuting ? 'Running...' : 'Run Workflow'}
-      </button>
-      {executionMessage && (
-        <span className={clsx('text-xs', executionMessage.startsWith('Error') ? 'text-red-400' : 'text-emerald-400')}>
-          {executionMessage}
-        </span>
-      )}
+      <SubmitButton disabled={disabled} isExecuting={isExecuting} />
+      <ExecutionMessage message={executionMessage} />
     </form>
   )
 }

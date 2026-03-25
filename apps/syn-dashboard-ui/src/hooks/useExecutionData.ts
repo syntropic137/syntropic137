@@ -16,6 +16,31 @@ export interface UseExecutionDataResult {
   refreshExecution: () => void
 }
 
+const REFRESH_EVENT_TYPES = new Set([
+  'PhaseStarted',
+  'PhaseCompleted',
+  'WorkflowCompleted',
+  'WorkflowFailed',
+  'OperationRecorded',
+  SSE_EVENTS.WORKSPACE_CREATED,
+  SSE_EVENTS.WORKSPACE_DESTROYED,
+  SSE_EVENTS.WORKSPACE_ERROR,
+])
+
+function isRefreshEvent(event: { type: string; event_type?: string }): boolean {
+  return event.type === 'event' && !!event.event_type && REFRESH_EVENT_TYPES.has(event.event_type)
+}
+
+function collectFulfilledArtifacts(results: PromiseSettledResult<ArtifactResponse>[]): Record<string, ArtifactResponse> {
+  const map: Record<string, ArtifactResponse> = {}
+  for (const result of results) {
+    if (result.status === 'fulfilled') {
+      map[result.value.id] = result.value
+    }
+  }
+  return map
+}
+
 export function useExecutionData(executionId: string | undefined): UseExecutionDataResult {
   const [execution, setExecution] = useState<ExecutionDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -33,43 +58,20 @@ export function useExecutionData(executionId: string | undefined): UseExecutionD
       .finally(() => setLoading(false))
   }, [executionId])
 
-  // Initial fetch
   useEffect(() => {
     refreshExecution()
   }, [refreshExecution])
 
-  // SSE subscription for live updates
   const { isConnected } = useExecutionStream(executionId, {
     onEvent: (event) => {
-      if (event.type === 'event' && event.event_type) {
-        const refreshEvents = [
-          'PhaseStarted',
-          'PhaseCompleted',
-          'WorkflowCompleted',
-          'WorkflowFailed',
-          'OperationRecorded',
-          SSE_EVENTS.WORKSPACE_CREATED,
-          SSE_EVENTS.WORKSPACE_DESTROYED,
-          SSE_EVENTS.WORKSPACE_ERROR,
-        ]
-        if (refreshEvents.includes(event.event_type)) {
-          refreshExecution()
-        }
-      }
+      if (isRefreshEvent(event)) refreshExecution()
     },
   })
 
-  // Fetch artifact details when artifact IDs are available
   useEffect(() => {
     if (!execution?.artifact_ids.length) return
     Promise.allSettled(execution.artifact_ids.map((id) => getArtifact(id))).then((results) => {
-      const map: Record<string, ArtifactResponse> = {}
-      results.forEach((result) => {
-        if (result.status === 'fulfilled') {
-          map[result.value.id] = result.value
-        }
-      })
-      setArtifactDetails(map)
+      setArtifactDetails(collectFulfilledArtifacts(results))
     })
   }, [execution?.artifact_ids.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
 

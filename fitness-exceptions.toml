@@ -92,80 +92,6 @@ issue = "#318"
 
 # --- syn-shared ---
 
-# --- TSX/TypeScript ---
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/components/MarkdownViewer::MermaidDiagram"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/ConversationLogViewer::ConversationLogViewer"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/SessionDetail::SessionDetail"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowDetail::WorkflowDetail"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-docs/components/hero/NetworkNodes::NetworkNodes"]
-value = 20
-issue = "#320"
-
-[max-cognitive."tsx:apps/syn-pulse-ui/src/components/SummaryStats::calculateStreak"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useExecutionData::useExecutionData"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useTriggerData::useTriggerData"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useTriggerDelete::useTriggerDelete"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-dashboard-ui/src/hooks/useTriggerToggle::useTriggerToggle"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-dashboard-ui/src/pages/WorkflowDetail/useExecutionSubmit::useExecutionSubmit"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-docs/app/api/docs-txt/[...slug]/route::GET"]
-value = 25
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-docs/app/llms-full.txt/route::GET"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-docs/components/diagrams/topology/shared/filters::buildTopologyGraph"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:apps/syn-docs/lib/mdx-files::collectMdxFiles"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:packages/openclaw-plugin/src/client::request"]
-value = 25
-issue = "#320"
-
-[max-cognitive."typescript:packages/openclaw-plugin/src/tools/execution_detail::synGetExecution"]
-value = 20
-issue = "#320"
-
-[max-cognitive."typescript:packages/openclaw-plugin/src/tools/observability_session::formatOperations"]
-value = 25
-issue = "#320"
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum Cyclomatic Complexity (function-level, threshold: 10)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -186,33 +112,9 @@ issue = "#315"
 value = 15
 issue = "#318"
 
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/ExecutionDetail/ExecutionDetail::ExecutionDetail"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/OperationDetails::OperationDetails"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/SessionDetail/SessionDetail::SessionDetail"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."tsx:apps/syn-dashboard-ui/src/pages/WorkflowDetail/WorkflowExecutionForm::WorkflowExecutionForm"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."tsx:apps/syn-pulse-ui/src/components/FilterBar::FilterBar"]
-value = 15
-issue = "#320"
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (function-level, threshold: 100)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-[max-loc-function."python:apps.syn-api.src.syn_api.routes.workflows.commands::create_workflow"]
-value = 105
-issue = "#320"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Maximum LOC (file-level, threshold: 750)
