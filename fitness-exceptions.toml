@@ -10,18 +10,6 @@
 
 # --- syn-api routes (ISS-315: webhooks, ISS-317: executions) ---
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::github_webhook_endpoint"]
-value = 35
-issue = "#315"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::list_repos"]
-value = 35
-issue = "#315"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.webhooks::_evaluate_triggers"]
-value = 20
-issue = "#315"
-
 [max-cognitive."python:apps.syn-api.src.syn_api.routes.executions.queries::get_detail"]
 value = 55
 issue = "#317"
@@ -456,10 +444,6 @@ issue = "#317"
 value = 15
 issue = "#320"
 
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.webhooks::github_webhook_endpoint"]
-value = 15
-issue = "#315"
-
 [max-cyclomatic."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_trigger"]
 value = 15
 issue = "#320"
@@ -527,10 +511,6 @@ issue = "#320"
 [max-loc-file."apps.syn-api.src.syn_api.routes.repos"]
 value = 825
 issue = "#320"
-
-[max-loc-file."apps.syn-api.src.syn_api.routes.webhooks"]
-value = 775
-issue = "#315"
 
 [max-loc-file."apps.syn-api.src.syn_api.routes.systems"]
 value = 845
