@@ -113,10 +113,16 @@ class ExecuteWorkflowHandler:
             repo_url = repo_url.replace(f"{{{{{key}}}}}", str(value))
         if "{{" in repo_url:
             unresolved = re.findall(r"\{\{(\w+)\}\}", repo_url)
-            msg = (
-                f"Repository URL contains unresolved placeholders: {unresolved}. "
-                f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
-            )
+            if unresolved:
+                msg = (
+                    f"Repository URL contains unresolved placeholders: {unresolved}. "
+                    f"Provide them via inputs (e.g., --input {unresolved[0]}=<value>)."
+                )
+            else:
+                msg = (
+                    "Repository URL contains malformed placeholders. "
+                    "Use the format {{name}} with alphanumeric/underscore characters."
+                )
             raise ValueError(msg)
         return repo_url
 
