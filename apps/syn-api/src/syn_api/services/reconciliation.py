@@ -50,7 +50,12 @@ async def _docker_rm(filter_arg: str, label: str) -> None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return
         ids = stdout.decode().split() if stdout else []
         if not ids:
             return
@@ -64,7 +69,12 @@ async def _docker_rm(filter_arg: str, label: str) -> None:
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        await asyncio.wait_for(stop_proc.wait(), timeout=30)
+        try:
+            await asyncio.wait_for(stop_proc.wait(), timeout=30)
+        except TimeoutError:
+            stop_proc.kill()
+            await stop_proc.wait()
+            return
         logger.info("Removed %d orphaned %s container(s)", len(ids), label)
     except Exception:
         logger.debug("Container cleanup skipped for %s (docker may not be available)", label)
