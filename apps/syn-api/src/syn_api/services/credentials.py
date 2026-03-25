@@ -27,7 +27,11 @@ def validate_credentials(degraded_reasons: list[str]) -> None:
     # Export Anthropic API key if available (needed for agent execution, not dashboard)
     api_key = settings.anthropic_api_key
     api_key_value = api_key.get_secret_value() if api_key else ""
-    oauth_value = settings.claude_code_oauth_token.get_secret_value() if settings.claude_code_oauth_token else ""
+    oauth_value = (
+        settings.claude_code_oauth_token.get_secret_value()
+        if settings.claude_code_oauth_token
+        else ""
+    )
     if api_key_value:
         os.environ[ENV_ANTHROPIC_API_KEY] = api_key_value
     elif oauth_value:
