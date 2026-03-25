@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Any: dict[str, Any] used for JSON data from json.loads() (system boundary — external CLI JSONL)
@@ -88,6 +89,20 @@ class StreamResult:
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({ClaudeToolName.SUBAGENT, ClaudeToolName.SUBAGENT_LEGACY})
+
+
+class _LineAction(Enum):
+    """Outcome of processing a single stream line."""
+
+    CONTINUE = auto()
+    BREAK = auto()
+
+
+@dataclass
+class _LineOutcome:
+    action: _LineAction
+    interrupt_reason: str | None = None
+    task_result: dict[str, Any] | None = None
 
 
 class EventStreamProcessor:
@@ -172,39 +187,19 @@ class EventStreamProcessor:
         """
         conversation_lines: list[str] = []
         line_count = 0
-        interrupt_requested = False
         interrupt_reason: str | None = None
         agent_task_result: dict[str, Any] | None = None
 
         async for line in stream:
             line_count += 1
-            logger.debug("Received line %d: %s", line_count, line[:100])
-
-            # Poll for CANCEL signal
-            poll = await self._cancel_poller.check(line_count)
-            if poll.should_interrupt:
-                interrupt_requested = True
-                interrupt_reason = poll.reason
-                await workspace.interrupt()
-                break
-
-            # Collect line for conversation storage (ADR-035)
+            outcome = await self._process_line(line, line_count, workspace)
             if line.strip():
                 conversation_lines.append(line)
-
-            # Parse hook events from the stream
-            hook_events = self._hook_parser.parse(line)
-            for hook_event in hook_events:
-                await self._process_hook_event(hook_event)
-
-            # Skip native CLI event processing if we handled hook events
-            if hook_events:
-                continue
-
-            # Fall back to Claude CLI native events
-            task_result = await self._process_cli_event(line)
-            if task_result is not None:
-                agent_task_result = task_result
+            if outcome.task_result is not None:
+                agent_task_result = outcome.task_result
+            if outcome.action is _LineAction.BREAK:
+                interrupt_reason = outcome.interrupt_reason
+                break
 
         logger.info(
             "Agent runner streaming complete: %d lines, cost=$%s (%d in, %d out)",
@@ -216,7 +211,7 @@ class EventStreamProcessor:
 
         return StreamResult(
             line_count=line_count,
-            interrupt_requested=interrupt_requested,
+            interrupt_requested=interrupt_reason is not None,
             interrupt_reason=interrupt_reason,
             agent_task_result=agent_task_result,
             conversation_lines=conversation_lines,
@@ -228,6 +223,29 @@ class EventStreamProcessor:
             duration_ms=self._result_duration_ms,
             num_turns=self._result_num_turns,
         )
+
+    async def _process_line(
+        self,
+        line: str,
+        line_count: int,
+        workspace: InterruptibleWorkspace,
+    ) -> _LineOutcome:
+        """Process a single stream line: cancel check, hook events, or CLI event."""
+        logger.debug("Received line %d: %s", line_count, line[:100])
+
+        poll = await self._cancel_poller.check(line_count)
+        if poll.should_interrupt:
+            await workspace.interrupt()
+            return _LineOutcome(action=_LineAction.BREAK, interrupt_reason=poll.reason)
+
+        hook_events = self._hook_parser.parse(line)
+        if hook_events:
+            for hook_event in hook_events:
+                await self._process_hook_event(hook_event)
+            return _LineOutcome(action=_LineAction.CONTINUE)
+
+        task_result = await self._process_cli_event(line)
+        return _LineOutcome(action=_LineAction.CONTINUE, task_result=task_result)
 
     async def _process_hook_event(self, hook_event: dict[str, Any]) -> None:
         """Process a single hook event: validate, enrich, record, track subagents."""
@@ -261,10 +279,8 @@ class EventStreamProcessor:
         ctx_data = enriched.get("context", {})
         tool_name = ctx_data.get("tool_name", "")
         tool_use_id = ctx_data.get("tool_use_id", "")
-        is_subagent = tool_name in _SUBAGENT_TOOL_NAMES
 
-        if not is_subagent:
-            # Attribute non-Task tool calls to the active subagent (if any)
+        if tool_name not in _SUBAGENT_TOOL_NAMES:
             if tool_name and self._subagents.has_active:
                 self._subagents.attribute_tool(tool_name)
             return
@@ -273,23 +289,29 @@ class EventStreamProcessor:
             return
 
         hook_event_type = hook_event.get("event_type", "")
-
         if hook_event_type == EventType.TOOL_EXECUTION_STARTED:
-            input_preview = ctx_data.get("input_preview", "")
-            event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
-            await self._collector.record_subagent_started(event.agent_name, tool_use_id)
-
+            await self._on_hook_subagent_started(ctx_data, tool_use_id)
         elif hook_event_type == EventType.TOOL_EXECUTION_COMPLETED:
-            success = ctx_data.get("success", True)
-            stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
-            if stopped_event:
-                await self._collector.record_subagent_stopped(
-                    agent_name=stopped_event.agent_name,
-                    tool_use_id=tool_use_id,
-                    duration_ms=stopped_event.duration_ms,
-                    success=stopped_event.success,
-                    tools_used=stopped_event.tools_used,
-                )
+            await self._on_hook_subagent_completed(ctx_data, tool_use_id)
+
+    async def _on_hook_subagent_started(self, ctx_data: dict[str, Any], tool_use_id: str) -> None:
+        """Handle TOOL_EXECUTION_STARTED hook for a subagent tool."""
+        input_preview = ctx_data.get("input_preview", "")
+        event = self._subagents.on_task_started_from_hook(tool_use_id, input_preview)
+        await self._collector.record_subagent_started(event.agent_name, tool_use_id)
+
+    async def _on_hook_subagent_completed(self, ctx_data: dict[str, Any], tool_use_id: str) -> None:
+        """Handle TOOL_EXECUTION_COMPLETED hook for a subagent tool."""
+        success = ctx_data.get("success", True)
+        stopped_event = self._subagents.on_task_completed(tool_use_id, success=success)
+        if stopped_event:
+            await self._collector.record_subagent_stopped(
+                agent_name=stopped_event.agent_name,
+                tool_use_id=tool_use_id,
+                duration_ms=stopped_event.duration_ms,
+                success=stopped_event.success,
+                tools_used=stopped_event.tools_used,
+            )
 
     async def _process_cli_event(self, line: str) -> dict[str, Any] | None:
         """Process a Claude CLI native event. Returns task result if found."""
