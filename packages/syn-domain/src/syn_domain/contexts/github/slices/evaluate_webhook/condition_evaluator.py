@@ -72,24 +72,27 @@ def _resolve_array_index(current: Any, key: str, index_str: str) -> Any:
     return current[idx] if idx < len(current) else None
 
 
+def _resolve_one_part(current: Any, part: str) -> Any:
+    """Resolve a single path segment (plain key or array-indexed) from *current*."""
+    if current is None:
+        return None
+    match = _ARRAY_INDEX_RE.match(part)
+    if match:
+        key, index_str = match.groups()
+        return _resolve_array_index(current, key, index_str)
+    if isinstance(current, dict):
+        return current.get(part)
+    return None
+
+
 def _resolve_field(payload: dict, field_path: str) -> Any:
     """Resolve a dot-notation field path from a payload dict.
 
     Supports array indexing: "check_run.pull_requests[0].number"
     """
-    parts = field_path.split(".")
     current: Any = payload
-    for part in parts:
-        if current is None:
-            return None
-        match = _ARRAY_INDEX_RE.match(part)
-        if match:
-            key, index_str = match.groups()
-            current = _resolve_array_index(current, key, index_str)
-        elif isinstance(current, dict):
-            current = current.get(part)
-        else:
-            return None
+    for part in field_path.split("."):
+        current = _resolve_one_part(current, part)
     return current
 
 

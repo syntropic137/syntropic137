@@ -150,60 +150,6 @@ issue = "#318"
 value = 20
 issue = "#318"
 
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection::on_phase_completed"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.cleanup.stale_execution_cleaner::cleanup_stale_executions"]
-value = 20
-issue = "#320"
-
-# --- syn-domain: other contexts ---
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.domain.read_models.session_cost::from_dict"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.agent_sessions.slices.session_cost.timescale_query::calculate"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github._shared.github_client::get_installation_token"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.domain.aggregate_trigger.TriggerRuleAggregate::on_trigger_registered"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.github.slices.evaluate_webhook.condition_evaluator::_resolve_field"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_organization.OrganizationAggregate::on_organization_updated"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.domain.aggregate_system.SystemAggregate::on_system_updated"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.list_repos.projection::list_all"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_cost.GetSystemCostHandler::handle"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.organization.slices.system_patterns.GetSystemPatternsHandler::_find_cost_outliers"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:packages.syn-domain.src.syn_domain.contexts.orchestration.domain.read_models.execution_cost::from_dict"]
-value = 20
-issue = "#320"
-
 # --- syn-adapters ---
 
 [max-cognitive."python:packages.syn-adapters.src.syn_adapters.agents.claude_complete::complete_request"]
@@ -443,10 +389,6 @@ value = 15
 issue = "#320"
 
 [max-cyclomatic."python:packages.syn-adapters.src.syn_adapters.subscriptions.service_health::health_check"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.get_execution_detail.projection::on_phase_completed"]
 value = 15
 issue = "#320"
 

@@ -142,19 +142,23 @@ class OrganizationAggregate(AggregateRoot["OrganizationCreatedEvent"]):
             self._created_by = data.get("created_by", "")
         self._is_deleted = False
 
+    @staticmethod
+    def _extract_optional_fields(
+        event: OrganizationUpdatedEvent,
+    ) -> tuple[str | None, str | None]:
+        """Extract (name, slug) from typed or dict-based update event."""
+        if hasattr(event, "name"):
+            return event.name, event.slug
+        data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+        return data.get("name"), data.get("slug")
+
     @event_sourcing_handler("organization.OrganizationUpdated")
     def on_organization_updated(self, event: OrganizationUpdatedEvent) -> None:
-        if hasattr(event, "name"):
-            if event.name is not None:
-                self._name = event.name
-            if event.slug is not None:
-                self._slug = event.slug
-        else:
-            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            if data.get("name") is not None:
-                self._name = data["name"]
-            if data.get("slug") is not None:
-                self._slug = data["slug"]
+        name, slug = self._extract_optional_fields(event)
+        if name is not None:
+            self._name = name
+        if slug is not None:
+            self._slug = slug
 
     @event_sourcing_handler("organization.OrganizationDeleted")
     def on_organization_deleted(self, _event: OrganizationDeletedEvent) -> None:

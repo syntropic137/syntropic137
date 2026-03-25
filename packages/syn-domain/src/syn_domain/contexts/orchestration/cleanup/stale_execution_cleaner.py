@@ -107,6 +107,38 @@ class StaleExecutionCleaner:
         self._projection = projection
         self._executions = execution_repository
 
+    async def _try_cleanup_one(
+        self,
+        summary: WorkflowExecutionSummary,
+        threshold: timedelta,
+        dry_run: bool,
+    ) -> str | None:
+        """Attempt to clean up a single stale execution.
+
+        Returns the execution ID if cleaned (or would be cleaned), else None.
+        """
+        execution_id = summary.workflow_execution_id
+
+        if not _is_past_expected_completion(summary):
+            logger.debug("Skipping %s - not past expected completion", execution_id)
+            return None
+
+        if dry_run:
+            logger.info("[DRY RUN] Would clean up: %s", execution_id)
+            return execution_id
+
+        try:
+            await self._mark_as_failed(
+                execution_id=execution_id,
+                reason="stale_timeout",
+                message=f"Execution timed out after {threshold}",
+            )
+            logger.info("Cleaned up stale execution: %s", execution_id)
+            return execution_id
+        except Exception:
+            logger.exception("Failed to clean up execution %s", execution_id)
+            return None
+
     async def cleanup_stale_executions(
         self,
         threshold: timedelta | None = None,
@@ -146,32 +178,10 @@ class StaleExecutionCleaner:
         )
 
         cleaned: list[str] = []
-
         for summary in stale_executions[: self.MAX_BATCH_SIZE]:
-            execution_id = summary.workflow_execution_id
-
-            if not _is_past_expected_completion(summary):
-                logger.debug("Skipping %s - not past expected completion", execution_id)
-                continue
-
-            if dry_run:
-                logger.info("[DRY RUN] Would clean up: %s", execution_id)
-                cleaned.append(execution_id)
-                continue
-
-            try:
-                await self._mark_as_failed(
-                    execution_id=execution_id,
-                    reason="stale_timeout",
-                    message=f"Execution timed out after {threshold}",
-                )
-                cleaned.append(execution_id)
-                logger.info("Cleaned up stale execution: %s", execution_id)
-            except Exception:
-                logger.exception(
-                    "Failed to clean up execution %s",
-                    execution_id,
-                )
+            result = await self._try_cleanup_one(summary, threshold, dry_run)
+            if result:
+                cleaned.append(result)
 
         if dry_run:
             logger.info("[DRY RUN] Would have cleaned up %d executions", len(cleaned))

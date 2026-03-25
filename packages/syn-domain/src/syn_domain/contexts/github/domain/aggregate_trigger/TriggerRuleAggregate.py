@@ -224,29 +224,62 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
 
     # --- Event sourcing handlers ---
 
+    @staticmethod
+    def _extract_trigger_fields(
+        event: TriggerRegisteredEvent,
+    ) -> tuple[str, str, str, str, str, str, dict[str, str], Any, Any]:
+        """Extract core trigger fields from a typed or dict-based event.
+
+        Returns (name, event_type, repository, installation_id, workflow_id,
+                 created_by, input_mapping, conditions_raw, config_raw).
+        """
+        if hasattr(event, "name"):
+            return (
+                event.name,
+                event.event,
+                event.repository,
+                event.installation_id,
+                event.workflow_id,
+                event.created_by,
+                dict(event.input_mapping) if event.input_mapping else {},
+                event.conditions,
+                event.config,
+            )
+        data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+        return (
+            data.get("name", ""),
+            data.get("event", ""),
+            data.get("repository", ""),
+            data.get("installation_id", ""),
+            data.get("workflow_id", ""),
+            data.get("created_by", ""),
+            data.get("input_mapping", {}),
+            data.get("conditions", ()),
+            data.get("config", {}),
+        )
+
+    @staticmethod
+    def _parse_trigger_config(config_raw: Any) -> TriggerConfig:
+        """Parse a config dict into a TriggerConfig, ignoring unknown keys."""
+        config_dict = config_raw if isinstance(config_raw, dict) else {}
+        if not config_dict:
+            return TriggerConfig()
+        valid_keys = set(TriggerConfig.__dataclass_fields__)
+        return TriggerConfig(**{k: v for k, v in config_dict.items() if k in valid_keys})
+
     @event_sourcing_handler("github.TriggerRegistered")
     def on_trigger_registered(self, event: TriggerRegisteredEvent) -> None:
-        if hasattr(event, "name"):
-            self._name = event.name
-            self._event = event.event
-            self._repository = event.repository
-            self._installation_id = event.installation_id
-            self._workflow_id = event.workflow_id
-            self._created_by = event.created_by
-            self._input_mapping = dict(event.input_mapping) if event.input_mapping else {}
-            conditions_raw = event.conditions
-            config_raw = event.config
-        else:
-            data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
-            self._name = data.get("name", "")
-            self._event = data.get("event", "")
-            self._repository = data.get("repository", "")
-            self._installation_id = data.get("installation_id", "")
-            self._workflow_id = data.get("workflow_id", "")
-            self._created_by = data.get("created_by", "")
-            self._input_mapping = data.get("input_mapping", {})
-            conditions_raw = data.get("conditions", ())
-            config_raw = data.get("config", {})
+        (
+            self._name,
+            self._event,
+            self._repository,
+            self._installation_id,
+            self._workflow_id,
+            self._created_by,
+            self._input_mapping,
+            conditions_raw,
+            config_raw,
+        ) = self._extract_trigger_fields(event)
 
         self._conditions = [
             TriggerCondition(
@@ -256,13 +289,7 @@ class TriggerRuleAggregate(AggregateRoot["TriggerRegisteredEvent"]):
             )
             for c in conditions_raw
         ]
-        config_dict = config_raw if isinstance(config_raw, dict) else {}
-        valid_keys = set(TriggerConfig.__dataclass_fields__)
-        self._config = (
-            TriggerConfig(**{k: v for k, v in config_dict.items() if k in valid_keys})
-            if config_dict
-            else TriggerConfig()
-        )
+        self._config = self._parse_trigger_config(config_raw)
         self._status = TriggerStatus.ACTIVE
 
     @event_sourcing_handler("github.TriggerPaused")

@@ -139,6 +139,43 @@ class TimescaleSessionCostQuery:
             cache_read=cache_read,
         )
 
+    @staticmethod
+    def _build_session_cost(
+        session_id: str,
+        exec_result: Any,
+        token_result: Any,
+        total_cost: Decimal,
+        input_tokens: int,
+        output_tokens: int,
+        cache_creation: int,
+        cache_read: int,
+        tool_count: int,
+        started_at: Any,
+        completed_at: Any,
+        duration_ms: int | None,
+    ) -> SessionCost:
+        """Assemble a SessionCost from resolved query fields."""
+        sc = SessionCost(session_id=session_id)
+        sc.input_tokens = input_tokens
+        sc.output_tokens = output_tokens
+        sc.cache_creation_tokens = cache_creation
+        sc.cache_read_tokens = cache_read
+        sc.tool_calls = tool_count
+        sc.token_cost_usd = total_cost
+        sc.total_cost_usd = total_cost
+        agent_model = _resolve_agent_model(exec_result, token_result)
+        if agent_model:
+            sc.agent_model = agent_model
+        sc.started_at = started_at
+        sc.execution_id = token_result.get("execution_id")
+        sc.phase_id = token_result.get("phase_id")
+        sc.workspace_id = token_result.get("workspace_id")
+        if completed_at:
+            sc.completed_at = completed_at
+        if duration_ms is not None:
+            sc.duration_ms = duration_ms
+        return sc
+
     async def calculate(self, session_id: str) -> SessionCost | None:
         """Calculate session cost from TimescaleDB."""
         async with self._pool.acquire() as conn:
@@ -158,24 +195,17 @@ class TimescaleSessionCostQuery:
             )
             completed_at, duration_ms = _resolve_duration(exec_result, token_result, started_at)
 
-            session_cost = SessionCost(session_id=session_id)
-            session_cost.input_tokens = input_tokens
-            session_cost.output_tokens = output_tokens
-            session_cost.cache_creation_tokens = cache_creation
-            session_cost.cache_read_tokens = cache_read
-            session_cost.tool_calls = tool_count or 0
-            session_cost.token_cost_usd = total_cost
-            session_cost.total_cost_usd = total_cost
-            agent_model = _resolve_agent_model(exec_result, token_result)
-            if agent_model:
-                session_cost.agent_model = agent_model
-            session_cost.started_at = started_at
-            session_cost.execution_id = token_result.get("execution_id")
-            session_cost.phase_id = token_result.get("phase_id")
-            session_cost.workspace_id = token_result.get("workspace_id")
-            if completed_at:
-                session_cost.completed_at = completed_at
-            if duration_ms is not None:
-                session_cost.duration_ms = duration_ms
-
-            return session_cost
+            return self._build_session_cost(
+                session_id=session_id,
+                exec_result=exec_result,
+                token_result=token_result,
+                total_cost=total_cost,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation=cache_creation,
+                cache_read=cache_read,
+                tool_count=tool_count or 0,
+                started_at=started_at,
+                completed_at=completed_at,
+                duration_ms=duration_ms,
+            )

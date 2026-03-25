@@ -5,6 +5,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from syn_domain.contexts.agent_sessions.domain.read_models.session_cost import (
+    _coerce_datetime,
+    _coerce_decimal,
+    _coerce_decimal_dict,
+)
+
 
 @dataclass
 class ExecutionCost:
@@ -87,50 +93,14 @@ class ExecutionCost:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ExecutionCost":
         """Create from dictionary."""
-        # Convert string amounts back to Decimal
-        cost_by_phase = {
-            k: Decimal(v) if isinstance(v, str) else v
-            for k, v in data.get("cost_by_phase", {}).items()
-        }
-        cost_by_model = {
-            k: Decimal(v) if isinstance(v, str) else v
-            for k, v in data.get("cost_by_model", {}).items()
-        }
-        cost_by_tool = {
-            k: Decimal(v) if isinstance(v, str) else v
-            for k, v in data.get("cost_by_tool", {}).items()
-        }
-
-        # Parse timestamps
-        started_at = data.get("started_at")
-        if isinstance(started_at, str):
-            started_at = datetime.fromisoformat(started_at)
-
-        completed_at = data.get("completed_at")
-        if isinstance(completed_at, str):
-            completed_at = datetime.fromisoformat(completed_at)
-
-        # Parse Decimal fields
-        total_cost = data.get("total_cost_usd", "0")
-        if isinstance(total_cost, str):
-            total_cost = Decimal(total_cost)
-
-        token_cost = data.get("token_cost_usd", "0")
-        if isinstance(token_cost, str):
-            token_cost = Decimal(token_cost)
-
-        compute_cost = data.get("compute_cost_usd", "0")
-        if isinstance(compute_cost, str):
-            compute_cost = Decimal(compute_cost)
-
         return cls(
             execution_id=data.get("execution_id", ""),
             workflow_id=data.get("workflow_id"),
             session_count=data.get("session_count", 0),
             session_ids=data.get("session_ids", []),
-            total_cost_usd=total_cost,
-            token_cost_usd=token_cost,
-            compute_cost_usd=compute_cost,
+            total_cost_usd=_coerce_decimal(data.get("total_cost_usd", "0")),
+            token_cost_usd=_coerce_decimal(data.get("token_cost_usd", "0")),
+            compute_cost_usd=_coerce_decimal(data.get("compute_cost_usd", "0")),
             input_tokens=data.get("input_tokens", 0),
             output_tokens=data.get("output_tokens", 0),
             cache_creation_tokens=data.get("cache_creation_tokens", 0),
@@ -138,12 +108,12 @@ class ExecutionCost:
             tool_calls=data.get("tool_calls", 0),
             turns=data.get("turns", 0),
             duration_ms=data.get("duration_ms", 0),
-            cost_by_phase=cost_by_phase,
-            cost_by_model=cost_by_model,
-            cost_by_tool=cost_by_tool,
+            cost_by_phase=_coerce_decimal_dict(data.get("cost_by_phase")),
+            cost_by_model=_coerce_decimal_dict(data.get("cost_by_model")),
+            cost_by_tool=_coerce_decimal_dict(data.get("cost_by_tool")),
             is_complete=data.get("is_complete", False),
-            started_at=started_at,
-            completed_at=completed_at,
+            started_at=_coerce_datetime(data.get("started_at")),
+            completed_at=_coerce_datetime(data.get("completed_at")),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -121,6 +121,31 @@ class GetSystemPatternsHandler:
 
         return _groups_to_patterns(groups)
 
+    @staticmethod
+    def _detect_outliers(
+        costs: list[tuple[str, Decimal]],
+    ) -> list[CostOutlier]:
+        """Return repos whose cost exceeds 3x the median."""
+        if len(costs) < 2:
+            return []
+
+        cost_values = [c for _, c in costs]
+        med = Decimal(str(median(cost_values)))
+        if med <= 0:
+            return []
+
+        outliers = [
+            CostOutlier(
+                repo_full_name=repo_name,
+                cost_usd=cost,
+                median_cost_usd=med,
+                deviation_factor=float(cost / med),
+            )
+            for repo_name, cost in costs
+            if float(cost / med) > 3.0
+        ]
+        return sorted(outliers, key=lambda o: o.deviation_factor, reverse=True)
+
     async def _find_cost_outliers(self, system_id: str) -> list[CostOutlier]:
         """Find repos with cost > 3x median."""
         repos = await self._repo_projection.list_all(system_id=system_id)
@@ -134,28 +159,7 @@ class GetSystemPatternsHandler:
             if rc.total_cost_usd > 0:
                 costs.append((repo.full_name, rc.total_cost_usd))
 
-        if len(costs) < 2:
-            return []
-
-        cost_values = [c for _, c in costs]
-        med = Decimal(str(median(cost_values)))
-        if med <= 0:
-            return []
-
-        outliers = []
-        for repo_name, cost in costs:
-            factor = float(cost / med)
-            if factor > 3.0:
-                outliers.append(
-                    CostOutlier(
-                        repo_full_name=repo_name,
-                        cost_usd=cost,
-                        median_cost_usd=med,
-                        deviation_factor=factor,
-                    )
-                )
-
-        return sorted(outliers, key=lambda o: o.deviation_factor, reverse=True)
+        return self._detect_outliers(costs)
 
     async def handle(self, query: GetSystemPatternsQuery) -> SystemPatterns:
         """Handle GetSystemPatternsQuery."""
