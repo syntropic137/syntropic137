@@ -15,13 +15,14 @@ Level 4 Verification: Real persistence roundtrip
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
     from event_sourcing import EventStoreRepository, GrpcEventStoreClient, RepositoryFactory
 
     from syn_domain.contexts.agent_sessions.domain.aggregate_session.AgentSessionAggregate import (
