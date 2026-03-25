@@ -45,7 +45,7 @@ function DonutChart({
 }: {
   data: ChartDataItem[]
   emptyMessage: string
-  tooltipFormatter?: (value: number) => [string, string]
+  tooltipFormatter?: (value: number | string) => [string, string]
 }) {
   if (!data.some((d) => d.value > 0)) {
     return (
@@ -100,7 +100,7 @@ export function DashboardCharts({ metrics }: DashboardChartsProps) {
     <DonutChart
       data={tokenDistribution}
       emptyMessage="No token data yet"
-      tooltipFormatter={(value: number) => [value.toLocaleString(), 'tokens']}
+      tooltipFormatter={(value) => [Number(value).toLocaleString(), 'tokens']}
     />
   )
 }

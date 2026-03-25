@@ -43,7 +43,7 @@ export function PhaseMetricsChart({ phaseChartData }: PhaseMetricsChartProps) {
                   borderRadius: '8px',
                   fontSize: '12px',
                 }}
-                formatter={(value: number) => [value.toLocaleString(), 'tokens']}
+                formatter={(value: number | string) => [Number(value).toLocaleString(), 'tokens']}
               />
               <Bar dataKey="tokens" radius={[0, 4, 4, 0]}>
                 {phaseChartData.map((entry, index) => (
