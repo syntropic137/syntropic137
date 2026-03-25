@@ -9,6 +9,7 @@ import logging
 from datetime import (
     datetime,  # noqa: TC003 — Pydantic needs datetime at runtime for model validation
 )
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -240,6 +241,60 @@ async def complete_session(
         return Err(SessionError.NOT_FOUND, message=str(e))
 
 
+@dataclass
+class _CostData:
+    """Intermediate cost data extracted from projections."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    total_tokens: int = 0
+    total_cost_usd: Decimal = Decimal("0")
+    agent_model: str | None = None
+    duration_seconds: float | None = None
+
+
+async def _load_tool_operations(
+    manager: Any, session_id: str
+) -> list[ToolOperation]:
+    """Load tool operations for a session from the projection."""
+    try:
+        tool_data = await manager.session_tools.get(session_id)
+        return [
+            ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])
+        ]
+    except Exception:
+        logger.exception("Failed to load tool operations for session %s", session_id)
+        return []
+
+
+async def _load_cost_data(
+    manager: Any, session_id: str, fallback_tokens: int, fallback_cost: Decimal
+) -> _CostData:
+    """Load cost data for a session from the projection."""
+    try:
+        cost = await manager.session_cost.get_session_cost(session_id)
+    except Exception:
+        logger.exception("Failed to load cost data for session %s", session_id)
+        return _CostData(total_tokens=fallback_tokens, total_cost_usd=fallback_cost)
+
+    if cost is None:
+        return _CostData(total_tokens=fallback_tokens, total_cost_usd=fallback_cost)
+
+    return _CostData(
+        input_tokens=cost.input_tokens,
+        output_tokens=cost.output_tokens,
+        cache_creation_tokens=cost.cache_creation_tokens,
+        cache_read_tokens=cost.cache_read_tokens,
+        # ISS-217: Use authoritative totals from cost projection; fall back to session_list
+        total_tokens=cost.total_tokens or fallback_tokens,
+        total_cost_usd=cost.total_cost_usd,
+        agent_model=cost.agent_model,
+        duration_seconds=(cost.duration_ms / 1000.0) if cost.duration_ms else None,
+    )
+
+
 async def get_session(
     session_id: str,
     auth: AuthContext | None = None,  # noqa: ARG001
@@ -263,40 +318,10 @@ async def get_session(
     if session is None:
         return Err(SessionError.NOT_FOUND, message=f"Session {session_id} not found")
 
-    # Get tool operations
-    operations: list[ToolOperation] = []
-    try:
-        tool_data = await manager.session_tools.get(session_id)
-        operations = [
-            ToolOperation.model_validate(op, from_attributes=True) for op in (tool_data or [])
-        ]
-    except Exception:
-        logger.exception("Failed to load tool operations for session %s", session_id)
-
-    # Get cost data
-    input_tokens = 0
-    output_tokens = 0
-    cache_creation_tokens = 0
-    cache_read_tokens = 0
-    total_cost = session.total_cost_usd
-    total_tokens = session.total_tokens
-    agent_model = None
-    duration_seconds = None
-    try:
-        cost = await manager.session_cost.get_session_cost(session_id)
-        if cost:
-            input_tokens = cost.input_tokens
-            output_tokens = cost.output_tokens
-            cache_creation_tokens = cost.cache_creation_tokens
-            cache_read_tokens = cost.cache_read_tokens
-            # ISS-217: Use authoritative totals from cost projection; fall back to session_list
-            total_tokens = cost.total_tokens or session.total_tokens
-            total_cost = cost.total_cost_usd
-            agent_model = cost.agent_model
-            if cost.duration_ms:
-                duration_seconds = cost.duration_ms / 1000.0
-    except Exception:
-        logger.exception("Failed to load cost data for session %s", session_id)
+    operations = await _load_tool_operations(manager, session_id)
+    cd = await _load_cost_data(
+        manager, session_id, session.total_tokens, session.total_cost_usd
+    )
 
     return Ok(
         SessionDetail(
@@ -306,17 +331,17 @@ async def get_session(
             phase_id=session.phase_id,
             agent_type=session.agent_type,
             status=session.status,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_creation_tokens=cache_creation_tokens,
-            cache_read_tokens=cache_read_tokens,
-            total_tokens=total_tokens,
-            total_cost_usd=total_cost,
-            agent_model=agent_model,
+            input_tokens=cd.input_tokens,
+            output_tokens=cd.output_tokens,
+            cache_creation_tokens=cd.cache_creation_tokens,
+            cache_read_tokens=cd.cache_read_tokens,
+            total_tokens=cd.total_tokens,
+            total_cost_usd=cd.total_cost_usd,
+            agent_model=cd.agent_model,
             operations=operations,
             started_at=session.started_at,
             completed_at=session.completed_at,
-            duration_seconds=duration_seconds,
+            duration_seconds=cd.duration_seconds,
         )
     )
 
@@ -359,6 +384,38 @@ async def list_sessions_endpoint(
     ]
 
 
+def _parse_tool_input(input_preview: str | None) -> dict[str, Any] | None:
+    """Parse a tool input preview string into a dict."""
+    if not input_preview:
+        return None
+    import json
+
+    try:
+        parsed = json.loads(input_preview)
+        return parsed if isinstance(parsed, dict) else {"raw": input_preview}
+    except (json.JSONDecodeError, TypeError):
+        return {"raw": input_preview}
+
+
+def _to_operation_info(op: ToolOperation) -> OperationInfo:
+    """Convert a ToolOperation to an OperationInfo response model."""
+    return OperationInfo(
+        operation_id=op.observation_id,
+        operation_type=op.operation_type,
+        timestamp=str(op.timestamp) if op.timestamp else None,
+        duration_seconds=(op.duration_ms / 1000.0) if op.duration_ms else None,
+        success=op.success if op.success is not None else True,
+        tool_name=op.tool_name,
+        tool_use_id=op.tool_use_id,
+        tool_input=_parse_tool_input(op.input_preview),
+        tool_output=op.output_preview,
+        git_sha=op.git_sha,
+        git_message=op.git_message,
+        git_branch=op.git_branch,
+        git_repo=op.git_repo,
+    )
+
+
 @router.get("/{session_id}", response_model=SessionResponse)
 async def get_session_endpoint(session_id: str) -> SessionResponse:
     """Get session details by ID."""
@@ -368,38 +425,7 @@ async def get_session_endpoint(session_id: str) -> SessionResponse:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     detail = result.value
-
-    # Convert tool operations to API format
-    operations: list[OperationInfo] = []
-    for op in detail.operations or []:
-        tool_input_dict: dict[str, Any] | None = None
-        input_preview = op.input_preview
-        if input_preview:
-            import json
-
-            try:
-                parsed = json.loads(input_preview)
-                tool_input_dict = parsed if isinstance(parsed, dict) else {"raw": input_preview}
-            except (json.JSONDecodeError, TypeError):
-                tool_input_dict = {"raw": input_preview}
-
-        operations.append(
-            OperationInfo(
-                operation_id=op.observation_id,
-                operation_type=op.operation_type,
-                timestamp=str(op.timestamp) if op.timestamp else None,
-                duration_seconds=(op.duration_ms / 1000.0) if op.duration_ms else None,
-                success=op.success if op.success is not None else True,
-                tool_name=op.tool_name,
-                tool_use_id=op.tool_use_id,
-                tool_input=tool_input_dict,
-                tool_output=op.output_preview,
-                git_sha=op.git_sha,
-                git_message=op.git_message,
-                git_branch=op.git_branch,
-                git_repo=op.git_repo,
-            )
-        )
+    operations = [_to_operation_info(op) for op in (detail.operations or [])]
 
     return SessionResponse(
         id=detail.id,

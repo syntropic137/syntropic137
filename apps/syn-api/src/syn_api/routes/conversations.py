@@ -79,6 +79,38 @@ class ConversationMetadataResponse(BaseModel):
 # =============================================================================
 
 
+def _extract_line_fields(
+    raw: str,
+) -> tuple[str | None, str | None, str | None]:
+    """Extract event_type, tool_name, and content preview from a JSONL line.
+
+    Returns (event_type, tool_name, preview) — all None-able.
+    """
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, AttributeError):
+        preview = raw[:200] if raw else None
+        return None, None, preview
+
+    event_type = data.get("type") or data.get("event_type")
+    tool_name = data.get("tool_name") or data.get("name")
+    content = data.get("content") or data.get("text") or ""
+    preview = content[:200] if isinstance(content, str) and content else None
+    return event_type, tool_name, preview
+
+
+def _parse_conversation_line(line_number: int, raw: str) -> ConversationLine:
+    """Parse a single raw JSONL line into a ConversationLine."""
+    event_type, tool_name, preview = _extract_line_fields(raw)
+    return ConversationLine(
+        line_number=line_number,
+        raw=raw,
+        event_type=event_type,
+        tool_name=tool_name,
+        content_preview=preview,
+    )
+
+
 async def get_conversation_log(
     session_id: str,
     offset: int = 0,
@@ -109,31 +141,10 @@ async def get_conversation_log(
 
         total = len(raw_lines)
         page = raw_lines[offset : offset + limit]
-
-        lines = []
-        for i, raw in enumerate(page, start=offset + 1):
-            event_type = None
-            tool_name = None
-            preview = None
-            try:
-                data = json.loads(raw)
-                event_type = data.get("type") or data.get("event_type")
-                tool_name = data.get("tool_name") or data.get("name")
-                content = data.get("content") or data.get("text") or ""
-                if isinstance(content, str):
-                    preview = content[:200] if content else None
-            except (json.JSONDecodeError, AttributeError):
-                preview = raw[:200] if raw else None
-
-            lines.append(
-                ConversationLine(
-                    line_number=i,
-                    raw=raw,
-                    event_type=event_type,
-                    tool_name=tool_name,
-                    content_preview=preview,
-                )
-            )
+        lines = [
+            _parse_conversation_line(i, raw)
+            for i, raw in enumerate(page, start=offset + 1)
+        ]
 
         return Ok(
             ConversationLog(

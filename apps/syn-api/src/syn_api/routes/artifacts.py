@@ -126,6 +126,34 @@ async def list_artifacts(
         return Err(ArtifactError.STORAGE_ERROR, message=str(e))
 
 
+async def _load_artifact_content(artifact_id: str, fallback_content: str | None) -> tuple[str | None, str | None]:
+    """Download artifact content from storage, falling back to projection content.
+
+    Returns:
+        (content, content_type) tuple.
+    """
+    try:
+        from syn_adapters.storage.artifact_storage import get_artifact_storage
+
+        storage = await get_artifact_storage()
+        raw = await storage.download(artifact_id)
+        return raw.decode("utf-8", errors="replace"), "text/plain"
+    except Exception:
+        logger.exception("Failed to load artifact content for %s", artifact_id)
+
+    # Fall back to projection content if storage download failed
+    if fallback_content is not None:
+        return fallback_content, "text/plain"
+    return None, None
+
+
+def _parse_artifact_created_at(created_at: str | datetime | None) -> datetime | None:
+    """Parse created_at from string or datetime."""
+    if isinstance(created_at, str):
+        return datetime.fromisoformat(created_at)
+    return created_at
+
+
 async def get_artifact(
     artifact_id: str,
     include_content: bool = False,
@@ -156,20 +184,7 @@ async def get_artifact(
         content = None
         content_type = None
         if include_content:
-            try:
-                from syn_adapters.storage.artifact_storage import get_artifact_storage
-
-                storage = await get_artifact_storage()
-                raw = await storage.download(artifact_id)
-                content = raw.decode("utf-8", errors="replace")
-                content_type = "text/plain"
-            except Exception:
-                logger.exception("Failed to load artifact content for %s", artifact_id)
-
-            # Fall back to projection content if storage download failed
-            if content is None:
-                content = artifact.content
-                content_type = "text/plain"
+            content, content_type = await _load_artifact_content(artifact_id, artifact.content)
 
         return Ok(
             ArtifactDetail(
@@ -183,9 +198,7 @@ async def get_artifact(
                 content_type=content_type,
                 content_hash=artifact.content_hash,
                 size_bytes=artifact.size_bytes,
-                created_at=datetime.fromisoformat(artifact.created_at)
-                if isinstance(artifact.created_at, str)
-                else artifact.created_at,
+                created_at=_parse_artifact_created_at(artifact.created_at),
             )
         )
     except Exception as e:
@@ -298,6 +311,32 @@ async def upload_artifact(
 # =============================================================================
 
 
+def _filter_artifacts(
+    items: list[ArtifactSummary],
+    phase_id: str | None,
+    artifact_type: str | None,
+) -> list[ArtifactSummary]:
+    """Apply optional phase and type filters to artifact summaries."""
+    if phase_id:
+        items = [a for a in items if a.phase_id == phase_id]
+    if artifact_type:
+        items = [a for a in items if a.artifact_type == artifact_type]
+    return items
+
+
+def _to_artifact_summary_response(a: ArtifactSummary) -> ArtifactSummaryResponse:
+    """Convert an ArtifactSummary to its API response model."""
+    return ArtifactSummaryResponse(
+        id=a.id,
+        workflow_id=a.workflow_id,
+        phase_id=a.phase_id,
+        artifact_type=a.artifact_type,
+        title=a.title,
+        size_bytes=a.size_bytes or 0,
+        created_at=str(a.created_at) if a.created_at else None,
+    )
+
+
 @router.get("", response_model=list[ArtifactSummaryResponse])
 async def list_artifacts_endpoint(
     workflow_id: str | None = Query(None, description="Filter by workflow ID"),
@@ -315,25 +354,8 @@ async def list_artifacts_endpoint(
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
-    items = result.value
-
-    if phase_id:
-        items = [a for a in items if a.phase_id == phase_id]
-    if artifact_type:
-        items = [a for a in items if a.artifact_type == artifact_type]
-
-    return [
-        ArtifactSummaryResponse(
-            id=a.id,
-            workflow_id=a.workflow_id,
-            phase_id=a.phase_id,
-            artifact_type=a.artifact_type,
-            title=a.title,
-            size_bytes=a.size_bytes or 0,
-            created_at=str(a.created_at) if a.created_at else None,
-        )
-        for a in items
-    ]
+    items = _filter_artifacts(result.value, phase_id, artifact_type)
+    return [_to_artifact_summary_response(a) for a in items]
 
 
 @router.get("/{artifact_id}", response_model=ArtifactResponse)

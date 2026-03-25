@@ -75,26 +75,50 @@ async def register_trigger(
 
     try:
         aggregate = await handler.handle(command)
-        await store.index_trigger(
-            trigger_id=aggregate.trigger_id,
-            name=aggregate.name,
-            event=aggregate.event,
-            repository=aggregate.repository,
-            workflow_id=aggregate.workflow_id,
-            conditions=[
-                {"field": c.field, "operator": c.operator, "value": c.value}
-                for c in aggregate.conditions
-            ],
-            input_mapping=aggregate.input_mapping,
-            config=aggregate.config,
-            installation_id=aggregate.installation_id,
-            created_by=aggregate.created_by,
-            status=aggregate.status.value,
-        )
-        await sync_published_events_to_projections()
+        await _index_and_sync_trigger(store, aggregate)
         return Ok(aggregate.trigger_id)
     except Exception as e:
         return Err(TriggerError.INVALID_INPUT, message=str(e))
+
+
+async def _index_and_sync_trigger(store: Any, aggregate: Any) -> None:
+    """Index a trigger aggregate in the store and sync projections."""
+    await store.index_trigger(
+        trigger_id=aggregate.trigger_id,
+        name=aggregate.name,
+        event=aggregate.event,
+        repository=aggregate.repository,
+        workflow_id=aggregate.workflow_id,
+        conditions=[
+            {"field": c.field, "operator": c.operator, "value": c.value}
+            for c in aggregate.conditions
+        ],
+        input_mapping=aggregate.input_mapping,
+        config=aggregate.config,
+        installation_id=aggregate.installation_id,
+        created_by=aggregate.created_by,
+        status=aggregate.status.value,
+    )
+    await sync_published_events_to_projections()
+
+
+async def _check_preset_duplicate(
+    repository: str, command_name: str, command_event: str
+) -> Result[None, TriggerError]:
+    """Check if a trigger with the same name+event already exists for the repo."""
+    from syn_api.routes.triggers.queries import list_triggers
+
+    existing = await list_triggers(repository=repository)
+    if not isinstance(existing, Ok):
+        return Ok(None)
+
+    for t in existing.value:
+        if t.name == command_name and t.event == command_event and t.status != TriggerStatus.DELETED:
+            return Err(
+                TriggerError.INVALID_INPUT,
+                message=f"Trigger '{command_name}' already exists for {repository}",
+            )
+    return Ok(None)
 
 
 async def enable_preset(
@@ -129,21 +153,9 @@ async def enable_preset(
             message=f"Workflow '{command.workflow_id}' does not exist. Seed workflows before creating triggers.",
         )
 
-    # Dedup check: skip if an active/paused trigger with the same name+repo+event exists
-    from syn_api.routes.triggers.queries import list_triggers
-
-    existing = await list_triggers(repository=repository)
-    if isinstance(existing, Ok):
-        for t in existing.value:
-            if (
-                t.name == command.name
-                and t.event == command.event
-                and t.status != TriggerStatus.DELETED
-            ):
-                return Err(
-                    TriggerError.INVALID_INPUT,
-                    message=f"Trigger '{command.name}' already exists for {repository}",
-                )
+    dedup = await _check_preset_duplicate(repository, command.name, command.event)
+    if isinstance(dedup, Err):
+        return dedup
 
     store = get_trigger_store()
     repo = get_trigger_repo()
@@ -151,23 +163,7 @@ async def enable_preset(
 
     try:
         aggregate = await handler.handle(command)
-        await store.index_trigger(
-            trigger_id=aggregate.trigger_id,
-            name=aggregate.name,
-            event=aggregate.event,
-            repository=aggregate.repository,
-            workflow_id=aggregate.workflow_id,
-            conditions=[
-                {"field": c.field, "operator": c.operator, "value": c.value}
-                for c in aggregate.conditions
-            ],
-            input_mapping=aggregate.input_mapping,
-            config=aggregate.config,
-            installation_id=aggregate.installation_id,
-            created_by=aggregate.created_by,
-            status=aggregate.status.value,
-        )
-        await sync_published_events_to_projections()
+        await _index_and_sync_trigger(store, aggregate)
         return Ok(aggregate.trigger_id)
     except Exception as e:
         return Err(TriggerError.INVALID_INPUT, message=str(e))

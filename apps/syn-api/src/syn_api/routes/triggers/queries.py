@@ -63,6 +63,15 @@ async def list_triggers(
     )
 
 
+def _resolve_config(config: Any) -> dict[str, Any]:
+    """Convert a config value (dataclass, dict, or other) to a plain dict."""
+    if dataclasses.is_dataclass(config) and not isinstance(config, type):
+        return dataclasses.asdict(config)  # type: ignore[arg-type]  # guarded by is_dataclass
+    if isinstance(config, dict):
+        return dict(config)
+    return {}
+
+
 async def get_trigger(
     trigger_id: str,
     auth: AuthContext | None = None,  # noqa: ARG001
@@ -87,9 +96,7 @@ async def get_trigger(
             created_at=indexed.created_at if hasattr(indexed, "created_at") else None,
             conditions=list(indexed.conditions) if indexed.conditions else [],
             input_mapping=dict(indexed.input_mapping) if indexed.input_mapping else {},
-            config=dataclasses.asdict(indexed.config)  # type: ignore[arg-type]  # guarded by is_dataclass
-            if dataclasses.is_dataclass(indexed.config) and not isinstance(indexed.config, type)
-            else (dict(indexed.config) if isinstance(indexed.config, dict) else {}),
+            config=_resolve_config(indexed.config),
             installation_id=indexed.installation_id or "",
             created_by=indexed.created_by or "",
             last_fired_at=indexed.last_fired_at if hasattr(indexed, "last_fired_at") else None,
@@ -166,6 +173,29 @@ async def list_triggers_endpoint(
     }
 
 
+async def _collect_history_entries(
+    triggers: list[TriggerSummary], limit: int
+) -> list[dict[str, Any]]:
+    """Collect history entries across all triggers."""
+    all_entries: list[dict[str, Any]] = []
+    for t in triggers:
+        hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
+        if isinstance(hist, Err):
+            continue
+        all_entries.extend(
+            {
+                "trigger_id": t.trigger_id,
+                "fired_at": e.fired_at.isoformat() if e.fired_at else None,
+                "execution_id": e.execution_id,
+                "event_type": e.github_event_type,
+                "pr_number": e.pr_number,
+                "status": e.status,
+            }
+            for e in hist.value
+        )
+    return all_entries
+
+
 @router.get("/history")
 async def get_all_history_endpoint(limit: int = 50) -> dict[str, Any]:
     """Get all trigger activity (global)."""
@@ -173,22 +203,7 @@ async def get_all_history_endpoint(limit: int = 50) -> dict[str, Any]:
     if isinstance(list_result, Err):
         return {"entries": [], "total": 0}
 
-    all_entries: list[dict[str, Any]] = []
-    for t in list_result.value:
-        hist = await get_trigger_history(trigger_id=t.trigger_id, limit=limit)
-        if not isinstance(hist, Err):
-            for e in hist.value:
-                all_entries.append(
-                    {
-                        "trigger_id": t.trigger_id,
-                        "fired_at": e.fired_at.isoformat() if e.fired_at else None,
-                        "execution_id": e.execution_id,
-                        "event_type": e.github_event_type,
-                        "pr_number": e.pr_number,
-                        "status": e.status,
-                    }
-                )
-
+    all_entries = await _collect_history_entries(list_result.value, limit)
     all_entries.sort(key=lambda x: x.get("fired_at") or "", reverse=True)
     all_entries = all_entries[:limit]
     return {"entries": all_entries, "total": len(all_entries)}

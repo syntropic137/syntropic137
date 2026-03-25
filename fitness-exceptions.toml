@@ -50,50 +50,6 @@ issue = "#319"
 value = 20
 issue = "#319"
 
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
-value = 35
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.sessions::get_session"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.conversations::get_conversation_log"]
-value = 35
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.artifacts::get_artifact"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.artifacts::list_artifacts_endpoint"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.events::get_session_tool_summary"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.events::get_token_metrics"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.observability::get_token_metrics"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.triggers.commands::enable_preset"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_trigger"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_all_history_endpoint"]
-value = 20
-issue = "#320"
-
 # --- syn-api services (ISS-316: lifecycle) ---
 
 [max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::startup"]
@@ -107,22 +63,6 @@ issue = "#316"
 [max-cognitive."python:apps.syn-api.src.syn_api.services.lifecycle::_seed_offline_data"]
 value = 20
 issue = "#316"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.config::get_config"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.services.config::validate_config"]
-value = 20
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api._wiring::_build_workspace_prompt"]
-value = 25
-issue = "#320"
-
-[max-cognitive."python:apps.syn-api.src.syn_api.middleware.webhook_recorder::__call__"]
-value = 20
-issue = "#320"
 
 # --- syn-domain: orchestration (ISS-318: EventStreamProcessor) ---
 
@@ -238,25 +178,9 @@ issue = "#317"
 value = 20
 issue = "#317"
 
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.sessions::get_session_endpoint"]
-value = 15
-issue = "#320"
-
 [max-cyclomatic."python:apps.syn-api.src.syn_api.routes.webhooks::github_webhook_endpoint"]
 value = 15
 issue = "#315"
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.triggers.queries::get_trigger"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api.routes.conversations::get_conversation_log"]
-value = 15
-issue = "#320"
-
-[max-cyclomatic."python:apps.syn-api.src.syn_api._wiring::_build_workspace_prompt"]
-value = 15
-issue = "#320"
 
 [max-cyclomatic."python:packages.syn-domain.src.syn_domain.contexts.orchestration.slices.execute_workflow.ExecuteWorkflowHandler::handle"]
 value = 15
