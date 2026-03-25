@@ -24,6 +24,10 @@ os.environ.setdefault("APP_ENVIRONMENT", "test")
 
 _TEST_WEBHOOK_SECRET = "test-webhook-secret"
 os.environ["SYN_GITHUB_WEBHOOK_SECRET"] = _TEST_WEBHOOK_SECRET
+# Override app_id to avoid GitHubAppSettings partial-config validator error.
+# .env may contain SYN_GITHUB_APP_ID without a matching private_key — pydantic-settings
+# reads .env directly, so os.environ must override it (not just pop).
+os.environ["SYN_GITHUB_APP_ID"] = ""
 
 # Path to webhook fixtures (relative to repo root)
 _FIXTURES_DIR = Path(__file__).resolve().parents[4] / "fixtures" / "webhooks"

@@ -190,7 +190,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      # TODO(#62): Enable EventStore service when container is published
+      # TODO(#343): Enable EventStore + Collector services when containers are published
       # eventstore:
       #   image: ghcr.io/syntropic137/event-store:latest
       #   ports:
