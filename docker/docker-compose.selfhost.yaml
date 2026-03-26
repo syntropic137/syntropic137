@@ -228,7 +228,7 @@ services:
       dockerfile: infra/docker/images/gateway/Dockerfile
     container_name: syn137-gateway
     ports:
-      - "127.0.0.1:${SYN_GATEWAY_PORT:-8008}:80"
+      - "127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80"
     environment:
       # Optional basic auth — protects UI and API, webhooks bypass.
       # Set SYN_API_PASSWORD to enable. Omit for no auth (local-only or Cloudflare Access).
