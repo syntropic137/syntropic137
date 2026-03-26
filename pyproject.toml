@@ -1,6 +1,6 @@
 [project]
 name = "syntropic137"
-version = "0.16.1"
+version = "0.16.2"
 description = "Event-sourced system for tracking AI agent work across workflows"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -41,6 +41,15 @@ dev = [
 [build-system]
 requires = ["uv_build>=0.9.13"]
 build-backend = "uv_build"
+
+# Security floors for transitive dependencies (ISS-259).
+# These don't add new deps — they force minimum versions when resolved.
+[tool.uv]
+constraint-dependencies = [
+    "requests>=2.33.0",      # GHSA-gc5v-m9x4-r6x2
+    "urllib3>=2.6.3",        # GHSA-38jv-5279-wg99
+    # pygments: GHSA-5239-wwwm-4pmq has no upstream fix yet (2.19.2 is latest).
+]
 
 [tool.uv.workspace]
 members = ["apps/*", "packages/*"]
