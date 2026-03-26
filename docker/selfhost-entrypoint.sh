@@ -25,6 +25,11 @@ if [ -f /run/secrets/redis_password ]; then
   export REDIS_URL="redis://:${REDIS_PASSWORD}@redis:6379/0"
 fi
 
+# Read MinIO password from Docker secret if available
+if [ -f /run/secrets/minio_password ]; then
+  export SYN_STORAGE_MINIO_SECRET_KEY="$(cat /run/secrets/minio_password)"
+fi
+
 # Drop privileges to 'syn' if running as root and gosu is available.
 # With docker-socket-proxy, the api starts as 'syn' directly — skip gosu.
 # Other containers (event-store) don't have gosu and run as their own user.

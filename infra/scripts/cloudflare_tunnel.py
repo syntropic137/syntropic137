@@ -26,8 +26,8 @@ if TYPE_CHECKING:
 # Constants
 # ---------------------------------------------------------------------------
 
-# Zero Trust dashboard — Cloudflare handles login/signup/account routing.
-DASHBOARD_URL = "https://one.dash.cloudflare.com"
+# Cloudflare Tunnels dashboard — :account is a SPA placeholder that auto-resolves.
+DASHBOARD_URL = "https://dash.cloudflare.com/?to=/:account/tunnels"
 
 
 # ---------------------------------------------------------------------------

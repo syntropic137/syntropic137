@@ -40,8 +40,9 @@ ROOT_ENV_EXAMPLE = PROJECT_ROOT / ".env.example"
 # Secret file names (single source of truth)
 # ---------------------------------------------------------------------------
 
-SECRET_DB_PASSWORD = "db-password.txt"
-SECRET_REDIS_PASSWORD = "redis-password.txt"
+SECRET_DB_PASSWORD = "db-password.secret"
+SECRET_REDIS_PASSWORD = "redis-password.secret"
+SECRET_MINIO_PASSWORD = "minio-password.secret"
 SECRET_GITHUB_KEY = "github-private-key.pem"
 SECRET_CF_TUNNEL_TOKEN = "cloudflare-tunnel-token.txt"
 
@@ -49,6 +50,7 @@ SECRET_CF_TUNNEL_TOKEN = "cloudflare-tunnel-token.txt"
 REQUIRED_SECRETS: dict[str, int] = {
     SECRET_DB_PASSWORD: 32,
     SECRET_REDIS_PASSWORD: 32,
+    SECRET_MINIO_PASSWORD: 32,
 }
 
 # ---------------------------------------------------------------------------

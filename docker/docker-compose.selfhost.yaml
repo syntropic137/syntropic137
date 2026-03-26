@@ -172,11 +172,10 @@ services:
       - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
       # 1Password (optional)
       - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
-      # MinIO (artifact storage)
+      # MinIO (artifact storage) — password read from Docker secret in entrypoint
       - SYN_STORAGE_PROVIDER=minio
       - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
       - SYN_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - SYN_STORAGE_MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
       - SYN_STORAGE_MINIO_SECURE=false
       # Crown-jewel secrets: injected as env vars (1Password or .env), never as files
       - SYN_GITHUB_PRIVATE_KEY=${SYN_GITHUB_PRIVATE_KEY:-}
@@ -196,6 +195,7 @@ services:
     secrets:
       - db_password
       - redis_password
+      - minio_password
     restart: always
     read_only: true
     security_opt:
@@ -275,6 +275,13 @@ services:
   # ===========================================================================
   minio:
     container_name: syn137-minio
+    environment:
+      # Clear base compose default — password injected via entrypoint from secret
+      MINIO_ROOT_PASSWORD: ""
+    entrypoint: ["sh", "-c", "export MINIO_ROOT_PASSWORD=\"$(cat /run/secrets/minio_password)\" && exec minio server /data --console-address ':9001'"]
+    command: []
+    secrets:
+      - minio_password
     ports:
       - "127.0.0.1:9000:9000" # S3 API — localhost-only, required for bucket init script
     volumes:
@@ -344,9 +351,11 @@ services:
 # =============================================================================
 secrets:
   db_password:
-    file: ../infra/docker/secrets/db-password.txt
+    file: ../infra/docker/secrets/db-password.secret
   redis_password:
-    file: ../infra/docker/secrets/redis-password.txt
+    file: ../infra/docker/secrets/redis-password.secret
+  minio_password:
+    file: ../infra/docker/secrets/minio-password.secret
 
 # =============================================================================
 # VOLUMES
