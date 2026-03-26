@@ -155,7 +155,7 @@ def check_secrets() -> bool:
 
 ENCRYPTION_CIPHER = "aes-256-cbc"
 PBKDF2_ITERATIONS = 600_000
-_SEALABLE_GLOBS = ("*.txt", "*.pem")
+_SEALABLE_GLOBS = ("*.txt", "*.secret", "*.pem")
 
 
 def _check_openssl() -> bool:

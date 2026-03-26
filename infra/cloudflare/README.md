@@ -21,7 +21,7 @@ This guide helps you set up secure external access to your self-hosted Syn137 de
 
 ### Step 1: Create Tunnel in Cloudflare Dashboard
 
-1. Go to [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
+1. Go to [Cloudflare Dashboard — Tunnels](https://dash.cloudflare.com/?to=/:account/tunnels)
 2. Navigate to: **Networks** → **Tunnels** → **Create a tunnel**
 3. Select **Cloudflared** connector type
 4. Name your tunnel: `syn-selfhost`

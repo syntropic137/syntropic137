@@ -449,7 +449,7 @@ The `docker-compose.cloudflare.yaml` overlay:
 
 ### Setup
 
-**1. Create a tunnel** in the [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/):
+**1. Create a tunnel** in the [Cloudflare Dashboard](https://dash.cloudflare.com/?to=/:account/tunnels):
 
 - Go to **Networks > Tunnels > Create a tunnel**
 - Name it (e.g., `syn-selfhost`)

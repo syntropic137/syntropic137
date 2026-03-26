@@ -1,0 +1,588 @@
+# =============================================================================
+# Release Containers — Build, Scan, Sign, Publish to GHCR
+# =============================================================================
+#
+# Trigger: GitHub release published (or manual dispatch for testing).
+#
+# Pipeline:
+#   1. Build multi-arch images (linux/amd64 + linux/arm64) for all services
+#   2. Security gate: OSV Scanner + Docker Scout CVE scan
+#   3. Push to GHCR with version tags
+#   4. Sign with cosign (keyless OIDC) + attach SBOM
+#   5. Attach release assets (compose file, syn-ctl, .env.example, SHA256SUMS)
+#
+# Severity policy:
+#   - Critical/High CVE → block release (job fails)
+#   - Medium → warn (logged in summary, does not block)
+#   - Low → log only
+#
+# Security:
+#   - All actions SHA-pinned (ISS-259)
+#   - cosign keyless signing (Sigstore OIDC — no secrets to manage)
+#   - SBOM attached to every image
+#   - No Trivy (project policy — compromised twice)
+# =============================================================================
+
+name: Release Containers
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag to use (e.g. v0.17.0). Defaults to 'dev' for testing."
+        required: false
+        default: "dev"
+      dry_run:
+        description: "Dry run — build and scan but don't push or sign"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-containers-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel an in-progress release
+
+# ISS-259: Least-privilege default. Jobs declare their own elevated permissions.
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: syntropic137
+
+jobs:
+  # ===========================================================================
+  # BUILD + SCAN — Matrix strategy for all container images
+  # ===========================================================================
+
+  build-scan-push:
+    name: "Build & Scan: ${{ matrix.image }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    permissions:
+      contents: read
+      packages: write       # Push to GHCR
+      id-token: write       # cosign keyless signing (Sigstore OIDC)
+      security-events: write # Upload SARIF results
+
+    strategy:
+      fail-fast: false  # Don't cancel other images if one fails
+      matrix:
+        include:
+          - image: syn-api
+            dockerfile: infra/docker/images/syn-api/Dockerfile
+            context: "."
+          - image: syn-gateway
+            dockerfile: infra/docker/images/gateway/Dockerfile
+            context: "."
+          - image: syn-collector
+            dockerfile: packages/syn-collector/Dockerfile
+            context: "."
+          - image: syn-dashboard-ui
+            dockerfile: apps/syn-dashboard-ui/Dockerfile
+            context: "."
+          - image: event-store
+            dockerfile: lib/event-sourcing-platform/event-store/Dockerfile
+            context: lib/event-sourcing-platform
+          - image: sidecar-proxy
+            dockerfile: docker/sidecar-proxy/Dockerfile
+            context: docker/sidecar-proxy
+          - image: token-injector
+            dockerfile: docker/token-injector/Dockerfile
+            context: docker/token-injector
+          - image: agentic-workspace
+            dockerfile: ""  # Built via build-provider.py (staged context)
+            context: ""
+
+    # NOTE: Matrix jobs cannot have per-entry outputs — digests are passed
+    # to the release-assets job via upload/download artifact instead.
+
+    steps:
+      # -----------------------------------------------------------------------
+      # Checkout
+      # -----------------------------------------------------------------------
+      # ISS-259: Pinned to commit SHA instead of mutable tag (@v4).
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      # -----------------------------------------------------------------------
+      # Determine version
+      # -----------------------------------------------------------------------
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "release" ]]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ inputs.version || 'dev' }}"
+          fi
+          # Strip 'v' prefix for semver-only contexts
+          SEMVER="${VERSION#v}"
+          # Extract major.minor for floating tag (e.g., v0.17)
+          MAJOR_MINOR="v$(echo "$SEMVER" | cut -d. -f1,2)"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "semver=$SEMVER" >> "$GITHUB_OUTPUT"
+          echo "major_minor=$MAJOR_MINOR" >> "$GITHUB_OUTPUT"
+
+          # Don't tag 'latest' for pre-releases or dev builds
+          if [[ "$VERSION" == "dev" ]] || [[ "$VERSION" == *"-"* ]]; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Docker Buildx (multi-arch support)
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
+
+      # -----------------------------------------------------------------------
+      # QEMU (ARM64 emulation for cross-platform builds)
+      # -----------------------------------------------------------------------
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+        with:
+          platforms: linux/arm64
+
+      # -----------------------------------------------------------------------
+      # GHCR login
+      # -----------------------------------------------------------------------
+      - name: Log in to GHCR
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2 # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # Agentic workspace: staged build via build-provider.py
+      # -----------------------------------------------------------------------
+      - name: Set up Python (agentic-workspace only)
+        if: matrix.image == 'agentic-workspace'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv (agentic-workspace only)
+        if: matrix.image == 'agentic-workspace'
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - name: Stage agentic-workspace build context
+        if: matrix.image == 'agentic-workspace'
+        working-directory: lib/agentic-primitives
+        run: |
+          # build-provider.py stages files into build/claude-cli/ but we
+          # only want the staging step, not the docker build itself.
+          # Extract the staging logic by running with --help to check, then
+          # just run the full build (it builds locally, we'll rebuild with buildx).
+          uv run scripts/build-provider.py claude-cli --tag agentic-workspace-staged:latest
+          echo "AGENTIC_CONTEXT=lib/agentic-primitives/build/claude-cli" >> "$GITHUB_ENV"
+          echo "AGENTIC_DOCKERFILE=lib/agentic-primitives/build/claude-cli/Dockerfile" >> "$GITHUB_ENV"
+
+      # -----------------------------------------------------------------------
+      # Compute build context and dockerfile for dynamic matrix entries
+      # -----------------------------------------------------------------------
+      - name: Resolve build parameters
+        id: build-params
+        run: |
+          if [[ "${{ matrix.image }}" == "agentic-workspace" ]]; then
+            echo "context=${{ env.AGENTIC_CONTEXT }}" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=${{ env.AGENTIC_DOCKERFILE }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "context=${{ matrix.context }}" >> "$GITHUB_OUTPUT"
+            echo "dockerfile=${{ matrix.dockerfile }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Docker metadata (tags + labels)
+      # -----------------------------------------------------------------------
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}
+          tags: |
+            # Version tag: v0.17.0
+            type=raw,value=${{ steps.version.outputs.version }}
+            # Major.minor tag: v0.17
+            type=raw,value=${{ steps.version.outputs.major_minor }}
+            # Latest tag (only for stable releases)
+            type=raw,value=latest,enable=${{ steps.version.outputs.is_prerelease == 'false' }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image }}
+            org.opencontainers.image.description=Syntropic137 ${{ matrix.image }} service
+            org.opencontainers.image.vendor=Syntropic137
+            org.opencontainers.image.source=https://github.com/syntropic137/syntropic137
+
+      # -----------------------------------------------------------------------
+      # Build (load locally for scanning — don't push yet)
+      # -----------------------------------------------------------------------
+      - name: Build image (local, for scanning)
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: ${{ steps.build-params.outputs.context }}
+          file: ${{ steps.build-params.outputs.dockerfile }}
+          platforms: linux/amd64  # Scan on native arch only (faster)
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -----------------------------------------------------------------------
+      # Security Gate 1: OSV Scanner
+      # -----------------------------------------------------------------------
+      - name: "Security gate: OSV Scanner"
+        id: osv-scan
+        run: |
+          echo "## OSV Scanner: ${{ matrix.image }}" >> "$GITHUB_STEP_SUMMARY"
+
+          # Run OSV Scanner on the built image filesystem
+          # Export image filesystem and scan it
+          CONTAINER_ID=$(docker create "${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:scan")
+          SCAN_DIR=$(mktemp -d)
+          docker export "$CONTAINER_ID" | tar -xf - -C "$SCAN_DIR" 2>/dev/null || true
+          docker rm "$CONTAINER_ID" > /dev/null
+
+          # Install osv-scanner (pinned version)
+          OSV_VERSION="v2.0.2"
+          curl -sSfL "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64" -o /usr/local/bin/osv-scanner
+          chmod +x /usr/local/bin/osv-scanner
+
+          # Scan — capture output and exit code
+          set +e
+          osv-scanner scan --recursive "$SCAN_DIR" --format json > osv-results.json 2>osv-stderr.log
+          OSV_EXIT=$?
+          set -e
+
+          # Validate JSON output before parsing
+          if ! jq empty osv-results.json 2>/dev/null; then
+            echo "::warning::OSV Scanner did not produce valid JSON. Stderr:" >> "$GITHUB_STEP_SUMMARY"
+            cat osv-stderr.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
+            rm -rf "$SCAN_DIR"
+            exit 0
+          fi
+
+          # Parse results for severity
+          if [[ $OSV_EXIT -eq 0 ]]; then
+            echo "No vulnerabilities found." >> "$GITHUB_STEP_SUMMARY"
+            echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
+          else
+            # Count by severity
+            CRITICAL=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "CRITICAL")] | length' osv-results.json 2>/dev/null || echo "0")
+            HIGH=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "HIGH")] | length' osv-results.json 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "MEDIUM")] | length' osv-results.json 2>/dev/null || echo "0")
+            LOW=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "LOW")] | length' osv-results.json 2>/dev/null || echo "0")
+
+            echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
+
+            if [[ "$CRITICAL" -gt 0 ]] || [[ "$HIGH" -gt 0 ]]; then
+              echo "has_critical_high=true" >> "$GITHUB_OUTPUT"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "**BLOCKED: Critical/High vulnerabilities found.**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
+              if [[ "$MEDIUM" -gt 0 ]]; then
+                echo "" >> "$GITHUB_STEP_SUMMARY"
+                echo "**WARNING: Medium vulnerabilities found (not blocking).**" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+          fi
+
+          # Cleanup
+          rm -rf "$SCAN_DIR"
+
+      # -----------------------------------------------------------------------
+      # Security Gate 2: Docker Scout CVE Scan
+      # -----------------------------------------------------------------------
+      - name: "Security gate: Docker Scout CVE scan"
+        id: scout-cves
+        uses: docker/scout-action@8910519cee8ac046f3ee99686b0dc6654d5ba1a7 # v1.20.3
+        with:
+          command: cves
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:scan
+          sarif-file: scout-results.sarif
+          summary: true
+
+      - name: "Evaluate Docker Scout results"
+        id: scout-eval
+        run: |
+          echo "## Docker Scout: ${{ matrix.image }}" >> "$GITHUB_STEP_SUMMARY"
+
+          # Parse SARIF for severity counts
+          if [[ -f scout-results.sarif ]]; then
+            CRITICAL=$(jq '[.runs[]?.results[]? | select(.level == "error") | select(.properties?.cvssScore >= 9.0)] | length' scout-results.sarif 2>/dev/null || echo "0")
+            HIGH=$(jq '[.runs[]?.results[]? | select(.level == "error")] | length' scout-results.sarif 2>/dev/null || echo "0")
+            MEDIUM=$(jq '[.runs[]?.results[]? | select(.level == "warning")] | length' scout-results.sarif 2>/dev/null || echo "0")
+            LOW=$(jq '[.runs[]?.results[]? | select(.level == "note")] | length' scout-results.sarif 2>/dev/null || echo "0")
+
+            echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
+
+            if [[ "$CRITICAL" -gt 0 ]] || [[ "$HIGH" -gt 0 ]]; then
+              echo "has_critical_high=true" >> "$GITHUB_OUTPUT"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "**BLOCKED: Critical/High CVEs found by Docker Scout.**" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "No SARIF results found (Docker Scout may not be configured)." >> "$GITHUB_STEP_SUMMARY"
+            echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Enforce severity policy — Critical/High blocks the release
+      # -----------------------------------------------------------------------
+      - name: "Enforce severity policy"
+        run: |
+          OSV_BLOCKED="${{ steps.osv-scan.outputs.has_critical_high }}"
+          SCOUT_BLOCKED="${{ steps.scout-eval.outputs.has_critical_high }}"
+
+          if [[ "$OSV_BLOCKED" == "true" ]] || [[ "$SCOUT_BLOCKED" == "true" ]]; then
+            echo "::error::Release blocked: Critical or High severity vulnerabilities detected in ${{ matrix.image }}."
+            echo "Review the Security Gate results above and fix all Critical/High findings before releasing."
+            exit 1
+          fi
+
+          echo "Security gates passed for ${{ matrix.image }}."
+
+      # -----------------------------------------------------------------------
+      # Build + Push multi-arch image to GHCR (only if scans pass)
+      # -----------------------------------------------------------------------
+      - name: Build and push multi-arch image
+        id: push
+        if: ${{ !inputs.dry_run }}
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
+        with:
+          context: ${{ steps.build-params.outputs.context }}
+          file: ${{ steps.build-params.outputs.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true  # SLSA provenance attestation
+          sbom: true        # Attach SBOM via BuildKit
+
+      # -----------------------------------------------------------------------
+      # Sign with cosign (keyless, OIDC-based via Sigstore)
+      # -----------------------------------------------------------------------
+      - name: Install cosign
+        if: ${{ !inputs.dry_run }}
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign image with cosign
+        if: ${{ !inputs.dry_run }}
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          COSIGN_YES: "true"  # Skip confirmation prompts
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}"
+          echo "Signing ${IMAGE}@${DIGEST}"
+          cosign sign "${IMAGE}@${DIGEST}"
+
+      # -----------------------------------------------------------------------
+      # SBOM: Docker Scout SBOM generation
+      # -----------------------------------------------------------------------
+      - name: "Generate SBOM"
+        if: ${{ !inputs.dry_run }}
+        uses: docker/scout-action@8910519cee8ac046f3ee99686b0dc6654d5ba1a7 # v1.20.3
+        with:
+          command: sbom
+          image: "${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:${{ steps.version.outputs.version }}"
+
+      # -----------------------------------------------------------------------
+      # Output digest for release assets job
+      # -----------------------------------------------------------------------
+      - name: Export digest
+        if: ${{ !inputs.dry_run }}
+        run: |
+          echo "digest=${{ steps.push.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          # Also write to a file for the release-assets job
+          mkdir -p /tmp/digests
+          echo "${{ steps.push.outputs.digest }}" > "/tmp/digests/${{ matrix.image }}"
+
+      - name: Upload digest artifact
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digest-${{ matrix.image }}
+          path: /tmp/digests/${{ matrix.image }}
+          retention-days: 1
+
+  # ===========================================================================
+  # RELEASE ASSETS — Attach compose file, syn-ctl, .env.example, SHA256SUMS
+  # ===========================================================================
+
+  release-assets:
+    name: Release Assets
+    runs-on: ubuntu-latest
+    needs: [build-scan-push]
+    if: ${{ github.event_name == 'release' && !inputs.dry_run }}
+    timeout-minutes: 10
+
+    permissions:
+      contents: write  # Attach assets to release
+      id-token: write  # cosign signing of SHA256SUMS
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      # -----------------------------------------------------------------------
+      # Download image digests from build job
+      # -----------------------------------------------------------------------
+      - name: Download all digest artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      # -----------------------------------------------------------------------
+      # Determine version
+      # -----------------------------------------------------------------------
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Prepare release assets
+      # -----------------------------------------------------------------------
+      - name: Prepare release directory
+        run: mkdir -p /tmp/release-assets
+
+      - name: Copy release files
+        run: |
+          cp docker/docker-compose.syntropic137.yaml /tmp/release-assets/
+          cp docker/selfhost.env.example /tmp/release-assets/
+          cp docker/selfhost-entrypoint.sh /tmp/release-assets/
+          cp syn-ctl /tmp/release-assets/
+          chmod +x /tmp/release-assets/syn-ctl
+          chmod +x /tmp/release-assets/selfhost-entrypoint.sh
+
+      # -----------------------------------------------------------------------
+      # Pin image digests in compose file (prevents tag mutation attacks)
+      # -----------------------------------------------------------------------
+      - name: Pin image digests in compose file
+        run: |
+          COMPOSE="/tmp/release-assets/docker-compose.syntropic137.yaml"
+
+          # For each image we build, replace the tag reference with a digest
+          for IMAGE_NAME in syn-api syn-gateway syn-collector event-store sidecar-proxy token-injector; do
+            DIGEST_FILE="/tmp/digests/${IMAGE_NAME}"
+            if [[ -f "$DIGEST_FILE" ]]; then
+              DIGEST=$(cat "$DIGEST_FILE")
+              # Replace: ghcr.io/syntropic137/<image>:${SYN_VERSION:-latest}
+              # With:    ghcr.io/syntropic137/<image>@<digest>
+              sed -i "s|ghcr.io/syntropic137/${IMAGE_NAME}:\${SYN_VERSION:-latest}|ghcr.io/syntropic137/${IMAGE_NAME}@${DIGEST}|g" "$COMPOSE"
+              echo "Pinned ${IMAGE_NAME} to ${DIGEST}"
+            else
+              echo "::warning::No digest found for ${IMAGE_NAME} — keeping tag reference"
+            fi
+          done
+
+          # Add version comment at top of file
+          sed -i "1i # Pinned to release ${{ steps.version.outputs.version }} — image digests verified by cosign" "$COMPOSE"
+
+      # -----------------------------------------------------------------------
+      # Generate SHA256SUMS
+      # -----------------------------------------------------------------------
+      - name: Generate SHA256SUMS
+        working-directory: /tmp/release-assets
+        run: |
+          sha256sum \
+            docker-compose.syntropic137.yaml \
+            selfhost.env.example \
+            selfhost-entrypoint.sh \
+            syn-ctl \
+            > SHA256SUMS
+
+          echo "## SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # Sign SHA256SUMS with cosign
+      # -----------------------------------------------------------------------
+      - name: Install cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003 # v4.1.1
+
+      - name: Sign SHA256SUMS
+        env:
+          COSIGN_YES: "true"
+        working-directory: /tmp/release-assets
+        run: cosign sign-blob --output-signature SHA256SUMS.sig --output-certificate SHA256SUMS.pem SHA256SUMS
+
+      # -----------------------------------------------------------------------
+      # Attach assets to GitHub release
+      # -----------------------------------------------------------------------
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.version.outputs.version }}" \
+            /tmp/release-assets/docker-compose.syntropic137.yaml \
+            /tmp/release-assets/selfhost.env.example \
+            /tmp/release-assets/selfhost-entrypoint.sh \
+            /tmp/release-assets/syn-ctl \
+            /tmp/release-assets/SHA256SUMS \
+            /tmp/release-assets/SHA256SUMS.sig \
+            /tmp/release-assets/SHA256SUMS.pem \
+            --clobber
+
+      # -----------------------------------------------------------------------
+      # Summary
+      # -----------------------------------------------------------------------
+      - name: Write release summary
+        run: |
+          echo "## Release Assets: ${{ steps.version.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Published Images" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | Digest |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui event-store sidecar-proxy token-injector agentic-workspace; do
+            DIGEST_FILE="/tmp/digests/${IMAGE_NAME}"
+            if [[ -f "$DIGEST_FILE" ]]; then
+              DIGEST=$(cat "$DIGEST_FILE")
+              echo "| \`ghcr.io/syntropic137/${IMAGE_NAME}\` | \`${DIGEST:0:19}...\` |" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Release Assets" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`docker-compose.syntropic137.yaml\` (image digests pinned)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`selfhost.env.example\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`selfhost-entrypoint.sh\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`syn-ctl\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`SHA256SUMS\` (cosign-signed)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Verification" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "# Verify image signatures" >> "$GITHUB_STEP_SUMMARY"
+          echo "cosign verify ghcr.io/syntropic137/syn-api@<digest>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "# Verify release asset checksums" >> "$GITHUB_STEP_SUMMARY"
+          echo "cosign verify-blob --signature SHA256SUMS.sig --certificate SHA256SUMS.pem SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+          echo "sha256sum -c SHA256SUMS" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

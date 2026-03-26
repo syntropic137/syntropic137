@@ -75,7 +75,7 @@ This handles:
 
 #### Option A: Via Cloudflare Dashboard (Recommended)
 
-1. Go to [Cloudflare Zero Trust](https://one.dash.cloudflare.com/)
+1. Go to [Cloudflare Dashboard — Tunnels](https://dash.cloudflare.com/?to=/:account/tunnels)
 2. Navigate to **Networks** → **Tunnels** → **Create a tunnel**
 3. Name it: `syn-selfhost`
 4. Copy the tunnel token to your `.env`:
