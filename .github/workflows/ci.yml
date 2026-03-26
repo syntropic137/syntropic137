@@ -402,7 +402,10 @@ jobs:
       - name: Audit Python dependencies
         run: |
           uv export --format requirements-txt --no-hashes --frozen --quiet \
-            | uv tool run pip-audit --disable-pip --no-deps -r /dev/stdin
+            | uv tool run pip-audit --disable-pip --no-deps \
+              --ignore-vuln GHSA-5239-wwwm-4pmq \
+              -r /dev/stdin
+          # TODO(#345): remove --ignore-vuln once pygments releases a fix
 
   #############################################################################
   # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)
