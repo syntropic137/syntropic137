@@ -928,12 +928,17 @@ _selfhost-preflight:
     fi
 
     # --- Docker secrets ---
-    for secret in db-password redis-password; do
-        if [ ! -f "infra/docker/secrets/${secret}.txt" ]; then
-            echo "  ❌ infra/docker/secrets/${secret}.txt missing. Run 'just onboard' to generate."
-            ERRORS=$((ERRORS + 1))
+    for secret in db-password redis-password minio-password; do
+        if [ ! -f "infra/docker/secrets/${secret}.secret" ]; then
+            # Backward compat: check .txt extension too
+            if [ -f "infra/docker/secrets/${secret}.txt" ]; then
+                echo "  ⚠️  infra/docker/secrets/${secret}.txt found (legacy). Rename to .secret extension."
+            else
+                echo "  ❌ infra/docker/secrets/${secret}.secret missing. Run 'just onboard' to generate."
+                ERRORS=$((ERRORS + 1))
+            fi
         else
-            echo "  ✅ ${secret}.txt"
+            echo "  ✅ ${secret}.secret"
         fi
     done
 
@@ -1219,6 +1224,20 @@ secrets-seal:
 # Decrypt secrets from .enc files (restores plain-text for Docker)
 secrets-unseal:
     @uv run python infra/scripts/secrets_setup.py unseal
+
+# Push secrets to 1Password vault (selfhost only — uses syn-ctl)
+secrets-push:
+    @echo "Push secrets to 1Password via syn-ctl:"
+    @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-push"
+    @echo ""
+    @echo "For dev environments, use: just onboard --stage configure_1password"
+
+# Pull secrets from 1Password vault (selfhost only — uses syn-ctl)
+secrets-pull:
+    @echo "Pull secrets from 1Password via syn-ctl:"
+    @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-pull"
+    @echo ""
+    @echo "For dev environments, use: just onboard --stage configure_1password"
 
 # --- Health ---
 

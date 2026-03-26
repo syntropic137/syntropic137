@@ -26,6 +26,7 @@ _OP_ITEM_TITLE = "syntropic137-config"
 
 # Canonical mapping: APP_ENVIRONMENT → vault name.
 _ENV_TO_VAULT: dict[str, str] = {
+    "selfhost": "syntropic137",
     "development": "syn137-dev",
     "beta": "syn137-beta",
     "staging": "syn137-staging",

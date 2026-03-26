@@ -1,21 +1,32 @@
-# Self-Host Docker Compose - Production overlay for self-hosted deployments
-# Usage: docker compose -f docker-compose.yaml -f docker-compose.selfhost.yaml up -d
-# Shortcut: just selfhost-up
+# =============================================================================
+# Syntropic137 — Self-Host Docker Compose (Published)
+# =============================================================================
 #
-# Adds: container names, persistent volumes, secrets, resource limits,
-#        restart policies, log rotation, gateway frontend, syn-internal network.
+# This is a SELF-CONTAINED compose file for self-hosters who pull pre-built
+# images from GHCR. No source code or submodules required.
 #
-# Replaces the former infra/docker/compose/docker-compose.yaml and
-# docker-compose.homelab.yaml files (consolidated per ADR-034).
+# Setup:
+#   1. Copy this file to ~/.syntropic137/
+#   2. Copy selfhost-entrypoint.sh to ~/.syntropic137/
+#   3. Copy .env.example to ~/.syntropic137/.env and configure
+#   4. Create secrets: mkdir -p secrets/ && openssl rand -hex 32 > secrets/db-password.secret
+#   5. docker compose -f docker-compose.syntropic137.yaml up -d
+#
+# See: https://docs.syntropic137.dev/self-host
+# =============================================================================
+
+name: syntropic137_selfhost
 
 services:
   # ===========================================================================
-  # DATABASE
+  # DATABASE — TimescaleDB (ADR-030: unified database)
   # ===========================================================================
   timescaledb:
+    image: timescale/timescaledb:2.25.1-pg16
     container_name: syn137-timescaledb
     environment:
-      # Clear POSTGRES_PASSWORD from base compose — _FILE variant is exclusive
+      POSTGRES_DB: ${POSTGRES_DB:-syn}
+      POSTGRES_USER: ${POSTGRES_USER:-syn}
       POSTGRES_PASSWORD: ""
       POSTGRES_PASSWORD_FILE: /run/secrets/db_password
     secrets:
@@ -23,6 +34,11 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-syn} -d ${POSTGRES_DB:-syn}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: always
     read_only: true
     security_opt:
@@ -53,16 +69,31 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # EVENT STORE
+  # EVENT STORE — gRPC Event Sourcing Server
   # ===========================================================================
   event-store:
+    image: ghcr.io/syntropic137/event-store:${SYN_VERSION:-latest}
     container_name: syn137-event-store
+    environment:
+      BACKEND: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
+      BIND_ADDR: 0.0.0.0:50051
+      RUST_LOG: info
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["/usr/local/bin/eventstore"]
     secrets:
       - db_password
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/50051' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: always
     read_only: true
     security_opt:
@@ -84,10 +115,35 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # COLLECTOR
+  # COLLECTOR — Agent Event Ingestion Service
   # ===========================================================================
   collector:
+    image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
     container_name: syn137-collector
+    volumes:
+      - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
+    command: ["python", "-m", "syn_collector"]
+    environment:
+      EVENT_COLLECTOR_PORT: "8080"
+      SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
+      EVENT_BATCH_SIZE: "100"
+      EVENT_BATCH_INTERVAL_MS: "1000"
+    secrets:
+      - db_password
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import http.client; c=http.client.HTTPConnection(''localhost'',8080); c.request(''GET'',''/health''); exit(0 if c.getresponse().status==200 else 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: always
     read_only: true
     security_opt:
@@ -112,17 +168,15 @@ services:
   # ===========================================================================
   # DOCKER SOCKET PROXY (ISS-164)
   # ===========================================================================
-  # Restricts api to only the Docker API endpoints it actually uses.
-  # The real socket is mounted ONLY here — api talks to this proxy via TCP.
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
     container_name: syn137-docker-socket-proxy
     environment:
-      CONTAINERS: 1     # Allow /containers/* path prefix (inspect, list, rm)
-      ALLOW_START: 1    # docker start → POST /containers/{id}/start
-      ALLOW_STOP: 1     # docker stop  → POST /containers/{id}/stop
-      EXEC: 1           # docker exec  → /exec/* paths
-      POST: 1           # Enable all non-GET verbs (POST, DELETE, PUT)
+      CONTAINERS: 1
+      ALLOW_START: 1
+      ALLOW_STOP: 1
+      EXEC: 1
+      POST: 1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     restart: always
@@ -150,52 +204,73 @@ services:
       - syn-proxy
 
   # ===========================================================================
-  # API
+  # API — Query and Control Service
   # ===========================================================================
   api:
+    image: ghcr.io/syntropic137/syn-api:${SYN_VERSION:-latest}
     container_name: syn137-api
-    build:
-      args:
-        INCLUDE_OP_CLI: "${INCLUDE_OP_CLI:-0}"
-        INCLUDE_DOCKER_CLI: "1"
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
       - api_logs:/app/logs
-      - ../workspaces:/workspaces
+      - ./workspaces:/workspaces
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
     command: ["sh", "-c", "uvicorn syn_api.main:app --host $$SYN_API_HOST --port $$SYN_API_PORT --root-path /api/v1"]
     environment:
-      - LOG_FORMAT=${LOG_FORMAT:-json}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - SYN_GITHUB_APP_ID=${SYN_GITHUB_APP_ID:-}
-      - SYN_GITHUB_APP_NAME=${SYN_GITHUB_APP_NAME:-}
-      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-production}
+      SYN_API_PORT: "8000"
+      SYN_API_HOST: "0.0.0.0"
+      SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
+      EVENT_STORE_HOST: event-store
+      EVENT_STORE_PORT: "50051"
+      REDIS_URL: redis://redis:6379/0
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-selfhost}
+      # GitHub App (optional)
+      SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
+      SYN_GITHUB_APP_NAME: ${SYN_GITHUB_APP_NAME:-}
+      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+      SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
       # 1Password (optional)
-      - OP_SERVICE_ACCOUNT_TOKEN=${OP_SERVICE_ACCOUNT_TOKEN:-}
+      OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:-}
       # MinIO (artifact storage) — password read from Docker secret in entrypoint
-      - SYN_STORAGE_PROVIDER=minio
-      - SYN_STORAGE_MINIO_ENDPOINT=minio:9000
-      - SYN_STORAGE_MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
-      - SYN_STORAGE_MINIO_SECURE=false
-      # Crown-jewel secrets: injected as env vars (1Password or .env), never as files
-      - SYN_GITHUB_PRIVATE_KEY=${SYN_GITHUB_PRIVATE_KEY:-}
-      - SYN_GITHUB_WEBHOOK_SECRET=${SYN_GITHUB_WEBHOOK_SECRET:-}
+      SYN_STORAGE_PROVIDER: minio
+      SYN_STORAGE_MINIO_ENDPOINT: minio:9000
+      SYN_STORAGE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      SYN_STORAGE_MINIO_SECURE: "false"
       # Agent credentials (for workspace containers)
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Workspace configuration
-      - SYN_WORKSPACE_CONTAINER_DIR=/workspaces
-      - SYN_WORKSPACE_HOST_DIR=${PWD}/workspaces
+      SYN_WORKSPACE_CONTAINER_DIR: /workspaces
+      SYN_WORKSPACE_HOST_DIR: ${PWD}/workspaces
       # Docker socket proxy (ISS-164)
-      - DOCKER_HOST=tcp://docker-socket-proxy:2375
-      - SYN_AGENT_NETWORK=syntropic137_${APP_ENVIRONMENT:-production}_agent-net
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      SYN_AGENT_NETWORK: syntropic137_selfhost_agent-net
     depends_on:
+      timescaledb:
+        condition: service_healthy
+      event-store:
+        condition: service_healthy
+      collector:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
       docker-socket-proxy:
         condition: service_started
     secrets:
       - db_password
       - redis_password
       - minio_password
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import http.client; c=http.client.HTTPConnection(''localhost'',8000); c.request(''GET'',''/health''); exit(0 if c.getresponse().status==200 else 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     restart: always
     read_only: true
     security_opt:
@@ -204,7 +279,7 @@ services:
       - ALL
     tmpfs:
       - /tmp
-      - /home/syn/.config  # 1Password CLI needs writable config dir on read-only FS
+      - /home/syn/.config
     deploy:
       resources:
         limits:
@@ -220,20 +295,16 @@ services:
       - syn-proxy
 
   # ===========================================================================
-  # FRONTEND (nginx)
+  # GATEWAY — nginx reverse proxy + dashboard UI
   # ===========================================================================
   gateway:
-    build:
-      context: ..
-      dockerfile: infra/docker/images/gateway/Dockerfile
+    image: ghcr.io/syntropic137/syn-gateway:${SYN_VERSION:-latest}
     container_name: syn137-gateway
     ports:
       - "127.0.0.1:${SYN_GATEWAY_PORT:-8137}:80"
     environment:
-      # Optional basic auth — protects UI and API, webhooks bypass.
-      # Set SYN_API_PASSWORD to enable. Omit for no auth (local-only or Cloudflare Access).
-      - SYN_API_PASSWORD=${SYN_API_PASSWORD:-}
-      - SYN_API_USER=${SYN_API_USER:-admin}
+      SYN_API_PASSWORD: ${SYN_API_PASSWORD:-}
+      SYN_API_USER: ${SYN_API_USER:-admin}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
       interval: 10s
@@ -271,21 +342,27 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # MINIO
+  # MINIO — S3-compatible Object Storage
   # ===========================================================================
   minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: syn137-minio
     environment:
-      # Clear base compose default — password injected via entrypoint from secret
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ""
     entrypoint: ["sh", "-c", "export MINIO_ROOT_PASSWORD=\"$(cat /run/secrets/minio_password)\" && exec minio server /data --console-address ':9001'"]
     command: []
     secrets:
       - minio_password
     ports:
-      - "127.0.0.1:9000:9000" # S3 API — localhost-only, required for bucket init script
+      - "127.0.0.1:9000:9000"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
     restart: always
     read_only: true
     security_opt:
@@ -308,11 +385,11 @@ services:
       - syn-internal
 
   # ===========================================================================
-  # REDIS
+  # REDIS — Caching and Pub/Sub
   # ===========================================================================
   redis:
+    image: redis:7-alpine
     container_name: syn137-redis
-    # Read password from Docker secret, then exec redis-server as redis user
     user: "999:999"
     entrypoint: ["sh", "-c", "exec redis-server --dir /data --appendonly yes --requirepass \"$(cat /run/secrets/redis_password)\""]
     command: []
@@ -346,16 +423,50 @@ services:
     networks:
       - syn-internal
 
+  # ===========================================================================
+  # ENVOY PROXY — Shared Credential Injection Proxy (ISS-43)
+  # ===========================================================================
+  envoy-proxy:
+    image: ghcr.io/syntropic137/sidecar-proxy:${SYN_VERSION:-latest}
+    container_name: syn137-envoy-proxy
+    depends_on:
+      token-injector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9901/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: always
+    networks:
+      - syn-internal
+      - agent-net
+
+  # ===========================================================================
+  # TOKEN INJECTOR — ext_authz gRPC service (ISS-43)
+  # ===========================================================================
+  token-injector:
+    image: ghcr.io/syntropic137/token-injector:${SYN_VERSION:-latest}
+    container_name: syn137-token-injector
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+    restart: always
+    networks:
+      - syn-internal
+
 # =============================================================================
-# SECRETS (file-based)
+# SECRETS (file-based — relative to ~/.syntropic137/)
 # =============================================================================
 secrets:
   db_password:
-    file: ../infra/docker/secrets/db-password.secret
+    file: ./secrets/db-password.secret
   redis_password:
-    file: ../infra/docker/secrets/redis-password.secret
+    file: ./secrets/redis-password.secret
   minio_password:
-    file: ../infra/docker/secrets/minio-password.secret
+    file: ./secrets/minio-password.secret
 
 # =============================================================================
 # VOLUMES
@@ -380,4 +491,7 @@ networks:
   syn-proxy:
     name: syn137_proxy
     driver: bridge
-    internal: true  # no external routing — proxy ↔ api only
+    internal: true
+  agent-net:
+    # Agents need egress for git clone/push. API key security enforced via
+    # ANTHROPIC_BASE_URL routing to the proxy — agents hold a placeholder only.

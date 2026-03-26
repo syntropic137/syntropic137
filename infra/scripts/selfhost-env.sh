@@ -24,6 +24,7 @@ fi
 
 # 3. Derive vault name from APP_ENVIRONMENT (no separate OP_VAULT needed)
 case "${APP_ENVIRONMENT:-}" in
+    selfhost)    _OP_VAULT="syntropic137" ;;
     development) _OP_VAULT="syn137-dev" ;;
     production)  _OP_VAULT="syn137-prod" ;;
     beta)        _OP_VAULT="syn137-beta" ;;

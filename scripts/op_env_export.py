@@ -24,6 +24,7 @@ _OP_SAT_PREFIX = "OP_SERVICE_ACCOUNT_TOKEN_"
 # Canonical env→vault mapping (mirrored from op_resolver.py — this script is
 # standalone and cannot import from syn_shared).
 _ENV_TO_VAULT: dict[str, str] = {
+    "selfhost": "syntropic137",
     "development": "syn137-dev",
     "beta": "syn137-beta",
     "staging": "syn137-staging",

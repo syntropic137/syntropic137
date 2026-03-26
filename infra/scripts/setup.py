@@ -109,6 +109,7 @@ class SetupContext:
     Producers and consumers:
       skip_github            — main() → configure_github_app
       non_interactive        — main() → all stages
+      org_mode               — main() → detect_environment
       app_environment        — detect_environment → configure_1password, configure_env
       github_app_id          — configure_github_app → configure_env
       github_app_name        — configure_github_app → configure_env
@@ -125,6 +126,7 @@ class SetupContext:
 
     skip_github: bool = False
     non_interactive: bool = False
+    org_mode: bool = False
     app_environment: str = ""
     github_app_id: str = ""
     github_app_name: str = ""
@@ -296,10 +298,11 @@ def port_in_use(port: int) -> bool:
 
 
 def detect_environment(ctx: SetupContext) -> bool:
-    """Detect or prompt for the target environment (development / production).
+    """Detect or prompt for the target environment.
 
-    Runs as the very first stage so the environment banner prints immediately
-    after the ASCII art and later stages can derive defaults from it.
+    Default (no --org): selfhost — simple confirmation, no menu.
+    With --org: 4-choice environment menu (dev/beta/staging/production).
+    With --non-interactive: defaults to selfhost (or existing if set).
     """
     banner("Stage: Detect Environment")
 
@@ -310,15 +313,26 @@ def detect_environment(ctx: SetupContext) -> bool:
     )
 
     if ctx.non_interactive:
-        chosen = existing or "development"
-    elif existing:
-        step(f"Current environment: {_BOLD}{existing}{_RST}")
-        if confirm(f"Keep {existing}?", default=True):
-            chosen = existing
+        chosen = existing or "selfhost"
+    elif ctx.org_mode:
+        # Organization mode — show the multi-environment menu
+        if existing:
+            step(f"Current environment: {_BOLD}{existing}{_RST}")
+            if confirm(f"Keep {existing}?", default=True):
+                chosen = existing
+            else:
+                chosen = _prompt_environment_choice()
         else:
             chosen = _prompt_environment_choice()
     else:
-        chosen = _prompt_environment_choice()
+        # Default selfhost path — simple confirmation, no menu
+        if existing and existing != "selfhost":
+            step(f"Current environment: {_BOLD}{existing}{_RST}")
+            step("Default for self-hosted is 'selfhost'.")
+            chosen = "selfhost" if confirm("Switch to selfhost?", default=True) else existing
+        else:
+            chosen = "selfhost"
+            step(f"Environment: {_BOLD}selfhost{_RST}")
 
     ctx.app_environment = chosen
     _update_env_file({ENV_APP_ENVIRONMENT: chosen}, target=ROOT_ENV_FILE)
@@ -1092,27 +1106,34 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         step(f"{_GREEN}FREE{_RST}  Cloudflare account")
         step(f"{_GREEN}~$10{_RST}  A domain on Cloudflare (or bring your own)")
         print()
-        hint("No domain? You can still use the platform — but GitHub triggers")
-        hint("won't work without a public URL for webhooks.")
+        hint("No domain? That's fine — the platform works without Cloudflare.")
+        hint("You can run workflows manually and use all local features.")
+        hint("The only thing you lose: GitHub webhook triggers (auto-runs on push/PR).")
         print()
 
         # Default=True because this is the recommended path for selfhost.
         # The old default=False contradicted the "(Recommended)" label.
         if not confirm("Configure Cloudflare Tunnel?", default=True):
-            step("Skipping Cloudflare configuration")
+            print()
+            ok("Skipping Cloudflare — you can always add it later with:")
+            step("  just setup --stage configure_cloudflare")
+            print()
+            hint("Without a tunnel, the platform works for manual workflow runs.")
+            hint("GitHub webhook triggers (auto-runs on push/PR) won't be available.")
+            if ctx.github_app_id:
+                print()
+                warn("You configured a GitHub App — webhook triggers need Cloudflare")
+                warn("to receive push/PR events. Add a tunnel when you're ready.")
             return True
 
     # One flow: open dashboard, user creates tunnel + adds route in the
     # same Cloudflare wizard, then comes back with the token and hostname.
     # No bouncing between pages, no separate "domain" step.
-    zt_url = "https://one.dash.cloudflare.com"
+    zt_url = "https://dash.cloudflare.com/?to=/:account/tunnels"
     print()
-    warn("If Cloudflare redirects you to dash.cloudflare.com after login,")
-    warn("you need to navigate to Zero Trust manually. Use the link below.")
+    step(f"Cloudflare Tunnels dashboard: {_BOLD}{zt_url}{_RST}")
     print()
-    step(f"Zero Trust dashboard: {_BOLD}{zt_url}{_RST}")
-    print()
-    if confirm("Open Cloudflare Zero Trust dashboard?", default=True):
+    if confirm("Open Cloudflare Tunnels dashboard?", default=True):
         webbrowser.open(zt_url)
         ok("Opened browser")
         print()
@@ -1126,7 +1147,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
 
     callout("Step 1: Create and name the tunnel")
     print()
-    step(f"In the Zero Trust dashboard ({_BOLD}{zt_url}{_RST}):")
+    step(f"In the Cloudflare dashboard ({_BOLD}{zt_url}{_RST}):")
     step(f"Networks  >  Connectors  >  {_PURPLE}Create a tunnel{_RST}")
     step(f"Select {_PURPLE}Cloudflared{_RST}")
     step(f"Name: {_PURPLE}syn137-{env_suffix}{_RST}  {_DIM}(or whatever you like){_RST}")
@@ -1423,6 +1444,7 @@ def _prompt_keychain_token(vault: str, *, app_environment: str = "") -> None:
 # Canonical env→vault mapping (mirrored from op_resolver.py — this script is
 # stdlib-only and cannot import from syn_shared).
 _ENV_TO_VAULT: dict[str, str] = {
+    "selfhost": "syntropic137",
     "development": "syn137-dev",
     "beta": "syn137-beta",
     "staging": "syn137-staging",
@@ -1547,10 +1569,11 @@ ENV_AUDIT_GROUPS: list[tuple[str, list[tuple[str, bool]]]] = [
         ],
     ),
     (
-        "Database",
+        "Database & Storage",
         [
-            ("db-password.txt", True),
-            ("redis-password.txt", True),
+            ("db-password.secret", True),
+            ("redis-password.secret", True),
+            ("minio-password.secret", True),
         ],
     ),
 ]
@@ -2289,6 +2312,11 @@ def main() -> None:
         help="Read configuration from env vars / existing .env (no prompts)",
     )
     parser.add_argument(
+        "--org",
+        action="store_true",
+        help="Organization mode — multi-environment selection",
+    )
+    parser.add_argument(
         "--stage",
         choices=STAGES,
         help="Re-run a specific setup stage",
@@ -2298,6 +2326,7 @@ def main() -> None:
     ctx = SetupContext(
         skip_github=args.skip_github,
         non_interactive=args.non_interactive,
+        org_mode=args.org,
     )
 
     print()
