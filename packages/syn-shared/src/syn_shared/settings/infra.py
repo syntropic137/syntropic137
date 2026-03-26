@@ -203,9 +203,10 @@ class InfraSettings(BaseSettings):
     # =========================================================================
 
     syn_gateway_port: int = Field(
-        default=8008,
+        default=8137,
         description=(
-            "Gateway port (nginx reverse proxy). Default 8008 - change to avoid conflicts."
+            "Gateway port (nginx reverse proxy). Default 8137 (matches Syn137 branding,"
+            " avoids common port collisions)."
         ),
     )
 

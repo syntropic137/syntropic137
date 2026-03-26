@@ -22,7 +22,7 @@ The definitive guide for self-hosting the Syntropic137 platform. This stack orch
 
 ## 1. Architecture
 
-The selfhost stack runs as Docker Compose services on an internal bridge network (`syn-internal`). The only exposed port is `127.0.0.1:8008` (nginx reverse proxy). External access is provided optionally through a Cloudflare Tunnel.
+The selfhost stack runs as Docker Compose services on an internal bridge network (`syn-internal`). The only exposed port is `127.0.0.1:8137` (nginx reverse proxy). External access is provided optionally through a Cloudflare Tunnel.
 
 ![Selfhost Architecture](docs/selfhost-architecture.svg)
 
@@ -165,19 +165,19 @@ The startup sequence:
 ### Step 5: Open the dashboard
 
 ```
-http://localhost:8008
+http://localhost:8137
 ```
 
 If you set `SYN_API_PASSWORD`, log in with `admin` / `<your-password>`.
 
-API docs are at `http://localhost:8008/api/v1/docs`.
+API docs are at `http://localhost:8137/api/v1/docs`.
 
 ### Step 6: Trigger a test workflow
 
 Via the API:
 
 ```bash
-curl -X POST http://localhost:8008/api/v1/workflows/research-workflow-v2/execute \
+curl -X POST http://localhost:8137/api/v1/workflows/research-workflow-v2/execute \
   -H "Content-Type: application/json" \
   -d '{"inputs": {"topic": "Event sourcing patterns in Python"}}'
 ```
@@ -270,7 +270,7 @@ These credentials are loaded by the shared Envoy proxy (`envoy-proxy` service) a
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYN_GATEWAY_PORT` | No | `8008` | Host port for the nginx reverse proxy |
+| `SYN_GATEWAY_PORT` | No | `8137` | Host port for the nginx reverse proxy |
 | `SYN_API_PASSWORD` | No | *(empty)* | Basic auth password. Empty = no auth. |
 | `SYN_API_USER` | No | `admin` | Basic auth username |
 | `RESTART_POLICY` | No | `always` | Container restart policy |
@@ -507,7 +507,7 @@ All recipes are run from the repository root using `just`.
 
 | Recipe | Description |
 |--------|-------------|
-| `just selfhost-up` | Start the selfhost stack (local access on `localhost:8008`) |
+| `just selfhost-up` | Start the selfhost stack (local access on `localhost:8137`) |
 | `just selfhost-up-tunnel` | Start with Cloudflare Tunnel (external access, no local port) |
 | `just selfhost-down` | Stop the stack (auto-detects tunnel) |
 | `just selfhost-restart <service>` | Restart a specific service |
@@ -660,11 +660,11 @@ Then restart:
 just selfhost-restart api
 ```
 
-### Port 8008 Already in Use
+### Port 8137 Already in Use
 
 ```bash
 # Check what is using the port
-lsof -i :8008
+lsof -i :8137
 
 # Change the port in infra/.env
 SYN_GATEWAY_PORT=8009

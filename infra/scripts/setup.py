@@ -1092,7 +1092,8 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         step(f"{_GREEN}FREE{_RST}  Cloudflare account")
         step(f"{_GREEN}~$10{_RST}  A domain on Cloudflare (or bring your own)")
         print()
-        hint("No domain? No problem — choose 'n' and we'll use smee.io instead.")
+        hint("No domain? You can still use the platform — but GitHub triggers")
+        hint("won't work without a public URL for webhooks.")
         print()
 
         # Default=True because this is the recommended path for selfhost.
@@ -1214,8 +1215,13 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         ctx.webhook_url = f"{domain}{webhook_path}"
         ok(f"Webhook URL: {ctx.webhook_url}")
     else:
-        ctx.needs_smee_fallback = True
-        step("No domain — we'll set up smee.io for webhooks next.")
+        is_dev_env = (ctx.app_environment or "development") in ("development",)
+        if is_dev_env:
+            ctx.needs_smee_fallback = True
+            step("No domain — we'll set up smee.io for webhooks next.")
+        else:
+            warn("No domain configured — GitHub triggers won't work.")
+            hint("You can set this up later with: just onboard --stage configure_cloudflare")
 
     ok("Cloudflare Tunnel configured")
     return True
@@ -1232,6 +1238,13 @@ def configure_smee(ctx: SetupContext) -> bool:
     smee.io is free, instant, requires no account — just click a link.
     That's the kind of zero-friction path we want for first-timers.
     """
+    # Smee is a dev-only tool — skip entirely for non-development environments.
+    is_dev_env = (ctx.app_environment or "development") in ("development",)
+    if not is_dev_env:
+        banner("Stage: Configure Webhook Proxy (Skipped)")
+        step("Smee is only used in development mode — skipping")
+        return True
+
     # Dynamically adjust the framing based on whether the user has a
     # domain configured.  No domain = smee is their webhook lifeline.
     needs_fallback = ctx.needs_smee_fallback

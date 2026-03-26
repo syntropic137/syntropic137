@@ -1035,7 +1035,7 @@ selfhost-status:
         echo "   API:      https://$_domain/api/v1"
         echo "   API Docs: https://$_domain/api/v1/docs"
     else
-        _port="${SYN_GATEWAY_PORT:-8008}"
+        _port="${SYN_GATEWAY_PORT:-8137}"
         echo "   UI:       http://localhost:$_port"
         echo "   API:      http://localhost:$_port/api/v1"
         echo "   API Docs: http://localhost:$_port/api/v1/docs"
