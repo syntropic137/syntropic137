@@ -55,7 +55,6 @@ Run `/syn-setup` again or `./syn-ctl update` to add features later.
 | Stop | `./syn-ctl down` | `just selfhost-down` |
 | Start | `./syn-ctl up` | `just selfhost-up` |
 | Update | `./syn-ctl update` | `git pull && just selfhost-up` |
-| Reset | `./syn-ctl reset` | `just selfhost-reset` |
 
 ## For Contributors (Dev Mode)
 

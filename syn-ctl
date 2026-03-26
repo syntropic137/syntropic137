@@ -111,7 +111,9 @@ env_set() {
     if grep -q "^${key}=" "${envfile}" 2>/dev/null; then
         # Use a temp file for portability (BSD + GNU sed differ on -i)
         local tmp="${envfile}.tmp.$$"
-        sed "s|^${key}=.*|${key}=${value}|" "${envfile}" > "${tmp}" && mv "${tmp}" "${envfile}"
+        local escaped_value
+        escaped_value="$(printf '%s\n' "${value}" | sed -e 's/[&|\\/]/\\&/g')"
+        sed "s|^${key}=.*|${key}=${escaped_value}|" "${envfile}" > "${tmp}" && mv "${tmp}" "${envfile}"
     else
         echo "${key}=${value}" >> "${envfile}"
     fi
@@ -125,10 +127,10 @@ prompt() {
     local input
     if [[ -n "${default}" ]]; then
         read -rp "${msg} [${default}]: " input
-        eval "${var}=\"${input:-${default}}\""
+        printf -v "${var}" '%s' "${input:-${default}}"
     else
         read -rp "${msg}: " input
-        eval "${var}=\"${input}\""
+        printf -v "${var}" '%s' "${input}"
     fi
 }
 
@@ -435,11 +437,10 @@ _add_github_app_browser() {
     fi
 
     echo ""
-    echo "After completing the flow, paste the callback URL here."
-    local callback_url
-    prompt callback_url "Callback URL"
+    echo "After completing the flow, the API stores the credentials automatically."
+    echo "Press Enter once you have finished the GitHub App creation flow."
+    read -rp ""
 
-    # Extract parameters from callback URL (the API handles this, but we confirm)
     info "GitHub App created via manifest flow."
     info "The API has stored the credentials automatically."
     info "If you need to verify, check your .env for SYN_GITHUB_APP_ID."
@@ -520,10 +521,10 @@ cmd_add_cloudflare() {
     [[ -z "${tunnel_hostname}" ]] && die "Tunnel hostname is required."
 
     env_set "CLOUDFLARE_TUNNEL_TOKEN" "${tunnel_token}"
-    env_set "CLOUDFLARE_TUNNEL_HOSTNAME" "${tunnel_hostname}"
+    env_set "SYN_PUBLIC_HOSTNAME" "${tunnel_hostname}"
 
     info "Cloudflare configuration written to .env"
-    info "  CLOUDFLARE_TUNNEL_HOSTNAME=${tunnel_hostname}"
+    info "  SYN_PUBLIC_HOSTNAME=${tunnel_hostname}"
 
     check_docker
     check_compose_file
@@ -549,7 +550,7 @@ cmd_add_1password() {
 
     load_env
 
-    local vault_name="Syntropic137"
+    local vault_name="syntropic137"
     echo ""
     echo "This will create a 1Password vault '${vault_name}' (if it doesn't exist)"
     echo "and push your current secrets there for backup and team sharing."
@@ -591,7 +592,7 @@ cmd_secrets_push() {
     fi
 
     load_env
-    local vault_name="Syntropic137"
+    local vault_name="syntropic137"
 
     if ! op vault get "${vault_name}" &>/dev/null; then
         die "Vault '${vault_name}' not found. Run 'syn-ctl add-1password' first."
@@ -646,7 +647,7 @@ cmd_secrets_pull() {
         die "Not signed in to 1Password CLI. Run 'op signin' first."
     fi
 
-    local vault_name="Syntropic137"
+    local vault_name="syntropic137"
 
     if ! op vault get "${vault_name}" &>/dev/null; then
         die "Vault '${vault_name}' not found. Run 'syn-ctl add-1password' first."

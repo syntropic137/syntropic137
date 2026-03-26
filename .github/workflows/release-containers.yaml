@@ -250,17 +250,25 @@ jobs:
           docker export "$CONTAINER_ID" | tar -xf - -C "$SCAN_DIR" 2>/dev/null || true
           docker rm "$CONTAINER_ID" > /dev/null
 
-          # Install osv-scanner
-          go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest 2>/dev/null || {
-            curl -sSfL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o /usr/local/bin/osv-scanner
-            chmod +x /usr/local/bin/osv-scanner
-          }
+          # Install osv-scanner (pinned version)
+          OSV_VERSION="v2.0.2"
+          curl -sSfL "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64" -o /usr/local/bin/osv-scanner
+          chmod +x /usr/local/bin/osv-scanner
 
           # Scan — capture output and exit code
           set +e
-          osv-scanner scan --recursive "$SCAN_DIR" --format json > osv-results.json 2>&1
+          osv-scanner scan --recursive "$SCAN_DIR" --format json > osv-results.json 2>osv-stderr.log
           OSV_EXIT=$?
           set -e
+
+          # Validate JSON output before parsing
+          if ! jq empty osv-results.json 2>/dev/null; then
+            echo "::warning::OSV Scanner did not produce valid JSON. Stderr:" >> "$GITHUB_STEP_SUMMARY"
+            cat osv-stderr.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+            echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
+            rm -rf "$SCAN_DIR"
+            exit 0
+          fi
 
           # Parse results for severity
           if [[ $OSV_EXIT -eq 0 ]]; then

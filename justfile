@@ -1225,13 +1225,19 @@ secrets-seal:
 secrets-unseal:
     @uv run python infra/scripts/secrets_setup.py unseal
 
-# Push secrets to 1Password vault
+# Push secrets to 1Password vault (selfhost only — uses syn-ctl)
 secrets-push:
-    uv run --directory infra python -m scripts.secrets_setup push
+    @echo "Push secrets to 1Password via syn-ctl:"
+    @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-push"
+    @echo ""
+    @echo "For dev environments, use: just onboard --stage configure_1password"
 
-# Pull secrets from 1Password vault
+# Pull secrets from 1Password vault (selfhost only — uses syn-ctl)
 secrets-pull:
-    uv run --directory infra python -m scripts.secrets_setup pull
+    @echo "Pull secrets from 1Password via syn-ctl:"
+    @echo "  cd ~/.syntropic137 && ./syn-ctl secrets-pull"
+    @echo ""
+    @echo "For dev environments, use: just onboard --stage configure_1password"
 
 # --- Health ---
 
