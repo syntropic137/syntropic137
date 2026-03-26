@@ -399,12 +399,15 @@ jobs:
       # Export locked deps from uv.lock → requirements.txt format, then pipe
       # to pip-audit. --disable-pip queries the PyPI JSON API directly instead
       # of shelling out to pip (faster, fewer moving parts).
-      # --ignore-vuln: pygments GHSA-5239-wwwm-4pmq has no upstream fix yet.
+      # --ignore-vuln: temporarily suppress advisories with no available fix
+      #   pygments  GHSA-5239-wwwm-4pmq — no upstream patch yet
+      #   protobuf  GHSA-7gcm-g887-7qv7 — fix pending ESP submodule PR
       - name: Audit Python dependencies
         run: |
           uv export --format requirements-txt --no-hashes --frozen --quiet \
             | uv tool run pip-audit --disable-pip --no-deps \
               --ignore-vuln GHSA-5239-wwwm-4pmq \
+              --ignore-vuln GHSA-7gcm-g887-7qv7 \
               -r /dev/stdin
 
   #############################################################################
