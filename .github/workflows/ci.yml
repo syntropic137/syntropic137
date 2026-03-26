@@ -345,9 +345,7 @@ jobs:
   # (covers CVEs, GitHub Security Advisories, and ecosystem-specific DBs).
   # Scans both Python (uv.lock) and all npm/pnpm lock files in one step.
   #
-  # Rollout: currently in warn mode (continue-on-error: true) to establish
-  # a clean baseline. Once zero findings confirmed, remove continue-on-error
-  # to enforce blocking. See TODO(#259).
+  # Baseline confirmed clean — supply chain checks are now blocking.
   #############################################################################
 
   osv-scan:
@@ -361,7 +359,6 @@ jobs:
         # The actual action now lives in the osv-scanner-action/ subdirectory.
         # SHA confirmed: gh api repos/google/osv-scanner-action/git/ref/tags/v1.9.0
         uses: google/osv-scanner-action/osv-scanner-action@19ec1116569a47416e11a45848722b1af31a857b # v1.9.0
-        continue-on-error: true  # TODO(#259): remove after first clean baseline run
         with:
           scan-args: |-
             --lockfile=uv.lock
@@ -405,8 +402,10 @@ jobs:
       - name: Audit Python dependencies
         run: |
           uv export --format requirements-txt --no-hashes --frozen --quiet \
-            | uv tool run pip-audit --disable-pip -r /dev/stdin
-        continue-on-error: true  # TODO(#259): remove after first clean baseline
+            | uv tool run pip-audit --disable-pip --no-deps \
+              --ignore-vuln GHSA-5239-wwwm-4pmq \
+              -r /dev/stdin
+          # TODO(#345): remove --ignore-vuln once pygments releases a fix
 
   #############################################################################
   # DEPENDENCY REVIEW - Block new CVE-laden packages on PRs (ISS-259)
@@ -425,11 +424,9 @@ jobs:
 
       # ISS-259: Pinned to SHA (v4.9.0). Flags newly added packages with CVEs
       # or install scripts — catches supply chain risks at PR review time.
-      # Requires GitHub Advanced Security (free for public repos). Currently
-      # warn-only until repo goes public and GHAS is auto-enabled.
+      # Requires GitHub Advanced Security (free for public repos).
       - name: Dependency Review
         uses: actions/dependency-review-action@f5b971718edcbb31275a1db40004592335c0e031 # v4.9.0
-        continue-on-error: true  # TODO(#259): remove after repo goes public (GHAS required)
 
   #############################################################################
   # SUMMARY - Required status check for PRs
@@ -459,7 +456,9 @@ jobs:
              [[ "${{ needs.python-unit-tests.result }}" == "failure" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "failure" ]] || \
              [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
-             [[ "${{ needs.submodule-check.result }}" == "failure" ]]; then
+             [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
+             [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
+             [[ "${{ needs.pip-audit.result }}" == "failure" ]]; then
             echo "❌ CI checks failed"
             exit 1
           fi
@@ -471,12 +470,21 @@ jobs:
             exit 1
           fi
 
+          # Dependency review only runs on PRs (requires base/head comparison)
+          if [[ "${{ github.event_name }}" == "pull_request" ]] && \
+             [[ "${{ needs.dependency-review.result }}" == "failure" ]]; then
+            echo "❌ Dependency review failed"
+            exit 1
+          fi
+
           # Check for cancellations
           if [[ "${{ needs.python-qa.result }}" == "cancelled" ]] || \
              [[ "${{ needs.architectural-fitness.result }}" == "cancelled" ]] || \
              [[ "${{ needs.python-unit-tests.result }}" == "cancelled" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.docs-site.result }}" == "cancelled" ]]; then
+             [[ "${{ needs.docs-site.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.osv-scan.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.pip-audit.result }}" == "cancelled" ]]; then
             echo "⚠️ CI checks were cancelled"
             exit 1
           fi

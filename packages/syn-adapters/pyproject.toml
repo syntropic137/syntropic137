@@ -1,6 +1,6 @@
 [project]
 name = "syn-adapters"
-version = "0.16.1"
+version = "0.16.2"
 description = "External integrations for Syntropic137"
 requires-python = ">=3.12"
 
@@ -14,8 +14,8 @@ dependencies = [
     "event-sourcing-python[grpc]", # Event Store SDK (ADR-007)
     "anthropic>=0.75.0",
     "pyyaml>=6.0.3",
-    "pyjwt>=2.10.1",
-    "cryptography>=46.0.3",
+    "pyjwt>=2.12.0",
+    "cryptography>=46.0.5",
     "redis>=5.0.0",
 ]
 
