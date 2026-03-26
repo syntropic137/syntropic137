@@ -42,9 +42,10 @@
   <text x="125" y="150" text-anchor="middle" fill="#8892b0" font-size="10">localhost:8137</text>
 
   <!-- GitHub -->
-  <rect x="770" y="110" width="130" height="50" rx="8" fill="#16213e" stroke="#f4845f" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="835" y="132" text-anchor="middle" fill="#f4845f" font-size="13" font-weight="bold">GitHub</text>
-  <text x="835" y="150" text-anchor="middle" fill="#8892b0" font-size="10">Webhooks + API</text>
+  <rect x="770" y="100" width="140" height="65" rx="8" fill="#16213e" stroke="#f4845f" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="840" y="122" text-anchor="middle" fill="#f4845f" font-size="13" font-weight="bold">GitHub</text>
+  <text x="840" y="140" text-anchor="middle" fill="#8892b0" font-size="10">via GitHub App</text>
+  <text x="840" y="155" text-anchor="middle" fill="#5a6a8a" font-size="9">repo access, webhooks, commits</text>
 
   <!-- Cloudflare Tunnel (optional) -->
   <rect x="370" y="110" width="210" height="50" rx="8" fill="#16213e" stroke="#f4845f" stroke-width="1.5" stroke-dasharray="5,3" filter="url(#shadow)"/>
@@ -61,9 +62,9 @@
   <path d="M 770 135 Q 660 135 582 135" fill="none" stroke="#f4845f" stroke-width="1.5" marker-end="url(#arrow-orange)"/>
   <text x="670" y="128" fill="#f4845f" font-size="9">webhook POST</text>
 
-  <!-- Arrow: API -> GitHub (push/commit via GitHub App) -->
+  <!-- Arrow: API -> GitHub (via GitHub App installation token) -->
   <path d="M 440 340 Q 700 280 770 140" fill="none" stroke="#64ffda" stroke-width="1.2" marker-end="url(#arrow-green)" stroke-dasharray="5,3"/>
-  <text x="640" y="270" fill="#64ffda" font-size="9" transform="rotate(-35 640 270)">push / commit</text>
+  <text x="630" y="268" fill="#64ffda" font-size="9" transform="rotate(-35 630 268)">GitHub App API</text>
 
   <!-- ===== FRONTEND TIER ===== -->
 
