@@ -1087,7 +1087,7 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         hint("Free tier is all you need. No credit card required.")
         print()
         # Be upfront about what's needed so there are no surprises after
-        # they say yes.  If they don't have a domain, point them to smee.
+        # they say yes.
         callout("What you'll need:")
         step(f"{_GREEN}FREE{_RST}  Cloudflare account")
         step(f"{_GREEN}~$10{_RST}  A domain on Cloudflare (or bring your own)")
@@ -1215,8 +1215,14 @@ def configure_cloudflare(ctx: SetupContext) -> bool:
         ctx.webhook_url = f"{domain}{webhook_path}"
         ok(f"Webhook URL: {ctx.webhook_url}")
     else:
-        is_dev_env = (ctx.app_environment or "development") in ("development",)
-        if is_dev_env:
+        # Same env fallback as configure_smee for single-stage reruns
+        app_env = (
+            ctx.app_environment
+            or os.environ.get(ENV_APP_ENVIRONMENT, "").strip()
+            or parse_env_file(ROOT_ENV_FILE).get(ENV_APP_ENVIRONMENT, "").strip()
+            or "development"
+        )
+        if app_env in ("development",):
             ctx.needs_smee_fallback = True
             step("No domain — we'll set up smee.io for webhooks next.")
         else:
@@ -1239,7 +1245,15 @@ def configure_smee(ctx: SetupContext) -> bool:
     That's the kind of zero-friction path we want for first-timers.
     """
     # Smee is a dev-only tool — skip entirely for non-development environments.
-    is_dev_env = (ctx.app_environment or "development") in ("development",)
+    # When running a single stage (--stage), detect_environment may not have run,
+    # so ctx.app_environment can be empty. Fall back to env var / .env file.
+    app_env = (
+        ctx.app_environment
+        or os.environ.get(ENV_APP_ENVIRONMENT, "").strip()
+        or parse_env_file(ROOT_ENV_FILE).get(ENV_APP_ENVIRONMENT, "").strip()
+        or "development"
+    )
+    is_dev_env = app_env in ("development",)
     if not is_dev_env:
         banner("Stage: Configure Webhook Proxy (Skipped)")
         step("Smee is only used in development mode — skipping")
