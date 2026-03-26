@@ -456,7 +456,9 @@ jobs:
              [[ "${{ needs.python-unit-tests.result }}" == "failure" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "failure" ]] || \
              [[ "${{ needs.docs-site.result }}" == "failure" ]] || \
-             [[ "${{ needs.submodule-check.result }}" == "failure" ]]; then
+             [[ "${{ needs.submodule-check.result }}" == "failure" ]] || \
+             [[ "${{ needs.osv-scan.result }}" == "failure" ]] || \
+             [[ "${{ needs.pip-audit.result }}" == "failure" ]]; then
             echo "❌ CI checks failed"
             exit 1
           fi
@@ -468,12 +470,21 @@ jobs:
             exit 1
           fi
 
+          # Dependency review only runs on PRs (requires base/head comparison)
+          if [[ "${{ github.event_name }}" == "pull_request" ]] && \
+             [[ "${{ needs.dependency-review.result }}" == "failure" ]]; then
+            echo "❌ Dependency review failed"
+            exit 1
+          fi
+
           # Check for cancellations
           if [[ "${{ needs.python-qa.result }}" == "cancelled" ]] || \
              [[ "${{ needs.architectural-fitness.result }}" == "cancelled" ]] || \
              [[ "${{ needs.python-unit-tests.result }}" == "cancelled" ]] || \
              [[ "${{ needs.dashboard-ui.result }}" == "cancelled" ]] || \
-             [[ "${{ needs.docs-site.result }}" == "cancelled" ]]; then
+             [[ "${{ needs.docs-site.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.osv-scan.result }}" == "cancelled" ]] || \
+             [[ "${{ needs.pip-audit.result }}" == "cancelled" ]]; then
             echo "⚠️ CI checks were cancelled"
             exit 1
           fi
