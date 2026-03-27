@@ -6,22 +6,17 @@
 #
 # Pipeline:
 #   1. Build multi-arch images (linux/amd64 + linux/arm64) for all services
-#   2. Security gate: OSV Scanner CVE scan
-#   3. Push to GHCR with version tags
-#   4. Sign with cosign (keyless OIDC) + attach SBOM
-#   5. Attach release assets (compose file, syn-ctl, .env.example, SHA256SUMS)
+#   2. Push to GHCR with version tags
+#   3. Sign with cosign (keyless OIDC) + attach SBOM
+#   4. Attach release assets (compose file, syn-ctl, .env.example, SHA256SUMS)
 #
-# Severity policy:
-#   - Critical/High CVE → block release (job fails)
-#   - Medium → warn (logged in summary, does not block)
-#   - Low → log only
+# Security scanning happens in CI (OSV Scanner + pip-audit on every push).
+# Release workflow trusts CI — builds, signs, and publishes only.
 #
 # Security:
 #   - All actions SHA-pinned (ISS-259)
 #   - cosign keyless signing (Sigstore OIDC — no secrets to manage)
 #   - SBOM attached to every image
-#   - No Trivy (project policy — compromised twice)
-#   - No Docker Scout (requires Docker Hub auth — unnecessary dependency)
 # =============================================================================
 
 name: Release Containers
@@ -223,105 +218,7 @@ jobs:
             org.opencontainers.image.source=https://github.com/syntropic137/syntropic137
 
       # -----------------------------------------------------------------------
-      # Build (load locally for scanning — don't push yet)
-      # -----------------------------------------------------------------------
-      - name: Build image (local, for scanning)
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7
-        with:
-          context: ${{ steps.build-params.outputs.context }}
-          file: ${{ steps.build-params.outputs.dockerfile }}
-          platforms: linux/amd64  # Scan on native arch only (faster)
-          load: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # -----------------------------------------------------------------------
-      # Security Gate 1: OSV Scanner
-      # -----------------------------------------------------------------------
-      - name: "Security gate: OSV Scanner"
-        id: osv-scan
-        run: |
-          echo "## OSV Scanner: ${{ matrix.image }}" >> "$GITHUB_STEP_SUMMARY"
-
-          # Run OSV Scanner on the built image filesystem
-          # Export image filesystem and scan it
-          CONTAINER_ID=$(docker create "${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:scan")
-          SCAN_DIR=$(mktemp -d)
-          docker export "$CONTAINER_ID" | tar -xf - -C "$SCAN_DIR" 2>/dev/null || true
-          docker rm "$CONTAINER_ID" > /dev/null
-
-          # Install osv-scanner (pinned version)
-          OSV_VERSION="v2.0.2"
-          curl -sSfL "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64" -o /usr/local/bin/osv-scanner
-          chmod +x /usr/local/bin/osv-scanner
-
-          # Scan — capture output and exit code
-          set +e
-          osv-scanner scan --recursive "$SCAN_DIR" --format json > osv-results.json 2>osv-stderr.log
-          OSV_EXIT=$?
-          set -e
-
-          # Validate JSON output before parsing
-          if ! jq empty osv-results.json 2>/dev/null; then
-            echo "::warning::OSV Scanner did not produce valid JSON. Stderr:" >> "$GITHUB_STEP_SUMMARY"
-            cat osv-stderr.log >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
-            echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
-            rm -rf "$SCAN_DIR"
-            exit 0
-          fi
-
-          # Parse results for severity
-          if [[ $OSV_EXIT -eq 0 ]]; then
-            echo "No vulnerabilities found." >> "$GITHUB_STEP_SUMMARY"
-            echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
-          else
-            # Count by severity
-            CRITICAL=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "CRITICAL")] | length' osv-results.json 2>/dev/null || echo "0")
-            HIGH=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "HIGH")] | length' osv-results.json 2>/dev/null || echo "0")
-            MEDIUM=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "MEDIUM")] | length' osv-results.json 2>/dev/null || echo "0")
-            LOW=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.severity? == "LOW")] | length' osv-results.json 2>/dev/null || echo "0")
-
-            echo "| Severity | Count |" >> "$GITHUB_STEP_SUMMARY"
-            echo "|----------|-------|" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Critical | $CRITICAL |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| High | $HIGH |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Medium | $MEDIUM |" >> "$GITHUB_STEP_SUMMARY"
-            echo "| Low | $LOW |" >> "$GITHUB_STEP_SUMMARY"
-
-            if [[ "$CRITICAL" -gt 0 ]] || [[ "$HIGH" -gt 0 ]]; then
-              echo "has_critical_high=true" >> "$GITHUB_OUTPUT"
-              echo "" >> "$GITHUB_STEP_SUMMARY"
-              echo "**BLOCKED: Critical/High vulnerabilities found.**" >> "$GITHUB_STEP_SUMMARY"
-            else
-              echo "has_critical_high=false" >> "$GITHUB_OUTPUT"
-              if [[ "$MEDIUM" -gt 0 ]]; then
-                echo "" >> "$GITHUB_STEP_SUMMARY"
-                echo "**WARNING: Medium vulnerabilities found (not blocking).**" >> "$GITHUB_STEP_SUMMARY"
-              fi
-            fi
-          fi
-
-          # Cleanup
-          rm -rf "$SCAN_DIR"
-
-      # -----------------------------------------------------------------------
-      # Enforce severity policy — Critical/High blocks the release
-      # -----------------------------------------------------------------------
-      - name: "Enforce severity policy"
-        run: |
-          OSV_BLOCKED="${{ steps.osv-scan.outputs.has_critical_high }}"
-
-          if [[ "$OSV_BLOCKED" == "true" ]]; then
-            echo "::error::Release blocked: Critical or High severity vulnerabilities detected in ${{ matrix.image }}."
-            echo "Review the OSV Scanner results above and fix all Critical/High findings before releasing."
-            exit 1
-          fi
-
-          echo "Security gates passed for ${{ matrix.image }}."
-
-      # -----------------------------------------------------------------------
-      # Build + Push multi-arch image to GHCR (only if scans pass)
+      # Build + Push multi-arch image to GHCR
       # -----------------------------------------------------------------------
       - name: Build and push multi-arch image
         id: push
