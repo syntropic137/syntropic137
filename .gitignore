@@ -194,6 +194,7 @@ DEEP-DIVE_*.md
 .topology/
 
 # Browser testing screenshots
+screenshots/
 /assets/
 build/
 HANDOFF-*.md
