@@ -359,13 +359,21 @@ jobs:
       # -----------------------------------------------------------------------
       # SBOM: Syft SBOM generation (open-source, no auth required)
       # -----------------------------------------------------------------------
-      - name: "Generate and attach SBOM"
+      - name: "Generate SBOM"
         if: ${{ !inputs.dry_run }}
         uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0 # v0.18.0
         with:
-          image: "${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}:${{ steps.version.outputs.version }}"
+          image: "${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}"
           format: spdx-json
           output-file: sbom-${{ matrix.image }}.spdx.json
+
+      - name: "Upload SBOM artifact"
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.spdx.json
+          retention-days: 90
 
       # -----------------------------------------------------------------------
       # Output digest for release assets job
