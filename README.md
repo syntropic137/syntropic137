@@ -4,46 +4,45 @@
 
 # Syntropic137
 
-Orchestrates AI agent execution in isolated Docker workspaces and captures every event for observability.
+**Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability — every tool call, token, cost, conversation, and artifact permanently captured in a queryable event store.
+
+- **Permanent, queryable data** — events, conversation logs, and artifacts are never lost. Analyze what agents do across sessions, workflows, repos, systems, and organizations. Enables compounding learning loops.
+- **Artifact pipeline** — each workflow phase produces output artifacts (stored in MinIO), passed as inputs to the next phase. Research → plan → code → review, each building on the last.
+- **Claude Code as a primitive** — agents run Claude Code inside secure ephemeral containers, leveraging Claude Code standards like [skills, commands, and hooks](https://docs.anthropic.com/en/docs/claude-code)
+- **Full observability** — token usage, tool traces, costs, and errors captured via event sourcing. [Claude Code hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) capture agent tasks and tool calls; conversation logs are saved after each session for reviewability; git hooks capture all git-related events.
+- **GitHub-native triggers** — integrated webhook triggers enable self-healing CI, auto-responses to review comments, and PR-driven workflows — agents respond in minutes so developers stay out of the loop
+- **Security as a first-class citizen** — isolated Docker workspaces, secret injection/clearing lifecycle, read-only containers, no-new-privileges
+- **Production-grade** — event-sourced state, crash recovery, idempotent handlers, Docker Compose single-machine deployment
+- **Workflow phases as Claude Code commands** — each phase is a prompt template using the `$ARGUMENTS` command standard, composable into multi-phase pipelines (research → plan → implement → review)
 
 ## Self-Hosting (recommended)
 
 Get your own instance running in minutes. Only prerequisite: **Docker**.
 
+> [!TIP]
 > **Using Claude Code?** Install the plugin — it handles everything:
 >
 > ```
-> /plugin install syntropic137/syntropic137-claude-plugin
+> claude plugin marketplace add syntropic137/syntropic137-claude-plugin
+> claude plugin install syntropic137
 > /syn-setup
 > ```
 
-### Manual Setup (without Claude Code)
-
-```bash
-mkdir -p ~/.syntropic137/secrets && cd ~/.syntropic137
-# Download latest release assets
-curl -sL https://github.com/syntropic137/syntropic137/releases/latest/download/docker-compose.syntropic137.yaml -o docker-compose.syntropic137.yaml
-curl -sL https://github.com/syntropic137/syntropic137/releases/latest/download/syn-ctl -o syn-ctl && chmod +x syn-ctl
-curl -sL https://github.com/syntropic137/syntropic137/releases/latest/download/selfhost.env.example -o .env
-curl -sL https://github.com/syntropic137/syntropic137/releases/latest/download/selfhost-entrypoint.sh -o selfhost-entrypoint.sh && chmod +x selfhost-entrypoint.sh
-# Generate secrets
-for s in db-password redis-password minio-password; do openssl rand -hex 32 > secrets/$s.secret; done
-chmod 600 secrets/*.secret
-# Edit .env — add your ANTHROPIC_API_KEY at minimum
-# Start
-docker compose -f docker-compose.syntropic137.yaml pull
-docker compose -f docker-compose.syntropic137.yaml up -d
-```
-
 Access: http://localhost:8137
 
-**Optional features** (add anytime):
-- **GitHub App** — PR triggers, code review, workflow automation
-- **Cloudflare Tunnel** — remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
-- **1Password** — encrypted secrets management
+> [!IMPORTANT]
+> **GitHub App** (required for agents to interact with GitHub):
+> - `/syn-setup` walks you through one-click creation via the manifest flow
+> - Enables: pushing code, creating PRs, code review, webhook-triggered workflows
 
-Run `/syn-setup` again or `./syn-ctl update` to add features later.
+> [!NOTE]
+> **Optional features** (add anytime):
+> - **Cloudflare Tunnel** — remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
+> - **1Password** — encrypted secrets management
+>
+> Run `/syn-setup` again or `./syn-ctl add-cloudflare` / `./syn-ctl add-1password` to add features later.
 
+> [!WARNING]
 > **Security:** Set `SYN_API_PASSWORD` for basic auth. Or protect with Cloudflare Access / VPN.
 
 ### Management Commands
@@ -55,6 +54,8 @@ Run `/syn-setup` again or `./syn-ctl update` to add features later.
 | Stop | `./syn-ctl down` | `just selfhost-down` |
 | Start | `./syn-ctl up` | `just selfhost-up` |
 | Update | `./syn-ctl update` | `git pull && just selfhost-up` |
+
+---
 
 ## For Contributors (Dev Mode)
 
@@ -80,7 +81,7 @@ Use `just dev-fresh` instead for a clean slate (wipes volumes and re-seeds).
 
 ## Architecture
 
-The system is organized into 6 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
+The system is organized into 5 bounded contexts following Vertical Slice Architecture (VSA) and DDD principles:
 
 ![Syn137 Architecture](./docs/architecture/vsa-overview.svg)
 
@@ -89,11 +90,11 @@ The system is organized into 6 bounded contexts following Vertical Slice Archite
 
 | Context | Aggregates | Purpose |
 |---------|------------|---------|
-| **Orchestration** | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
-| **Organization** | Organization, System, Repo | Organization hierarchy, system and repo management |
-| **Agent Sessions** | AgentSession | Agent sessions and observability metrics |
-| **GitHub** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
-| **Artifacts** | Artifact | Artifact storage and retrieval |
+| **`orchestration`** | Workspace, WorkflowTemplate, WorkflowExecution | Workflow execution and workspace management |
+| **`organization`** | Organization, System, Repo | Organization hierarchy, system and repo management |
+| **`agent_sessions`** | AgentSession | Agent sessions and observability metrics |
+| **`github`** | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
+| **`artifacts`** | Artifact | Artifact storage and retrieval |
 
 **Infrastructure:** PostgreSQL (event store + projections) · Redis · MinIO
 
@@ -113,6 +114,7 @@ just cli -- <command>           # run via just
 ```bash
 syn workflow list
 syn workflow show <id>
+syn workflow create --type implementation --repo owner/repo --description "Feature X"
 syn workflow run <id> --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml
@@ -190,75 +192,36 @@ syntropic137/
 ├── apps/
 │   ├── syn-api/                 # FastAPI HTTP server
 │   ├── syn-cli/                 # CLI tool ("syn")
-│   └── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
+│   ├── syn-dashboard-ui/        # Dashboard frontend (Vite + React)
+│   ├── syn-docs/                # Public documentation site (Next.js + Fumadocs)
+│   └── syn-pulse-ui/            # Pulse/heatmap UI
 ├── packages/
 │   ├── syn-domain/              # Domain events, aggregates, ports
 │   ├── syn-adapters/            # Orchestration + observability adapters
 │   ├── syn-collector/           # Event ingestion API
-│   └── syn-shared/              # Settings, configuration
+│   ├── syn-shared/              # Settings, configuration
+│   ├── syn-tokens/              # Token vending and spend tracking
+│   ├── syn-perf/                # Performance benchmarking
+│   └── openclaw-plugin/         # OpenClaw integration
 ├── lib/                         # Git submodules (our own projects)
 │   ├── agentic-primitives/      # Agent building blocks, isolation providers
-│   └── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
-├── infra/                       # Docker Compose, setup wizard, secrets
-├── docker/                      # Compose files (base, dev, selfhost, test)
-└── docs/                        # Documentation and ADRs
+│   ├── event-sourcing-platform/ # Rust event store, Python SDK, VSA tool
+│   ├── syntropic137-claude-plugin/ # Claude Code plugin
+│   └── agent-paradise-standards-system/ # Architecture fitness functions
+├── infra/                       # Setup wizard, secrets, deployment scripts
+├── docker/                      # Compose files (base, dev, selfhost, test, cloudflare)
+└── docs/                        # Internal documentation and ADRs
 ```
 
 ## Environment Configuration
 
-Two `.env` files with **strict separation** — no variable appears in both.
+Two `.env` files with **strict separation** — no variable appears in both:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  .env  (root)                                                   │
-│  Application config — owned by Pydantic Settings                │
-│                                                                 │
-│  APP_ENVIRONMENT          SYN_GITHUB_APP_ID                     │
-│  ANTHROPIC_API_KEY        SYN_GITHUB_APP_NAME                   │
-│  CLAUDE_CODE_OAUTH_TOKEN  SYN_GITHUB_PRIVATE_KEY                │
-│  LOG_LEVEL / LOG_FORMAT   SYN_GITHUB_WEBHOOK_SECRET             │
-│  OP_SERVICE_ACCOUNT_*     DEV__SMEE_URL                         │
-│  ESP_EVENT_STORE_DB_URL   SYN_OBSERVABILITY_DB_URL              │
-│  ... (all Settings fields — see .env.example)                   │
-├─────────────────────────────────────────────────────────────────┤
-│  Read by: Pydantic Settings, op_resolver, just dev,             │
-│           selfhost-env.sh (sourced first)                       │
-│  Template: .env.example (auto-generated from Settings classes)  │
-└─────────────────────────────────────────────────────────────────┘
+- **Root `.env`** — Application config (API keys, GitHub App, app settings). Auto-generated template: `just gen-env` → `.env.example`
+- **`infra/.env`** — Infrastructure config (Docker, resource limits, Cloudflare, secrets). Template: `infra/.env.example`
 
-┌─────────────────────────────────────────────────────────────────┐
-│  infra/.env                                                     │
-│  Infrastructure config — Docker Compose, deployment tuning      │
-│                                                                 │
-│  COMPOSE_PROJECT_NAME     CLOUDFLARE_TUNNEL_TOKEN               │
-│  POSTGRES_PASSWORD/DB/USER  SYN_DOMAIN                          │
-│  MINIO_ROOT_USER/PASSWORD INCLUDE_OP_CLI                        │
-│  REDIS_PASSWORD           SYN_GATEWAY_PORT                      │
-│  Resource limits (API_MEMORY_LIMIT, etc.)                       │
-│  Backup settings, PG tuning                                     │
-├─────────────────────────────────────────────────────────────────┤
-│  Read by: Docker Compose, selfhost-env.sh (sourced second)      │
-│  Template: infra/.env.example (manually maintained)             │
-└─────────────────────────────────────────────────────────────────┘
-
-        ┌──────────────────────────────┐
-        │  selfhost-env.sh             │
-        │  1. source .env              │
-        │  2. source infra/.env        │
-        │  3. Derive vault from        │
-        │     APP_ENVIRONMENT          │
-        │  4. Load 1Password token     │
-        │  5. Resolve 1Password →      │
-        │     export to env            │
-        └──────────────────────────────┘
-```
-
-| Workflow | Root `.env` | `infra/.env` |
-|----------|------------|-------------|
-| `just onboard-dev` | Created from `.env.example` | Not needed |
-| `just dev` | Read via `env_file` | Not used |
-| `just onboard` (selfhost) | Created, app config | Created, infra config |
-| `just selfhost-up` | Sourced first | Sourced second |
+> [!TIP]
+> Both `.env.example` files are extensively commented with descriptions, defaults, and security notes. Reference them directly for all available configuration options.
 
 ## Secrets (1Password)
 
