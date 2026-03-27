@@ -380,7 +380,7 @@ jobs:
         env:
           COSIGN_YES: "true"
         working-directory: /tmp/release-assets
-        run: cosign sign-blob --output-signature SHA256SUMS.sig --output-certificate SHA256SUMS.pem SHA256SUMS
+        run: cosign sign-blob --bundle SHA256SUMS.bundle SHA256SUMS
 
       # -----------------------------------------------------------------------
       # Attach assets to GitHub release
@@ -395,8 +395,7 @@ jobs:
             /tmp/release-assets/selfhost-entrypoint.sh \
             /tmp/release-assets/syn-ctl \
             /tmp/release-assets/SHA256SUMS \
-            /tmp/release-assets/SHA256SUMS.sig \
-            /tmp/release-assets/SHA256SUMS.pem \
+            /tmp/release-assets/SHA256SUMS.bundle \
             --clobber
 
       # -----------------------------------------------------------------------
