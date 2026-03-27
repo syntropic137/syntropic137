@@ -7,38 +7,32 @@
 # =============================================================================
 # Build Stage
 # =============================================================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
-# Install pnpm globally
-RUN npm install -g pnpm
+# Install pnpm (lockfile is v9.0)
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-# Set up workspace structure matching the monorepo layout
-# This is required because vite.config.ts uses relative paths like:
-# path.resolve(__dirname, '../../lib/ui-feedback/...')
 WORKDIR /workspace
 
-# Copy ui-feedback package (dependency referenced in vite.config.ts)
+# Copy workspace config and lockfiles for dependency caching
+COPY pnpm-workspace.yaml ./
+COPY pnpm-lock.yaml ./
+COPY apps/syn-dashboard-ui/package.json ./apps/syn-dashboard-ui/
+
+# Install dependencies (frozen lockfile for reproducibility)
+RUN pnpm install --frozen-lockfile --filter syn-dashboard-ui
+
+# Copy ui-feedback source (resolved via Vite alias and tsconfig paths)
 COPY lib/ui-feedback/packages/ui-feedback-react/ ./lib/ui-feedback/packages/ui-feedback-react/
 
-# Copy app package files for dependency installation
-COPY apps/syn-dashboard-ui/package.json apps/syn-dashboard-ui/pnpm-lock.yaml ./apps/syn-dashboard-ui/
-
-# Install dependencies from the app directory
-WORKDIR /workspace/apps/syn-dashboard-ui
-RUN pnpm install --frozen-lockfile
-
-# Copy app source files (excluding node_modules already installed above)
-COPY apps/syn-dashboard-ui/src ./src
-COPY apps/syn-dashboard-ui/public ./public
-COPY apps/syn-dashboard-ui/index.html ./index.html
-COPY apps/syn-dashboard-ui/vite.config.ts ./vite.config.ts
-COPY apps/syn-dashboard-ui/tsconfig*.json ./
-COPY apps/syn-dashboard-ui/eslint.config.js ./eslint.config.js
+# Copy dashboard source
+COPY apps/syn-dashboard-ui/ ./apps/syn-dashboard-ui/
 
 # Build for production
 # API_URL is set to /api - nginx will proxy to backend
+WORKDIR /workspace/apps/syn-dashboard-ui
 ENV VITE_API_URL=/api
-RUN pnpm run build
+RUN pnpm build
 
 # =============================================================================
 # Runtime Stage
@@ -46,6 +40,7 @@ RUN pnpm run build
 FROM nginx:1.28.2-alpine AS runtime
 
 # Copy built assets to nginx
+# Copy built dashboard assets from builder
 COPY --from=builder /workspace/apps/syn-dashboard-ui/dist /usr/share/nginx/html
 
 # Copy nginx configuration
