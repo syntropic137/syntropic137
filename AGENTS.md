@@ -243,7 +243,7 @@ gh project item-edit --project-id PVT_kwDOD5uLBM4BPw_5 --id <item-id> \
 - `syntropic137/syntropic137` — core platform
 - `syntropic137/event-sourcing-platform` — ES foundation
 - `syntropic137/syntropic137-claude-plugin` — Claude Code plugin (onboarding, commands, skills)
-- `syntropic137/syn137-landing-page` — public landing page
+- `syntropic137/syntropic137-landing-page` — public landing page
 
 ### Rules
 
