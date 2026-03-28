@@ -182,7 +182,6 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
     networks:
       - default
 
