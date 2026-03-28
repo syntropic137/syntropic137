@@ -232,7 +232,7 @@ just selfhost-reset
 │  │              │    │   (nginx reverse proxy)   │               │
 │  └──────────────┘    │  /       → Dashboard UI   │               │
 │                      │  /pulse/ → Pulse UI       │               │
-│                      │  /api/   → API proxy      │               │
+│                      │  /api/v1/→ API proxy      │               │
 │                      └──────────────────────────┘               │
 │                                    │                             │
 │                                    ▼                             │
