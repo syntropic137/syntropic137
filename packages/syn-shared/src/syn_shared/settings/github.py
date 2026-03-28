@@ -107,15 +107,25 @@ class GitHubAppSettings(BaseSettings):
     # =========================================================================
 
     @property
+    def _has_usable_key_file(self) -> bool:
+        """Check if app_private_key_file points to a non-empty PEM file."""
+        if not self.app_private_key_file:
+            return False
+        key_path = Path(self.app_private_key_file)
+        try:
+            return key_path.is_file() and key_path.stat().st_size > 0
+        except OSError:
+            return False
+
+    @property
     def is_configured(self) -> bool:
         """Check if GitHub App is configured.
 
         Returns True if app_id is set AND a private key is available via
-        either app_private_key_file (preferred) or private_key env var.
+        either app_private_key_file (preferred, non-empty) or private_key env var.
         """
         has_key = bool(self.private_key.get_secret_value())
-        has_key_file = bool(self.app_private_key_file) and Path(self.app_private_key_file).is_file()
-        return bool(self.app_id and (has_key or has_key_file))
+        return bool(self.app_id and (has_key or self._has_usable_key_file))
 
     @property
     def bot_name(self) -> str:
@@ -147,11 +157,14 @@ class GitHubAppSettings(BaseSettings):
 
         app_id requires at least one key source (file or env var).
         A key source without app_id is also a misconfiguration.
+
+        Note: _has_usable_key_file checks that the file exists and is non-empty,
+        so a Docker compose path pointing to an empty placeholder won't trigger
+        a false positive.
         """
         has_app_id = bool(self.app_id)
         has_key = bool(self.private_key.get_secret_value())
-        has_key_file = bool(self.app_private_key_file)
-        has_any_key = has_key or has_key_file
+        has_any_key = has_key or self._has_usable_key_file
 
         if has_app_id and not has_any_key:
             msg = (

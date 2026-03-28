@@ -37,11 +37,12 @@ from syn_adapters.github.client_endpoints import list_accessible_repos as _list_
 from syn_adapters.github.client_endpoints import list_installations as _list_installations
 from syn_adapters.github.client_endpoints import update_webhook_config as _update_webhook_config
 from syn_adapters.github.client_jwt import (
-    JWT_ALGORITHM as JWT_ALGORITHM,
-)
-from syn_adapters.github.client_jwt import (
+    _PEM_HEADER,
     decode_private_key,
     generate_jwt,
+)
+from syn_adapters.github.client_jwt import (
+    JWT_ALGORITHM as JWT_ALGORITHM,
 )
 from syn_adapters.github.client_token import get_installation_token as _get_installation_token
 
@@ -198,7 +199,7 @@ class GitHubAppClient:
                     msg = f"Private key file not found: {path}"
                     raise GitHubAuthError(msg)
                 pem = path.read_text(encoding="utf-8").strip()
-                if not pem.startswith("-----BEGIN"):
+                if not pem.startswith(_PEM_HEADER):
                     msg = f"Private key file does not contain valid PEM: {path}"
                     raise GitHubAuthError(msg)
                 if self._settings.private_key.get_secret_value():
