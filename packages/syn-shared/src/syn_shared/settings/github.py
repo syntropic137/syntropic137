@@ -161,7 +161,9 @@ class GitHubAppSettings(BaseSettings):
             raise ValueError(msg)
 
         if not has_app_id and has_any_key:
-            msg = "Incomplete GitHub App config: private key is set but SYN_GITHUB_APP_ID is missing."
+            msg = (
+                "Incomplete GitHub App config: private key is set but SYN_GITHUB_APP_ID is missing."
+            )
             raise ValueError(msg)
 
         return self
