@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import base64
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from syn_adapters.github.client_jwt import decode_private_key
 
