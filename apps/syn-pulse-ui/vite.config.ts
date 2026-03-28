@@ -4,6 +4,8 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // VITE_BASE_PATH is set during gateway Docker build to '/pulse/'
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [react(), tailwindcss()],
   server: {
     port: 5174,

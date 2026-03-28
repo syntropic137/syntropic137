@@ -79,6 +79,9 @@ jobs:
           - image: syn-dashboard-ui
             dockerfile: apps/syn-dashboard-ui/Dockerfile
             context: "."
+          - image: syn-pulse-ui
+            dockerfile: apps/syn-pulse-ui/Dockerfile
+            context: "."
           - image: event-store
             dockerfile: lib/event-sourcing-platform/event-store/Dockerfile
             context: lib/event-sourcing-platform
@@ -408,7 +411,7 @@ jobs:
           echo "### Published Images" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | Digest |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui event-store sidecar-proxy token-injector agentic-workspace; do
+          for IMAGE_NAME in syn-api syn-gateway syn-collector syn-dashboard-ui syn-pulse-ui event-store sidecar-proxy token-injector agentic-workspace; do
             DIGEST_FILE="/tmp/digests/${IMAGE_NAME}"
             if [[ -f "$DIGEST_FILE" ]]; then
               DIGEST=$(cat "$DIGEST_FILE")

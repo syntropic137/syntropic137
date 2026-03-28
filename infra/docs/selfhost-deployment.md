@@ -5,7 +5,7 @@ Complete guide for deploying Syntropic137 on a self-hosted server (Mac Mini, Lin
 ## Overview
 
 This deployment provides:
-- **Full Syn137 stack**: Dashboard UI, API, Event Store, PostgreSQL
+- **Full Syn137 stack**: Dashboard UI, Pulse UI, API, Event Store, PostgreSQL
 - **Secure external access**: Via Cloudflare Tunnel (no port forwarding)
 - **Automatic restarts**: Services restart on failure or reboot
 - **Log management**: Automatic log rotation
@@ -227,10 +227,19 @@ just selfhost-reset
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Your Self-Host                               │
 │                                                                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐      │
-│  │  cloudflared │───▶│   gateway   │───▶│     api      │      │
-│  │              │    │   (nginx)    │    │  (FastAPI)   │      │
-│  └──────────────┘    └──────────────┘    └──────────────┘      │
+│  ┌──────────────┐    ┌──────────────────────────┐               │
+│  │  cloudflared │───▶│        gateway           │               │
+│  │              │    │   (nginx reverse proxy)   │               │
+│  └──────────────┘    │  /       → Dashboard UI   │               │
+│                      │  /pulse/ → Pulse UI       │               │
+│                      │  /api/   → API proxy      │               │
+│                      └──────────────────────────┘               │
+│                                    │                             │
+│                                    ▼                             │
+│                            ┌──────────────┐                     │
+│                            │     api      │                     │
+│                            │  (FastAPI)   │                     │
+│                            └──────────────┘                     │
 │                                                 │                │
 │                           ┌─────────────────────┼───────────┐   │
 │                           ▼                     ▼           │   │
