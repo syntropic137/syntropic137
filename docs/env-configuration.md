@@ -107,7 +107,7 @@ For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup 
 |----------|----------|---------|-------------|--------------|
 | `SYN_GITHUB_APP_ID` | For GitHub App | None | GitHub App ID | [github.com/settings/apps](https://github.com/settings/apps) |
 | `SYN_GITHUB_APP_NAME` | No | `syn-app` | App name for commit attribution (shows as `<name>[bot]`) | Your app's slug |
-| `SYN_GITHUB_PRIVATE_KEY` | For GitHub App | None | PEM-format private key | Generate from app settings |
+| `SYN_GITHUB_PRIVATE_KEY` | For GitHub App | None | `file:` path, raw PEM, or base64 | Download `.pem` from app settings |
 | `SYN_GITHUB_WEBHOOK_SECRET` | For webhooks | None | Webhook signature secret | Set during app creation |
 
 > **Note:** If either of `SYN_GITHUB_APP_ID` or `SYN_GITHUB_PRIVATE_KEY` is set, both are required. Installation IDs are resolved dynamically via `get_installation_for_repo()`.

@@ -114,6 +114,7 @@ class SetupContext:
       github_app_id          — configure_github_app → configure_env
       github_app_name        — configure_github_app → configure_env
       github_private_key_b64 — configure_github_app → configure_env
+      github_private_key_file_ref — configure_github_app → configure_env (preferred over b64)
       github_webhook_secret  — configure_github_app → configure_env
       cloudflare_tunnel_token — configure_cloudflare → configure_env, configure_smee
       syn_domain             — configure_cloudflare → configure_env, print_summary
@@ -131,6 +132,7 @@ class SetupContext:
     github_app_id: str = ""
     github_app_name: str = ""
     github_private_key_b64: str = ""
+    github_private_key_file_ref: str = ""
     github_webhook_secret: str = ""
     cloudflare_tunnel_token: str = ""
     syn_domain: str = ""
@@ -577,7 +579,9 @@ def _persist_github_app_to_env(ctx: SetupContext) -> None:
         env_updates[ENV_GITHUB_APP_ID] = ctx.github_app_id
     if ctx.github_app_name:
         env_updates[ENV_GITHUB_APP_NAME] = ctx.github_app_name
-    if ctx.github_private_key_b64:
+    if ctx.github_private_key_file_ref:
+        env_updates[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_file_ref
+    elif ctx.github_private_key_b64:
         env_updates[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_b64
     if ctx.github_webhook_secret:
         env_updates[ENV_GITHUB_WEBHOOK_SECRET] = ctx.github_webhook_secret
@@ -628,11 +632,14 @@ def _configure_github_app_manifest(ctx: SetupContext) -> bool:
     ctx.github_app_name = result.get("slug", app_name)
 
     # Extract crown-jewel secrets into ctx for .env injection
-    import base64 as _b64
-
     pem = result.get("pem", "")
     if pem:
-        ctx.github_private_key_b64 = _b64.b64encode(pem.encode()).decode()
+        pem_dest = SECRETS_DIR / "github-private-key.pem"
+        SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+        pem_dest.write_text(pem)
+        pem_dest.chmod(0o600)
+        rel_path = pem_dest.relative_to(PROJECT_ROOT)
+        ctx.github_private_key_file_ref = f"file:{rel_path}"
     webhook_secret = result.get("webhook_secret", "")
     if webhook_secret:
         ctx.github_webhook_secret = webhook_secret
@@ -645,8 +652,6 @@ def _configure_github_app_manifest(ctx: SetupContext) -> bool:
 
 def _configure_github_app_manual(ctx: SetupContext) -> bool:
     """Manual GitHub App configuration (existing app)."""
-    import base64
-
     print()
     print("  Enter your existing GitHub App credentials.")
     print("  (Find them at https://github.com/settings/apps)")
@@ -655,28 +660,25 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
     ctx.github_app_id = prompt("GitHub App ID (numeric)")
     ctx.github_app_name = prompt("GitHub App name (slug)")
 
-    # Private key — base64-encode and store in ctx for .env
+    # Private key — save to secrets dir and use file: reference in .env
     print()
     pem_dest = SECRETS_DIR / "github-private-key.pem"
-    pem_text = ""
     if pem_dest.exists():
         ok("Private key found at infra/docker/secrets/github-private-key.pem")
-        pem_text = pem_dest.read_text()
     else:
         pem_path = prompt("Path to .pem private key file")
         if pem_path and Path(pem_path).expanduser().exists():
             src = Path(pem_path).expanduser()
-            pem_text = src.read_text()
-            # Keep a backup copy in secrets dir (not consumed by Docker Compose)
             SECRETS_DIR.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, pem_dest)
-            ok(f"Private key backup saved to {pem_dest}")
+            ok(f"Private key saved to {pem_dest}")
         else:
             warn("Private key not found — you'll need to add it to .env manually")
-            hint("  base64 < /path/to/your-app.pem | tr -d '\\n'")
+            hint("  SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem")
 
-    if pem_text:
-        ctx.github_private_key_b64 = base64.b64encode(pem_text.encode()).decode()
+    if pem_dest.exists():
+        rel_path = pem_dest.relative_to(PROJECT_ROOT)
+        ctx.github_private_key_file_ref = f"file:{rel_path}"
 
     # Webhook secret — generate or read existing, store in ctx for .env
     import secrets as _secrets
@@ -744,7 +746,9 @@ def configure_env(ctx: SetupContext) -> bool:
         root_subs[ENV_GITHUB_APP_ID] = ctx.github_app_id
     if ctx.github_app_name:
         root_subs[ENV_GITHUB_APP_NAME] = ctx.github_app_name
-    if ctx.github_private_key_b64:
+    if ctx.github_private_key_file_ref:
+        root_subs[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_file_ref
+    elif ctx.github_private_key_b64:
         root_subs[ENV_GITHUB_PRIVATE_KEY] = ctx.github_private_key_b64
     if ctx.github_webhook_secret:
         root_subs[ENV_GITHUB_WEBHOOK_SECRET] = ctx.github_webhook_secret
@@ -893,8 +897,26 @@ def _audit_github_app(ctx: SetupContext) -> tuple[int, int]:
     )
     pem_path = SECRETS_DIR / "github-private-key.pem"
 
-    if pem_b64:
-        # Env var path: base64-encoded PEM — decode and validate
+    if pem_b64 and pem_b64.startswith("file:"):
+        # file: reference — validate the referenced file
+        ref_path = Path(pem_b64[len("file:") :].strip())
+        if not ref_path.is_absolute():
+            ref_path = PROJECT_ROOT / ref_path
+        if ref_path.exists():
+            content = ref_path.read_text()
+            if "BEGIN RSA PRIVATE KEY" in content or "BEGIN PRIVATE KEY" in content:
+                ok(f"Private key (file: → {ref_path.name}) — valid PEM")
+            else:
+                warn(f"Private key file {ref_path} missing PEM header")
+                warnings += 1
+        else:
+            warn(f"Private key file: reference points to missing file: {ref_path}")
+            warnings += 1
+    elif pem_b64 and pem_b64.startswith("-----BEGIN"):
+        # Raw PEM passthrough
+        ok("Private key (raw PEM in env) — valid")
+    elif pem_b64:
+        # Base64-encoded PEM — decode and validate
         try:
             decoded = _b64.b64decode(pem_b64).decode("utf-8", errors="replace")
             if "BEGIN RSA PRIVATE KEY" in decoded or "BEGIN PRIVATE KEY" in decoded:
@@ -2135,7 +2157,9 @@ def _print_op_summary(ctx: SetupContext) -> None:
         fields.append((ENV_GITHUB_APP_ID, ctx.github_app_id))
     if ctx.github_app_name:
         fields.append((ENV_GITHUB_APP_NAME, ctx.github_app_name))
-    if ctx.github_private_key_b64:
+    if ctx.github_private_key_file_ref:
+        fields.append((ENV_GITHUB_PRIVATE_KEY, ctx.github_private_key_file_ref))
+    elif ctx.github_private_key_b64:
         fields.append((ENV_GITHUB_PRIVATE_KEY, ctx.github_private_key_b64))
     if ctx.github_webhook_secret:
         fields.append((ENV_GITHUB_WEBHOOK_SECRET, ctx.github_webhook_secret))

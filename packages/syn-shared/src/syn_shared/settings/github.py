@@ -70,10 +70,13 @@ class GitHubAppSettings(BaseSettings):
     private_key: SecretStr = Field(
         default=SecretStr(""),
         description=(
-            "GitHub App private key, base64-encoded. "
+            "GitHub App private key. Supports three formats: "
+            "(1) file:<path> — read PEM from file, e.g. file:infra/docker/secrets/github-private-key.pem; "
+            "(2) raw PEM starting with '-----BEGIN'; "
+            "(3) base64-encoded PEM string. "
             "Download the .pem from: https://github.com/settings/apps/<app>/privatekeys "
-            "Encode it: cat your-app.pem | base64 | tr -d '\\n' | pbcopy "
-            "Paste the result as the value. Never commit the raw key to git!"
+            "Simplest: place the .pem in infra/docker/secrets/ and use a file: reference. "
+            "Never commit the raw key to git!"
         ),
     )
 

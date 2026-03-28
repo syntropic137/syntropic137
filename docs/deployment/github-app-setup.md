@@ -230,15 +230,16 @@ SYN_GITHUB_WEBHOOK_SECRET=your-webhook-secret
 
 #### For Docker Self-Host
 
-The private key is base64-encoded and stored in `infra/.env` (or resolved
-from 1Password). The `just onboard` wizard handles this automatically.
+The private key is stored in `.env` as a `file:` path reference, raw PEM, or
+base64-encoded string (or resolved from 1Password). The `just onboard` wizard
+handles this automatically.
 
-To encode manually:
+Simplest approach — place the `.pem` in the secrets directory:
 
 ```bash
-# Base64-encode the PEM and add to infra/.env
-base64 < private-key.pem | tr -d '\n'
-# → paste the output as: SYN_GITHUB_PRIVATE_KEY=<base64>
+cp private-key.pem infra/docker/secrets/github-private-key.pem
+# Then set in .env:
+# SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem
 ```
 
 Docker Compose passes the env var to the dashboard container. No file-based

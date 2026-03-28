@@ -49,7 +49,7 @@ configured, 1Password takes precedence (existing env vars are never overwritten)
 
 | Secret | Docker secret file | 1Password field | Notes |
 |--------|-------------------|-----------------|-------|
-| **GitHub App PEM** | `github-private-key.pem` (raw PEM) | `SYN_GITHUB_PRIVATE_KEY` (base64-encoded) | Entrypoint auto-encodes the PEM to base64 |
+| **GitHub App PEM** | `github-private-key.pem` (raw PEM) | `SYN_GITHUB_PRIVATE_KEY` (`file:` path, raw PEM, or base64) | Entrypoint reads PEM via `file:` reference |
 | **GitHub webhook secret** | `github-webhook-secret.txt` | `SYN_GITHUB_WEBHOOK_SECRET` | Plain text |
 | **DB password** | `db-password.txt` | Not needed — entrypoint builds `DATABASE_URL` from the file | |
 | **Redis password** | `redis-password.txt` | Not needed — entrypoint builds `REDIS_URL` from the file | |
@@ -89,7 +89,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 That's it. The selfhost entrypoint reads the secret files and exports:
-- `github-private-key.pem` → base64-encodes → `SYN_GITHUB_PRIVATE_KEY`
+- `github-private-key.pem` → `file:` reference → `SYN_GITHUB_PRIVATE_KEY`
 - `github-webhook-secret.txt` → `SYN_GITHUB_WEBHOOK_SECRET`
 - `db-password.txt` → builds `DATABASE_URL`
 - `redis-password.txt` → builds `REDIS_URL`
@@ -101,17 +101,16 @@ The `.pem` file you download from GitHub is a multi-line RSA key file.
 **For Docker secrets (Path A):** Just copy the raw `.pem` file as-is. The
 entrypoint handles the base64 encoding automatically.
 
-**For 1Password (Path B):** You need to base64-encode it first:
+**For 1Password (Path B):** You can store the base64-encoded key or the raw PEM:
 
 ```bash
-# Encode and copy to clipboard (macOS)
+# Option 1: base64-encode and copy to clipboard (macOS)
 cat ~/Downloads/your-app.pem | base64 | tr -d '\n' | pbcopy
 
-# Or encode to stdout (Linux)
-cat ~/Downloads/your-app.pem | base64 -w0
+# Option 2: store raw PEM directly (1Password handles multiline)
 ```
 
-Paste the resulting base64 string as the `SYN_GITHUB_PRIVATE_KEY` field value
+Paste the value as the `SYN_GITHUB_PRIVATE_KEY` field value
 in 1Password.
 
 > **Note:** You still need the raw `.pem` file in `infra/docker/secrets/` even
@@ -221,7 +220,7 @@ op item edit "syntropic137-config" \
   --vault "syn137-dev" \
   'SYN_GITHUB_APP_ID=123456' \
   'SYN_GITHUB_APP_NAME=your-app-name' \
-  'SYN_GITHUB_PRIVATE_KEY=<base64-encoded-pem>' \
+  'SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem' \
   'SYN_GITHUB_WEBHOOK_SECRET=<webhook-secret>'
 ```
 
@@ -242,7 +241,7 @@ Each secret is a field on that item, labeled after its env var.
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token (alternative) | Claude Code settings |
 | `SYN_GITHUB_APP_ID` | GitHub App numeric ID | GitHub → Settings → Developer Settings → Your App → App ID |
 | `SYN_GITHUB_APP_NAME` | GitHub App slug | Same page, the URL slug (e.g. `syn-engineer-beta`) |
-| `SYN_GITHUB_PRIVATE_KEY` | GitHub App signing key (**base64-encoded**) | `cat your-app.pem \| base64 \| tr -d '\n'` |
+| `SYN_GITHUB_PRIVATE_KEY` | GitHub App signing key (`file:` path, raw PEM, or base64) | Place `.pem` in secrets dir and use `file:` reference |
 | `SYN_GITHUB_WEBHOOK_SECRET` | GitHub webhook HMAC secret | `openssl rand -hex 32` (must match GitHub App settings) |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare Tunnel token | Zero Trust → Networks → Connectors → your tunnel → Install |
 

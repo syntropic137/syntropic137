@@ -67,7 +67,7 @@ just onboard
 ```
 
 This handles:
-- GitHub App private key (base64-encoded into `.env` or resolved from 1Password)
+- GitHub App private key (`file:` path reference, base64, or raw PEM in `.env` — or resolved from 1Password)
 - Webhook secret (generated and stored in `.env` or resolved from 1Password)
 - Cloudflare tunnel token (stored in `.env` or resolved from 1Password)
 
@@ -259,7 +259,7 @@ they never touch the filesystem at all.
 
 | Secret | Env Var | Description |
 |--------|---------|-------------|
-| GitHub private key | `SYN_GITHUB_PRIVATE_KEY` | Base64-encoded PEM |
+| GitHub private key | `SYN_GITHUB_PRIVATE_KEY` | `file:` path, raw PEM, or base64 |
 | Webhook secret | `SYN_GITHUB_WEBHOOK_SECRET` | HMAC signing key |
 | Tunnel token | `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare tunnel auth |
 
@@ -325,7 +325,7 @@ just selfhost-up
 **What to store in your 1Password `syntropic137-config` item:**
 - `SYN_GITHUB_APP_ID`
 - `SYN_GITHUB_APP_NAME`
-- `SYN_GITHUB_PRIVATE_KEY` (base64-encoded PEM)
+- `SYN_GITHUB_PRIVATE_KEY` (`file:` path, raw PEM, or base64)
 - `SYN_GITHUB_WEBHOOK_SECRET`
 - `CLOUDFLARE_TUNNEL_TOKEN`
 - `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
