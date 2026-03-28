@@ -1,13 +1,15 @@
 <p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="https://syntropic137.canny.io"><img src="https://img.shields.io/badge/feedback-Canny-purple.svg" alt="Feature Requests" /></a>
+  <a href="https://github.com/syntropic137/syntropic137/discussions"><img src="https://img.shields.io/badge/community-Discussions-green.svg" alt="Discussions" /></a>
+  <a href="https://syntropic137.com"><img src="https://img.shields.io/badge/web-syntropic137.com-black.svg" alt="Website" /></a>
+</p>
+
+<p align="center">
   <img src="./public/assets/syn137-banner.png" alt="Syntropic137 Banner" width="100%" />
 </p>
 
 # Syntropic137
-
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Feature Requests](https://img.shields.io/badge/feedback-Canny-purple.svg)](https://syntropic137.canny.io)
-[![Discussions](https://img.shields.io/badge/community-Discussions-green.svg)](https://github.com/syntropic137/syntropic137/discussions)
-[![Website](https://img.shields.io/badge/web-syntropic137.com-black.svg)](https://syntropic137.com)
 
 **Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability — every tool call, token, cost, conversation, and artifact permanently captured in a queryable event store.
 
