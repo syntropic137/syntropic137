@@ -68,7 +68,7 @@ export function ContributionHeatmap({ days, startDate, endDate }: ContributionHe
 
   const calendarProps = {
     emptyColor: '#1a1a2e',
-    colors: ['#1a3366', '#2952a3', '#3d6dd9', '#4D80FF'] as const,
+    colors: ['#1a3366', '#2952a3', '#3d6dd9', '#4D80FF'] as string[],
     minValue: 0,
     maxValue,
     monthSpacing: 4,
