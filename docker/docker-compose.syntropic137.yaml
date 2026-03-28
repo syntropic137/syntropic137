@@ -445,7 +445,7 @@ services:
       - agent-net
 
   # ===========================================================================
-  # TOKEN INJECTOR — ext_authz gRPC service (ISS-43)
+  # TOKEN INJECTOR — ext_authz HTTP service (ISS-43)
   # ===========================================================================
   token-injector:
     image: ghcr.io/syntropic137/token-injector:${SYN_VERSION:-latest}
@@ -453,9 +453,6 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
-    secrets:
-      - github_app_private_key
     restart: always
     networks:
       - syn-internal

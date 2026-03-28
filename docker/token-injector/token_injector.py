@@ -13,11 +13,13 @@ the real API key).
 
 Runs as a plain HTTP server on port 9002.
 
+Note: GitHub hosts are passthrough — agents receive installation tokens
+during the setup phase (stored in ~/.git-credentials). The token injector
+does NOT handle GitHub auth.
+
 Environment:
     ANTHROPIC_API_KEY: Anthropic API key (used when CLAUDE_CODE_OAUTH_TOKEN not set)
     CLAUDE_CODE_OAUTH_TOKEN: OAuth token for Claude (takes priority over API key)
-    SYN_GITHUB_APP_PRIVATE_KEY_FILE: Path to PEM file (Docker secret, preferred)
-    SYN_GITHUB_PRIVATE_KEY: GitHub App private key (fallback)
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ import logging
 import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -53,8 +54,6 @@ _ANTHROPIC_HOSTS = (
     # requests arrive with Host: syn-envoy-proxy (ISS-43).
     "syn-envoy-proxy",
 )
-
-_GITHUB_HOSTS = ("api.github.com", "github.com")
 
 
 def _build_anthropic_entry() -> ServiceEntry | None:
@@ -85,18 +84,6 @@ def _build_registry() -> dict[str, ServiceEntry]:
         for host in _ANTHROPIC_HOSTS:
             registry[host] = anthropic_entry
 
-    # GitHub: prefer file-based secret (Docker secret mount)
-    github_key = ""
-    key_file = os.environ.get("SYN_GITHUB_APP_PRIVATE_KEY_FILE", "").strip()
-    if key_file and Path(key_file).is_file():
-        github_key = Path(key_file).read_text(encoding="utf-8").strip()
-    if not github_key:
-        github_key = os.environ.get("SYN_GITHUB_PRIVATE_KEY", "").strip()
-    if github_key:
-        gh_entry = ServiceEntry("github", "Authorization", f"Bearer {github_key}")
-        for host in _GITHUB_HOSTS:
-            registry[host] = gh_entry
-
     return registry
 
 
@@ -104,6 +91,11 @@ REGISTRY = _build_registry()
 
 # Passthrough hosts — allowed but no credential injection
 PASSTHROUGH_HOSTS = {
+    # GitHub — agents get installation tokens during setup phase
+    "api.github.com",
+    "github.com",
+    "raw.githubusercontent.com",
+    # Package registries
     "pypi.org",
     "files.pythonhosted.org",
     "registry.npmjs.org",
