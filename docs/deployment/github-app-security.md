@@ -61,13 +61,17 @@ This document describes how Syn137 securely integrates with GitHub using GitHub 
 ### 1. Private Key (Master Secret)
 
 - **What**: RSA private key in PEM format
-- **Where**: Vault, AWS Secrets Manager, or base64-encoded in env
+- **Where**: Vault, AWS Secrets Manager, or `file:` path / base64 in env
 - **Lifetime**: Until rotated (recommend: 90 days)
 - **Access**: Control plane only, never in containers
 
 ```bash
-# Generate new private key (done in GitHub App settings)
-# Download .pem file, base64 encode for storage
+# Download .pem from GitHub App settings, then either:
+# Option 1 (recommended): file reference
+cp syn-app.pem infra/docker/secrets/github-private-key.pem
+# SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem
+
+# Option 2: base64 encode for inline storage
 cat syn-app.pem | base64 | tr -d '\n'
 ```
 
@@ -234,7 +238,7 @@ See GitHub Issue #24 for multi-tenancy implementation details.
 # Required
 SYN_GITHUB_APP_ID=2461312
 SYN_GITHUB_APP_NAME=aef-engineer-beta
-SYN_GITHUB_PRIVATE_KEY=<base64-encoded-pem>
+SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem
 
 # Optional
 SYN_GITHUB_WEBHOOK_SECRET=<hmac-secret>

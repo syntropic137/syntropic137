@@ -2002,7 +2002,7 @@ Secure token management for agentic operations at scale:
 # GitHub App environment variables
 export SYN_GITHUB_APP_ID=2461312
 export SYN_GITHUB_APP_NAME=aef-engineer-beta
-export SYN_GITHUB_PRIVATE_KEY=$(cat path/to/private-key.pem | base64)
+export SYN_GITHUB_PRIVATE_KEY=file:path/to/private-key.pem
 
 # Verify configuration
 just cli config show | grep GITHUB

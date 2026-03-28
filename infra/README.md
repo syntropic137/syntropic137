@@ -114,7 +114,7 @@ Open `infra/.env` and fill in (at minimum):
 # Required for GitHub integration
 SYN_GITHUB_APP_ID=123456
 SYN_GITHUB_APP_NAME=your-app-name
-SYN_GITHUB_PRIVATE_KEY=<base64-encoded PEM>
+SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem
 SYN_GITHUB_WEBHOOK_SECRET=<your-webhook-secret>
 
 # Required for agent execution (at least one)
@@ -215,7 +215,7 @@ All configuration lives in `infra/.env`. Copy from `infra/.env.example` to get s
 |----------|----------|---------|-------------|
 | `SYN_GITHUB_APP_ID` | **Yes** | — | Numeric App ID from GitHub Settings |
 | `SYN_GITHUB_APP_NAME` | **Yes** | — | App slug (e.g., `syn-engineer-beta`) |
-| `SYN_GITHUB_PRIVATE_KEY` | **Yes** | — | Base64-encoded RSA PEM. Generate: `base64 < app.pem \| tr -d '\n'` |
+| `SYN_GITHUB_PRIVATE_KEY` | **Yes** | — | `file:` path, raw PEM, or base64-encoded. Simplest: `file:infra/docker/secrets/github-private-key.pem` |
 | `SYN_GITHUB_WEBHOOK_SECRET` | **Yes** | — | Webhook HMAC secret. Generate: `openssl rand -hex 32` |
 
 ### Agent Credentials
@@ -384,7 +384,7 @@ APP_ENVIRONMENT (from root .env — see § Environment Files above)
 |-------------|-------|
 | `SYN_GITHUB_APP_ID` | Your GitHub App numeric ID |
 | `SYN_GITHUB_APP_NAME` | Your GitHub App slug |
-| `SYN_GITHUB_PRIVATE_KEY` | Base64-encoded RSA PEM |
+| `SYN_GITHUB_PRIVATE_KEY` | `file:` path, raw PEM, or base64 |
 | `SYN_GITHUB_WEBHOOK_SECRET` | Webhook HMAC secret |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Cloudflare tunnel token |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
