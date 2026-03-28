@@ -54,7 +54,7 @@ jobs:
 
   build-scan-push:
     name: "Build & Scan: ${{ matrix.image }}"
-    runs-on: ubuntu-24.04-arm64-8-cores
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     permissions:
