@@ -26,6 +26,7 @@ import logging
 import os
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -87,9 +88,8 @@ def _build_registry() -> dict[str, ServiceEntry]:
     # GitHub: prefer file-based secret (Docker secret mount)
     github_key = ""
     key_file = os.environ.get("SYN_GITHUB_APP_PRIVATE_KEY_FILE", "").strip()
-    if key_file and os.path.isfile(key_file):
-        with open(key_file, encoding="utf-8") as f:
-            github_key = f.read().strip()
+    if key_file and Path(key_file).is_file():
+        github_key = Path(key_file).read_text(encoding="utf-8").strip()
     if not github_key:
         github_key = os.environ.get("SYN_GITHUB_PRIVATE_KEY", "").strip()
     if github_key:

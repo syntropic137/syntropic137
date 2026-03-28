@@ -174,6 +174,27 @@ class GitHubAppClient:
         """Get the bot email for commits."""
         return self._settings.bot_email
 
+    def _read_key_from_file(self, key_file: str) -> str:
+        """Read and validate a PEM private key from a file path.
+
+        Raises:
+            GitHubAuthError: If file is missing or doesn't contain valid PEM.
+        """
+        path = Path(key_file)
+        if not path.is_file():
+            msg = f"Private key file not found: {path}"
+            raise GitHubAuthError(msg)
+        pem = path.read_text(encoding="utf-8").strip()
+        if not pem.startswith(_PEM_HEADER):
+            msg = f"Private key file does not contain valid PEM: {path}"
+            raise GitHubAuthError(msg)
+        if self._settings.private_key.get_secret_value():
+            logger.warning(
+                "Both app_private_key_file and private_key set; using file: %s",
+                key_file,
+            )
+        return pem
+
     def _get_private_key(self) -> str:
         """Get the private key (cached after first read).
 
@@ -191,28 +212,12 @@ class GitHubAppClient:
             return self._private_key
 
         try:
-            # Priority 1: Direct file path (Docker secret / mounted PEM)
             key_file = self._settings.app_private_key_file
             if key_file:
-                path = Path(key_file)
-                if not path.is_file():
-                    msg = f"Private key file not found: {path}"
-                    raise GitHubAuthError(msg)
-                pem = path.read_text(encoding="utf-8").strip()
-                if not pem.startswith(_PEM_HEADER):
-                    msg = f"Private key file does not contain valid PEM: {path}"
-                    raise GitHubAuthError(msg)
-                if self._settings.private_key.get_secret_value():
-                    logger.warning(
-                        "Both app_private_key_file and private_key set; using file: %s",
-                        key_file,
-                    )
-                self._private_key = pem
-                return self._private_key
-
-            # Priority 2: Env var (base64, raw PEM, or file: reference)
-            encoded = self._settings.private_key.get_secret_value()
-            self._private_key = decode_private_key(encoded)
+                self._private_key = self._read_key_from_file(key_file)
+            else:
+                encoded = self._settings.private_key.get_secret_value()
+                self._private_key = decode_private_key(encoded)
             return self._private_key
         except GitHubAuthError:
             raise
