@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import time
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import jwt
@@ -18,6 +19,10 @@ from syn_adapters.github.client import (
     InstallationToken,
     reset_github_client,
 )
+from syn_adapters.github.client_jwt import _PEM_HEADER
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # Test RSA key (PKCS8 format, DO NOT USE IN PRODUCTION)
 TEST_PRIVATE_KEY = """-----BEGIN PRIVATE KEY-----
@@ -59,6 +64,7 @@ def mock_github_settings() -> MagicMock:
     settings = MagicMock()
     settings.app_id = "12345"
     settings.app_name = "test-app"
+    settings.app_private_key_file = ""  # No file — use env var fallback
     settings.private_key = MagicMock()
     settings.private_key.get_secret_value.return_value = TEST_PRIVATE_KEY_B64
     settings.is_configured = True
@@ -161,7 +167,7 @@ class TestGitHubAppClient:
         key2 = client._get_private_key()
 
         assert key1 == key2
-        assert key1.startswith("-----BEGIN PRIVATE KEY-----")
+        assert key1.startswith(_PEM_HEADER)
 
         # Should only decode once
         mock_github_settings.private_key.get_secret_value.assert_called_once()
@@ -173,6 +179,56 @@ class TestGitHubAppClient:
 
         with pytest.raises(GitHubAuthError, match="Failed to decode"):
             client._get_private_key()
+
+    def test_get_private_key_from_file(
+        self, mock_github_settings: MagicMock, tmp_path: Path
+    ) -> None:
+        """Should read PEM directly from file when app_private_key_file is set."""
+        pem_file = tmp_path / "test.pem"
+        pem_file.write_text(TEST_PRIVATE_KEY)
+
+        mock_github_settings.app_private_key_file = str(pem_file)
+        mock_github_settings.private_key.get_secret_value.return_value = ""
+        client = GitHubAppClient(mock_github_settings)
+
+        key = client._get_private_key()
+        assert key.startswith(_PEM_HEADER)
+
+    def test_get_private_key_file_not_found(self, mock_github_settings: MagicMock) -> None:
+        """Should raise when app_private_key_file points to missing file."""
+        mock_github_settings.app_private_key_file = "/nonexistent/path.pem"
+        client = GitHubAppClient(mock_github_settings)
+
+        with pytest.raises(GitHubAuthError, match="Private key file not found"):
+            client._get_private_key()
+
+    def test_get_private_key_file_invalid_pem(
+        self, mock_github_settings: MagicMock, tmp_path: Path
+    ) -> None:
+        """Should raise when file exists but doesn't contain PEM."""
+        bad_file = tmp_path / "bad.pem"
+        bad_file.write_text("this is not a PEM file")
+
+        mock_github_settings.app_private_key_file = str(bad_file)
+        client = GitHubAppClient(mock_github_settings)
+
+        with pytest.raises(GitHubAuthError, match="does not contain valid PEM"):
+            client._get_private_key()
+
+    def test_get_private_key_file_takes_priority(
+        self, mock_github_settings: MagicMock, tmp_path: Path
+    ) -> None:
+        """File path should take priority over env var when both are set."""
+        pem_file = tmp_path / "test.pem"
+        pem_file.write_text(TEST_PRIVATE_KEY)
+
+        mock_github_settings.app_private_key_file = str(pem_file)
+        # env var also set (base64)
+        mock_github_settings.private_key.get_secret_value.return_value = TEST_PRIVATE_KEY_B64
+        client = GitHubAppClient(mock_github_settings)
+
+        key = client._get_private_key()
+        assert key.startswith(_PEM_HEADER)
 
     @pytest.mark.asyncio
     async def test_get_installation_token_success(self, mock_github_settings: MagicMock) -> None:

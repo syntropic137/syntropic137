@@ -14,8 +14,8 @@ Agent Container (agent-net only, no external egress)
 Shared Envoy Proxy (bridges agent-net + default network)
   ├─ ext_authz → Token Injector (reads keys from proxy's own env vars)
   │   ├─ api.anthropic.com → injects x-api-key or Authorization: Bearer
-  │   ├─ api.github.com    → injects Authorization: Bearer
-  │   ├─ github.com         → injects Authorization: Bearer (git clone)
+  │   ├─ api.github.com    → passthrough (agent uses setup-phase token)
+  │   ├─ github.com         → passthrough (agent uses ~/.git-credentials)
   │   ├─ pypi.org           → passthrough (no injection)
   │   ├─ registry.npmjs.org → passthrough (no injection)
   │   └─ *                  → 403 Forbidden
@@ -47,8 +47,9 @@ Agent containers are attached to the `agent-net` Docker network, which is intern
 | File | Purpose |
 |------|---------|
 | `envoy.yaml` | Envoy configuration: listeners, virtual hosts, clusters, ext_authz |
-| `token_injector.py` | gRPC ext_authz service that injects credentials from env vars |
-| `Dockerfile` | Builds the Envoy proxy image with token injector |
+| `Dockerfile` | Builds the Envoy proxy image (pure Envoy — no credential logic) |
+
+The token injector is a separate service in `docker/token-injector/`.
 
 ## Environment Variables (on the proxy container)
 
@@ -56,7 +57,6 @@ Agent containers are attached to the `agent-net` Docker network, which is intern
 |----------|-------------|----------|
 | `ANTHROPIC_API_KEY` | Anthropic API key | One of API key or OAuth token |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code OAuth token (takes priority over API key) | One of API key or OAuth token |
-| `SYN_GITHUB_PRIVATE_KEY` | GitHub App private key or installation token | For GitHub operations |
 | `SYN_EXECUTION_ID` | Execution ID for tracing headers | No (defaults to "shared") |
 
 ## Allowed Hosts
@@ -66,14 +66,18 @@ Agent containers are attached to the `agent-net` Docker network, which is intern
 | Host | Service | Header Injected |
 |------|---------|----------------|
 | `api.anthropic.com` | Claude API | `x-api-key` or `Authorization: Bearer` |
-| `api.github.com` | GitHub API | `Authorization: Bearer` |
-| `github.com` | Git HTTPS (clone/push) | `Authorization: Bearer` |
-| `raw.githubusercontent.com` | GitHub raw content | `Authorization: Bearer` |
 
 ### Passthrough (No Injection)
 
+GitHub credentials are provisioned during the setup phase (installation token
+stored in `~/.git-credentials` and `~/.config/gh/hosts.yml`). The proxy routes
+traffic but does not inject credentials.
+
 | Host | Purpose |
 |------|---------|
+| `api.github.com` | GitHub API |
+| `github.com` | Git HTTPS (clone/push) |
+| `raw.githubusercontent.com` | GitHub raw content |
 | `pypi.org` | Python packages |
 | `files.pythonhosted.org` | Python package downloads |
 | `registry.npmjs.org` | npm packages |

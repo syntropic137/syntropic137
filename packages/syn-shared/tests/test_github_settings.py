@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from pydantic import SecretStr
 
@@ -9,6 +11,9 @@ from syn_shared.settings.github import (
     GitHubAppSettings,
     reset_github_settings,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.mark.unit
@@ -126,3 +131,109 @@ class TestGitHubAppSettings:
         assert settings.app_name == "test-app"
         assert settings.private_key.get_secret_value() == "secret-key"
         assert settings.is_configured
+
+    # =========================================================================
+    # FILE-BASED KEY (app_private_key_file) — Docker secret path
+    # =========================================================================
+
+    def test_is_configured_with_key_file(self, tmp_path: Path) -> None:
+        """app_id + non-empty key file = configured."""
+        pem = tmp_path / "key.pem"
+        pem.write_text("-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----")
+
+        settings = GitHubAppSettings(
+            app_id="123",
+            private_key=SecretStr(""),
+            app_private_key_file=str(pem),
+            _env_file=None,
+        )
+        assert settings.is_configured
+        assert settings._has_usable_key_file
+
+    def test_empty_placeholder_file_not_configured(self, tmp_path: Path) -> None:
+        """Empty placeholder (Docker secret for unconfigured app) should not count."""
+        pem = tmp_path / "key.pem"
+        pem.touch()  # 0 bytes — empty placeholder
+
+        settings = GitHubAppSettings(
+            app_id="",
+            private_key=SecretStr(""),
+            app_private_key_file=str(pem),
+            _env_file=None,
+        )
+        assert not settings.is_configured
+        assert not settings._has_usable_key_file
+
+    def test_nonexistent_key_file_not_configured(self) -> None:
+        """Nonexistent file path should not count as configured."""
+        settings = GitHubAppSettings(
+            app_id="",
+            private_key=SecretStr(""),
+            app_private_key_file="/run/secrets/github_app_private_key",
+            _env_file=None,
+        )
+        assert not settings.is_configured
+        assert not settings._has_usable_key_file
+
+    def test_validator_accepts_key_file_only(self, tmp_path: Path) -> None:
+        """app_id + key file (no env var) should pass validation."""
+        pem = tmp_path / "key.pem"
+        pem.write_text("-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----")
+
+        settings = GitHubAppSettings(
+            app_id="123",
+            private_key=SecretStr(""),
+            app_private_key_file=str(pem),
+            _env_file=None,
+        )
+        assert settings.is_configured
+
+    def test_validator_rejects_app_id_with_empty_placeholder(self, tmp_path: Path) -> None:
+        """app_id + empty placeholder file + no env var = incomplete config."""
+        pem = tmp_path / "key.pem"
+        pem.touch()  # 0 bytes
+
+        with pytest.raises(ValueError, match="Incomplete GitHub App config"):
+            GitHubAppSettings(
+                app_id="123",
+                private_key=SecretStr(""),
+                app_private_key_file=str(pem),
+                _env_file=None,
+            )
+
+    def test_validator_rejects_app_id_with_nonexistent_file(self) -> None:
+        """app_id + nonexistent file path + no env var = incomplete config."""
+        with pytest.raises(ValueError, match="Incomplete GitHub App config"):
+            GitHubAppSettings(
+                app_id="123",
+                private_key=SecretStr(""),
+                app_private_key_file="/nonexistent/key.pem",
+                _env_file=None,
+            )
+
+    def test_partial_config_missing_private_key_accepts_key_file(self, tmp_path: Path) -> None:
+        """Previously this test required private_key env var; now key file alone is sufficient."""
+        pem = tmp_path / "key.pem"
+        pem.write_text("-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----")
+
+        settings = GitHubAppSettings(
+            app_id="123456",
+            private_key=SecretStr(""),
+            installation_id="123",
+            app_private_key_file=str(pem),
+            _env_file=None,
+        )
+        assert settings.is_configured
+
+    def test_key_file_with_no_app_id_raises_error(self, tmp_path: Path) -> None:
+        """Key file set but no app_id = incomplete config."""
+        pem = tmp_path / "key.pem"
+        pem.write_text("-----BEGIN RSA PRIVATE KEY-----\ndata\n-----END RSA PRIVATE KEY-----")
+
+        with pytest.raises(ValueError, match="Incomplete GitHub App config"):
+            GitHubAppSettings(
+                app_id="",
+                private_key=SecretStr(""),
+                app_private_key_file=str(pem),
+                _env_file=None,
+            )

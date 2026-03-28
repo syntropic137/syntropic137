@@ -251,6 +251,11 @@ gh project item-edit --project-id PVT_kwDOD5uLBM4BPw_5 --id <item-id> \
 - P0 = do first, P3 = do last (within each milestone)
 - Launch milestone must be clear before open source release
 
+## Security
+
+- [Security Practices](docs/security-practices.md) — supply chain hardening, Docker runtime security, credential management
+- [GitHub App Security Model](docs/deployment/github-app-security.md) — PEM handling, token lifecycle, network isolation, token injector architecture
+
 ## Tooling
 
 - **uv** for Python package management (workspaces)

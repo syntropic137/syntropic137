@@ -43,7 +43,7 @@ ROOT_ENV_EXAMPLE = PROJECT_ROOT / ".env.example"
 SECRET_DB_PASSWORD = "db-password.secret"
 SECRET_REDIS_PASSWORD = "redis-password.secret"
 SECRET_MINIO_PASSWORD = "minio-password.secret"
-SECRET_GITHUB_KEY = "github-private-key.pem"
+SECRET_GITHUB_KEY = "github-app-private-key.pem"
 SECRET_CF_TUNNEL_TOKEN = "cloudflare-tunnel-token.txt"
 
 # Required auto-generated secrets: filename → byte length (2x chars in hex)

@@ -384,7 +384,7 @@ def save_credentials(
     """Persist the credentials returned by :func:`exchange_code`.
 
     Saves:
-    - ``github-private-key.pem`` — the RSA private key
+    - ``github-app-private-key.pem`` — the RSA private key
     - ``github-webhook-secret.txt`` — the webhook secret
     - ``github-client-secret.txt`` — the OAuth client secret
 
@@ -395,7 +395,7 @@ def save_credentials(
     written: dict[str, str] = {}
 
     # Private key
-    pem_path = sdir / "github-private-key.pem"
+    pem_path = sdir / "github-app-private-key.pem"
     pem_path.write_text(credentials["pem"])
     _set_secure_permissions(pem_path)
     written["pem"] = str(pem_path)

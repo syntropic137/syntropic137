@@ -33,6 +33,7 @@ class AppEnvironment(str, Enum):
     BETA = "beta"
     STAGING = "staging"
     PRODUCTION = "production"
+    SELFHOST = "selfhost"
     TEST = "test"
     OFFLINE = "offline"
 
