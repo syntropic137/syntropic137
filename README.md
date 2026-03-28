@@ -4,6 +4,11 @@
 
 # Syntropic137
 
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Feature Requests](https://img.shields.io/badge/feedback-Canny-purple.svg)](https://syntropic137.canny.io)
+[![Discussions](https://img.shields.io/badge/community-Discussions-green.svg)](https://github.com/syntropic137/syntropic137/discussions)
+[![Website](https://img.shields.io/badge/web-syntropic137.com-black.svg)](https://syntropic137.com)
+
 **Self-hosted agentic engineering platform.** Run AI agents in isolated Docker workspaces with full observability — every tool call, token, cost, conversation, and artifact permanently captured in a queryable event store.
 
 - **Permanent, queryable data** — events, conversation logs, and artifacts are never lost. Analyze what agents do across sessions, workflows, repos, systems, and organizations. Enables compounding learning loops.
