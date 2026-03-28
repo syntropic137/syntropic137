@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import Field, SecretStr, model_validator
@@ -70,13 +71,21 @@ class GitHubAppSettings(BaseSettings):
     private_key: SecretStr = Field(
         default=SecretStr(""),
         description=(
-            "GitHub App private key. Supports three formats: "
-            "(1) file:<path> — read PEM from file, e.g. file:infra/docker/secrets/github-private-key.pem; "
+            "GitHub App private key (fallback). Supports three formats: "
+            "(1) file:<path> — read PEM from file; "
             "(2) raw PEM starting with '-----BEGIN'; "
             "(3) base64-encoded PEM string. "
-            "Download the .pem from: https://github.com/settings/apps/<app>/privatekeys "
-            "Simplest: place the .pem in infra/docker/secrets/ and use a file: reference. "
-            "Never commit the raw key to git!"
+            "Prefer SYN_GITHUB_APP_PRIVATE_KEY_FILE for Docker deployments."
+        ),
+    )
+
+    app_private_key_file: str = Field(
+        default="",
+        description=(
+            "Path to PEM file containing the GitHub App private key. "
+            "Takes priority over SYN_GITHUB_PRIVATE_KEY env var. "
+            "In Docker: set to /run/secrets/github_app_private_key "
+            "(mounted as tmpfs — never hits disk, not visible in docker inspect)."
         ),
     )
 
@@ -101,15 +110,12 @@ class GitHubAppSettings(BaseSettings):
     def is_configured(self) -> bool:
         """Check if GitHub App is configured.
 
-        Returns True if the App identity fields are set:
-        - app_id
-        - private_key (non-empty)
-
-        Note: Installations are resolved dynamically per-repo via
-        get_installation_for_repo(), since a single app can be installed
-        on multiple orgs/accounts.
+        Returns True if app_id is set AND a private key is available via
+        either app_private_key_file (preferred) or private_key env var.
         """
-        return bool(self.app_id and self.private_key.get_secret_value())
+        has_key = bool(self.private_key.get_secret_value())
+        has_key_file = bool(self.app_private_key_file) and Path(self.app_private_key_file).is_file()
+        return bool(self.app_id and (has_key or has_key_file))
 
     @property
     def bot_name(self) -> str:
@@ -137,26 +143,25 @@ class GitHubAppSettings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_complete_config(self) -> Self:
-        """Ensure GitHub App identity fields are both set or both absent.
+        """Ensure GitHub App config is complete or entirely absent.
 
-        app_id and private_key must be provided together — one without
-        the other is a misconfiguration.
-
-        Installations are resolved dynamically per-repo for multi-tenant support.
+        app_id requires at least one key source (file or env var).
+        A key source without app_id is also a misconfiguration.
         """
-        identity_fields = [
-            self.app_id,
-            self.private_key.get_secret_value(),
-        ]
-        provided = sum(1 for f in identity_fields if f)
+        has_app_id = bool(self.app_id)
+        has_key = bool(self.private_key.get_secret_value())
+        has_key_file = bool(self.app_private_key_file)
+        has_any_key = has_key or has_key_file
 
-        if provided == 1:
-            missing = []
-            if not self.app_id:
-                missing.append("SYN_GITHUB_APP_ID")
-            if not self.private_key.get_secret_value():
-                missing.append("SYN_GITHUB_PRIVATE_KEY")
-            msg = f"Incomplete GitHub App config. Missing: {', '.join(missing)}"
+        if has_app_id and not has_any_key:
+            msg = (
+                "Incomplete GitHub App config: SYN_GITHUB_APP_ID is set but no private key. "
+                "Set SYN_GITHUB_APP_PRIVATE_KEY_FILE or SYN_GITHUB_PRIVATE_KEY."
+            )
+            raise ValueError(msg)
+
+        if not has_app_id and has_any_key:
+            msg = "Incomplete GitHub App config: private key is set but SYN_GITHUB_APP_ID is missing."
             raise ValueError(msg)
 
         return self

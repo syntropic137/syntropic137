@@ -123,7 +123,7 @@ services:
     volumes:
       - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/selfhost-entrypoint.sh"]
-    command: ["python", "-m", "syn_collector"]
+    command: ["python", "-m", "syn_collector.cli", "serve", "--port", "8080", "--host", "0.0.0.0"]
     environment:
       EVENT_COLLECTOR_PORT: "8080"
       SYN_OBSERVABILITY_DB_URL: postgres://${POSTGRES_USER:-syn}:${POSTGRES_PASSWORD:-syn_dev_password}@timescaledb:5432/${POSTGRES_DB:-syn}
@@ -225,10 +225,10 @@ services:
       LOG_FORMAT: ${LOG_FORMAT:-json}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       APP_ENVIRONMENT: ${APP_ENVIRONMENT:-selfhost}
-      # GitHub App (optional)
+      # GitHub App (optional — private key mounted as Docker secret)
       SYN_GITHUB_APP_ID: ${SYN_GITHUB_APP_ID:-}
       SYN_GITHUB_APP_NAME: ${SYN_GITHUB_APP_NAME:-}
-      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+      SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
       SYN_GITHUB_WEBHOOK_SECRET: ${SYN_GITHUB_WEBHOOK_SECRET:-}
       # 1Password (optional)
       OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:-}
@@ -261,6 +261,7 @@ services:
       - db_password
       - redis_password
       - minio_password
+      - github_app_private_key
     healthcheck:
       test:
         [
@@ -433,7 +434,7 @@ services:
       token-injector:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:9901/ready"]
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/8081' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -452,7 +453,9 @@ services:
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
-      SYN_GITHUB_PRIVATE_KEY: ${SYN_GITHUB_PRIVATE_KEY:-}
+      SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+    secrets:
+      - github_app_private_key
     restart: always
     networks:
       - syn-internal
@@ -467,6 +470,8 @@ secrets:
     file: ./secrets/redis-password.secret
   minio_password:
     file: ./secrets/minio-password.secret
+  github_app_private_key:
+    file: ./secrets/github-app-private-key.pem
 
 # =============================================================================
 # VOLUMES

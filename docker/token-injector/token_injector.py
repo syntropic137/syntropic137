@@ -16,7 +16,8 @@ Runs as a plain HTTP server on port 9002.
 Environment:
     ANTHROPIC_API_KEY: Anthropic API key (used when CLAUDE_CODE_OAUTH_TOKEN not set)
     CLAUDE_CODE_OAUTH_TOKEN: OAuth token for Claude (takes priority over API key)
-    SYN_GITHUB_PRIVATE_KEY: GitHub App private key / installation token
+    SYN_GITHUB_APP_PRIVATE_KEY_FILE: Path to PEM file (Docker secret, preferred)
+    SYN_GITHUB_PRIVATE_KEY: GitHub App private key (fallback)
 """
 
 from __future__ import annotations
@@ -83,7 +84,14 @@ def _build_registry() -> dict[str, ServiceEntry]:
         for host in _ANTHROPIC_HOSTS:
             registry[host] = anthropic_entry
 
-    github_key = os.environ.get("SYN_GITHUB_PRIVATE_KEY", "").strip()
+    # GitHub: prefer file-based secret (Docker secret mount)
+    github_key = ""
+    key_file = os.environ.get("SYN_GITHUB_APP_PRIVATE_KEY_FILE", "").strip()
+    if key_file and os.path.isfile(key_file):
+        with open(key_file, encoding="utf-8") as f:
+            github_key = f.read().strip()
+    if not github_key:
+        github_key = os.environ.get("SYN_GITHUB_PRIVATE_KEY", "").strip()
     if github_key:
         gh_entry = ServiceEntry("github", "Authorization", f"Bearer {github_key}")
         for host in _GITHUB_HOSTS:

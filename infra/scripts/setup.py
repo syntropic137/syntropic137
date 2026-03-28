@@ -83,6 +83,7 @@ from shared import (
     ROOT_ENV_EXAMPLE,
     ROOT_ENV_FILE,
     SCRIPTS_DIR,
+    SECRET_GITHUB_KEY,
     SECRETS_DIR,
     WEBHOOK_ROUTE,
     compose_file_args,
@@ -634,7 +635,7 @@ def _configure_github_app_manifest(ctx: SetupContext) -> bool:
     # Extract crown-jewel secrets into ctx for .env injection
     pem = result.get("pem", "")
     if pem:
-        pem_dest = SECRETS_DIR / "github-private-key.pem"
+        pem_dest = SECRETS_DIR / SECRET_GITHUB_KEY
         SECRETS_DIR.mkdir(parents=True, exist_ok=True)
         pem_dest.write_text(pem)
         pem_dest.chmod(0o600)
@@ -662,9 +663,9 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
 
     # Private key — save to secrets dir and use file: reference in .env
     print()
-    pem_dest = SECRETS_DIR / "github-private-key.pem"
+    pem_dest = SECRETS_DIR / SECRET_GITHUB_KEY
     if pem_dest.exists():
-        ok("Private key found at infra/docker/secrets/github-private-key.pem")
+        ok(f"Private key found at {pem_dest.relative_to(PROJECT_ROOT)}")
     else:
         pem_path = prompt("Path to .pem private key file")
         if pem_path and Path(pem_path).expanduser().exists():
@@ -673,8 +674,8 @@ def _configure_github_app_manual(ctx: SetupContext) -> bool:
             shutil.copy2(src, pem_dest)
             ok(f"Private key saved to {pem_dest}")
         else:
-            warn("Private key not found — you'll need to add it to .env manually")
-            hint("  SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem")
+            warn("Private key not found — copy your .pem to:")
+            hint(f"  {pem_dest.relative_to(PROJECT_ROOT)}")
 
     if pem_dest.exists():
         rel_path = pem_dest.relative_to(PROJECT_ROOT)
@@ -780,7 +781,7 @@ def _audit_file_security() -> tuple[int, int]:
     warnings = 0
 
     # PEM file permissions
-    pem_path = SECRETS_DIR / "github-private-key.pem"
+    pem_path = SECRETS_DIR / SECRET_GITHUB_KEY
     if pem_path.exists():
         try:
             mode = pem_path.stat().st_mode
@@ -895,7 +896,7 @@ def _audit_github_app(ctx: SetupContext) -> tuple[int, int]:
         os.environ.get(ENV_GITHUB_PRIVATE_KEY, "").strip()
         or root_vals.get(ENV_GITHUB_PRIVATE_KEY, "").strip()
     )
-    pem_path = SECRETS_DIR / "github-private-key.pem"
+    pem_path = SECRETS_DIR / SECRET_GITHUB_KEY
 
     if pem_b64 and pem_b64.startswith("file:"):
         # file: reference — validate the referenced file

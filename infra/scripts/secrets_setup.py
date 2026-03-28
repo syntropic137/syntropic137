@@ -36,7 +36,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-from shared import REQUIRED_SECRETS, SECRETS_DIR, set_secure_permissions
+from shared import REQUIRED_SECRETS, SECRET_GITHUB_KEY, SECRETS_DIR, set_secure_permissions
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,6 +82,14 @@ def generate_secrets(force: bool = False) -> bool:
         set_secure_permissions(path)
         print(f"  ✓ {filename} (generated)")
         generated += 1
+
+    # Ensure GitHub App PEM placeholder exists (Docker Compose requires the file
+    # even when GitHub integration is not configured — the app handles empty files
+    # gracefully by checking is_configured before reading the key).
+    pem_placeholder = SECRETS_DIR / SECRET_GITHUB_KEY
+    if not pem_placeholder.exists():
+        pem_placeholder.touch(mode=0o600)
+        print(f"  ✓ {SECRET_GITHUB_KEY} (placeholder created)")
 
     print()
 

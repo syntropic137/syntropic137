@@ -6,9 +6,10 @@ set -e
 # This ensures DATABASE_URL and REDIS_URL are built from secrets rather
 # than dev defaults.
 #
-# GitHub secrets (SYN_GITHUB_PRIVATE_KEY, SYN_GITHUB_WEBHOOK_SECRET) are
-# passed as env vars via compose (sourced from 1Password or .env), not as
-# Docker secret files.
+# GitHub App private key is mounted as a Docker secret at
+# /run/secrets/github_app_private_key (preferred, tmpfs-backed).
+# The app reads the file directly via SYN_GITHUB_APP_PRIVATE_KEY_FILE.
+# SYN_GITHUB_WEBHOOK_SECRET is still passed as an env var.
 
 # Read DB password from Docker secret if available
 if [ -f /run/secrets/db_password ]; then

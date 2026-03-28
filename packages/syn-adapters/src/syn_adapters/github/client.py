@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -173,24 +174,49 @@ class GitHubAppClient:
         return self._settings.bot_email
 
     def _get_private_key(self) -> str:
-        """Get the decoded private key (cached after first decode).
+        """Get the private key (cached after first read).
+
+        Priority:
+            1. app_private_key_file — direct file read (Docker secret / mounted PEM)
+            2. private_key env var — decoded via decode_private_key() (base64/PEM/file:)
 
         Returns:
             PEM-formatted private key string.
 
         Raises:
-            GitHubAuthError: If private key is invalid.
+            GitHubAuthError: If private key cannot be resolved.
         """
         if self._private_key is not None:
             return self._private_key
 
         try:
-            assert self._settings.private_key is not None
+            # Priority 1: Direct file path (Docker secret / mounted PEM)
+            key_file = self._settings.app_private_key_file
+            if key_file:
+                path = Path(key_file)
+                if not path.is_file():
+                    msg = f"Private key file not found: {path}"
+                    raise GitHubAuthError(msg)
+                pem = path.read_text(encoding="utf-8").strip()
+                if not pem.startswith("-----BEGIN"):
+                    msg = f"Private key file does not contain valid PEM: {path}"
+                    raise GitHubAuthError(msg)
+                if self._settings.private_key.get_secret_value():
+                    logger.warning(
+                        "Both app_private_key_file and private_key set; using file: %s",
+                        key_file,
+                    )
+                self._private_key = pem
+                return self._private_key
+
+            # Priority 2: Env var (base64, raw PEM, or file: reference)
             encoded = self._settings.private_key.get_secret_value()
             self._private_key = decode_private_key(encoded)
             return self._private_key
+        except GitHubAuthError:
+            raise
         except Exception as e:
-            msg = f"Failed to decode private key: {e}"
+            msg = f"Failed to resolve private key: {e}"
             raise GitHubAuthError(msg) from e
 
     def _generate_jwt(self) -> str:
@@ -293,7 +319,7 @@ def get_github_client() -> GitHubAppClient:
     settings = get_settings()
 
     if not settings.github.is_configured:
-        msg = "GitHub App not configured. Set SYN_GITHUB_APP_ID and SYN_GITHUB_PRIVATE_KEY."
+        msg = "GitHub App not configured. Set SYN_GITHUB_APP_ID and either SYN_GITHUB_APP_PRIVATE_KEY_FILE or SYN_GITHUB_PRIVATE_KEY."
         raise ValueError(msg)
 
     _github_client = GitHubAppClient(settings.github)
