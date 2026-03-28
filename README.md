@@ -1,8 +1,8 @@
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="MIT License" /></a>
-  <a href="https://syntropic137.canny.io"><img src="https://img.shields.io/badge/feedback-Canny-a855f7?style=for-the-badge&logo=headspace&logoColor=white" alt="Feature Requests" /></a>
-  <a href="https://github.com/syntropic137/syntropic137/discussions"><img src="https://img.shields.io/badge/community-Discussions-22c55e?style=for-the-badge&logo=github&logoColor=white" alt="Discussions" /></a>
-  <a href="https://syntropic137.com"><img src="https://img.shields.io/badge/web-syntropic137.com-4D80FF?style=for-the-badge&logo=safari&logoColor=white" alt="Website" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT License" /></a>
+  <a href="https://syntropic137.canny.io"><img src="https://img.shields.io/badge/feedback-Canny-a855f7?style=flat-square" alt="Feature Requests" /></a>
+  <a href="https://github.com/syntropic137/syntropic137/discussions"><img src="https://img.shields.io/badge/community-Discussions-22c55e?style=flat-square&logo=github&logoColor=white" alt="Discussions" /></a>
+  <a href="https://syntropic137.com"><img src="https://img.shields.io/badge/web-syntropic137.com-4D80FF?style=flat-square" alt="Website" /></a>
 </p>
 
 <p align="center">
