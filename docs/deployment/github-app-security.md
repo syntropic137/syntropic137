@@ -13,74 +13,74 @@ This document describes how Syn137 securely integrates with GitHub using GitHub 
 | **Rate Limits** | 5k/hour shared | 5k/hour per installation |
 | **Rotation** | Manual | Automatic |
 
-## Token Flow
+## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                          Syn137 Control Plane                           │
+│                     Syn137 Control Plane (API container)            │
+│                                                                     │
+│   PEM key: /run/secrets/github_app_private_key (tmpfs, RAM-only)   │
 │                                                                     │
 │   ┌─────────────────────────────────────────────────────────────┐   │
 │   │                    GitHubAppClient                           │   │
 │   │                                                             │   │
-│   │   1. Load private key (from Vault/env)                      │   │
-│   │   2. Generate JWT (10 min TTL, signed with private key)     │   │
+│   │   1. Read PEM from Docker secret (file path)                │   │
+│   │   2. Generate JWT (10 min TTL, signed with PEM)             │   │
 │   │   3. Exchange JWT for installation token (1 hour TTL)       │   │
 │   │   4. Cache token, refresh at 50 min                         │   │
 │   │                                                             │   │
 │   └─────────────────────────────────────────────────────────────┘   │
 │                                   │                                  │
-│                                   ▼                                  │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                    Token Vending Service                     │   │
-│   │                                                             │   │
-│   │   • Issues scoped tokens to sidecars                        │   │
-│   │   • Tracks which execution has which token                  │   │
-│   │   • Revokes all tokens when execution completes             │   │
-│   │                                                             │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
+│                           Setup Phase                                │
+│                    (installation token only)                          │
+│                                   │                                  │
+└───────────────────────────────────┼──────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                         Agent Container                              │
 │                                                                     │
-│   Environment:                                                      │
-│     GITHUB_API_URL=http://localhost:8080/github                    │
-│     EXECUTION_ID=exec-abc123                                        │
+│   Setup phase injects:                                              │
+│     ~/.git-credentials        (installation token, 1-hour TTL)     │
+│     ~/.config/gh/hosts.yml    (gh CLI auth)                        │
 │                                                                     │
-│   NO GITHUB TOKEN! All git operations go through sidecar.          │
+│   Then secrets are CLEARED from environment.                        │
 │                                                                     │
-│   Git commands use credential helper that calls sidecar:           │
-│     git config credential.helper '!sidecar-git-credential'         │
+│   NO PEM. NO raw signing key. Only the derived token.              │
+│                                                                     │
+│   All traffic routed through shared Envoy proxy:                   │
+│     ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081                 │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Token Types
 
-### 1. Private Key (Master Secret)
+### 1. PEM Key (Master Secret)
 
-- **What**: RSA private key in PEM format
-- **Where**: Vault, AWS Secrets Manager, or `file:` path / base64 in env
+- **What**: RSA key in PEM format, downloaded from GitHub App settings
+- **Where**: Docker secret at `/run/secrets/github_app_private_key` (tmpfs, RAM-only)
 - **Lifetime**: Until rotated (recommend: 90 days)
-- **Access**: Control plane only, never in containers
+- **Access**: API container only, never in agent containers
 
 ```bash
-# Download .pem from GitHub App settings, then either:
-# Option 1 (recommended): file reference
-cp syn-app.pem infra/docker/secrets/github-private-key.pem
-# SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem
+# Download .pem from GitHub App settings, then:
+# Selfhost: place at ~/.syntropic137/secrets/github-app-private-key.pem
+cp syn-app.pem ~/.syntropic137/secrets/github-app-private-key.pem
+chmod 600 ~/.syntropic137/secrets/github-app-private-key.pem
 
-# Option 2: base64 encode for inline storage
-cat syn-app.pem | base64 | tr -d '\n'
+# Docker Compose mounts it as a secret (tmpfs — never hits disk inside the container).
+# The app reads it via SYN_GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github_app_private_key
 ```
+
+**Fallback (dev/CI):** Set `SYN_GITHUB_PRIVATE_KEY` as an env var with a `file:` path, raw PEM, or base64-encoded PEM. The Docker secret path takes priority when both are set.
 
 ### 2. JWT Token (Ephemeral)
 
-- **What**: JSON Web Token signed with private key
+- **What**: JSON Web Token signed with the PEM
 - **Lifetime**: 10 minutes maximum
 - **Use**: Exchange for installation token
-- **Access**: Control plane only
+- **Access**: API container only, never leaves the control plane
 
 ```python
 payload = {
@@ -88,15 +88,15 @@ payload = {
     'exp': now + 600,     # Expires in 10 minutes
     'iss': app_id,        # GitHub App ID
 }
-jwt_token = jwt.encode(payload, private_key, algorithm='RS256')
+jwt_token = jwt.encode(payload, pem_key, algorithm='RS256')
 ```
 
 ### 3. Installation Token (Short-Lived)
 
-- **What**: OAuth-style token for API access
+- **What**: OAuth-style token for GitHub API access
 - **Lifetime**: 1 hour (GitHub enforced maximum)
-- **Scope**: Only repos where app is installed
-- **Access**: Sidecar only, never in agent container
+- **Scope**: Only repos where the app is installed
+- **Access**: Baked into agent container during setup phase, then environment is cleared
 
 ```python
 response = httpx.post(
@@ -107,19 +107,35 @@ installation_token = response.json()['token']
 # Token format: ghs_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
+> **Note:** Installation tokens expire after 1 hour. For agent sessions exceeding 1 hour, token refresh is tracked in GitHub Issue #377.
+
 ## Security Controls
 
-### 1. Private Key Protection
+### 1. PEM Protection (Docker Secrets)
+
+The PEM is mounted as a Docker secret — stored on tmpfs (RAM-only) inside the container:
+
+- **Not visible** in `docker inspect` output
+- **Not visible** in `/proc/1/environ` (not an env var)
+- **Not visible** in `docker compose config` output
+- **Not written** to the container filesystem (tmpfs only)
+- **Host file** permissions: `0600` (owner read/write only)
 
 ```yaml
-# Vault policy for private key
-path "secret/data/syn/github/private-key" {
-  capabilities = ["read"]
-}
+# docker-compose.syntropic137.yaml
+secrets:
+  github_app_private_key:
+    file: ./secrets/github-app-private-key.pem
 
-# Only Token Vending Service can access
-allowed_entity_aliases = ["token-vending-service"]
+services:
+  api:
+    secrets:
+      - github_app_private_key
+    environment:
+      SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
 ```
+
+Only the API container has access to the PEM. Agent containers never see it.
 
 ### 2. Token Scoping
 
@@ -144,25 +160,28 @@ Installation tokens are automatically scoped to:
 
 ### 3. Token Revocation
 
-Tokens can be revoked in multiple ways:
-
 ```python
-# 1. Automatic: Token expires after 1 hour
+# 1. Automatic: Token expires after 1 hour (GitHub enforced)
 
-# 2. Execution complete: Revoke immediately
-await token_vending.revoke_tokens(execution_id)
-
-# 3. Emergency: Revoke all tokens for installation
+# 2. Emergency: Revoke a specific installation token
 httpx.delete(
     f'https://api.github.com/installation/token',
     headers={'Authorization': f'Bearer {installation_token}'},
 )
 
-# 4. Nuclear: Suspend entire GitHub App
-# Done via GitHub.com UI
+# 3. Nuclear: Suspend entire GitHub App via GitHub.com UI
 ```
 
-### 4. Audit Trail
+### 4. Network Isolation
+
+Agent containers run on a restricted Docker network (`agent-net`):
+
+- **Anthropic API**: Routed through shared Envoy proxy (`syn-envoy-proxy:8081`). Agents hold a placeholder key (`proxy-managed`); the token injector (`ext_authz`) replaces it with the real credential. Direct calls to `api.anthropic.com` fail.
+- **GitHub API**: Passthrough — agents use the installation token baked into `~/.git-credentials` during setup. The token injector does not handle GitHub auth.
+- **Package registries**: Passthrough (pypi.org, npmjs.org, etc.)
+- **All other hosts**: Blocked by the Envoy allowlist (returns 403).
+
+### 5. Audit Trail
 
 All GitHub operations are auditable:
 
@@ -171,24 +190,10 @@ All GitHub operations are auditable:
 {
   "@timestamp": "2025-12-12T01:30:00Z",
   "action": "git.push",
-  "actor": "aef-engineer-beta[bot]",
-  "actor_id": 12345678,
-  "repository": "syntropic137/sandbox_aef-engineer-beta",
+  "actor": "your-app-name[bot]",
+  "repository": "org/repo",
   "ref": "refs/heads/feature/agent-changes",
   "commit_sha": "abc1234"
-}
-```
-
-```json
-// Syn137 internal audit log
-{
-  "timestamp": "2025-12-12T01:30:00Z",
-  "execution_id": "exec-abc123",
-  "workflow_id": "code-review-v1",
-  "operation": "git.push",
-  "repository": "syntropic137/sandbox_aef-engineer-beta",
-  "commit_sha": "abc1234",
-  "agent_session": "session-xyz"
 }
 ```
 
@@ -198,50 +203,41 @@ Commits made by the agent show clear bot attribution:
 
 ```
 commit abc1234567890
-Author: aef-engineer-beta[bot] <2461312+aef-engineer-beta[bot]@users.noreply.github.com>
+Author: your-app-name[bot] <APP_ID+your-app-name[bot]@users.noreply.github.com>
 Date:   Thu Dec 12 01:30:00 2025 -0800
 
     feat: implement code review suggestions
-
-    Applied by Syn137 agent
-    - Workflow: code-review-v1
-    - Execution: exec-abc123
-    - Session: session-xyz
-
-    Co-authored-by: Neural <neural@example.com>
 ```
 
-## Multi-Tenancy Considerations
-
-For multi-tenant deployments (multiple organizations):
-
-```python
-# Each organization has its own installation
-installations = {
-    "org-a": "12345678",  # Installation ID for Org A
-    "org-b": "87654321",  # Installation ID for Org B
-}
-
-# Tokens are scoped per-installation
-async def get_token_for_org(org: str) -> str:
-    installation_id = installations[org]
-    return await github_client.get_installation_token(installation_id)
-```
-
-See GitHub Issue #24 for multi-tenancy implementation details.
+The `[bot]` suffix is added by GitHub automatically for GitHub App installations.
 
 ## Configuration
 
-### Environment Variables
+### Selfhost (Docker Compose)
 
 ```bash
-# Required
-SYN_GITHUB_APP_ID=2461312
-SYN_GITHUB_APP_NAME=aef-engineer-beta
-SYN_GITHUB_PRIVATE_KEY=file:infra/docker/secrets/github-private-key.pem
-
-# Optional
+# In ~/.syntropic137/.env:
+SYN_GITHUB_APP_ID=123456
+SYN_GITHUB_APP_NAME=your-app-name
 SYN_GITHUB_WEBHOOK_SECRET=<hmac-secret>
+
+# PEM file (not an env var — mounted as Docker secret):
+# Place at ~/.syntropic137/secrets/github-app-private-key.pem
+```
+
+The compose file sets `SYN_GITHUB_APP_PRIVATE_KEY_FILE=/run/secrets/github_app_private_key` automatically. Do not override it.
+
+### Dev/CI (env var fallback)
+
+```bash
+# Option 1: file reference
+SYN_GITHUB_PRIVATE_KEY=file:/path/to/app.pem
+
+# Option 2: raw PEM (must start with -----BEGIN)
+SYN_GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
+
+# Option 3: base64-encoded PEM
+SYN_GITHUB_PRIVATE_KEY=LS0tLS1CRUdJTi...
 ```
 
 ### Pydantic Settings
@@ -252,24 +248,48 @@ from syn_shared.settings import get_settings
 settings = get_settings()
 github = settings.github
 
-# Check if configured
+# Check if configured (requires app_id + either key file or env var)
 if github.is_configured:
-    print(f"Bot: {github.bot_username}")      # aef-engineer-beta[bot]
-    print(f"Email: {github.bot_email}")        # 2461312+aef-engineer-beta[bot]@...
+    print(f"Bot: {github.bot_username}")      # your-app-name[bot]
+    print(f"Email: {github.bot_email}")        # APP_ID+your-app-name[bot]@...
 ```
+
+## Token Injector Architecture
+
+The token injector is an HTTP service implementing Envoy's `ext_authz` protocol. It runs alongside the Envoy proxy and handles credential injection for agent containers.
+
+**What it handles:**
+- **Anthropic API** — injects `x-api-key` (or `Authorization: Bearer` for OAuth) by replacing the `proxy-managed` placeholder
+
+**What it does NOT handle:**
+- **GitHub API** — passthrough. Agents use installation tokens from the setup phase.
+- **Package registries** — passthrough (pypi.org, npmjs.org, etc.)
+
+```
+Agent Container                 Envoy Proxy              Token Injector (ext_authz)
+      │                              │                              │
+      │  ANTHROPIC_BASE_URL          │                              │
+      │  = http://proxy:8081         │                              │
+      │──── x-api-key: proxy-managed ──►                            │
+      │                              │──── ext_authz check ────────►│
+      │                              │                              │
+      │                              │◄─── 200 + real x-api-key ───│
+      │                              │                              │
+      │                              │──── request to anthropic ───►│
+```
+
+See `docker/token-injector/` and `docker/sidecar-proxy/` for implementation.
 
 ## Troubleshooting
 
-### Token Generation Fails
+### PEM Not Found
 
-```python
-# Check private key format
-import base64
-private_key = base64.b64decode(settings.github.private_key.get_secret_value())
-assert private_key.startswith(b'-----BEGIN RSA PRIVATE KEY-----')
+```bash
+# Verify the secret is mounted
+docker exec syn137-api ls -la /run/secrets/github_app_private_key
 
-# Check app ID matches key
-# JWT will fail signature verification if mismatched
+# Verify the env var points to the right path
+docker exec syn137-api printenv SYN_GITHUB_APP_PRIVATE_KEY_FILE
 ```
 
 ### Permission Denied
@@ -285,7 +305,7 @@ gh api /app | jq '.permissions'
 ### Rate Limiting
 
 ```bash
-# Check rate limit status
+# Check rate limit status (use an installation token)
 curl -H "Authorization: Bearer $TOKEN" \
   https://api.github.com/rate_limit
 ```
@@ -294,4 +314,3 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 - [GitHub App Setup Guide](./github-app-setup.md)
 - [ADR-022: Secure Token Architecture](../adrs/ADR-022-secure-token-architecture.md)
-- [Environment Configuration](../env-configuration.md)

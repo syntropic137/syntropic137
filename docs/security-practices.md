@@ -131,6 +131,49 @@ Not yet implemented as a blocking gate. Planned controls:
 
 ---
 
+## Docker Runtime Security
+
+Agent containers run in isolated Docker environments with multiple layers of defense. For the full GitHub App integration model, see [GitHub App Security Model](./deployment/github-app-security.md).
+
+### Secret isolation — Docker secrets (tmpfs)
+
+Sensitive credentials (database passwords, Redis passwords, MinIO passwords, GitHub App PEM) are mounted as **Docker secrets** — stored on tmpfs (RAM-only) at `/run/secrets/`. They are:
+- Not visible in `docker inspect`
+- Not in the process environment (`/proc/1/environ`)
+- Not in `docker compose config` output
+- Never written to the container filesystem
+
+### Agent credential injection — Envoy ext_authz proxy
+
+Agent containers never hold real API keys. Instead:
+1. Agents are started with `ANTHROPIC_API_KEY=proxy-managed` (a placeholder)
+2. All Anthropic traffic routes through a shared Envoy proxy (`ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081`)
+3. The **token injector** (ext_authz HTTP service) intercepts requests and replaces the placeholder with the real credential
+4. Direct calls to `api.anthropic.com` from agents fail — only the proxy path works
+
+GitHub API access uses a different pattern: short-lived installation tokens (1-hour TTL) are baked into `~/.git-credentials` during a setup phase, then the environment is cleared. The token injector treats GitHub hosts as passthrough.
+
+### Container hardening
+
+All containers in the selfhost compose file use:
+- `read_only: true` — immutable root filesystem
+- `no-new-privileges: true` — prevents privilege escalation
+- `cap_drop: ALL` — drops all Linux capabilities (re-adds only what's needed)
+- Resource limits (memory and CPU) — prevents runaway containers
+- JSON file logging with rotation — prevents disk exhaustion
+
+### Network segmentation
+
+- **syn-internal**: Control plane services (API, database, event store, collector)
+- **syn-proxy**: Docker socket proxy (API ↔ socket proxy only, `internal: true`)
+- **agent-net**: Agent containers + Envoy proxy. Not fully internal (agents need git egress), but API key security enforced via proxy routing.
+
+### Docker socket proxy
+
+The API container does not mount `/var/run/docker.sock` directly. Instead, it connects through a **Docker socket proxy** (tecnativa/docker-socket-proxy) that allowlists only the operations needed for workspace management (container create/start/stop/exec). This limits blast radius if the API container is compromised.
+
+---
+
 ## Planned Controls (not yet implemented)
 
 - [ ] Pre-commit secret gate (`gitleaks`) — ISS-259
