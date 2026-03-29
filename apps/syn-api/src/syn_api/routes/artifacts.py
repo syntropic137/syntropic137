@@ -9,8 +9,8 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query, UploadFile
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
@@ -309,6 +309,22 @@ async def upload_artifact(
 
 
 # =============================================================================
+# Request Models
+# =============================================================================
+
+
+class CreateArtifactRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    workflow_id: str
+    artifact_type: str
+    title: str
+    content: str
+    phase_id: str | None = None
+    session_id: str | None = None
+    content_type: str = "text/markdown"
+
+
+# =============================================================================
 # HTTP Endpoints
 # =============================================================================
 
@@ -411,4 +427,50 @@ async def get_artifact_content_endpoint(artifact_id: str) -> dict[str, str | int
         "content": a.content,
         "content_type": a.content_type or "text/markdown",
         "size_bytes": a.size_bytes,
+    }
+
+
+@router.post("")
+async def create_artifact_endpoint(body: CreateArtifactRequest) -> dict[str, str]:
+    """Create a new artifact."""
+    result = await create_artifact(
+        workflow_id=body.workflow_id,
+        artifact_type=body.artifact_type,
+        title=body.title,
+        content=body.content,
+        phase_id=body.phase_id,
+        session_id=body.session_id,
+        content_type=body.content_type,
+    )
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return {
+        "id": result.value,
+        "title": body.title,
+        "artifact_type": body.artifact_type,
+        "status": "created",
+    }
+
+
+@router.post("/{artifact_id}/upload")
+async def upload_artifact_endpoint(artifact_id: str, file: UploadFile) -> dict[str, str]:
+    """Upload binary content for an existing artifact."""
+    data = await file.read()
+
+    result = await upload_artifact(
+        artifact_id=artifact_id,
+        data=data,
+        filename=file.filename or "upload",
+        content_type=file.content_type or "application/octet-stream",
+    )
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return {
+        "artifact_id": artifact_id,
+        "storage_url": result.value,
+        "status": "uploaded",
     }
