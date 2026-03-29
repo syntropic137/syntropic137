@@ -104,9 +104,7 @@ class GitHubEventPoller:
                 logger.warning("Skipping malformed repo name: %s", repo_full_name)
                 continue
             owner, repo = repo_full_name.split("/", 1)
-            response = await self._events_client.poll_repo_events(
-                owner, repo, installation_id
-            )
+            response = await self._events_client.poll_repo_events(owner, repo, installation_id)
             if response.has_new_events:
                 await self._process_events(response.events, installation_id)
             interval = max(interval, response.poll_interval)
