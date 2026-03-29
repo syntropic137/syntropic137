@@ -351,7 +351,7 @@ services:
   # Setup:
   #   1. Create tunnel in Cloudflare Zero Trust dashboard
   #   2. Set CLOUDFLARE_TUNNEL_TOKEN in .env
-  #   3. Set public hostname service URL to: http://gateway:80
+  #   3. Set public hostname service URL to: http://gateway:8081
   cloudflared:
     image: cloudflare/cloudflared:2026.2.0
     container_name: syn137-cloudflared
@@ -362,7 +362,7 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
-    restart: always
+    restart: on-failure:3
     read_only: true
     security_opt:
       - no-new-privileges:true

@@ -1680,7 +1680,7 @@ _workspace-check:
 
 registry := "ghcr.io/syntropic137"
 
-# Build and push all container images locally (skips event-store by default)
+# Build and push core container images locally (skips event-store and agentic-workspace — use release-retag for those)
 release-local version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1696,19 +1696,17 @@ release-local version:
     docker buildx use multiarch
 
     # Images to build (order: fast first)
-    declare -A IMAGES=(
-        ["token-injector"]="docker/token-injector/Dockerfile:docker/token-injector"
-        ["sidecar-proxy"]="docker/sidecar-proxy/Dockerfile:docker/sidecar-proxy"
-        ["syn-collector"]="packages/syn-collector/Dockerfile:."
-        ["syn-pulse-ui"]="apps/syn-pulse-ui/Dockerfile:."
-        ["syn-dashboard-ui"]="apps/syn-dashboard-ui/Dockerfile:."
-        ["syn-api"]="infra/docker/images/syn-api/Dockerfile:."
-        ["syn-gateway"]="infra/docker/images/gateway/Dockerfile:."
-    )
-
     FAILED=()
     for image in token-injector sidecar-proxy syn-collector syn-pulse-ui syn-dashboard-ui syn-api syn-gateway; do
-        IFS=: read -r dockerfile context <<< "${IMAGES[$image]}"
+        case "$image" in
+            token-injector)   dockerfile="docker/token-injector/Dockerfile"; context="docker/token-injector" ;;
+            sidecar-proxy)    dockerfile="docker/sidecar-proxy/Dockerfile"; context="docker/sidecar-proxy" ;;
+            syn-collector)    dockerfile="packages/syn-collector/Dockerfile"; context="." ;;
+            syn-pulse-ui)     dockerfile="apps/syn-pulse-ui/Dockerfile"; context="." ;;
+            syn-dashboard-ui) dockerfile="apps/syn-dashboard-ui/Dockerfile"; context="." ;;
+            syn-api)          dockerfile="infra/docker/images/syn-api/Dockerfile"; context="." ;;
+            syn-gateway)      dockerfile="infra/docker/images/gateway/Dockerfile"; context="." ;;
+        esac
         echo "📦 Building $image..."
         if docker buildx build --platform linux/amd64,linux/arm64 \
             -f "$dockerfile" \
@@ -1770,4 +1768,4 @@ release-local-full version from:
     just release-assets "{{version}}"
     echo ""
     echo "🎉 Full release complete: {{version}}"
-    echo "   Test with: SYN_VERSION={{version}} docker compose -f docker-compose.syntropic137.yaml pull"
+    echo "   Test with: SYN_VERSION={{version}} docker compose -f docker/docker-compose.syntropic137.yaml pull"
