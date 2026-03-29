@@ -82,9 +82,8 @@ jobs:
           - image: syn-pulse-ui
             dockerfile: apps/syn-pulse-ui/Dockerfile
             context: "."
-          - image: event-store
-            dockerfile: lib/event-sourcing-platform/event-store/Dockerfile
-            context: lib/event-sourcing-platform
+          # event-store is built and published by the event-sourcing-platform repo
+          # (ghcr.io/syntropic137/event-store). Digest is resolved in release-assets.
           - image: sidecar-proxy
             dockerfile: docker/sidecar-proxy/Dockerfile
             context: docker/sidecar-proxy
@@ -332,13 +331,37 @@ jobs:
           chmod +x /tmp/release-assets/selfhost-entrypoint.sh
 
       # -----------------------------------------------------------------------
-      # Pin image digests in compose file (prevents tag mutation attacks)
+      # Resolve event-store digest from upstream (published by ESP repo)
       # -----------------------------------------------------------------------
+      - name: Resolve event-store digest from GHCR
+        id: event-store-digest
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          IMAGE="ghcr.io/syntropic137/event-store"
+
+          # Try the exact version tag first, fall back to latest
+          DIGEST=$(docker manifest inspect "${IMAGE}:${VERSION}" 2>/dev/null \
+            | jq -r '.digest // empty') || true
+
+          if [[ -z "$DIGEST" ]]; then
+            echo "::warning::event-store:${VERSION} not found in GHCR — trying 'latest'"
+            DIGEST=$(docker manifest inspect "${IMAGE}:latest" 2>/dev/null \
+              | jq -r '.digest // empty') || true
+          fi
+
+          if [[ -n "$DIGEST" ]]; then
+            echo "Resolved event-store digest: ${DIGEST}"
+            mkdir -p /tmp/digests
+            echo "$DIGEST" > /tmp/digests/event-store
+          else
+            echo "::warning::Could not resolve event-store digest — keeping tag reference"
+          fi
+
       - name: Pin image digests in compose file
         run: |
           COMPOSE="/tmp/release-assets/docker-compose.syntropic137.yaml"
 
-          # For each image we build, replace the tag reference with a digest
+          # Pin images built by this workflow + event-store from upstream
           for IMAGE_NAME in syn-api syn-gateway syn-collector event-store sidecar-proxy token-injector; do
             DIGEST_FILE="/tmp/digests/${IMAGE_NAME}"
             if [[ -f "$DIGEST_FILE" ]]; then
