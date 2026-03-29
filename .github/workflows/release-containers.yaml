@@ -340,13 +340,14 @@ jobs:
           IMAGE="ghcr.io/syntropic137/event-store"
 
           # Try the exact version tag first, fall back to latest
-          DIGEST=$(docker manifest inspect "${IMAGE}:${VERSION}" 2>/dev/null \
-            | jq -r '.digest // empty') || true
+          # --verbose is needed to get the digest from manifest inspect
+          DIGEST=$(docker manifest inspect --verbose "${IMAGE}:${VERSION}" 2>/dev/null \
+            | jq -r '.[0].Descriptor.digest // empty') || true
 
           if [[ -z "$DIGEST" ]]; then
             echo "::warning::event-store:${VERSION} not found in GHCR — trying 'latest'"
-            DIGEST=$(docker manifest inspect "${IMAGE}:latest" 2>/dev/null \
-              | jq -r '.digest // empty') || true
+            DIGEST=$(docker manifest inspect --verbose "${IMAGE}:latest" 2>/dev/null \
+              | jq -r '.[0].Descriptor.digest // empty') || true
           fi
 
           if [[ -n "$DIGEST" ]]; then
