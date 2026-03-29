@@ -29,6 +29,11 @@ RESET = "\033[0m"
 # All legacy events have been migrated! Keep this for future exceptions if needed.
 KNOWN_DATACLASS_EVENTS: set[str] = set()
 
+# Classes ending in "Event" that are NOT domain events (value objects, DTOs, etc.)
+NOT_DOMAIN_EVENTS: set[str] = {
+    "NormalizedEvent",  # ISS-386: value object bridging webhook/Events API payloads
+}
+
 
 class EventValidator(ast.NodeVisitor):
     """AST visitor that validates event class definitions."""
@@ -42,7 +47,7 @@ class EventValidator(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Check if class is an event and validate it."""
         # Check if class name ends with "Event"
-        if not node.name.endswith("Event"):
+        if not node.name.endswith("Event") or node.name in NOT_DOMAIN_EVENTS:
             self.generic_visit(node)
             return
 
