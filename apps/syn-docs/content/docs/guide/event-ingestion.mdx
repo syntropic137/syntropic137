@@ -1,0 +1,111 @@
+---
+title: Event Ingestion
+description: How Syntropic137 receives GitHub events through webhooks and polling.
+---
+
+Syntropic137 uses a **hybrid approach** to receive GitHub events: webhooks for
+real-time delivery, and Events API polling as a zero-config fallback. Both
+sources feed into a unified pipeline with content-based deduplication — the same
+event is never processed twice, regardless of how it arrives.
+
+## How It Works
+
+```
+GitHub Webhook ──────────┐
+                         ├──> NormalizedEvent ──> Dedup ──> Trigger Evaluation
+Events API Poller ───────┘
+```
+
+1. **Webhook endpoint** receives GitHub webhook deliveries in real time
+2. **Events API poller** runs as a background task, polling GitHub's Events API
+   for repositories that have active triggers
+3. Both sources normalize their payloads into a common `NormalizedEvent` format
+4. The **EventPipeline** checks each event against a dedup store (Redis) using
+   content-based keys — if the event was already processed, it's skipped
+5. New events are routed to trigger evaluation, which fires matching workflows
+
+## Polling Modes
+
+The poller adapts its behavior based on whether webhooks are arriving:
+
+| Mode | Interval | When it activates |
+|------|----------|-------------------|
+| **Active Polling** | 60 seconds | No webhook received in 30 minutes (or never) |
+| **Safety Net** | 300 seconds | Webhooks arriving normally |
+
+When you first start Syntropic137 without a webhook URL configured, the poller
+operates in **Active Polling** mode — checking for new events every 60 seconds.
+Once webhooks start arriving (after configuring a tunnel or public URL), the
+poller automatically backs off to **Safety Net** mode, polling every 5 minutes
+as a catch-up mechanism.
+
+If webhooks stop arriving (tunnel goes down, GitHub outage), the poller detects
+the gap after 30 minutes and switches back to active polling.
+
+## Deduplication
+
+When both webhooks and polling are active, the same event may arrive from both
+sources. Syntropic137 prevents double-processing using **content-based dedup keys**.
+
+Each event type has a dedicated key extractor that uses stable identifiers present
+in both webhook and Events API payloads:
+
+- **Push events:** repository + commit SHA (`after` field)
+- **Pull requests:** repository + PR number + action + `updated_at` timestamp
+- **Check runs:** repository + check run ID + action
+- **Issue comments:** repository + comment ID + action
+
+Keys are stored in Redis with a 24-hour TTL using atomic `SETNX` — the first
+source to deliver an event "wins," and the duplicate from the other source is
+silently skipped.
+
+### Fail-open behavior
+
+If Redis is temporarily unavailable, events are **processed anyway** rather than
+dropped. Trigger safety guards (fire counts, cooldown periods) provide
+second-layer protection against duplicate workflows.
+
+## GitHub API Quota
+
+The Events API has a rate limit of 60 conditional requests per hour per
+installation. Syntropic137 minimizes quota usage through several mechanisms:
+
+- **ETag caching:** Uses `If-None-Match` headers for conditional requests.
+  304 Not Modified responses still count against the limit but return no data.
+- **Selective polling:** Only repositories with active triggers are polled.
+  Repos without triggers consume zero API calls.
+- **Adaptive intervals:** In Safety Net mode (webhooks healthy), polling drops
+  to every 5 minutes — roughly 12 requests per hour per repo.
+- **X-Poll-Interval:** The poller respects GitHub's recommended minimum interval
+  from the `X-Poll-Interval` response header.
+
+### Quota estimates
+
+| Mode | Polls/hour/repo | With 5 repos |
+|------|-----------------|--------------|
+| Active Polling (60s) | ~60 | ~300 |
+| Safety Net (300s) | ~12 | ~60 |
+
+## Configuration
+
+All polling settings use the `SYN_POLLING_` environment variable prefix:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYN_POLLING_DISABLED` | `false` | Disable polling entirely |
+| `SYN_POLLING_POLL_INTERVAL_SECONDS` | `60.0` | Active polling interval (min: 10s) |
+| `SYN_POLLING_SAFETY_NET_INTERVAL_SECONDS` | `300.0` | Safety net interval (min: 60s) |
+| `SYN_POLLING_WEBHOOK_STALE_THRESHOLD_SECONDS` | `1800.0` | Seconds without webhook before active polling (min: 60s) |
+| `SYN_POLLING_DEDUP_TTL_SECONDS` | `86400` | Redis dedup key TTL (min: 3600s) |
+
+## Disabling Polling
+
+If you have reliable webhook delivery and want zero Events API quota usage:
+
+```bash
+SYN_POLLING_DISABLED=true
+```
+
+This is recommended for production deployments with a stable public webhook URL
+or Cloudflare Tunnel. The webhook endpoint continues to work normally regardless
+of this setting.

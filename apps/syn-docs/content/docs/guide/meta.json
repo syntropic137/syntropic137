@@ -5,6 +5,7 @@
     "getting-started",
     "architecture",
     "configuration",
+    "event-ingestion",
     "self-hosting"
   ]
 }

@@ -17,6 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 if TYPE_CHECKING:
     from syn_shared.settings.dev_tooling import DevToolingSettings
     from syn_shared.settings.github import GitHubAppSettings
+    from syn_shared.settings.polling import PollingSettings
     from syn_shared.settings.storage import StorageSettings
     from syn_shared.settings.workspace import (
         ContainerLoggingSettings,
@@ -522,6 +523,21 @@ class Settings(BaseSettings):
         from syn_shared.settings.github import GitHubAppSettings
 
         return GitHubAppSettings()
+
+    # =========================================================================
+    # POLLING (ISS-386) - GitHub Events API hybrid ingestion
+    # =========================================================================
+
+    @property
+    def polling(self) -> PollingSettings:
+        """Get GitHub Events API polling settings.
+
+        Polling is enabled by default for zero-config onboarding.
+        Set ``SYN_POLLING_DISABLED=true`` to opt out.
+        """
+        from syn_shared.settings.polling import PollingSettings
+
+        return PollingSettings()
 
 
 @lru_cache

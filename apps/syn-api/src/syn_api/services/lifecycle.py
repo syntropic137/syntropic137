@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from syn_adapters.subscriptions.coordinator_service import CoordinatorSubscriptionService
     from syn_api._wiring import BackgroundWorkflowDispatcher
     from syn_api.auth import AuthContext
+    from syn_api.services.github_event_poller import GitHubEventPoller
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class LifecycleState:
 
     subscription_service: CoordinatorSubscriptionService | None = None
     workflow_dispatcher: BackgroundWorkflowDispatcher | None = None
+    event_poller: GitHubEventPoller | None = None
     degraded_reasons: list[str] = field(default_factory=list)
 
 
@@ -87,6 +89,7 @@ async def startup(
 
     # Degraded path — warn and continue
     await _init_subscriptions(_state)
+    await _init_event_poller(_state)
     await reconcile_orphaned_sessions()
     await cleanup_orphaned_containers()
 
@@ -106,6 +109,11 @@ async def shutdown(
         Ok(None) on success, Err(LifecycleError) on failure.
     """
     try:
+        if _state.event_poller is not None:
+            with contextlib.suppress(Exception):
+                await _state.event_poller.stop()
+            _state.event_poller = None
+
         if _state.workflow_dispatcher is not None:
             with contextlib.suppress(Exception):
                 await _state.workflow_dispatcher.shutdown()
@@ -205,3 +213,42 @@ async def _init_subscriptions(state: LifecycleState) -> None:
     except Exception:
         logger.exception("Failed to start subscription coordinator (degraded mode)")
         state.degraded_reasons.append("subscription_coordinator")
+
+
+async def _init_event_poller(state: LifecycleState) -> None:
+    """Start the GitHub Events API poller (degraded on failure)."""
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    if not settings.github.is_configured:
+        logger.info("GitHub App not configured — event poller disabled")
+        return
+
+    if not settings.polling.enabled:
+        logger.info("Event polling disabled by configuration")
+        return
+
+    try:
+        from syn_adapters.github.client import get_github_client
+        from syn_adapters.github.events_api_client import GitHubEventsAPIClient
+        from syn_api._wiring import (
+            get_event_pipeline,
+            get_trigger_store,
+            get_webhook_health_tracker,
+        )
+        from syn_api.services.github_event_poller import GitHubEventPoller
+
+        events_client = GitHubEventsAPIClient(get_github_client())
+        poller = GitHubEventPoller(
+            events_client=events_client,
+            pipeline=get_event_pipeline(),
+            health_tracker=get_webhook_health_tracker(),
+            trigger_store=get_trigger_store(),
+            settings=settings.polling,
+        )
+        await poller.start()
+        state.event_poller = poller
+    except Exception:
+        logger.exception("Failed to start event poller (degraded mode)")
+        state.degraded_reasons.append("event_poller")
