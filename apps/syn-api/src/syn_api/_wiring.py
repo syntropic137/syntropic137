@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts.github.slices.event_pipeline.dedup_port import DedupPort
     from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
@@ -303,7 +304,7 @@ def get_event_pipeline() -> EventPipeline:
     return pipeline
 
 
-def _create_dedup_adapter() -> object:
+def _create_dedup_adapter() -> DedupPort:
     """Create the appropriate dedup adapter based on environment."""
     from syn_shared.settings import get_settings
 

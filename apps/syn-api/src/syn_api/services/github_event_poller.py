@@ -80,41 +80,46 @@ class GitHubEventPoller:
             interval = self._state.current_interval
 
             try:
-                repos = await self._get_repos_to_poll()
-                if repos:
-                    logger.debug(
-                        "Polling %d repo(s) in %s mode",
-                        len(repos),
-                        self._state.mode.value,
-                    )
-
-                for repo_full_name, installation_id in repos:
-                    owner, repo = repo_full_name.split("/", 1)
-                    response = await self._events_client.poll_repo_events(
-                        owner, repo, installation_id
-                    )
-                    if response.has_new_events:
-                        await self._process_events(response.events, installation_id)
-
-                    # Respect GitHub's recommended poll interval
-                    interval = max(interval, response.poll_interval)
-
+                interval = await self._poll_all_repos(interval)
                 self._state.record_success()
-
             except asyncio.CancelledError:
                 raise
-
             except Exception as exc:
-                self._state.record_error()
-                # Check for rate limit with reset_at
-                reset_seconds = _extract_rate_limit_wait(exc)
-                if reset_seconds is not None:
-                    interval = max(interval, reset_seconds)
-                    logger.warning("Rate limited during polling, backing off %.0fs", interval)
-                else:
-                    logger.exception("Polling error, backing off")
+                interval = self._handle_poll_error(exc, interval)
 
             await asyncio.sleep(interval)
+
+    async def _poll_all_repos(self, interval: float) -> float:
+        """Poll all repos with active triggers, returning the effective interval."""
+        repos = await self._get_repos_to_poll()
+        if repos:
+            logger.debug(
+                "Polling %d repo(s) in %s mode",
+                len(repos),
+                self._state.mode.value,
+            )
+
+        for repo_full_name, installation_id in repos:
+            owner, repo = repo_full_name.split("/", 1)
+            response = await self._events_client.poll_repo_events(
+                owner, repo, installation_id
+            )
+            if response.has_new_events:
+                await self._process_events(response.events, installation_id)
+            interval = max(interval, response.poll_interval)
+
+        return interval
+
+    def _handle_poll_error(self, exc: Exception, interval: float) -> float:
+        """Handle a polling error: record backoff and adjust interval."""
+        self._state.record_error()
+        reset_seconds = _extract_rate_limit_wait(exc)
+        if reset_seconds is not None:
+            interval = max(interval, reset_seconds)
+            logger.warning("Rate limited during polling, backing off %.0fs", interval)
+        else:
+            logger.exception("Polling error, backing off")
+        return interval
 
     async def _get_repos_to_poll(self) -> list[tuple[str, str]]:
         """Get (repo, installation_id) pairs for repos with active triggers.
