@@ -1673,3 +1673,101 @@ _workspace-check:
         echo "   Rebuilding to include latest agentic-primitives changes..."
         just workspace-build
     fi
+
+# --- Release (Local) ---
+# Build and push container images to GHCR from your local machine.
+# Useful when CI is slow or broken. Requires: gh auth with write:packages scope.
+
+registry := "ghcr.io/syntropic137"
+
+# Build and push all container images locally (skips event-store by default)
+release-local version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🚀 Local release: {{version}}"
+    echo ""
+
+    # Login to GHCR
+    gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
+    echo ""
+
+    # Ensure buildx builder exists
+    docker buildx inspect multiarch >/dev/null 2>&1 || docker buildx create --name multiarch
+    docker buildx use multiarch
+
+    # Images to build (order: fast first)
+    declare -A IMAGES=(
+        ["token-injector"]="docker/token-injector/Dockerfile:docker/token-injector"
+        ["sidecar-proxy"]="docker/sidecar-proxy/Dockerfile:docker/sidecar-proxy"
+        ["syn-collector"]="packages/syn-collector/Dockerfile:."
+        ["syn-pulse-ui"]="apps/syn-pulse-ui/Dockerfile:."
+        ["syn-dashboard-ui"]="apps/syn-dashboard-ui/Dockerfile:."
+        ["syn-api"]="infra/docker/images/syn-api/Dockerfile:."
+        ["syn-gateway"]="infra/docker/images/gateway/Dockerfile:."
+    )
+
+    FAILED=()
+    for image in token-injector sidecar-proxy syn-collector syn-pulse-ui syn-dashboard-ui syn-api syn-gateway; do
+        IFS=: read -r dockerfile context <<< "${IMAGES[$image]}"
+        echo "📦 Building $image..."
+        if docker buildx build --platform linux/amd64,linux/arm64 \
+            -f "$dockerfile" \
+            -t "{{registry}}/$image:{{version}}" \
+            --push "$context"; then
+            echo "✅ $image pushed"
+        else
+            echo "❌ $image failed"
+            FAILED+=("$image")
+        fi
+        echo ""
+    done
+
+    # Summary
+    echo "=== Release Summary ==="
+    echo "Version: {{version}}"
+    echo "Registry: {{registry}}"
+    if [ ${#FAILED[@]} -eq 0 ]; then
+        echo "✅ All images pushed successfully"
+    else
+        echo "❌ Failed: ${FAILED[*]}"
+        exit 1
+    fi
+
+# Re-tag an existing image version without rebuilding (e.g., event-store)
+release-retag image from to:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🏷️  Re-tagging {{registry}}/{{image}}:{{from}} → {{to}}"
+    gh auth token | docker login ghcr.io -u syntropic137 --password-stdin
+    docker buildx imagetools create \
+        "{{registry}}/{{image}}:{{from}}" \
+        --tag "{{registry}}/{{image}}:{{to}}"
+    echo "✅ Done"
+
+# Upload selfhost assets to a GitHub release
+release-assets version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📎 Uploading selfhost assets to {{version}}"
+    gh release upload "{{version}}" \
+        docker/docker-compose.syntropic137.yaml \
+        docker/selfhost.env.example \
+        docker/selfhost-entrypoint.sh \
+        syn-ctl \
+        --repo syntropic137/syntropic137 --clobber
+    echo "✅ Assets uploaded"
+
+# Full local release: build images + re-tag event-store + upload assets
+# Usage: just release-local-full v0.17.1 v0.17.0
+#   version: the new tag to create
+#   from: existing tag to re-tag event-store/agentic-workspace from (they rarely change)
+release-local-full version from:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just release-local "{{version}}"
+    just release-retag event-store "{{from}}" "{{version}}"
+    just release-retag agentic-workspace "{{from}}" "{{version}}"
+    just release-assets "{{version}}"
+    echo ""
+    echo "🎉 Full release complete: {{version}}"
+    echo "   Test with: SYN_VERSION={{version}} docker compose -f docker-compose.syntropic137.yaml pull"
