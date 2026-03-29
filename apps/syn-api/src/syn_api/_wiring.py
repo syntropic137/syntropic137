@@ -12,6 +12,8 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+    from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
     from syn_domain.contexts.orchestration.domain.aggregate_execution.value_objects import (
         ExecutablePhase,
     )
@@ -272,6 +274,80 @@ def get_trigger_store():
     )
 
     return get_trigger_query_store()
+
+
+# ---------------------------------------------------------------------------
+# Event pipeline (ISS-386) — dedup + unified ingestion
+# ---------------------------------------------------------------------------
+
+_event_pipeline_singleton: object | None = None
+_webhook_health_tracker_singleton: object | None = None
+
+
+def get_event_pipeline() -> EventPipeline:
+    """Return the singleton EventPipeline with Redis dedup (in-memory fallback)."""
+    from syn_domain.contexts.github.slices.event_pipeline.pipeline import EventPipeline
+
+    global _event_pipeline_singleton
+    if _event_pipeline_singleton is not None:
+        assert isinstance(_event_pipeline_singleton, EventPipeline)
+        return _event_pipeline_singleton
+
+    dedup = _create_dedup_adapter()
+    pipeline = EventPipeline(
+        dedup=dedup,
+        trigger_store=get_trigger_store(),
+        trigger_repo=get_trigger_repo(),
+    )
+    _event_pipeline_singleton = pipeline
+    return pipeline
+
+
+def _create_dedup_adapter() -> object:
+    """Create the appropriate dedup adapter based on environment."""
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+
+    if settings.uses_in_memory_stores:
+        from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
+
+        return InMemoryDedupAdapter()
+
+    try:
+        import redis.asyncio as aioredis
+
+        from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
+
+        redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        logger.info("EventPipeline using Redis dedup (%s)", settings.redis_url)
+        return RedisDedupAdapter(redis_client)
+    except Exception:
+        logger.warning(
+            "Redis unavailable for dedup — using in-memory fallback",
+            exc_info=True,
+        )
+        from syn_adapters.dedup.memory_dedup import InMemoryDedupAdapter
+
+        return InMemoryDedupAdapter()
+
+
+def get_webhook_health_tracker() -> WebhookHealthTracker:
+    """Return the singleton WebhookHealthTracker."""
+    from syn_api.services.webhook_health_tracker import WebhookHealthTracker
+
+    global _webhook_health_tracker_singleton
+    if _webhook_health_tracker_singleton is not None:
+        assert isinstance(_webhook_health_tracker_singleton, WebhookHealthTracker)
+        return _webhook_health_tracker_singleton
+
+    from syn_shared.settings import get_settings
+
+    settings = get_settings()
+    threshold = settings.polling.webhook_stale_threshold_seconds
+    tracker = WebhookHealthTracker(stale_threshold=threshold)
+    _webhook_health_tracker_singleton = tracker
+    return tracker
 
 
 async def sync_published_events_to_projections() -> None:

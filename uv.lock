@@ -1620,7 +1620,7 @@ requires-dist = [
 
 [[package]]
 name = "syntropic137"
-version = "0.17.0"
+version = "0.17.0b3"
 source = { editable = "." }
 dependencies = [
     { name = "event-sourcing-python" },
