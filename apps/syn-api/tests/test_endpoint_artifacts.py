@@ -15,7 +15,6 @@ from syn_api.routes.artifacts import (
 )
 from syn_api.types import ArtifactError, Err, Ok
 
-
 # --- create_artifact_endpoint ---
 
 
@@ -64,20 +63,22 @@ async def test_create_artifact_endpoint_with_optional_fields() -> None:
 
 
 async def test_create_artifact_endpoint_service_error() -> None:
-    with patch(
-        "syn_api.routes.artifacts.create_artifact",
-        new_callable=AsyncMock,
-        return_value=Err(ArtifactError.STORAGE_ERROR, message="disk full"),
+    with (
+        patch(
+            "syn_api.routes.artifacts.create_artifact",
+            new_callable=AsyncMock,
+            return_value=Err(ArtifactError.STORAGE_ERROR, message="disk full"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
     ):
-        with pytest.raises(HTTPException) as exc_info:
-            await create_artifact_endpoint(
-                CreateArtifactRequest(
-                    workflow_id="wf-1",
-                    artifact_type="document",
-                    title="Bad",
-                    content="x",
-                )
+        await create_artifact_endpoint(
+            CreateArtifactRequest(
+                workflow_id="wf-1",
+                artifact_type="document",
+                title="Bad",
+                content="x",
             )
+        )
     assert exc_info.value.status_code == 400
     assert "disk full" in str(exc_info.value.detail)
 

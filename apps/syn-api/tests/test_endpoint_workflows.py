@@ -15,7 +15,6 @@ from syn_api.routes.workflows.commands import (
 )
 from syn_api.types import Err, Ok, WorkflowError, WorkflowValidation
 
-
 # --- create_workflow_endpoint ---
 
 
@@ -58,13 +57,15 @@ async def test_create_workflow_endpoint_with_all_fields() -> None:
 
 
 async def test_create_workflow_endpoint_service_error() -> None:
-    with patch(
-        "syn_api.routes.workflows.commands.create_workflow",
-        new_callable=AsyncMock,
-        return_value=Err(WorkflowError.INVALID_INPUT, message="bad workflow"),
+    with (
+        patch(
+            "syn_api.routes.workflows.commands.create_workflow",
+            new_callable=AsyncMock,
+            return_value=Err(WorkflowError.INVALID_INPUT, message="bad workflow"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
     ):
-        with pytest.raises(HTTPException) as exc_info:
-            await create_workflow_endpoint(CreateWorkflowRequest(name="Bad Workflow"))
+        await create_workflow_endpoint(CreateWorkflowRequest(name="Bad Workflow"))
     assert exc_info.value.status_code == 400
     assert "bad workflow" in str(exc_info.value.detail)
 
@@ -105,11 +106,13 @@ async def test_validate_yaml_endpoint_invalid_yaml() -> None:
 
 
 async def test_validate_yaml_endpoint_service_error() -> None:
-    with patch(
-        "syn_api.routes.workflows.commands.validate_yaml",
-        new_callable=AsyncMock,
-        return_value=Err(WorkflowError.NOT_FOUND, message="file not found"),
+    with (
+        patch(
+            "syn_api.routes.workflows.commands.validate_yaml",
+            new_callable=AsyncMock,
+            return_value=Err(WorkflowError.NOT_FOUND, message="file not found"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
     ):
-        with pytest.raises(HTTPException) as exc_info:
-            await validate_yaml_endpoint(ValidateYamlRequest(file="/nonexistent.yaml"))
+        await validate_yaml_endpoint(ValidateYamlRequest(file="/nonexistent.yaml"))
     assert exc_info.value.status_code == 400
