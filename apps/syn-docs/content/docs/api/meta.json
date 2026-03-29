@@ -19,7 +19,6 @@
     "costs",
     "---Automation---",
     "triggers",
-    "webhooks",
-    "websocket"
+    "webhooks"
   ]
 }

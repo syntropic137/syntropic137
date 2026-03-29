@@ -14,9 +14,7 @@ runner = CliRunner()
 _HELPERS_CLIENT = "syn_cli.commands._api_helpers.get_client"
 
 
-def _mock_response(
-    status_code: int = 200, json_data: dict | list | None = None
-) -> MagicMock:
+def _mock_response(status_code: int = 200, json_data: dict | list | None = None) -> MagicMock:
     resp = MagicMock()
     resp.status_code = status_code
     resp.json.return_value = json_data if json_data is not None else {}
@@ -44,9 +42,7 @@ def _mock_client(*responses: MagicMock) -> MagicMock:
 @pytest.mark.unit
 class TestArtifactCreate:
     def test_create_success(self) -> None:
-        client = _mock_client(
-            _mock_response(200, {"id": "art-new-id", "status": "created"})
-        )
+        client = _mock_client(_mock_response(200, {"id": "art-new-id", "status": "created"}))
         with patch(_HELPERS_CLIENT, return_value=client):
             result = runner.invoke(
                 app,

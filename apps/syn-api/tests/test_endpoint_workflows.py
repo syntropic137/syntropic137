@@ -25,9 +25,7 @@ async def test_create_workflow_endpoint_success() -> None:
         new_callable=AsyncMock,
         return_value=Ok("wf-abc-123"),
     ):
-        result = await create_workflow_endpoint(
-            CreateWorkflowRequest(name="My Workflow")
-        )
+        result = await create_workflow_endpoint(CreateWorkflowRequest(name="My Workflow"))
     assert result["id"] == "wf-abc-123"
     assert result["name"] == "My Workflow"
     assert result["workflow_type"] == "custom"
@@ -66,9 +64,7 @@ async def test_create_workflow_endpoint_service_error() -> None:
         return_value=Err(WorkflowError.INVALID_INPUT, message="bad workflow"),
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await create_workflow_endpoint(
-                CreateWorkflowRequest(name="Bad Workflow")
-            )
+            await create_workflow_endpoint(CreateWorkflowRequest(name="Bad Workflow"))
     assert exc_info.value.status_code == 400
     assert "bad workflow" in str(exc_info.value.detail)
 
@@ -89,9 +85,7 @@ async def test_validate_yaml_endpoint_success() -> None:
             )
         ),
     ):
-        result = await validate_yaml_endpoint(
-            ValidateYamlRequest(file="/tmp/test.yaml")
-        )
+        result = await validate_yaml_endpoint(ValidateYamlRequest(file="/tmp/test.yaml"))
     assert result["valid"] is True
     assert result["name"] == "Test WF"
     assert result["phase_count"] == 2
@@ -101,13 +95,9 @@ async def test_validate_yaml_endpoint_invalid_yaml() -> None:
     with patch(
         "syn_api.routes.workflows.commands.validate_yaml",
         new_callable=AsyncMock,
-        return_value=Ok(
-            WorkflowValidation(valid=False, errors=["Missing required field: name"])
-        ),
+        return_value=Ok(WorkflowValidation(valid=False, errors=["Missing required field: name"])),
     ):
-        result = await validate_yaml_endpoint(
-            ValidateYamlRequest(file="/tmp/bad.yaml")
-        )
+        result = await validate_yaml_endpoint(ValidateYamlRequest(file="/tmp/bad.yaml"))
     assert result["valid"] is False
     errors = result["errors"]
     assert isinstance(errors, list)
@@ -121,7 +111,5 @@ async def test_validate_yaml_endpoint_service_error() -> None:
         return_value=Err(WorkflowError.NOT_FOUND, message="file not found"),
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await validate_yaml_endpoint(
-                ValidateYamlRequest(file="/nonexistent.yaml")
-            )
+            await validate_yaml_endpoint(ValidateYamlRequest(file="/nonexistent.yaml"))
     assert exc_info.value.status_code == 400

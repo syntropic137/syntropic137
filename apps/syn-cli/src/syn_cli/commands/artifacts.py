@@ -129,9 +129,7 @@ def create_artifact(
     ],
     title: Annotated[str, typer.Option("--title", help="Artifact title")],
     content: Annotated[str, typer.Option("--content", "-c", help="Artifact content")],
-    phase: Annotated[
-        str | None, typer.Option("--phase", "-p", help="Phase ID")
-    ] = None,
+    phase: Annotated[str | None, typer.Option("--phase", "-p", help="Phase ID")] = None,
 ) -> None:
     """Create a new artifact."""
     data = api_post(
