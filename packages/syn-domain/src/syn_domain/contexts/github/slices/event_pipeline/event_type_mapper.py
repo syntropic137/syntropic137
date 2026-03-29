@@ -73,6 +73,8 @@ def map_events_api_to_normalized(
 
     dedup_key = compute_dedup_key(event_type, action, enriched_payload)
 
+    if created_at and created_at.endswith("Z"):
+        created_at = created_at[:-1] + "+00:00"
     received_at = datetime.fromisoformat(created_at) if created_at else datetime.now(UTC)
 
     return NormalizedEvent(

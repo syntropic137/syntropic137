@@ -321,8 +321,11 @@ def _create_dedup_adapter() -> DedupPort:
         from syn_adapters.dedup.redis_dedup import RedisDedupAdapter
 
         redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
-        logger.info("EventPipeline using Redis dedup (%s)", settings.redis_url)
-        return RedisDedupAdapter(redis_client)
+        logger.info("EventPipeline using Redis dedup")
+        return RedisDedupAdapter(
+            redis_client,
+            ttl_seconds=settings.polling.dedup_ttl_seconds,
+        )
     except Exception:
         logger.warning(
             "Redis unavailable for dedup — using in-memory fallback",

@@ -47,7 +47,7 @@ Per-event-type extractors (`dedup_keys.py`):
 | `pull_request` | repo + PR number + action + updated_at | `pr:owner/repo:42:opened:2026-03-29T...` |
 | `check_run` | repo + check run ID + action | `check_run:owner/repo:789:completed` |
 | `issue_comment` | repo + comment ID + action | `comment:owner/repo:456:created` |
-| Unknown types | SHA-256 hash of sorted payload | `sha256:a1b2c3d4e5f6...` |
+| Unknown types | `unknown:` + SHA-256 hash of sorted payload | `unknown:a1b2c3d4e5f6...` |
 
 The `updated_at` field in PR keys prevents stale dedup: reopening a PR generates a new key even though the PR number is the same.
 
