@@ -44,6 +44,24 @@ syn agent list
 syn agent show <session-id>
 ```
 
+### `syn artifacts`
+
+Browse, create, and retrieve workflow artifacts.
+
+```bash
+# List artifacts
+syn artifacts list --workflow <workflow-id>
+
+# Show artifact metadata and content
+syn artifacts show <artifact-id>
+
+# Print raw artifact content
+syn artifacts content <artifact-id> --raw
+
+# Create a new artifact
+syn artifacts create --workflow <id> --type document --title "Design Doc" --content "..."
+```
+
 ### `syn config`
 
 Manage configuration.

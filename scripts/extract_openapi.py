@@ -60,7 +60,7 @@ def main() -> None:
         "control": "Pause, resume, cancel, and inject context into running executions",
         "sessions": "List and inspect agent sessions",
         "conversations": "Retrieve conversation logs and metadata",
-        "artifacts": "Access artifacts produced by agent sessions",
+        "artifacts": "Create, upload, and retrieve artifacts produced by agent sessions",
         "costs": "Track token costs per session and execution",
         "metrics": "System-wide metrics and health data",
         "events": "Query session events, timelines, and tool usage",

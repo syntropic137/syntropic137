@@ -148,6 +148,15 @@ syn agent test --provider claude --prompt "Hello"
 syn agent chat --provider claude
 ```
 
+### Artifacts
+
+```bash
+syn artifacts list --workflow <workflow-id>
+syn artifacts show <artifact-id>
+syn artifacts content <artifact-id> --raw
+syn artifacts create --workflow <id> --type document --title "Design Doc" --content "# Overview ..."
+```
+
 ### Trigger Rules
 
 ```bash
