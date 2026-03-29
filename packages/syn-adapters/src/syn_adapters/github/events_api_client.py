@@ -75,11 +75,12 @@ class GitHubEventsAPIClient:
             if etag:
                 self._etags[etag_key] = etag
 
-            events: list[dict[str, Any]] = response.json()
+            data = response.json()
+            events: list[dict[str, Any]] = data if isinstance(data, list) else []
             return EventsAPIResponse(
                 events=events,
                 poll_interval=poll_interval,
-                has_new_events=True,
+                has_new_events=bool(events),
             )
 
         # Handle errors (rate limit, auth, not found, etc.)

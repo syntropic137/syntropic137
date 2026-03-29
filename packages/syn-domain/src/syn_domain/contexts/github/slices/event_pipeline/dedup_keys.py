@@ -50,8 +50,11 @@ def _dedup_pull_request(action: str, payload: dict[str, Any]) -> str | None:
     repo = _repo_name(payload)
     pr = payload.get("pull_request", {})
     number = payload.get("number") or pr.get("number", "")
-    updated_at = pr.get("updated_at", "")
-    return f"pr:{repo}:{number}:{action}:{updated_at}"
+    # Use head SHA instead of updated_at — updated_at can differ by
+    # microseconds between webhook delivery and Events API snapshot,
+    # breaking cross-source dedup.
+    head_sha = pr.get("head", {}).get("sha", "")
+    return f"pr:{repo}:{number}:{action}:{head_sha}"
 
 
 def _dedup_check_run(action: str, payload: dict[str, Any]) -> str | None:
@@ -80,9 +83,11 @@ def _dedup_pr_review(action: str, payload: dict[str, Any]) -> str | None:
 
 def _dedup_issues(action: str, payload: dict[str, Any]) -> str | None:
     repo = _repo_name(payload)
-    number = payload.get("issue", {}).get("number", "")
-    updated_at = payload.get("issue", {}).get("updated_at", "")
-    return f"issue:{repo}:{number}:{action}:{updated_at}"
+    issue = payload.get("issue", {})
+    number = issue.get("number", "")
+    # Use issue number + action only — updated_at can differ between
+    # webhook and Events API, and number+action is sufficient for dedup.
+    return f"issue:{repo}:{number}:{action}"
 
 
 def _dedup_create(action: str, payload: dict[str, Any]) -> str | None:  # noqa: ARG001

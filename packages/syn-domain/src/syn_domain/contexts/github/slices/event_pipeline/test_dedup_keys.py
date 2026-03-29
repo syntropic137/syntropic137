@@ -51,16 +51,16 @@ class TestPullRequestDedupKey:
     def test_pr_opened(self) -> None:
         payload = {
             "number": 42,
-            "pull_request": {"number": 42, "updated_at": "2026-01-01T00:00:00Z"},
+            "pull_request": {"number": 42, "head": {"sha": "abc123"}},
             "repository": {"full_name": "owner/repo"},
         }
         key = compute_dedup_key("pull_request", "opened", payload)
-        assert key == "pr:owner/repo:42:opened:2026-01-01T00:00:00Z"
+        assert key == "pr:owner/repo:42:opened:abc123"
 
     def test_pr_different_actions_produce_different_keys(self) -> None:
         base = {
             "number": 42,
-            "pull_request": {"number": 42, "updated_at": "2026-01-01T00:00:00Z"},
+            "pull_request": {"number": 42, "head": {"sha": "abc123"}},
             "repository": {"full_name": "owner/repo"},
         }
         key_opened = compute_dedup_key("pull_request", "opened", base)
