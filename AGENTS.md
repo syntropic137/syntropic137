@@ -82,7 +82,7 @@ Treat Python like TypeScript. Strict type safety everywhere.
 |---------|------------|---------|
 | `orchestration` | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
 | `agent_sessions` | AgentSession | Agent sessions and observability |
-| `github` | Installation, TriggerRule | GitHub App integration, webhook trigger rules |
+| `github` | Installation, TriggerRule | GitHub App integration, webhook trigger rules, hybrid event pipeline (webhook + polling with dedup) |
 | `artifacts` | Artifact | Artifact storage |
 | `organization` | Organization, System, Repo | Organization hierarchy, system/repo management, insights |
 
@@ -106,6 +106,27 @@ Claude CLI runs INSIDE Docker containers, not on the host. `WorkspaceService` cr
 ### Event Storage
 
 `WorkflowExecutionEngine` is the single owner of event recording. It parses Claude CLI JSONL output and records token usage, tool lifecycle, and subagent lifecycle events. All events keyed by `session_id`.
+
+### Hybrid Event Ingestion (ADR-050)
+
+GitHub events enter the system through a unified `EventPipeline` that accepts events from two sources:
+
+1. **Webhooks** — Real-time delivery from GitHub. Primary path when the App is configured with a reachable URL.
+2. **Events API polling** — Background `asyncio.Task` in syn-api that polls GitHub's Events API. Enabled by default for zero-config onboarding (no tunnel setup required).
+
+Both sources normalize payloads into `NormalizedEvent` and feed `EventPipeline.ingest()`. Content-based dedup keys (commit SHA, PR number, check run ID — not delivery IDs) ensure the same logical event is processed exactly once regardless of source.
+
+**Mode switching:** The poller adapts its interval based on webhook health:
+- **ACTIVE_POLLING** (60s) — No webhooks received in 30 minutes; poll aggressively
+- **SAFETY_NET** (300s) — Webhooks healthy; poll infrequently as a catch-up net
+
+**Fail-open dedup:** If Redis is unavailable, events are processed anyway. Trigger safety guards (fire counts, cooldowns) provide second-layer protection against duplicates.
+
+**Key files:**
+- `packages/syn-domain/.../event_pipeline/pipeline.py` — Unified pipeline with dedup
+- `packages/syn-domain/.../event_pipeline/dedup_keys.py` — Content-based dedup key extractors
+- `apps/syn-api/src/syn_api/services/github_event_poller.py` — Background poller
+- `packages/syn-shared/src/syn_shared/settings/polling.py` — `SYN_POLLING_*` configuration
 
 ### Testing
 

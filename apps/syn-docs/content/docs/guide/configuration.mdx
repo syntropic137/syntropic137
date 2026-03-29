@@ -43,5 +43,19 @@ and managing repositories.
 | `AGENT_TIMEOUT` | `3600` | Maximum agent execution time (seconds) |
 | `AGENT_MAX_CONCURRENT` | `4` | Maximum concurrent agent sessions |
 
+## Event Polling
+
+Syntropic137 polls the GitHub Events API as a zero-config fallback when webhooks
+are unavailable. Polling is **enabled by default** — no tunnel setup required.
+See [Event Ingestion](/docs/guide/event-ingestion) for how the hybrid approach works.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYN_POLLING_DISABLED` | `false` | Disable Events API polling entirely |
+| `SYN_POLLING_POLL_INTERVAL_SECONDS` | `60.0` | Active polling interval (seconds) |
+| `SYN_POLLING_SAFETY_NET_INTERVAL_SECONDS` | `300.0` | Safety net polling interval (seconds) |
+| `SYN_POLLING_WEBHOOK_STALE_THRESHOLD_SECONDS` | `1800.0` | Seconds before switching to active polling |
+| `SYN_POLLING_DEDUP_TTL_SECONDS` | `86400` | Redis dedup key TTL (seconds) |
+
 See `.env.example` in the repository for the complete list of configuration
 options.
