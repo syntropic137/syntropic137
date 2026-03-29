@@ -1768,4 +1768,4 @@ release-local-full version from:
     just release-assets "{{version}}"
     echo ""
     echo "🎉 Full release complete: {{version}}"
-    echo "   Test with: SYN_VERSION={{version}} docker compose -f docker-compose.syntropic137.yaml pull"
+    echo "   Test with: SYN_VERSION={{version}} docker compose -f docker/docker-compose.syntropic137.yaml pull"
