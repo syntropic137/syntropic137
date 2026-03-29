@@ -12,6 +12,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from syn_api.routes.workflows.commands import create_workflow, validate_yaml
+from syn_api.routes.workflows.commands import router as commands_router
 from syn_api.routes.workflows.queries import (
     get_workflow,
     list_workflows,
@@ -22,6 +23,7 @@ from syn_api.routes.workflows.queries import (
 
 router = APIRouter()
 router.include_router(queries_router)
+router.include_router(commands_router)
 
 __all__ = [
     "create_workflow",

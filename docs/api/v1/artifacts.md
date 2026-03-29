@@ -2,7 +2,7 @@
 
 Artifact storage and retrieval.
 
-**Status:** Stub — all functions return `Err(ArtifactError.NOT_IMPLEMENTED)`.
+**Status:** Implemented — list, get, create, and upload operations with event-sourced aggregate and artifact storage.
 
 ## list_artifacts()
 

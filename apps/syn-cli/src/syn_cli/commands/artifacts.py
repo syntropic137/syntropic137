@@ -9,7 +9,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from syn_cli._output import console, format_timestamp
-from syn_cli.commands._api_helpers import api_get, api_get_list, build_params
+from syn_cli.commands._api_helpers import api_get, api_get_list, api_post, build_params
 
 app = typer.Typer(
     name="artifacts",
@@ -114,3 +114,36 @@ def get_content(
         content_type = data.get("content_type", "text/plain")
         lexer = "markdown" if "markdown" in str(content_type) else "text"
         console.print(Syntax(content, lexer, theme="github-dark", word_wrap=True))
+
+
+@app.command("create")
+def create_artifact(
+    workflow: Annotated[str, typer.Option("--workflow", "-w", help="Workflow ID")],
+    artifact_type: Annotated[
+        str,
+        typer.Option(
+            "--type",
+            "-t",
+            help="Artifact type (code, document, research_summary)",
+        ),
+    ],
+    title: Annotated[str, typer.Option("--title", help="Artifact title")],
+    content: Annotated[str, typer.Option("--content", "-c", help="Artifact content")],
+    phase: Annotated[str | None, typer.Option("--phase", "-p", help="Phase ID")] = None,
+) -> None:
+    """Create a new artifact."""
+    data = api_post(
+        "/artifacts",
+        json={
+            "workflow_id": workflow,
+            "artifact_type": artifact_type,
+            "title": title,
+            "content": content,
+            "phase_id": phase,
+        },
+    )
+
+    artifact_id = data.get("id", "unknown")
+    console.print(f"[bold green]Created artifact:[/bold green] [cyan]{title}[/cyan]")
+    console.print(f"  ID: [dim]{artifact_id}[/dim]")
+    console.print(f"  Type: [dim]{artifact_type}[/dim]")

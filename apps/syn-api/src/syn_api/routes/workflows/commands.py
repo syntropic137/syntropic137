@@ -1,13 +1,16 @@
 """Workflow TEMPLATE command operations (create, validate).
 
 Service functions are plain ``async def`` (importable by tests).
-No HTTP endpoints currently — these are called from CLI or other services.
+HTTP endpoints wire the service functions to ``@router.post()`` routes.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
@@ -30,6 +33,8 @@ if TYPE_CHECKING:
         WorkflowClassification,
         WorkflowType,
     )
+
+router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 
 def _resolve_workflow_type(workflow_type: str) -> WorkflowType:
@@ -198,4 +203,92 @@ async def validate_yaml(
             valid=False,
             errors=[error_msg] if error_msg else ["Unknown validation error"],
         )
+    )
+
+
+# =============================================================================
+# Request Models
+# =============================================================================
+
+
+class CreateWorkflowRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    name: str
+    workflow_type: str = "custom"
+    classification: str = "standard"
+    repository_url: str = "https://github.com/example/repo"
+    repository_ref: str = "main"
+    description: str | None = None
+    phases: list[dict[str, str | int]] | None = None
+
+
+class ValidateYamlRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    file: str
+
+
+# =============================================================================
+# Response Models
+# =============================================================================
+
+
+class CreateWorkflowResponse(BaseModel):
+    id: str
+    name: str
+    workflow_type: str
+    status: str
+
+
+class ValidateYamlResponse(BaseModel):
+    valid: bool
+    name: str = ""
+    workflow_type: str = ""
+    phase_count: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
+# HTTP Endpoints
+# =============================================================================
+
+
+@router.post("", response_model=CreateWorkflowResponse, status_code=201)
+async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflowResponse:
+    """Create a new workflow template."""
+    result = await create_workflow(
+        name=body.name,
+        workflow_type=body.workflow_type,
+        classification=body.classification,
+        repository_url=body.repository_url,
+        repository_ref=body.repository_ref,
+        description=body.description,
+        phases=body.phases,
+    )
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return CreateWorkflowResponse(
+        id=result.value,
+        name=body.name,
+        workflow_type=body.workflow_type,
+        status="created",
+    )
+
+
+@router.post("/validate", response_model=ValidateYamlResponse)
+async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
+    """Validate a workflow YAML file."""
+    result = await validate_yaml(yaml_path=body.file)
+
+    if isinstance(result, Err):
+        raise HTTPException(status_code=400, detail=result.message)
+
+    v = result.value
+    return ValidateYamlResponse(
+        valid=v.valid,
+        name=v.name or "",
+        workflow_type=v.workflow_type or "",
+        phase_count=v.phase_count or 0,
+        errors=v.errors or [],
     )

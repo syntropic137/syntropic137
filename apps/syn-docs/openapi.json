@@ -1,19 +1,19 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Syn137 Dashboard API",
-    "description": "Dashboard API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
-    "version": "0.1.0"
+    "title": "Syntropic137 API",
+    "description": "API for Syntropic137. Provides real-time observability for workflow execution, agent sessions, and artifacts.",
+    "version": "0.5.1"
   },
   "paths": {
-    "/api/workflows": {
+    "/workflows": {
       "get": {
         "tags": [
           "workflows"
         ],
-        "summary": "List Workflows",
+        "summary": "List Workflows Endpoint",
         "description": "List all workflow templates.",
-        "operationId": "list_workflows_api_workflows_get",
+        "operationId": "list_workflows_endpoint_workflows_get",
         "parameters": [
           {
             "name": "workflow_type",
@@ -40,11 +40,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number"
+            }
           },
           {
             "name": "page_size",
@@ -54,11 +52,27 @@
               "type": "integer",
               "maximum": 100,
               "minimum": 1,
-              "description": "Items per page",
               "default": 20,
               "title": "Page Size"
+            }
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (- prefix = descending)",
+              "title": "Order By"
             },
-            "description": "Items per page"
+            "description": "Sort field (- prefix = descending)"
           }
         ],
         "responses": {
@@ -83,16 +97,60 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Create Workflow Endpoint",
+        "description": "Create a new workflow template.",
+        "operationId": "create_workflow_endpoint_workflows_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Create Workflow Endpoint Workflows Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
-    "/api/workflows/{workflow_id}": {
+    "/workflows/{workflow_id}": {
       "get": {
         "tags": [
           "workflows"
         ],
-        "summary": "Get Workflow",
+        "summary": "Get Workflow Endpoint",
         "description": "Get workflow details by ID.",
-        "operationId": "get_workflow_api_workflows__workflow_id__get",
+        "operationId": "get_workflow_endpoint_workflows__workflow_id__get",
         "parameters": [
           {
             "name": "workflow_id",
@@ -128,14 +186,14 @@
         }
       }
     },
-    "/api/workflows/{workflow_id}/runs": {
+    "/workflows/{workflow_id}/runs": {
       "get": {
         "tags": [
           "workflows"
         ],
-        "summary": "List Workflow Runs",
+        "summary": "List Workflow Runs Endpoint",
         "description": "List all execution runs for a workflow.",
-        "operationId": "list_workflow_runs_api_workflows__workflow_id__runs_get",
+        "operationId": "list_workflow_runs_endpoint_workflows__workflow_id__runs_get",
         "parameters": [
           {
             "name": "workflow_id",
@@ -171,14 +229,14 @@
         }
       }
     },
-    "/api/workflows/{workflow_id}/history": {
+    "/workflows/{workflow_id}/history": {
       "get": {
         "tags": [
           "workflows"
         ],
-        "summary": "Get Workflow History",
-        "description": "Get execution history for a workflow.\n\nDEPRECATED: Use /workflows/{workflow_id}/runs instead.",
-        "operationId": "get_workflow_history_api_workflows__workflow_id__history_get",
+        "summary": "Get Workflow History Endpoint",
+        "description": "DEPRECATED: Use /workflows/{workflow_id}/runs instead.",
+        "operationId": "get_workflow_history_endpoint_workflows__workflow_id__history_get",
         "parameters": [
           {
             "name": "workflow_id",
@@ -214,34 +272,23 @@
         }
       }
     },
-    "/api/workflows/{workflow_id}/execute": {
+    "/workflows/validate": {
       "post": {
         "tags": [
-          "execution"
+          "workflows"
         ],
-        "summary": "Execute Workflow",
-        "description": "Start workflow execution in background.",
-        "operationId": "execute_workflow_api_workflows__workflow_id__execute_post",
-        "parameters": [
-          {
-            "name": "workflow_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Workflow Id"
-            }
-          }
-        ],
+        "summary": "Validate Yaml Endpoint",
+        "description": "Validate a workflow YAML file.",
+        "operationId": "validate_yaml_endpoint_workflows_validate_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExecuteWorkflowRequest"
+                "$ref": "#/components/schemas/ValidateYamlRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -249,109 +296,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ExecuteWorkflowResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workflows/{workflow_id}/executions/{execution_id}": {
-      "get": {
-        "tags": [
-          "execution"
-        ],
-        "summary": "Get Execution Status",
-        "description": "Get the status of a workflow execution.",
-        "operationId": "get_execution_status_api_workflows__workflow_id__executions__execution_id__get",
-        "parameters": [
-          {
-            "name": "workflow_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Workflow Id"
-            }
-          },
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ExecutionStatusResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workflows/executions/active": {
-      "get": {
-        "tags": [
-          "execution"
-        ],
-        "summary": "List Active Executions",
-        "description": "List all active (non-completed) executions.",
-        "operationId": "list_active_executions_api_workflows_executions_active_get",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 20,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ExecutionStatusResponse"
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    ]
                   },
-                  "title": "Response List Active Executions Api Workflows Executions Active Get"
+                  "type": "object",
+                  "title": "Response Validate Yaml Endpoint Workflows Validate Post"
                 }
               }
             }
@@ -369,14 +334,14 @@
         }
       }
     },
-    "/api/executions": {
+    "/executions": {
       "get": {
         "tags": [
           "executions"
         ],
-        "summary": "List All Executions",
+        "summary": "List Executions Endpoint",
         "description": "List all workflow executions across all workflows.",
-        "operationId": "list_all_executions_api_executions_get",
+        "operationId": "list_executions_endpoint_executions_get",
         "parameters": [
           {
             "name": "status",
@@ -448,14 +413,14 @@
         }
       }
     },
-    "/api/executions/{execution_id}": {
+    "/executions/{execution_id}": {
       "get": {
         "tags": [
           "executions"
         ],
-        "summary": "Get Execution",
+        "summary": "Get Execution Endpoint",
         "description": "Get detailed information about a workflow execution run.",
-        "operationId": "get_execution_api_executions__execution_id__get",
+        "operationId": "get_execution_endpoint_executions__execution_id__get",
         "parameters": [
           {
             "name": "execution_id",
@@ -491,14 +456,428 @@
         }
       }
     },
-    "/api/sessions": {
+    "/workflows/{workflow_id}/execute": {
+      "post": {
+        "tags": [
+          "execution"
+        ],
+        "summary": "Execute Workflow Endpoint",
+        "description": "Start workflow execution in background.",
+        "operationId": "execute_workflow_endpoint_workflows__workflow_id__execute_post",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteWorkflowRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecuteWorkflowResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/executions/{execution_id}": {
+      "get": {
+        "tags": [
+          "execution"
+        ],
+        "summary": "Get Execution Status Endpoint",
+        "description": "Get the status of a workflow execution.",
+        "operationId": "get_execution_status_endpoint_workflows__workflow_id__executions__execution_id__get",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/executions/active": {
+      "get": {
+        "tags": [
+          "execution"
+        ],
+        "summary": "List Active Executions Endpoint",
+        "description": "List all active (non-completed) executions.",
+        "operationId": "list_active_executions_endpoint_workflows_executions_active_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExecutionStatusResponse"
+                  },
+                  "title": "Response List Active Executions Endpoint Workflows Executions Active Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/pause": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Pause Execution Endpoint",
+        "description": "Pause a running execution.",
+        "operationId": "pause_execution_endpoint_executions__execution_id__pause_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PauseRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/resume": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Resume Execution Endpoint",
+        "description": "Resume a paused execution.",
+        "operationId": "resume_execution_endpoint_executions__execution_id__resume_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/cancel": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Cancel Execution Endpoint",
+        "description": "Cancel a running or paused execution.",
+        "operationId": "cancel_execution_endpoint_executions__execution_id__cancel_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CancelRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/inject": {
+      "post": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Inject Context Endpoint",
+        "description": "Inject a message into the execution context.",
+        "operationId": "inject_context_endpoint_executions__execution_id__inject_post",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/executions/{execution_id}/state": {
+      "get": {
+        "tags": [
+          "control"
+        ],
+        "summary": "Get Execution State Endpoint",
+        "description": "Get current execution state.",
+        "operationId": "get_execution_state_endpoint_executions__execution_id__state_get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions": {
       "get": {
         "tags": [
           "sessions"
         ],
-        "summary": "List Sessions",
+        "summary": "List Sessions Endpoint",
         "description": "List agent sessions with optional filtering.",
-        "operationId": "list_sessions_api_sessions_get",
+        "operationId": "list_sessions_endpoint_sessions_get",
         "parameters": [
           {
             "name": "workflow_id",
@@ -559,9 +938,9 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/SessionSummary"
+                    "$ref": "#/components/schemas/SessionSummaryResponse"
                   },
-                  "title": "Response List Sessions Api Sessions Get"
+                  "title": "Response List Sessions Endpoint Sessions Get"
                 }
               }
             }
@@ -579,14 +958,14 @@
         }
       }
     },
-    "/api/sessions/{session_id}": {
+    "/sessions/{session_id}": {
       "get": {
         "tags": [
           "sessions"
         ],
-        "summary": "Get Session",
+        "summary": "Get Session Endpoint",
         "description": "Get session details by ID.",
-        "operationId": "get_session_api_sessions__session_id__get",
+        "operationId": "get_session_endpoint_sessions__session_id__get",
         "parameters": [
           {
             "name": "session_id",
@@ -622,14 +1001,14 @@
         }
       }
     },
-    "/api/artifacts": {
+    "/artifacts": {
       "get": {
         "tags": [
           "artifacts"
         ],
-        "summary": "List Artifacts",
+        "summary": "List Artifacts Endpoint",
         "description": "List artifacts with optional filtering.",
-        "operationId": "list_artifacts_api_artifacts_get",
+        "operationId": "list_artifacts_endpoint_artifacts_get",
         "parameters": [
           {
             "name": "workflow_id",
@@ -708,9 +1087,53 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ArtifactSummary"
+                    "$ref": "#/components/schemas/ArtifactSummaryResponse"
                   },
-                  "title": "Response List Artifacts Api Artifacts Get"
+                  "title": "Response List Artifacts Endpoint Artifacts Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Create Artifact Endpoint",
+        "description": "Create a new artifact.",
+        "operationId": "create_artifact_endpoint_artifacts_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Create Artifact Endpoint Artifacts Post"
                 }
               }
             }
@@ -728,14 +1151,14 @@
         }
       }
     },
-    "/api/artifacts/{artifact_id}": {
+    "/artifacts/{artifact_id}": {
       "get": {
         "tags": [
           "artifacts"
         ],
-        "summary": "Get Artifact",
+        "summary": "Get Artifact Endpoint",
         "description": "Get artifact details by ID.",
-        "operationId": "get_artifact_api_artifacts__artifact_id__get",
+        "operationId": "get_artifact_endpoint_artifacts__artifact_id__get",
         "parameters": [
           {
             "name": "artifact_id",
@@ -783,14 +1206,14 @@
         }
       }
     },
-    "/api/artifacts/{artifact_id}/content": {
+    "/artifacts/{artifact_id}/content": {
       "get": {
         "tags": [
           "artifacts"
         ],
-        "summary": "Get Artifact Content",
+        "summary": "Get Artifact Content Endpoint",
         "description": "Get artifact content only (for large artifacts).",
-        "operationId": "get_artifact_content_api_artifacts__artifact_id__content_get",
+        "operationId": "get_artifact_content_endpoint_artifacts__artifact_id__content_get",
         "parameters": [
           {
             "name": "artifact_id",
@@ -822,7 +1245,7 @@
                       }
                     ]
                   },
-                  "title": "Response Get Artifact Content Api Artifacts  Artifact Id  Content Get"
+                  "title": "Response Get Artifact Content Endpoint Artifacts  Artifact Id  Content Get"
                 }
               }
             }
@@ -840,14 +1263,71 @@
         }
       }
     },
-    "/api/metrics": {
+    "/artifacts/{artifact_id}/upload": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Upload Artifact Endpoint",
+        "description": "Upload binary content for an existing artifact.",
+        "operationId": "upload_artifact_endpoint_artifacts__artifact_id__upload_post",
+        "parameters": [
+          {
+            "name": "artifact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Upload Artifact Endpoint Artifacts  Artifact Id  Upload Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
       "get": {
         "tags": [
           "metrics"
         ],
-        "summary": "Get Metrics",
+        "summary": "Get Metrics Endpoint",
         "description": "Get aggregated metrics across all workflows or for a specific workflow.",
-        "operationId": "get_metrics_api_metrics_get",
+        "operationId": "get_metrics_endpoint_metrics_get",
         "parameters": [
           {
             "name": "workflow_id",
@@ -892,14 +1372,14 @@
         }
       }
     },
-    "/api/observability/sessions/{session_id}/tools": {
+    "/observability/sessions/{session_id}/tools": {
       "get": {
         "tags": [
           "observability"
         ],
-        "summary": "Get Tool Timeline",
+        "summary": "Get Tool Timeline Endpoint",
         "description": "Get tool execution timeline for a session.",
-        "operationId": "get_tool_timeline_api_observability_sessions__session_id__tools_get",
+        "operationId": "get_tool_timeline_endpoint_observability_sessions__session_id__tools_get",
         "parameters": [
           {
             "name": "session_id",
@@ -939,7 +1419,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Get Tool Timeline Api Observability Sessions  Session Id  Tools Get"
+                  "title": "Response Get Tool Timeline Endpoint Observability Sessions  Session Id  Tools Get"
                 }
               }
             }
@@ -957,14 +1437,14 @@
         }
       }
     },
-    "/api/observability/sessions/{session_id}/tokens": {
+    "/observability/sessions/{session_id}/tokens": {
       "get": {
         "tags": [
           "observability"
         ],
-        "summary": "Get Token Metrics",
+        "summary": "Get Token Metrics Endpoint",
         "description": "Get token usage metrics for a session.",
-        "operationId": "get_token_metrics_api_observability_sessions__session_id__tokens_get",
+        "operationId": "get_token_metrics_endpoint_observability_sessions__session_id__tokens_get",
         "parameters": [
           {
             "name": "session_id",
@@ -994,7 +1474,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Get Token Metrics Api Observability Sessions  Session Id  Tokens Get"
+                  "title": "Response Get Token Metrics Endpoint Observability Sessions  Session Id  Tokens Get"
                 }
               }
             }
@@ -1012,273 +1492,14 @@
         }
       }
     },
-    "/api/executions/{execution_id}/pause": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Pause Execution",
-        "description": "Pause a running execution.",
-        "operationId": "pause_execution_api_executions__execution_id__pause_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/PauseRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Request"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/executions/{execution_id}/resume": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Resume Execution",
-        "description": "Resume a paused execution.",
-        "operationId": "resume_execution_api_executions__execution_id__resume_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/executions/{execution_id}/cancel": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Cancel Execution",
-        "description": "Cancel a running or paused execution.",
-        "operationId": "cancel_execution_api_executions__execution_id__cancel_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/CancelRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Request"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/executions/{execution_id}/inject": {
-      "post": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Inject Context",
-        "description": "Inject a message into the execution context.",
-        "operationId": "inject_context_api_executions__execution_id__inject_post",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InjectRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ControlResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/executions/{execution_id}/state": {
-      "get": {
-        "tags": [
-          "control"
-        ],
-        "summary": "Get Execution State",
-        "description": "Get current execution state.",
-        "operationId": "get_execution_state_api_executions__execution_id__state_get",
-        "parameters": [
-          {
-            "name": "execution_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Execution Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/StateResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/costs/sessions": {
+    "/costs/sessions": {
       "get": {
         "tags": [
           "costs"
         ],
-        "summary": "List Session Costs",
+        "summary": "List Session Costs Endpoint",
         "description": "List session costs with optional filtering.",
-        "operationId": "list_session_costs_api_costs_sessions_get",
+        "operationId": "list_session_costs_endpoint_costs_sessions_get",
         "parameters": [
           {
             "name": "execution_id",
@@ -1323,7 +1544,7 @@
                   "items": {
                     "$ref": "#/components/schemas/SessionCostResponse"
                   },
-                  "title": "Response List Session Costs Api Costs Sessions Get"
+                  "title": "Response List Session Costs Endpoint Costs Sessions Get"
                 }
               }
             }
@@ -1341,14 +1562,14 @@
         }
       }
     },
-    "/api/costs/sessions/{session_id}": {
+    "/costs/sessions/{session_id}": {
       "get": {
         "tags": [
           "costs"
         ],
-        "summary": "Get Session Cost",
+        "summary": "Get Session Cost Endpoint",
         "description": "Get cost for a specific session.",
-        "operationId": "get_session_cost_api_costs_sessions__session_id__get",
+        "operationId": "get_session_cost_endpoint_costs_sessions__session_id__get",
         "parameters": [
           {
             "name": "session_id",
@@ -1396,14 +1617,14 @@
         }
       }
     },
-    "/api/costs/executions": {
+    "/costs/executions": {
       "get": {
         "tags": [
           "costs"
         ],
-        "summary": "List Execution Costs",
+        "summary": "List Execution Costs Endpoint",
         "description": "List execution costs.",
-        "operationId": "list_execution_costs_api_costs_executions_get",
+        "operationId": "list_execution_costs_endpoint_costs_executions_get",
         "parameters": [
           {
             "name": "limit",
@@ -1430,7 +1651,7 @@
                   "items": {
                     "$ref": "#/components/schemas/ExecutionCostResponse"
                   },
-                  "title": "Response List Execution Costs Api Costs Executions Get"
+                  "title": "Response List Execution Costs Endpoint Costs Executions Get"
                 }
               }
             }
@@ -1448,14 +1669,14 @@
         }
       }
     },
-    "/api/costs/executions/{execution_id}": {
+    "/costs/executions/{execution_id}": {
       "get": {
         "tags": [
           "costs"
         ],
-        "summary": "Get Execution Cost",
+        "summary": "Get Execution Cost Endpoint",
         "description": "Get aggregated cost for a workflow execution.",
-        "operationId": "get_execution_cost_api_costs_executions__execution_id__get",
+        "operationId": "get_execution_cost_endpoint_costs_executions__execution_id__get",
         "parameters": [
           {
             "name": "execution_id",
@@ -1515,21 +1736,21 @@
         }
       }
     },
-    "/api/costs/summary": {
+    "/costs/summary": {
       "get": {
         "tags": [
           "costs"
         ],
-        "summary": "Get Cost Summary",
+        "summary": "Get Cost Summary Endpoint",
         "description": "Get summary of all costs across sessions and executions.",
-        "operationId": "get_cost_summary_api_costs_summary_get",
+        "operationId": "get_cost_summary_endpoint_costs_summary_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CostSummaryResponse"
+                  "$ref": "#/components/schemas/syn_api__routes__costs__CostSummaryResponse"
                 }
               }
             }
@@ -1537,14 +1758,62 @@
         }
       }
     },
-    "/api/events/sessions/{session_id}": {
+    "/events/recent": {
       "get": {
         "tags": [
           "events"
         ],
-        "summary": "Get Session Events",
+        "summary": "Get Recent Activity Endpoint",
+        "description": "Get recent git activity events for the global dashboard feed.",
+        "operationId": "get_recent_activity_endpoint_events_recent_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Max events to return",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max events to return"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/events/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Get Session Events Endpoint",
         "description": "Get all events for a session.",
-        "operationId": "get_session_events_api_events_sessions__session_id__get",
+        "operationId": "get_session_events_endpoint_events_sessions__session_id__get",
         "parameters": [
           {
             "name": "session_id",
@@ -1625,14 +1894,14 @@
         }
       }
     },
-    "/api/events/sessions/{session_id}/timeline": {
+    "/events/sessions/{session_id}/timeline": {
       "get": {
         "tags": [
           "events"
         ],
-        "summary": "Get Session Timeline",
+        "summary": "Get Session Timeline Endpoint",
         "description": "Get a timeline view of session events.",
-        "operationId": "get_session_timeline_api_events_sessions__session_id__timeline_get",
+        "operationId": "get_session_timeline_endpoint_events_sessions__session_id__timeline_get",
         "parameters": [
           {
             "name": "session_id",
@@ -1666,9 +1935,9 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TimelineEntry"
+                    "$ref": "#/components/schemas/TimelineEntryResponse"
                   },
-                  "title": "Response Get Session Timeline Api Events Sessions  Session Id  Timeline Get"
+                  "title": "Response Get Session Timeline Endpoint Events Sessions  Session Id  Timeline Get"
                 }
               }
             }
@@ -1686,14 +1955,14 @@
         }
       }
     },
-    "/api/events/sessions/{session_id}/costs": {
+    "/events/sessions/{session_id}/costs": {
       "get": {
         "tags": [
           "events"
         ],
-        "summary": "Get Session Costs",
+        "summary": "Get Session Costs Endpoint",
         "description": "Get cost summary for a session.",
-        "operationId": "get_session_costs_api_events_sessions__session_id__costs_get",
+        "operationId": "get_session_costs_endpoint_events_sessions__session_id__costs_get",
         "parameters": [
           {
             "name": "session_id",
@@ -1711,7 +1980,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CostSummary"
+                  "$ref": "#/components/schemas/syn_api__routes__events__CostSummaryResponse"
                 }
               }
             }
@@ -1729,14 +1998,14 @@
         }
       }
     },
-    "/api/events/sessions/{session_id}/tools": {
+    "/events/sessions/{session_id}/tools": {
       "get": {
         "tags": [
           "events"
         ],
-        "summary": "Get Session Tools",
+        "summary": "Get Session Tools Endpoint",
         "description": "Get tool usage summary for a session.",
-        "operationId": "get_session_tools_api_events_sessions__session_id__tools_get",
+        "operationId": "get_session_tools_endpoint_events_sessions__session_id__tools_get",
         "parameters": [
           {
             "name": "session_id",
@@ -1758,7 +2027,7 @@
                   "items": {
                     "$ref": "#/components/schemas/ToolSummary"
                   },
-                  "title": "Response Get Session Tools Api Events Sessions  Session Id  Tools Get"
+                  "title": "Response Get Session Tools Endpoint Events Sessions  Session Id  Tools Get"
                 }
               }
             }
@@ -1776,14 +2045,14 @@
         }
       }
     },
-    "/api/conversations/{session_id}": {
+    "/conversations/{session_id}": {
       "get": {
         "tags": [
           "conversations"
         ],
-        "summary": "Get Conversation Log",
+        "summary": "Get Conversation Log Endpoint",
         "description": "Get conversation log for a session.",
-        "operationId": "get_conversation_log_api_conversations__session_id__get",
+        "operationId": "get_conversation_log_endpoint_conversations__session_id__get",
         "parameters": [
           {
             "name": "session_id",
@@ -1839,14 +2108,14 @@
         }
       }
     },
-    "/api/conversations/{session_id}/metadata": {
+    "/conversations/{session_id}/metadata": {
       "get": {
         "tags": [
           "conversations"
         ],
-        "summary": "Get Conversation Metadata",
+        "summary": "Get Conversation Metadata Endpoint",
         "description": "Get conversation metadata for a session.",
-        "operationId": "get_conversation_metadata_api_conversations__session_id__metadata_get",
+        "operationId": "get_conversation_metadata_endpoint_conversations__session_id__metadata_get",
         "parameters": [
           {
             "name": "session_id",
@@ -1866,13 +2135,13 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/ConversationMetadata"
+                      "$ref": "#/components/schemas/ConversationMetadataResponse"
                     },
                     {
                       "type": "null"
                     }
                   ],
-                  "title": "Response Get Conversation Metadata Api Conversations  Session Id  Metadata Get"
+                  "title": "Response Get Conversation Metadata Endpoint Conversations  Session Id  Metadata Get"
                 }
               }
             }
@@ -1890,58 +2159,14 @@
         }
       }
     },
-    "/api/triggers": {
-      "post": {
-        "tags": [
-          "triggers"
-        ],
-        "summary": "Register Trigger",
-        "description": "Register a new trigger rule.",
-        "operationId": "register_trigger_api_triggers_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Register Trigger Api Triggers Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
+    "/triggers": {
       "get": {
         "tags": [
           "triggers"
         ],
-        "summary": "List Triggers",
+        "summary": "List Triggers Endpoint",
         "description": "List all trigger rules.",
-        "operationId": "list_triggers_api_triggers_get",
+        "operationId": "list_triggers_endpoint_triggers_get",
         "parameters": [
           {
             "name": "repository",
@@ -1984,7 +2209,51 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response List Triggers Api Triggers Get"
+                  "title": "Response List Triggers Endpoint Triggers Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "triggers"
+        ],
+        "summary": "Register Trigger Endpoint",
+        "description": "Register a new trigger rule.",
+        "operationId": "register_trigger_endpoint_triggers_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Register Trigger Endpoint Triggers Post"
                 }
               }
             }
@@ -2002,14 +2271,60 @@
         }
       }
     },
-    "/api/triggers/{trigger_id}": {
+    "/triggers/history": {
       "get": {
         "tags": [
           "triggers"
         ],
-        "summary": "Get Trigger",
+        "summary": "Get All History Endpoint",
+        "description": "Get all trigger activity (global).",
+        "operationId": "get_all_history_endpoint_triggers_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get All History Endpoint Triggers History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/triggers/{trigger_id}": {
+      "get": {
+        "tags": [
+          "triggers"
+        ],
+        "summary": "Get Trigger Endpoint",
         "description": "Get trigger details.",
-        "operationId": "get_trigger_api_triggers__trigger_id__get",
+        "operationId": "get_trigger_endpoint_triggers__trigger_id__get",
         "parameters": [
           {
             "name": "trigger_id",
@@ -2029,7 +2344,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Get Trigger Api Triggers  Trigger Id  Get"
+                  "title": "Response Get Trigger Endpoint Triggers  Trigger Id  Get"
                 }
               }
             }
@@ -2050,9 +2365,9 @@
         "tags": [
           "triggers"
         ],
-        "summary": "Update Trigger",
+        "summary": "Update Trigger Endpoint",
         "description": "Update trigger (pause/resume).",
-        "operationId": "update_trigger_api_triggers__trigger_id__patch",
+        "operationId": "update_trigger_endpoint_triggers__trigger_id__patch",
         "parameters": [
           {
             "name": "trigger_id",
@@ -2084,7 +2399,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Update Trigger Api Triggers  Trigger Id  Patch"
+                  "title": "Response Update Trigger Endpoint Triggers  Trigger Id  Patch"
                 }
               }
             }
@@ -2105,9 +2420,9 @@
         "tags": [
           "triggers"
         ],
-        "summary": "Delete Trigger",
+        "summary": "Delete Trigger Endpoint",
         "description": "Delete a trigger rule.",
-        "operationId": "delete_trigger_api_triggers__trigger_id__delete",
+        "operationId": "delete_trigger_endpoint_triggers__trigger_id__delete",
         "parameters": [
           {
             "name": "trigger_id",
@@ -2127,7 +2442,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Delete Trigger Api Triggers  Trigger Id  Delete"
+                  "title": "Response Delete Trigger Endpoint Triggers  Trigger Id  Delete"
                 }
               }
             }
@@ -2145,14 +2460,69 @@
         }
       }
     },
-    "/api/triggers/presets/{preset_name}": {
+    "/triggers/{trigger_id}/history": {
+      "get": {
+        "tags": [
+          "triggers"
+        ],
+        "summary": "Get Trigger History Endpoint",
+        "description": "Get execution history for a trigger.",
+        "operationId": "get_trigger_history_endpoint_triggers__trigger_id__history_get",
+        "parameters": [
+          {
+            "name": "trigger_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Trigger Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Trigger History Endpoint Triggers  Trigger Id  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/triggers/presets/{preset_name}": {
       "post": {
         "tags": [
           "triggers"
         ],
-        "summary": "Enable Preset",
+        "summary": "Enable Preset Endpoint",
         "description": "Enable a preset for a repository.",
-        "operationId": "enable_preset_api_triggers_presets__preset_name__post",
+        "operationId": "enable_preset_endpoint_triggers_presets__preset_name__post",
         "parameters": [
           {
             "name": "preset_name",
@@ -2184,108 +2554,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Enable Preset Api Triggers Presets  Preset Name  Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/triggers/{trigger_id}/history": {
-      "get": {
-        "tags": [
-          "triggers"
-        ],
-        "summary": "Get Trigger History",
-        "description": "Get execution history for a trigger.",
-        "operationId": "get_trigger_history_api_triggers__trigger_id__history_get",
-        "parameters": [
-          {
-            "name": "trigger_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Trigger Id"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Trigger History Api Triggers  Trigger Id  History Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/triggers/history": {
-      "get": {
-        "tags": [
-          "triggers"
-        ],
-        "summary": "Get All History",
-        "description": "Get all trigger activity (global).\n\nNote: This falls back to domain-level projection since\nglobal history aggregation is not yet in syn_api.",
-        "operationId": "get_all_history_api_triggers_history_get",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 50,
-              "title": "Limit"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get All History Api Triggers History Get"
+                  "title": "Response Enable Preset Endpoint Triggers Presets  Preset Name  Post"
                 }
               }
             }
@@ -2308,9 +2577,9 @@
         "tags": [
           "webhooks"
         ],
-        "summary": "Github Webhook",
-        "description": "Handle GitHub webhooks.\n\nProcesses installation and other events via syn_api.v1.github.",
-        "operationId": "github_webhook_webhooks_github_post",
+        "summary": "Github Webhook Endpoint",
+        "description": "Handle GitHub webhooks.",
+        "operationId": "github_webhook_endpoint_webhooks_github_post",
         "parameters": [
           {
             "name": "X-GitHub-Event",
@@ -2355,7 +2624,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Github Webhook Webhooks Github Post"
+                  "title": "Response Github Webhook Endpoint Webhooks Github Post"
                 }
               }
             }
@@ -2373,14 +2642,75 @@
         }
       }
     },
-    "/ws/health": {
+    "/sse/executions/{execution_id}": {
       "get": {
         "tags": [
-          "websocket"
+          "sse"
         ],
-        "summary": "Websocket Health",
-        "description": "Health check for WebSocket subsystem.",
-        "operationId": "websocket_health_ws_health_get",
+        "summary": "Execution Sse",
+        "description": "Stream domain events for a single execution.\n\nSends a ``connected`` handshake frame on connect, then forwards every\ndomain event emitted by the RealTimeProjection for this execution.\nCloses automatically when a terminal event (WorkflowCompleted /\nWorkflowFailed) is broadcast, or when the client disconnects.",
+        "operationId": "execution_sse_sse_executions__execution_id__get",
+        "parameters": [
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sse/activity": {
+      "get": {
+        "tags": [
+          "sse"
+        ],
+        "summary": "Activity Sse",
+        "description": "Stream the global activity feed (git events, system-wide activity).\n\nRuns indefinitely until the client disconnects.  There is no terminal\nsentinel for the activity channel \u2014 it never completes.",
+        "operationId": "activity_sse_sse_activity_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sse/health": {
+      "get": {
+        "tags": [
+          "sse"
+        ],
+        "summary": "Sse Health",
+        "description": "Health check for the SSE subsystem.\n\nReturns active subscriber and execution counts from the RealTimeProjection.",
+        "operationId": "sse_health_sse_health_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2389,7 +2719,1560 @@
                 "schema": {
                   "additionalProperties": true,
                   "type": "object",
-                  "title": "Response Websocket Health Ws Health Get"
+                  "title": "Response Sse Health Sse Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "List Organizations Endpoint",
+        "description": "List all organizations.",
+        "operationId": "list_organizations_endpoint_organizations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Organizations Endpoint Organizations Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Create Organization Endpoint",
+        "description": "Create a new organization.",
+        "operationId": "create_organization_endpoint_organizations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Create Organization Endpoint Organizations Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/organizations/{organization_id}": {
+      "get": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Get Organization Endpoint",
+        "description": "Get organization details.",
+        "operationId": "get_organization_endpoint_organizations__organization_id__get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Organization Endpoint Organizations  Organization Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Update Organization Endpoint",
+        "description": "Update an organization.",
+        "operationId": "update_organization_endpoint_organizations__organization_id__put",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Update Organization Endpoint Organizations  Organization Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "organizations"
+        ],
+        "summary": "Delete Organization Endpoint",
+        "description": "Soft-delete an organization.",
+        "operationId": "delete_organization_endpoint_organizations__organization_id__delete",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Organization Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete Organization Endpoint Organizations  Organization Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems": {
+      "post": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Create System Endpoint",
+        "description": "Create a new system.",
+        "operationId": "create_system_endpoint_systems_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create System Endpoint Systems Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "List Systems Endpoint",
+        "description": "List systems with optional organization filter.",
+        "operationId": "list_systems_endpoint_systems_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Organization Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Systems Endpoint Systems Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems/{system_id}": {
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Get System Endpoint",
+        "description": "Get system details.",
+        "operationId": "get_system_endpoint_systems__system_id__get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get System Endpoint Systems  System Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Update System Endpoint",
+        "description": "Update a system.",
+        "operationId": "update_system_endpoint_systems__system_id__put",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Update System Endpoint Systems  System Id  Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Delete System Endpoint",
+        "description": "Soft-delete a system.",
+        "operationId": "delete_system_endpoint_systems__system_id__delete",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete System Endpoint Systems  System Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems/{system_id}/status": {
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Get System Status Endpoint",
+        "description": "Get cross-repo health overview for a system.",
+        "operationId": "get_system_status_endpoint_systems__system_id__status_get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get System Status Endpoint Systems  System Id  Status Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems/{system_id}/cost": {
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Get System Cost Endpoint",
+        "description": "Get cost breakdown for a system.",
+        "operationId": "get_system_cost_endpoint_systems__system_id__cost_get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get System Cost Endpoint Systems  System Id  Cost Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems/{system_id}/activity": {
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Get System Activity Endpoint",
+        "description": "Get execution timeline for a system.",
+        "operationId": "get_system_activity_endpoint_systems__system_id__activity_get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get System Activity Endpoint Systems  System Id  Activity Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems/{system_id}/patterns": {
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Get System Patterns Endpoint",
+        "description": "Get recurring failure and cost patterns for a system.",
+        "operationId": "get_system_patterns_endpoint_systems__system_id__patterns_get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get System Patterns Endpoint Systems  System Id  Patterns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/systems/{system_id}/history": {
+      "get": {
+        "tags": [
+          "systems"
+        ],
+        "summary": "Get System History Endpoint",
+        "description": "Get historical execution timeline for a system.",
+        "operationId": "get_system_history_endpoint_systems__system_id__history_get",
+        "parameters": [
+          {
+            "name": "system_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "System Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get System History Endpoint Systems  System Id  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos": {
+      "post": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Register Repo Endpoint",
+        "description": "Register a new repo.",
+        "operationId": "register_repo_endpoint_repos_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Register Repo Endpoint Repos Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "List Repos Endpoint",
+        "description": "List repos with optional filters.",
+        "operationId": "list_repos_endpoint_repos_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "system_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "unassigned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Unassigned"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Repos Endpoint Repos Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Get Repo Endpoint",
+        "description": "Get repo details.",
+        "operationId": "get_repo_endpoint_repos__repo_id__get",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Repo Endpoint Repos  Repo Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/assign": {
+      "post": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Assign Repo To System Endpoint",
+        "description": "Assign a repo to a system.",
+        "operationId": "assign_repo_to_system_endpoint_repos__repo_id__assign_post",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Assign Repo To System Endpoint Repos  Repo Id  Assign Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/unassign": {
+      "post": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Unassign Repo From System Endpoint",
+        "description": "Unassign a repo from its system.",
+        "operationId": "unassign_repo_from_system_endpoint_repos__repo_id__unassign_post",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Unassign Repo From System Endpoint Repos  Repo Id  Unassign Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/health": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Get Repo Health Endpoint",
+        "description": "Get health snapshot for a repo.",
+        "operationId": "get_repo_health_endpoint_repos__repo_id__health_get",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Repo Health Endpoint Repos  Repo Id  Health Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/cost": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Get Repo Cost Endpoint",
+        "description": "Get cost breakdown for a repo.",
+        "operationId": "get_repo_cost_endpoint_repos__repo_id__cost_get",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Repo Cost Endpoint Repos  Repo Id  Cost Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/activity": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Get Repo Activity Endpoint",
+        "description": "Get execution timeline for a repo.",
+        "operationId": "get_repo_activity_endpoint_repos__repo_id__activity_get",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Repo Activity Endpoint Repos  Repo Id  Activity Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/failures": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Get Repo Failures Endpoint",
+        "description": "Get recent failures for a repo.",
+        "operationId": "get_repo_failures_endpoint_repos__repo_id__failures_get",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Repo Failures Endpoint Repos  Repo Id  Failures Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{repo_id}/sessions": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Get Repo Sessions Endpoint",
+        "description": "Get agent sessions for a repo.",
+        "operationId": "get_repo_sessions_endpoint_repos__repo_id__sessions_get",
+        "parameters": [
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Repo Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Repo Sessions Endpoint Repos  Repo Id  Sessions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/overview": {
+      "get": {
+        "tags": [
+          "insights"
+        ],
+        "summary": "Get Global Overview Endpoint",
+        "description": "Get global overview of all systems and repos.",
+        "operationId": "get_global_overview_endpoint_insights_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Global Overview Endpoint Insights Overview Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/cost": {
+      "get": {
+        "tags": [
+          "insights"
+        ],
+        "summary": "Get Global Cost Endpoint",
+        "description": "Get global cost breakdown across all repos.",
+        "operationId": "get_global_cost_endpoint_insights_cost_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Global Cost Endpoint Insights Cost Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/insights/contribution-heatmap": {
+      "get": {
+        "tags": [
+          "insights"
+        ],
+        "summary": "Get Contribution Heatmap Endpoint",
+        "description": "Get daily contribution heatmap data.",
+        "operationId": "get_contribution_heatmap_endpoint_insights_contribution_heatmap_get",
+        "parameters": [
+          {
+            "name": "organization_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Organization Id"
+            }
+          },
+          {
+            "name": "system_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "System Id"
+            }
+          },
+          {
+            "name": "repo_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repo Id"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          },
+          {
+            "name": "metric",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "sessions",
+              "title": "Metric"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/providers": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "List Providers Endpoint",
+        "description": "List available agent providers.",
+        "operationId": "list_providers_endpoint_agents_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Providers Endpoint Agents Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/test": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Test Agent Endpoint",
+        "description": "Test an agent provider with a simple prompt.",
+        "operationId": "test_agent_endpoint_agents_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Test Agent Endpoint Agents Test Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/chat": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Chat Endpoint",
+        "description": "Send a stateless chat completion request.",
+        "operationId": "chat_endpoint_agents_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Chat Endpoint Agents Chat Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2545,8 +4428,7 @@
           "created_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2582,7 +4464,7 @@
         "title": "ArtifactResponse",
         "description": "Detailed artifact response."
       },
-      "ArtifactSummary": {
+      "ArtifactSummaryResponse": {
         "properties": {
           "id": {
             "type": "string",
@@ -2633,8 +4515,7 @@
           "created_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -2650,8 +4531,22 @@
           "phase_id",
           "artifact_type"
         ],
-        "title": "ArtifactSummary",
+        "title": "ArtifactSummaryResponse",
         "description": "Summary of an artifact."
+      },
+      "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_artifact_endpoint_artifacts__artifact_id__upload_post"
       },
       "CancelRequest": {
         "properties": {
@@ -2717,7 +4612,7 @@
         "title": "ControlResponse",
         "description": "Response from a control command."
       },
-      "ConversationLine": {
+      "ConversationLineResponse": {
         "properties": {
           "line_number": {
             "type": "integer",
@@ -2778,7 +4673,7 @@
           "line_number",
           "raw"
         ],
-        "title": "ConversationLine",
+        "title": "ConversationLineResponse",
         "description": "A single line from the conversation log."
       },
       "ConversationLogResponse": {
@@ -2789,7 +4684,7 @@
           },
           "lines": {
             "items": {
-              "$ref": "#/components/schemas/ConversationLine"
+              "$ref": "#/components/schemas/ConversationLineResponse"
             },
             "type": "array",
             "title": "Lines"
@@ -2820,7 +4715,7 @@
         "title": "ConversationLogResponse",
         "description": "Response containing conversation log."
       },
-      "ConversationMetadata": {
+      "ConversationMetadataResponse": {
         "properties": {
           "session_id": {
             "type": "string",
@@ -2966,107 +4861,133 @@
         "required": [
           "session_id"
         ],
-        "title": "ConversationMetadata",
+        "title": "ConversationMetadataResponse",
         "description": "Conversation index metadata."
       },
-      "CostSummary": {
+      "CreateArtifactRequest": {
         "properties": {
-          "session_id": {
+          "workflow_id": {
             "type": "string",
-            "title": "Session Id"
+            "title": "Workflow Id"
           },
-          "input_tokens": {
-            "type": "integer",
-            "title": "Input Tokens",
-            "default": 0
+          "artifact_type": {
+            "type": "string",
+            "title": "Artifact Type"
           },
-          "output_tokens": {
-            "type": "integer",
-            "title": "Output Tokens",
-            "default": 0
+          "title": {
+            "type": "string",
+            "title": "Title"
           },
-          "total_tokens": {
-            "type": "integer",
-            "title": "Total Tokens",
-            "default": 0
+          "content": {
+            "type": "string",
+            "title": "Content"
           },
-          "cache_creation_tokens": {
-            "type": "integer",
-            "title": "Cache Creation Tokens",
-            "default": 0
-          },
-          "cache_read_tokens": {
-            "type": "integer",
-            "title": "Cache Read Tokens",
-            "default": 0
-          },
-          "estimated_cost_usd": {
+          "phase_id": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Estimated Cost Usd"
+            "title": "Phase Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "default": "text/markdown"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
-          "session_id"
+          "workflow_id",
+          "artifact_type",
+          "title",
+          "content"
         ],
-        "title": "CostSummary",
-        "description": "Cost summary for a session."
+        "title": "CreateArtifactRequest"
       },
-      "CostSummaryResponse": {
+      "CreateWorkflowRequest": {
         "properties": {
-          "total_cost_usd": {
+          "name": {
             "type": "string",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-            "title": "Total Cost Usd",
-            "default": "0"
+            "title": "Name"
           },
-          "total_sessions": {
-            "type": "integer",
-            "title": "Total Sessions",
-            "default": 0
+          "workflow_type": {
+            "type": "string",
+            "title": "Workflow Type",
+            "default": "custom"
           },
-          "total_executions": {
-            "type": "integer",
-            "title": "Total Executions",
-            "default": 0
+          "classification": {
+            "type": "string",
+            "title": "Classification",
+            "default": "standard"
           },
-          "total_tokens": {
-            "type": "integer",
-            "title": "Total Tokens",
-            "default": 0
+          "repository_url": {
+            "type": "string",
+            "title": "Repository Url",
+            "default": "https://github.com/example/repo"
           },
-          "total_tool_calls": {
-            "type": "integer",
-            "title": "Total Tool Calls",
-            "default": 0
+          "repository_ref": {
+            "type": "string",
+            "title": "Repository Ref",
+            "default": "main"
           },
-          "top_models": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Top Models"
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
-          "top_sessions": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Top Sessions"
+          "phases": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phases"
           }
         },
+        "additionalProperties": false,
         "type": "object",
-        "title": "CostSummaryResponse",
-        "description": "Summary of all costs across sessions/executions."
+        "required": [
+          "name"
+        ],
+        "title": "CreateWorkflowRequest"
       },
       "EventListResponse": {
         "properties": {
@@ -3160,13 +5081,26 @@
             },
             "type": "object",
             "title": "Inputs",
-            "description": "Input variables for the workflow (e.g., topic, context). Keys must match {{variable}} placeholders in workflow prompts."
+            "description": "Input variables for the workflow."
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task",
+            "description": "Primary task description -- substituted for $ARGUMENTS in phase prompts."
           },
           "provider": {
             "type": "string",
             "title": "Provider",
-            "description": "Agent provider to use (claude, openai, mock)",
-            "default": "claude"
+            "description": "Agent provider to use. Currently ignored by execute(); sending this field has no effect.",
+            "default": "claude",
+            "deprecated": true
           },
           "max_budget_usd": {
             "anyOf": [
@@ -3178,13 +5112,14 @@
               }
             ],
             "title": "Max Budget Usd",
-            "description": "Maximum budget in USD for this execution"
+            "description": "Maximum budget in USD. Currently ignored by execute(); sending this field has no effect.",
+            "deprecated": true
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "ExecuteWorkflowRequest",
-        "description": "Request to execute a workflow.\n\nIMPORTANT: Use 'inputs' not 'parameters' for workflow variables.\nExtra fields are rejected to catch typos early."
+        "description": "Request to execute a workflow."
       },
       "ExecuteWorkflowResponse": {
         "properties": {
@@ -3331,8 +5266,7 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3343,8 +5277,7 @@
           "completed_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3459,8 +5392,7 @@
           "workflow_name",
           "status"
         ],
-        "title": "ExecutionDetailResponse",
-        "description": "Detailed response for a workflow execution run."
+        "title": "ExecutionDetailResponse"
       },
       "ExecutionHistoryResponse": {
         "properties": {
@@ -3474,7 +5406,8 @@
           },
           "executions": {
             "items": {
-              "$ref": "#/components/schemas/ExecutionRun"
+              "additionalProperties": true,
+              "type": "object"
             },
             "type": "array",
             "title": "Executions"
@@ -3490,8 +5423,7 @@
           "workflow_id",
           "workflow_name"
         ],
-        "title": "ExecutionHistoryResponse",
-        "description": "Response for workflow execution history."
+        "title": "ExecutionHistoryResponse"
       },
       "ExecutionListResponse": {
         "properties": {
@@ -3522,80 +5454,7 @@
           "executions",
           "total"
         ],
-        "title": "ExecutionListResponse",
-        "description": "Response for listing all executions."
-      },
-      "ExecutionRun": {
-        "properties": {
-          "workflow_execution_id": {
-            "type": "string",
-            "title": "Workflow Execution Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "started_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Started At"
-          },
-          "completed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "total_tokens": {
-            "type": "integer",
-            "title": "Total Tokens",
-            "default": 0
-          },
-          "total_cost_usd": {
-            "type": "string",
-            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
-            "title": "Total Cost Usd",
-            "default": "0"
-          },
-          "phase_results": {
-            "items": {
-              "$ref": "#/components/schemas/PhaseMetrics"
-            },
-            "type": "array",
-            "title": "Phase Results"
-          },
-          "error_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Message"
-          }
-        },
-        "type": "object",
-        "required": [
-          "workflow_execution_id",
-          "status"
-        ],
-        "title": "ExecutionRun",
-        "description": "A single execution run of a workflow (detailed view)."
+        "title": "ExecutionListResponse"
       },
       "ExecutionRunListResponse": {
         "properties": {
@@ -3626,8 +5485,7 @@
           "workflow_id",
           "workflow_name"
         ],
-        "title": "ExecutionRunListResponse",
-        "description": "Response for listing workflow execution runs."
+        "title": "ExecutionRunListResponse"
       },
       "ExecutionRunSummary": {
         "properties": {
@@ -3650,10 +5508,6 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
                 "type": "string"
               },
               {
@@ -3664,10 +5518,6 @@
           },
           "completed_at": {
             "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
               {
                 "type": "string"
               },
@@ -3717,8 +5567,7 @@
           "workflow_name",
           "status"
         ],
-        "title": "ExecutionRunSummary",
-        "description": "Summary of a single execution run for list views."
+        "title": "ExecutionRunSummary"
       },
       "ExecutionStatusResponse": {
         "properties": {
@@ -3758,8 +5607,7 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3770,8 +5618,7 @@
           "completed_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -3874,8 +5721,7 @@
           "workflow_name",
           "status"
         ],
-        "title": "ExecutionSummaryResponse",
-        "description": "Summary of a workflow execution for list views."
+        "title": "ExecutionSummaryResponse"
       },
       "HTTPValidationError": {
         "properties": {
@@ -3912,6 +5758,46 @@
         ],
         "title": "InjectRequest",
         "description": "Request to inject context into an execution."
+      },
+      "InputDeclarationModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": true
+          },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "InputDeclarationModel"
       },
       "MetricsResponse": {
         "properties": {
@@ -3993,6 +5879,9 @@
               {
                 "type": "string",
                 "format": "date-time"
+              },
+              {
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4126,6 +6015,50 @@
               }
             ],
             "title": "Thinking Content"
+          },
+          "git_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Sha"
+          },
+          "git_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Message"
+          },
+          "git_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Branch"
+          },
+          "git_repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Git Repo"
           }
         },
         "type": "object",
@@ -4134,7 +6067,7 @@
           "operation_type"
         ],
         "title": "OperationInfo",
-        "description": "Information about a session operation.\n\nSupports multiple operation types for full observability:\n- MESSAGE_REQUEST/RESPONSE: LLM API calls\n- TOOL_STARTED/COMPLETED/BLOCKED: Tool lifecycle\n- THINKING: Extended thinking content\n- ERROR: Error information"
+        "description": "Information about a session operation."
       },
       "PauseRequest": {
         "properties": {
@@ -4207,6 +6140,28 @@
             },
             "type": "array",
             "title": "Allowed Tools"
+          },
+          "argument_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Argument Hint"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
           }
         },
         "type": "object",
@@ -4214,8 +6169,7 @@
           "phase_id",
           "name"
         ],
-        "title": "PhaseDefinition",
-        "description": "Phase definition within a workflow template.\n\nThis is the template definition, not execution state.\nFor phase execution details, see PhaseExecutionDetail."
+        "title": "PhaseDefinition"
       },
       "PhaseExecutionInfo": {
         "properties": {
@@ -4317,8 +6271,7 @@
               "$ref": "#/components/schemas/PhaseOperationInfo"
             },
             "type": "array",
-            "title": "Operations",
-            "default": []
+            "title": "Operations"
           }
         },
         "type": "object",
@@ -4327,8 +6280,7 @@
           "name",
           "status"
         ],
-        "title": "PhaseExecutionInfo",
-        "description": "Information about a phase execution within a run."
+        "title": "PhaseExecutionInfo"
       },
       "PhaseMetrics": {
         "properties": {
@@ -4439,8 +6391,7 @@
           "operation_id",
           "operation_type"
         ],
-        "title": "PhaseOperationInfo",
-        "description": "Information about an operation within a phase."
+        "title": "PhaseOperationInfo"
       },
       "SessionCostResponse": {
         "properties": {
@@ -4586,8 +6537,7 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4598,8 +6548,7 @@
           "completed_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4613,7 +6562,7 @@
           "session_id"
         ],
         "title": "SessionCostResponse",
-        "description": "Cost for a single session (atomic unit)."
+        "description": "Cost for a single session."
       },
       "SessionResponse": {
         "properties": {
@@ -4723,6 +6672,16 @@
             "title": "Output Tokens",
             "default": 0
           },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
+            "default": 0
+          },
           "total_tokens": {
             "type": "integer",
             "title": "Total Tokens",
@@ -4744,8 +6703,7 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4756,8 +6714,7 @@
           "completed_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4806,7 +6763,7 @@
         "title": "SessionResponse",
         "description": "Detailed session response."
       },
-      "SessionSummary": {
+      "SessionSummaryResponse": {
         "properties": {
           "id": {
             "type": "string",
@@ -4874,8 +6831,7 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4886,8 +6842,7 @@
           "completed_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -4904,7 +6859,7 @@
           "status",
           "agent_provider"
         ],
-        "title": "SessionSummary",
+        "title": "SessionSummaryResponse",
         "description": "Summary of an agent session."
       },
       "StateResponse": {
@@ -4926,7 +6881,7 @@
         "title": "StateResponse",
         "description": "Response with execution state."
       },
-      "TimelineEntry": {
+      "TimelineEntryResponse": {
         "properties": {
           "time": {
             "title": "Time"
@@ -4974,7 +6929,7 @@
           "time",
           "event_type"
         ],
-        "title": "TimelineEntry",
+        "title": "TimelineEntryResponse",
         "description": "Timeline entry for visualization."
       },
       "ToolSummary": {
@@ -5016,6 +6971,20 @@
         "title": "ToolSummary",
         "description": "Tool usage summary."
       },
+      "ValidateYamlRequest": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "title": "File"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "ValidateYamlRequest"
+      },
       "ValidationError": {
         "properties": {
           "loc": {
@@ -5053,7 +7022,7 @@
         "properties": {
           "workflows": {
             "items": {
-              "$ref": "#/components/schemas/WorkflowSummary"
+              "$ref": "#/components/schemas/WorkflowSummaryResponse"
             },
             "type": "array",
             "title": "Workflows"
@@ -5078,8 +7047,7 @@
           "workflows",
           "total"
         ],
-        "title": "WorkflowListResponse",
-        "description": "Response for workflow list endpoint."
+        "title": "WorkflowListResponse"
       },
       "WorkflowResponse": {
         "properties": {
@@ -5117,11 +7085,17 @@
             "type": "array",
             "title": "Phases"
           },
+          "input_declarations": {
+            "items": {
+              "$ref": "#/components/schemas/InputDeclarationModel"
+            },
+            "type": "array",
+            "title": "Input Declarations"
+          },
           "created_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -5153,10 +7127,9 @@
           "workflow_type",
           "classification"
         ],
-        "title": "WorkflowResponse",
-        "description": "Detailed workflow TEMPLATE response.\n\nTemplates don't have execution status.\nFor execution details, use /api/executions/{id}."
+        "title": "WorkflowResponse"
       },
-      "WorkflowSummary": {
+      "WorkflowSummaryResponse": {
         "properties": {
           "id": {
             "type": "string",
@@ -5177,8 +7150,7 @@
           "created_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -5199,15 +7171,117 @@
           "workflow_type",
           "phase_count"
         ],
-        "title": "WorkflowSummary",
-        "description": "Summary of a workflow TEMPLATE for list views.\n\nNote: Templates don't have status. Status belongs to executions."
+        "title": "WorkflowSummaryResponse"
+      },
+      "syn_api__routes__costs__CostSummaryResponse": {
+        "properties": {
+          "total_cost_usd": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Cost Usd",
+            "default": "0"
+          },
+          "total_sessions": {
+            "type": "integer",
+            "title": "Total Sessions",
+            "default": 0
+          },
+          "total_executions": {
+            "type": "integer",
+            "title": "Total Executions",
+            "default": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "total_tool_calls": {
+            "type": "integer",
+            "title": "Total Tool Calls",
+            "default": 0
+          },
+          "top_models": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Top Models"
+          },
+          "top_sessions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Top Sessions"
+          }
+        },
+        "type": "object",
+        "title": "CostSummaryResponse",
+        "description": "Summary of all costs across sessions/executions."
+      },
+      "syn_api__routes__events__CostSummaryResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "default": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens",
+            "default": 0
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens",
+            "default": 0
+          },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
+            "default": 0
+          },
+          "estimated_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "CostSummaryResponse",
+        "description": "Cost summary for a session."
       }
     }
   },
   "tags": [
     {
+      "name": "agents",
+      "description": ""
+    },
+    {
       "name": "artifacts",
-      "description": "Access artifacts produced by agent sessions"
+      "description": "Create, upload, and retrieve artifacts produced by agent sessions"
     },
     {
       "name": "control",
@@ -5234,6 +7308,10 @@
       "description": "Query execution records and details"
     },
     {
+      "name": "insights",
+      "description": ""
+    },
+    {
       "name": "metrics",
       "description": "System-wide metrics and health data"
     },
@@ -5242,8 +7320,24 @@
       "description": "Token metrics and tool timelines for sessions"
     },
     {
+      "name": "organizations",
+      "description": ""
+    },
+    {
+      "name": "repos",
+      "description": ""
+    },
+    {
       "name": "sessions",
       "description": "List and inspect agent sessions"
+    },
+    {
+      "name": "sse",
+      "description": ""
+    },
+    {
+      "name": "systems",
+      "description": ""
     },
     {
       "name": "triggers",
@@ -5252,10 +7346,6 @@
     {
       "name": "webhooks",
       "description": "Incoming webhook endpoints (GitHub events)"
-    },
-    {
-      "name": "websocket",
-      "description": "WebSocket health and real-time communication"
     },
     {
       "name": "workflows",
