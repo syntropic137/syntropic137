@@ -76,7 +76,13 @@ async def test_create_and_list_artifacts():
     )
     assert isinstance(create_result, Ok)
 
+    created_id = create_result.value
+    assert isinstance(created_id, str)
+    assert created_id
+
     list_result = await list_artifacts(workflow_id="wf-test-456")
     assert isinstance(list_result, Ok)
-    # Artifact may or may not appear in list depending on projection dispatch
-    # in test mode — the important thing is no errors
+    assert isinstance(list_result.value, list)
+    # NOTE: In-memory event store doesn't auto-dispatch to projections,
+    # so the created artifact may not appear in list results.
+    # Full round-trip is verified in integration tests with real infrastructure.

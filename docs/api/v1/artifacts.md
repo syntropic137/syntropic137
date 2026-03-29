@@ -2,7 +2,7 @@
 
 Artifact storage and retrieval.
 
-**Status:** Implemented — CRUD operations with event-sourced aggregate and artifact storage.
+**Status:** Implemented — list, get, create, and upload operations with event-sourced aggregate and artifact storage.
 
 ## list_artifacts()
 

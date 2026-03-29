@@ -32,10 +32,10 @@ async def test_create_artifact_endpoint_success() -> None:
                 content="Hello world",
             )
         )
-    assert result["id"] == "art-abc-123"
-    assert result["title"] == "Test Doc"
-    assert result["artifact_type"] == "document"
-    assert result["status"] == "created"
+    assert result.id == "art-abc-123"
+    assert result.title == "Test Doc"
+    assert result.artifact_type == "document"
+    assert result.status == "created"
 
 
 async def test_create_artifact_endpoint_with_optional_fields() -> None:
@@ -98,9 +98,9 @@ async def test_upload_artifact_endpoint_success() -> None:
             headers={"content-type": "text/plain"},
         )
         result = await upload_artifact_endpoint("art-1", file)
-    assert result["artifact_id"] == "art-1"
-    assert result["storage_url"] == "s3://bucket/art-1"
-    assert result["status"] == "uploaded"
+    assert result.artifact_id == "art-1"
+    assert result.storage_url == "s3://bucket/art-1"
+    assert result.status == "uploaded"
 
 
 async def test_upload_artifact_endpoint_service_error() -> None:
@@ -162,3 +162,12 @@ async def test_upload_artifact_endpoint_default_content_type() -> None:
         )
         await upload_artifact_endpoint("art-4", file)
     assert mock_upload.call_args.kwargs["content_type"] == "application/octet-stream"
+
+
+async def test_upload_artifact_endpoint_rejects_oversized_file() -> None:
+    """Upload exceeding 50 MB limit returns 413."""
+    oversized = b"x" * (50 * 1024 * 1024 + 1)
+    file = UploadFile(filename="big.bin", file=BytesIO(oversized))
+    with pytest.raises(HTTPException) as exc_info:
+        await upload_artifact_endpoint("art-5", file)
+    assert exc_info.value.status_code == 413

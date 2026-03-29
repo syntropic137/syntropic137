@@ -25,10 +25,10 @@ async def test_create_workflow_endpoint_success() -> None:
         return_value=Ok("wf-abc-123"),
     ):
         result = await create_workflow_endpoint(CreateWorkflowRequest(name="My Workflow"))
-    assert result["id"] == "wf-abc-123"
-    assert result["name"] == "My Workflow"
-    assert result["workflow_type"] == "custom"
-    assert result["status"] == "created"
+    assert result.id == "wf-abc-123"
+    assert result.name == "My Workflow"
+    assert result.workflow_type == "custom"
+    assert result.status == "created"
 
 
 async def test_create_workflow_endpoint_with_all_fields() -> None:
@@ -47,8 +47,8 @@ async def test_create_workflow_endpoint_with_all_fields() -> None:
                 description="A full workflow",
             )
         )
-    assert result["id"] == "wf-full"
-    assert result["workflow_type"] == "research"
+    assert result.id == "wf-full"
+    assert result.workflow_type == "research"
     mock_create.assert_called_once()
     call_kwargs = mock_create.call_args
     assert call_kwargs.kwargs.get("workflow_type") == "research" or (
@@ -87,9 +87,9 @@ async def test_validate_yaml_endpoint_success() -> None:
         ),
     ):
         result = await validate_yaml_endpoint(ValidateYamlRequest(file="/tmp/test.yaml"))
-    assert result["valid"] is True
-    assert result["name"] == "Test WF"
-    assert result["phase_count"] == 2
+    assert result.valid is True
+    assert result.name == "Test WF"
+    assert result.phase_count == 2
 
 
 async def test_validate_yaml_endpoint_invalid_yaml() -> None:
@@ -99,10 +99,8 @@ async def test_validate_yaml_endpoint_invalid_yaml() -> None:
         return_value=Ok(WorkflowValidation(valid=False, errors=["Missing required field: name"])),
     ):
         result = await validate_yaml_endpoint(ValidateYamlRequest(file="/tmp/bad.yaml"))
-    assert result["valid"] is False
-    errors = result["errors"]
-    assert isinstance(errors, list)
-    assert len(errors) == 1
+    assert result.valid is False
+    assert len(result.errors) == 1
 
 
 async def test_validate_yaml_endpoint_service_error() -> None:

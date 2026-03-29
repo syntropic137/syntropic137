@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from syn_api._wiring import (
     ensure_connected,
@@ -228,12 +228,32 @@ class ValidateYamlRequest(BaseModel):
 
 
 # =============================================================================
+# Response Models
+# =============================================================================
+
+
+class CreateWorkflowResponse(BaseModel):
+    id: str
+    name: str
+    workflow_type: str
+    status: str
+
+
+class ValidateYamlResponse(BaseModel):
+    valid: bool
+    name: str = ""
+    workflow_type: str = ""
+    phase_count: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
 # HTTP Endpoints
 # =============================================================================
 
 
-@router.post("")
-async def create_workflow_endpoint(body: CreateWorkflowRequest) -> dict[str, str]:
+@router.post("", response_model=CreateWorkflowResponse, status_code=201)
+async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflowResponse:
     """Create a new workflow template."""
     result = await create_workflow(
         name=body.name,
@@ -248,18 +268,16 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> dict[str, str
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {
-        "id": result.value,
-        "name": body.name,
-        "workflow_type": body.workflow_type,
-        "status": "created",
-    }
+    return CreateWorkflowResponse(
+        id=result.value,
+        name=body.name,
+        workflow_type=body.workflow_type,
+        status="created",
+    )
 
 
-@router.post("/validate")
-async def validate_yaml_endpoint(
-    body: ValidateYamlRequest,
-) -> dict[str, str | int | bool | list[str]]:
+@router.post("/validate", response_model=ValidateYamlResponse)
+async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlResponse:
     """Validate a workflow YAML file."""
     result = await validate_yaml(yaml_path=body.file)
 
@@ -267,10 +285,10 @@ async def validate_yaml_endpoint(
         raise HTTPException(status_code=400, detail=result.message)
 
     v = result.value
-    return {
-        "valid": v.valid,
-        "name": v.name or "",
-        "workflow_type": v.workflow_type or "",
-        "phase_count": v.phase_count or 0,
-        "errors": v.errors or [],
-    }
+    return ValidateYamlResponse(
+        valid=v.valid,
+        name=v.name or "",
+        workflow_type=v.workflow_type or "",
+        phase_count=v.phase_count or 0,
+        errors=v.errors or [],
+    )

@@ -324,6 +324,30 @@ class CreateArtifactRequest(BaseModel):
     content_type: str = "text/markdown"
 
 
+class CreateArtifactResponse(BaseModel):
+    id: str
+    title: str
+    artifact_type: str
+    status: str
+
+
+class UploadArtifactResponse(BaseModel):
+    artifact_id: str
+    storage_url: str
+    status: str
+
+
+class ArtifactContentResponse(BaseModel):
+    artifact_id: str
+    content: str | None
+    content_type: str
+    size_bytes: int | None
+
+
+# Maximum upload size: 50 MB
+_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+
+
 # =============================================================================
 # HTTP Endpoints
 # =============================================================================
@@ -413,8 +437,8 @@ async def get_artifact_endpoint(
     )
 
 
-@router.get("/{artifact_id}/content")
-async def get_artifact_content_endpoint(artifact_id: str) -> dict[str, str | int | None]:
+@router.get("/{artifact_id}/content", response_model=ArtifactContentResponse)
+async def get_artifact_content_endpoint(artifact_id: str) -> ArtifactContentResponse:
     """Get artifact content only (for large artifacts)."""
     result = await get_artifact(artifact_id, include_content=True)
 
@@ -422,16 +446,16 @@ async def get_artifact_content_endpoint(artifact_id: str) -> dict[str, str | int
         raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not found")
 
     a = result.value
-    return {
-        "artifact_id": artifact_id,
-        "content": a.content,
-        "content_type": a.content_type or "text/markdown",
-        "size_bytes": a.size_bytes,
-    }
+    return ArtifactContentResponse(
+        artifact_id=artifact_id,
+        content=a.content,
+        content_type=a.content_type or "text/markdown",
+        size_bytes=a.size_bytes,
+    )
 
 
-@router.post("")
-async def create_artifact_endpoint(body: CreateArtifactRequest) -> dict[str, str]:
+@router.post("", response_model=CreateArtifactResponse, status_code=201)
+async def create_artifact_endpoint(body: CreateArtifactRequest) -> CreateArtifactResponse:
     """Create a new artifact."""
     result = await create_artifact(
         workflow_id=body.workflow_id,
@@ -446,18 +470,23 @@ async def create_artifact_endpoint(body: CreateArtifactRequest) -> dict[str, str
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {
-        "id": result.value,
-        "title": body.title,
-        "artifact_type": body.artifact_type,
-        "status": "created",
-    }
+    return CreateArtifactResponse(
+        id=result.value,
+        title=body.title,
+        artifact_type=body.artifact_type,
+        status="created",
+    )
 
 
-@router.post("/{artifact_id}/upload")
-async def upload_artifact_endpoint(artifact_id: str, file: UploadFile) -> dict[str, str]:
-    """Upload binary content for an existing artifact."""
+@router.post("/{artifact_id}/upload", response_model=UploadArtifactResponse)
+async def upload_artifact_endpoint(artifact_id: str, file: UploadFile) -> UploadArtifactResponse:
+    """Upload binary content for an existing artifact (max 50 MB)."""
     data = await file.read()
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Upload exceeds maximum size of {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
 
     result = await upload_artifact(
         artifact_id=artifact_id,
@@ -469,8 +498,8 @@ async def upload_artifact_endpoint(artifact_id: str, file: UploadFile) -> dict[s
     if isinstance(result, Err):
         raise HTTPException(status_code=400, detail=result.message)
 
-    return {
-        "artifact_id": artifact_id,
-        "storage_url": result.value,
-        "status": "uploaded",
-    }
+    return UploadArtifactResponse(
+        artifact_id=artifact_id,
+        storage_url=result.value,
+        status="uploaded",
+    )
