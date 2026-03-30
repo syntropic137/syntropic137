@@ -350,13 +350,14 @@ jobs:
               | jq -r '.[0].Descriptor.digest // empty') || true
           fi
 
-          if [[ -n "$DIGEST" ]]; then
-            echo "Resolved event-store digest: ${DIGEST}"
-            mkdir -p /tmp/digests
-            echo "$DIGEST" > /tmp/digests/event-store
-          else
-            echo "::warning::Could not resolve event-store digest — keeping tag reference"
+          if [[ -z "$DIGEST" ]]; then
+            echo "::error::Could not resolve event-store digest from GHCR — refusing to release without supply chain pinning"
+            exit 1
           fi
+
+          echo "Resolved event-store digest: ${DIGEST}"
+          mkdir -p /tmp/digests
+          echo "$DIGEST" > /tmp/digests/event-store
 
       - name: Pin image digests in compose file
         run: |
