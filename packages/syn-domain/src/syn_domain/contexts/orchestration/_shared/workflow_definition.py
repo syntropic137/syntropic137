@@ -10,7 +10,7 @@ and its frontmatter is merged into the phase definition at load time.
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003 - needed at runtime for file operations
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -35,9 +35,34 @@ def _resolve_phase_prompt_file(phase: dict[str, Any], base_dir: Path) -> None:
     Loads the .md file, sets prompt_template to its body,
     merges normalized frontmatter (YAML values take precedence),
     and removes the prompt_file key.
+
+    Raises:
+        ValueError: If prompt_template is already set, or the path
+            is absolute or escapes base_dir.
     """
-    md_path = base_dir / phase["prompt_file"]
-    md_prompt = load_md_prompt(md_path)
+    # Fix 1: Mutual exclusivity — Pydantic validator can't fire on raw dicts.
+    if "prompt_template" in phase and phase["prompt_template"] is not None:
+        msg = (
+            f"Phase '{phase.get('id', '?')}': specify either "
+            "'prompt_template' or 'prompt_file', not both"
+        )
+        raise ValueError(msg)
+
+    # Fix 2: Path traversal security.
+    prompt_file = phase["prompt_file"]
+    prompt_path = Path(prompt_file)
+
+    if prompt_path.is_absolute():
+        msg = f"prompt_file must be a relative path, got: {prompt_file!r}"
+        raise ValueError(msg)
+
+    resolved = (base_dir / prompt_path).resolve()
+    base_resolved = base_dir.resolve()
+    if base_resolved not in resolved.parents and resolved != base_resolved:
+        msg = f"prompt_file path {prompt_file!r} escapes base directory {str(base_resolved)!r}"
+        raise ValueError(msg)
+
+    md_prompt = load_md_prompt(resolved)
 
     # Merge frontmatter — YAML phase values take precedence.
     normalized = normalize_frontmatter(md_prompt.metadata)
@@ -219,6 +244,9 @@ class WorkflowDefinition(BaseModel):
         resolved_base = base_dir or path.parent
         content = path.read_text(encoding="utf-8")
         data = yaml.safe_load(content)
+        if not isinstance(data, dict):
+            msg = "Workflow YAML must be a mapping at the root level"
+            raise ValueError(msg)
         cls._resolve_prompt_files(data, resolved_base)
         return cls.model_validate(data)
 
@@ -290,6 +318,9 @@ def validate_workflow_yaml(
     try:
         if base_dir is not None:
             data = yaml.safe_load(content)
+            if not isinstance(data, dict):
+                msg = "Workflow YAML must be a mapping at the root level"
+                raise ValueError(msg)
             WorkflowDefinition._resolve_prompt_files(data, base_dir)
             WorkflowDefinition.model_validate(data)
         else:

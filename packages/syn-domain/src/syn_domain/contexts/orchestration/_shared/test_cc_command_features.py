@@ -609,3 +609,53 @@ phases:
 
         defn = WorkflowDefinition.from_file(yaml_file, base_dir=prompts_dir)
         assert defn.phases[0].prompt_template == "Research prompt content."
+
+    def test_both_prompt_template_and_file_in_yaml_from_file(self, tmp_path: Path) -> None:
+        """from_file() rejects YAML that has both prompt_template and prompt_file."""
+        (tmp_path / "phase.md").write_text("External prompt.")
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            '    prompt_template: "inline prompt"\n'
+            "    prompt_file: phase.md\n"
+        )
+
+        with pytest.raises(ValueError, match="specify either 'prompt_template' or 'prompt_file'"):
+            WorkflowDefinition.from_file(yaml_file)
+
+    def test_prompt_file_absolute_path_rejected(self, tmp_path: Path) -> None:
+        """Absolute paths in prompt_file are rejected."""
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: /etc/passwd\n"
+        )
+
+        with pytest.raises(ValueError, match="must be a relative path"):
+            WorkflowDefinition.from_file(yaml_file)
+
+    def test_prompt_file_traversal_rejected(self, tmp_path: Path) -> None:
+        """Path traversal via ../ in prompt_file is rejected."""
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: ../../etc/passwd\n"
+        )
+
+        with pytest.raises(ValueError, match="escapes base directory"):
+            WorkflowDefinition.from_file(yaml_file)

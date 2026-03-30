@@ -300,3 +300,34 @@ def test_load_workflow_definitions_with_prompt_files() -> None:
         for defn in definitions:
             domain_phases = defn.get_domain_phases()
             assert domain_phases[0].prompt_template is not None
+
+
+# =============================================================================
+# Root Type Guard Tests (Fix 3, Fix 4)
+# =============================================================================
+
+
+def test_from_file_empty_yaml(tmp_path: Path) -> None:
+    """Empty YAML file raises ValueError about root mapping."""
+    yaml_file = tmp_path / "workflow.yaml"
+    yaml_file.write_text("")
+
+    with pytest.raises(ValueError, match="must be a mapping"):
+        WorkflowDefinition.from_file(yaml_file)
+
+
+def test_from_file_list_yaml(tmp_path: Path) -> None:
+    """YAML list at root raises ValueError about root mapping."""
+    yaml_file = tmp_path / "workflow.yaml"
+    yaml_file.write_text("- item1\n- item2\n")
+
+    with pytest.raises(ValueError, match="must be a mapping"):
+        WorkflowDefinition.from_file(yaml_file)
+
+
+def test_validate_empty_yaml_with_base_dir(tmp_path: Path) -> None:
+    """validate_workflow_yaml with empty content and base_dir returns error."""
+    is_valid, error = validate_workflow_yaml("", base_dir=tmp_path)
+    assert is_valid is False
+    assert error is not None
+    assert "must be a mapping" in error

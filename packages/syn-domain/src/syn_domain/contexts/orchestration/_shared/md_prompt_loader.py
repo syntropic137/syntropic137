@@ -50,7 +50,7 @@ def load_md_prompt(path: Path) -> MdPrompt:
         FileNotFoundError: If the file does not exist.
         ValueError: If the frontmatter YAML is malformed.
     """
-    if not path.exists():
+    if not path.is_file():
         msg = f"Prompt file not found: {path}"
         raise FileNotFoundError(msg)
 
@@ -70,28 +70,37 @@ def _parse_md_prompt(text: str, *, source_path: Path | None = None) -> MdPrompt:
 
 
 def _split_frontmatter(text: str) -> tuple[str, str] | None:
-    """Split text into (frontmatter_raw, body) or None if no frontmatter."""
-    stripped = text.lstrip("\n")
+    """Split text into (frontmatter_raw, body) or None if no frontmatter.
 
-    if not stripped.startswith(_FRONTMATTER_DELIMITER):
+    Delimiter lines must be exactly ``---`` (handles both LF and CRLF).
+    Lines like ``---extra`` are NOT treated as delimiters.
+    """
+    lines = text.splitlines(keepends=True)
+
+    # Skip leading blank lines.
+    idx = 0
+    while idx < len(lines) and lines[idx].strip() == "":
+        idx += 1
+    if idx >= len(lines):
         return None
 
-    after_open = stripped[len(_FRONTMATTER_DELIMITER) :]
-    if not after_open.startswith("\n"):
+    # Opening delimiter must be exactly '---'.
+    if lines[idx].rstrip("\r\n") != _FRONTMATTER_DELIMITER:
+        return None
+    idx += 1
+
+    # Find closing delimiter.
+    close_idx: int | None = None
+    for j in range(idx, len(lines)):
+        if lines[j].rstrip("\r\n") == _FRONTMATTER_DELIMITER:
+            close_idx = j
+            break
+
+    if close_idx is None:
         return None
 
-    rest = after_open[1:]  # skip the newline after opening ---
-
-    # Handle empty frontmatter (--- immediately follows).
-    if rest.startswith(_FRONTMATTER_DELIMITER):
-        return "", rest[len(_FRONTMATTER_DELIMITER) :]
-
-    close_idx = rest.find(f"\n{_FRONTMATTER_DELIMITER}")
-    if close_idx == -1:
-        return None
-
-    frontmatter_raw = rest[:close_idx]
-    body = rest[close_idx + len(f"\n{_FRONTMATTER_DELIMITER}") :]
+    frontmatter_raw = "".join(lines[idx:close_idx])
+    body = "".join(lines[close_idx + 1 :])
     return frontmatter_raw, body
 
 

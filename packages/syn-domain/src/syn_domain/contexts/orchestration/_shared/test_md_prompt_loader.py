@@ -102,6 +102,36 @@ class TestLoadMdPrompt:
         assert result.content == "Prompt content"
         assert result.metadata == {"model": "haiku"}
 
+    def test_delimiter_with_trailing_text_not_matched(self, tmp_path: Path) -> None:
+        """A line like '---extra' is NOT a valid closing delimiter."""
+        md_file = tmp_path / "phase.md"
+        md_file.write_text("---\nmodel: sonnet\n---extra\nBody content.\n")
+        result = load_md_prompt(md_file)
+        # No valid closing delimiter → entire file is plain content (no frontmatter).
+        assert result.metadata == {}
+        assert "model: sonnet" in result.content
+
+    def test_unclosed_frontmatter_treated_as_plain(self, tmp_path: Path) -> None:
+        """Opening '---' with no closing delimiter → plain content."""
+        md_file = tmp_path / "phase.md"
+        md_file.write_text("---\nmodel: sonnet\nBody content without closing.\n")
+        result = load_md_prompt(md_file)
+        assert result.metadata == {}
+        assert "model: sonnet" in result.content
+
+    def test_crlf_line_endings(self, tmp_path: Path) -> None:
+        """CRLF line endings are handled correctly."""
+        md_file = tmp_path / "phase.md"
+        md_file.write_bytes(b"---\r\nmodel: sonnet\r\n---\r\nBody content.\r\n")
+        result = load_md_prompt(md_file)
+        assert result.metadata == {"model": "sonnet"}
+        assert result.content == "Body content."
+
+    def test_load_md_directory_raises(self, tmp_path: Path) -> None:
+        """Passing a directory path raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError, match="Prompt file not found"):
+            load_md_prompt(tmp_path)
+
     def test_md_prompt_is_frozen(self) -> None:
         prompt = MdPrompt(content="test", metadata={})
         with pytest.raises(AttributeError):
