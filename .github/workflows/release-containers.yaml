@@ -427,6 +427,17 @@ jobs:
             --clobber
 
       # -----------------------------------------------------------------------
+      # Notify downstream repos
+      # -----------------------------------------------------------------------
+      - name: Notify syntropic137-npx to sync templates
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.NPX_DISPATCH_TOKEN }}
+          repository: syntropic137/syntropic137-npx
+          event-type: template-sync
+          client-payload: '{"ref": "${{ steps.version.outputs.version }}"}'
+
+      # -----------------------------------------------------------------------
       # Summary
       # -----------------------------------------------------------------------
       - name: Write release summary
