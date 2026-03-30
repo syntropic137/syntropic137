@@ -430,6 +430,8 @@ jobs:
       # Notify downstream repos
       # -----------------------------------------------------------------------
       - name: Notify syntropic137-npx to sync templates
+        if: ${{ secrets.NPX_DISPATCH_TOKEN != '' }}
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.NPX_DISPATCH_TOKEN }}
         run: |
