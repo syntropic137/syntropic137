@@ -8,14 +8,38 @@ import { defaultPhaseStyle } from './workflowConstants'
 interface PhasePipelineProps {
   phases: PhaseDefinition[]
   phaseMetrics: PhaseMetrics[] | undefined
+  selectedPhaseId?: string | null
+  onPhaseSelect?: (phaseId: string) => void
 }
 
-function PhaseCard({ phase, phaseMetric }: { phase: PhaseDefinition; phaseMetric?: PhaseMetrics }) {
+function PhaseCard({
+  phase,
+  phaseMetric,
+  isSelected,
+  onClick,
+}: {
+  phase: PhaseDefinition
+  phaseMetric?: PhaseMetrics
+  isSelected?: boolean
+  onClick?: () => void
+}) {
   return (
     <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick?.()
+        }
+      }}
       className={clsx(
         'flex min-w-[180px] flex-col rounded-lg border p-4 transition-all',
-        defaultPhaseStyle
+        onClick && 'cursor-pointer hover:border-[var(--color-accent)]/50',
+        isSelected
+          ? 'border-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/50 bg-[var(--color-accent)]/5'
+          : defaultPhaseStyle
       )}
     >
       <div className="flex items-center gap-2">
@@ -42,17 +66,22 @@ function PhaseCard({ phase, phaseMetric }: { phase: PhaseDefinition; phaseMetric
   )
 }
 
-export function PhasePipeline({ phases, phaseMetrics }: PhasePipelineProps) {
+export function PhasePipeline({ phases, phaseMetrics, selectedPhaseId, onPhaseSelect }: PhasePipelineProps) {
   return (
     <Card>
-      <CardHeader title="Phase Pipeline" subtitle="Workflow execution phases" />
+      <CardHeader title="Phase Pipeline" subtitle="Workflow execution phases — click a phase to view or edit its prompt" />
       <CardContent>
         <div className="flex items-center gap-2 overflow-x-auto pb-2">
           {phases.map((phase, idx) => {
             const phaseMetric = phaseMetrics?.find(p => p.phase_id === phase.phase_id)
             return (
               <div key={phase.phase_id} className="flex items-center">
-                <PhaseCard phase={phase} phaseMetric={phaseMetric} />
+                <PhaseCard
+                  phase={phase}
+                  phaseMetric={phaseMetric}
+                  isSelected={selectedPhaseId === phase.phase_id}
+                  onClick={onPhaseSelect ? () => onPhaseSelect(phase.phase_id) : undefined}
+                />
                 {idx < phases.length - 1 && (
                   <div className="mx-2 h-px w-8 bg-[var(--color-border)]" />
                 )}

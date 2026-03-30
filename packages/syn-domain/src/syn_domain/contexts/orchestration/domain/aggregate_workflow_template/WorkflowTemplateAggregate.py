@@ -19,6 +19,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
         CreateWorkflowTemplateCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
+        UpdatePhasePromptCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
+        WorkflowPhaseUpdatedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
     )
@@ -53,6 +59,27 @@ def _normalize_event_data(event: Any) -> dict[str, Any]:
 def _parse_enum(value: Any, enum_type: type) -> Any:
     """Convert a string to an enum, or return as-is if already typed."""
     return enum_type(value) if isinstance(value, str) else value
+
+
+_PHASE_UPDATE_FIELDS = [
+    "workflow_id",
+    "phase_id",
+    "prompt_template",
+    "model",
+    "timeout_seconds",
+    "allowed_tools",
+]
+
+
+def _normalize_phase_update_data(event: Any) -> dict[str, Any]:
+    """Extract a flat dict from a WorkflowPhaseUpdated event.
+
+    Handles both Pydantic-style events and dict-like events from gRPC.
+    """
+    data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+    for field in _PHASE_UPDATE_FIELDS:
+        data.setdefault(field, [] if field == "allowed_tools" else None)
+    return data
 
 
 def _parse_typed_list(raw: list, type_name: str) -> list:
@@ -175,6 +202,38 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         self._apply(event)
 
+    @command_handler("UpdatePhasePromptCommand")
+    def update_phase_prompt(self, command: UpdatePhasePromptCommand) -> None:
+        """Handle UpdatePhasePromptCommand.
+
+        Validates business rules and emits WorkflowPhaseUpdatedEvent.
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
+            WorkflowPhaseUpdatedEvent,
+        )
+
+        # Guard: workflow must already exist
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+
+        # Guard: phase_id must exist in current phases
+        phase_ids = {p.phase_id for p in self._phases}
+        if command.phase_id not in phase_ids:
+            msg = f"Phase '{command.phase_id}' not found in workflow"
+            raise ValueError(msg)
+
+        event = WorkflowPhaseUpdatedEvent(
+            workflow_id=self.id,
+            phase_id=command.phase_id,
+            prompt_template=command.prompt_template,
+            model=command.model,
+            timeout_seconds=command.timeout_seconds,
+            allowed_tools=command.allowed_tools or [],
+        )
+
+        self._apply(event)
+
     # =========================================================================
     # EVENT SOURCING HANDLERS - Update state only, NO business logic
     # =========================================================================
@@ -214,3 +273,40 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         Delegates to the canonical handler so old events rehydrate correctly.
         """
         self.on_workflow_created(event)
+
+    @event_sourcing_handler("WorkflowPhaseUpdated")
+    def on_phase_updated(self, event: WorkflowPhaseUpdatedEvent) -> None:
+        """Apply WorkflowPhaseUpdatedEvent to update a phase in aggregate state.
+
+        Rebuilds the phases list with the updated phase.
+        Must be idempotent for rehydration.
+        """
+        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+            PhaseDefinition,
+        )
+
+        data = _normalize_phase_update_data(event)
+        phase_id = data["phase_id"]
+
+        updated_phases: list[PhaseDefinition] = []
+        for p in self._phases:
+            if p.phase_id == phase_id:
+                updated = PhaseDefinition(
+                    phase_id=p.phase_id,
+                    name=p.name,
+                    order=p.order,
+                    execution_type=p.execution_type,
+                    description=p.description,
+                    input_artifact_types=p.input_artifact_types,
+                    output_artifact_types=p.output_artifact_types,
+                    prompt_template=data["prompt_template"],
+                    max_tokens=p.max_tokens,
+                    timeout_seconds=data["timeout_seconds"] if data["timeout_seconds"] is not None else p.timeout_seconds,
+                    allowed_tools=data["allowed_tools"] if data["allowed_tools"] else list(p.allowed_tools),
+                    argument_hint=p.argument_hint,
+                    model=data["model"] if data["model"] is not None else p.model,
+                )
+                updated_phases.append(updated)
+            else:
+                updated_phases.append(p)
+        self._phases = updated_phases

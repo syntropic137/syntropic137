@@ -35,7 +35,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 3  # Bumped: ISS-211 input_declarations, argument_hint, model
+    VERSION = 4  # Bumped: ISS-402 WorkflowPhaseUpdated event handler
 
     def __init__(self, store: Any):
         """Initialize with a projection store."""
@@ -113,6 +113,33 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         if existing:
             existing["runs_count"] = existing.get("runs_count", 0) + 1
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_phase_updated(self, event_data: dict) -> None:
+        """Handle WorkflowPhaseUpdated event - update phase prompt and config."""
+        workflow_id = event_data.get("workflow_id", "")
+        phase_id = event_data.get("phase_id", "")
+        if not workflow_id or not phase_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if not existing:
+            return
+
+        # Update the matching phase in the phases list
+        phases = existing.get("phases", [])
+        for phase in phases:
+            pid = phase.get(PhaseFields.ID, phase.get(PhaseFields.PHASE_ID, ""))
+            if pid == phase_id:
+                phase[PhaseFields.PROMPT_TEMPLATE] = event_data.get("prompt_template")
+                if event_data.get("model") is not None:
+                    phase["model"] = event_data["model"]
+                if event_data.get("timeout_seconds") is not None:
+                    phase[PhaseFields.TIMEOUT_SECONDS] = event_data["timeout_seconds"]
+                if event_data.get("allowed_tools") is not None:
+                    phase[PhaseFields.ALLOWED_TOOLS] = event_data["allowed_tools"]
+                break
+
+        await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def get_by_id(self, workflow_id: str) -> WorkflowDetail | None:
         """Get a workflow template by ID."""
