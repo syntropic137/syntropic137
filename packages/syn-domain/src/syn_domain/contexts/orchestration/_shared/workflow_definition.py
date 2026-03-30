@@ -7,10 +7,15 @@ validation when loading workflow definitions from disk.
 from __future__ import annotations
 
 from pathlib import Path  # noqa: TC003 - needed at runtime for file operations
+from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from syn_domain.contexts.orchestration._shared.md_prompt_loader import (
+    load_md_prompt,
+    normalize_frontmatter,
+)
 from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
     InputDeclaration,
     PhaseDefinition,
@@ -18,6 +23,26 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowClassification,
     WorkflowType,
 )
+
+
+def _resolve_phase_prompt_file(phase: dict[str, Any], base_dir: Path) -> None:
+    """Resolve a single phase's prompt_file reference in-place.
+
+    Loads the .md file, sets prompt_template to its body,
+    merges normalized frontmatter (YAML values take precedence),
+    and removes the prompt_file key.
+    """
+    md_path = base_dir / phase["prompt_file"]
+    md_prompt = load_md_prompt(md_path)
+
+    # Merge frontmatter — YAML phase values take precedence.
+    normalized = normalize_frontmatter(md_prompt.metadata)
+    for key, value in normalized.items():
+        if key not in phase or phase[key] is None:
+            phase[key] = value
+
+    phase["prompt_template"] = md_prompt.content
+    del phase["prompt_file"]
 
 
 class RepositoryConfig(BaseModel):
@@ -72,15 +97,37 @@ class PhaseYamlDefinition(BaseModel):
 
     # Agent configuration
     prompt_template: str | None = None
+    prompt_file: str | None = None
     max_tokens: int | None = None
     timeout_seconds: int | None = None
+    allowed_tools: list[str] = Field(default_factory=list)
 
     # Claude Code command extensions (ISS-211)
     argument_hint: str | None = None
     model: str | None = None
 
+    @model_validator(mode="after")
+    def validate_prompt_source(self) -> PhaseYamlDefinition:
+        """Ensure at most one of prompt_template or prompt_file is set."""
+        if self.prompt_template is not None and self.prompt_file is not None:
+            msg = f"Phase '{self.id}': specify either 'prompt_template' or 'prompt_file', not both"
+            raise ValueError(msg)
+        return self
+
     def to_domain(self) -> PhaseDefinition:
-        """Convert to domain PhaseDefinition."""
+        """Convert to domain PhaseDefinition.
+
+        Raises:
+            ValueError: If prompt_file was set but not resolved via from_file().
+        """
+        if self.prompt_file is not None and self.prompt_template is None:
+            msg = (
+                f"Phase '{self.id}': prompt_file '{self.prompt_file}' was not resolved. "
+                "Use WorkflowDefinition.from_file() instead of from_yaml() "
+                "for workflows with prompt_file references."
+            )
+            raise ValueError(msg)
+
         return PhaseDefinition(
             phase_id=self.id,
             name=self.name,
@@ -92,6 +139,7 @@ class PhaseYamlDefinition(BaseModel):
             prompt_template=self.prompt_template,
             max_tokens=self.max_tokens,
             timeout_seconds=self.timeout_seconds,
+            allowed_tools=self.allowed_tools,
             argument_hint=self.argument_hint,
             model=self.model,
         )
@@ -144,15 +192,47 @@ class WorkflowDefinition(BaseModel):
 
     @classmethod
     def from_yaml(cls, content: str) -> WorkflowDefinition:
-        """Parse workflow definition from YAML string."""
+        """Parse workflow definition from YAML string.
+
+        Note: prompt_file references are NOT resolved here (no base_dir).
+        Use from_file() for workflows that reference external .md files.
+        """
         data = yaml.safe_load(content)
         return cls.model_validate(data)
 
     @classmethod
-    def from_file(cls, path: Path) -> WorkflowDefinition:
-        """Load workflow definition from a YAML file."""
+    def from_file(cls, path: Path, *, base_dir: Path | None = None) -> WorkflowDefinition:
+        """Load workflow definition from a YAML file.
+
+        Resolves prompt_file references relative to base_dir (defaults to
+        the YAML file's parent directory).
+
+        Args:
+            path: Path to the YAML workflow file.
+            base_dir: Base directory for resolving prompt_file paths.
+                Defaults to path.parent.
+        """
+        resolved_base = base_dir or path.parent
         content = path.read_text(encoding="utf-8")
-        return cls.from_yaml(content)
+        data = yaml.safe_load(content)
+        cls._resolve_prompt_files(data, resolved_base)
+        return cls.model_validate(data)
+
+    @classmethod
+    def _resolve_prompt_files(cls, data: dict[str, Any], base_dir: Path) -> None:
+        """Resolve prompt_file references in-place on the raw YAML dict.
+
+        Args:
+            data: Raw parsed YAML dict (mutated in place).
+            base_dir: Base directory for resolving relative paths.
+        """
+        phases = data.get("phases")
+        if not phases or not isinstance(phases, list):
+            return
+
+        for phase in phases:
+            if isinstance(phase, dict) and "prompt_file" in phase:
+                _resolve_phase_prompt_file(phase, base_dir)
 
     def get_domain_phases(self) -> list[PhaseDefinition]:
         """Convert all phases to domain PhaseDefinition objects."""
@@ -190,17 +270,26 @@ def load_workflow_definitions(directory: Path) -> list[WorkflowDefinition]:
     return definitions
 
 
-def validate_workflow_yaml(content: str) -> tuple[bool, str | None]:
-    """Validate workflow YAML content without loading.
+def validate_workflow_yaml(
+    content: str, *, base_dir: Path | None = None
+) -> tuple[bool, str | None]:
+    """Validate workflow YAML content.
 
     Args:
         content: YAML content to validate.
+        base_dir: If provided, resolve prompt_file references relative
+            to this directory. Otherwise, only schema validation is performed.
 
     Returns:
         Tuple of (is_valid, error_message).
     """
     try:
-        WorkflowDefinition.from_yaml(content)
+        if base_dir is not None:
+            data = yaml.safe_load(content)
+            WorkflowDefinition._resolve_prompt_files(data, base_dir)
+            WorkflowDefinition.model_validate(data)
+        else:
+            WorkflowDefinition.from_yaml(content)
         return (True, None)
     except Exception as e:
         return (False, str(e))

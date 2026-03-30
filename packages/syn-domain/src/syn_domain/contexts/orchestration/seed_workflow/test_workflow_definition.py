@@ -213,3 +213,90 @@ def test_load_from_nonexistent_directory() -> None:
     """Test loading from a non-existent directory raises error."""
     with pytest.raises(FileNotFoundError):
         load_workflow_definitions(Path("/nonexistent/path"))
+
+
+# =============================================================================
+# prompt_file Tests (ISS-398)
+# =============================================================================
+
+
+def test_load_from_file_with_prompt_file() -> None:
+    """End-to-end: YAML with prompt_file resolves .md content."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dir_path = Path(tmpdir)
+
+        # Create the .md prompt file.
+        prompts = dir_path / "prompts"
+        prompts.mkdir()
+        (prompts / "research.md").write_text(
+            "---\nmodel: sonnet\nmax-tokens: 4096\n---\n\n"
+            "You are a research assistant.\n\n"
+            "## Task\n$ARGUMENTS\n"
+        )
+
+        # Create the YAML workflow referencing it.
+        yaml_file = dir_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: prompt-file-wf\n"
+            "name: Prompt File Workflow\n"
+            "phases:\n"
+            "  - id: research\n"
+            "    name: Research\n"
+            "    order: 1\n"
+            "    prompt_file: prompts/research.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+        assert defn.id == "prompt-file-wf"
+
+        phase = defn.phases[0]
+        assert phase.prompt_template is not None
+        assert "research assistant" in phase.prompt_template
+        assert "$ARGUMENTS" in phase.prompt_template
+        assert phase.model == "sonnet"
+        assert phase.max_tokens == 4096
+        assert phase.prompt_file is None  # resolved away
+
+        # Domain conversion should also work.
+        domain_phases = defn.get_domain_phases()
+        assert domain_phases[0].prompt_template is not None
+        assert domain_phases[0].model == "sonnet"
+
+
+def test_load_workflow_definitions_with_prompt_files() -> None:
+    """Directory with mixed inline and .md-referenced workflows all load."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dir_path = Path(tmpdir)
+
+        # Workflow 1: inline prompt_template.
+        (dir_path / "inline.yaml").write_text(
+            "id: inline-wf\n"
+            "name: Inline\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            '    prompt_template: "Inline prompt."\n'
+        )
+
+        # Workflow 2: prompt_file reference.
+        (dir_path / "phase.md").write_text("External prompt content.")
+        (dir_path / "external.yaml").write_text(
+            "id: external-wf\n"
+            "name: External\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        definitions = load_workflow_definitions(dir_path)
+        assert len(definitions) == 2
+        ids = {d.id for d in definitions}
+        assert ids == {"inline-wf", "external-wf"}
+
+        # Verify both have resolved prompts.
+        for defn in definitions:
+            domain_phases = defn.get_domain_phases()
+            assert domain_phases[0].prompt_template is not None

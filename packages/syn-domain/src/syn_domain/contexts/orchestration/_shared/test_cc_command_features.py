@@ -1,10 +1,12 @@
 """Tests for ISS-211: Workflows as Claude Code Commands.
 
 Tests $ARGUMENTS substitution, InputDeclaration, new PhaseDefinition fields,
-YAML parsing with inputs section, and backward compatibility.
+YAML parsing with inputs section, backward compatibility, and prompt_file (ISS-398).
 """
 
 from __future__ import annotations
+
+from pathlib import Path  # noqa: TC003 - needed at runtime
 
 import pytest
 
@@ -375,3 +377,235 @@ class TestExampleWorkflows:
         create_pr_phase = defn.phases[0]
         assert "$ARGUMENTS" in (create_pr_phase.prompt_template or "")
         assert "{{repo_url}}" in (create_pr_phase.prompt_template or "")
+
+
+# =============================================================================
+# Prompt File Tests (ISS-398)
+# =============================================================================
+
+
+@pytest.mark.unit
+class TestPromptFile:
+    """Tests for prompt_file resolution and frontmatter merge."""
+
+    def test_prompt_file_resolves_from_file(self, tmp_path: Path) -> None:
+        """YAML with prompt_file resolves .md content into prompt_template."""
+        prompts = tmp_path / "prompts"
+        prompts.mkdir()
+        (prompts / "discovery.md").write_text(
+            "---\nmodel: sonnet\n---\n\nYou are a research assistant.\n"
+        )
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: discovery\n"
+            "    name: Discovery\n"
+            "    order: 1\n"
+            "    prompt_file: prompts/discovery.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+        phase = defn.phases[0]
+        assert phase.prompt_template == "You are a research assistant."
+        assert phase.prompt_file is None  # resolved away
+        assert phase.model == "sonnet"
+
+    def test_prompt_file_and_template_mutual_exclusion(self) -> None:
+        """Cannot set both prompt_template and prompt_file."""
+        yaml_content = """
+id: test-wf
+name: Test
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    prompt_template: "inline prompt"
+    prompt_file: prompts/phase.md
+"""
+        with pytest.raises(ValueError, match="specify either 'prompt_template' or 'prompt_file'"):
+            WorkflowDefinition.from_yaml(yaml_content)
+
+    def test_frontmatter_merges_into_phase(self, tmp_path: Path) -> None:
+        """.md frontmatter values populate phase fields when YAML doesn't set them."""
+        (tmp_path / "phase.md").write_text(
+            "---\n"
+            "model: opus\n"
+            "argument-hint: '[task]'\n"
+            "max-tokens: 8192\n"
+            "timeout-seconds: 600\n"
+            "allowed-tools: Read, Grep\n"
+            "---\n\n"
+            "Do the work.\n"
+        )
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+        phase = defn.phases[0]
+        assert phase.model == "opus"
+        assert phase.argument_hint == "[task]"
+        assert phase.max_tokens == 8192
+        assert phase.timeout_seconds == 600
+        assert phase.allowed_tools == ["Read", "Grep"]
+
+    def test_yaml_overrides_frontmatter(self, tmp_path: Path) -> None:
+        """YAML phase config takes precedence over .md frontmatter."""
+        (tmp_path / "phase.md").write_text(
+            "---\nmodel: opus\nmax-tokens: 8192\n---\n\nPrompt body.\n"
+        )
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    model: sonnet\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+        phase = defn.phases[0]
+        assert phase.model == "sonnet"  # YAML wins
+        assert phase.max_tokens == 8192  # frontmatter fills gap
+
+    def test_allowed_tools_from_frontmatter(self, tmp_path: Path) -> None:
+        """.md allowed-tools flows to domain PhaseDefinition."""
+        (tmp_path / "phase.md").write_text(
+            "---\nallowed-tools: Bash, Read, Grep\n---\n\nDo work.\n"
+        )
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+        domain_phases = defn.get_domain_phases()
+        assert domain_phases[0].allowed_tools == ["Bash", "Read", "Grep"]
+
+    def test_allowed_tools_from_yaml(self) -> None:
+        """allowed_tools in YAML flows to domain PhaseDefinition."""
+        yaml_content = """
+id: test-wf
+name: Test
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    allowed_tools:
+      - Bash
+      - Read
+    prompt_template: "Do work."
+"""
+        defn = WorkflowDefinition.from_yaml(yaml_content)
+        domain_phases = defn.get_domain_phases()
+        assert domain_phases[0].allowed_tools == ["Bash", "Read"]
+
+    def test_missing_md_file_error(self, tmp_path: Path) -> None:
+        """Referencing a non-existent .md file raises FileNotFoundError."""
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: nonexistent.md\n"
+        )
+
+        with pytest.raises(FileNotFoundError, match=r"nonexistent\.md"):
+            WorkflowDefinition.from_file(yaml_file)
+
+    def test_prompt_file_unresolved_guard(self) -> None:
+        """to_domain() raises if prompt_file was not resolved."""
+        yaml_content = """
+id: test-wf
+name: Test
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    prompt_file: prompts/phase.md
+"""
+        defn = WorkflowDefinition.from_yaml(yaml_content)
+        with pytest.raises(ValueError, match="was not resolved"):
+            defn.get_domain_phases()
+
+    def test_backward_compat_inline_prompt_unchanged(self) -> None:
+        """Existing inline prompt_template workflows still parse correctly."""
+        yaml_content = """
+id: legacy-wf
+name: Legacy
+phases:
+  - id: p1
+    name: Phase 1
+    order: 1
+    prompt_template: "Do the thing."
+    max_tokens: 4096
+"""
+        defn = WorkflowDefinition.from_yaml(yaml_content)
+        phase = defn.phases[0]
+        assert phase.prompt_template == "Do the thing."
+        assert phase.prompt_file is None
+        domain_phases = defn.get_domain_phases()
+        assert domain_phases[0].prompt_template == "Do the thing."
+
+    def test_prompt_file_with_arguments_substitution(self, tmp_path: Path) -> None:
+        """$ARGUMENTS in .md content is preserved for runtime substitution."""
+        (tmp_path / "phase.md").write_text(
+            "---\nmodel: sonnet\n---\n\n## Your Task\n$ARGUMENTS\n\n## Context\n{{topic}}\n"
+        )
+        yaml_file = tmp_path / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file)
+        assert "$ARGUMENTS" in (defn.phases[0].prompt_template or "")
+        assert "{{topic}}" in (defn.phases[0].prompt_template or "")
+
+    def test_custom_base_dir(self, tmp_path: Path) -> None:
+        """prompt_file resolves relative to explicit base_dir."""
+        prompts_dir = tmp_path / "shared_prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "phase.md").write_text("Research prompt content.")
+
+        yaml_dir = tmp_path / "workflows"
+        yaml_dir.mkdir()
+        yaml_file = yaml_dir / "workflow.yaml"
+        yaml_file.write_text(
+            "id: test-wf\n"
+            "name: Test\n"
+            "phases:\n"
+            "  - id: p1\n"
+            "    name: Phase 1\n"
+            "    order: 1\n"
+            "    prompt_file: phase.md\n"
+        )
+
+        defn = WorkflowDefinition.from_file(yaml_file, base_dir=prompts_dir)
+        assert defn.phases[0].prompt_template == "Research prompt content."

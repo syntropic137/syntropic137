@@ -115,7 +115,7 @@ We continue using `claude -p <prompt>` for agent invocation rather than the Agen
 ### Trade-offs
 
 - Two substitution syntaxes coexist (`$ARGUMENTS` and `{{variable}}`) — necessary for backward compatibility
-- Commands are inlined in workflow phases for now — a shared Command aggregate is a future iteration
+- Commands can be inlined via `prompt_template` or referenced as external `.md` files via `prompt_file` (ISS-398). A shared Command aggregate is a future iteration
 
 ### Future Work
 

@@ -61,7 +61,7 @@ phases:
     max_tokens: 4096
     timeout_seconds: 300
 
-    # Prompt template — the Claude Code command
+    # Prompt — inline OR external file (mutually exclusive)
     # Use $ARGUMENTS for the primary task, {{variable}} for named inputs
     prompt_template: |
       You are a research assistant.
@@ -73,6 +73,9 @@ phases:
       1. Identify key areas of interest
       2. Gather context from {{topic}}
       3. Output structured findings
+
+    # OR reference an external .md file instead of inline prompt_template:
+    # prompt_file: prompts/research.md  # Resolved relative to this YAML file
 
   - id: phase-2
     name: Analysis Phase
@@ -104,6 +107,64 @@ Workflow prompts support two substitution patterns that coexist:
 | `{{phase-id}}` | Output from a previous phase | `{{phase-1}}` → *(phase 1 artifact content)* |
 
 Built-in variables: `{{execution_id}}`, `{{workflow_id}}`, `{{repo_url}}`
+
+## External Prompt Files
+
+Instead of inlining prompts in YAML, phases can reference external `.md` files via `prompt_file`. This uses the same format as Claude Code commands — optional YAML frontmatter between `---` delimiters, followed by the prompt body.
+
+```yaml
+# In your workflow YAML:
+phases:
+  - id: discovery
+    name: Discovery
+    order: 1
+    prompt_file: prompts/discovery.md  # Resolved relative to this YAML file
+```
+
+```markdown
+<!-- prompts/discovery.md -->
+---
+model: sonnet
+argument-hint: "<research topic or question>"
+allowed-tools: Bash, Read, Grep, Glob
+max-tokens: 4096
+timeout-seconds: 300
+---
+
+You are a research assistant conducting initial exploration.
+
+## Your Task
+$ARGUMENTS
+
+## How to Approach This
+1. Identify key areas of interest
+2. Gather relevant context from the codebase
+3. Define 3-5 research questions
+
+Output a structured research scope with your initial questions.
+```
+
+### Frontmatter Keys
+
+| Frontmatter Key | Maps To | Type |
+|-----------------|---------|------|
+| `model` | `model` | string |
+| `argument-hint` | `argument_hint` | string |
+| `allowed-tools` | `allowed_tools` | comma-separated string or YAML list |
+| `max-tokens` | `max_tokens` | integer |
+| `timeout-seconds` | `timeout_seconds` | integer |
+
+### Merge Precedence
+
+YAML phase config always overrides `.md` frontmatter. Frontmatter values are used only when the YAML does not set that field. This means the `.md` file provides sensible defaults, while the workflow YAML can override any of them per-phase.
+
+### Rules
+
+- `prompt_template` and `prompt_file` are **mutually exclusive** — set one or the other
+- `prompt_file` paths are resolved relative to the YAML file's directory (or an explicit `base_dir`)
+- Missing `.md` files produce a clear `FileNotFoundError` at load time
+- `$ARGUMENTS` and `{{variable}}` substitutions work identically in both inline and external prompts
+- Resolution happens at **load/seed time** — the domain model always receives a resolved prompt string
 
 ## Seeding Workflows
 
