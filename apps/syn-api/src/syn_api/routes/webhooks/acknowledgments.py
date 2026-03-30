@@ -54,7 +54,9 @@ async def _resolve_trigger_details(
                     pass
     except Exception:
         logger.debug("Could not resolve trigger details for acknowledgment", exc_info=True)
-        details = [{"trigger_id": tid, "trigger_name": "", "workflow_name": ""} for tid in trigger_ids]
+        details = [
+            {"trigger_id": tid, "trigger_name": "", "workflow_name": ""} for tid in trigger_ids
+        ]
     return details
 
 
@@ -96,7 +98,9 @@ async def _post_trigger_started_comment(
         name = d.get("trigger_name") or d["trigger_id"]
         workflow = d.get("workflow_name")
         if workflow:
-            body += f"Trigger **{name}** fired on `{compound_event}` — dispatching **{workflow}**.\n"
+            body += (
+                f"Trigger **{name}** fired on `{compound_event}` — dispatching **{workflow}**.\n"
+            )
         else:
             body += f"Trigger **{name}** fired on `{compound_event}` — dispatching workflow.\n"
 
