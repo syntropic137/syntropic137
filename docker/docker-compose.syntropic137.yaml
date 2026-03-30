@@ -246,6 +246,8 @@ services:
       # Docker socket proxy (ISS-164)
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       SYN_AGENT_NETWORK: syntropic137_selfhost_agent-net
+      # Envoy proxy URL for agent containers (must resolve on agent-net)
+      SYN_PROXY_URL: http://envoy-proxy:8081
     depends_on:
       timescaledb:
         condition: service_healthy

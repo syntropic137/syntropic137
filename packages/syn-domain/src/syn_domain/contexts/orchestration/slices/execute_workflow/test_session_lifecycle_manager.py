@@ -74,6 +74,36 @@ class TestCompleteSuccess:
         repo.save.assert_awaited_once()
 
     @pytest.mark.asyncio
+    @pytest.mark.regression
+    async def test_session_aggregate_receives_authoritative_tokens(self) -> None:
+        """Regression: session must reflect authoritative CLI result tokens.
+
+        Per-turn assistant events may report input_tokens=0 (cache hits),
+        but the CLI result event has the true totals. The processor must
+        pass those authoritative values through to session completion.
+        See: ISS-405 / hotfix-403.
+        """
+        repo = AsyncMock()
+        mgr = _make_manager(repo)
+        await mgr.start()
+
+        # Authoritative values from CLI result event (includes cache tokens)
+        await mgr.complete_success(
+            input_tokens=6939,
+            output_tokens=517,
+            total_tokens=7456,
+            duration_seconds=303.0,
+            source="processor",
+        )
+
+        session = mgr.session
+        assert session is not None
+        # The aggregate should have the authoritative values, not zeros
+        assert session._tokens.input_tokens == 6939
+        assert session._tokens.output_tokens == 517
+        assert session._tokens.total_tokens == 7456
+
+    @pytest.mark.asyncio
     async def test_skips_token_recording_when_zero(self) -> None:
         repo = AsyncMock()
         mgr = _make_manager(repo)
