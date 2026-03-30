@@ -1,7 +1,11 @@
 """Pydantic models for parsing workflow YAML definitions.
 
 These models define the schema for workflow YAML files and provide
-validation when loading workflow definitions from disk.
+validation when loading workflow definitions from disk. Phases may
+specify a ``prompt_file`` referencing an external ``.md`` file instead
+of an inline ``prompt_template``. The ``.md`` file is loaded via
+:func:`~syn_domain.contexts.orchestration._shared.md_prompt_loader.load_md_prompt`
+and its frontmatter is merged into the phase definition at load time.
 """
 
 from __future__ import annotations
