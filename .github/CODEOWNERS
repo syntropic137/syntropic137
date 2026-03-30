@@ -5,14 +5,14 @@
 # config, or shared package without a human approval gate.
 
 # CI/CD — workflow changes are highest risk (arbitrary code execution in CI)
-/.github/                   @neural
+/.github/                   @NeuralEmpowerment
 
 # Infrastructure and secrets management
-/docker/                    @neural
-/infra/                     @neural
+/docker/                    @NeuralEmpowerment
+/infra/                     @NeuralEmpowerment
 
 # Shared configuration — env constants, settings, credentials
-/packages/syn-shared/       @neural
+/packages/syn-shared/       @NeuralEmpowerment
 
 # Submodule references — pinned commit changes must be intentional
-/.gitmodules                @neural
+/.gitmodules                @NeuralEmpowerment

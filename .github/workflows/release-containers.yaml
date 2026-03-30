@@ -427,6 +427,24 @@ jobs:
             --clobber
 
       # -----------------------------------------------------------------------
+      # Notify downstream repos
+      # -----------------------------------------------------------------------
+      - name: Notify syntropic137-npx to sync templates
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.NPX_DISPATCH_TOKEN }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::NPX_DISPATCH_TOKEN not set — skipping template sync notification"
+            exit 0
+          fi
+          gh workflow run template-sync.yml \
+            --repo syntropic137/syntropic137-npx \
+            --field ref="${{ steps.version.outputs.version }}" \
+          && echo "✓ Template sync triggered for ${{ steps.version.outputs.version }}" \
+          || echo "::warning::Failed to trigger template sync — release assets are published, sync manually"
+
+      # -----------------------------------------------------------------------
       # Summary
       # -----------------------------------------------------------------------
       - name: Write release summary
