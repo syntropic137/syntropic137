@@ -15,6 +15,25 @@ _TRIGGER_LABELS: dict[str, str] = {
 }
 
 
+async def _resolve_workflow_names(
+    details: list[dict[str, str]],
+) -> None:
+    """Resolve workflow names from projection store and update details in place."""
+    from syn_adapters.projection_stores import get_projection_store
+
+    proj_store = get_projection_store()
+    workflow_ids = {d["workflow_id"] for d in details if d.get("workflow_id")}
+    names: dict[str, str] = {}
+    for wf_id in workflow_ids:
+        data = await proj_store.get("workflow_details", wf_id)
+        if data:
+            names[wf_id] = data.get("name", "")
+    for d in details:
+        wf_id = d.get("workflow_id", "")
+        if wf_id in names:
+            d["workflow_name"] = names[wf_id]
+
+
 async def _resolve_trigger_details(
     trigger_ids: list[str],
 ) -> list[dict[str, str]]:
@@ -23,11 +42,11 @@ async def _resolve_trigger_details(
     Returns a list of dicts with keys: trigger_id, trigger_name, workflow_name.
     Falls back to raw IDs on any failure.
     """
-    details: list[dict[str, str]] = []
     try:
         from syn_api._wiring import get_trigger_store
 
         store = get_trigger_store()
+        details: list[dict[str, str]] = []
         for tid in trigger_ids:
             entry: dict[str, str] = {"trigger_id": tid, "trigger_name": "", "workflow_name": ""}
             trigger = await store.get(tid)
@@ -36,28 +55,11 @@ async def _resolve_trigger_details(
                 entry["workflow_id"] = trigger.workflow_id
             details.append(entry)
 
-        # Batch-resolve workflow names from projection store
-        workflow_ids = {d["workflow_id"] for d in details if d.get("workflow_id")}
-        if workflow_ids:
-            from syn_adapters.projection_stores import get_projection_store
-
-            proj_store = get_projection_store()
-            for wf_id in workflow_ids:
-                try:
-                    data = await proj_store.get("workflow_details", wf_id)
-                    if data:
-                        wf_name = data.get("name", "")
-                        for d in details:
-                            if d.get("workflow_id") == wf_id:
-                                d["workflow_name"] = wf_name
-                except Exception:
-                    pass
+        await _resolve_workflow_names(details)
+        return details
     except Exception:
         logger.debug("Could not resolve trigger details for acknowledgment", exc_info=True)
-        details = [
-            {"trigger_id": tid, "trigger_name": "", "workflow_name": ""} for tid in trigger_ids
-        ]
-    return details
+        return [{"trigger_id": tid, "trigger_name": "", "workflow_name": ""} for tid in trigger_ids]
 
 
 # Dispatch table for extracting PR numbers from webhook payloads

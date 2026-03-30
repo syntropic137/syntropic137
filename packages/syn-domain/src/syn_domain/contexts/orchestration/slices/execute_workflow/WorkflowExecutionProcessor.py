@@ -532,20 +532,31 @@ class WorkflowExecutionProcessor:
         aggregate._handle_command(complete_cmd)
         await self._save_and_sync(aggregate)
 
-        session_mgr = self._session_managers.pop(todo.phase_id, None)
+        await self._finalize_phase(todo.phase_id, final_input, final_output, final_total, duration)
+
+    async def _finalize_phase(
+        self,
+        phase_id: str,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        duration: float,
+    ) -> None:
+        """Complete session and clean up phase-local state."""
+        session_mgr = self._session_managers.pop(phase_id, None)
         if session_mgr is not None:
             await session_mgr.complete_success(
-                input_tokens=final_input,
-                output_tokens=final_output,
-                total_tokens=final_total,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
                 duration_seconds=duration,
                 source="processor",
             )
 
-        self._active_workspaces.pop(todo.phase_id, None)
-        self._active_envs.pop(todo.phase_id, None)
-        self._active_cmds.pop(todo.phase_id, None)
-        workspace_cm = self._active_workspace_cms.pop(todo.phase_id, None)
+        self._active_workspaces.pop(phase_id, None)
+        self._active_envs.pop(phase_id, None)
+        self._active_cmds.pop(phase_id, None)
+        workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
 
