@@ -46,8 +46,8 @@ Access: http://localhost:8137
 
 ### Management Commands
 
-| Action | Published path (`~/.syntropic137/`) | Source repo |
-|--------|-------------------------------------|-------------|
+| Action | Setup CLI (`npx @syntropic137/setup`) | Source repo |
+|--------|----------------------------------------|-------------|
 | Status | `npx @syntropic137/setup status` | `just selfhost-status` |
 | Logs | `npx @syntropic137/setup logs` | `just selfhost-logs` |
 | Stop | `npx @syntropic137/setup stop` | `just selfhost-down` |
