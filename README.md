@@ -24,43 +24,35 @@
 
 ## Self-Hosting (recommended)
 
-Get your own instance running in minutes. Only prerequisite: **Docker**.
+Get your own instance running in minutes. Prerequisites: **Node.js 18+** and **Docker**.
 
-> [!TIP]
-> **Using Claude Code?** Install the plugin — it handles everything:
->
-> ```
-> claude plugin marketplace add syntropic137/syntropic137-claude-plugin
-> claude plugin install syntropic137
-> /syn-setup
-> ```
+```bash
+npx @syntropic137/setup
+```
+
+The setup CLI interactively handles Docker validation, secret generation, GitHub App creation (via OAuth manifest flow), and starting the full stack.
 
 Access: http://localhost:8137
 
-> [!IMPORTANT]
-> **GitHub App** (required for agents to interact with GitHub):
-> - `/syn-setup` walks you through one-click creation via the manifest flow
-> - Enables: pushing code, creating PRs, code review, webhook-triggered workflows
-
 > [!NOTE]
-> **Optional features** (add anytime):
+> **Optional features** (configurable during setup or anytime after):
 > - **Cloudflare Tunnel** — remote access + webhook delivery (highly recommended, free; required for GitHub webhook triggers; without it, manual workflow runs only and dashboard on localhost only; domain costs $10-15/year if buying new)
 > - **1Password** — encrypted secrets management
 >
-> Run `/syn-setup` again or `./syn-ctl add-cloudflare` / `./syn-ctl add-1password` to add features later.
+> Run `npx @syntropic137/setup` again to add features later.
 
 > [!WARNING]
 > **Security:** Set `SYN_API_PASSWORD` for basic auth. Or protect with Cloudflare Access / VPN.
 
 ### Management Commands
 
-| Action | Published path (`~/.syntropic137/`) | Source repo |
-|--------|-------------------------------------|-------------|
-| Status | `./syn-ctl status` | `just selfhost-status` |
-| Logs | `./syn-ctl logs` | `just selfhost-logs` |
-| Stop | `./syn-ctl down` | `just selfhost-down` |
-| Start | `./syn-ctl up` | `just selfhost-up` |
-| Update | `./syn-ctl update` | `git pull && just selfhost-up` |
+| Action | Setup CLI (`npx @syntropic137/setup`) | Source repo |
+|--------|----------------------------------------|-------------|
+| Status | `npx @syntropic137/setup status` | `just selfhost-status` |
+| Logs | `npx @syntropic137/setup logs` | `just selfhost-logs` |
+| Stop | `npx @syntropic137/setup stop` | `just selfhost-down` |
+| Start | `npx @syntropic137/setup start` | `just selfhost-up` |
+| Update | `npx @syntropic137/setup update` | `git pull && just selfhost-up` |
 
 ---
 
