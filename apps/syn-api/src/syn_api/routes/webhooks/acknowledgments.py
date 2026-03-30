@@ -14,6 +14,50 @@ _TRIGGER_LABELS: dict[str, str] = {
     "issue_comment.created": "Command",
 }
 
+
+async def _resolve_trigger_details(
+    trigger_ids: list[str],
+) -> list[dict[str, str]]:
+    """Look up trigger name and workflow name for each trigger ID (best-effort).
+
+    Returns a list of dicts with keys: trigger_id, trigger_name, workflow_name.
+    Falls back to raw IDs on any failure.
+    """
+    details: list[dict[str, str]] = []
+    try:
+        from syn_api._wiring import get_trigger_store
+
+        store = get_trigger_store()
+        for tid in trigger_ids:
+            entry: dict[str, str] = {"trigger_id": tid, "trigger_name": "", "workflow_name": ""}
+            trigger = await store.get(tid)
+            if trigger is not None:
+                entry["trigger_name"] = trigger.name
+                entry["workflow_id"] = trigger.workflow_id
+            details.append(entry)
+
+        # Batch-resolve workflow names from projection store
+        workflow_ids = {d["workflow_id"] for d in details if d.get("workflow_id")}
+        if workflow_ids:
+            from syn_adapters.projection_stores import get_projection_store
+
+            proj_store = get_projection_store()
+            for wf_id in workflow_ids:
+                try:
+                    data = await proj_store.get("workflow_details", wf_id)
+                    if data:
+                        wf_name = data.get("name", "")
+                        for d in details:
+                            if d.get("workflow_id") == wf_id:
+                                d["workflow_name"] = wf_name
+                except Exception:
+                    pass
+    except Exception:
+        logger.debug("Could not resolve trigger details for acknowledgment", exc_info=True)
+        details = [{"trigger_id": tid, "trigger_name": "", "workflow_name": ""} for tid in trigger_ids]
+    return details
+
+
 # Dispatch table for extracting PR numbers from webhook payloads
 _PR_EXTRACTORS: dict[str, Any] = {
     "issue_comment": lambda p: p.get("issue", {}).get("number")
@@ -45,8 +89,16 @@ async def _post_trigger_started_comment(
     Best-effort — failures are logged but do not block webhook processing.
     """
     label = _TRIGGER_LABELS.get(compound_event, "Workflow")
-    trigger_list = ", ".join(f"`{tid}`" for tid in trigger_ids)
-    body = f"⚡ **{label} Starting**\n\nTrigger {trigger_list} fired on `{compound_event}` — dispatching workflow."
+    details = await _resolve_trigger_details(trigger_ids)
+
+    body = f"⚡ **{label} Starting**\n\n"
+    for d in details:
+        name = d.get("trigger_name") or d["trigger_id"]
+        workflow = d.get("workflow_name")
+        if workflow:
+            body += f"Trigger **{name}** fired on `{compound_event}` — dispatching **{workflow}**.\n"
+        else:
+            body += f"Trigger **{name}** fired on `{compound_event}` — dispatching workflow.\n"
 
     try:
         from syn_adapters.github.client import get_github_client
