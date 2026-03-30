@@ -233,6 +233,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            INCLUDE_DOCKER_CLI=${{ matrix.image == 'syn-api' && '1' || '0' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true  # SLSA provenance attestation
