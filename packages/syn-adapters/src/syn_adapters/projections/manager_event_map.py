@@ -97,6 +97,9 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("workflow_detail", "on_workflow_template_created"),
         ("dashboard_metrics", "on_workflow_template_created"),
     ],
+    "WorkflowTemplateArchived": [
+        ("workflow_list", "on_workflow_template_archived"),
+    ],
     "WorkflowExecutionStarted": [
         ("workflow_list", "on_workflow_execution_started"),
         ("workflow_detail", "on_workflow_execution_started"),

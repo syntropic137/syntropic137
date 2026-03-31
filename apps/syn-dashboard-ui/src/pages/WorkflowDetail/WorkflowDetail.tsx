@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   ArrowLeft,
   GitBranch,
@@ -9,6 +10,7 @@ import { useWorkflowData } from '../../hooks'
 import type { WorkflowResponse } from '../../types'
 import { PhaseMetricsChart } from './PhaseMetricsChart'
 import { PhasePipeline } from './PhasePipeline'
+import { PhasePromptEditor } from './PhasePromptEditor'
 import { WorkflowArtifactsList } from './WorkflowArtifactsList'
 import { WorkflowExecutionForm } from './WorkflowExecutionForm'
 import { WorkflowMetrics } from './WorkflowMetrics'
@@ -78,7 +80,8 @@ function WorkflowDetailHeader({ workflow, workflowId }: { workflow: WorkflowResp
 export function WorkflowDetail() {
   const { workflowId } = useParams<{ workflowId: string }>()
   const navigate = useNavigate()
-  const { workflow, metrics, artifacts, executions, loading, error } = useWorkflowData(workflowId)
+  const { workflow, metrics, artifacts, executions, loading, error, refetch } = useWorkflowData(workflowId)
+  const [selectedPhaseId, setSelectedPhaseId] = useState<string | null>(null)
 
   if (loading) return <PageLoader />
 
@@ -96,6 +99,13 @@ export function WorkflowDetail() {
   }
 
   const phaseChartData = buildPhaseChartData(metrics?.phases ?? [])
+  const selectedPhase = selectedPhaseId
+    ? workflow.phases.find((p) => p.phase_id === selectedPhaseId)
+    : null
+
+  function handlePhaseSelect(phaseId: string) {
+    setSelectedPhaseId((prev) => (prev === phaseId ? null : phaseId))
+  }
 
   return (
     <div className="space-y-6">
@@ -109,7 +119,21 @@ export function WorkflowDetail() {
         workflowId={workflowId!}
       />
 
-      <PhasePipeline phases={workflow.phases} phaseMetrics={metrics?.phases} />
+      <PhasePipeline
+        phases={workflow.phases}
+        phaseMetrics={metrics?.phases}
+        selectedPhaseId={selectedPhaseId}
+        onPhaseSelect={handlePhaseSelect}
+      />
+
+      {selectedPhase && (
+        <PhasePromptEditor
+          key={selectedPhase.phase_id}
+          phase={selectedPhase}
+          workflowId={workflowId!}
+          onSaved={refetch}
+        />
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <PhaseMetricsChart phaseChartData={phaseChartData} />

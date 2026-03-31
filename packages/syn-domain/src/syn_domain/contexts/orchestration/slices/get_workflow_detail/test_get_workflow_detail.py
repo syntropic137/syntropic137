@@ -155,6 +155,163 @@ class TestWorkflowDetailProjection:
         assert phase_1.order == 0
 
 
+class TestWorkflowPhaseUpdatedProjection:
+    """Tests for WorkflowDetailProjection handling WorkflowPhaseUpdated events."""
+
+    @pytest.mark.asyncio
+    async def test_updates_phase_prompt(self, projection: WorkflowDetailProjection):
+        """Test projection updates prompt_template on phase update event."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "wf-1",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "classification": "technical",
+                "phases": [
+                    {
+                        "id": "p1",
+                        "name": "Research",
+                        "prompt_template": "Original prompt",
+                        "order": 0,
+                    },
+                    {
+                        "id": "p2",
+                        "name": "Analysis",
+                        "prompt_template": "Analysis prompt",
+                        "order": 1,
+                    },
+                ],
+            }
+        )
+
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "wf-1",
+                "phase_id": "p1",
+                "prompt_template": "Updated prompt",
+            }
+        )
+
+        detail = await projection.get_by_id("wf-1")
+        assert detail is not None
+        assert detail.phases[0].prompt_template == "Updated prompt"
+        # Other phase unchanged
+        assert detail.phases[1].prompt_template == "Analysis prompt"
+
+    @pytest.mark.asyncio
+    async def test_updates_optional_fields(self, projection: WorkflowDetailProjection):
+        """Test projection updates model, timeout, and allowed_tools when provided."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "wf-1",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "classification": "technical",
+                "phases": [
+                    {
+                        "id": "p1",
+                        "name": "Research",
+                        "prompt_template": "Original",
+                        "model": "sonnet",
+                        "timeout_seconds": 300,
+                        "allowed_tools": ["Bash"],
+                        "order": 0,
+                    },
+                ],
+            }
+        )
+
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "wf-1",
+                "phase_id": "p1",
+                "prompt_template": "Updated",
+                "model": "opus",
+                "timeout_seconds": 600,
+                "allowed_tools": ["Bash", "Read", "Write"],
+            }
+        )
+
+        detail = await projection.get_by_id("wf-1")
+        assert detail is not None
+        phase = detail.phases[0]
+        assert phase.prompt_template == "Updated"
+        assert phase.model == "opus"
+        assert phase.timeout_seconds == 600
+        assert list(phase.allowed_tools) == ["Bash", "Read", "Write"]
+
+    @pytest.mark.asyncio
+    async def test_preserves_fields_when_none(self, projection: WorkflowDetailProjection):
+        """Test projection preserves existing values when optional fields are None."""
+        await projection.on_workflow_template_created(
+            {
+                "workflow_id": "wf-1",
+                "name": "Test Workflow",
+                "workflow_type": "research",
+                "classification": "technical",
+                "phases": [
+                    {
+                        "id": "p1",
+                        "name": "Research",
+                        "prompt_template": "Original",
+                        "model": "sonnet",
+                        "timeout_seconds": 300,
+                        "allowed_tools": ["Bash"],
+                        "order": 0,
+                    },
+                ],
+            }
+        )
+
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "wf-1",
+                "phase_id": "p1",
+                "prompt_template": "Updated",
+                # model, timeout_seconds, allowed_tools not provided
+            }
+        )
+
+        detail = await projection.get_by_id("wf-1")
+        assert detail is not None
+        phase = detail.phases[0]
+        assert phase.prompt_template == "Updated"
+        assert phase.model == "sonnet"  # preserved
+        assert phase.timeout_seconds == 300  # preserved
+        assert list(phase.allowed_tools) == ["Bash"]  # preserved
+
+    @pytest.mark.asyncio
+    async def test_ignores_missing_workflow(self, projection: WorkflowDetailProjection):
+        """Test projection silently ignores update for non-existent workflow."""
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "non-existent",
+                "phase_id": "p1",
+                "prompt_template": "Updated",
+            }
+        )
+        # Should not raise — just a no-op
+
+    @pytest.mark.asyncio
+    async def test_ignores_empty_ids(self, projection: WorkflowDetailProjection):
+        """Test projection silently ignores events with empty workflow/phase IDs."""
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "",
+                "phase_id": "p1",
+                "prompt_template": "Updated",
+            }
+        )
+        await projection.on_workflow_phase_updated(
+            {
+                "workflow_id": "wf-1",
+                "phase_id": "",
+                "prompt_template": "Updated",
+            }
+        )
+        # Should not raise
+
+
 class TestGetWorkflowDetailHandler:
     """Tests for GetWorkflowDetailHandler."""
 

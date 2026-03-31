@@ -121,6 +121,7 @@ Describes an expected workflow input. Used for validation, documentation, and UI
 | `order` | `int` | Execution order |
 | `description` | `str \| None` | Phase description |
 | `prompt_template` | `str \| None` | Prompt template (may contain `$ARGUMENTS` and `{{variable}}` placeholders) |
+| `prompt_file` | `str \| None` | Path to an external `.md` prompt file (YAML-only; resolved at load time into `prompt_template`). Mutually exclusive with `prompt_template`. |
 | `argument_hint` | `str \| None` | Hint for what `$ARGUMENTS` represents (e.g., `"[task-description]"`) |
 | `model` | `str \| None` | Per-phase model override (e.g., `"sonnet"`, `"opus"`) |
 | `timeout_seconds` | `int` | Phase timeout (default 300) |
@@ -131,6 +132,22 @@ Describes an expected workflow input. Used for validation, documentation, and UI
 Extends WorkflowSummary with:
 - `phases: list[PhaseDefinitionResponse]` — phase definitions
 - `input_declarations: list[InputDeclarationResponse]` — declared workflow inputs (ISS-211)
+
+### UpdatePhasePromptRequest
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `prompt_template` | `str` | New prompt template (required, non-empty) |
+| `model` | `str \| None` | Model override — omit or `null` to keep existing |
+| `timeout_seconds` | `int \| None` | Timeout override — omit or `null` to keep existing |
+| `allowed_tools` | `list[str] \| None` | Allowed tools — omit or `null` to keep existing, `[]` to clear |
+
+### UpdatePhaseResponse
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workflow_id` | `str` | The updated workflow template ID |
+| `phase_id` | `str` | The updated phase ID |
 
 ### ExecutionSummary
 

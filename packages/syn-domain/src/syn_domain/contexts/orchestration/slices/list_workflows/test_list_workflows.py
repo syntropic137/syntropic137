@@ -117,6 +117,63 @@ class TestWorkflowListProjection:
         assert impl_workflows[0].id == "wf-2"
 
     @pytest.mark.asyncio
+    async def test_on_workflow_template_archived(self, projection: WorkflowListProjection):
+        """Test handling WorkflowTemplateArchived event."""
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-1", "name": "Test", "phases": []}
+        )
+
+        await projection.on_workflow_template_archived({"workflow_id": "wf-1"})
+
+        summaries = await projection.get_all(include_archived=True)
+        assert len(summaries) == 1
+        assert summaries[0].is_archived is True
+
+    @pytest.mark.asyncio
+    async def test_query_excludes_archived_by_default(self, projection: WorkflowListProjection):
+        """Archived workflows should be excluded from query by default."""
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-1", "name": "Active", "phases": []}
+        )
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-2", "name": "Archived", "phases": []}
+        )
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+
+        results = await projection.query()
+        assert len(results) == 1
+        assert results[0].id == "wf-1"
+
+    @pytest.mark.asyncio
+    async def test_query_includes_archived_when_requested(self, projection: WorkflowListProjection):
+        """include_archived=True should return archived workflows."""
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-1", "name": "Active", "phases": []}
+        )
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-2", "name": "Archived", "phases": []}
+        )
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+
+        results = await projection.query(include_archived=True)
+        assert len(results) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_all_excludes_archived_by_default(self, projection: WorkflowListProjection):
+        """get_all should exclude archived workflows by default."""
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-1", "name": "Active", "phases": []}
+        )
+        await projection.on_workflow_template_created(
+            {"workflow_id": "wf-2", "name": "Archived", "phases": []}
+        )
+        await projection.on_workflow_template_archived({"workflow_id": "wf-2"})
+
+        results = await projection.get_all()
+        assert len(results) == 1
+        assert results[0].id == "wf-1"
+
+    @pytest.mark.asyncio
     async def test_query_with_pagination(self, projection: WorkflowListProjection):
         """Test querying with limit and offset."""
         for i in range(5):

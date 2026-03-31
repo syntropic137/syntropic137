@@ -43,6 +43,30 @@ export interface ExecuteWorkflowResponse {
   message: string
 }
 
+export interface UpdatePhasePromptRequest {
+  prompt_template: string
+  model?: string | null
+  timeout_seconds?: number | null
+  allowed_tools?: string[] | null
+}
+
+export interface UpdatePhaseResponse {
+  workflow_id: string
+  phase_id: string
+  status: string
+}
+
+export async function updatePhasePrompt(
+  workflowId: string,
+  phaseId: string,
+  request: UpdatePhasePromptRequest
+): Promise<UpdatePhaseResponse> {
+  return fetchJSON(`${API_BASE}/workflows/${workflowId}/phases/${phaseId}`, {
+    method: 'PUT',
+    body: JSON.stringify(request),
+  })
+}
+
 export async function executeWorkflow(
   workflowId: string,
   request: ExecuteWorkflowRequest = {}

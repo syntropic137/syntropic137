@@ -201,6 +201,71 @@ curl -X POST /api/v1/workflows/research-workflow-v2/execute \
 
 ---
 
+## update_phase_prompt()
+
+Update the prompt template and configuration for a single phase in a workflow template.
+
+**Signature:**
+
+```python
+async def update_phase_prompt(
+    workflow_id: str,
+    phase_id: str,
+    prompt_template: str,
+    model: str | None = None,
+    timeout_seconds: int | None = None,
+    allowed_tools: list[str] | None = None,
+) -> Result[str, WorkflowError]
+```
+
+**Parameters:**
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `workflow_id` | `str` | required | Workflow template ID |
+| `phase_id` | `str` | required | Phase to update |
+| `prompt_template` | `str` | required | New prompt template (non-empty) |
+| `model` | `str \| None` | `None` | Model override — `None` preserves existing value |
+| `timeout_seconds` | `int \| None` | `None` | Timeout override — `None` preserves existing value |
+| `allowed_tools` | `list[str] \| None` | `None` | Allowed tools — `None` preserves existing, `[]` clears |
+
+**Returns:** `Ok(workflow_id)` on success.
+
+**Errors:**
+- `WorkflowError.NOT_FOUND` if the workflow or phase doesn't exist
+- `WorkflowError.INVALID_INPUT` on validation failure (e.g., empty prompt)
+
+**"Keep existing" semantics:** Optional fields (`model`, `timeout_seconds`, `allowed_tools`) use `None` to mean "don't change." To explicitly clear a field, pass an empty value (e.g., `allowed_tools=[]`).
+
+**Example:**
+
+```python
+result = await syn_api.v1.workflows.update_phase_prompt(
+    workflow_id="wf-abc123",
+    phase_id="discovery",
+    prompt_template="You are a senior researcher.\n\n## Task\n$ARGUMENTS",
+    model="opus",
+)
+match result:
+    case Ok(wf_id):
+        print(f"Updated phase in workflow {wf_id}")
+    case Err(error, message):
+        print(f"Failed: {message}")
+```
+
+**HTTP API:**
+
+```bash
+curl -X PUT /api/v1/workflows/wf-abc123/phases/discovery \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_template": "You are a senior researcher.\n\n## Task\n$ARGUMENTS",
+    "model": "opus"
+  }'
+```
+
+---
+
 ## get_execution()
 
 Get detailed information about a workflow execution.

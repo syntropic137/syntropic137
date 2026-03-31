@@ -232,6 +232,8 @@ services:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       SYN_AGENT_NETWORK: syntropic137_selfhost_agent-net
       SYN_GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+      # Envoy proxy URL for agent containers (must resolve on agent-net)
+      SYN_PROXY_URL: http://envoy-proxy:8081
     depends_on:
       timescaledb:
         condition: service_healthy

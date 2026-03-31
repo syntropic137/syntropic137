@@ -83,6 +83,8 @@ jobs:
           SYN_STORAGE_MINIO_SECRET_KEY=smoke_test_minio_password
           ANTHROPIC_API_KEY=placeholder-not-used
           EOF
+          # Strip leading whitespace from heredoc (YAML indentation)
+          sed -i 's/^[[:space:]]*//' .env
 
       # -------------------------------------------------------------------------
       # Build and start the selfhost stack.
@@ -139,8 +141,8 @@ jobs:
       - name: Verify envoy-proxy is reachable on agent-net
         run: |
           echo "Verifying envoy-proxy DNS and admin endpoint from agent-net..."
-          # The envoy image is minimal (no curl/wget). Use busybox on the
-          # agent-net network to test DNS resolution and admin readiness.
+          # The envoy image is minimal (no curl/wget). Use a lightweight
+          # container on the agent-net network to verify DNS + HTTP connectivity.
           #
           # Filter by compose project name to avoid grabbing a stale agent-net
           # from a different project (e.g. dev stack).
@@ -154,14 +156,18 @@ jobs:
             exit 1
           fi
 
-          # DNS resolution
-          docker run --rm --network "$AGENT_NET" busybox:latest nslookup envoy-proxy
-          echo "DNS resolution successful."
-
-          # Admin endpoint readiness
-          docker run --rm --network "$AGENT_NET" busybox:latest \
-            wget -qO- http://envoy-proxy:9901/ready
-          echo "Envoy proxy is ready."
+          # Verify DNS resolution + admin endpoint in one step.
+          # busybox nslookup has known issues with Docker embedded DNS on some
+          # CI platforms — wget is more reliable and tests both DNS and HTTP.
+          RESULT=$(docker run --rm --network "$AGENT_NET" busybox:latest \
+            wget -qO- http://envoy-proxy:9901/ready 2>&1) || {
+            echo "ERROR: Could not reach envoy-proxy:9901 from agent-net"
+            echo "Output: $RESULT"
+            docker network inspect "$AGENT_NET" --format '{{range .Containers}}{{.Name}} {{end}}'
+            exit 1
+          }
+          echo "Envoy admin response: $RESULT"
+          echo "Envoy proxy is reachable on agent-net."
 
       - name: Verify API can create a workflow (round-trip)
         run: |

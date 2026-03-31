@@ -19,11 +19,12 @@ class WorkflowResolver:
     def __init__(self, client: httpx.Client) -> None:
         self._client = client
 
-    def resolve(self, partial_id: str) -> WorkflowSummary:
+    def resolve(self, partial_id: str, *, include_archived: bool = False) -> WorkflowSummary:
         """Resolve a partial workflow ID to a full WorkflowSummary.
 
         Args:
             partial_id: Full or partial workflow ID
+            include_archived: Search archived workflows too
 
         Returns:
             Matched WorkflowSummary
@@ -31,7 +32,10 @@ class WorkflowResolver:
         Raises:
             typer.Exit: On not-found or ambiguous match
         """
-        list_resp = self._client.get("/workflows")
+        params: dict[str, str] = {}
+        if include_archived:
+            params["include_archived"] = "true"
+        list_resp = self._client.get("/workflows", params=params)
         if list_resp.status_code != 200:
             print_error("Failed to list workflows")
             raise typer.Exit(1)

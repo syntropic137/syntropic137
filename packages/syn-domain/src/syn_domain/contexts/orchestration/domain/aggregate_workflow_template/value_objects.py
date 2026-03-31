@@ -55,6 +55,11 @@ class PhaseDefinition(BaseModel):
 
     Phases are the building blocks of workflows.
     Each phase has inputs, outputs, and execution parameters.
+
+    The ``prompt_template`` field contains the resolved prompt text.
+    When a workflow YAML uses ``prompt_file`` to reference an external
+    ``.md`` file, the loader resolves it into ``prompt_template`` before
+    the domain model is constructed (see ``WorkflowDefinition.from_file``).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -76,7 +81,12 @@ class PhaseDefinition(BaseModel):
 
     # Agent configuration
     prompt_template: str | None = None
-    """The actual prompt template content for this phase."""
+    """The resolved prompt template content for this phase.
+
+    This may originate from an inline ``prompt_template`` in the workflow
+    YAML or from an external ``.md`` file referenced via ``prompt_file``.
+    In either case, the value stored here is the final prompt text.
+    """
 
     max_tokens: int | None = None
     timeout_seconds: int | None = None

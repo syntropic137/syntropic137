@@ -1,7 +1,10 @@
 """Service for seeding workflows from YAML definitions.
 
 This service handles the process of loading workflow YAML files
-and creating corresponding workflows in the event store.
+and creating corresponding workflows in the event store. During
+seeding, ``prompt_file`` references in phase definitions are resolved
+to their ``.md`` file contents (frontmatter merged, body becomes
+``prompt_template``) via ``WorkflowDefinition.from_file()``.
 """
 
 from __future__ import annotations
