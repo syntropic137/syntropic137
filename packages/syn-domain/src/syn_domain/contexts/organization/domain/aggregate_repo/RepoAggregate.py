@@ -177,6 +177,13 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         )
         self._apply(event)
 
+    @staticmethod
+    def _changed_value(new: object, current: object) -> object:
+        """Return *new* when it represents an actual change, else ``None``."""
+        if new is None or new == current:
+            return None
+        return new
+
     @command_handler("UpdateRepoCommand")
     def update(self, command: Any) -> None:
         from syn_domain.contexts.organization.domain.events.RepoUpdatedEvent import (
@@ -191,22 +198,9 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
             raise ValueError(msg)
 
         # Only include fields that actually changed
-        default_branch = (
-            command.default_branch
-            if command.default_branch is not None and command.default_branch != self._default_branch
-            else None
-        )
-        is_private = (
-            command.is_private
-            if command.is_private is not None and command.is_private != self._is_private
-            else None
-        )
-        installation_id = (
-            command.installation_id
-            if command.installation_id is not None
-            and command.installation_id != self._installation_id
-            else None
-        )
+        default_branch = self._changed_value(command.default_branch, self._default_branch)
+        is_private = self._changed_value(command.is_private, self._is_private)
+        installation_id = self._changed_value(command.installation_id, self._installation_id)
 
         # If nothing actually changed, no-op
         if default_branch is None and is_private is None and installation_id is None:

@@ -404,6 +404,27 @@ async def update_repo(
     return Ok(None)
 
 
+async def _check_active_triggers(repo_id: str, full_name: str) -> Result[None, RepoError]:
+    """Cross-context guard: reject if active trigger rules reference this repo."""
+    try:
+        from syn_domain.contexts.github.slices.list_triggers.projection import (
+            get_trigger_rule_projection,
+        )
+
+        trigger_projection = get_trigger_rule_projection()
+        triggers = await trigger_projection.list_all()
+        active = [t for t in triggers if t.repository == full_name and t.status == "active"]
+        if active:
+            names = ", ".join(t.name for t in active[:3])
+            return Err(
+                RepoError.HAS_ACTIVE_TRIGGERS,
+                message=f"Repo has {len(active)} active trigger(s): {names}",
+            )
+    except Exception:
+        logger.warning("Could not check trigger rules for repo %s", repo_id, exc_info=True)
+    return Ok(None)
+
+
 async def deregister_repo(
     repo_id: str,
     deregistered_by: str = "",
@@ -423,32 +444,13 @@ async def deregister_repo(
 
     await ensure_connected()
 
-    # Look up repo to get full_name for cross-context trigger check
     repo_result = await get_repo(repo_id)
     if isinstance(repo_result, Err):
         return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
 
-    # Cross-context guard: check for active trigger rules referencing this repo
-    try:
-        from syn_domain.contexts.github.slices.list_triggers.projection import (
-            get_trigger_rule_projection,
-        )
-
-        trigger_projection = get_trigger_rule_projection()
-        triggers = await trigger_projection.list_all()
-        active_triggers = [
-            t
-            for t in triggers
-            if t.repository == repo_result.value.full_name and t.status == "active"
-        ]
-        if active_triggers:
-            names = ", ".join(t.name for t in active_triggers[:3])
-            return Err(
-                RepoError.HAS_ACTIVE_TRIGGERS,
-                message=f"Repo has {len(active_triggers)} active trigger(s): {names}",
-            )
-    except Exception:
-        logger.warning("Could not check trigger rules for repo %s", repo_id, exc_info=True)
+    trigger_check = await _check_active_triggers(repo_id, repo_result.value.full_name)
+    if isinstance(trigger_check, Err):
+        return trigger_check
 
     try:
         command = DeregisterRepoCommand(
