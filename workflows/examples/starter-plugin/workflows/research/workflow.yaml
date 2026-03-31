@@ -1,0 +1,25 @@
+id: starter-research-v1
+name: Starter Research
+description: "Quick research workflow with shared summarize phase"
+type: research
+classification: simple
+
+inputs:
+  - name: task
+    description: "The research topic"
+    required: true
+
+phases:
+  - id: investigate
+    name: Investigate
+    order: 1
+    execution_type: sequential
+    prompt_file: phases/investigate.md
+    output_artifacts: [findings]
+
+  - id: summarize
+    name: Summarize
+    order: 2
+    execution_type: sequential
+    prompt_file: shared://summarize
+    output_artifacts: [summary]

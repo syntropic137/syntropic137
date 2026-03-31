@@ -128,9 +128,13 @@ def show_workflow(
 
 @app.command("validate")
 def validate_workflow(
-    file: Annotated[Path, typer.Argument(help="YAML file to validate")],
+    file: Annotated[Path, typer.Argument(help="YAML file or package directory to validate")],
 ) -> None:
-    """Validate a workflow YAML file without creating it."""
+    """Validate a workflow YAML file or package directory without creating it."""
+    if file.is_dir():
+        _validate_package_dir(file)
+        return
+
     validation = api_post("/workflows/validate", json={"file": str(file)})
 
     if validation.get("valid"):
@@ -143,3 +147,23 @@ def validate_workflow(
         for error in validation.get("errors", []):
             console.print(f"  {error}")
         raise typer.Exit(1)
+
+
+def _validate_package_dir(path: Path) -> None:
+    """Validate a workflow package directory (client-side only, no API needed)."""
+    from syn_cli.commands._package_resolver import detect_format, resolve_package
+
+    try:
+        fmt = detect_format(path)
+        _manifest, workflows = resolve_package(path)
+    except (FileNotFoundError, ValueError) as e:
+        print_error(str(e))
+        raise typer.Exit(1) from None
+
+    console.print(f"[green]Valid {fmt.value} package[/green]\n")
+    console.print(f"  [dim]Directory:[/dim] {path}")
+    console.print(f"  [dim]Workflows:[/dim] {len(workflows)}")
+    total_phases = sum(len(w.phases) for w in workflows)
+    console.print(f"  [dim]Total phases:[/dim] {total_phases}")
+    for wf in workflows:
+        console.print(f"  [dim]  • {wf.name}[/dim] ({len(wf.phases)} phases)")

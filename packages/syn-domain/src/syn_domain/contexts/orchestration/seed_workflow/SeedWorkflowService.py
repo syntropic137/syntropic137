@@ -1,10 +1,17 @@
 """Service for seeding workflows from YAML definitions.
 
-This service handles the process of loading workflow YAML files
-and creating corresponding workflows in the event store. During
-seeding, ``prompt_file`` references in phase definitions are resolved
-to their ``.md`` file contents (frontmatter merged, body becomes
-``prompt_template``) via ``WorkflowDefinition.from_file()``.
+**Development / testing tool only.** This service bypasses the HTTP API
+and writes directly to the event store via ``CreateWorkflowTemplateHandler``.
+It exists so developers and CI can bootstrap example workflows quickly
+(e.g. ``just seed-workflows``).
+
+For production user-facing installation, use the CLI command
+``syn workflow install`` which resolves packages client-side and
+POSTs the resolved workflow(s) through the public API.
+
+During seeding, ``prompt_file`` references in phase definitions are
+resolved to their ``.md`` file contents (frontmatter merged, body
+becomes ``prompt_template``) via ``WorkflowDefinition.from_file()``.
 """
 
 from __future__ import annotations
@@ -99,7 +106,12 @@ def _handle_seed_error(
 
 
 class WorkflowSeeder:
-    """Service for seeding workflows from YAML definitions."""
+    """Development-only service for seeding workflows directly into the event store.
+
+    Bypasses the HTTP API — intended for ``just seed-workflows``, test fixtures,
+    and local development bootstrapping. Production workflow installation goes
+    through ``syn workflow install`` → API.
+    """
 
     def __init__(
         self,

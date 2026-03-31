@@ -28,7 +28,8 @@ from syn_api.types import (
 
 if TYPE_CHECKING:
     from syn_api.auth import AuthContext
-    from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        InputDeclaration,
         PhaseDefinition,
         WorkflowClassification,
         WorkflowType,
@@ -101,6 +102,26 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
     ]
 
 
+def _build_input_declarations(
+    inputs: list[dict[str, Any]] | None,
+) -> list[InputDeclaration]:
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        InputDeclaration,
+    )
+
+    if not inputs:
+        return []
+    return [
+        InputDeclaration(
+            name=inp["name"],
+            description=inp.get("description"),
+            required=inp.get("required", True),
+            default=inp.get("default"),
+        )
+        for inp in inputs
+    ]
+
+
 async def create_workflow(
     name: str,
     workflow_type: str = "custom",
@@ -108,7 +129,10 @@ async def create_workflow(
     repository_url: str = "https://github.com/example/repo",
     repository_ref: str = "main",
     description: str | None = None,
+    project_name: str | None = None,
     phases: list[dict[str, Any]] | None = None,
+    input_declarations: list[dict[str, Any]] | None = None,
+    workflow_id: str | None = None,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[str, WorkflowError]:
     """Create a new workflow template.
@@ -120,7 +144,10 @@ async def create_workflow(
         repository_url: Repository URL for the workflow.
         repository_ref: Repository ref/branch.
         description: Optional description.
+        project_name: Optional project name association.
         phases: Optional list of phase definitions. Defaults to a single initial phase.
+        input_declarations: Optional list of input declarations.
+        workflow_id: Optional client-supplied ID. Auto-generated if omitted.
         auth: Optional authentication context.
 
     Returns:
@@ -134,7 +161,7 @@ async def create_workflow(
     )
 
     command = CreateWorkflowTemplateCommand(
-        aggregate_id=str(uuid4()),
+        aggregate_id=workflow_id or str(uuid4()),
         name=name,
         description=description or f"Workflow: {name}",
         workflow_type=_resolve_workflow_type(workflow_type),
@@ -142,6 +169,8 @@ async def create_workflow(
         repository_url=repository_url,
         repository_ref=repository_ref,
         phases=_build_phase_defs(phases),
+        project_name=project_name,
+        input_declarations=_build_input_declarations(input_declarations),
     )
 
     await ensure_connected()
@@ -222,13 +251,16 @@ async def validate_yaml(
 
 class CreateWorkflowRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str | None = None  # Client-supplied ID; auto-generated if omitted
     name: str
     workflow_type: str = "custom"
     classification: str = "standard"
     repository_url: str = "https://github.com/example/repo"
     repository_ref: str = "main"
     description: str | None = None
+    project_name: str | None = None
     phases: list[dict[str, Any]] | None = None
+    input_declarations: list[dict[str, Any]] | None = None
 
 
 class ValidateYamlRequest(BaseModel):
@@ -271,7 +303,10 @@ async def create_workflow_endpoint(body: CreateWorkflowRequest) -> CreateWorkflo
         repository_url=body.repository_url,
         repository_ref=body.repository_ref,
         description=body.description,
+        project_name=body.project_name,
         phases=body.phases,
+        input_declarations=body.input_declarations,
+        workflow_id=body.id,
     )
 
     if isinstance(result, Err):
