@@ -11,7 +11,9 @@ if TYPE_CHECKING:
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
+    _resolve_local_prompt_path,
     _resolve_phase_prompt_file,
+    _resolve_shared_prompt_path,
 )
 
 
@@ -159,3 +161,44 @@ phases:
         defn = WorkflowDefinition.from_file(tmp_path / "workflow.yaml")
         assert defn.phases[0].prompt_template == "Local prompt."
         assert defn.phases[0].model == "haiku"
+
+
+@pytest.mark.unit
+class TestExtractedPathHelpers:
+    """Regression tests for helpers extracted during complexity refactoring."""
+
+    def test_resolve_shared_prompt_path_happy(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "phase-library"
+        lib_dir.mkdir()
+        (lib_dir / "summarize.md").write_text("content")
+
+        result = _resolve_shared_prompt_path("test", "shared://summarize", lib_dir)
+        assert result == (lib_dir / "summarize.md").resolve()
+
+    def test_resolve_shared_prompt_path_no_library(self) -> None:
+        with pytest.raises(ValueError, match="requires a phase-library"):
+            _resolve_shared_prompt_path("test", "shared://foo", None)
+
+    def test_resolve_shared_prompt_path_empty_ref(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "phase-library"
+        lib_dir.mkdir()
+        with pytest.raises(ValueError, match="empty"):
+            _resolve_shared_prompt_path("test", "shared://", lib_dir)
+
+    def test_resolve_shared_prompt_path_traversal(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "phase-library"
+        lib_dir.mkdir()
+        with pytest.raises(ValueError, match="escapes phase-library"):
+            _resolve_shared_prompt_path("test", "shared://../../etc/passwd", lib_dir)
+
+    def test_resolve_local_prompt_path_happy(self, tmp_path: Path) -> None:
+        result = _resolve_local_prompt_path("phases/test.md", tmp_path)
+        assert result == (tmp_path / "phases" / "test.md").resolve()
+
+    def test_resolve_local_prompt_path_absolute_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="relative path"):
+            _resolve_local_prompt_path("/etc/passwd", tmp_path)
+
+    def test_resolve_local_prompt_path_traversal_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="escapes base directory"):
+            _resolve_local_prompt_path("../../etc/passwd", tmp_path)

@@ -37,6 +37,59 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
 _SHARED_PREFIX = "shared://"
 
 
+def _resolve_shared_prompt_path(
+    phase_id: str,
+    prompt_file: str,
+    phase_library_dir: Path | None,
+) -> Path:
+    """Resolve a ``shared://`` prompt reference to a filesystem path.
+
+    Raises:
+        ValueError: If no library dir is provided, reference is empty,
+            or the resolved path escapes the library directory.
+    """
+    if phase_library_dir is None:
+        msg = (
+            f"Phase '{phase_id}': shared:// reference "
+            f"'{prompt_file}' requires a phase-library directory"
+        )
+        raise ValueError(msg)
+
+    ref_name = prompt_file.removeprefix(_SHARED_PREFIX)
+    if not ref_name:
+        msg = f"Phase '{phase_id}': shared:// reference is empty"
+        raise ValueError(msg)
+
+    prompt_path = phase_library_dir / f"{ref_name}.md"
+    resolved = prompt_path.resolve()
+    lib_resolved = phase_library_dir.resolve()
+    if lib_resolved not in resolved.parents and resolved != lib_resolved:
+        msg = f"Phase '{phase_id}': shared:// path '{ref_name}' escapes phase-library directory"
+        raise ValueError(msg)
+
+    return resolved
+
+
+def _resolve_local_prompt_path(prompt_file: str, base_dir: Path) -> Path:
+    """Resolve a relative prompt_file path with traversal security.
+
+    Raises:
+        ValueError: If the path is absolute or escapes the base directory.
+    """
+    prompt_path = Path(prompt_file)
+    if prompt_path.is_absolute():
+        msg = f"prompt_file must be a relative path, got: {prompt_file!r}"
+        raise ValueError(msg)
+
+    resolved = (base_dir / prompt_path).resolve()
+    base_resolved = base_dir.resolve()
+    if base_resolved not in resolved.parents and resolved != base_resolved:
+        msg = f"prompt_file path {prompt_file!r} escapes base directory {str(base_resolved)!r}"
+        raise ValueError(msg)
+
+    return resolved
+
+
 def _resolve_phase_prompt_file(
     phase: dict[str, Any],
     base_dir: Path,
@@ -50,22 +103,7 @@ def _resolve_phase_prompt_file(
     and removes the prompt_file key.
 
     Supports ``shared://`` prefix for phase-library references.
-    When ``prompt_file`` starts with ``shared://``, the remainder is
-    resolved against *phase_library_dir* (e.g. ``shared://create-pr``
-    → ``<phase_library_dir>/create-pr.md``).
-
-    Args:
-        phase: Raw phase dict (mutated in place).
-        base_dir: Base directory for resolving relative prompt_file paths.
-        phase_library_dir: Directory containing shared phase ``.md`` files.
-            Required when any phase uses ``shared://`` references.
-
-    Raises:
-        ValueError: If prompt_template is already set, the path is
-            absolute, escapes its allowed directory, or ``shared://``
-            is used without a phase_library_dir.
     """
-    # Mutual exclusivity — Pydantic validator can't fire on raw dicts.
     if "prompt_template" in phase and phase["prompt_template"] is not None:
         msg = (
             f"Phase '{phase.get('id', '?')}': specify either "
@@ -74,43 +112,12 @@ def _resolve_phase_prompt_file(
         raise ValueError(msg)
 
     prompt_file: str = phase["prompt_file"]
+    phase_id = str(phase.get("id", "?"))
 
-    # Handle shared:// references from phase-library.
     if prompt_file.startswith(_SHARED_PREFIX):
-        if phase_library_dir is None:
-            msg = (
-                f"Phase '{phase.get('id', '?')}': shared:// reference "
-                f"'{prompt_file}' requires a phase-library directory"
-            )
-            raise ValueError(msg)
-
-        ref_name = prompt_file.removeprefix(_SHARED_PREFIX)
-        if not ref_name:
-            msg = f"Phase '{phase.get('id', '?')}': shared:// reference is empty"
-            raise ValueError(msg)
-
-        prompt_path = phase_library_dir / f"{ref_name}.md"
-        resolved = prompt_path.resolve()
-        lib_resolved = phase_library_dir.resolve()
-        if lib_resolved not in resolved.parents and resolved != lib_resolved:
-            msg = (
-                f"Phase '{phase.get('id', '?')}': shared:// path "
-                f"'{ref_name}' escapes phase-library directory"
-            )
-            raise ValueError(msg)
+        resolved = _resolve_shared_prompt_path(phase_id, prompt_file, phase_library_dir)
     else:
-        # Standard relative path resolution with traversal security.
-        prompt_path = Path(prompt_file)
-
-        if prompt_path.is_absolute():
-            msg = f"prompt_file must be a relative path, got: {prompt_file!r}"
-            raise ValueError(msg)
-
-        resolved = (base_dir / prompt_path).resolve()
-        base_resolved = base_dir.resolve()
-        if base_resolved not in resolved.parents and resolved != base_resolved:
-            msg = f"prompt_file path {prompt_file!r} escapes base directory {str(base_resolved)!r}"
-            raise ValueError(msg)
+        resolved = _resolve_local_prompt_path(prompt_file, base_dir)
 
     md_prompt = load_md_prompt(resolved)
 

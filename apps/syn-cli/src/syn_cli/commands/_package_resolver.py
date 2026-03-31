@@ -111,6 +111,24 @@ def parse_source(source: str) -> tuple[str, bool]:
 # ---------------------------------------------------------------------------
 
 
+def _validate_package_path(path: Path) -> None:
+    """Validate that a path exists and is a directory."""
+    if not path.exists():
+        msg = f"Package path does not exist: {path}"
+        raise FileNotFoundError(msg)
+    if not path.is_dir():
+        msg = f"Package path is not a directory: {path}"
+        raise ValueError(msg)
+
+
+def _has_multi_workflow_layout(path: Path) -> bool:
+    """Check if directory has workflows/*/workflow.yaml structure."""
+    workflows_dir = path / "workflows"
+    if not workflows_dir.is_dir():
+        return False
+    return any((d / "workflow.yaml").exists() for d in workflows_dir.iterdir() if d.is_dir())
+
+
 def detect_format(path: Path) -> PackageFormat:
     """Detect the package format of a directory.
 
@@ -118,27 +136,14 @@ def detect_format(path: Path) -> PackageFormat:
         FileNotFoundError: If path doesn't exist.
         ValueError: If no recognizable package format is found.
     """
-    if not path.exists():
-        msg = f"Package path does not exist: {path}"
-        raise FileNotFoundError(msg)
+    _validate_package_path(path)
 
-    if not path.is_dir():
-        msg = f"Package path is not a directory: {path}"
-        raise ValueError(msg)
+    if _has_multi_workflow_layout(path):
+        return PackageFormat.MULTI_WORKFLOW
 
-    # Multi-workflow plugin: workflows/*/workflow.yaml
-    workflows_dir = path / "workflows"
-    if workflows_dir.is_dir():
-        subdirs = [d for d in workflows_dir.iterdir() if d.is_dir()]
-        has_workflow_yaml = any((d / "workflow.yaml").exists() for d in subdirs)
-        if has_workflow_yaml:
-            return PackageFormat.MULTI_WORKFLOW
-
-    # Single workflow package: workflow.yaml at root
     if (path / "workflow.yaml").exists():
         return PackageFormat.SINGLE_WORKFLOW
 
-    # Standalone YAML files (legacy compat)
     yaml_files = list(path.glob("*.yaml")) + list(path.glob("*.yml"))
     if yaml_files:
         return PackageFormat.STANDALONE_YAML
@@ -261,6 +266,65 @@ def _phase_to_dict(phase: Any) -> dict[str, object]:
 # ---------------------------------------------------------------------------
 
 
+def _resolve_multi_workflow(path: Path, source: str) -> list[ResolvedWorkflow]:
+    """Resolve all workflows in a multi-workflow plugin directory."""
+    phase_library_dir = path / "phase-library"
+    lib_dir = phase_library_dir if phase_library_dir.is_dir() else None
+
+    workflows_dir = path / "workflows"
+    resolved: list[ResolvedWorkflow] = []
+    for subdir in sorted(workflows_dir.iterdir()):
+        if subdir.is_dir() and (subdir / "workflow.yaml").exists():
+            wf = _resolve_single_workflow(
+                workflow_dir=subdir,
+                phase_library_dir=lib_dir,
+                source_path=source,
+            )
+            resolved.append(wf)
+    return resolved
+
+
+def _resolve_standalone_yaml(path: Path, source: str) -> list[ResolvedWorkflow]:
+    """Resolve standalone YAML workflow files (legacy format)."""
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        load_workflow_definitions,
+    )
+
+    definitions = load_workflow_definitions(path)
+    return [_definition_to_resolved(defn, source) for defn in definitions]
+
+
+def _definition_to_resolved(defn: Any, source: str) -> ResolvedWorkflow:
+    """Convert a WorkflowDefinition to a ResolvedWorkflow."""
+    phases = [_phase_to_dict(p.to_domain()) for p in defn.phases]
+    input_decls: list[dict[str, object]] = [
+        {
+            "name": i.name,
+            "description": i.description,
+            "required": i.required,
+            "default": i.default,
+        }
+        for i in defn.inputs
+    ]
+    repo_url = (
+        defn.repository.url if defn.repository else "https://github.com/placeholder/not-configured"
+    )
+    repo_ref = defn.repository.ref if defn.repository else "main"
+    return ResolvedWorkflow(
+        id=defn.id,
+        name=defn.name,
+        workflow_type=defn.type.value,
+        classification=defn.classification.value,
+        repository_url=repo_url,
+        repository_ref=repo_ref,
+        description=defn.description,
+        project_name=defn.project_name,
+        phases=phases,
+        input_declarations=input_decls,
+        source_path=source,
+    )
+
+
 def resolve_package(
     path: Path,
 ) -> tuple[PluginManifest | None, list[ResolvedWorkflow]]:
@@ -278,63 +342,11 @@ def resolve_package(
         return (manifest, [workflow])
 
     if fmt == PackageFormat.MULTI_WORKFLOW:
-        phase_library_dir = path / "phase-library"
-        lib_dir = phase_library_dir if phase_library_dir.is_dir() else None
-
-        workflows_dir = path / "workflows"
-        resolved: list[ResolvedWorkflow] = []
-        for subdir in sorted(workflows_dir.iterdir()):
-            if subdir.is_dir() and (subdir / "workflow.yaml").exists():
-                wf = _resolve_single_workflow(
-                    workflow_dir=subdir,
-                    phase_library_dir=lib_dir,
-                    source_path=source,
-                )
-                resolved.append(wf)
-        return (manifest, resolved)
+        return (manifest, _resolve_multi_workflow(path, source))
 
     if fmt == PackageFormat.STANDALONE_YAML:
-        from syn_domain.contexts.orchestration._shared.workflow_definition import (
-            load_workflow_definitions,
-        )
+        return (manifest, _resolve_standalone_yaml(path, source))
 
-        definitions = load_workflow_definitions(path)
-        resolved_standalone: list[ResolvedWorkflow] = []
-        for defn in definitions:
-            phases = [_phase_to_dict(p.to_domain()) for p in defn.phases]
-            input_decls: list[dict[str, object]] = [
-                {
-                    "name": i.name,
-                    "description": i.description,
-                    "required": i.required,
-                    "default": i.default,
-                }
-                for i in defn.inputs
-            ]
-            repo_url = (
-                defn.repository.url
-                if defn.repository
-                else "https://github.com/placeholder/not-configured"
-            )
-            repo_ref = defn.repository.ref if defn.repository else "main"
-            resolved_standalone.append(
-                ResolvedWorkflow(
-                    id=defn.id,
-                    name=defn.name,
-                    workflow_type=defn.type.value,
-                    classification=defn.classification.value,
-                    repository_url=repo_url,
-                    repository_ref=repo_ref,
-                    description=defn.description,
-                    project_name=defn.project_name,
-                    phases=phases,
-                    input_declarations=input_decls,
-                    source_path=source,
-                )
-            )
-        return (manifest, resolved_standalone)
-
-    # Should not reach here — detect_format raises on unknown
     msg = f"Unsupported package format: {fmt}"
     raise ValueError(msg)
 

@@ -9,6 +9,9 @@ import pytest
 
 from syn_cli.commands._package_models import PackageFormat
 from syn_cli.commands._package_resolver import (
+    _has_multi_workflow_layout,
+    _resolve_multi_workflow,
+    _validate_package_path,
     detect_format,
     load_manifest,
     parse_source,
@@ -345,3 +348,52 @@ class TestScaffoldMulti:
         pkg_dir = tmp_path / "test-plugin"
         scaffold_multi_package(pkg_dir, name="Test")
         assert detect_format(pkg_dir) == PackageFormat.MULTI_WORKFLOW
+
+
+# ---------------------------------------------------------------------------
+# Extracted helper regression tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestExtractedHelpers:
+    """Tests for helpers extracted during complexity refactoring."""
+
+    def test_validate_package_path_nonexistent(self) -> None:
+        with pytest.raises(FileNotFoundError):
+            _validate_package_path(Path("/nonexistent/path"))
+
+    def test_validate_package_path_file(self, tmp_path: Path) -> None:
+        f = tmp_path / "file.txt"
+        f.write_text("hello")
+        with pytest.raises(ValueError, match="not a directory"):
+            _validate_package_path(f)
+
+    def test_validate_package_path_ok(self, tmp_path: Path) -> None:
+        _validate_package_path(tmp_path)  # Should not raise
+
+    def test_has_multi_workflow_layout_true(self, tmp_path: Path) -> None:
+        wf_dir = tmp_path / "workflows" / "research"
+        wf_dir.mkdir(parents=True)
+        _write_workflow_yaml(wf_dir)
+        assert _has_multi_workflow_layout(tmp_path) is True
+
+    def test_has_multi_workflow_layout_no_workflows_dir(self, tmp_path: Path) -> None:
+        assert _has_multi_workflow_layout(tmp_path) is False
+
+    def test_has_multi_workflow_layout_empty_workflows_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "workflows").mkdir()
+        assert _has_multi_workflow_layout(tmp_path) is False
+
+    def test_resolve_multi_workflow(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "phase-library"
+        lib_dir.mkdir()
+        (lib_dir / "summarize.md").write_text("---\nmodel: sonnet\n---\n\nSummarize.\n")
+
+        wf_dir = tmp_path / "workflows" / "research"
+        wf_dir.mkdir(parents=True)
+        _write_workflow_yaml(wf_dir)
+
+        workflows = _resolve_multi_workflow(tmp_path, str(tmp_path))
+        assert len(workflows) == 1
+        assert workflows[0].name == "Test Workflow"

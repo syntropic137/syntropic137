@@ -14,6 +14,7 @@ from syn_cli._output import console, format_timestamp, print_error, print_succes
 from syn_cli.commands._api_helpers import api_post
 from syn_cli.commands._package_models import (
     InstalledWorkflowRef,
+    PluginManifest,
     ResolvedWorkflow,
 )
 from syn_cli.commands._package_resolver import (
@@ -29,6 +30,52 @@ from syn_cli.commands._package_resolver import (
 from syn_cli.commands.workflow._crud import app
 
 # ---------------------------------------------------------------------------
+# Install helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_source(
+    source: str, ref: str
+) -> tuple[Path, PluginManifest | None, list[ResolvedWorkflow], Path | None]:
+    """Resolve a package source (local or remote) to workflows.
+
+    Returns:
+        (package_path, manifest, workflows, tmpdir_to_cleanup_or_none)
+    """
+    resolved_source, is_remote = parse_source(source)
+
+    if is_remote:
+        console.print(f"Cloning [cyan]{resolved_source}[/cyan]@{ref}...")
+        tmpdir, manifest, workflows = resolve_from_git(resolved_source, ref=ref)
+        return (tmpdir, manifest, workflows, tmpdir)
+
+    package_path = Path(resolved_source).resolve()
+    manifest, workflows = resolve_package(package_path)
+    return (package_path, manifest, workflows, None)
+
+
+def _install_workflows_via_api(
+    workflows: list[ResolvedWorkflow],
+) -> list[InstalledWorkflowRef]:
+    """POST each resolved workflow to the API, returning installed refs."""
+    installed_refs: list[InstalledWorkflowRef] = []
+    for i, wf in enumerate(workflows, 1):
+        console.print(f"  [{i}/{len(workflows)}] Creating [bold]{wf.name}[/bold]...", end=" ")
+        try:
+            data = api_post(
+                "/workflows",
+                json=wf.model_dump(exclude={"source_path"}),
+                expected=(201,),
+            )
+            wf_id = data.get("id", "unknown")
+            console.print(f"[green]done[/green] (id: {wf_id})")
+            installed_refs.append(InstalledWorkflowRef(id=wf_id, name=wf.name))
+        except typer.Exit:
+            console.print("[red]failed[/red]")
+    return installed_refs
+
+
+# ---------------------------------------------------------------------------
 # syn workflow install
 # ---------------------------------------------------------------------------
 
@@ -42,18 +89,11 @@ def install_workflow(
     ] = False,
 ) -> None:
     """Install workflow(s) from a package directory or git repository."""
-    resolved_source, is_remote = parse_source(source)
     tmpdir: Path | None = None
 
     try:
         try:
-            if is_remote:
-                console.print(f"Cloning [cyan]{resolved_source}[/cyan]@{ref}...")
-                tmpdir, manifest, workflows = resolve_from_git(resolved_source, ref=ref)
-                package_path = tmpdir
-            else:
-                package_path = Path(resolved_source).resolve()
-                manifest, workflows = resolve_package(package_path)
+            package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
         except (FileNotFoundError, ValueError, RuntimeError) as e:
             print_error(str(e))
             raise typer.Exit(1) from None
@@ -62,12 +102,10 @@ def install_workflow(
             print_error("No workflows found in package")
             raise typer.Exit(1)
 
-        # Determine package name / version
         fmt = detect_format(package_path)
         pkg_name = manifest.name if manifest is not None else package_path.name
         pkg_version = manifest.version if manifest is not None else "0.0.0"
 
-        # Preview panel
         total_phases = sum(len(w.phases) for w in workflows)
         console.print(
             Panel(
@@ -86,27 +124,12 @@ def install_workflow(
             _print_workflow_summary(workflows)
             return
 
-        # Install each workflow via the API
-        installed_refs: list[InstalledWorkflowRef] = []
-        for i, wf in enumerate(workflows, 1):
-            console.print(f"  [{i}/{len(workflows)}] Creating [bold]{wf.name}[/bold]...", end=" ")
-            try:
-                data = api_post(
-                    "/workflows",
-                    json=wf.model_dump(exclude={"source_path"}),
-                    expected=(201,),
-                )
-                wf_id = data.get("id", "unknown")
-                console.print(f"[green]done[/green] (id: {wf_id})")
-                installed_refs.append(InstalledWorkflowRef(id=wf_id, name=wf.name))
-            except typer.Exit:
-                console.print("[red]failed[/red]")
+        installed_refs = _install_workflows_via_api(workflows)
 
         if not installed_refs:
             print_error("No workflows were installed")
             raise typer.Exit(1)
 
-        # Record installation
         record_installation(
             package_name=pkg_name,
             package_version=pkg_version,
