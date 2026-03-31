@@ -51,8 +51,7 @@ def _token_injector_anthropic_hosts() -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "_ANTHROPIC_HOSTS":
-                    if isinstance(node.value, ast.Tuple):
+                if isinstance(target, ast.Name) and target.id == "_ANTHROPIC_HOSTS" and isinstance(node.value, ast.Tuple):
                         return {
                             elt.value
                             for elt in node.value.elts
