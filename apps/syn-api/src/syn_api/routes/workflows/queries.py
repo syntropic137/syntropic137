@@ -223,7 +223,10 @@ async def list_workflows_endpoint(
     """List all workflow templates."""
     offset = (page - 1) * page_size
     result = await list_workflows(
-        workflow_type=workflow_type, limit=500, offset=0, include_archived=include_archived
+        workflow_type=workflow_type,
+        limit=page_size,
+        offset=offset,
+        include_archived=include_archived,
     )
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)

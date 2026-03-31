@@ -132,6 +132,9 @@ class WorkflowListProjection(AutoDispatchProjection):
         if workflow_type_filter:
             filters["workflow_type"] = workflow_type_filter
 
+        if not include_archived:
+            filters["is_archived"] = False
+
         data = await self._store.query(
             self.PROJECTION_NAME,
             filters=filters if filters else None,
@@ -139,7 +142,4 @@ class WorkflowListProjection(AutoDispatchProjection):
             limit=limit,
             offset=offset,
         )
-        summaries = [WorkflowSummary.from_dict(d) for d in data]
-        if not include_archived:
-            summaries = [s for s in summaries if not s.is_archived]
-        return summaries
+        return [WorkflowSummary.from_dict(d) for d in data]

@@ -375,6 +375,11 @@ async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
     """
     result = await delete_workflow(workflow_id=workflow_id)
     if isinstance(result, Err):
-        status = 404 if result.error == WorkflowError.NOT_FOUND else 409
+        status_map = {
+            WorkflowError.NOT_FOUND: 404,
+            WorkflowError.HAS_ACTIVE_EXECUTIONS: 409,
+            WorkflowError.ALREADY_ARCHIVED: 409,
+        }
+        status = status_map.get(result.error, 400)
         raise HTTPException(status_code=status, detail=result.message)
     return DeleteWorkflowResponse(workflow_id=workflow_id, status="archived")

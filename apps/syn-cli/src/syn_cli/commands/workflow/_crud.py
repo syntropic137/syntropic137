@@ -168,7 +168,7 @@ def delete_workflow(
     """
     try:
         with get_client() as client:
-            wf = WorkflowResolver(client).resolve(workflow_id)
+            wf = WorkflowResolver(client).resolve(workflow_id, include_archived=True)
     except typer.Exit:
         raise
     except Exception:
