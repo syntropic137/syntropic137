@@ -56,6 +56,36 @@ async def test_create_workflow_endpoint_with_all_fields() -> None:
     )
 
 
+def test_create_workflow_request_rejects_invalid_id() -> None:
+    """Client-supplied IDs must match the safe character pattern."""
+    from pydantic import ValidationError
+
+    # Empty string
+    with pytest.raises(ValidationError):
+        CreateWorkflowRequest(name="Test", id="")
+
+    # Special characters
+    with pytest.raises(ValidationError):
+        CreateWorkflowRequest(name="Test", id="../../etc/passwd")
+
+    # Starts with dash
+    with pytest.raises(ValidationError):
+        CreateWorkflowRequest(name="Test", id="-bad-start")
+
+
+def test_create_workflow_request_accepts_valid_ids() -> None:
+    """Valid slug-style and UUID-style IDs should be accepted."""
+    req = CreateWorkflowRequest(name="Test", id="research-v1")
+    assert req.id == "research-v1"
+
+    req2 = CreateWorkflowRequest(name="Test", id="my.workflow_v2")
+    assert req2.id == "my.workflow_v2"
+
+    # None is fine (auto-generated)
+    req3 = CreateWorkflowRequest(name="Test")
+    assert req3.id is None
+
+
 async def test_create_workflow_endpoint_service_error() -> None:
     with (
         patch(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +16,7 @@ from syn_cli.commands._package_resolver import (
     detect_format,
     load_manifest,
     parse_source,
+    resolve_from_git,
     resolve_package,
     scaffold_multi_package,
     scaffold_single_package,
@@ -397,3 +399,26 @@ class TestExtractedHelpers:
         workflows = _resolve_multi_workflow(tmp_path, str(tmp_path))
         assert len(workflows) == 1
         assert workflows[0].name == "Test Workflow"
+
+
+# ---------------------------------------------------------------------------
+# resolve_from_git — error path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestResolveFromGit:
+    def test_clone_failure_raises_and_cleans_up(self) -> None:
+        """Failed git clone should raise RuntimeError and clean up tmpdir."""
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "fatal: repository not found"
+
+        with (
+            patch("syn_cli.commands._package_resolver.subprocess.run", return_value=mock_result),
+            patch("syn_cli.commands._package_resolver.shutil.rmtree") as mock_rmtree,
+        ):
+            with pytest.raises(RuntimeError, match="repository not found"):
+                resolve_from_git("https://github.com/bad/repo.git", ref="main")
+
+            mock_rmtree.assert_called_once()

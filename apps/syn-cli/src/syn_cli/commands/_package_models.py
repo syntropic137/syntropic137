@@ -36,6 +36,7 @@ class PluginManifest(BaseModel):
     added in future manifest versions are silently skipped.
     """
 
+    # Forward-compat: unknown fields from future manifest versions are silently skipped
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     manifest_version: int = 1
@@ -83,7 +84,7 @@ class ResolvedWorkflow(BaseModel):
 class InstalledWorkflowRef(BaseModel):
     """Reference to a single workflow created during installation."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     name: str
@@ -92,7 +93,7 @@ class InstalledWorkflowRef(BaseModel):
 class InstallationRecord(BaseModel):
     """Record of a single package installation."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     package_name: str
     package_version: str
@@ -109,7 +110,7 @@ class InstalledRegistry(BaseModel):
     Stored at ``~/.syntropic137/workflows/installed.json``.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     version: int = 1
     installations: list[InstallationRecord] = Field(default_factory=list)

@@ -310,7 +310,12 @@ async def delete_workflow(
 
 class CreateWorkflowRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    id: str | None = None  # Client-supplied ID; auto-generated if omitted
+    id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+    )
     name: str
     workflow_type: str = "custom"
     classification: str = "standard"

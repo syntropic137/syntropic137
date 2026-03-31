@@ -13,7 +13,15 @@ import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from syn_domain.contexts.orchestration._shared.workflow_definition import (
+        WorkflowDefinition,
+    )
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+    )
 
 import yaml
 
@@ -196,7 +204,7 @@ def _resolve_single_workflow(
     ready to POST.
     """
     from syn_domain.contexts.orchestration._shared.workflow_definition import (
-        WorkflowDefinition,
+        WorkflowDefinition as WD,
     )
 
     yaml_path = workflow_dir / "workflow.yaml"
@@ -204,43 +212,15 @@ def _resolve_single_workflow(
         msg = f"workflow.yaml not found in {workflow_dir}"
         raise FileNotFoundError(msg)
 
-    definition = WorkflowDefinition.from_file(
+    definition = WD.from_file(
         yaml_path,
         phase_library_dir=phase_library_dir,
     )
 
-    # Convert phases to dicts for the API payload.
-    phases: list[dict[str, object]] = [_phase_to_dict(p.to_domain()) for p in definition.phases]
-
-    # Convert input declarations to dicts.
-    input_decls: list[dict[str, object]] = [
-        {"name": i.name, "description": i.description, "required": i.required, "default": i.default}
-        for i in definition.inputs
-    ]
-
-    repo_url = (
-        definition.repository.url
-        if definition.repository
-        else "https://github.com/placeholder/not-configured"
-    )
-    repo_ref = definition.repository.ref if definition.repository else "main"
-
-    return ResolvedWorkflow(
-        id=definition.id,
-        name=definition.name,
-        workflow_type=definition.type.value,
-        classification=definition.classification.value,
-        repository_url=repo_url,
-        repository_ref=repo_ref,
-        description=definition.description,
-        project_name=definition.project_name,
-        phases=phases,
-        input_declarations=input_decls,
-        source_path=source_path,
-    )
+    return _definition_to_resolved(definition, source_path)
 
 
-def _phase_to_dict(phase: Any) -> dict[str, object]:
+def _phase_to_dict(phase: PhaseDefinition) -> dict[str, object]:
     """Convert a domain PhaseDefinition to a dict for the API payload."""
     return {
         "phase_id": phase.phase_id,
@@ -294,7 +274,7 @@ def _resolve_standalone_yaml(path: Path, source: str) -> list[ResolvedWorkflow]:
     return [_definition_to_resolved(defn, source) for defn in definitions]
 
 
-def _definition_to_resolved(defn: Any, source: str) -> ResolvedWorkflow:
+def _definition_to_resolved(defn: WorkflowDefinition, source: str) -> ResolvedWorkflow:
     """Convert a WorkflowDefinition to a ResolvedWorkflow."""
     phases = [_phase_to_dict(p.to_domain()) for p in defn.phases]
     input_decls: list[dict[str, object]] = [
