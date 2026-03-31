@@ -21,13 +21,10 @@ type EditorTab = 'write' | 'preview'
  * Skips tokens already inside code blocks or inline code.
  */
 function highlightPromptTokens(content: string): string {
-  // Split by code blocks and inline code to avoid double-wrapping
   const parts = content.split(/(```[\s\S]*?```|`[^`]+`)/)
   return parts
     .map((part, i) => {
-      // Odd indices are code blocks/inline code — leave as-is
       if (i % 2 === 1) return part
-      // Replace $ARGUMENTS, $TASK, and {{...}} tokens with inline code
       return part
         .replace(/(\$ARGUMENTS|\$TASK)/g, '`$1`')
         .replace(/(\{\{[^}]+\}\})/g, '`$1`')
@@ -65,6 +62,64 @@ function PhaseMetaBadges({ phase }: { phase: PhaseDefinition }) {
   )
 }
 
+function ConfigFields({
+  model, timeout, tools,
+  onModelChange, onTimeoutChange, onToolsChange,
+}: {
+  model: string; timeout: string; tools: string
+  onModelChange: (v: string) => void; onTimeoutChange: (v: string) => void; onToolsChange: (v: string) => void
+}) {
+  const inputClass = 'w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]'
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      <div>
+        <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label>
+        <input type="text" value={model} onChange={(e) => onModelChange(e.target.value)} placeholder="e.g. sonnet, opus" className={inputClass} />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Timeout (seconds)</label>
+        <input type="number" value={timeout} onChange={(e) => onTimeoutChange(e.target.value)} placeholder="300" className={inputClass} />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Allowed Tools</label>
+        <input type="text" value={tools} onChange={(e) => onToolsChange(e.target.value)} placeholder="Bash, Read, Write" className={inputClass} />
+      </div>
+    </div>
+  )
+}
+
+function TabBar({ activeTab, onTabChange }: { activeTab: EditorTab; onTabChange: (tab: EditorTab) => void }) {
+  return (
+    <div className="flex border-b border-[var(--color-border)]">
+      {(['write', 'preview'] as const).map((tab) => (
+        <button
+          key={tab}
+          onClick={() => onTabChange(tab)}
+          className={clsx(
+            'px-4 py-2 text-sm font-medium capitalize transition-colors',
+            activeTab === tab
+              ? 'border-b-2 border-[var(--color-accent)] text-[var(--color-text-primary)]'
+              : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+          )}
+        >
+          {tab}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function PromptContent({ tab, prompt }: { tab: EditorTab; prompt: string; onPromptChange?: (v: string) => void }) {
+  if (tab === 'preview') {
+    return (
+      <div className="min-h-[400px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        {prompt ? <MarkdownViewer content={highlightPromptTokens(prompt)} /> : <p className="text-sm text-[var(--color-text-muted)] italic">Nothing to preview</p>}
+      </div>
+    )
+  }
+  return null
+}
+
 export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEditorProps) {
   const [isEditing, setIsEditing] = useState(false)
   const [editedPrompt, setEditedPrompt] = useState(phase.prompt_template ?? '')
@@ -83,8 +138,6 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEdi
     }
   }, [])
 
-  const hasPrompt = !!phase.prompt_template
-
   function startEditing() {
     setEditedPrompt(phase.prompt_template ?? '')
     setEditedModel(phase.model ?? '')
@@ -96,33 +149,18 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEdi
     setIsEditing(true)
   }
 
-  function cancelEditing() {
-    setIsEditing(false)
-    setError(null)
-  }
-
   async function handleSave() {
-    if (!editedPrompt.trim()) {
-      setError('Prompt cannot be empty')
-      return
-    }
-
+    if (!editedPrompt.trim()) { setError('Prompt cannot be empty'); return }
     setIsSaving(true)
     setError(null)
-
     try {
-      const toolsList = editedTools
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean)
-
+      const toolsList = editedTools.split(',').map((t) => t.trim()).filter(Boolean)
       await updatePhasePrompt(workflowId, phase.phase_id, {
         prompt_template: editedPrompt,
         model: editedModel || null,
         timeout_seconds: editedTimeout ? Number(editedTimeout) : null,
-        allowed_tools: toolsList.length > 0 ? toolsList : null,
+        allowed_tools: toolsList,
       })
-
       setIsEditing(false)
       setSaveSuccess(true)
       saveTimerRef.current = setTimeout(() => setSaveSuccess(false), 2000)
@@ -134,126 +172,39 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEdi
     }
   }
 
+  const hasPrompt = !!phase.prompt_template
+
   return (
     <Card>
       <CardHeader
         title={`Phase: ${phase.name}`}
         subtitle={phase.description ?? `Phase ${phase.order}`}
-        action={
-          !isEditing ? (
-            <button
-              onClick={startEditing}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-surface-elevated)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] ring-1 ring-inset ring-[var(--color-border)] transition-colors hover:text-[var(--color-text-primary)] hover:ring-[var(--color-accent)]"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </button>
-          ) : undefined
-        }
+        action={!isEditing ? (
+          <button onClick={startEditing} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-surface-elevated)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] ring-1 ring-inset ring-[var(--color-border)] transition-colors hover:text-[var(--color-text-primary)] hover:ring-[var(--color-accent)]">
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </button>
+        ) : undefined}
       />
       <CardContent>
         <PhaseMetaBadges phase={phase} />
 
         {isEditing ? (
           <div className="mt-4 space-y-4">
-            {/* Config fields */}
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Model</label>
-                <input
-                  type="text"
-                  value={editedModel}
-                  onChange={(e) => setEditedModel(e.target.value)}
-                  placeholder="e.g. sonnet, opus"
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Timeout (seconds)</label>
-                <input
-                  type="number"
-                  value={editedTimeout}
-                  onChange={(e) => setEditedTimeout(e.target.value)}
-                  placeholder="300"
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-[var(--color-text-secondary)]">Allowed Tools</label>
-                <input
-                  type="text"
-                  value={editedTools}
-                  onChange={(e) => setEditedTools(e.target.value)}
-                  placeholder="Bash, Read, Write"
-                  className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-                />
-              </div>
-            </div>
-
-            {/* Tab bar */}
-            <div className="flex border-b border-[var(--color-border)]">
-              <button
-                onClick={() => setActiveTab('write')}
-                className={clsx(
-                  'px-4 py-2 text-sm font-medium transition-colors',
-                  activeTab === 'write'
-                    ? 'border-b-2 border-[var(--color-accent)] text-[var(--color-text-primary)]'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                )}
-              >
-                Write
-              </button>
-              <button
-                onClick={() => setActiveTab('preview')}
-                className={clsx(
-                  'px-4 py-2 text-sm font-medium transition-colors',
-                  activeTab === 'preview'
-                    ? 'border-b-2 border-[var(--color-accent)] text-[var(--color-text-primary)]'
-                    : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                )}
-              >
-                Preview
-              </button>
-            </div>
-
-            {/* Editor / Preview */}
+            <ConfigFields model={editedModel} timeout={editedTimeout} tools={editedTools} onModelChange={setEditedModel} onTimeoutChange={setEditedTimeout} onToolsChange={setEditedTools} />
+            <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
             {activeTab === 'write' ? (
-              <textarea
-                value={editedPrompt}
-                onChange={(e) => setEditedPrompt(e.target.value)}
-                className="min-h-[400px] w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
-                placeholder="Enter prompt template..."
-              />
+              <textarea value={editedPrompt} onChange={(e) => setEditedPrompt(e.target.value)} className="min-h-[400px] w-full resize-y rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 font-mono text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]" placeholder="Enter prompt template..." />
             ) : (
-              <div className="min-h-[400px] rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                {editedPrompt ? (
-                  <MarkdownViewer content={highlightPromptTokens(editedPrompt)} />
-                ) : (
-                  <p className="text-sm text-[var(--color-text-muted)] italic">Nothing to preview</p>
-                )}
-              </div>
+              <PromptContent tab={activeTab} prompt={editedPrompt} />
             )}
-
-            {/* Error */}
-            {error && (
-              <p className="text-sm text-[var(--color-error)]">{error}</p>
-            )}
-
-            {/* Actions */}
+            {error && <p className="text-sm text-[var(--color-error)]">{error}</p>}
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleSave}
-                disabled={isSaving || !editedPrompt.trim()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-              >
+              <button onClick={handleSave} disabled={isSaving || !editedPrompt.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50">
                 <Save className="h-4 w-4" />
                 {isSaving ? 'Saving...' : 'Save'}
               </button>
-              <button
-                onClick={cancelEditing}
-                disabled={isSaving}
-                className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
-              >
+              <button onClick={() => { setIsEditing(false); setError(null) }} disabled={isSaving} className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]">
                 <X className="h-4 w-4" />
                 Cancel
               </button>
@@ -272,9 +223,7 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEdi
                 <MarkdownViewer content={highlightPromptTokens(phase.prompt_template!)} />
               </div>
             ) : (
-              <p className="text-sm text-[var(--color-text-muted)] italic">
-                No prompt template defined for this phase.
-              </p>
+              <p className="text-sm text-[var(--color-text-muted)] italic">No prompt template defined for this phase.</p>
             )}
           </div>
         )}

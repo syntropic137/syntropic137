@@ -82,6 +82,34 @@ def _normalize_phase_update_data(event: Any) -> dict[str, Any]:
     return data
 
 
+def _coalesce(new: Any, existing: Any) -> Any:
+    """Return new if not None, else existing."""
+    return new if new is not None else existing
+
+
+def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDefinition:
+    """Create a new PhaseDefinition with updated fields from event data."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+    )
+
+    return PhaseDefinition(
+        phase_id=phase.phase_id,
+        name=phase.name,
+        order=phase.order,
+        execution_type=phase.execution_type,
+        description=phase.description,
+        input_artifact_types=phase.input_artifact_types,
+        output_artifact_types=phase.output_artifact_types,
+        prompt_template=data["prompt_template"],
+        max_tokens=phase.max_tokens,
+        timeout_seconds=_coalesce(data["timeout_seconds"], phase.timeout_seconds),
+        allowed_tools=_coalesce(data["allowed_tools"], list(phase.allowed_tools)),
+        argument_hint=phase.argument_hint,
+        model=_coalesce(data["model"], phase.model),
+    )
+
+
 def _parse_typed_list(raw: list, type_name: str) -> list:
     """Convert a list of dicts to typed objects, or pass through if already typed."""
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
@@ -281,32 +309,8 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         Rebuilds the phases list with the updated phase.
         Must be idempotent for rehydration.
         """
-        from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
-            PhaseDefinition,
-        )
-
         data = _normalize_phase_update_data(event)
         phase_id = data["phase_id"]
-
-        updated_phases: list[PhaseDefinition] = []
-        for p in self._phases:
-            if p.phase_id == phase_id:
-                updated = PhaseDefinition(
-                    phase_id=p.phase_id,
-                    name=p.name,
-                    order=p.order,
-                    execution_type=p.execution_type,
-                    description=p.description,
-                    input_artifact_types=p.input_artifact_types,
-                    output_artifact_types=p.output_artifact_types,
-                    prompt_template=data["prompt_template"],
-                    max_tokens=p.max_tokens,
-                    timeout_seconds=data["timeout_seconds"] if data["timeout_seconds"] is not None else p.timeout_seconds,
-                    allowed_tools=data["allowed_tools"] if data["allowed_tools"] is not None else list(p.allowed_tools),
-                    argument_hint=p.argument_hint,
-                    model=data["model"] if data["model"] is not None else p.model,
-                )
-                updated_phases.append(updated)
-            else:
-                updated_phases.append(p)
-        self._phases = updated_phases
+        self._phases = [
+            _apply_phase_update(p, data) if p.phase_id == phase_id else p for p in self._phases
+        ]

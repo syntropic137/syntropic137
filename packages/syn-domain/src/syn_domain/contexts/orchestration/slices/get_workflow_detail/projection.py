@@ -21,6 +21,27 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import
 )
 
 
+def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] | None:
+    """Find a phase dict by ID, checking both 'id' and 'phase_id' keys."""
+    for phase in phases:
+        pid = phase.get(PhaseFields.ID, phase.get(PhaseFields.PHASE_ID, ""))
+        if pid == phase_id:
+            return phase
+    return None
+
+
+def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> None:
+    """Apply updated fields from a phase update event onto a phase dict."""
+    phase[PhaseFields.PROMPT_TEMPLATE] = event_data.get("prompt_template")
+    for event_key, phase_key in (
+        ("model", "model"),
+        ("timeout_seconds", PhaseFields.TIMEOUT_SECONDS),
+        ("allowed_tools", PhaseFields.ALLOWED_TOOLS),
+    ):
+        if event_data.get(event_key) is not None:
+            phase[phase_key] = event_data[event_key]
+
+
 class WorkflowDetailProjection(AutoDispatchProjection):
     """Builds workflow TEMPLATE detail read model from events.
 
@@ -126,18 +147,9 @@ class WorkflowDetailProjection(AutoDispatchProjection):
             return
 
         # Update the matching phase in the phases list
-        phases = existing.get("phases", [])
-        for phase in phases:
-            pid = phase.get(PhaseFields.ID, phase.get(PhaseFields.PHASE_ID, ""))
-            if pid == phase_id:
-                phase[PhaseFields.PROMPT_TEMPLATE] = event_data.get("prompt_template")
-                if event_data.get("model") is not None:
-                    phase["model"] = event_data["model"]
-                if event_data.get("timeout_seconds") is not None:
-                    phase[PhaseFields.TIMEOUT_SECONDS] = event_data["timeout_seconds"]
-                if event_data.get("allowed_tools") is not None:
-                    phase[PhaseFields.ALLOWED_TOOLS] = event_data["allowed_tools"]
-                break
+        phase = _find_phase(existing.get("phases", []), phase_id)
+        if phase is not None:
+            _apply_phase_fields(phase, event_data)
 
         await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 

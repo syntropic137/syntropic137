@@ -25,15 +25,15 @@ function PhaseCard({
 }) {
   return (
     <div
-      role="button"
-      tabIndex={0}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
-      onKeyDown={(e) => {
+      onKeyDown={onClick ? (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onClick?.()
+          onClick()
         }
-      }}
+      } : undefined}
       className={clsx(
         'flex min-w-[180px] flex-col rounded-lg border p-4 transition-all',
         onClick && 'cursor-pointer hover:border-[var(--color-accent)]/50',
