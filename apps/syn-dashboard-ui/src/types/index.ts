@@ -25,6 +25,9 @@ export interface PhaseDefinition {
   order: number
   description: string | null
   agent_type: string
+  prompt_template: string | null
+  timeout_seconds: number
+  allowed_tools: string[]
   argument_hint: string | null
   model: string | null
 }

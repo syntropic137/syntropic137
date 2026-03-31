@@ -116,16 +116,12 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Create Workflow Endpoint Workflows Post"
+                  "$ref": "#/components/schemas/CreateWorkflowResponse"
                 }
               }
             }
@@ -296,27 +292,69 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "items": {
-                          "type": "string"
-                        },
-                        "type": "array"
-                      }
-                    ]
-                  },
-                  "type": "object",
-                  "title": "Response Validate Yaml Endpoint Workflows Validate Post"
+                  "$ref": "#/components/schemas/ValidateYamlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflows/{workflow_id}/phases/{phase_id}": {
+      "put": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Update Phase Prompt Endpoint",
+        "description": "Update a workflow phase's prompt template and optional config.",
+        "operationId": "update_phase_prompt_endpoint_workflows__workflow_id__phases__phase_id__put",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "phase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Phase Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePhasePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatePhaseResponse"
                 }
               }
             }
@@ -1124,16 +1162,12 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Create Artifact Endpoint Artifacts Post"
+                  "$ref": "#/components/schemas/CreateArtifactResponse"
                 }
               }
             }
@@ -1231,21 +1265,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "title": "Response Get Artifact Content Endpoint Artifacts  Artifact Id  Content Get"
+                  "$ref": "#/components/schemas/ArtifactContentResponse"
                 }
               }
             }
@@ -1269,7 +1289,7 @@
           "artifacts"
         ],
         "summary": "Upload Artifact Endpoint",
-        "description": "Upload binary content for an existing artifact.",
+        "description": "Upload binary content for an existing artifact (max 50 MB).",
         "operationId": "upload_artifact_endpoint_artifacts__artifact_id__upload_post",
         "parameters": [
           {
@@ -1298,11 +1318,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Upload Artifact Endpoint Artifacts  Artifact Id  Upload Post"
+                  "$ref": "#/components/schemas/UploadArtifactResponse"
                 }
               }
             }
@@ -4327,6 +4343,48 @@
   },
   "components": {
     "schemas": {
+      "ArtifactContentResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "content",
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "ArtifactContentResponse"
+      },
       "ArtifactResponse": {
         "properties": {
           "id": {
@@ -4920,6 +4978,34 @@
         ],
         "title": "CreateArtifactRequest"
       },
+      "CreateArtifactResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "artifact_type": {
+            "type": "string",
+            "title": "Artifact Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "artifact_type",
+          "status"
+        ],
+        "title": "CreateArtifactResponse"
+      },
       "CreateWorkflowRequest": {
         "properties": {
           "name": {
@@ -4988,6 +5074,34 @@
           "name"
         ],
         "title": "CreateWorkflowRequest"
+      },
+      "CreateWorkflowResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "workflow_type": {
+            "type": "string",
+            "title": "Workflow Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "workflow_type",
+          "status"
+        ],
+        "title": "CreateWorkflowResponse"
       },
       "EventListResponse": {
         "properties": {
@@ -6971,6 +7085,103 @@
         "title": "ToolSummary",
         "description": "Tool usage summary."
       },
+      "UpdatePhasePromptRequest": {
+        "properties": {
+          "prompt_template": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Prompt Template"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prompt_template"
+        ],
+        "title": "UpdatePhasePromptRequest"
+      },
+      "UpdatePhaseResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "phase_id",
+          "status"
+        ],
+        "title": "UpdatePhaseResponse"
+      },
+      "UploadArtifactResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "storage_url": {
+            "type": "string",
+            "title": "Storage Url"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "storage_url",
+          "status"
+        ],
+        "title": "UploadArtifactResponse"
+      },
       "ValidateYamlRequest": {
         "properties": {
           "file": {
@@ -6984,6 +7195,41 @@
           "file"
         ],
         "title": "ValidateYamlRequest"
+      },
+      "ValidateYamlResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "workflow_type": {
+            "type": "string",
+            "title": "Workflow Type",
+            "default": ""
+          },
+          "phase_count": {
+            "type": "integer",
+            "title": "Phase Count",
+            "default": 0
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "ValidateYamlResponse"
       },
       "ValidationError": {
         "properties": {

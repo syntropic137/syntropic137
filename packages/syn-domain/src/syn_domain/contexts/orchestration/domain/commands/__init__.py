@@ -21,6 +21,9 @@ from syn_domain.contexts.orchestration.domain.commands.InjectTokensCommand impor
 from syn_domain.contexts.orchestration.domain.commands.TerminateWorkspaceCommand import (
     TerminateWorkspaceCommand,
 )
+from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
+    UpdatePhasePromptCommand,
+)
 
 __all__ = [
     "CreateWorkflowTemplateCommand",
@@ -29,4 +32,5 @@ __all__ = [
     "ExecuteWorkflowCommand",
     "InjectTokensCommand",
     "TerminateWorkspaceCommand",
+    "UpdatePhasePromptCommand",
 ]

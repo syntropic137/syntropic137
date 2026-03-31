@@ -133,6 +133,22 @@ Extends WorkflowSummary with:
 - `phases: list[PhaseDefinitionResponse]` — phase definitions
 - `input_declarations: list[InputDeclarationResponse]` — declared workflow inputs (ISS-211)
 
+### UpdatePhasePromptRequest
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `prompt_template` | `str` | New prompt template (required, non-empty) |
+| `model` | `str \| None` | Model override — omit or `null` to keep existing |
+| `timeout_seconds` | `int \| None` | Timeout override — omit or `null` to keep existing |
+| `allowed_tools` | `list[str] \| None` | Allowed tools — omit or `null` to keep existing, `[]` to clear |
+
+### UpdatePhaseResponse
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `workflow_id` | `str` | The updated workflow template ID |
+| `phase_id` | `str` | The updated phase ID |
+
 ### ExecutionSummary
 
 | Field | Type | Description |
