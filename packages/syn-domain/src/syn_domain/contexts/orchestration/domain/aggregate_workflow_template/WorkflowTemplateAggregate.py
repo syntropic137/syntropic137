@@ -78,7 +78,7 @@ def _normalize_phase_update_data(event: Any) -> dict[str, Any]:
     """
     data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
     for field in _PHASE_UPDATE_FIELDS:
-        data.setdefault(field, [] if field == "allowed_tools" else None)
+        data.setdefault(field, None)
     return data
 
 
@@ -229,7 +229,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
             prompt_template=command.prompt_template,
             model=command.model,
             timeout_seconds=command.timeout_seconds,
-            allowed_tools=command.allowed_tools or [],
+            allowed_tools=command.allowed_tools,
         )
 
         self._apply(event)
@@ -302,7 +302,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
                     prompt_template=data["prompt_template"],
                     max_tokens=p.max_tokens,
                     timeout_seconds=data["timeout_seconds"] if data["timeout_seconds"] is not None else p.timeout_seconds,
-                    allowed_tools=data["allowed_tools"] if data["allowed_tools"] else list(p.allowed_tools),
+                    allowed_tools=data["allowed_tools"] if data["allowed_tools"] is not None else list(p.allowed_tools),
                     argument_hint=p.argument_hint,
                     model=data["model"] if data["model"] is not None else p.model,
                 )

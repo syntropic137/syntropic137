@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from event_sourcing import DomainEvent, event
-from pydantic import Field
 
 
 @event("WorkflowPhaseUpdated", "v1")
@@ -26,4 +25,4 @@ class WorkflowPhaseUpdatedEvent(DomainEvent):
     # Optional config overrides (None = unchanged from previous state)
     model: str | None = None
     timeout_seconds: int | None = None
-    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] | None = None

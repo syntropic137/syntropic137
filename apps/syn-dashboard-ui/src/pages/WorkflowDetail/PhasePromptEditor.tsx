@@ -1,6 +1,6 @@
 import { clsx } from 'clsx'
 import { Check, Clock, Cpu, Pencil, Save, Wrench, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { updatePhasePrompt } from '../../api/workflows'
 import { Card, CardContent, CardHeader } from '../../components'
@@ -75,6 +75,13 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEdi
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(null)
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
+  }, [])
 
   const hasPrompt = !!phase.prompt_template
 
@@ -118,7 +125,7 @@ export function PhasePromptEditor({ phase, workflowId, onSaved }: PhasePromptEdi
 
       setIsEditing(false)
       setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 2000)
+      saveTimerRef.current = setTimeout(() => setSaveSuccess(false), 2000)
       onSaved?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
