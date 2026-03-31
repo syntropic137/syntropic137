@@ -135,6 +135,22 @@ services:
       retries: 5
       start_period: 10s
     container_name: syn137-collector
+    volumes:
+    - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
+    entrypoint:
+    - /bin/sh
+    - /selfhost-entrypoint.sh
+    command:
+    - python
+    - -m
+    - syn_collector.cli
+    - serve
+    - --port
+    - "8080"
+    - --host
+    - 0.0.0.0
+    secrets:
+    - db_password
     restart: always
     read_only: true
     security_opt:
@@ -156,22 +172,6 @@ services:
     networks:
     - syn-internal
     image: ghcr.io/syntropic137/syn-collector:${SYN_VERSION:-latest}
-    volumes:
-    - ./selfhost-entrypoint.sh:/selfhost-entrypoint.sh:ro
-    entrypoint:
-    - /bin/sh
-    - /selfhost-entrypoint.sh
-    command:
-    - python
-    - -m
-    - syn_collector.cli
-    - serve
-    - --port
-    - "8080"
-    - --host
-    - 0.0.0.0
-    secrets:
-    - db_password
   docker-socket-proxy:
     image: tecnativa/docker-socket-proxy:0.3.0
     container_name: syn137-docker-socket-proxy

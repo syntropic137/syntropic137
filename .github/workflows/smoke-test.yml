@@ -15,13 +15,15 @@ name: Smoke Test
 on:
   push:
     branches:
+      - main
       - 'release/**'
-      - 'feat/405-*'
     paths:
       - 'docker/**'
       - 'infra/docker/**'
       - '.github/workflows/smoke-test.yml'
   pull_request:
+    branches:
+      - main
     paths:
       - 'docker/**'
       - 'infra/docker/**'
@@ -134,30 +136,32 @@ jobs:
           docker compose $COMPOSE_FILES exec -T api docker --version
           echo "Docker CLI found."
 
-      - name: Verify envoy-proxy admin endpoint is reachable
+      - name: Verify envoy-proxy is reachable on agent-net
         run: |
-          echo "Checking Envoy proxy readiness..."
-          # Use docker compose exec (service name) rather than docker exec (container name)
-          # because envoy-proxy has no explicit container_name in the selfhost overlay.
-          docker compose $COMPOSE_FILES exec -T envoy-proxy \
-            wget -qO- http://localhost:9901/ready || \
-          docker compose $COMPOSE_FILES exec -T api \
-            wget -qO- http://envoy-proxy:9901/ready
-          echo "Envoy proxy is ready."
-
-      - name: Verify service DNS resolution on agent-net
-        run: |
-          echo "Verifying envoy-proxy is reachable by service name from agent-net..."
-          # Discover the agent-net network name dynamically (includes project name prefix)
-          AGENT_NET=$(docker network ls --filter name=agent-net --format '{{.Name}}' | head -1)
-          echo "Found agent network: $AGENT_NET"
+          echo "Verifying envoy-proxy DNS and admin endpoint from agent-net..."
+          # The envoy image is minimal (no curl/wget). Use busybox on the
+          # agent-net network to test DNS resolution and admin readiness.
+          #
+          # Filter by compose project name to avoid grabbing a stale agent-net
+          # from a different project (e.g. dev stack).
+          PROJECT=$(docker compose $COMPOSE_FILES config --format json | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
+          AGENT_NET=$(docker network ls --filter "name=${PROJECT}_agent-net" --format '{{.Name}}' | head -1)
+          echo "Compose project: $PROJECT"
+          echo "Agent network: $AGENT_NET"
           if [ -z "$AGENT_NET" ]; then
-            echo "ERROR: Could not find agent-net network"
+            echo "ERROR: Could not find agent-net network for project '$PROJECT'"
             docker network ls
             exit 1
           fi
+
+          # DNS resolution
           docker run --rm --network "$AGENT_NET" busybox:latest nslookup envoy-proxy
           echo "DNS resolution successful."
+
+          # Admin endpoint readiness
+          docker run --rm --network "$AGENT_NET" busybox:latest \
+            wget -qO- http://envoy-proxy:9901/ready
+          echo "Envoy proxy is ready."
 
       - name: Verify API can create a workflow (round-trip)
         run: |
@@ -181,7 +185,7 @@ jobs:
           }).encode()
 
           req = urllib.request.Request(
-              'http://localhost:8000/api/v1/workflows',
+              'http://localhost:8000/workflows',
               data=payload,
               headers={'Content-Type': 'application/json'},
               method='POST'

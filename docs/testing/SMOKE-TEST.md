@@ -17,8 +17,8 @@ The smoke test builds and starts the selfhost Docker Compose stack with locally-
 
 ## When It Runs
 
-- **Push** to `release/**` or `feat/405-*` branches (when `docker/**`, `infra/docker/**`, or the workflow itself changes)
-- **Pull requests** touching the same paths
+- **Push** to `main` or `release/**` branches (when `docker/**`, `infra/docker/**`, or the workflow itself changes)
+- **Pull requests** targeting `main` that touch the same paths
 - **Manual** via `workflow_dispatch`
 
 ## How It Works

@@ -235,12 +235,12 @@ def _apply_envoy_overrides(services: dict) -> None:
 
 
 def _apply_collector_overrides(services: dict) -> None:
-    """Add entrypoint/command for collector in published compose.
+    """Ensure collector has entrypoint/command for secret injection.
 
-    The published image needs the selfhost-entrypoint.sh for secret
-    injection (reads db_password Docker secret into DATABASE_URL).
-    The selfhost overlay doesn't add this because it relies on env var
-    interpolation from the .env file.
+    The selfhost overlay adds the selfhost-entrypoint.sh for secret
+    injection (reads db_password Docker secret into SYN_OBSERVABILITY_DB_URL).
+    This function is idempotent — it ensures the published compose has
+    the same configuration.
     """
     if "collector" not in services:
         return
