@@ -16,6 +16,9 @@ if TYPE_CHECKING:
         InputDeclaration,
         PhaseDefinition,
     )
+    from syn_domain.contexts.orchestration.domain.commands.ArchiveWorkflowTemplateCommand import (
+        ArchiveWorkflowTemplateCommand,
+    )
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
         CreateWorkflowTemplateCommand,
     )
@@ -24,6 +27,9 @@ if TYPE_CHECKING:
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
         WorkflowPhaseUpdatedEvent,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+        WorkflowTemplateArchivedEvent,
     )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
@@ -158,6 +164,7 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._status: WorkflowStatus = WorkflowStatus.PENDING
         self._project_name: str | None = None
         self._description: str | None = None
+        self._is_archived: bool = False
 
     def get_aggregate_type(self) -> str:
         """Return aggregate type name."""
@@ -177,6 +184,11 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
     def phases(self) -> list[PhaseDefinition]:
         """Get workflow phases."""
         return list(self._phases)
+
+    @property
+    def is_archived(self) -> bool:
+        """Whether this workflow template has been archived."""
+        return self._is_archived
 
     @property
     def input_declarations(self) -> list[InputDeclaration]:
@@ -293,6 +305,32 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         self._project_name = data["project_name"]
         self._description = data["description"]
         self._input_declarations = _parse_typed_list(data["input_declarations"], "InputDeclaration")
+
+    @command_handler("ArchiveWorkflowTemplateCommand")
+    def archive_workflow(self, command: ArchiveWorkflowTemplateCommand) -> None:
+        """Handle ArchiveWorkflowTemplateCommand.
+
+        Guards against double-archive. The active-execution guard is
+        handled by the application service (cross-aggregate concern).
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+            WorkflowTemplateArchivedEvent,
+        )
+
+        if self._is_archived:
+            msg = "Workflow template already archived"
+            raise ValueError(msg)
+
+        event = WorkflowTemplateArchivedEvent(
+            workflow_id=str(self.id),
+            archived_by=command.archived_by,
+        )
+        self._apply(event)
+
+    @event_sourcing_handler("WorkflowTemplateArchived")
+    def on_workflow_archived(self, _event: WorkflowTemplateArchivedEvent) -> None:
+        """Apply WorkflowTemplateArchivedEvent to update aggregate state."""
+        self._is_archived = True
 
     @event_sourcing_handler("WorkflowCreated")
     def on_workflow_created_legacy(self, event: WorkflowTemplateCreatedEvent) -> None:

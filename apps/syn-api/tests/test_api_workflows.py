@@ -186,3 +186,88 @@ async def test_validate_yaml_file_not_found():
 
     result = await validate_yaml("/nonexistent/path/workflow.yaml")
     assert isinstance(result, Err)
+
+
+# === Delete (archive) workflow tests ===
+
+
+async def test_delete_workflow():
+    """Create a workflow then delete it."""
+    from syn_api.routes.workflows import create_workflow, delete_workflow
+
+    create_result = await create_workflow(name="Deletable Workflow")
+    assert isinstance(create_result, Ok)
+    workflow_id = create_result.value
+
+    delete_result = await delete_workflow(workflow_id)
+    assert isinstance(delete_result, Ok)
+
+
+async def test_delete_workflow_not_found():
+    """Delete a workflow that doesn't exist."""
+    from syn_api.routes.workflows import delete_workflow
+
+    result = await delete_workflow("nonexistent-id")
+    assert isinstance(result, Err)
+
+
+async def test_delete_workflow_already_archived():
+    """Deleting an already-archived workflow returns an error."""
+    from syn_api.routes.workflows import create_workflow, delete_workflow
+
+    create_result = await create_workflow(name="Archive Twice")
+    assert isinstance(create_result, Ok)
+    workflow_id = create_result.value
+
+    first = await delete_workflow(workflow_id)
+    assert isinstance(first, Ok)
+
+    second = await delete_workflow(workflow_id)
+    assert isinstance(second, Err)
+    assert second.error.value == "already_archived"
+
+
+async def test_list_excludes_archived_by_default():
+    """Archived workflows should not appear in the default list."""
+    from syn_api.routes.workflows import create_workflow, delete_workflow, list_workflows
+
+    create_result = await create_workflow(name="Soon Archived")
+    assert isinstance(create_result, Ok)
+    workflow_id = create_result.value
+
+    await delete_workflow(workflow_id)
+
+    list_result = await list_workflows()
+    assert isinstance(list_result, Ok)
+    assert len(list_result.value) == 0
+
+
+async def test_list_includes_archived():
+    """include_archived=True should return archived workflows."""
+    from syn_api.routes.workflows import create_workflow, delete_workflow, list_workflows
+
+    create_result = await create_workflow(name="Archived But Visible")
+    assert isinstance(create_result, Ok)
+    workflow_id = create_result.value
+
+    await delete_workflow(workflow_id)
+
+    list_result = await list_workflows(include_archived=True)
+    assert isinstance(list_result, Ok)
+    assert len(list_result.value) == 1
+    assert list_result.value[0].is_archived is True
+
+
+async def test_get_workflow_still_returns_archived():
+    """Getting an archived workflow by ID should still work."""
+    from syn_api.routes.workflows import create_workflow, delete_workflow, get_workflow
+
+    create_result = await create_workflow(name="Archived Detail")
+    assert isinstance(create_result, Ok)
+    workflow_id = create_result.value
+
+    await delete_workflow(workflow_id)
+
+    get_result = await get_workflow(workflow_id)
+    assert isinstance(get_result, Ok)
+    assert get_result.value.id == workflow_id

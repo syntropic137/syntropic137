@@ -34,6 +34,18 @@
             "description": "Filter by workflow type"
           },
           {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived workflows",
+              "default": false,
+              "title": "Include Archived"
+            },
+            "description": "Include archived workflows"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -168,6 +180,53 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Archive (soft-delete) a workflow template",
+        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.",
+        "operationId": "delete_workflow_endpoint_workflows__workflow_id__delete",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteWorkflowResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow template not found"
+          },
+          "409": {
+            "description": "Conflict \u2014 workflow has active executions or is already archived"
           },
           "422": {
             "description": "Validation Error",
@@ -5047,16 +5106,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      }
-                    ]
-                  },
+                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -5102,6 +5152,24 @@
           "status"
         ],
         "title": "CreateWorkflowResponse"
+      },
+      "DeleteWorkflowResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "status"
+        ],
+        "title": "DeleteWorkflowResponse"
       },
       "EventListResponse": {
         "properties": {
@@ -7408,6 +7476,11 @@
             "type": "integer",
             "title": "Runs Count",
             "default": 0
+          },
+          "is_archived": {
+            "type": "boolean",
+            "title": "Is Archived",
+            "default": false
           }
         },
         "type": "object",
