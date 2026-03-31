@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from syn_domain.contexts.orchestration._shared.workflow_definition import (
     WorkflowDefinition,
@@ -137,9 +140,7 @@ phases:
         """Non-shared:// prompt_file paths continue to work as before."""
         phases_dir = tmp_path / "phases"
         phases_dir.mkdir()
-        (phases_dir / "local.md").write_text(
-            "---\nmodel: haiku\n---\n\nLocal prompt.\n"
-        )
+        (phases_dir / "local.md").write_text("---\nmodel: haiku\n---\n\nLocal prompt.\n")
 
         (tmp_path / "workflow.yaml").write_text(
             """\

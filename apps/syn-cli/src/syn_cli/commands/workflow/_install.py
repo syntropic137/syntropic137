@@ -28,7 +28,6 @@ from syn_cli.commands._package_resolver import (
 )
 from syn_cli.commands.workflow._crud import app
 
-
 # ---------------------------------------------------------------------------
 # syn workflow install
 # ---------------------------------------------------------------------------
@@ -38,7 +37,9 @@ from syn_cli.commands.workflow._crud import app
 def install_workflow(
     source: Annotated[str, typer.Argument(help="Local path, GitHub URL, or org/repo shorthand")],
     ref: Annotated[str, typer.Option("--ref", help="Git branch/tag to clone")] = "main",
-    dry_run: Annotated[bool, typer.Option("--dry-run", "-n", help="Validate without installing")] = False,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", "-n", help="Validate without installing")
+    ] = False,
 ) -> None:
     """Install workflow(s) from a package directory or git repository."""
     resolved_source, is_remote = parse_source(source)
@@ -114,9 +115,7 @@ def install_workflow(
         workflows=installed_refs,
     )
 
-    print_success(
-        f"\nInstalled {len(installed_refs)} workflow(s) from {source}"
-    )
+    print_success(f"\nInstalled {len(installed_refs)} workflow(s) from {source}")
 
     # Cleanup
     if tmpdir is not None:
@@ -164,7 +163,7 @@ def list_installed() -> None:
 
 @app.command("init")
 def init_package(
-    directory: Annotated[Path, typer.Argument(help="Directory to scaffold")] = Path("."),
+    directory: Annotated[Path, typer.Argument(help="Directory to scaffold")] = Path(),
     name: Annotated[str | None, typer.Option("--name", "-n", help="Workflow name")] = None,
     workflow_type: Annotated[str, typer.Option("--type", "-t", help="Workflow type")] = "research",
     phases: Annotated[int, typer.Option("--phases", help="Number of phases")] = 3,
@@ -196,7 +195,7 @@ def init_package(
         fmt_label = "single workflow package"
 
     print_success(f"Scaffolded {fmt_label} at {resolved_dir}")
-    console.print(f"\nNext steps:")
+    console.print("\nNext steps:")
     console.print(f"  1. Edit the prompts in [cyan]{resolved_dir}/phases/[/cyan]")
     console.print(f"  2. Validate: [cyan]syn workflow validate {resolved_dir}[/cyan]")
     console.print(f"  3. Install: [cyan]syn workflow install {resolved_dir}[/cyan]")

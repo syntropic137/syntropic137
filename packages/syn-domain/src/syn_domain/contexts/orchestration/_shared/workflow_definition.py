@@ -34,7 +34,6 @@ from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_
     WorkflowType,
 )
 
-
 _SHARED_PREFIX = "shared://"
 
 
@@ -331,9 +330,7 @@ class WorkflowDefinition(BaseModel):
 
         for phase in phases:
             if isinstance(phase, dict) and "prompt_file" in phase:
-                _resolve_phase_prompt_file(
-                    phase, base_dir, phase_library_dir=phase_library_dir
-                )
+                _resolve_phase_prompt_file(phase, base_dir, phase_library_dir=phase_library_dir)
 
     def get_domain_phases(self) -> list[PhaseDefinition]:
         """Convert all phases to domain PhaseDefinition objects."""

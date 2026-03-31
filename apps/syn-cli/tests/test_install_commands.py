@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -67,7 +70,13 @@ class TestInstallWorkflow:
     def test_install_local_single(self, tmp_path: Path) -> None:
         _write_single_package(tmp_path / "pkg")
         created_resp = _mock_response(
-            201, {"id": "wf-abc123", "name": "Test Install Workflow", "workflow_type": "research", "status": "created"}
+            201,
+            {
+                "id": "wf-abc123",
+                "name": "Test Install Workflow",
+                "workflow_type": "research",
+                "status": "created",
+            },
         )
         client = _mock_client(created_resp)
         with (

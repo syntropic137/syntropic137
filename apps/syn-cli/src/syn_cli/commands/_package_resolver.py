@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +65,7 @@ def record_installation(
         package_version=package_version,
         source=source,
         source_ref=source_ref,
-        installed_at=datetime.now(tz=timezone.utc).isoformat(),
+        installed_at=datetime.now(tz=UTC).isoformat(),
         format=fmt.value,
         workflows=workflows,
     )
@@ -205,9 +205,7 @@ def _resolve_single_workflow(
     )
 
     # Convert phases to dicts for the API payload.
-    phases: list[dict[str, object]] = [
-        _phase_to_dict(p.to_domain()) for p in definition.phases
-    ]
+    phases: list[dict[str, object]] = [_phase_to_dict(p.to_domain()) for p in definition.phases]
 
     # Convert input declarations to dicts.
     input_decls: list[dict[str, object]] = [
@@ -215,7 +213,11 @@ def _resolve_single_workflow(
         for i in definition.inputs
     ]
 
-    repo_url = definition.repository.url if definition.repository else "https://github.com/placeholder/not-configured"
+    repo_url = (
+        definition.repository.url
+        if definition.repository
+        else "https://github.com/placeholder/not-configured"
+    )
     repo_ref = definition.repository.ref if definition.repository else "main"
 
     return ResolvedWorkflow(
@@ -239,7 +241,9 @@ def _phase_to_dict(phase: Any) -> dict[str, object]:
         "phase_id": phase.phase_id,
         "name": phase.name,
         "order": phase.order,
-        "execution_type": phase.execution_type.value if hasattr(phase.execution_type, "value") else str(phase.execution_type),
+        "execution_type": phase.execution_type.value
+        if hasattr(phase.execution_type, "value")
+        else str(phase.execution_type),
         "description": phase.description,
         "input_artifact_types": phase.input_artifact_types,
         "output_artifact_types": phase.output_artifact_types,
@@ -299,10 +303,19 @@ def resolve_package(
         for defn in definitions:
             phases = [_phase_to_dict(p.to_domain()) for p in defn.phases]
             input_decls: list[dict[str, object]] = [
-                {"name": i.name, "description": i.description, "required": i.required, "default": i.default}
+                {
+                    "name": i.name,
+                    "description": i.description,
+                    "required": i.required,
+                    "default": i.default,
+                }
                 for i in defn.inputs
             ]
-            repo_url = defn.repository.url if defn.repository else "https://github.com/placeholder/not-configured"
+            repo_url = (
+                defn.repository.url
+                if defn.repository
+                else "https://github.com/placeholder/not-configured"
+            )
             repo_ref = defn.repository.ref if defn.repository else "main"
             resolved_standalone.append(
                 ResolvedWorkflow(
@@ -346,7 +359,7 @@ def resolve_from_git(
     tmpdir = Path(tempfile.mkdtemp(prefix="syn-pkg-"))
     cmd = ["git", "clone", "--depth=1", "--branch", ref, url, str(tmpdir)]
 
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,

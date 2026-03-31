@@ -98,7 +98,9 @@ class TestDetectFormat:
         assert detect_format(tmp_path) == PackageFormat.MULTI_WORKFLOW
 
     def test_standalone_yaml(self, tmp_path: Path) -> None:
-        (tmp_path / "my-workflow.yaml").write_text("id: test\nname: Test\ntype: custom\nclassification: simple\nphases:\n  - id: p1\n    name: P1\n    order: 1\n    prompt_template: hi\n")
+        (tmp_path / "my-workflow.yaml").write_text(
+            "id: test\nname: Test\ntype: custom\nclassification: simple\nphases:\n  - id: p1\n    name: P1\n    order: 1\n    prompt_template: hi\n"
+        )
         assert detect_format(tmp_path) == PackageFormat.STANDALONE_YAML
 
     def test_unknown_raises(self, tmp_path: Path) -> None:
@@ -129,7 +131,7 @@ class TestParseSource:
         assert source == "https://github.com/org/repo.git"
 
     def test_ssh_url(self) -> None:
-        source, is_remote = parse_source("git@github.com:org/repo.git")
+        _source, is_remote = parse_source("git@github.com:org/repo.git")
         assert is_remote is True
 
     def test_github_shorthand(self) -> None:
@@ -138,15 +140,15 @@ class TestParseSource:
         assert source == "https://github.com/org/repo.git"
 
     def test_local_path(self, tmp_path: Path) -> None:
-        source, is_remote = parse_source(str(tmp_path))
+        _source, is_remote = parse_source(str(tmp_path))
         assert is_remote is False
 
     def test_relative_path(self) -> None:
-        source, is_remote = parse_source("./my-package")
+        _source, is_remote = parse_source("./my-package")
         assert is_remote is False
 
     def test_dot_dot_path(self) -> None:
-        source, is_remote = parse_source("../my-package")
+        _source, is_remote = parse_source("../my-package")
         assert is_remote is False
 
 
@@ -231,9 +233,7 @@ class TestResolveMultiPackage:
         # phase-library/
         lib_dir = tmp_path / "phase-library"
         lib_dir.mkdir()
-        (lib_dir / "summarize.md").write_text(
-            "---\nmodel: sonnet\n---\n\nSummarize the work.\n"
-        )
+        (lib_dir / "summarize.md").write_text("---\nmodel: sonnet\n---\n\nSummarize the work.\n")
 
         # workflows/research/
         wf_dir = tmp_path / "workflows" / "research"
