@@ -32,13 +32,15 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
-  const refetch = useCallback(() => setRefreshKey((k) => k + 1), [])
+  const refetch = useCallback(() => {
+    setLoading(true)
+    setRefreshKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
     if (!workflowId) return
 
     let cancelled = false
-    setLoading(true)
     Promise.all([
       getWorkflow(workflowId),
       getMetrics(workflowId),
