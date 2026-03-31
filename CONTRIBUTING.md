@@ -36,11 +36,11 @@ just install-hooks
 ### Running QA
 
 ```bash
-# Full QA suite: lint, format, typecheck, test, coverage, VSA validation
+# Full QA suite: lint, format, typecheck, test, VSA validation
 just qa
 
 # Individual checks
-just lint          # ruff lint
+just lint          # ruff check
 just format        # ruff format
 just typecheck     # pyright (strict mode)
 just test          # pytest
