@@ -49,8 +49,10 @@ class WorkflowError(str, Enum):
 
     NOT_FOUND = "not_found"
     ALREADY_EXISTS = "already_exists"
+    ALREADY_ARCHIVED = "already_archived"
     INVALID_INPUT = "invalid_input"
     EXECUTION_FAILED = "execution_failed"
+    HAS_ACTIVE_EXECUTIONS = "has_active_executions"
     NOT_IMPLEMENTED = "not_implemented"
 
 
@@ -193,6 +195,7 @@ class WorkflowSummary(BaseModel):
     description: str | None = None
     created_at: datetime | None = None
     runs_count: int = 0
+    is_archived: bool = False
 
 
 class InputDeclarationResponse(BaseModel):

@@ -26,7 +26,7 @@ class WorkflowListProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_summaries"
-    VERSION = 2  # Bumped: migrated to AutoDispatchProjection, renamed on_workflow_created
+    VERSION = 3  # Bumped: added archive support with is_archived field
 
     def __init__(self, store: Any):
         """Initialize with a projection store."""
@@ -60,12 +60,27 @@ class WorkflowListProjection(AutoDispatchProjection):
             description=event_data.get("description"),
             created_at=event_data.get("created_at"),
             runs_count=0,
+            is_archived=False,
         )
         await self._store.save(
             self.PROJECTION_NAME,
             summary.id,
             summary.to_dict(),
         )
+
+    async def on_workflow_template_archived(self, event_data: dict) -> None:
+        """Handle WorkflowTemplateArchived event.
+
+        Marks the workflow template as archived in the read model.
+        """
+        workflow_id = event_data.get("workflow_id")
+        if not workflow_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if existing:
+            existing["is_archived"] = True
+            await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def on_workflow_execution_started(self, event_data: dict) -> None:
         """Handle WorkflowExecutionStarted event.
@@ -81,10 +96,17 @@ class WorkflowListProjection(AutoDispatchProjection):
             existing["runs_count"] = existing.get("runs_count", 0) + 1
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
-    async def get_all(self) -> list[WorkflowSummary]:
-        """Get all workflow template summaries."""
+    async def get_all(self, include_archived: bool = False) -> list[WorkflowSummary]:
+        """Get all workflow template summaries.
+
+        Args:
+            include_archived: If True, include archived templates. Defaults to False.
+        """
         data = await self._store.get_all(self.PROJECTION_NAME)
-        return [WorkflowSummary.from_dict(d) for d in data]
+        summaries = [WorkflowSummary.from_dict(d) for d in data]
+        if not include_archived:
+            summaries = [s for s in summaries if not s.is_archived]
+        return summaries
 
     async def query(
         self,
@@ -92,6 +114,7 @@ class WorkflowListProjection(AutoDispatchProjection):
         limit: int = 100,
         offset: int = 0,
         order_by: str = "-created_at",
+        include_archived: bool = False,
     ) -> list[WorkflowSummary]:
         """Query workflow template summaries with optional filtering.
 
@@ -100,6 +123,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             limit: Maximum results
             offset: Pagination offset
             order_by: Sort field (prefix with - for descending)
+            include_archived: If True, include archived templates. Defaults to False.
 
         Returns:
             List of matching WorkflowSummary objects
@@ -115,4 +139,7 @@ class WorkflowListProjection(AutoDispatchProjection):
             limit=limit,
             offset=offset,
         )
-        return [WorkflowSummary.from_dict(d) for d in data]
+        summaries = [WorkflowSummary.from_dict(d) for d in data]
+        if not include_archived:
+            summaries = [s for s in summaries if not s.is_archived]
+        return summaries

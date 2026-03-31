@@ -114,3 +114,67 @@ async def test_validate_yaml_endpoint_service_error() -> None:
     ):
         await validate_yaml_endpoint(ValidateYamlRequest(file="/nonexistent.yaml"))
     assert exc_info.value.status_code == 400
+
+
+# --- delete_workflow_endpoint ---
+
+
+async def test_delete_workflow_endpoint_success() -> None:
+    from syn_api.routes.workflows.commands import delete_workflow_endpoint
+
+    with patch(
+        "syn_api.routes.workflows.commands.delete_workflow",
+        new_callable=AsyncMock,
+        return_value=Ok(None),
+    ):
+        result = await delete_workflow_endpoint("wf-abc-123")
+    assert result["workflow_id"] == "wf-abc-123"
+    assert result["status"] == "archived"
+
+
+async def test_delete_workflow_endpoint_not_found() -> None:
+    from syn_api.routes.workflows.commands import delete_workflow_endpoint
+
+    with (
+        patch(
+            "syn_api.routes.workflows.commands.delete_workflow",
+            new_callable=AsyncMock,
+            return_value=Err(WorkflowError.NOT_FOUND, message="not found"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await delete_workflow_endpoint("nonexistent")
+    assert exc_info.value.status_code == 404
+
+
+async def test_delete_workflow_endpoint_has_active_executions() -> None:
+    from syn_api.routes.workflows.commands import delete_workflow_endpoint
+
+    with (
+        patch(
+            "syn_api.routes.workflows.commands.delete_workflow",
+            new_callable=AsyncMock,
+            return_value=Err(
+                WorkflowError.HAS_ACTIVE_EXECUTIONS,
+                message="Cannot archive: 1 active execution(s)",
+            ),
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await delete_workflow_endpoint("wf-busy")
+    assert exc_info.value.status_code == 409
+
+
+async def test_delete_workflow_endpoint_already_archived() -> None:
+    from syn_api.routes.workflows.commands import delete_workflow_endpoint
+
+    with (
+        patch(
+            "syn_api.routes.workflows.commands.delete_workflow",
+            new_callable=AsyncMock,
+            return_value=Err(WorkflowError.ALREADY_ARCHIVED, message="already archived"),
+        ),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await delete_workflow_endpoint("wf-old")
+    assert exc_info.value.status_code == 409

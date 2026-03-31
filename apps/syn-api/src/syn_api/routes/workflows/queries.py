@@ -40,6 +40,7 @@ class WorkflowSummaryResponse(BaseModel):
     phase_count: int
     created_at: str | None = None
     runs_count: int = 0
+    is_archived: bool = False
 
 
 class InputDeclarationModel(BaseModel):
@@ -154,6 +155,7 @@ async def list_workflows(
     workflow_type: str | None = None,
     limit: int = 100,
     offset: int = 0,
+    include_archived: bool = False,
     auth: AuthContext | None = None,  # noqa: ARG001
 ) -> Result[list[WorkflowSummary], WorkflowError]:
     """List all workflow templates."""
@@ -162,6 +164,7 @@ async def list_workflows(
         workflow_type_filter=workflow_type,
         limit=limit,
         offset=offset,
+        include_archived=include_archived,
     )
     return Ok(
         [
@@ -174,6 +177,7 @@ async def list_workflows(
                 description=s.description,
                 created_at=s.created_at,
                 runs_count=s.runs_count,
+                is_archived=s.is_archived,
             )
             for s in domain_summaries
         ]
@@ -211,13 +215,16 @@ async def get_workflow(
 @router.get("", response_model=WorkflowListResponse)
 async def list_workflows_endpoint(
     workflow_type: str | None = Query(None, description="Filter by workflow type"),
+    include_archived: bool = Query(False, description="Include archived workflows"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     order_by: str | None = Query(None, description="Sort field (- prefix = descending)"),
 ) -> WorkflowListResponse:
     """List all workflow templates."""
     offset = (page - 1) * page_size
-    result = await list_workflows(workflow_type=workflow_type, limit=500, offset=0)
+    result = await list_workflows(
+        workflow_type=workflow_type, limit=500, offset=0, include_archived=include_archived
+    )
     if isinstance(result, Err):
         raise HTTPException(status_code=500, detail=result.message)
 
@@ -229,6 +236,7 @@ async def list_workflows_endpoint(
             phase_count=s.phase_count,
             created_at=str(s.created_at) if s.created_at else None,
             runs_count=s.runs_count,
+            is_archived=s.is_archived,
         )
         for s in result.value
     ]
