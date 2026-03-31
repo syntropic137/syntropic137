@@ -1,0 +1,41 @@
+name: Enhancement
+description: Suggest an improvement — performance, UI, DX, or similar
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Suggest an improvement to something that already exists — performance, UI, developer experience, etc.
+        For brand-new feature requests, use the [feature request board](https://syntropic137.canny.io/feature-requests).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What could be better?
+      description: What's the current experience and what's the pain point?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this work? Include examples if possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches did you consider?
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Screenshots, links, or anything else that helps explain the request.
+    validations:
+      required: false
