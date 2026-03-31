@@ -1,0 +1,222 @@
+name: Smoke Test
+
+# Tier 2 smoke test (issue #405): validate the selfhost compose stack starts
+# cleanly and passes key infrastructure checks.
+#
+# Catches bugs that unit tests miss:
+#   - Docker CLI missing from syn-api image (build-arg not passed)
+#   - Proxy DNS resolution failures (envoy-proxy not reachable from agent-net)
+#   - Service health check failures (misconfigured environment)
+#   - Missing secrets or broken entrypoints
+#
+# Uses the actual selfhost compose overlay (docker-compose.selfhost.yaml)
+# with locally-built images — same Dockerfiles and build-args as release.
+
+on:
+  push:
+    branches:
+      - 'release/**'
+      - 'feat/405-*'
+    paths:
+      - 'docker/**'
+      - 'infra/docker/**'
+      - '.github/workflows/smoke-test.yml'
+  pull_request:
+    paths:
+      - 'docker/**'
+      - 'infra/docker/**'
+      - '.github/workflows/smoke-test.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ISS-259: Least-privilege default
+permissions:
+  contents: read
+
+jobs:
+  compose-smoke:
+    name: Compose Stack Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ISS-259: Pinned to commit SHA instead of mutable tag (@v4).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232dc # v3
+
+      # -------------------------------------------------------------------------
+      # Create minimal secrets and env for the selfhost stack.
+      # Real API keys are NOT needed — we only validate service startup,
+      # health checks, and infrastructure connectivity.
+      # -------------------------------------------------------------------------
+
+      - name: Create test secrets directory
+        run: |
+          mkdir -p infra/docker/secrets
+          echo "smoke_test_db_password" > infra/docker/secrets/db-password.secret
+          echo "smoke_test_redis_password" > infra/docker/secrets/redis-password.secret
+          echo "smoke_test_minio_password" > infra/docker/secrets/minio-password.secret
+
+      - name: Create minimal .env
+        run: |
+          cat > .env <<'EOF'
+          APP_ENVIRONMENT=test
+          DEBUG=false
+          LOG_LEVEL=INFO
+          LOG_FORMAT=json
+          SYN_STORAGE_PROVIDER=minio
+          SYN_STORAGE_MINIO_ENDPOINT=minio:9000
+          SYN_STORAGE_MINIO_ACCESS_KEY=minioadmin
+          SYN_STORAGE_MINIO_SECRET_KEY=smoke_test_minio_password
+          ANTHROPIC_API_KEY=placeholder-not-used
+          EOF
+
+      # -------------------------------------------------------------------------
+      # Build and start the selfhost stack.
+      # --build ensures we use locally-built images with correct build-args,
+      # catching issues like INCLUDE_DOCKER_CLI not being passed.
+      # -------------------------------------------------------------------------
+
+      - name: Build and start selfhost stack
+        run: |
+          docker compose \
+            -f docker/docker-compose.yaml \
+            -f docker/docker-compose.selfhost.yaml \
+            up --build -d
+        env:
+          COMPOSE_PROJECT_NAME: syn137_smoke
+
+      # -------------------------------------------------------------------------
+      # Validation checks
+      # -------------------------------------------------------------------------
+
+      - name: Wait for API health check
+        run: |
+          echo "Waiting for syn-api to become healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' syn137-api 2>/dev/null || echo "missing")
+            echo "  Attempt $i/30: $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "API is healthy."
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: API did not become healthy within 5 minutes."
+              docker compose -f docker/docker-compose.yaml -f docker/docker-compose.selfhost.yaml logs api
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Verify syn-api health endpoint responds
+        run: |
+          docker exec syn137-api python -c "
+          import urllib.request, json, sys
+          try:
+              with urllib.request.urlopen('http://localhost:8137/health', timeout=10) as r:
+                  data = json.loads(r.read())
+                  print('Health response:', json.dumps(data, indent=2))
+                  sys.exit(0)
+          except Exception as e:
+              print('Health check failed:', e)
+              sys.exit(1)
+          "
+
+      - name: Verify Docker CLI is present in syn-api image
+        run: |
+          echo "Checking for Docker CLI in syn-api container..."
+          docker exec syn137-api docker --version
+          echo "Docker CLI found."
+
+      - name: Verify envoy-proxy admin endpoint is reachable
+        run: |
+          echo "Checking Envoy proxy readiness..."
+          docker exec syn137-envoy-proxy wget -qO- http://localhost:9901/ready || \
+          docker exec syn137-api wget -qO- http://envoy-proxy:9901/ready
+          echo "Envoy proxy is ready."
+
+      - name: Verify service DNS resolution on agent-net
+        run: |
+          echo "Verifying envoy-proxy is reachable by service name from agent-net..."
+          # Create a temporary container on agent-net and resolve envoy-proxy
+          docker run --rm \
+            --network syntropic137_smoke_agent-net \
+            busybox:latest \
+            nslookup envoy-proxy
+          echo "DNS resolution successful."
+
+      - name: Verify API can create a workflow (round-trip)
+        run: |
+          docker exec syn137-api python -c "
+          import urllib.request, urllib.error, json, sys
+
+          payload = json.dumps({
+              'name': 'smoke-test-workflow',
+              'workflow_type': 'custom',
+              'classification': 'simple',
+              'repository_url': 'https://github.com/example/repo',
+              'repository_ref': 'main',
+              'phases': [{
+                  'name': 'smoke-phase',
+                  'prompt_template': 'Respond with OK',
+                  'model': 'claude-haiku-4-5-20251001',
+                  'allowed_tools': ['Bash'],
+              }]
+          }).encode()
+
+          req = urllib.request.Request(
+              'http://localhost:8137/api/v1/workflows',
+              data=payload,
+              headers={'Content-Type': 'application/json'},
+              method='POST'
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  data = json.loads(r.read())
+                  workflow_id = data.get('id') or data.get('workflow_id')
+                  print('Created workflow:', workflow_id)
+                  if not workflow_id:
+                      print('ERROR: No workflow ID in response:', data)
+                      sys.exit(1)
+                  sys.exit(0)
+          except urllib.error.HTTPError as e:
+              body = e.read().decode()
+              print('HTTP error:', e.code, body)
+              sys.exit(1)
+          except Exception as e:
+              print('Request failed:', e)
+              sys.exit(1)
+          "
+
+      # -------------------------------------------------------------------------
+      # Teardown
+      # -------------------------------------------------------------------------
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Collecting container logs ==="
+          docker compose \
+            -f docker/docker-compose.yaml \
+            -f docker/docker-compose.selfhost.yaml \
+            logs --tail=100
+          echo "=== Container status ==="
+          docker compose \
+            -f docker/docker-compose.yaml \
+            -f docker/docker-compose.selfhost.yaml \
+            ps
+
+      - name: Tear down stack
+        if: always()
+        run: |
+          docker compose \
+            -f docker/docker-compose.yaml \
+            -f docker/docker-compose.selfhost.yaml \
+            down -v --remove-orphans
