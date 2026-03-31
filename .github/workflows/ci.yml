@@ -118,6 +118,9 @@ jobs:
       - name: Structural & ES invariants
         run: just fitness-invariants
 
+      - name: Published compose consistency
+        run: just check-compose
+
   #############################################################################
   # PYTHON UNIT TESTS - Fast, runs on every push
   #############################################################################

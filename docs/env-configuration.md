@@ -99,6 +99,17 @@ All env vars are routed through Pydantic Settings — **never use `os.environ.ge
 
 > **Warning:** `SYN_STORAGE_PROVIDER=local` in non-test environments logs a warning. Set `SYN_STORAGE_PROVIDER=minio` for Docker deployments.
 
+### Proxy Configuration (ISS-43)
+
+Agent containers route API traffic through a shared Envoy proxy for credential injection. Agents never see real API keys — they hold a `proxy-managed` placeholder and send requests to the proxy, which injects credentials via ext_authz.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `SYN_PROXY_URL` | No | `http://envoy-proxy:8081` | URL of the shared credential injection proxy. Agents use this as `ANTHROPIC_BASE_URL`. |
+| `SYN_AGENT_NETWORK` | Selfhost | `syntropic137_selfhost_agent-net` | Docker network agents attach to. Must match the compose project's `agent-net` network name. |
+
+> **Note:** The proxy hostname `envoy-proxy` is the Docker Compose **service name**, not a container name. Docker DNS resolves service names within a compose network. Both the dev and selfhost stacks use the same service name, so this default works everywhere.
+
 ### GitHub App (Secure Agent Commits)
 
 For secure, auto-rotating tokens with clear audit trails. See [GitHub App Setup Guide](deployment/github-app-setup.md).
