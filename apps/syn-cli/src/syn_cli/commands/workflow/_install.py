@@ -14,6 +14,7 @@ from syn_cli._output import console, format_timestamp, print_error, print_succes
 from syn_cli.commands._api_helpers import api_post
 from syn_cli.commands._package_models import (
     InstalledWorkflowRef,
+    PackageFormat,
     PluginManifest,
     ResolvedWorkflow,
 )
@@ -41,17 +42,24 @@ def _resolve_source(
 
     Returns:
         (package_path, manifest, workflows, tmpdir_to_cleanup_or_none)
+
+    Raises:
+        typer.Exit: On resolution errors (already printed).
     """
-    resolved_source, is_remote = parse_source(source)
+    try:
+        resolved_source, is_remote = parse_source(source)
 
-    if is_remote:
-        console.print(f"Cloning [cyan]{resolved_source}[/cyan]@{ref}...")
-        tmpdir, manifest, workflows = resolve_from_git(resolved_source, ref=ref)
-        return (tmpdir, manifest, workflows, tmpdir)
+        if is_remote:
+            console.print(f"Cloning [cyan]{resolved_source}[/cyan]@{ref}...")
+            tmpdir, manifest, workflows = resolve_from_git(resolved_source, ref=ref)
+            return (tmpdir, manifest, workflows, tmpdir)
 
-    package_path = Path(resolved_source).resolve()
-    manifest, workflows = resolve_package(package_path)
-    return (package_path, manifest, workflows, None)
+        package_path = Path(resolved_source).resolve()
+        manifest, workflows = resolve_package(package_path)
+        return (package_path, manifest, workflows, None)
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        print_error(str(e))
+        raise typer.Exit(1) from None
 
 
 def _install_workflows_via_api(
@@ -80,6 +88,28 @@ def _install_workflows_via_api(
 # ---------------------------------------------------------------------------
 
 
+def _print_package_preview(
+    pkg_name: str,
+    pkg_version: str,
+    source: str,
+    fmt: PackageFormat,
+    workflows: list[ResolvedWorkflow],
+) -> None:
+    """Print a package preview panel."""
+    total_phases = sum(len(w.phases) for w in workflows)
+    console.print(
+        Panel(
+            f"[bold]{pkg_name}[/bold] v{pkg_version}\n"
+            f"Source: {source}\n"
+            f"Format: {fmt.value}\n"
+            f"Workflows: {len(workflows)}\n"
+            f"Total phases: {total_phases}",
+            title="[cyan]Package Preview[/cyan]",
+            border_style="cyan",
+        )
+    )
+
+
 @app.command("install")
 def install_workflow(
     source: Annotated[str, typer.Argument(help="Local path, GitHub URL, or org/repo shorthand")],
@@ -89,15 +119,9 @@ def install_workflow(
     ] = False,
 ) -> None:
     """Install workflow(s) from a package directory or git repository."""
-    tmpdir: Path | None = None
+    package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
 
     try:
-        try:
-            package_path, manifest, workflows, tmpdir = _resolve_source(source, ref)
-        except (FileNotFoundError, ValueError, RuntimeError) as e:
-            print_error(str(e))
-            raise typer.Exit(1) from None
-
         if not workflows:
             print_error("No workflows found in package")
             raise typer.Exit(1)
@@ -106,18 +130,7 @@ def install_workflow(
         pkg_name = manifest.name if manifest is not None else package_path.name
         pkg_version = manifest.version if manifest is not None else "0.0.0"
 
-        total_phases = sum(len(w.phases) for w in workflows)
-        console.print(
-            Panel(
-                f"[bold]{pkg_name}[/bold] v{pkg_version}\n"
-                f"Source: {source}\n"
-                f"Format: {fmt.value}\n"
-                f"Workflows: {len(workflows)}\n"
-                f"Total phases: {total_phases}",
-                title="[cyan]Package Preview[/cyan]",
-                border_style="cyan",
-            )
-        )
+        _print_package_preview(pkg_name, pkg_version, source, fmt, workflows)
 
         if dry_run:
             print_success("Dry run — package is valid, no workflows installed")
