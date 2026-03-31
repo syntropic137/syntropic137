@@ -80,6 +80,15 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 name=p["name"],
                 order=p.get("order", i + 1),
                 description=p.get("description", ""),
+                prompt_template=p.get("prompt_template"),
+                model=p.get("model"),
+                max_tokens=p.get("max_tokens"),
+                timeout_seconds=p.get("timeout_seconds"),
+                allowed_tools=p.get("allowed_tools", []),
+                argument_hint=p.get("argument_hint"),
+                execution_type=p.get("execution_type", "sequential"),
+                input_artifact_types=p.get("input_artifact_types", []),
+                output_artifact_types=p.get("output_artifact_types", []),
             )
             for i, p in enumerate(phases)
         ]
@@ -278,12 +287,20 @@ class CreateWorkflowRequest(BaseModel):
     repository_url: str = "https://github.com/example/repo"
     repository_ref: str = "main"
     description: str | None = None
-    phases: list[dict[str, str | int]] | None = None
+    phases: list[dict[str, Any]] | None = None
 
 
 class ValidateYamlRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     file: str
+
+
+class UpdatePhasePromptRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    prompt_template: str = Field(..., min_length=1)
+    model: str | None = None
+    timeout_seconds: int | None = None
+    allowed_tools: list[str] | None = None
 
 
 # =============================================================================
@@ -295,6 +312,12 @@ class CreateWorkflowResponse(BaseModel):
     id: str
     name: str
     workflow_type: str
+    status: str
+
+
+class UpdatePhaseResponse(BaseModel):
+    workflow_id: str
+    phase_id: str
     status: str
 
 
@@ -383,3 +406,93 @@ async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
         status = status_map.get(result.error, 400)
         raise HTTPException(status_code=status, detail=result.message)
     return DeleteWorkflowResponse(workflow_id=workflow_id, status="archived")
+
+
+# =============================================================================
+# Phase Update
+# =============================================================================
+
+
+async def update_phase_prompt(
+    workflow_id: str,
+    phase_id: str,
+    prompt_template: str,
+    model: str | None = None,
+    timeout_seconds: int | None = None,
+    allowed_tools: list[str] | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[str, WorkflowError]:
+    """Update a workflow phase's prompt template and optional config.
+
+    Args:
+        workflow_id: The workflow template ID.
+        phase_id: The phase to update.
+        prompt_template: New prompt content.
+        model: Optional model override.
+        timeout_seconds: Optional timeout override.
+        allowed_tools: Optional allowed tools override.
+        auth: Optional authentication context.
+
+    Returns:
+        Ok(workflow_id) on success, Err(WorkflowError) on failure.
+    """
+    from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
+        UpdatePhasePromptCommand,
+    )
+    from syn_domain.contexts.orchestration.slices.update_workflow_phase.UpdateWorkflowPhaseHandler import (
+        UpdateWorkflowPhaseHandler,
+    )
+
+    command = UpdatePhasePromptCommand(
+        aggregate_id=workflow_id,
+        phase_id=phase_id,
+        prompt_template=prompt_template,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        allowed_tools=allowed_tools,
+    )
+
+    await ensure_connected()
+    repository = get_workflow_repo()
+    publisher = get_publisher()
+    handler = UpdateWorkflowPhaseHandler(
+        repository=repository,
+        event_publisher=publisher,
+    )
+
+    try:
+        result_id = await handler.handle(command)
+        await sync_published_events_to_projections()
+        return Ok(result_id)
+    except ValueError as e:
+        error_msg = str(e).lower()
+        if "not found" in error_msg:
+            return Err(WorkflowError.NOT_FOUND, message=str(e))
+        return Err(WorkflowError.INVALID_INPUT, message=str(e))
+
+
+@router.put("/{workflow_id}/phases/{phase_id}", response_model=UpdatePhaseResponse)
+async def update_phase_prompt_endpoint(
+    workflow_id: str,
+    phase_id: str,
+    body: UpdatePhasePromptRequest,
+) -> UpdatePhaseResponse:
+    """Update a workflow phase's prompt template and optional config."""
+    result = await update_phase_prompt(
+        workflow_id=workflow_id,
+        phase_id=phase_id,
+        prompt_template=body.prompt_template,
+        model=body.model,
+        timeout_seconds=body.timeout_seconds,
+        allowed_tools=body.allowed_tools,
+    )
+
+    if isinstance(result, Err):
+        status_code = 404 if result.error == WorkflowError.NOT_FOUND else 400
+        raise HTTPException(status_code=status_code, detail=result.message)
+
+    return UpdatePhaseResponse(
+        workflow_id=workflow_id,
+        phase_id=phase_id,
+        status="updated",
+    )

@@ -369,6 +369,68 @@
         }
       }
     },
+    "/workflows/{workflow_id}/phases/{phase_id}": {
+      "put": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Update Phase Prompt Endpoint",
+        "description": "Update a workflow phase's prompt template and optional config.",
+        "operationId": "update_phase_prompt_endpoint_workflows__workflow_id__phases__phase_id__put",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          },
+          {
+            "name": "phase_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Phase Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePhasePromptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdatePhaseResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/executions": {
       "get": {
         "tags": [
@@ -5044,16 +5106,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      }
-                    ]
-                  },
+                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -7099,6 +7152,80 @@
         ],
         "title": "ToolSummary",
         "description": "Tool usage summary."
+      },
+      "UpdatePhasePromptRequest": {
+        "properties": {
+          "prompt_template": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Prompt Template"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prompt_template"
+        ],
+        "title": "UpdatePhasePromptRequest"
+      },
+      "UpdatePhaseResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "phase_id": {
+            "type": "string",
+            "title": "Phase Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "phase_id",
+          "status"
+        ],
+        "title": "UpdatePhaseResponse"
       },
       "UploadArtifactResponse": {
         "properties": {

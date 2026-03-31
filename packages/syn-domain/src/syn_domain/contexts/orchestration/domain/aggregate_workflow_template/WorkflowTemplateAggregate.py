@@ -22,6 +22,12 @@ if TYPE_CHECKING:
     from syn_domain.contexts.orchestration.domain.commands.CreateWorkflowTemplateCommand import (
         CreateWorkflowTemplateCommand,
     )
+    from syn_domain.contexts.orchestration.domain.commands.UpdatePhasePromptCommand import (
+        UpdatePhasePromptCommand,
+    )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
+        WorkflowPhaseUpdatedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
         WorkflowTemplateArchivedEvent,
     )
@@ -59,6 +65,55 @@ def _normalize_event_data(event: Any) -> dict[str, Any]:
 def _parse_enum(value: Any, enum_type: type) -> Any:
     """Convert a string to an enum, or return as-is if already typed."""
     return enum_type(value) if isinstance(value, str) else value
+
+
+_PHASE_UPDATE_FIELDS = [
+    "workflow_id",
+    "phase_id",
+    "prompt_template",
+    "model",
+    "timeout_seconds",
+    "allowed_tools",
+]
+
+
+def _normalize_phase_update_data(event: Any) -> dict[str, Any]:
+    """Extract a flat dict from a WorkflowPhaseUpdated event.
+
+    Handles both Pydantic-style events and dict-like events from gRPC.
+    """
+    data = event.model_dump() if hasattr(event, "model_dump") else dict(event)
+    for field in _PHASE_UPDATE_FIELDS:
+        data.setdefault(field, None)
+    return data
+
+
+def _coalesce(new: Any, existing: Any) -> Any:
+    """Return new if not None, else existing."""
+    return new if new is not None else existing
+
+
+def _apply_phase_update(phase: PhaseDefinition, data: dict[str, Any]) -> PhaseDefinition:
+    """Create a new PhaseDefinition with updated fields from event data."""
+    from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.value_objects import (
+        PhaseDefinition,
+    )
+
+    return PhaseDefinition(
+        phase_id=phase.phase_id,
+        name=phase.name,
+        order=phase.order,
+        execution_type=phase.execution_type,
+        description=phase.description,
+        input_artifact_types=phase.input_artifact_types,
+        output_artifact_types=phase.output_artifact_types,
+        prompt_template=data["prompt_template"],
+        max_tokens=phase.max_tokens,
+        timeout_seconds=_coalesce(data["timeout_seconds"], phase.timeout_seconds),
+        allowed_tools=_coalesce(data["allowed_tools"], list(phase.allowed_tools)),
+        argument_hint=phase.argument_hint,
+        model=_coalesce(data["model"], phase.model),
+    )
 
 
 def _parse_typed_list(raw: list, type_name: str) -> list:
@@ -187,6 +242,38 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
 
         self._apply(event)
 
+    @command_handler("UpdatePhasePromptCommand")
+    def update_phase_prompt(self, command: UpdatePhasePromptCommand) -> None:
+        """Handle UpdatePhasePromptCommand.
+
+        Validates business rules and emits WorkflowPhaseUpdatedEvent.
+        """
+        from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
+            WorkflowPhaseUpdatedEvent,
+        )
+
+        # Guard: workflow must already exist
+        if self.id is None:
+            msg = "Workflow does not exist"
+            raise ValueError(msg)
+
+        # Guard: phase_id must exist in current phases
+        phase_ids = {p.phase_id for p in self._phases}
+        if command.phase_id not in phase_ids:
+            msg = f"Phase '{command.phase_id}' not found in workflow"
+            raise ValueError(msg)
+
+        event = WorkflowPhaseUpdatedEvent(
+            workflow_id=self.id,
+            phase_id=command.phase_id,
+            prompt_template=command.prompt_template,
+            model=command.model,
+            timeout_seconds=command.timeout_seconds,
+            allowed_tools=command.allowed_tools,
+        )
+
+        self._apply(event)
+
     # =========================================================================
     # EVENT SOURCING HANDLERS - Update state only, NO business logic
     # =========================================================================
@@ -252,3 +339,16 @@ class WorkflowTemplateAggregate(AggregateRoot["WorkflowTemplateCreatedEvent"]):
         Delegates to the canonical handler so old events rehydrate correctly.
         """
         self.on_workflow_created(event)
+
+    @event_sourcing_handler("WorkflowPhaseUpdated")
+    def on_phase_updated(self, event: WorkflowPhaseUpdatedEvent) -> None:
+        """Apply WorkflowPhaseUpdatedEvent to update a phase in aggregate state.
+
+        Rebuilds the phases list with the updated phase.
+        Must be idempotent for rehydration.
+        """
+        data = _normalize_phase_update_data(event)
+        phase_id = data["phase_id"]
+        self._phases = [
+            _apply_phase_update(p, data) if p.phase_id == phase_id else p for p in self._phases
+        ]

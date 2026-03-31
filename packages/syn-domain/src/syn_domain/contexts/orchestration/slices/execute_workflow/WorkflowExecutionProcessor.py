@@ -117,6 +117,7 @@ class WorkflowExecutionProcessor:
         self._active_cmds: dict[str, list[str]] = {}
         self._session_managers: dict[str, SessionLifecycleManager] = {}
         self._phase_tokens: dict[str, TokenAccumulator] = {}
+        self._phase_auth_tokens: dict[str, tuple[int, int]] = {}  # authoritative (input, output)
         self._phase_artifact_ids: dict[str, list[str]] = {}
         self._phase_started_at: dict[str, datetime] = {}
 
@@ -428,6 +429,11 @@ class WorkflowExecutionProcessor:
             success=result.command.exit_code == 0,
         )
         self._phase_tokens[todo.phase_id] = result.tokens
+        # Store authoritative totals from CLI result event (includes cache tokens)
+        self._phase_auth_tokens[todo.phase_id] = (
+            result.command.input_tokens,
+            result.command.output_tokens,
+        )
 
         if result.command.exit_code != 0:
             msg = (
@@ -484,11 +490,17 @@ class WorkflowExecutionProcessor:
         """Dispatch COMPLETE_PHASE."""
         assert todo.phase_id is not None
         tokens = self._phase_tokens.pop(todo.phase_id, TokenAccumulator())
+        auth_tokens = self._phase_auth_tokens.pop(todo.phase_id, None)
         artifact_ids = self._phase_artifact_ids.pop(todo.phase_id, [])
         started_at = self._phase_started_at.pop(todo.phase_id, datetime.now(UTC))
 
+        # Prefer authoritative CLI result totals over per-turn accumulation
+        final_input = auth_tokens[0] if auth_tokens else tokens.input_tokens
+        final_output = auth_tokens[1] if auth_tokens else tokens.output_tokens
+        final_total = final_input + final_output
+
         warnings: list[str] = []
-        if tokens.input_tokens == 0 and tokens.output_tokens == 0:
+        if final_input == 0 and final_output == 0:
             warnings.append("zero_tokens")
         if not artifact_ids:
             warnings.append("no_artifacts")
@@ -511,29 +523,40 @@ class WorkflowExecutionProcessor:
             phase_id=todo.phase_id,
             session_id=todo.session_id,
             artifact_id=artifact_ids[0] if artifact_ids else None,
-            input_tokens=tokens.input_tokens,
-            output_tokens=tokens.output_tokens,
-            total_tokens=tokens.total_tokens,
+            input_tokens=final_input,
+            output_tokens=final_output,
+            total_tokens=final_total,
             cost_usd=tokens.estimate_cost(),
             duration_seconds=duration,
         )
         aggregate._handle_command(complete_cmd)
         await self._save_and_sync(aggregate)
 
-        session_mgr = self._session_managers.pop(todo.phase_id, None)
+        await self._finalize_phase(todo.phase_id, final_input, final_output, final_total, duration)
+
+    async def _finalize_phase(
+        self,
+        phase_id: str,
+        input_tokens: int,
+        output_tokens: int,
+        total_tokens: int,
+        duration: float,
+    ) -> None:
+        """Complete session and clean up phase-local state."""
+        session_mgr = self._session_managers.pop(phase_id, None)
         if session_mgr is not None:
             await session_mgr.complete_success(
-                input_tokens=tokens.input_tokens,
-                output_tokens=tokens.output_tokens,
-                total_tokens=tokens.total_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=total_tokens,
                 duration_seconds=duration,
                 source="processor",
             )
 
-        self._active_workspaces.pop(todo.phase_id, None)
-        self._active_envs.pop(todo.phase_id, None)
-        self._active_cmds.pop(todo.phase_id, None)
-        workspace_cm = self._active_workspace_cms.pop(todo.phase_id, None)
+        self._active_workspaces.pop(phase_id, None)
+        self._active_envs.pop(phase_id, None)
+        self._active_cmds.pop(phase_id, None)
+        workspace_cm = self._active_workspace_cms.pop(phase_id, None)
         if workspace_cm is not None:
             await workspace_cm.__aexit__(None, None, None)
 
