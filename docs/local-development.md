@@ -172,7 +172,7 @@ syntropic137/
 docker ps
 
 # View container logs
-docker logs syn-postgres
+docker logs syn-db
 
 # Restart services
 just dev-reset
@@ -182,7 +182,7 @@ just dev-reset
 
 ```bash
 # Connect to database directly
-docker exec -it syn-postgres psql -U syn -d syn
+docker exec -it syn-db psql -U syn -d syn
 
 # Check tables
 \dt event_store.*

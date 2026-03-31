@@ -229,7 +229,7 @@ docker network inspect syn-network
 
 **Validation Commands:**
 ```bash
-docker exec syn-postgres psql -U syn -d syn -c "\dt"
+docker exec syn-db psql -U syn -d syn -c "\dt"
 ```
 
 ---
@@ -819,7 +819,7 @@ curl -s http://localhost:8137/api/workflows | jq '.total'
 **Validation:**
 ```bash
 # After starting a workflow
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, aggregate_id, global_nonce FROM events WHERE event_type = 'WorkflowExecutionStarted' ORDER BY global_nonce DESC LIMIT 1;"
 ```
 
@@ -842,7 +842,7 @@ docker exec syn-postgres psql -U syn -d syn -c \
 **Validation:**
 ```bash
 # After a phase completes
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, convert_from(payload, 'UTF8')::json as payload FROM events WHERE event_type = 'PhaseCompleted' ORDER BY global_nonce DESC LIMIT 1;"
 ```
 
@@ -863,7 +863,7 @@ docker exec syn-postgres psql -U syn -d syn -c \
 **Validation:**
 ```bash
 # Check session events
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, aggregate_id FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce;"
 ```
 
@@ -884,7 +884,7 @@ docker exec syn-postgres psql -U syn -d syn -c \
 **Validation:**
 ```bash
 # Compare event store to API
-EVENT_COUNT=$(docker exec syn-postgres psql -U syn -d syn -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
+EVENT_COUNT=$(docker exec syn-db psql -U syn -d syn -t -c "SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted';")
 API_COUNT=$(curl -s http://localhost:8137/api/sessions?status=completed | jq 'length')
 echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 ```
@@ -906,7 +906,7 @@ echo "Event Store: $EVENT_COUNT, API: $API_COUNT"
 **Validation:**
 ```bash
 # Full event audit
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 ```
 
@@ -2180,7 +2180,7 @@ curl -s http://localhost:8137/health | jq
 uv run python scripts/e2e_github_app_test.py
 
 # Verify events in store
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 ```
 
@@ -2381,7 +2381,7 @@ syn workflow run --container --workflow water-lightyear-calc
 curl -s http://localhost:8137/api/executions/<exec_id> | jq '{completed_phases, total_phases}'
 
 # Verify event count in Event Store
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted' AND aggregate_id = '<exec_id>';"
 ```
 
@@ -2432,7 +2432,7 @@ python -c "from syn_shared.workspace_paths import WORKSPACE_OUTPUT_DIR; print(WO
 curl -s "http://localhost:8137/api/sessions?execution_id=<exec_id>" | jq
 
 # Event store verification
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, convert_from(payload, 'UTF8')::json->>'phase_id' as phase_id \
    FROM events WHERE aggregate_type = 'AgentSession' ORDER BY global_nonce DESC LIMIT 5;"
 ```
@@ -2512,7 +2512,7 @@ curl -X POST http://localhost:8137/api/executions/cleanup \
 syn execution cleanup --threshold 2h
 
 # Verify stale executions marked failed
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, convert_from(payload, 'UTF8')::json->>'reason' \
    FROM events WHERE event_type = 'WorkflowFailed' ORDER BY global_nonce DESC LIMIT 5;"
 ```
@@ -2587,7 +2587,7 @@ syn workflow run --container --workflow water-lightyear-calc \
 curl -s http://localhost:8137/api/executions/<exec_id> | jq
 
 # Check events
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events WHERE aggregate_id = '<exec_id>' GROUP BY event_type;"
 ```
 
@@ -2845,7 +2845,7 @@ sleep 30
 source .env && uv run syn workflow run water-lightyear --container
 
 # Verify events in store
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY COUNT(*) DESC;"
 
 # Verify in UI
@@ -3147,20 +3147,20 @@ _Add any observations, recommendations, or follow-up items here._
 
 ```bash
 # List all events
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type;"
 
 # Find missing PhaseCompleted events
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT
      (SELECT COUNT(*) FROM events WHERE event_type = 'SessionCompleted') as session_completed,
      (SELECT COUNT(*) FROM events WHERE event_type = 'PhaseCompleted') as phase_completed;"
 
 # Check projection sync
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "SELECT projection_name, last_event_position FROM projection_states;"
 
 # Reset projections (DANGEROUS - rebuilds from scratch)
-docker exec syn-postgres psql -U syn -d syn -c \
+docker exec syn-db psql -U syn -d syn -c \
   "UPDATE projection_states SET last_event_position = 0 WHERE projection_name = 'global_subscription';"
 ```
