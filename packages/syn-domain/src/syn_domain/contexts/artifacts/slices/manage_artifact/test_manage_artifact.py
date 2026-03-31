@@ -57,9 +57,7 @@ class TestManageArtifactHandler:
         agg = await _create_artifact(repo)
         handler = ManageArtifactHandler(repository=repo)
 
-        await handler.update(
-            UpdateArtifactCommand(aggregate_id=str(agg.id), title="New Title")
-        )
+        await handler.update(UpdateArtifactCommand(aggregate_id=str(agg.id), title="New Title"))
 
         updated = await repo.get_by_id(str(agg.id))
         assert updated.title == "New Title"
@@ -87,9 +85,7 @@ class TestManageArtifactHandler:
         handler = ManageArtifactHandler(repository=repo)
 
         await handler.update(
-            UpdateArtifactCommand(
-                aggregate_id=str(agg.id), is_primary_deliverable=False
-            )
+            UpdateArtifactCommand(aggregate_id=str(agg.id), is_primary_deliverable=False)
         )
 
         updated = await repo.get_by_id(str(agg.id))
@@ -101,14 +97,10 @@ class TestManageArtifactHandler:
         agg = await _create_artifact(repo)
         handler = ManageArtifactHandler(repository=repo)
 
-        await handler.delete(
-            DeleteArtifactCommand(aggregate_id=str(agg.id), deleted_by="admin")
-        )
+        await handler.delete(DeleteArtifactCommand(aggregate_id=str(agg.id), deleted_by="admin"))
 
         with pytest.raises(ValueError, match="deleted"):
-            await handler.update(
-                UpdateArtifactCommand(aggregate_id=str(agg.id), title="New Title")
-            )
+            await handler.update(UpdateArtifactCommand(aggregate_id=str(agg.id), title="New Title"))
 
     @pytest.mark.asyncio
     async def test_update_not_found(self) -> None:
@@ -138,9 +130,7 @@ class TestManageArtifactHandler:
         agg = await _create_artifact(repo)
         handler = ManageArtifactHandler(repository=repo)
 
-        await handler.delete(
-            DeleteArtifactCommand(aggregate_id=str(agg.id), deleted_by="admin")
-        )
+        await handler.delete(DeleteArtifactCommand(aggregate_id=str(agg.id), deleted_by="admin"))
 
         with pytest.raises(ValueError, match="already deleted"):
             await handler.delete(

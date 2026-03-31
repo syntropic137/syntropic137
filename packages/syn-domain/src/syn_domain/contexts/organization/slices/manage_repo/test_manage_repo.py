@@ -11,11 +11,11 @@ from syn_domain.contexts.organization.domain.aggregate_repo.RepoAggregate import
 from syn_domain.contexts.organization.domain.commands.AssignRepoToSystemCommand import (
     AssignRepoToSystemCommand,
 )
-from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
-    RegisterRepoCommand,
-)
 from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
     DeregisterRepoCommand,
+)
+from syn_domain.contexts.organization.domain.commands.RegisterRepoCommand import (
+    RegisterRepoCommand,
 )
 from syn_domain.contexts.organization.domain.commands.UnassignRepoFromSystemCommand import (
     UnassignRepoFromSystemCommand,
@@ -146,9 +146,7 @@ class TestManageRepoHandler:
         agg = await _create_repo(repo)
         handler = ManageRepoHandler(repository=repo)
 
-        result = await handler.update(
-            UpdateRepoCommand(repo_id=agg.repo_id, is_private=True)
-        )
+        result = await handler.update(UpdateRepoCommand(repo_id=agg.repo_id, is_private=True))
         assert result == HandlerResult(success=True)
 
         updated = await repo.get_by_id(agg.repo_id)

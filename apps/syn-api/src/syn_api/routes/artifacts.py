@@ -567,9 +567,7 @@ async def create_artifact_endpoint(body: CreateArtifactRequest) -> CreateArtifac
 
 
 @router.put("/{artifact_id}", response_model=ArtifactResponse)
-async def update_artifact_endpoint(
-    artifact_id: str, body: UpdateArtifactRequest
-) -> dict[str, Any]:
+async def update_artifact_endpoint(artifact_id: str, body: UpdateArtifactRequest) -> dict[str, Any]:
     """Update artifact metadata."""
     result = await update_artifact(
         artifact_id=artifact_id,
