@@ -112,8 +112,11 @@ just cli -- <command>           # run via just
 
 ```bash
 syn workflow list
+syn workflow list --include-archived          # include archived templates
 syn workflow show <id>
 syn workflow create --type implementation --repo owner/repo --description "Feature X"
+syn workflow delete <id>                      # archive (soft-delete) a template
+syn workflow delete <id> --force              # skip confirmation prompt
 syn workflow run <id> --task "Implement retry logic" --input key=value
 syn workflow status <id>
 syn workflow validate path/to/workflow.yaml

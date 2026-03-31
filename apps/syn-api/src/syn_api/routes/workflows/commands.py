@@ -353,11 +353,28 @@ async def validate_yaml_endpoint(body: ValidateYamlRequest) -> ValidateYamlRespo
     )
 
 
-@router.delete("/{workflow_id}")
-async def delete_workflow_endpoint(workflow_id: str) -> dict[str, Any]:
-    """Archive (soft-delete) a workflow template."""
+class DeleteWorkflowResponse(BaseModel):
+    workflow_id: str
+    status: str
+
+
+@router.delete(
+    "/{workflow_id}",
+    response_model=DeleteWorkflowResponse,
+    summary="Archive (soft-delete) a workflow template",
+    responses={
+        404: {"description": "Workflow template not found"},
+        409: {"description": "Conflict — workflow has active executions or is already archived"},
+    },
+)
+async def delete_workflow_endpoint(workflow_id: str) -> DeleteWorkflowResponse:
+    """Archive (soft-delete) a workflow template.
+
+    Archived templates are excluded from listing by default but remain
+    accessible via `GET /workflows/{id}` and with `?include_archived=true`.
+    """
     result = await delete_workflow(workflow_id=workflow_id)
     if isinstance(result, Err):
         status = 404 if result.error == WorkflowError.NOT_FOUND else 409
         raise HTTPException(status_code=status, detail=result.message)
-    return {"workflow_id": workflow_id, "status": "archived"}
+    return DeleteWorkflowResponse(workflow_id=workflow_id, status="archived")

@@ -78,13 +78,13 @@ Treat Python like TypeScript. Strict type safety everywhere.
 - Co-locate entities and value objects with their aggregate root
 - A bounded context MUST have `aggregate_*/` folders; projection-only modules are not contexts
 
-| Context | Aggregates | Purpose |
-|---------|------------|---------|
-| `orchestration` | Workspace, Workflow, WorkflowExecution | Workflow execution and workspace management |
-| `agent_sessions` | AgentSession | Agent sessions and observability |
-| `github` | Installation, TriggerRule | GitHub App integration, webhook trigger rules, hybrid event pipeline (webhook + polling with dedup) |
-| `artifacts` | Artifact | Artifact storage |
-| `organization` | Organization, System, Repo | Organization hierarchy, system/repo management, insights |
+| Context | Aggregates | Key Operations | Purpose |
+|---------|------------|----------------|---------|
+| `orchestration` | Workspace, Workflow, WorkflowExecution | Create, archive (soft-delete), execute, pause/resume/cancel | Workflow execution and workspace management |
+| `agent_sessions` | AgentSession | Start, record operations, complete | Agent sessions and observability |
+| `github` | Installation, TriggerRule | Register, configure, fire triggers | GitHub App integration, webhook trigger rules, hybrid event pipeline (webhook + polling with dedup) |
+| `artifacts` | Artifact | Create, upload, retrieve | Artifact storage |
+| `organization` | Organization, System, Repo | CRUD, assign/unassign repos to systems | Organization hierarchy, system/repo management, insights |
 
 ### TODO/FIXME Standard
 

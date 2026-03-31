@@ -128,8 +128,8 @@ async def test_delete_workflow_endpoint_success() -> None:
         return_value=Ok(None),
     ):
         result = await delete_workflow_endpoint("wf-abc-123")
-    assert result["workflow_id"] == "wf-abc-123"
-    assert result["status"] == "archived"
+    assert result.workflow_id == "wf-abc-123"
+    assert result.status == "archived"
 
 
 async def test_delete_workflow_endpoint_not_found() -> None:

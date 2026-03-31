@@ -161,7 +161,11 @@ def delete_workflow(
         typer.Option("--force", "-f", help="Skip confirmation prompt"),
     ] = False,
 ) -> None:
-    """Archive (soft-delete) a workflow template."""
+    """Archive (soft-delete) a workflow template.
+
+    Archived workflows are hidden from 'syn workflow list' by default.
+    Use 'syn workflow list --include-archived' to see them.
+    """
     try:
         with get_client() as client:
             wf = WorkflowResolver(client).resolve(workflow_id)

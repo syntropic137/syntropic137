@@ -34,6 +34,18 @@
             "description": "Filter by workflow type"
           },
           {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include archived workflows",
+              "default": false,
+              "title": "Include Archived"
+            },
+            "description": "Include archived workflows"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -116,16 +128,12 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Create Workflow Endpoint Workflows Post"
+                  "$ref": "#/components/schemas/CreateWorkflowResponse"
                 }
               }
             }
@@ -172,6 +180,53 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "workflows"
+        ],
+        "summary": "Archive (soft-delete) a workflow template",
+        "description": "Archive (soft-delete) a workflow template.\n\nArchived templates are excluded from listing by default but remain\naccessible via `GET /workflows/{id}` and with `?include_archived=true`.",
+        "operationId": "delete_workflow_endpoint_workflows__workflow_id__delete",
+        "parameters": [
+          {
+            "name": "workflow_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workflow Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteWorkflowResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow template not found"
+          },
+          "409": {
+            "description": "Conflict \u2014 workflow has active executions or is already archived"
           },
           "422": {
             "description": "Validation Error",
@@ -296,27 +351,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      },
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "items": {
-                          "type": "string"
-                        },
-                        "type": "array"
-                      }
-                    ]
-                  },
-                  "type": "object",
-                  "title": "Response Validate Yaml Endpoint Workflows Validate Post"
+                  "$ref": "#/components/schemas/ValidateYamlResponse"
                 }
               }
             }
@@ -1124,16 +1159,12 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Create Artifact Endpoint Artifacts Post"
+                  "$ref": "#/components/schemas/CreateArtifactResponse"
                 }
               }
             }
@@ -1231,21 +1262,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "integer"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "title": "Response Get Artifact Content Endpoint Artifacts  Artifact Id  Content Get"
+                  "$ref": "#/components/schemas/ArtifactContentResponse"
                 }
               }
             }
@@ -1269,7 +1286,7 @@
           "artifacts"
         ],
         "summary": "Upload Artifact Endpoint",
-        "description": "Upload binary content for an existing artifact.",
+        "description": "Upload binary content for an existing artifact (max 50 MB).",
         "operationId": "upload_artifact_endpoint_artifacts__artifact_id__upload_post",
         "parameters": [
           {
@@ -1298,11 +1315,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Upload Artifact Endpoint Artifacts  Artifact Id  Upload Post"
+                  "$ref": "#/components/schemas/UploadArtifactResponse"
                 }
               }
             }
@@ -4327,6 +4340,48 @@
   },
   "components": {
     "schemas": {
+      "ArtifactContentResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "content",
+          "content_type",
+          "size_bytes"
+        ],
+        "title": "ArtifactContentResponse"
+      },
       "ArtifactResponse": {
         "properties": {
           "id": {
@@ -4920,6 +4975,34 @@
         ],
         "title": "CreateArtifactRequest"
       },
+      "CreateArtifactResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "artifact_type": {
+            "type": "string",
+            "title": "Artifact Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "artifact_type",
+          "status"
+        ],
+        "title": "CreateArtifactResponse"
+      },
       "CreateWorkflowRequest": {
         "properties": {
           "name": {
@@ -4988,6 +5071,52 @@
           "name"
         ],
         "title": "CreateWorkflowRequest"
+      },
+      "CreateWorkflowResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "workflow_type": {
+            "type": "string",
+            "title": "Workflow Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "workflow_type",
+          "status"
+        ],
+        "title": "CreateWorkflowResponse"
+      },
+      "DeleteWorkflowResponse": {
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "title": "Workflow Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workflow_id",
+          "status"
+        ],
+        "title": "DeleteWorkflowResponse"
       },
       "EventListResponse": {
         "properties": {
@@ -6971,6 +7100,29 @@
         "title": "ToolSummary",
         "description": "Tool usage summary."
       },
+      "UploadArtifactResponse": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "title": "Artifact Id"
+          },
+          "storage_url": {
+            "type": "string",
+            "title": "Storage Url"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "storage_url",
+          "status"
+        ],
+        "title": "UploadArtifactResponse"
+      },
       "ValidateYamlRequest": {
         "properties": {
           "file": {
@@ -6984,6 +7136,41 @@
           "file"
         ],
         "title": "ValidateYamlRequest"
+      },
+      "ValidateYamlResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "default": ""
+          },
+          "workflow_type": {
+            "type": "string",
+            "title": "Workflow Type",
+            "default": ""
+          },
+          "phase_count": {
+            "type": "integer",
+            "title": "Phase Count",
+            "default": 0
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "ValidateYamlResponse"
       },
       "ValidationError": {
         "properties": {
@@ -7162,6 +7349,11 @@
             "type": "integer",
             "title": "Runs Count",
             "default": 0
+          },
+          "is_archived": {
+            "type": "boolean",
+            "title": "Is Archived",
+            "default": false
           }
         },
         "type": "object",
