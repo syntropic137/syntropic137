@@ -147,6 +147,8 @@ class ArtifactListProjection(AutoDispatchProjection):
             data["name"] = event_data["title"]
         if event_data.get("is_primary_deliverable") is not None:
             data["is_primary_deliverable"] = event_data["is_primary_deliverable"]
+        if event_data.get("metadata") is not None:
+            data["metadata"] = event_data["metadata"]
         await self._store.save(self.PROJECTION_NAME, artifact_id, data)
 
     async def on_artifact_deleted(self, event_data: dict) -> None:

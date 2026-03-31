@@ -8,10 +8,12 @@ for compatibility with EventStoreRepository.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
 
 from event_sourcing import AggregateRoot, aggregate, command_handler, event_sourcing_handler
+
+_T = TypeVar("_T")
 
 if TYPE_CHECKING:
     from syn_domain.contexts.organization.domain.events.RepoAssignedToSystemEvent import (
@@ -178,7 +180,7 @@ class RepoAggregate(AggregateRoot["RepoRegisteredEvent"]):
         self._apply(event)
 
     @staticmethod
-    def _changed_value(new: object, current: object) -> object:
+    def _changed_value(new: _T | None, current: _T) -> _T | None:
         """Return *new* when it represents an actual change, else ``None``."""
         if new is None or new == current:
             return None

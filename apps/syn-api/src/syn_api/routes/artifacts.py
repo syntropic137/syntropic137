@@ -566,8 +566,8 @@ async def create_artifact_endpoint(body: CreateArtifactRequest) -> CreateArtifac
     )
 
 
-@router.put("/{artifact_id}", response_model=ArtifactResponse)
-async def update_artifact_endpoint(artifact_id: str, body: UpdateArtifactRequest) -> dict[str, Any]:
+@router.put("/{artifact_id}")
+async def update_artifact_endpoint(artifact_id: str, body: UpdateArtifactRequest) -> dict[str, str]:
     """Update artifact metadata."""
     result = await update_artifact(
         artifact_id=artifact_id,
@@ -581,6 +581,8 @@ async def update_artifact_endpoint(artifact_id: str, body: UpdateArtifactRequest
             raise HTTPException(status_code=404, detail=result.message)
         if result.error == ArtifactError.ALREADY_DELETED:
             raise HTTPException(status_code=409, detail=result.message)
+        if result.error == ArtifactError.STORAGE_ERROR:
+            raise HTTPException(status_code=500, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
     return {"artifact_id": artifact_id, "status": "updated"}
@@ -596,6 +598,8 @@ async def delete_artifact_endpoint(artifact_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail=result.message)
         if result.error == ArtifactError.ALREADY_DELETED:
             raise HTTPException(status_code=409, detail=result.message)
+        if result.error == ArtifactError.STORAGE_ERROR:
+            raise HTTPException(status_code=500, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
     return {"artifact_id": artifact_id, "status": "deleted"}

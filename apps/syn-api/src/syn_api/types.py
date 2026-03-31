@@ -164,6 +164,7 @@ class RepoError(str, Enum):
     NOT_ASSIGNED = "not_assigned"
     ALREADY_DEREGISTERED = "already_deregistered"
     HAS_ACTIVE_TRIGGERS = "has_active_triggers"
+    TRIGGER_CHECK_FAILED = "trigger_check_failed"
 
 
 class AgentError(str, Enum):

@@ -404,8 +404,10 @@ async def update_repo(
     return Ok(None)
 
 
-async def _check_active_triggers(repo_id: str, full_name: str) -> Result[None, RepoError]:
+async def _check_active_triggers(repo_id: str, full_name: str | None) -> Result[None, RepoError]:
     """Cross-context guard: reject if active trigger rules reference this repo."""
+    if full_name is None:
+        return Ok(None)
     try:
         from syn_domain.contexts.github.slices.list_triggers.projection import (
             get_trigger_rule_projection,
@@ -422,6 +424,10 @@ async def _check_active_triggers(repo_id: str, full_name: str) -> Result[None, R
             )
     except Exception:
         logger.warning("Could not check trigger rules for repo %s", repo_id, exc_info=True)
+        return Err(
+            RepoError.TRIGGER_CHECK_FAILED,
+            message="Could not verify trigger rule status",
+        )
     return Ok(None)
 
 
@@ -445,10 +451,11 @@ async def deregister_repo(
     await ensure_connected()
 
     repo_result = await get_repo(repo_id)
-    if isinstance(repo_result, Err):
-        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+    repo_full_name: str | None = None
+    if isinstance(repo_result, Ok):
+        repo_full_name = repo_result.value.full_name
 
-    trigger_check = await _check_active_triggers(repo_id, repo_result.value.full_name)
+    trigger_check = await _check_active_triggers(repo_id, repo_full_name)
     if isinstance(trigger_check, Err):
         return trigger_check
 
@@ -582,6 +589,8 @@ async def deregister_repo_endpoint(repo_id: str) -> dict[str, Any]:
             raise HTTPException(status_code=404, detail=result.message)
         if result.error in (RepoError.HAS_ACTIVE_TRIGGERS, RepoError.ALREADY_DEREGISTERED):
             raise HTTPException(status_code=409, detail=result.message)
+        if result.error == RepoError.TRIGGER_CHECK_FAILED:
+            raise HTTPException(status_code=503, detail=result.message)
         raise HTTPException(status_code=400, detail=result.message)
 
     return {"repo_id": repo_id, "status": "deregistered"}
