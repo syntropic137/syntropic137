@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { getWorkflow, getWorkflowHistory } from '../api/workflows'
 import { listExecutions } from '../api/executions'
 import { getMetrics } from '../api/observability'
@@ -19,6 +19,7 @@ export interface UseWorkflowDataResult {
   executions: WorkflowExecutionSummary[]
   loading: boolean
   error: string | null
+  refetch: () => void
 }
 
 export function useWorkflowData(workflowId: string | undefined): UseWorkflowDataResult {
@@ -29,6 +30,12 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
   const [executions, setExecutions] = useState<WorkflowExecutionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const refetch = useCallback(() => {
+    setLoading(true)
+    setRefreshKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
     if (!workflowId) return
@@ -57,7 +64,7 @@ export function useWorkflowData(workflowId: string | undefined): UseWorkflowData
       })
 
     return () => { cancelled = true }
-  }, [workflowId])
+  }, [workflowId, refreshKey])
 
-  return { workflow, metrics, history, artifacts, executions, loading, error }
+  return { workflow, metrics, history, artifacts, executions, loading, error, refetch }
 }

@@ -13,13 +13,30 @@ Per ADR-020:
 - Commands and events live in shared commands/ and events/ folders
 """
 
+from dataclasses import dataclass
+
 # Note: Imports may fail during transition period while old contexts still exist
 # Use lazy imports or try/except when importing aggregates
 __all__ = [
+    "HandlerResult",
     "WorkflowExecutionAggregate",
     "WorkflowTemplateAggregate",
     "WorkspaceAggregate",
 ]
+
+
+@dataclass(frozen=True)
+class HandlerResult:
+    """Discriminated result for manage handlers.
+
+    Handlers return:
+    - ``HandlerResult(success=True)`` on success
+    - ``None`` when the aggregate is not found
+    - ``HandlerResult(success=False, error=...)`` when a domain rule is violated
+    """
+
+    success: bool
+    error: str = ""
 
 
 def __getattr__(name: str) -> type:

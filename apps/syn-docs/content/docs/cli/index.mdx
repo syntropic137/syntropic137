@@ -24,6 +24,14 @@ Manage and trigger workflows.
 ```bash
 # List workflows
 syn workflow list
+syn workflow list --include-archived    # include archived templates
+
+# Create a workflow
+syn workflow create --type implementation --repo owner/repo
+
+# Delete (archive) a workflow
+syn workflow delete <id>                # soft-delete with confirmation
+syn workflow delete <id> --force        # skip confirmation prompt
 
 # Run a workflow
 syn workflow run --name <workflow-name>

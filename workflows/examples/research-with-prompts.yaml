@@ -1,0 +1,72 @@
+# Research Workflow (with prompt_file)
+# Demonstrates using external .md prompt files alongside inline prompts.
+# Phase 1 loads its prompt from prompts/research-discovery.md (frontmatter
+# provides model, allowed-tools, max-tokens, etc.).
+# Phase 2 uses an inline prompt_template for comparison.
+
+id: research-with-prompts-v1
+name: Research with Prompt Files
+description: |
+  A two-phase research workflow demonstrating prompt_file usage.
+  Phase 1 loads its prompt from an external .md file (with frontmatter).
+  Phase 2 uses an inline prompt_template, showing both approaches coexisting.
+
+type: research
+classification: standard
+
+repository: null
+project_name: null
+
+inputs:
+  - name: task
+    description: "What to research (issue body, topic description, etc.)"
+    required: true
+
+phases:
+  - id: discovery
+    name: Discovery Phase
+    order: 1
+    execution_type: sequential
+    description: |
+      Initial exploration and scoping. Loads prompt and agent config
+      from an external .md file via prompt_file.
+    input_artifacts: []
+    output_artifacts:
+      - research_scope
+      - initial_questions
+    # Agent config (model, allowed-tools, max-tokens, timeout-seconds,
+    # argument-hint) comes from the .md file's frontmatter.
+    prompt_file: prompts/research-discovery.md
+
+  - id: synthesis
+    name: Synthesis
+    order: 2
+    execution_type: sequential
+    argument_hint: "[research-topic]"
+    description: |
+      Consolidate discovery findings into actionable recommendations.
+      Uses an inline prompt_template.
+    input_artifacts:
+      - research_scope
+      - initial_questions
+    output_artifacts:
+      - research_summary
+      - recommendations
+    max_tokens: 4096
+    timeout_seconds: 300
+    prompt_template: |
+      You are a technical writer synthesizing research findings.
+
+      ## Original Task
+      $ARGUMENTS
+
+      ## Discovery Results
+      {{discovery}}
+
+      ## How to Approach This
+      1. Summarize key findings in a clear, structured format
+      2. Provide specific, actionable recommendations
+      3. List concrete next steps with priorities
+      4. Identify risks and open questions
+
+      Output a research summary with recommendations.

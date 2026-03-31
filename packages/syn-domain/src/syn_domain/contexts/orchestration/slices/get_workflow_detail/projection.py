@@ -21,6 +21,27 @@ from syn_domain.contexts.orchestration.domain.read_models.workflow_detail import
 )
 
 
+def _find_phase(phases: list[dict[str, Any]], phase_id: str) -> dict[str, Any] | None:
+    """Find a phase dict by ID, checking both 'id' and 'phase_id' keys."""
+    for phase in phases:
+        pid = phase.get(PhaseFields.ID, phase.get(PhaseFields.PHASE_ID, ""))
+        if pid == phase_id:
+            return phase
+    return None
+
+
+def _apply_phase_fields(phase: dict[str, Any], event_data: dict[str, Any]) -> None:
+    """Apply updated fields from a phase update event onto a phase dict."""
+    phase[PhaseFields.PROMPT_TEMPLATE] = event_data.get("prompt_template")
+    for event_key, phase_key in (
+        ("model", "model"),
+        ("timeout_seconds", PhaseFields.TIMEOUT_SECONDS),
+        ("allowed_tools", PhaseFields.ALLOWED_TOOLS),
+    ):
+        if event_data.get(event_key) is not None:
+            phase[phase_key] = event_data[event_key]
+
+
 class WorkflowDetailProjection(AutoDispatchProjection):
     """Builds workflow TEMPLATE detail read model from events.
 
@@ -35,7 +56,7 @@ class WorkflowDetailProjection(AutoDispatchProjection):
     """
 
     PROJECTION_NAME = "workflow_details"
-    VERSION = 3  # Bumped: ISS-211 input_declarations, argument_hint, model
+    VERSION = 4  # Bumped: ISS-402 WorkflowPhaseUpdated event handler
 
     def __init__(self, store: Any):
         """Initialize with a projection store."""
@@ -113,6 +134,24 @@ class WorkflowDetailProjection(AutoDispatchProjection):
         if existing:
             existing["runs_count"] = existing.get("runs_count", 0) + 1
             await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
+
+    async def on_workflow_phase_updated(self, event_data: dict) -> None:
+        """Handle WorkflowPhaseUpdated event - update phase prompt and config."""
+        workflow_id = event_data.get("workflow_id", "")
+        phase_id = event_data.get("phase_id", "")
+        if not workflow_id or not phase_id:
+            return
+
+        existing = await self._store.get(self.PROJECTION_NAME, workflow_id)
+        if not existing:
+            return
+
+        # Update the matching phase in the phases list
+        phase = _find_phase(existing.get("phases", []), phase_id)
+        if phase is not None:
+            _apply_phase_fields(phase, event_data)
+
+        await self._store.save(self.PROJECTION_NAME, workflow_id, existing)
 
     async def get_by_id(self, workflow_id: str) -> WorkflowDetail | None:
         """Get a workflow template by ID."""

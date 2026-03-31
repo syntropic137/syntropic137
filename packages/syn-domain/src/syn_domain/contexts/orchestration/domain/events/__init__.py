@@ -54,6 +54,9 @@ from syn_domain.contexts.orchestration.domain.events.WorkflowFailedEvent import 
 from syn_domain.contexts.orchestration.domain.events.WorkflowInterruptedEvent import (
     WorkflowInterruptedEvent,
 )
+from syn_domain.contexts.orchestration.domain.events.WorkflowPhaseUpdatedEvent import (
+    WorkflowPhaseUpdatedEvent,
+)
 from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
     WorkflowTemplateCreatedEvent,
 )
@@ -99,6 +102,7 @@ __all__ = [
     "WorkflowExecutionStartedEvent",
     "WorkflowFailedEvent",
     "WorkflowInterruptedEvent",
+    "WorkflowPhaseUpdatedEvent",
     "WorkflowTemplateCreatedEvent",
     "WorkspaceCommandExecutedEvent",
     "WorkspaceCreatedEvent",
