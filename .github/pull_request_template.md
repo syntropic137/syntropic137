@@ -1,3 +1,6 @@
+<!-- If this PR addresses a GitHub issue, uncomment the line below -->
+<!-- Closes #000 -->
+
 ## Summary
 
 <!-- What does this PR do and why? -->
