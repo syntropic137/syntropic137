@@ -55,6 +55,8 @@ static_resources:
                         - "api.anthropic.com:443"
                         - "syn-envoy-proxy:8081"
                         - "syn-envoy-proxy"
+                        - "envoy-proxy:8081"
+                        - "envoy-proxy"
                       routes:
                         - match:
                             prefix: "/"

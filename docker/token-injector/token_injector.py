@@ -50,8 +50,11 @@ class ServiceEntry:
 _ANTHROPIC_HOSTS = (
     "api.anthropic.com",
     "claude.ai",
-    # When agents use ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081,
-    # requests arrive with Host: syn-envoy-proxy (ISS-43).
+    # When agents use ANTHROPIC_BASE_URL=http://<proxy>:8081,
+    # requests arrive with the proxy hostname (ISS-43).
+    # "envoy-proxy" = Compose service name (works in all stacks).
+    # "syn-envoy-proxy" = dev compose container name (legacy default).
+    "envoy-proxy",
     "syn-envoy-proxy",
 )
 

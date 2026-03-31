@@ -79,6 +79,15 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 name=p["name"],
                 order=p.get("order", i + 1),
                 description=p.get("description", ""),
+                prompt_template=p.get("prompt_template"),
+                model=p.get("model"),
+                max_tokens=p.get("max_tokens"),
+                timeout_seconds=p.get("timeout_seconds"),
+                allowed_tools=p.get("allowed_tools", []),
+                argument_hint=p.get("argument_hint"),
+                execution_type=p.get("execution_type", "sequential"),
+                input_artifact_types=p.get("input_artifact_types", []),
+                output_artifact_types=p.get("output_artifact_types", []),
             )
             for i, p in enumerate(phases)
         ]
@@ -219,7 +228,7 @@ class CreateWorkflowRequest(BaseModel):
     repository_url: str = "https://github.com/example/repo"
     repository_ref: str = "main"
     description: str | None = None
-    phases: list[dict[str, str | int]] | None = None
+    phases: list[dict[str, Any]] | None = None
 
 
 class ValidateYamlRequest(BaseModel):
