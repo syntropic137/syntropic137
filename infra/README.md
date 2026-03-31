@@ -231,7 +231,7 @@ These credentials are loaded by the shared Envoy proxy (`envoy-proxy` service) a
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYN_PROXY_URL` | No | `http://syn-envoy-proxy:8081` | URL of the shared Envoy proxy for credential injection |
+| `SYN_PROXY_URL` | No | `http://envoy-proxy:8081` | URL of the shared Envoy proxy for credential injection |
 | `SYN_AGENT_NETWORK` | No | `agent-net` | Docker network for agent containers (internal, no external egress) |
 | `SYN_PROXY_EXTRA_SERVICES` | No | — | JSON array of additional services for credential injection (e.g., Firecrawl) |
 

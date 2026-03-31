@@ -6,7 +6,7 @@ based on the SYN_STORAGE_* environment variables.
 Usage:
     from syn_adapters.object_storage import get_storage
 
-    # Returns LocalStorage or SupabaseStorage based on SYN_STORAGE_PROVIDER
+    # Returns LocalStorage or MinioStorage based on SYN_STORAGE_PROVIDER
     storage = await get_storage()
 """
 
@@ -16,13 +16,12 @@ from functools import lru_cache
 
 from syn_adapters.object_storage.local import LocalStorage
 from syn_adapters.object_storage.minio import MinioStorage
-from syn_adapters.object_storage.supabase import SupabaseStorage
 from syn_shared.settings import get_settings
 from syn_shared.settings.storage import StorageProvider
 
 
 @lru_cache
-def _get_storage_instance() -> LocalStorage | SupabaseStorage | MinioStorage:
+def _get_storage_instance() -> LocalStorage | MinioStorage:
     """Get cached storage instance based on configuration.
 
     Returns:
@@ -30,13 +29,6 @@ def _get_storage_instance() -> LocalStorage | SupabaseStorage | MinioStorage:
     """
     settings = get_settings()
     storage_settings = settings.storage
-
-    if storage_settings.provider == StorageProvider.SUPABASE:
-        return SupabaseStorage(
-            supabase_url=storage_settings.supabase_url,
-            supabase_key=storage_settings.supabase_key.get_secret_value(),
-            bucket_name=storage_settings.bucket_name,
-        )
 
     if storage_settings.provider == StorageProvider.MINIO:
         return MinioStorage(
@@ -51,7 +43,7 @@ def _get_storage_instance() -> LocalStorage | SupabaseStorage | MinioStorage:
     return LocalStorage(base_path=storage_settings.local_path)
 
 
-async def get_storage() -> LocalStorage | SupabaseStorage | MinioStorage:
+async def get_storage() -> LocalStorage | MinioStorage:
     """Get storage adapter based on configuration.
 
     Creates and returns the appropriate storage adapter based on

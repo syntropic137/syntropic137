@@ -1,0 +1,248 @@
+name: Smoke Test
+
+# Tier 2 smoke test (issue #405): validate the selfhost compose stack starts
+# cleanly and passes key infrastructure checks.
+#
+# Catches bugs that unit tests miss:
+#   - Docker CLI missing from syn-api image (build-arg not passed)
+#   - Proxy DNS resolution failures (envoy-proxy not reachable from agent-net)
+#   - Service health check failures (misconfigured environment)
+#   - Missing secrets or broken entrypoints
+#
+# Uses the actual selfhost compose overlay (docker-compose.selfhost.yaml)
+# with locally-built images — same Dockerfiles and build-args as release.
+#
+# Strategy: runs on push to main (post-merge), NOT on PRs.
+#
+# The full Docker stack build takes ~4 minutes, which is a significant
+# bottleneck for PR iteration. Tier 1 fitness tests (hostname agreement,
+# compose consistency, field round-trip) run on every push in ~5 seconds
+# and catch most config drift. This smoke test is the post-merge safety net.
+#
+# Release process: releases are cut from main only after confirming the
+# smoke test passed on the merge commit. If the smoke test fails on main,
+# the release is blocked until the issue is fixed.
+#
+# To re-enable PR-level smoke testing (e.g. when Docker build caching
+# brings the time down), uncomment the pull_request trigger below.
+
+on:
+  push:
+    branches:
+      - main
+      - 'release/**'
+    paths:
+      - 'docker/**'
+      - 'infra/docker/**'
+      - '.github/workflows/smoke-test.yml'
+  # Disabled: ~4 min Docker build is a CI/CD bottleneck for PR iteration.
+  # Tier 1 fitness tests catch config drift on every push. This smoke test
+  # runs post-merge as a safety net before release.
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'docker/**'
+  #     - 'infra/docker/**'
+  #     - '.github/workflows/smoke-test.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ISS-259: Least-privilege default
+permissions:
+  contents: read
+
+env:
+  # Compose files used in all compose commands
+  COMPOSE_FILES: -f docker/docker-compose.yaml -f docker/docker-compose.selfhost.yaml
+
+jobs:
+  compose-smoke:
+    name: Compose Stack Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # ISS-259: Pinned to commit SHA instead of mutable tag (@v4).
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          submodules: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # -------------------------------------------------------------------------
+      # Create minimal secrets and env for the selfhost stack.
+      # Real API keys are NOT needed — we only validate service startup,
+      # health checks, and infrastructure connectivity.
+      # -------------------------------------------------------------------------
+
+      - name: Create test secrets directory
+        run: |
+          mkdir -p infra/docker/secrets
+          echo "smoke_test_db_password" > infra/docker/secrets/db-password.secret
+          echo "smoke_test_redis_password" > infra/docker/secrets/redis-password.secret
+          echo "smoke_test_minio_password" > infra/docker/secrets/minio-password.secret
+
+      - name: Create minimal .env
+        run: |
+          cat > .env <<'EOF'
+          APP_ENVIRONMENT=test
+          DEBUG=false
+          LOG_LEVEL=INFO
+          LOG_FORMAT=json
+          SYN_STORAGE_PROVIDER=minio
+          SYN_STORAGE_MINIO_ENDPOINT=minio:9000
+          SYN_STORAGE_MINIO_ACCESS_KEY=minioadmin
+          SYN_STORAGE_MINIO_SECRET_KEY=smoke_test_minio_password
+          ANTHROPIC_API_KEY=placeholder-not-used
+          EOF
+          # Strip leading whitespace from heredoc (YAML indentation)
+          sed -i 's/^[[:space:]]*//' .env
+
+      # -------------------------------------------------------------------------
+      # Build and start the selfhost stack.
+      # --build ensures we use locally-built images with correct build-args,
+      # catching issues like INCLUDE_DOCKER_CLI not being passed.
+      # -------------------------------------------------------------------------
+
+      - name: Build and start selfhost stack
+        run: docker compose $COMPOSE_FILES up --build -d
+
+      # -------------------------------------------------------------------------
+      # Validation checks
+      # -------------------------------------------------------------------------
+
+      - name: Wait for API health check
+        run: |
+          echo "Waiting for syn-api to become healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' syn137-api 2>/dev/null || echo "missing")
+            echo "  Attempt $i/30: $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "API is healthy."
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "ERROR: API did not become healthy within 5 minutes."
+              docker compose $COMPOSE_FILES logs api
+              exit 1
+            fi
+            sleep 10
+          done
+
+      - name: Verify syn-api health endpoint responds
+        run: |
+          # Port 8000 is the internal API port (container-side)
+          docker compose $COMPOSE_FILES exec -T api python -c "
+          import urllib.request, json, sys
+          try:
+              with urllib.request.urlopen('http://localhost:8000/health', timeout=10) as r:
+                  data = json.loads(r.read())
+                  print('Health response:', json.dumps(data, indent=2))
+                  sys.exit(0)
+          except Exception as e:
+              print('Health check failed:', e)
+              sys.exit(1)
+          "
+
+      - name: Verify Docker CLI is present in syn-api image
+        run: |
+          echo "Checking for Docker CLI in syn-api container..."
+          docker compose $COMPOSE_FILES exec -T api docker --version
+          echo "Docker CLI found."
+
+      - name: Verify envoy-proxy is reachable on agent-net
+        run: |
+          echo "Verifying envoy-proxy DNS and admin endpoint from agent-net..."
+          # The envoy image is minimal (no curl/wget). Use a lightweight
+          # container on the agent-net network to verify DNS + HTTP connectivity.
+          #
+          # Filter by compose project name to avoid grabbing a stale agent-net
+          # from a different project (e.g. dev stack).
+          PROJECT=$(docker compose $COMPOSE_FILES config --format json | python3 -c "import sys,json; print(json.load(sys.stdin)['name'])")
+          AGENT_NET=$(docker network ls --filter "name=${PROJECT}_agent-net" --format '{{.Name}}' | head -1)
+          echo "Compose project: $PROJECT"
+          echo "Agent network: $AGENT_NET"
+          if [ -z "$AGENT_NET" ]; then
+            echo "ERROR: Could not find agent-net network for project '$PROJECT'"
+            docker network ls
+            exit 1
+          fi
+
+          # Verify DNS resolution + admin endpoint in one step.
+          # busybox nslookup has known issues with Docker embedded DNS on some
+          # CI platforms — wget is more reliable and tests both DNS and HTTP.
+          RESULT=$(docker run --rm --network "$AGENT_NET" busybox:latest \
+            wget -qO- http://envoy-proxy:9901/ready 2>&1) || {
+            echo "ERROR: Could not reach envoy-proxy:9901 from agent-net"
+            echo "Output: $RESULT"
+            docker network inspect "$AGENT_NET" --format '{{range .Containers}}{{.Name}} {{end}}'
+            exit 1
+          }
+          echo "Envoy admin response: $RESULT"
+          echo "Envoy proxy is reachable on agent-net."
+
+      - name: Verify API can create a workflow (round-trip)
+        run: |
+          # Port 8000 is the internal API port (container-side).
+          # Minimal payload — avoids list-typed phase fields that would
+          # require a broader request schema.
+          docker compose $COMPOSE_FILES exec -T api python -c "
+          import urllib.request, urllib.error, json, sys
+
+          payload = json.dumps({
+              'name': 'smoke-test-workflow',
+              'workflow_type': 'custom',
+              'classification': 'simple',
+              'repository_url': 'https://github.com/example/repo',
+              'repository_ref': 'main',
+              'phases': [{
+                  'name': 'smoke-phase',
+                  'prompt_template': 'Respond with OK',
+                  'model': 'claude-haiku-4-5-20251001',
+              }]
+          }).encode()
+
+          req = urllib.request.Request(
+              'http://localhost:8000/workflows',
+              data=payload,
+              headers={'Content-Type': 'application/json'},
+              method='POST'
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  data = json.loads(r.read())
+                  workflow_id = data.get('id') or data.get('workflow_id')
+                  print('Created workflow:', workflow_id)
+                  if not workflow_id:
+                      print('ERROR: No workflow ID in response:', data)
+                      sys.exit(1)
+                  sys.exit(0)
+          except urllib.error.HTTPError as e:
+              body = e.read().decode()
+              print('HTTP error:', e.code, body)
+              sys.exit(1)
+          except Exception as e:
+              print('Request failed:', e)
+              sys.exit(1)
+          "
+
+      # -------------------------------------------------------------------------
+      # Teardown
+      # -------------------------------------------------------------------------
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Collecting container logs ==="
+          docker compose $COMPOSE_FILES logs --tail=100
+          echo "=== Container status ==="
+          docker compose $COMPOSE_FILES ps
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose $COMPOSE_FILES down -v --remove-orphans

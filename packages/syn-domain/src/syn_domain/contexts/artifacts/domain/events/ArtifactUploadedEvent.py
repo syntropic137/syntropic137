@@ -35,7 +35,7 @@ class ArtifactUploadedEvent(DomainEvent):
 
     # Storage details
     storage_provider: str
-    """Storage provider used (e.g., 'local', 'supabase')."""
+    """Storage provider used (e.g., 'local', 'minio')."""
 
     storage_prefix: str
     """Key prefix where artifacts were stored."""

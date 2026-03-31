@@ -246,7 +246,7 @@ class WorkspaceService:
 
         # Shared Envoy proxy for credential injection (ISS-43).
         # Agents never see API keys — the proxy injects them via ext_authz.
-        proxy_url = os.environ.get("SYN_PROXY_URL", "http://syn-envoy-proxy:8081")
+        proxy_url = os.environ.get("SYN_PROXY_URL", "http://envoy-proxy:8081")
         sidecar = SharedEnvoyAdapter(proxy_url=proxy_url)
 
         # Token vending

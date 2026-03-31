@@ -47,14 +47,12 @@ static_resources:
                   virtual_hosts:
                     # Anthropic API
                     # Matches both direct api.anthropic.com traffic AND requests routed
-                    # via ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081 (ISS-43).
+                    # via ANTHROPIC_BASE_URL=http://envoy-proxy:8081 (ISS-43).
                     # host_rewrite_literal ensures upstream sees api.anthropic.com.
                     - name: anthropic
                       domains:
                         - "api.anthropic.com"
                         - "api.anthropic.com:443"
-                        - "syn-envoy-proxy:8081"
-                        - "syn-envoy-proxy"
                         - "envoy-proxy:8081"
                         - "envoy-proxy"
                       routes:

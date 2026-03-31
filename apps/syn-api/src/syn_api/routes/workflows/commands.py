@@ -71,6 +71,7 @@ def _resolve_classification(classification: str) -> WorkflowClassification:
 def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefinition]:
     from syn_domain.contexts.orchestration._shared.WorkflowValueObjects import (
         PhaseDefinition,
+        PhaseExecutionType,
     )
 
     if phases:
@@ -79,16 +80,16 @@ def _build_phase_defs(phases: list[dict[str, Any]] | None) -> list[PhaseDefiniti
                 phase_id=p.get("phase_id", str(uuid4())),
                 name=p["name"],
                 order=p.get("order", i + 1),
-                description=p.get("description", ""),
+                description=p.get("description"),
+                execution_type=p.get("execution_type", PhaseExecutionType.SEQUENTIAL),
+                input_artifact_types=p.get("input_artifact_types", []),
+                output_artifact_types=p.get("output_artifact_types", []),
                 prompt_template=p.get("prompt_template"),
-                model=p.get("model"),
                 max_tokens=p.get("max_tokens"),
                 timeout_seconds=p.get("timeout_seconds"),
                 allowed_tools=p.get("allowed_tools", []),
                 argument_hint=p.get("argument_hint"),
-                execution_type=p.get("execution_type", "sequential"),
-                input_artifact_types=p.get("input_artifact_types", []),
-                output_artifact_types=p.get("output_artifact_types", []),
+                model=p.get("model"),
             )
             for i, p in enumerate(phases)
         ]

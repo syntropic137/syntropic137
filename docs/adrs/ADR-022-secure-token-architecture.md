@@ -553,8 +553,8 @@ Phase 1 of the shared Envoy proxy is now implemented. Agent containers no longer
 
 ```
 Agent Container (agent-net only)
-  ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081
-  HTTP_PROXY=http://syn-envoy-proxy:8081
+  ANTHROPIC_BASE_URL=http://envoy-proxy:8081
+  HTTP_PROXY=http://envoy-proxy:8081
   NO API KEYS
     │
     ▼

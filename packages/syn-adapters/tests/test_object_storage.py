@@ -1,7 +1,6 @@
 """Tests for object storage adapters.
 
-Tests LocalStorage and the storage factory.
-SupabaseStorage tests require Supabase to be running.
+Tests LocalStorage, MinioStorage, and the storage factory.
 """
 
 from __future__ import annotations
@@ -167,22 +166,6 @@ class TestStorageSettings:
 
         assert settings.provider == StorageProvider.LOCAL
         assert settings.is_local is True
-        assert settings.is_supabase is False
-        assert settings.is_configured is True
-
-    def test_supabase_settings_validation(self) -> None:
-        """Test that Supabase settings require URL and key."""
-        with pytest.raises(ValueError, match="Supabase storage requires"):
-            StorageSettings(provider=StorageProvider.SUPABASE)
-
-    def test_supabase_settings_valid(self) -> None:
-        """Test valid Supabase settings."""
-        settings = StorageSettings(
-            provider=StorageProvider.SUPABASE,
-            supabase_url="https://example.supabase.co",
-            supabase_key="secret-key",
-        )
-        assert settings.is_supabase is True
         assert settings.is_configured is True
 
     def test_max_file_size_bytes(self) -> None:

@@ -3,7 +3,7 @@
 Aggregates must be pure domain objects:
 - No async functions (aggregates are synchronous)
 - No IO module imports (aiohttp, httpx, asyncio, subprocess, socket, etc.)
-- No infrastructure imports (sqlmodel, asyncpg, psycopg, redis, minio, supabase)
+- No infrastructure imports (sqlmodel, asyncpg, psycopg, redis, minio)
 - No open() calls
 """
 
@@ -31,7 +31,6 @@ _FORBIDDEN_MODULES = frozenset(
         "psycopg",
         "redis",
         "minio",
-        "supabase",
     }
 )
 

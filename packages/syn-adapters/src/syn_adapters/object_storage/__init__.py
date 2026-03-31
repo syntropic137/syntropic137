@@ -1,7 +1,7 @@
 """Object storage adapters for artifact storage.
 
 This module provides storage adapters for storing and retrieving agent artifacts.
-Supports local filesystem, Supabase Storage, and MinIO.
+Supports local filesystem and MinIO.
 
 See ADR-012: Artifact Storage
 
@@ -12,10 +12,6 @@ Environment-based selection via SYN_STORAGE_* variables:
 - **MINIO** (default for `just dev`): Uses MinIO (S3-compatible)
   Requires SYN_STORAGE_MINIO_ENDPOINT, ACCESS_KEY, SECRET_KEY.
   For local development with S3 API.
-
-- **SUPABASE**: Uses Supabase Storage (S3-compatible)
-  Requires SYN_STORAGE_SUPABASE_URL and SYN_STORAGE_SUPABASE_KEY.
-  For production.
 
 Usage:
     from syn_adapters.object_storage import get_storage
@@ -50,7 +46,6 @@ from syn_adapters.object_storage.protocol import (
     UploadError,
     UploadResult,
 )
-from syn_adapters.object_storage.supabase import SupabaseStorage
 
 __all__ = [
     "DownloadError",
@@ -62,7 +57,6 @@ __all__ = [
     "StorageError",
     "StorageObject",
     "StorageProtocol",
-    "SupabaseStorage",
     "UploadError",
     "UploadResult",
     "get_storage",

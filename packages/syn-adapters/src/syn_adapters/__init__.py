@@ -3,7 +3,7 @@
 This package provides adapters for:
 - AI Agents (Claude) - see `syn_adapters.agents`
 - Storage (PostgreSQL, In-Memory) - see `syn_adapters.storage`
-- Object Storage (Local, MinIO, Supabase) - see `syn_adapters.object_storage`
+- Object Storage (Local, MinIO) - see `syn_adapters.object_storage`
 - Events (Event storage and buffering) - see `syn_adapters.events`
 """
 
@@ -25,7 +25,6 @@ from syn_adapters.object_storage import (
     LocalStorage,
     MinioStorage,
     StorageProtocol,
-    SupabaseStorage,
     get_storage,
 )
 
@@ -41,7 +40,6 @@ __all__ = [
     "LocalStorage",
     "MinioStorage",
     "StorageProtocol",
-    "SupabaseStorage",
     "__version__",
     "get_agent",
     "get_available_agents",
