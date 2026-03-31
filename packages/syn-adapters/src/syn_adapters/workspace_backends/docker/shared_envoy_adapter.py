@@ -1,7 +1,7 @@
 """Shared Envoy proxy adapter — implements SidecarPort for shared proxy (ISS-43).
 
 Instead of spinning up a per-workspace sidecar container, this adapter points all
-workspaces at a single shared Envoy proxy service (``syn-envoy-proxy``). The proxy
+workspaces at a single shared Envoy proxy service (``envoy-proxy``). The proxy
 injects credentials into outbound requests; agent containers never see API keys.
 
 Phase 1 (this PR):
@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROXY_URL = "http://syn-envoy-proxy:8081"
+DEFAULT_PROXY_URL = "http://envoy-proxy:8081"
 
 
 class SharedEnvoyAdapter:
@@ -46,9 +46,9 @@ class SharedEnvoyAdapter:
     all HTTP traffic through this proxy.
 
     Usage:
-        adapter = SharedEnvoyAdapter(proxy_url="http://syn-envoy-proxy:8081")
+        adapter = SharedEnvoyAdapter(proxy_url="http://envoy-proxy:8081")
         handle = await adapter.start(config, isolation_handle)
-        # handle.proxy_url == "http://syn-envoy-proxy:8081"
+        # handle.proxy_url == "http://envoy-proxy:8081"
         await adapter.stop(handle)  # no-op for shared proxy
     """
 

@@ -90,7 +90,7 @@ All env vars are routed through Pydantic Settings — **never use `os.environ.ge
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `SYN_STORAGE_PROVIDER` | Selfhost | `local` | Provider: `local`, `minio`, `supabase`. **Must be `minio` for Docker/selfhost.** |
+| `SYN_STORAGE_PROVIDER` | Selfhost | `local` | Provider: `local`, `minio`. **Must be `minio` for Docker/selfhost.** |
 | `SYN_STORAGE_MINIO_ENDPOINT` | For MinIO | `` | MinIO endpoint (`host:port`) |
 | `SYN_STORAGE_MINIO_ACCESS_KEY` | For MinIO | `` | MinIO access key |
 | `SYN_STORAGE_MINIO_SECRET_KEY` | For MinIO | `` | MinIO secret key |

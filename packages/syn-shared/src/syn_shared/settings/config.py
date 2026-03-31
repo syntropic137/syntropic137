@@ -344,13 +344,13 @@ class Settings(BaseSettings):
     )
 
     # =========================================================================
-    # STORAGE (S3/Supabase for artifacts)
+    # STORAGE (S3-compatible for artifacts)
     # =========================================================================
 
     artifact_storage_type: str = Field(
         default="database",
         description=(
-            "Artifact storage backend: 'database' (PostgreSQL), 's3' (S3/Supabase). "
+            "Artifact storage backend: 'database' (PostgreSQL), 's3' (S3-compatible). "
             "Start with database, migrate to s3 for large artifacts."
         ),
     )
@@ -366,7 +366,6 @@ class Settings(BaseSettings):
         default=None,
         description=(
             "S3-compatible endpoint URL. "
-            "For Supabase: https://<project>.supabase.co/storage/v1/s3 "
             "Leave empty for AWS S3."
         ),
     )
@@ -484,7 +483,7 @@ class Settings(BaseSettings):
         """Get object storage settings for artifacts.
 
         Returns a StorageSettings instance configured from SYN_STORAGE_* env vars.
-        Supports local filesystem (development) and Supabase (production).
+        Supports local filesystem (development) and MinIO (Docker/selfhost).
 
         See ADR-012: Artifact Storage
         """

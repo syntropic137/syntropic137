@@ -6,8 +6,8 @@ This directory contains the Envoy proxy configuration that injects API credentia
 
 ```
 Agent Container (agent-net only, no external egress)
-  ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081
-  HTTP_PROXY=http://syn-envoy-proxy:8081
+  ANTHROPIC_BASE_URL=http://envoy-proxy:8081
+  HTTP_PROXY=http://envoy-proxy:8081
   NO ANTHROPIC_API_KEY, NO CLAUDE_CODE_OAUTH_TOKEN
     │
     ▼
@@ -106,11 +106,11 @@ curl http://localhost:9901/ready
 
 # Test Anthropic credential injection (from inside agent-net)
 docker run --rm --network agent-net curlimages/curl \
-  curl -s -H "Host: api.anthropic.com" http://syn-envoy-proxy:8081/v1/messages
+  curl -s -H "Host: api.anthropic.com" http://envoy-proxy:8081/v1/messages
 
 # Test blocking
 docker run --rm --network agent-net curlimages/curl \
-  curl -s -H "Host: attacker.com" http://syn-envoy-proxy:8081/
+  curl -s -H "Host: attacker.com" http://envoy-proxy:8081/
 # → 403 Forbidden
 ```
 
@@ -122,13 +122,13 @@ docker run --rm -it --network agent-net ubuntu:22.04 bash
 
 # Inside the container:
 env | grep -i key           # → nothing (no API keys)
-env | grep ANTHROPIC_BASE   # → http://syn-envoy-proxy:8081
+env | grep ANTHROPIC_BASE   # → http://envoy-proxy:8081
 curl https://evil.com       # → fails (no external network)
 ```
 
 ## Token Injection Flow
 
-1. Agent makes request to `http://syn-envoy-proxy:8081` with `Host: api.anthropic.com`
+1. Agent makes request to `http://envoy-proxy:8081` with `Host: api.anthropic.com`
 2. Envoy matches the virtual host and calls the ext_authz filter
 3. Token Injector looks up the host in its service registry
 4. Token Injector returns the appropriate credential header

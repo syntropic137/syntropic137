@@ -1,7 +1,7 @@
 # Syn137 Envoy Proxy
 # Pure Envoy — credential injection handled by the token-injector service (ext_authz)
 #
-# Build: docker build -t syn-envoy-proxy:latest .
+# Build: docker build -t envoy-proxy:latest .
 
 FROM envoyproxy/envoy:v1.31-latest
 

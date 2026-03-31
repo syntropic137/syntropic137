@@ -147,7 +147,7 @@ Sensitive credentials (database passwords, Redis passwords, MinIO passwords, Git
 
 Agent containers never hold real API keys. Instead:
 1. Agents are started with `ANTHROPIC_API_KEY=proxy-managed` (a placeholder)
-2. All Anthropic traffic routes through a shared Envoy proxy (`ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081`)
+2. All Anthropic traffic routes through a shared Envoy proxy (`ANTHROPIC_BASE_URL=http://envoy-proxy:8081`)
 3. The **token injector** (ext_authz HTTP service) intercepts requests and replaces the placeholder with the real credential
 4. Direct calls to `api.anthropic.com` from agents fail — only the proxy path works
 

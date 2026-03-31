@@ -1,7 +1,7 @@
 """Object storage protocol - interface for storing and retrieving artifacts.
 
 Provides a protocol-based abstraction for object storage backends,
-supporting both local filesystem (development) and Supabase Storage (production).
+supporting both local filesystem (development) and MinIO (Docker/selfhost).
 
 See ADR-012: Artifact Storage
 

@@ -11,7 +11,7 @@ Usage:
 
     settings = get_settings()
     storage = settings.storage
-    provider = storage.provider  # "local" | "supabase" | "minio"
+    provider = storage.provider  # "local" | "minio"
 """
 
 from __future__ import annotations
@@ -31,12 +31,10 @@ class StorageProvider(str, Enum):
     """Available storage providers for artifacts.
 
     LOCAL: Filesystem storage (development/testing)
-    SUPABASE: Supabase Storage (S3-compatible, production)
     MINIO: MinIO Storage (S3-compatible, self-hosted)
     """
 
     LOCAL = "local"
-    SUPABASE = "supabase"
     MINIO = "minio"
 
 
@@ -44,7 +42,7 @@ class StorageSettings(BaseSettings):
     """Object storage configuration for artifacts.
 
     Controls where agent artifacts are stored (outputs, reports, files).
-    Supports local filesystem, Supabase Storage, and MinIO.
+    Supports local filesystem and MinIO.
 
     Override via SYN_STORAGE_* environment variables.
 
@@ -59,12 +57,6 @@ class StorageSettings(BaseSettings):
         SYN_STORAGE_MINIO_ACCESS_KEY=minioadmin
         SYN_STORAGE_MINIO_SECRET_KEY=minioadmin
         SYN_STORAGE_MINIO_SECURE=false
-
-        # Supabase (production)
-        SYN_STORAGE_PROVIDER=supabase
-        SYN_STORAGE_SUPABASE_URL=https://xxx.supabase.co
-        SYN_STORAGE_SUPABASE_KEY=eyJ...
-        SYN_STORAGE_BUCKET_NAME=syn-artifacts
     """
 
     model_config = SettingsConfigDict(
@@ -82,8 +74,8 @@ class StorageSettings(BaseSettings):
         default=StorageProvider.LOCAL,
         description=(
             "Storage provider to use. "
-            "Options: 'local' (filesystem), 'supabase' (S3-compatible). "
-            "Default: local (development). Use supabase for production."
+            "Options: 'local' (filesystem), 'minio' (S3-compatible). "
+            "Default: local (development). Use minio for Docker/selfhost."
         ),
     )
 
@@ -100,35 +92,11 @@ class StorageSettings(BaseSettings):
         ),
     )
 
-    # =========================================================================
-    # SUPABASE STORAGE SETTINGS
-    # =========================================================================
-
-    supabase_url: str = Field(
-        default="",
-        description=(
-            "Supabase project URL. "
-            "Format: https://<project-ref>.supabase.co "
-            "Required when provider is 'supabase'. "
-            "Get from: Supabase Dashboard > Settings > API"
-        ),
-    )
-
-    supabase_key: SecretStr = Field(
-        default=SecretStr(""),
-        description=(
-            "Supabase service role key (for server-side access). "
-            "Use service_role key, NOT anon key, for storage operations. "
-            "Required when provider is 'supabase'. "
-            "Get from: Supabase Dashboard > Settings > API > service_role"
-        ),
-    )
-
     bucket_name: str = Field(
         default="syn-artifacts",
         description=(
             "Storage bucket name for artifacts. "
-            "Used by Supabase and MinIO providers. "
+            "Used by MinIO provider. "
             "Default: syn-artifacts"
         ),
     )
@@ -204,11 +172,6 @@ class StorageSettings(BaseSettings):
         return self.provider == StorageProvider.LOCAL
 
     @property
-    def is_supabase(self) -> bool:
-        """Check if using Supabase storage."""
-        return self.provider == StorageProvider.SUPABASE
-
-    @property
     def is_minio(self) -> bool:
         """Check if using MinIO storage."""
         return self.provider == StorageProvider.MINIO
@@ -219,13 +182,10 @@ class StorageSettings(BaseSettings):
 
         Returns True if:
         - Local provider: always configured
-        - Supabase provider: URL and key are set
         - MinIO provider: endpoint, access key, and secret key are set
         """
         if self.is_local:
             return True
-        if self.is_supabase:
-            return bool(self.supabase_url and self.supabase_key.get_secret_value())
         if self.is_minio:
             return bool(
                 self.minio_endpoint
@@ -272,16 +232,7 @@ class StorageSettings(BaseSettings):
     @model_validator(mode="after")
     def validate_provider_config(self) -> StorageSettings:
         """Ensure provider-specific settings are complete."""
-        if self.provider == StorageProvider.SUPABASE:
-            self._check_required_fields(
-                "Supabase",
-                {"supabase_url": self.supabase_url, "supabase_key": self.supabase_key},
-                {
-                    "supabase_url": "SYN_STORAGE_SUPABASE_URL",
-                    "supabase_key": "SYN_STORAGE_SUPABASE_KEY",
-                },
-            )
-        elif self.provider == StorageProvider.MINIO:
+        if self.provider == StorageProvider.MINIO:
             self._check_required_fields(
                 "MinIO",
                 {

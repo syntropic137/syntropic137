@@ -50,9 +50,9 @@ class ServiceEntry:
 _ANTHROPIC_HOSTS = (
     "api.anthropic.com",
     "claude.ai",
-    # When agents use ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081,
-    # requests arrive with Host: syn-envoy-proxy (ISS-43).
-    "syn-envoy-proxy",
+    # When agents use ANTHROPIC_BASE_URL=http://envoy-proxy:8081,
+    # requests arrive with Host: envoy-proxy (ISS-43).
+    "envoy-proxy",
 )
 
 

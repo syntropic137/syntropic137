@@ -49,7 +49,7 @@ This document describes how Syn137 securely integrates with GitHub using GitHub 
 │   NO PEM. NO raw signing key. Only the derived token.              │
 │                                                                     │
 │   All traffic routed through shared Envoy proxy:                   │
-│     ANTHROPIC_BASE_URL=http://syn-envoy-proxy:8081                 │
+│     ANTHROPIC_BASE_URL=http://envoy-proxy:8081                 │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -176,7 +176,7 @@ httpx.delete(
 
 Agent containers run on a restricted Docker network (`agent-net`):
 
-- **Anthropic API**: Routed through shared Envoy proxy (`syn-envoy-proxy:8081`). Agents hold a placeholder key (`proxy-managed`); the token injector (`ext_authz`) replaces it with the real credential. Direct calls to `api.anthropic.com` fail.
+- **Anthropic API**: Routed through shared Envoy proxy (`envoy-proxy:8081`). Agents hold a placeholder key (`proxy-managed`); the token injector (`ext_authz`) replaces it with the real credential. Direct calls to `api.anthropic.com` fail.
 - **GitHub API**: Passthrough — agents use the installation token baked into `~/.git-credentials` during setup. The token injector does not handle GitHub auth.
 - **Package registries**: Passthrough (pypi.org, npmjs.org, etc.)
 - **All other hosts**: Blocked by the Envoy allowlist (returns 403).
