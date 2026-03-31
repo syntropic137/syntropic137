@@ -1,17 +1,18 @@
-name: Feature Request
-description: Suggest a new feature or enhancement
+name: Enhancement
+description: Suggest an improvement — performance, UI, DX, or similar
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Have an idea for Syntropic137? We'd love to hear it.
+        Suggest an improvement to something that already exists — performance, UI, developer experience, etc.
+        For brand-new feature requests, use the [feature request board](https://syntropic137.canny.io/feature-requests).
 
   - type: textarea
     id: problem
     attributes:
-      label: Problem
-      description: What problem does this solve? What's the pain point?
+      label: What could be better?
+      description: What's the current experience and what's the pain point?
     validations:
       required: true
 

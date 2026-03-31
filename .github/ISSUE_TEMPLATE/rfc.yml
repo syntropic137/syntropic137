@@ -1,5 +1,5 @@
-name: RFC (Request for Comments)
-description: Propose a significant design change or new subsystem
+name: RFC / Design Proposal
+description: Propose a significant architectural change, new subsystem, or scaling design
 labels: ["rfc"]
 body:
   - type: markdown
