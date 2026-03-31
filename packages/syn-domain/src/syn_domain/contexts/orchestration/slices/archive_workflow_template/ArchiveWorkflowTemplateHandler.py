@@ -64,7 +64,7 @@ class ArchiveWorkflowTemplateHandler:
             return HandlerResult(success=False, error=msg)
 
         try:
-            aggregate._handle_command(command)
+            aggregate.archive_workflow(command)
         except ValueError as e:
             return HandlerResult(success=False, error=str(e))
 
