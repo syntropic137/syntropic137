@@ -209,6 +209,32 @@ class RepoProjection:
         await self._store.save(PROJECTION_NAME, repo_id, data)
         logger.info(f"Projected RepoUnassignedFromSystem: {repo_id}")
 
+    async def on_repo_updated(self, event: dict[str, Any]) -> None:
+        """Handle RepoUpdated event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        data = await self._store.get(PROJECTION_NAME, repo_id)
+        if data is None:
+            logger.warning(f"RepoUpdated for unknown repo: {repo_id}")
+            return
+        if event.get("default_branch") is not None:
+            data["default_branch"] = str(event["default_branch"])
+        if event.get("is_private") is not None:
+            data["is_private"] = bool(event["is_private"])
+        if event.get("installation_id") is not None:
+            data["installation_id"] = str(event["installation_id"])
+        await self._store.save(PROJECTION_NAME, repo_id, data)
+        logger.info(f"Projected RepoUpdated: {repo_id}")
+
+    async def on_repo_deregistered(self, event: dict[str, Any]) -> None:
+        """Handle RepoDeregistered event dict from manager dispatch."""
+        repo_id = str(event.get("repo_id", ""))
+        if not repo_id:
+            return
+        await self._store.delete(PROJECTION_NAME, repo_id)
+        logger.info(f"Projected RepoDeregistered: {repo_id}")
+
 
 _projection: RepoProjection | None = None
 

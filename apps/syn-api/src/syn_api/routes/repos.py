@@ -359,6 +359,120 @@ async def get_repo_sessions(
     return Ok([r.to_dict() for r in results])
 
 
+async def update_repo(
+    repo_id: str,
+    default_branch: str | None = None,
+    is_private: bool | None = None,
+    installation_id: str | None = None,
+    updated_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, RepoError]:
+    """Update mutable fields of a repo."""
+    from syn_adapters.storage.repositories import get_repo_repository
+    from syn_domain.contexts.organization.domain.commands.UpdateRepoCommand import (
+        UpdateRepoCommand,
+    )
+    from syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler import (
+        ManageRepoHandler,
+    )
+
+    await ensure_connected()
+
+    try:
+        command = UpdateRepoCommand(
+            repo_id=repo_id,
+            default_branch=default_branch,
+            is_private=is_private,
+            installation_id=installation_id,
+            updated_by=updated_by,
+        )
+    except ValueError as e:
+        return Err(RepoError.INVALID_INPUT, message=str(e))
+
+    repo = get_repo_repository()
+    handler = ManageRepoHandler(repository=repo)
+    result = await handler.update(command)
+
+    if result is None:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
+    if not result.success:
+        error_enum = _classify_repo_error(result.error)
+        return Err(error_enum, message=result.error)
+
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
+async def deregister_repo(
+    repo_id: str,
+    deregistered_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, RepoError]:
+    """Deregister (soft-delete) a repo.
+
+    Cross-context guard: rejects if active trigger rules reference this repo.
+    """
+    from syn_adapters.storage.repositories import get_repo_repository
+    from syn_domain.contexts.organization.domain.commands.DeregisterRepoCommand import (
+        DeregisterRepoCommand,
+    )
+    from syn_domain.contexts.organization.slices.manage_repo.ManageRepoHandler import (
+        ManageRepoHandler,
+    )
+
+    await ensure_connected()
+
+    # Look up repo to get full_name for cross-context trigger check
+    repo_result = await get_repo(repo_id)
+    if isinstance(repo_result, Err):
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
+    # Cross-context guard: check for active trigger rules referencing this repo
+    try:
+        from syn_domain.contexts.github.slices.list_triggers.projection import (
+            get_trigger_rule_projection,
+        )
+
+        trigger_projection = get_trigger_rule_projection()
+        triggers = await trigger_projection.list_all()
+        active_triggers = [
+            t
+            for t in triggers
+            if t.repository == repo_result.value.full_name and t.status == "active"
+        ]
+        if active_triggers:
+            names = ", ".join(t.name for t in active_triggers[:3])
+            return Err(
+                RepoError.HAS_ACTIVE_TRIGGERS,
+                message=f"Repo has {len(active_triggers)} active trigger(s): {names}",
+            )
+    except Exception:
+        logger.warning("Could not check trigger rules for repo %s", repo_id, exc_info=True)
+
+    try:
+        command = DeregisterRepoCommand(
+            repo_id=repo_id,
+            deregistered_by=deregistered_by,
+        )
+    except ValueError as e:
+        return Err(RepoError.INVALID_INPUT, message=str(e))
+
+    repo = get_repo_repository()
+    handler = ManageRepoHandler(repository=repo)
+    result = await handler.deregister(command)
+
+    if result is None:
+        return Err(RepoError.NOT_FOUND, message=f"Repo {repo_id} not found")
+
+    if not result.success:
+        error_enum = _classify_repo_error(result.error)
+        return Err(error_enum, message=result.error)
+
+    await sync_published_events_to_projections()
+    return Ok(None)
+
+
 def _classify_repo_error(error_msg: str) -> RepoError:
     """Map a domain ValueError message to a specific RepoError."""
     lower = error_msg.lower()
@@ -366,6 +480,8 @@ def _classify_repo_error(error_msg: str) -> RepoError:
         return RepoError.ALREADY_ASSIGNED
     if "not assigned" in lower:
         return RepoError.NOT_ASSIGNED
+    if "deregistered" in lower:
+        return RepoError.ALREADY_DEREGISTERED
     return RepoError.INVALID_INPUT
 
 
@@ -431,6 +547,42 @@ async def get_repo_endpoint(repo_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=result.message)
 
     return result.value.model_dump()
+
+
+@router.put("/{repo_id}")
+async def update_repo_endpoint(repo_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Update mutable fields of a repo."""
+    result = await update_repo(
+        repo_id=repo_id,
+        default_branch=body.get("default_branch"),
+        is_private=body.get("is_private"),
+        installation_id=body.get("installation_id"),
+        updated_by=body.get("updated_by", "api"),
+    )
+
+    if isinstance(result, Err):
+        if result.error == RepoError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == RepoError.ALREADY_DEREGISTERED:
+            raise HTTPException(status_code=409, detail=result.message)
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return {"repo_id": repo_id, "status": "updated"}
+
+
+@router.delete("/{repo_id}")
+async def deregister_repo_endpoint(repo_id: str) -> dict[str, Any]:
+    """Deregister (soft-delete) a repo."""
+    result = await deregister_repo(repo_id=repo_id, deregistered_by="api")
+
+    if isinstance(result, Err):
+        if result.error == RepoError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error in (RepoError.HAS_ACTIVE_TRIGGERS, RepoError.ALREADY_DEREGISTERED):
+            raise HTTPException(status_code=409, detail=result.message)
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return {"repo_id": repo_id, "status": "deregistered"}
 
 
 @router.post("/{repo_id}/assign")

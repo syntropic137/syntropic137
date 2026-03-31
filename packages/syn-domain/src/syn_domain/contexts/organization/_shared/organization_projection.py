@@ -207,6 +207,12 @@ class OrganizationProjection:
     # Canonical name for coordinator dispatch (bare event type: RepoRegistered)
     on_repo_registered = on_repo_registered_increment
 
+    async def on_repo_deregistered_decrement(self, event: dict[str, Any]) -> None:
+        """Decrement repo_count when a repo is deregistered."""
+        org_id = str(event.get("organization_id", ""))
+        if org_id:
+            await self.increment_repo_count(org_id, delta=-1)
+
 
 _projection: OrganizationProjection | None = None
 

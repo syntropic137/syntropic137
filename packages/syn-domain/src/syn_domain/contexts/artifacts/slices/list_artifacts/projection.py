@@ -135,6 +135,27 @@ class ArtifactListProjection(AutoDispatchProjection):
         )
         return [ArtifactSummary.from_dict(d) for d in data]
 
+    async def on_artifact_updated(self, event_data: dict) -> None:
+        """Handle ArtifactUpdated event."""
+        artifact_id = event_data.get("artifact_id", "")
+        if not artifact_id:
+            return
+        data = await self._store.get(self.PROJECTION_NAME, artifact_id)
+        if data is None:
+            return
+        if event_data.get("title") is not None:
+            data["name"] = event_data["title"]
+        if event_data.get("is_primary_deliverable") is not None:
+            data["is_primary_deliverable"] = event_data["is_primary_deliverable"]
+        await self._store.save(self.PROJECTION_NAME, artifact_id, data)
+
+    async def on_artifact_deleted(self, event_data: dict) -> None:
+        """Handle ArtifactDeleted event."""
+        artifact_id = event_data.get("artifact_id", "")
+        if not artifact_id:
+            return
+        await self._store.delete(self.PROJECTION_NAME, artifact_id)
+
     async def query(
         self,
         workflow_id: str | None = None,

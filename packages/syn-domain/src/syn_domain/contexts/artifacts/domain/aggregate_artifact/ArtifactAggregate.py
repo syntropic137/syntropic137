@@ -17,8 +17,20 @@ if TYPE_CHECKING:
     from syn_domain.contexts.artifacts.domain.commands.CreateArtifactCommand import (
         CreateArtifactCommand,
     )
+    from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
+        DeleteArtifactCommand,
+    )
+    from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
+        UpdateArtifactCommand,
+    )
     from syn_domain.contexts.artifacts.domain.events.ArtifactCreatedEvent import (
         ArtifactCreatedEvent,
+    )
+    from syn_domain.contexts.artifacts.domain.events.ArtifactDeletedEvent import (
+        ArtifactDeletedEvent,
+    )
+    from syn_domain.contexts.artifacts.domain.events.ArtifactUpdatedEvent import (
+        ArtifactUpdatedEvent,
     )
 
 
@@ -51,6 +63,7 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._title: str | None = None
         self._storage_uri: str | None = None  # Object storage reference (ADR-012)
         self._is_primary_deliverable: bool = True
+        self._is_deleted: bool = False
         self._derived_from: list[str] = []
         self._metadata: dict[str, str | int | float | bool | None] = {}
 
@@ -118,6 +131,11 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         return self._is_primary_deliverable
 
     @property
+    def is_deleted(self) -> bool:
+        """Check if this artifact has been soft-deleted."""
+        return self._is_deleted
+
+    @property
     def storage_uri(self) -> str | None:
         """Get the object storage URI for this artifact's content."""
         return self._storage_uri
@@ -182,6 +200,54 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
 
         self._apply(event)
 
+    @command_handler("UpdateArtifactCommand")
+    def update_artifact(self, command: UpdateArtifactCommand) -> None:
+        """Handle UpdateArtifactCommand.
+
+        Updates mutable artifact metadata (title, metadata, is_primary_deliverable).
+        """
+        from syn_domain.contexts.artifacts.domain.events.ArtifactUpdatedEvent import (
+            ArtifactUpdatedEvent,
+        )
+
+        if self.id is None:
+            msg = "Artifact does not exist"
+            raise ValueError(msg)
+        if self._is_deleted:
+            msg = "Artifact is deleted"
+            raise ValueError(msg)
+
+        event = ArtifactUpdatedEvent(
+            artifact_id=str(self.id),
+            title=command.title,
+            metadata=command.metadata,
+            is_primary_deliverable=command.is_primary_deliverable,
+        )
+        self._apply(event)
+
+    @command_handler("DeleteArtifactCommand")
+    def delete_artifact(self, command: DeleteArtifactCommand) -> None:
+        """Handle DeleteArtifactCommand.
+
+        Soft-deletes the artifact.
+        """
+        from syn_domain.contexts.artifacts.domain.events.ArtifactDeletedEvent import (
+            ArtifactDeletedEvent,
+        )
+
+        if self.id is None:
+            msg = "Artifact does not exist"
+            raise ValueError(msg)
+        if self._is_deleted:
+            msg = "Artifact is already deleted"
+            raise ValueError(msg)
+
+        event = ArtifactDeletedEvent(
+            artifact_id=str(self.id),
+            deleted_by=command.deleted_by,
+        )
+        self._apply(event)
+
     # =========================================================================
     # EVENT SOURCING HANDLERS
     # =========================================================================
@@ -203,3 +269,18 @@ class ArtifactAggregate(AggregateRoot["ArtifactCreatedEvent"]):
         self._is_primary_deliverable = event.is_primary_deliverable
         self._derived_from = list(event.derived_from)
         self._metadata = dict(event.metadata)
+
+    @event_sourcing_handler("ArtifactUpdated")
+    def on_artifact_updated(self, event: ArtifactUpdatedEvent) -> None:
+        """Apply ArtifactUpdatedEvent."""
+        if event.title is not None:
+            self._title = event.title
+        if event.metadata is not None:
+            self._metadata = dict(event.metadata)
+        if event.is_primary_deliverable is not None:
+            self._is_primary_deliverable = event.is_primary_deliverable
+
+    @event_sourcing_handler("ArtifactDeleted")
+    def on_artifact_deleted(self, _event: ArtifactDeletedEvent) -> None:
+        """Apply ArtifactDeletedEvent."""
+        self._is_deleted = True

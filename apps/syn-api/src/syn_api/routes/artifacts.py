@@ -246,12 +246,14 @@ async def create_artifact(
             CreateArtifactCommand,
         )
 
-        type_map = {
-            "research_summary": ArtifactType.RESEARCH_SUMMARY,
-            "code": ArtifactType.CODE,
-            "document": ArtifactType.DOCUMENTATION,
-        }
-        art_type = type_map.get(artifact_type.lower(), ArtifactType.RESEARCH_SUMMARY)
+        try:
+            art_type = ArtifactType(artifact_type.lower())
+        except ValueError:
+            return Err(
+                ArtifactError.INVALID_INPUT,
+                message=f"Unknown artifact_type: '{artifact_type}'. "
+                f"Valid types: {[t.value for t in ArtifactType]}",
+            )
 
         artifact_id = str(uuid4())
         command = CreateArtifactCommand(
@@ -311,6 +313,92 @@ async def upload_artifact(
 # =============================================================================
 # Request Models
 # =============================================================================
+
+
+async def update_artifact(
+    artifact_id: str,
+    title: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    is_primary_deliverable: bool | None = None,
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, ArtifactError]:
+    """Update mutable metadata of an artifact."""
+    await ensure_connected()
+    try:
+        from syn_domain.contexts.artifacts.domain.commands.UpdateArtifactCommand import (
+            UpdateArtifactCommand,
+        )
+        from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
+            ManageArtifactHandler,
+        )
+
+        command = UpdateArtifactCommand(
+            aggregate_id=artifact_id,
+            title=title,
+            metadata=metadata,
+            is_primary_deliverable=is_primary_deliverable,
+        )
+
+        repo = get_artifact_repo()
+        handler = ManageArtifactHandler(repository=repo)
+        await handler.update(command)
+        await sync_published_events_to_projections()
+        return Ok(None)
+    except KeyError:
+        return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
+    except ValueError as e:
+        if "deleted" in str(e).lower():
+            return Err(ArtifactError.ALREADY_DELETED, message=str(e))
+        return Err(ArtifactError.INVALID_INPUT, message=str(e))
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+async def delete_artifact(
+    artifact_id: str,
+    deleted_by: str = "",
+    auth: AuthContext | None = None,  # noqa: ARG001
+) -> Result[None, ArtifactError]:
+    """Soft-delete an artifact."""
+    await ensure_connected()
+    try:
+        from syn_domain.contexts.artifacts.domain.commands.DeleteArtifactCommand import (
+            DeleteArtifactCommand,
+        )
+        from syn_domain.contexts.artifacts.slices.manage_artifact.ManageArtifactHandler import (
+            ManageArtifactHandler,
+        )
+
+        command = DeleteArtifactCommand(
+            aggregate_id=artifact_id,
+            deleted_by=deleted_by,
+        )
+
+        repo = get_artifact_repo()
+        handler = ManageArtifactHandler(repository=repo)
+        await handler.delete(command)
+        await sync_published_events_to_projections()
+        return Ok(None)
+    except KeyError:
+        return Err(ArtifactError.NOT_FOUND, message=f"Artifact {artifact_id} not found")
+    except ValueError as e:
+        if "already deleted" in str(e).lower():
+            return Err(ArtifactError.ALREADY_DELETED, message=str(e))
+        return Err(ArtifactError.INVALID_INPUT, message=str(e))
+    except Exception as e:
+        return Err(ArtifactError.STORAGE_ERROR, message=str(e))
+
+
+# =============================================================================
+# Request Models
+# =============================================================================
+
+
+class UpdateArtifactRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    title: str | None = None
+    metadata: dict[str, Any] | None = None
+    is_primary_deliverable: bool | None = None
 
 
 class CreateArtifactRequest(BaseModel):
@@ -476,6 +564,43 @@ async def create_artifact_endpoint(body: CreateArtifactRequest) -> CreateArtifac
         artifact_type=body.artifact_type,
         status="created",
     )
+
+
+@router.put("/{artifact_id}", response_model=ArtifactResponse)
+async def update_artifact_endpoint(
+    artifact_id: str, body: UpdateArtifactRequest
+) -> dict[str, Any]:
+    """Update artifact metadata."""
+    result = await update_artifact(
+        artifact_id=artifact_id,
+        title=body.title,
+        metadata=body.metadata,
+        is_primary_deliverable=body.is_primary_deliverable,
+    )
+
+    if isinstance(result, Err):
+        if result.error == ArtifactError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ArtifactError.ALREADY_DELETED:
+            raise HTTPException(status_code=409, detail=result.message)
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return {"artifact_id": artifact_id, "status": "updated"}
+
+
+@router.delete("/{artifact_id}")
+async def delete_artifact_endpoint(artifact_id: str) -> dict[str, Any]:
+    """Soft-delete an artifact."""
+    result = await delete_artifact(artifact_id=artifact_id, deleted_by="api")
+
+    if isinstance(result, Err):
+        if result.error == ArtifactError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail=result.message)
+        if result.error == ArtifactError.ALREADY_DELETED:
+            raise HTTPException(status_code=409, detail=result.message)
+        raise HTTPException(status_code=400, detail=result.message)
+
+    return {"artifact_id": artifact_id, "status": "deleted"}
 
 
 @router.post("/{artifact_id}/upload", response_model=UploadArtifactResponse)

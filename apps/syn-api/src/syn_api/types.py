@@ -95,6 +95,7 @@ class ArtifactError(str, Enum):
     INVALID_INPUT = "invalid_input"
     STORAGE_ERROR = "storage_error"
     NOT_IMPLEMENTED = "not_implemented"
+    ALREADY_DELETED = "already_deleted"
 
 
 class GitHubError(str, Enum):
@@ -161,6 +162,8 @@ class RepoError(str, Enum):
     SYSTEM_NOT_FOUND = "system_not_found"
     ALREADY_ASSIGNED = "already_assigned"
     NOT_ASSIGNED = "not_assigned"
+    ALREADY_DEREGISTERED = "already_deregistered"
+    HAS_ACTIVE_TRIGGERS = "has_active_triggers"
 
 
 class AgentError(str, Enum):
