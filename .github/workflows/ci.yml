@@ -71,6 +71,17 @@ jobs:
       - name: Check test debt
         run: uv run python scripts/check_test_debt.py
 
+      # POKA-YOKE: Fail if OpenAPI spec is stale.
+      # Regenerates from the FastAPI app and diffs against the committed file.
+      # Catches endpoint additions/changes that forgot to update openapi.json.
+      - name: OpenAPI spec drift check
+        run: |
+          uv run python scripts/extract_openapi.py
+          if ! git diff --exit-code apps/syn-docs/openapi.json; then
+            echo "❌ OpenAPI spec is stale. Run 'uv run python scripts/extract_openapi.py' and commit."
+            exit 1
+          fi
+
   #############################################################################
   # ARCHITECTURAL FITNESS - Structural invariant enforcement
   #############################################################################
