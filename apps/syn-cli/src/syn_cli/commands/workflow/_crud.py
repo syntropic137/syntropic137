@@ -10,7 +10,7 @@ from rich.table import Table
 
 from syn_cli._output import console, print_error
 from syn_cli.client import get_client
-from syn_cli.commands._api_helpers import api_get, api_post, handle_connect_error
+from syn_cli.commands._api_helpers import api_delete, api_get, api_post, handle_connect_error
 from syn_cli.commands._workflow_models import WorkflowDetail
 from syn_cli.commands._workflow_resolver import WorkflowResolver
 
@@ -64,9 +64,17 @@ def create_workflow(
 
 
 @app.command("list")
-def list_workflows() -> None:
+def list_workflows(
+    include_archived: Annotated[
+        bool,
+        typer.Option("--include-archived", help="Include archived workflows"),
+    ] = False,
+) -> None:
     """List all workflows in the system."""
-    data = api_get("/workflows")
+    params: dict[str, str] = {}
+    if include_archived:
+        params["include_archived"] = "true"
+    data = api_get("/workflows", params=params)
 
     workflows = data.get("workflows", [])
     if not workflows:
@@ -147,6 +155,36 @@ def validate_workflow(
         for error in validation.get("errors", []):
             console.print(f"  {error}")
         raise typer.Exit(1)
+
+
+@app.command("delete")
+def delete_workflow(
+    workflow_id: Annotated[str, typer.Argument(help="Workflow ID (partial match supported)")],
+    force: Annotated[
+        bool,
+        typer.Option("--force", "-f", help="Skip confirmation prompt"),
+    ] = False,
+) -> None:
+    """Archive (soft-delete) a workflow template.
+
+    Archived workflows are hidden from 'syn workflow list' by default.
+    Use 'syn workflow list --include-archived' to see them.
+    """
+    try:
+        with get_client() as client:
+            wf = WorkflowResolver(client).resolve(workflow_id, include_archived=True)
+    except typer.Exit:
+        raise
+    except Exception:
+        handle_connect_error()
+
+    if not force and not typer.confirm(f"Archive workflow '{wf.name}' ({wf.id})?"):
+        console.print("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
+
+    api_delete(f"/workflows/{wf.id}")
+    console.print(f"[bold green]Archived workflow:[/bold green] [cyan]{wf.name}[/cyan]")
+    console.print(f"  ID: [dim]{wf.id}[/dim]")
 
 
 def _validate_package_dir(path: Path) -> None:

@@ -41,6 +41,9 @@ class WorkflowSummary:
     runs_count: int = 0
     """Number of times this workflow has been executed."""
 
+    is_archived: bool = False
+    """Whether this workflow template has been archived."""
+
     @classmethod
     def from_dict(cls, data: dict) -> "WorkflowSummary":
         """Create from dictionary data."""
@@ -53,6 +56,7 @@ class WorkflowSummary:
             description=data.get("description"),
             created_at=data.get("created_at"),
             runs_count=data.get("runs_count", 0),
+            is_archived=data.get("is_archived", False),
         )
 
     def to_dict(self) -> dict:
@@ -75,4 +79,5 @@ class WorkflowSummary:
             "description": self.description,
             "created_at": created_at_str,
             "runs_count": self.runs_count,
+            "is_archived": self.is_archived,
         }

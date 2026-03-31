@@ -28,6 +28,9 @@ async def get_workflow_by_id(
     from syn_domain.contexts.orchestration.domain.aggregate_workflow_template.WorkflowTemplateAggregate import (
         WorkflowTemplateAggregate,
     )
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+        WorkflowTemplateArchivedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
     )
@@ -41,23 +44,28 @@ async def get_workflow_by_id(
     # Reconstruct aggregate from events using SDK's rehydrate method
     aggregate = WorkflowTemplateAggregate()
 
+    _EVENT_CLASSES: dict[str, type] = {
+        "WorkflowTemplateCreated": WorkflowTemplateCreatedEvent,
+        "WorkflowTemplateArchived": WorkflowTemplateArchivedEvent,
+    }
+
     # Build EventEnvelope list for rehydration
-    envelopes: list[EventEnvelope[WorkflowTemplateCreatedEvent]] = []
+    envelopes: list[EventEnvelope[Any]] = []
     for stored_event in stored_events:
-        if stored_event.event_type == "WorkflowTemplateCreated":
-            # Reconstruct the event from stored data
-            event = WorkflowTemplateCreatedEvent(**stored_event.event_data)
-            metadata = EventMetadata(
-                event_id=f"evt-{stored_event.sequence}",
-                aggregate_id=stored_event.aggregate_id,
-                aggregate_type=stored_event.aggregate_type,
-                aggregate_nonce=stored_event.version,
-            )
-            envelope = EventEnvelope(event=event, metadata=metadata)
-            envelopes.append(envelope)
+        event_cls = _EVENT_CLASSES.get(stored_event.event_type)
+        if event_cls is None:
+            continue
+        event = event_cls(**stored_event.event_data)
+        metadata = EventMetadata(
+            event_id=f"evt-{stored_event.sequence}",
+            aggregate_id=stored_event.aggregate_id,
+            aggregate_type=stored_event.aggregate_type,
+            aggregate_nonce=stored_event.version,
+        )
+        envelopes.append(EventEnvelope(event=event, metadata=metadata))
 
     # Use SDK's rehydrate method for proper event sourcing replay
-    aggregate.rehydrate(envelopes)  # type: ignore[arg-type]  # generic covariance: list[EventEnvelope[SpecificEvent]] is compatible with list[EventEnvelope[DomainEvent]]
+    aggregate.rehydrate(envelopes)  # type: ignore[arg-type]  # generic covariance
 
     return aggregate
 
@@ -68,22 +76,31 @@ def _build_envelopes(
     """Build EventEnvelope list from stored events for a single aggregate."""
     from event_sourcing import EventEnvelope, EventMetadata
 
+    from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateArchivedEvent import (
+        WorkflowTemplateArchivedEvent,
+    )
     from syn_domain.contexts.orchestration.domain.events.WorkflowTemplateCreatedEvent import (
         WorkflowTemplateCreatedEvent,
     )
 
+    event_classes: dict[str, type] = {
+        "WorkflowTemplateCreated": WorkflowTemplateCreatedEvent,
+        "WorkflowTemplateArchived": WorkflowTemplateArchivedEvent,
+    }
+
     envelopes: list[EventEnvelope[Any]] = []
     for stored_event in stored_events:
-        if stored_event.event_type != "WorkflowTemplateCreated":  # type: ignore[union-attr]
+        event_cls = event_classes.get(stored_event.event_type)  # type: ignore[union-attr]
+        if event_cls is None:
             continue
-        workflow_event = WorkflowTemplateCreatedEvent(**stored_event.event_data)  # type: ignore[union-attr]
+        event = event_cls(**stored_event.event_data)  # type: ignore[union-attr]
         metadata = EventMetadata(
             event_id=f"evt-{stored_event.sequence}",  # type: ignore[union-attr]
             aggregate_id=stored_event.aggregate_id,  # type: ignore[union-attr]
             aggregate_type=stored_event.aggregate_type,  # type: ignore[union-attr]
             aggregate_nonce=stored_event.version,  # type: ignore[union-attr]
         )
-        envelopes.append(EventEnvelope(event=workflow_event, metadata=metadata))
+        envelopes.append(EventEnvelope(event=event, metadata=metadata))
     return envelopes
 
 

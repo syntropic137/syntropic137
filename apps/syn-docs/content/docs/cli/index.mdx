@@ -52,6 +52,14 @@ syn workflow init ./my-plugin --name "My Plugin" --multi
 ```bash
 # List workflows
 syn workflow list
+syn workflow list --include-archived    # include archived templates
+
+# Create a workflow
+syn workflow create --type implementation --repo owner/repo
+
+# Delete (archive) a workflow
+syn workflow delete <id>                # soft-delete with confirmation
+syn workflow delete <id> --force        # skip confirmation prompt
 
 # Show workflow details
 syn workflow show <workflow-id>
@@ -62,7 +70,7 @@ syn workflow create "My Workflow" --type research
 # Run a workflow
 syn workflow run <workflow-id> --task "Your task here"
 
-# Get execution status
+# Show workflow run history
 syn workflow status <workflow-id>
 ```
 

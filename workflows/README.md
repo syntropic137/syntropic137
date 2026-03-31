@@ -155,6 +155,35 @@ Content is resolved at install time (copy-on-create) — no runtime coupling.
 
 ## Development: Seeding
 
+## Editing Phases After Creation
+
+Once a workflow is installed, individual phases can be updated via the API or the dashboard UI without re-creating the entire workflow.
+
+### API
+
+```bash
+curl -X PUT /api/v1/workflows/{workflow_id}/phases/{phase_id} \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt_template": "Updated prompt with $ARGUMENTS",
+    "model": "opus",
+    "timeout_seconds": 600
+  }'
+```
+
+Only `prompt_template` is required. Optional fields (`model`, `timeout_seconds`, `allowed_tools`) use **"keep existing" semantics** — omit them or pass `null` to preserve the current value. Pass an explicit empty value (e.g., `"allowed_tools": []`) to clear a field.
+
+### Dashboard
+
+1. Open a workflow's detail page
+2. Click a phase in the pipeline visualization
+3. Use the editor to modify the prompt (with live markdown preview) and phase configuration
+4. Click **Save**
+
+Changes are event-sourced — the original prompt is preserved in the event history and can be replayed.
+
+## Development: Seeding
+
 For local development and testing, workflows can be seeded directly into the event store bypassing the API:
 
 ```bash

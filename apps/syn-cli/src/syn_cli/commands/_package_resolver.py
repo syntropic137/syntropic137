@@ -8,6 +8,7 @@ POST to the Syntropic137 API.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 from datetime import UTC, datetime
@@ -97,10 +98,9 @@ def parse_source(source: str) -> tuple[str, bool]:
     if path.exists() or source.startswith((".", "/")):
         return (source, False)
 
-    # GitHub shorthand: org/repo or org/repo@ref
-    if "/" in source and not source.startswith("."):
-        base = source.split("@")[0] if "@" in source else source
-        return (f"https://github.com/{base}.git", True)
+    # GitHub shorthand: org/repo (use --ref flag for branch/tag)
+    if "/" in source and "@" not in source and not source.startswith("."):
+        return (f"https://github.com/{source}.git", True)
 
     # Fallback: treat as local path (will fail gracefully at detection)
     return (source, False)
@@ -366,6 +366,7 @@ def resolve_from_git(
         timeout=120,
     )
     if result.returncode != 0:
+        shutil.rmtree(tmpdir, ignore_errors=True)
         msg = f"git clone failed: {result.stderr.strip()}"
         raise RuntimeError(msg)
 
