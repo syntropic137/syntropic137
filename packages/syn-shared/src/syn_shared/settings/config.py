@@ -364,10 +364,7 @@ class Settings(BaseSettings):
 
     s3_endpoint_url: str | None = Field(
         default=None,
-        description=(
-            "S3-compatible endpoint URL. "
-            "Leave empty for AWS S3."
-        ),
+        description=("S3-compatible endpoint URL. Leave empty for AWS S3."),
     )
 
     s3_access_key_id: SecretStr | None = Field(

@@ -36,6 +36,10 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Compose files used in all compose commands
+  COMPOSE_FILES: -f docker/docker-compose.yaml -f docker/docker-compose.selfhost.yaml
+
 jobs:
   compose-smoke:
     name: Compose Stack Smoke Test
@@ -49,7 +53,7 @@ jobs:
           submodules: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232dc # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # -------------------------------------------------------------------------
       # Create minimal secrets and env for the selfhost stack.
@@ -85,13 +89,7 @@ jobs:
       # -------------------------------------------------------------------------
 
       - name: Build and start selfhost stack
-        run: |
-          docker compose \
-            -f docker/docker-compose.yaml \
-            -f docker/docker-compose.selfhost.yaml \
-            up --build -d
-        env:
-          COMPOSE_PROJECT_NAME: syn137_smoke
+        run: docker compose $COMPOSE_FILES up --build -d
 
       # -------------------------------------------------------------------------
       # Validation checks
@@ -109,7 +107,7 @@ jobs:
             fi
             if [ "$i" -eq 30 ]; then
               echo "ERROR: API did not become healthy within 5 minutes."
-              docker compose -f docker/docker-compose.yaml -f docker/docker-compose.selfhost.yaml logs api
+              docker compose $COMPOSE_FILES logs api
               exit 1
             fi
             sleep 10
@@ -117,10 +115,11 @@ jobs:
 
       - name: Verify syn-api health endpoint responds
         run: |
-          docker exec syn137-api python -c "
+          # Port 8000 is the internal API port (container-side)
+          docker compose $COMPOSE_FILES exec -T api python -c "
           import urllib.request, json, sys
           try:
-              with urllib.request.urlopen('http://localhost:8137/health', timeout=10) as r:
+              with urllib.request.urlopen('http://localhost:8000/health', timeout=10) as r:
                   data = json.loads(r.read())
                   print('Health response:', json.dumps(data, indent=2))
                   sys.exit(0)
@@ -132,29 +131,40 @@ jobs:
       - name: Verify Docker CLI is present in syn-api image
         run: |
           echo "Checking for Docker CLI in syn-api container..."
-          docker exec syn137-api docker --version
+          docker compose $COMPOSE_FILES exec -T api docker --version
           echo "Docker CLI found."
 
       - name: Verify envoy-proxy admin endpoint is reachable
         run: |
           echo "Checking Envoy proxy readiness..."
-          docker exec syn137-envoy-proxy wget -qO- http://localhost:9901/ready || \
-          docker exec syn137-api wget -qO- http://envoy-proxy:9901/ready
+          # Use docker compose exec (service name) rather than docker exec (container name)
+          # because envoy-proxy has no explicit container_name in the selfhost overlay.
+          docker compose $COMPOSE_FILES exec -T envoy-proxy \
+            wget -qO- http://localhost:9901/ready || \
+          docker compose $COMPOSE_FILES exec -T api \
+            wget -qO- http://envoy-proxy:9901/ready
           echo "Envoy proxy is ready."
 
       - name: Verify service DNS resolution on agent-net
         run: |
           echo "Verifying envoy-proxy is reachable by service name from agent-net..."
-          # Create a temporary container on agent-net and resolve envoy-proxy
-          docker run --rm \
-            --network syntropic137_smoke_agent-net \
-            busybox:latest \
-            nslookup envoy-proxy
+          # Discover the agent-net network name dynamically (includes project name prefix)
+          AGENT_NET=$(docker network ls --filter name=agent-net --format '{{.Name}}' | head -1)
+          echo "Found agent network: $AGENT_NET"
+          if [ -z "$AGENT_NET" ]; then
+            echo "ERROR: Could not find agent-net network"
+            docker network ls
+            exit 1
+          fi
+          docker run --rm --network "$AGENT_NET" busybox:latest nslookup envoy-proxy
           echo "DNS resolution successful."
 
       - name: Verify API can create a workflow (round-trip)
         run: |
-          docker exec syn137-api python -c "
+          # Port 8000 is the internal API port (container-side).
+          # Minimal payload — avoids list-typed phase fields that would
+          # require a broader request schema.
+          docker compose $COMPOSE_FILES exec -T api python -c "
           import urllib.request, urllib.error, json, sys
 
           payload = json.dumps({
@@ -167,12 +177,11 @@ jobs:
                   'name': 'smoke-phase',
                   'prompt_template': 'Respond with OK',
                   'model': 'claude-haiku-4-5-20251001',
-                  'allowed_tools': ['Bash'],
               }]
           }).encode()
 
           req = urllib.request.Request(
-              'http://localhost:8137/api/v1/workflows',
+              'http://localhost:8000/api/v1/workflows',
               data=payload,
               headers={'Content-Type': 'application/json'},
               method='POST'
@@ -203,20 +212,10 @@ jobs:
         if: failure()
         run: |
           echo "=== Collecting container logs ==="
-          docker compose \
-            -f docker/docker-compose.yaml \
-            -f docker/docker-compose.selfhost.yaml \
-            logs --tail=100
+          docker compose $COMPOSE_FILES logs --tail=100
           echo "=== Container status ==="
-          docker compose \
-            -f docker/docker-compose.yaml \
-            -f docker/docker-compose.selfhost.yaml \
-            ps
+          docker compose $COMPOSE_FILES ps
 
       - name: Tear down stack
         if: always()
-        run: |
-          docker compose \
-            -f docker/docker-compose.yaml \
-            -f docker/docker-compose.selfhost.yaml \
-            down -v --remove-orphans
+        run: docker compose $COMPOSE_FILES down -v --remove-orphans

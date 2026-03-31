@@ -5,8 +5,6 @@ Validates:
 2. Build args declared in compose files are a subset of ARGs in the corresponding
    Dockerfile — build-args that don't exist in the Dockerfile are silently ignored
    by Docker, masking configuration drift.
-3. Services that define an Envoy proxy use the canonical service name 'envoy-proxy'
-   (not container-name-based hostnames).
 """
 
 from __future__ import annotations
