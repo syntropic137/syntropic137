@@ -27,10 +27,6 @@ class UpdateArtifactCommand(BaseModel):
     @model_validator(mode="after")
     def check_at_least_one_field(self) -> UpdateArtifactCommand:
         """Ensure at least one field to update is provided."""
-        if (
-            self.title is None
-            and self.metadata is None
-            and self.is_primary_deliverable is None
-        ):
+        if self.title is None and self.metadata is None and self.is_primary_deliverable is None:
             raise ValueError("at least one field to update is required")
         return self

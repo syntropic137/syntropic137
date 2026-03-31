@@ -41,9 +41,5 @@ class UpdateRepoCommand:
         """Validate the command."""
         if not self.repo_id:
             raise ValueError("repo_id is required")
-        if (
-            self.default_branch is None
-            and self.is_private is None
-            and self.installation_id is None
-        ):
+        if self.default_branch is None and self.is_private is None and self.installation_id is None:
             raise ValueError("at least one field to update is required")
