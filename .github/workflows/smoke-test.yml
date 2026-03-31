@@ -11,6 +11,20 @@ name: Smoke Test
 #
 # Uses the actual selfhost compose overlay (docker-compose.selfhost.yaml)
 # with locally-built images — same Dockerfiles and build-args as release.
+#
+# Strategy: runs on push to main (post-merge), NOT on PRs.
+#
+# The full Docker stack build takes ~4 minutes, which is a significant
+# bottleneck for PR iteration. Tier 1 fitness tests (hostname agreement,
+# compose consistency, field round-trip) run on every push in ~5 seconds
+# and catch most config drift. This smoke test is the post-merge safety net.
+#
+# Release process: releases are cut from main only after confirming the
+# smoke test passed on the merge commit. If the smoke test fails on main,
+# the release is blocked until the issue is fixed.
+#
+# To re-enable PR-level smoke testing (e.g. when Docker build caching
+# brings the time down), uncomment the pull_request trigger below.
 
 on:
   push:
@@ -21,13 +35,16 @@ on:
       - 'docker/**'
       - 'infra/docker/**'
       - '.github/workflows/smoke-test.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'docker/**'
-      - 'infra/docker/**'
-      - '.github/workflows/smoke-test.yml'
+  # Disabled: ~4 min Docker build is a CI/CD bottleneck for PR iteration.
+  # Tier 1 fitness tests catch config drift on every push. This smoke test
+  # runs post-merge as a safety net before release.
+  # pull_request:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'docker/**'
+  #     - 'infra/docker/**'
+  #     - '.github/workflows/smoke-test.yml'
   workflow_dispatch:
 
 concurrency:
