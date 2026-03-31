@@ -75,7 +75,9 @@ def test_build_phase_defs_preserves_all_fields() -> None:
     assert phase.input_artifact_types == ["research_report", "code_bundle"], (
         "input_artifact_types was not preserved"
     )
-    assert phase.output_artifact_types == ["test_results"], "output_artifact_types was not preserved"
+    assert phase.output_artifact_types == ["test_results"], (
+        "output_artifact_types was not preserved"
+    )
     assert phase.prompt_template == "Analyze the following: $ARGUMENTS", (
         "prompt_template was silently dropped — this is ISS-405"
     )
@@ -83,4 +85,7 @@ def test_build_phase_defs_preserves_all_fields() -> None:
     assert phase.timeout_seconds == 600, "timeout_seconds was silently dropped"
     assert phase.allowed_tools == ["Read", "Write", "Bash"], "allowed_tools was silently dropped"
     assert phase.argument_hint == "[task-description]", "argument_hint was silently dropped"
+    assert phase.execution_type == PhaseExecutionType.PARALLEL.value, (
+        "execution_type was silently dropped"
+    )
     assert phase.model == "claude-opus-4-6", "model was silently dropped"

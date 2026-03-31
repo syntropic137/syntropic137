@@ -179,9 +179,7 @@ def _replace_default_network(services: dict) -> None:
     for svc in services.values():
         networks = svc.get("networks")
         if networks and isinstance(networks, list):
-            svc["networks"] = [
-                "syn-internal" if n == "default" else n for n in networks
-            ]
+            svc["networks"] = ["syn-internal" if n == "default" else n for n in networks]
 
 
 def _apply_api_overrides(services: dict) -> None:
@@ -254,8 +252,14 @@ def _apply_collector_overrides(services: dict) -> None:
     svc["volumes"] = volumes
     svc["entrypoint"] = ["/bin/sh", "/selfhost-entrypoint.sh"]
     svc["command"] = [
-        "python", "-m", "syn_collector.cli", "serve",
-        "--port", "8080", "--host", "0.0.0.0",
+        "python",
+        "-m",
+        "syn_collector.cli",
+        "serve",
+        "--port",
+        "8080",
+        "--host",
+        "0.0.0.0",
     ]
     # Add db_password secret
     secrets = svc.get("secrets", [])

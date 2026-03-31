@@ -229,7 +229,7 @@ class CreateWorkflowRequest(BaseModel):
     repository_url: str = "https://github.com/example/repo"
     repository_ref: str = "main"
     description: str | None = None
-    phases: list[dict[str, str | int]] | None = None
+    phases: list[dict[str, Any]] | None = None
 
 
 class ValidateYamlRequest(BaseModel):

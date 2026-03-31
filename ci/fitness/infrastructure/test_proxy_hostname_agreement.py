@@ -107,7 +107,11 @@ def test_proxy_hostname_agreement() -> None:
     )
 
     # Envoy domains and injector hosts should share the proxy hostname
-    shared = envoy_domains & injector_hosts - {"api.anthropic.com", "claude.ai", "api.anthropic.com:443"}
+    shared = envoy_domains & injector_hosts - {
+        "api.anthropic.com",
+        "claude.ai",
+        "api.anthropic.com:443",
+    }
     assert shared, (
         f"No shared proxy hostname between envoy domains {sorted(envoy_domains)} "
         f"and injector hosts {sorted(injector_hosts)}. "

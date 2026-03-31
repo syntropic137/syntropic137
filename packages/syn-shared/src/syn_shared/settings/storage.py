@@ -95,9 +95,7 @@ class StorageSettings(BaseSettings):
     bucket_name: str = Field(
         default="syn-artifacts",
         description=(
-            "Storage bucket name for artifacts. "
-            "Used by MinIO provider. "
-            "Default: syn-artifacts"
+            "Storage bucket name for artifacts. Used by MinIO provider. Default: syn-artifacts"
         ),
     )
 
