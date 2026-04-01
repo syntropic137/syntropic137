@@ -42,7 +42,8 @@ class TestEventTypeMapper:
         assert result.event_type == "pull_request"
         assert result.action == "opened"
 
-    def test_maps_check_run_event(self) -> None:
+    def test_check_run_event_not_in_events_api(self) -> None:
+        """CheckRunEvent is webhook-only — the Events API never returns it (ISS-409)."""
         raw = {
             "id": "111",
             "type": "CheckRunEvent",
@@ -50,10 +51,7 @@ class TestEventTypeMapper:
             "payload": {"action": "completed", "check_run": {"id": 99}},
             "created_at": "2026-01-01T00:00:00Z",
         }
-        result = map_events_api_to_normalized(raw, "inst-1")
-        assert result is not None
-        assert result.event_type == "check_run"
-        assert result.action == "completed"
+        assert map_events_api_to_normalized(raw, "inst-1") is None
 
     def test_maps_issue_comment_event(self) -> None:
         raw = {
