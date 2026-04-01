@@ -220,6 +220,10 @@ class PhaseDefinitionResponse(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     argument_hint: str | None = None
     model: str | None = None
+    execution_type: str = "sequential"
+    max_tokens: int | None = None
+    input_artifact_types: list[str] = Field(default_factory=list)
+    output_artifact_types: list[str] = Field(default_factory=list)
 
 
 class WorkflowDetail(BaseModel):

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -111,6 +112,19 @@ class ExecutionHistoryResponse(BaseModel):
     total_executions: int = 0
 
 
+class ExportManifestResponse(BaseModel):
+    """Structured export of a workflow as a file manifest.
+
+    Each key in ``files`` is a relative path; each value is the file content.
+    The CLI writes these to disk to produce an installable package or plugin.
+    """
+
+    format: Literal["package", "plugin"]
+    workflow_id: str
+    workflow_name: str
+    files: dict[str, str]
+
+
 # -- Mapping helpers (single source of truth for phase/input mapping) ---------
 
 
@@ -128,6 +142,10 @@ def _map_phases(raw_phases: list[PhaseDefinitionDetail] | None) -> list[PhaseDef
             allowed_tools=list(p.allowed_tools),
             argument_hint=p.argument_hint,
             model=p.model,
+            execution_type=p.execution_type,
+            max_tokens=p.max_tokens,
+            input_artifact_types=list(p.input_artifact_types),
+            output_artifact_types=list(p.output_artifact_types),
         )
         for p in (raw_phases or [])
     ]
@@ -207,6 +225,235 @@ async def get_workflow(
             runs_count=detail.runs_count,
         )
     )
+
+
+async def export_workflow(
+    workflow_id: str,
+    fmt: Literal["package", "plugin"] = "package",
+) -> Result[ExportManifestResponse, WorkflowError]:
+    """Export a workflow as a structured file manifest.
+
+    Builds the file tree for a workflow package or Claude Code plugin.
+    The CLI writes these files to disk to produce an installable directory.
+    """
+    result = await get_workflow(workflow_id)
+    if isinstance(result, Err):
+        return result
+
+    detail = result.value
+    files: dict[str, str] = {}
+    slug = _sanitize_slug(detail.name)
+
+    try:
+        if fmt == "plugin":
+            _build_plugin_files(detail, slug, files)
+        else:
+            _build_package_files(detail, files)
+    except ValueError as exc:
+        return Err(WorkflowError.INVALID_INPUT, message=str(exc))
+
+    return Ok(
+        ExportManifestResponse(
+            format=fmt,
+            workflow_id=detail.id,
+            workflow_name=detail.name,
+            files=files,
+        )
+    )
+
+
+# -- Export helpers -----------------------------------------------------------
+
+_SAFE_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+_SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
+
+# Characters that require quoting in YAML scalar values.
+_YAML_SPECIAL_RE = re.compile(r"[:{}\[\],&*?|>!%#@`\"\'\n]")
+
+
+def _sanitize_slug(name: str) -> str:
+    """Convert a workflow name to a safe slug for file paths."""
+    slug = name.lower().replace(" ", "-")
+    slug = re.sub(r"[^a-z0-9._-]", "", slug)
+    slug = slug.strip(".-")
+    if not slug or not _SAFE_SLUG_RE.match(slug):
+        slug = "workflow"
+    return slug
+
+
+def _validate_phase_id(phase_id: str) -> str:
+    """Validate a phase ID is safe for use in file paths."""
+    if not _SAFE_ID_RE.match(phase_id):
+        msg = f"Phase ID contains unsafe characters: {phase_id!r}"
+        raise ValueError(msg)
+    return phase_id
+
+
+def _yaml_quote(value: str) -> str:
+    """Quote a YAML string value if it contains special characters."""
+    if _YAML_SPECIAL_RE.search(value):
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
+
+
+# -- Export file builders -----------------------------------------------------
+
+
+def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
+    """Build a .md file with YAML frontmatter from a phase definition.
+
+    Uses kebab-case keys matching what md_prompt_loader.py expects on import.
+    """
+    frontmatter_lines: list[str] = []
+
+    if phase.model:
+        frontmatter_lines.append(f"model: {_yaml_quote(phase.model)}")
+    if phase.argument_hint:
+        frontmatter_lines.append(f"argument-hint: {_yaml_quote(phase.argument_hint)}")
+    if phase.allowed_tools:
+        frontmatter_lines.append(f"allowed-tools: {','.join(phase.allowed_tools)}")
+    if phase.timeout_seconds and phase.timeout_seconds != 300:
+        frontmatter_lines.append(f"timeout-seconds: {phase.timeout_seconds}")
+    if phase.max_tokens is not None:
+        frontmatter_lines.append(f"max-tokens: {phase.max_tokens}")
+
+    body = phase.prompt_template or ""
+
+    if frontmatter_lines:
+        frontmatter = "\n".join(frontmatter_lines)
+        return f"---\n{frontmatter}\n---\n\n{body}\n"
+    return f"{body}\n"
+
+
+def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
+    """Build the ``inputs:`` block lines for workflow.yaml."""
+    if not detail.input_declarations:
+        return []
+    lines: list[str] = ["", "inputs:"]
+    for decl in detail.input_declarations:
+        lines.append(f"  - name: {_yaml_quote(decl.name)}")
+        if decl.description:
+            lines.append(f"    description: {_yaml_quote(decl.description)}")
+        lines.append(f"    required: {str(decl.required).lower()}")
+        if decl.default is not None:
+            lines.append(f"    default: {_yaml_quote(decl.default)}")
+    return lines
+
+
+def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """Build the phase entry lines for a single phase in workflow.yaml."""
+    pid = _validate_phase_id(phase.phase_id)
+    lines = [
+        f"  - id: {pid}",
+        f"    name: {_yaml_quote(phase.name)}",
+        f"    order: {phase.order}",
+        f"    execution_type: {phase.execution_type}",
+    ]
+    if phase.description:
+        lines.append(f"    description: {_yaml_quote(phase.description)}")
+    lines.append(f"    prompt_file: phases/{pid}.md")
+    if phase.output_artifact_types:
+        artifacts = ", ".join(phase.output_artifact_types)
+        lines.append(f"    output_artifacts: [{artifacts}]")
+    return lines
+
+
+def _build_workflow_yaml(detail: WorkflowDetail) -> str:
+    """Build workflow.yaml content from a WorkflowDetail.
+
+    Phase definitions use ``prompt_file`` references to external .md files,
+    matching the format that ``WorkflowDefinition.from_file()`` expects.
+    Paths are always relative to the workflow.yaml location.
+    """
+    lines: list[str] = [
+        f"id: {detail.id}",
+        f"name: {_yaml_quote(detail.name)}",
+        f"description: {_yaml_quote(detail.description or '')}",
+        f"type: {detail.workflow_type}",
+        f"classification: {detail.classification}",
+        *_yaml_input_lines(detail),
+        "",
+        "phases:",
+    ]
+    for phase in sorted(detail.phases, key=lambda p: p.order):
+        lines.extend(_yaml_phase_lines(phase))
+    return "\n".join(lines) + "\n"
+
+
+def _build_readme(detail: WorkflowDetail) -> str:
+    """Build README.md for an exported package."""
+    phase_list = "\n".join(
+        f"- **Phase {p.order}:** {p.name}" for p in sorted(detail.phases, key=lambda p: p.order)
+    )
+    return (
+        f"# {detail.name}\n\n"
+        f"{detail.description or ''}\n\n"
+        f"## Usage\n\n"
+        f"```bash\n"
+        f"syn workflow install .\n"
+        f'syn workflow run {detail.id} --task "Your task here"\n'
+        f"```\n\n"
+        f"## Phases\n\n"
+        f"{phase_list}\n"
+    )
+
+
+def _build_manifest_yaml(detail: WorkflowDetail, slug: str) -> str:
+    """Build syntropic137.yaml manifest."""
+    return (
+        f"manifest_version: 1\n"
+        f"name: {slug}\n"
+        f'version: "0.1.0"\n'
+        f"description: {_yaml_quote(detail.description or detail.name)}\n"
+    )
+
+
+def _build_cc_command(detail: WorkflowDetail, slug: str) -> str:
+    """Build a Claude Code command wrapper .md file."""
+    return (
+        f"---\n"
+        f"model: sonnet\n"
+        f'argument-hint: "<task>"\n'
+        f"allowed-tools: Bash\n"
+        f"---\n\n"
+        f"# /syn-{slug} — Run {detail.name} Workflow\n\n"
+        f"Execute the {slug} workflow via Syntropic137:\n\n"
+        f"```bash\n"
+        f'syn workflow run {detail.id} --task "$ARGUMENTS"\n'
+        f"```\n"
+    )
+
+
+def _build_package_files(
+    detail: WorkflowDetail,
+    files: dict[str, str],
+) -> None:
+    """Populate ``files`` dict with package format structure."""
+    files["workflow.yaml"] = _build_workflow_yaml(detail)
+    files["README.md"] = _build_readme(detail)
+
+    for phase in detail.phases:
+        pid = _validate_phase_id(phase.phase_id)
+        files[f"phases/{pid}.md"] = _build_phase_md(phase)
+
+
+def _build_plugin_files(
+    detail: WorkflowDetail,
+    slug: str,
+    files: dict[str, str],
+) -> None:
+    """Populate ``files`` dict with plugin format structure."""
+    files["syntropic137.yaml"] = _build_manifest_yaml(detail, slug)
+    files["README.md"] = _build_readme(detail)
+    files[f"commands/syn-{slug}.md"] = _build_cc_command(detail, slug)
+
+    wf_prefix = f"workflows/{slug}"
+    files[f"{wf_prefix}/workflow.yaml"] = _build_workflow_yaml(detail)
+
+    for phase in detail.phases:
+        pid = _validate_phase_id(phase.phase_id)
+        files[f"{wf_prefix}/phases/{pid}.md"] = _build_phase_md(phase)
 
 
 # -- HTTP Endpoints -----------------------------------------------------------
@@ -300,6 +547,23 @@ async def get_workflow_endpoint(workflow_id: str) -> WorkflowResponse:
         runs_count=detail.runs_count,
         runs_link=f"/api/workflows/{detail.id}/runs",
     )
+
+
+@router.get("/{workflow_id}/export", response_model=ExportManifestResponse)
+async def export_workflow_endpoint(
+    workflow_id: str,
+    format: Literal["package", "plugin"] = Query(
+        "package",
+        description="Export format: 'package' (workflow.yaml + phases) or 'plugin' (full CC plugin)",
+    ),
+) -> ExportManifestResponse:
+    """Export a workflow as a distributable package or Claude Code plugin."""
+    result = await export_workflow(workflow_id, fmt=format)
+    if isinstance(result, Err):
+        if result.error == WorkflowError.NOT_FOUND:
+            raise HTTPException(status_code=404, detail=f"Workflow {workflow_id} not found")
+        raise HTTPException(status_code=422, detail=result.message)
+    return result.value
 
 
 @router.get("/{workflow_id}/runs", response_model=ExecutionRunListResponse)

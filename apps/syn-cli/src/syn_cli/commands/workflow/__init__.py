@@ -1,4 +1,4 @@
-"""Workflow management commands — create, list, show, run, status, validate, install, init."""
+"""Workflow management commands — create, list, show, run, status, validate, install, init, export."""
 
 from syn_cli.commands.workflow._crud import (
     app,
@@ -7,6 +7,7 @@ from syn_cli.commands.workflow._crud import (
     show_workflow,
     validate_workflow,
 )
+from syn_cli.commands.workflow._export import export_workflow
 from syn_cli.commands.workflow._install import (
     init_package,
     install_workflow,
@@ -17,6 +18,7 @@ from syn_cli.commands.workflow._run import run_workflow, workflow_status
 __all__ = [
     "app",
     "create_workflow",
+    "export_workflow",
     "init_package",
     "install_workflow",
     "list_installed",
