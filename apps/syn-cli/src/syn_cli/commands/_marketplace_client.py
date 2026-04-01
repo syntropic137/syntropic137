@@ -225,6 +225,28 @@ def _matches_query(
     )
 
 
+def _matches_filters(
+    plugin: MarketplacePluginEntry,
+    query: str,
+    category: str | None,
+    tag: str | None,
+) -> bool:
+    """Check if a plugin matches all search filters."""
+    if not _matches_query(plugin, query):
+        return False
+    if category and plugin.category.lower() != category.lower():
+        return False
+    return not (tag and not any(t.lower() == tag.lower() for t in plugin.tags))
+
+
+def _get_registry_index(name: str, entry: RegistryEntry) -> MarketplaceIndex | None:
+    """Refresh and return a registry index, or None on failure."""
+    try:
+        return refresh_index(name, entry)
+    except RuntimeError:
+        return None
+
+
 def search_all_registries(
     query: str = "",
     *,
@@ -240,21 +262,25 @@ def search_all_registries(
     results: list[tuple[str, MarketplacePluginEntry]] = []
 
     for name, entry in config.registries.items():
-        try:
-            index = refresh_index(name, entry)
-        except RuntimeError:
-            continue  # skip unreachable registries
-
+        index = _get_registry_index(name, entry)
+        if index is None:
+            continue
         for plugin in index.plugins:
-            if not _matches_query(plugin, query):
-                continue
-            if category and plugin.category.lower() != category.lower():
-                continue
-            if tag and not any(t.lower() == tag.lower() for t in plugin.tags):
-                continue
-            results.append((name, plugin))
+            if _matches_filters(plugin, query, category, tag):
+                results.append((name, plugin))
 
     return results
+
+
+def _resolve_target_registries(
+    config: RegistryConfig, registry: str | None
+) -> list[tuple[str, RegistryEntry]]:
+    """Build the list of registries to search."""
+    if registry:
+        if registry not in config.registries:
+            return []
+        return [(registry, config.registries[registry])]
+    return list(config.registries.items())
 
 
 def resolve_plugin_by_name(
@@ -273,18 +299,10 @@ def resolve_plugin_by_name(
     """
     config = load_registries()
 
-    registries = config.registries.items()
-    if registry:
-        if registry not in config.registries:
-            return None
-        registries = [(registry, config.registries[registry])]
-
-    for reg_name, entry in registries:
-        try:
-            index = refresh_index(reg_name, entry)
-        except RuntimeError:
+    for reg_name, entry in _resolve_target_registries(config, registry):
+        index = _get_registry_index(reg_name, entry)
+        if index is None:
             continue
-
         for plugin in index.plugins:
             if plugin.name == name:
                 return (reg_name, entry, plugin)

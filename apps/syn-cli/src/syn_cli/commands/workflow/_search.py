@@ -16,6 +16,45 @@ from syn_cli.commands._marketplace_client import (
 from syn_cli.commands.workflow._crud import app
 
 
+def _print_no_results(query: str, category: str | None, tag: str | None) -> None:
+    """Print empty results message with contextual help."""
+    console.print("[dim]No workflows found.[/dim]")
+    if not query and not category and not tag:
+        console.print(
+            "[dim]Add a marketplace first: syn marketplace add syntropic137/workflow-library[/dim]"
+        )
+
+
+def _print_search_results(
+    results: list[tuple[str, object]],
+) -> None:
+    """Print search results as a table."""
+    from syn_cli.commands._marketplace_models import MarketplacePluginEntry
+
+    table = Table(title="Available Workflows")
+    table.add_column("Name", style="bold")
+    table.add_column("Version")
+    table.add_column("Category")
+    table.add_column("Description")
+    table.add_column("Registry", style="dim")
+
+    for reg_name, plugin in results:
+        assert isinstance(plugin, MarketplacePluginEntry)
+        table.add_row(
+            plugin.name,
+            plugin.version,
+            plugin.category or "-",
+            _truncate(plugin.description, 50),
+            reg_name,
+        )
+
+    console.print(table)
+    console.print(
+        f"\n[dim]{len(results)} result{'s' if len(results) != 1 else ''}. "
+        f"Install with: syn workflow install <name>[/dim]"
+    )
+
+
 @app.command("search")
 def search_workflows(
     query: Annotated[
@@ -38,40 +77,14 @@ def search_workflows(
     """Search for workflows across registered marketplaces."""
     results = search_all_registries(query, category=category, tag=tag)
 
-    # Filter by specific registry if requested
     if registry:
         results = [(rn, p) for rn, p in results if rn == registry]
 
     if not results:
-        console.print("[dim]No workflows found.[/dim]")
-        if not query and not category and not tag:
-            console.print(
-                "[dim]Add a marketplace first: "
-                "syn marketplace add syntropic137/workflow-library[/dim]"
-            )
+        _print_no_results(query, category, tag)
         return
 
-    table = Table(title="Available Workflows")
-    table.add_column("Name", style="bold")
-    table.add_column("Version")
-    table.add_column("Category")
-    table.add_column("Description")
-    table.add_column("Registry", style="dim")
-
-    for reg_name, plugin in results:
-        table.add_row(
-            plugin.name,
-            plugin.version,
-            plugin.category or "-",
-            _truncate(plugin.description, 50),
-            reg_name,
-        )
-
-    console.print(table)
-    console.print(
-        f"\n[dim]{len(results)} result{'s' if len(results) != 1 else ''}. "
-        f"Install with: syn workflow install <name>[/dim]"
-    )
+    _print_search_results(results)
 
 
 @app.command("info")
