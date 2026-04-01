@@ -2,7 +2,7 @@
 
 import type { Node, Edge } from '@xyflow/react';
 import { ReactFlowDiagram } from '../ReactFlowDiagram';
-import { edge } from '../layout';
+import { edge, hedge } from '../layout';
 
 // Write side (left column) — centered in group
 const WX = 100;
@@ -38,6 +38,8 @@ const edges: Edge[] = [
   edge('commands', 'aggregates'),
   edge('aggregates', 'events'),
   edge('events', 'eventStore'),
+  // Cross-side: events feed projections
+  hedge('eventStore', 'projections', 'Subscribe'),
   edge('projections', 'cache'),
   edge('cache', 'queryApi'),
 ];

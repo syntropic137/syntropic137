@@ -26,10 +26,10 @@ export const metadata: Metadata = {
     default: 'Syntropic137 — Agentic Engineering',
   },
   description:
-    'Orchestrate AI agents with event-sourced workflows. Build, observe, and scale agentic systems with precision.',
+    'Self-hosted agentic engineering platform. Run AI agents in isolated Docker workspaces with full observability — every decision permanently captured.',
   icons: {
-    icon: '/favicon.svg',
-    apple: '/favicon.svg',
+    icon: '/favicon.png',
+    apple: '/favicon.png',
   },
 };
 

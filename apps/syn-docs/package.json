@@ -4,10 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
+    "prebuild": "pnpm run generate",
+    "generate": "pnpm run generate:cli && pnpm run generate:openapi",
     "build": "next build",
     "start": "next start",
     "types:check": "tsc --noEmit",
-    "generate:openapi": "node scripts/generate-api-docs.mjs"
+    "generate:openapi": "node scripts/generate-api-docs.mjs",
+    "generate:cli": "uvx --with typer --with rich --with pyyaml python scripts/generate-cli-docs.py"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -28,9 +31,10 @@
     "three": "^0.182.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.0",
     "@tailwindcss/postcss": "^4.1.0",
-    "@types/mdx": "^2.0.13",
     "@types/d3-force": "^3.0.0",
+    "@types/mdx": "^2.0.13",
     "@types/node": "^22.14.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

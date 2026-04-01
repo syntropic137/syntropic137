@@ -10,6 +10,7 @@ import {
 import { notFound } from 'next/navigation';
 import { getMDXComponents } from '@/mdx-components';
 import { LLMCopyButton } from '@/components/LLMCopyButton';
+import { DocsFooter } from '@/components/DocsFooter';
 
 function getRawContent(slug?: string[]): string {
   const contentDir = path.join(process.cwd(), 'content/docs');
@@ -59,18 +60,19 @@ export default async function Page(props: {
   const MDXContent = page.data.body;
   const rawContent = getRawContent(params.slug);
   const editUrl = getEditUrl(params.slug);
-  const txtUrl = params.slug ? `/docs/${params.slug.join('/')}.txt` : '/docs.txt';
+  const mdUrl = params.slug ? `/docs/${params.slug.join('/')}.md` : '/docs.md';
 
   return (
     <DocsPage toc={page.data.toc}>
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription>{page.data.description}</DocsDescription>
-      <LLMCopyButton content={rawContent} title={page.data.title} editUrl={editUrl} txtUrl={txtUrl} />
+      <LLMCopyButton content={rawContent} title={page.data.title} editUrl={editUrl} mdUrl={mdUrl} />
       <DocsBody>
         <MDXContent
           components={getMDXComponents({})}
         />
       </DocsBody>
+      <DocsFooter />
     </DocsPage>
   );
 }

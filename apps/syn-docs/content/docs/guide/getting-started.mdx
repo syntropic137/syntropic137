@@ -3,6 +3,29 @@ title: Getting Started
 description: Install Syntropic137 and run your first AI agent workflow in under 5 minutes.
 ---
 
+<Callout type="info">
+Get up and running in a single command — no config files, no YAML, no manual setup.
+</Callout>
+
+```bash title="Terminal"
+npx @syntropic137/setup
+```
+
+This opens an **interactive terminal** with arrow-key navigation, styled prompts, and progress tracking. Choose from available commands or jump straight to a full install with `init`.
+
+## Available Commands
+
+```bash title="Setup CLI"
+npx @syntropic137/setup init        # Full interactive install wizard
+npx @syntropic137/setup status      # Show running services
+npx @syntropic137/setup start       # Start the stack
+npx @syntropic137/setup stop        # Stop the stack
+npx @syntropic137/setup logs        # Tail service logs
+npx @syntropic137/setup update      # Pull latest images and restart
+npx @syntropic137/setup github-app  # Configure GitHub App integration
+npx @syntropic137/setup plugin      # Install Claude Code plugin
+```
+
 ## Prerequisites
 
 You need three things installed on your machine:
@@ -17,24 +40,22 @@ Syntropic137 requires Docker Compose v2 (the `docker compose` plugin), not the l
 
 ## Install
 
-One command bootstraps the entire platform:
-
-```bash
+```bash title="Terminal"
 npx @syntropic137/setup init
 ```
 
-The interactive wizard walks you through:
+The `init` wizard walks you through the full setup step-by-step:
 
 1. **Docker check** — verifies Docker and Compose are available
 2. **Directory setup** — creates `~/.syntropic137/` with config, secrets, and workspace directories
 3. **Secret generation** — creates cryptographically random passwords for Postgres, Redis, and MinIO (stored as `chmod 600` files)
 4. **API key** — prompts for your `ANTHROPIC_API_KEY` (or detects `CLAUDE_CODE_OAUTH_TOKEN` if set)
-5. **GitHub App** *(optional)* — opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
+5. **GitHub App** — opens your browser to create a GitHub App via manifest flow for webhook-triggered workflows
 6. **Claude Code plugin** *(optional)* — installs the Syntropic137 plugin for Claude Code if the `claude` CLI is detected
 7. **Pull & start** — downloads container images and starts the full stack
 
 <Callout type="info">
-The GitHub App and Claude Code plugin steps are optional. You can skip them during setup and add them later with `npx @syntropic137/setup github-app` and `npx @syntropic137/setup plugin`.
+The Claude Code plugin step is optional — skip it during setup and add later with `npx @syntropic137/setup plugin`. The GitHub App is required for webhook-triggered workflows.
 </Callout>
 
 Once complete, the dashboard is live at **http://localhost:8137**.
@@ -43,7 +64,7 @@ Once complete, the dashboard is live at **http://localhost:8137**.
 
 Install the example research workflow package and run it:
 
-```bash
+```bash title="Terminal"
 # Install the starter research workflow
 syn workflow install ./workflows/examples/research-package/
 
@@ -52,9 +73,9 @@ syn workflow run research-package-v1 \
   --task "Investigate event sourcing patterns for building reliable agent systems"
 ```
 
-The workflow executes in an isolated Docker workspace. You can watch it in real time on the dashboard or via SSE:
+The workflow executes in an isolated Docker workspace. Watch it in real time on the dashboard or via SSE:
 
-```bash
+```bash title="Terminal"
 # Stream execution events
 curl -N http://localhost:8137/api/executions/{execution-id}/stream
 ```
@@ -66,22 +87,12 @@ After setup, your `~/.syntropic137/` directory contains a Docker Compose stack w
 | Service | Port | Purpose |
 |---------|------|---------|
 | `gateway` | 8137 | nginx reverse proxy + dashboard UI |
-| `api` | 8000 | FastAPI — REST API, WebSocket, SSE |
+| `api` | 8000 | FastAPI — REST API, SSE |
 | `event-store` | 50051 | gRPC event sourcing server |
 | `collector` | 8080 | Agent event ingestion |
 | `timescaledb` | 5432 | PostgreSQL + TimescaleDB |
 | `redis` | 6379 | Caching and pub/sub |
 | `minio` | 9000 | S3-compatible artifact storage |
-
-Manage the stack with the setup CLI:
-
-```bash
-npx @syntropic137/setup status   # Show running services
-npx @syntropic137/setup stop     # Stop the stack
-npx @syntropic137/setup start    # Start the stack
-npx @syntropic137/setup logs     # Tail logs
-npx @syntropic137/setup update   # Pull latest images and restart
-```
 
 ## Next Steps
 

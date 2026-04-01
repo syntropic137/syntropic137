@@ -1,6 +1,6 @@
 'use client';
 
-import { HeroSection, FeaturesGrid, QuickLinksGrid } from './sections';
+import { HeroSection, FeaturesGrid, QuickLinksGrid, SocialFooter } from './sections';
 
 export default function HomePage() {
   return (
@@ -8,6 +8,7 @@ export default function HomePage() {
       <HeroSection />
       <FeaturesGrid />
       <QuickLinksGrid />
+      <SocialFooter />
     </main>
   );
 }

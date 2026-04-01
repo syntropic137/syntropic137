@@ -1,5 +1,7 @@
 import type { MDXComponents } from 'mdx/types';
 import defaultMdxComponents from 'fumadocs-ui/mdx';
+import { Files, File, Folder } from 'fumadocs-ui/components/files';
+import { heading } from '@/components/Heading';
 import { APIPage } from '@/lib/source';
 import { Badge } from '@/components/Badge';
 import { FeatureCard, FeatureGrid } from '@/components/FeatureCard';
@@ -20,6 +22,7 @@ import {
 export function getMDXComponents(components: MDXComponents): MDXComponents {
   return {
     ...defaultMdxComponents,
+    ...heading,
     APIPage,
     Badge,
     FeatureCard,
@@ -56,6 +59,10 @@ export function getMDXComponents(components: MDXComponents): MDXComponents {
     DeploymentArchitectureFlow,
     WorkspaceIsolationFlow,
     ScalingFlow,
+    // File tree components
+    Files,
+    File,
+    Folder,
     ...components,
   };
 }

@@ -34,9 +34,9 @@ const flowNodes: Node[] = [
   { id: 's1', type: 'flowNode', position: row2.s1, data: { icon: 'server', label: 'Syn137 Server 1', color: 'purple', size: 'sm' } },
   { id: 's2', type: 'flowNode', position: row2.s2, data: { icon: 'server', label: 'Syn137 Server 2', color: 'purple', size: 'sm' } },
   { id: 's3', type: 'flowNode', position: row2.s3, data: { icon: 'server', label: 'Syn137 Server 3', color: 'purple', size: 'sm' } },
-  { id: 'pg', type: 'flowNode', position: row3.pg, data: { icon: 'database', label: 'PostgreSQL', color: 'emerald', size: 'sm' } },
-  { id: 'redis', type: 'flowNode', position: row3.redis, data: { icon: 'zap', label: 'Redis Cluster', color: 'amber', size: 'sm' } },
-  { id: 'minio', type: 'flowNode', position: row3.minio, data: { icon: 'drive', label: 'S3 Storage', color: 'pink', size: 'sm' } },
+  { id: 'pg', type: 'flowNode', position: row3.pg, data: { icon: 'database', label: 'TimescaleDB', color: 'emerald', size: 'sm' } },
+  { id: 'redis', type: 'flowNode', position: row3.redis, data: { icon: 'zap', label: 'Redis', color: 'amber', size: 'sm' } },
+  { id: 'minio', type: 'flowNode', position: row3.minio, data: { icon: 'drive', label: 'MinIO (S3)', color: 'pink', size: 'sm' } },
 ];
 
 const nodes: Node[] = [...groupNodes, ...flowNodes];

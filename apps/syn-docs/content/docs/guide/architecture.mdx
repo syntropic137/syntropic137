@@ -16,9 +16,9 @@ Syntropic137 distinguishes between two kinds of events, each optimized for its u
 | | Domain Events | Observability Events |
 |---|---|---|
 | **Purpose** | Business logic, state transitions | Telemetry, metrics, audit logs |
-| **Storage** | Event Store (gRPC) | TimescaleDB (hypertable) |
+| **Storage** | TimescaleDB (append-only, replay-safe) | TimescaleDB (hypertable, time-series optimized) |
+| **Pipeline** | Command → Aggregate → Event → Projection | Agent stdout → Collector → EventBuffer → TimescaleDB |
 | **Validation** | Aggregate invariants, can be rejected | Schema validation only, append-only |
-| **Throughput** | ~1K/sec | ~10K/sec |
 | **Examples** | `WorkflowCreated`, `ExecutionStarted` | `ToolExecuted`, `TokensUsed` |
 
 <TwoEventTypesFlow />
@@ -43,32 +43,54 @@ Syntropic137 is organized into five bounded contexts with nine aggregates:
 
 ## Real-Time Communication
 
-Syntropic137 provides two real-time channels for monitoring execution:
-
-**WebSocket** — Bidirectional control plane for pause/resume/cancel commands and state updates:
-
-```
-wss://host/ws/control/{execution_id}
-```
-
-**Server-Sent Events** — Unidirectional stream for execution progress, tool events, and token updates:
+Syntropic137 uses **Server-Sent Events (SSE)** for real-time monitoring of executions — progress updates, tool events, token metrics, and state changes all stream over a single connection:
 
 ```
 GET /api/executions/{execution_id}/stream
 ```
 
+Control commands (pause, resume, cancel) are sent via standard REST API calls rather than a persistent connection.
+
 ### Execution State Machine
 
-<StateMachineFlow />
+<div className="not-prose my-6 overflow-x-auto rounded-lg border border-fd-border bg-fd-card p-6">
+  <div className="flex flex-col gap-3 text-sm font-mono">
+    <div className="flex items-center gap-2">
+      <span className="inline-block w-28 rounded-md bg-fd-muted px-3 py-1.5 text-center text-fd-muted-foreground">NOT_STARTED</span>
+      <span className="text-fd-muted-foreground">→ start →</span>
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ finish →</span>
+      <span className="inline-block w-28 rounded-md bg-emerald-500/20 px-3 py-1.5 text-center text-emerald-400">COMPLETED</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ error →</span>
+      <span className="inline-block w-28 rounded-md bg-red-500/20 px-3 py-1.5 text-center text-red-400">FAILED</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ pause →</span>
+      <span className="inline-block w-28 rounded-md bg-amber-500/20 px-3 py-1.5 text-center text-amber-400">PAUSED</span>
+      <span className="text-fd-muted-foreground">→ resume →</span>
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem)]">
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary font-semibold opacity-0">RUNNING</span>
+      <span className="text-fd-muted-foreground">→ interrupt →</span>
+      <span className="inline-block w-28 rounded-md bg-orange-500/20 px-3 py-1.5 text-center text-orange-400">INTERRUPTED</span>
+      <span className="text-fd-muted-foreground">→ retry →</span>
+      <span className="inline-block w-24 rounded-md bg-fd-primary/20 px-3 py-1.5 text-center text-fd-primary">RUNNING</span>
+    </div>
+    <div className="flex items-center gap-2 pl-[calc(7rem+2.5rem+0.5rem+6rem+3.5rem+0.5rem)]">
+      <span className="inline-block w-28 rounded-md bg-amber-500/20 px-3 py-1.5 text-center text-amber-400 opacity-0">PAUSED</span>
+      <span className="text-fd-muted-foreground">→ cancel →</span>
+      <span className="inline-block w-28 rounded-md bg-zinc-500/20 px-3 py-1.5 text-center text-zinc-400">CANCELLED</span>
+    </div>
+  </div>
+</div>
 
 **Yield Points** — The agent can only be paused at safe points: before each workflow phase, after each tool execution, and after each LLM call.
 
 ## Performance
 
-| Operation | Latency | Throughput |
-|-----------|---------|------------|
-| Domain event append | ~10ms | 1K/sec |
-| Observability event insert | ~5ms | 10K/sec |
-| Read model query (cached) | sub-ms | 100K/sec |
-| Read model query (miss) | ~20ms | 5K/sec |
-| Artifact upload | ~100ms | 100/sec |
+Both event pipelines are optimized for their access patterns. Domain events use append-only writes with aggregate-level consistency. Observability events use TimescaleDB hypertables with automatic partitioning for high-throughput ingestion. Read models are cached in Redis for fast dashboard and API queries.

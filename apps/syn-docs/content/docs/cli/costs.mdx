@@ -1,0 +1,81 @@
+---
+title: syn costs
+description: "View cost tracking data for sessions and executions"
+---
+
+View cost tracking data for sessions and executions
+
+## `syn costs execution`
+
+Show detailed cost breakdown for an execution.
+
+```bash
+syn costs execution <execution_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `execution_id` | `text` | Yes | Execution ID |
+
+---
+
+## `syn costs executions`
+
+List cost data for workflow executions.
+
+```bash
+syn costs executions
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--limit`, `-n` | `integer range` | `50` | Max results |
+
+---
+
+## `syn costs session`
+
+Show detailed cost breakdown for a session.
+
+```bash
+syn costs session <session_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `session_id` | `text` | Yes | Session ID |
+
+---
+
+## `syn costs sessions`
+
+List cost data for sessions.
+
+```bash
+syn costs sessions
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--execution`, `-e` | `text` | --- | Filter by execution ID |
+| `--limit`, `-n` | `integer range` | `50` | Max results |
+
+---
+
+## `syn costs summary`
+
+Show aggregated cost summary across all sessions and executions.
+
+```bash
+syn costs summary
+```
+
+---

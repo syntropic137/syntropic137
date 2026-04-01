@@ -9,12 +9,12 @@ export function GET(request: NextRequest) {
 
   lines.push('# Syntropic137 Documentation');
   lines.push('');
-  lines.push('> Syntropic137 — Agentic Engineering. Orchestrate AI agents with event-sourced workflows.');
+  lines.push('> Syntropic137 — Agentic Engineering Platform. Orchestrate AI agents with event-sourced workflows.');
   lines.push('');
   lines.push('## LLM Endpoints');
   lines.push('');
-  lines.push(`- ${origin}/llms.txt — This file. Structured index of all documentation pages.`);
-  lines.push(`- ${origin}/llms-full.txt — Complete documentation content in a single file.`);
+  lines.push(`- ${origin}/llms.md — This file. Structured index of all documentation pages.`);
+  lines.push(`- ${origin}/llms-full.md — Complete documentation content in a single file.`);
   lines.push(`- ${origin}/llms — Human-readable LLM docs page with system prompt and usage guide.`);
   lines.push('');
   lines.push('## Pages');

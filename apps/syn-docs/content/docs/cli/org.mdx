@@ -1,0 +1,95 @@
+---
+title: syn org
+description: "Manage organizations"
+---
+
+Manage organizations
+
+## `syn org create`
+
+Create a new organization.
+
+```bash
+syn org create --name <name> --slug <slug>
+```
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name`, `-n` | `text` | --- | Organization name |
+| `--slug`, `-s` | `text` | --- | URL-safe slug |
+| `--created-by` | `text` | `cli` | Creator identifier |
+
+---
+
+## `syn org delete`
+
+Delete an organization.
+
+```bash
+syn org delete <organization_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `organization_id` | `text` | Yes | Organization ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--force`, `-f` | `boolean` | `false` | Skip confirmation |
+
+---
+
+## `syn org list`
+
+List all organizations.
+
+```bash
+syn org list
+```
+
+---
+
+## `syn org show`
+
+Show details of an organization.
+
+```bash
+syn org show <organization_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `organization_id` | `text` | Yes | Organization ID |
+
+---
+
+## `syn org update`
+
+Update an organization's name or slug.
+
+```bash
+syn org update <organization_id>
+```
+
+**Arguments:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `organization_id` | `text` | Yes | Organization ID |
+
+**Options:**
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--name`, `-n` | `text` | --- | New name |
+| `--slug`, `-s` | `text` | --- | New slug |
+
+---

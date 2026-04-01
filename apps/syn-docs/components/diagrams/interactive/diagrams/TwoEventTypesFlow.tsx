@@ -29,9 +29,9 @@ const nodes: Node[] = [
   { id: 'domainEvent', type: 'flowNode', position: { x: DX, y: 170 }, data: { icon: 'zap', label: 'Event', color: 'pink', size: 'sm' } },
   { id: 'eventStore', type: 'flowNode', position: { x: DX, y: 240 }, data: { icon: 'database', label: 'Event Store', color: 'purple', size: 'sm' } },
   // Observability Events — 4 vertical
-  { id: 'agent', type: 'flowNode', position: { x: OX, y: 40 }, data: { icon: 'zap', label: 'Agent', color: 'cyan', size: 'sm' } },
-  { id: 'observation', type: 'flowNode', position: { x: OX, y: 105 }, data: { icon: 'eye', label: 'Observation', color: 'cyan', size: 'sm' } },
-  { id: 'schemaCheck', type: 'flowNode', position: { x: OX, y: 170 }, data: { icon: 'check', label: 'Schema Check', color: 'emerald', size: 'sm' } },
+  { id: 'agentOutput', type: 'flowNode', position: { x: OX, y: 40 }, data: { icon: 'zap', label: 'Agent JSONL', color: 'cyan', size: 'sm' } },
+  { id: 'collector', type: 'flowNode', position: { x: OX, y: 105 }, data: { icon: 'radio', label: 'Collector', sublabel: 'HTTP ingest', color: 'cyan', size: 'sm' } },
+  { id: 'eventBuffer', type: 'flowNode', position: { x: OX, y: 170 }, data: { icon: 'layers', label: 'Event Buffer', color: 'emerald', size: 'sm' } },
   { id: 'timescale', type: 'flowNode', position: { x: OX, y: 240 }, data: { icon: 'database', label: 'TimescaleDB', sublabel: 'Hypertable', color: 'cyan', size: 'sm' } },
 ];
 
@@ -39,9 +39,9 @@ const edges: Edge[] = [
   edge('command', 'aggregate'),
   edge('aggregate', 'domainEvent'),
   edge('domainEvent', 'eventStore', 'gRPC'),
-  edge('agent', 'observation'),
-  edge('observation', 'schemaCheck'),
-  edge('schemaCheck', 'timescale', 'Direct insert'),
+  edge('agentOutput', 'collector'),
+  edge('collector', 'eventBuffer'),
+  edge('eventBuffer', 'timescale', 'Batched write'),
 ];
 
 export function TwoEventTypesFlow() {

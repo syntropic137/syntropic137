@@ -2,18 +2,22 @@
   "title": "Documentation",
   "root": true,
   "pages": [
+    "---Get Started---",
     "getting-started",
     "core-concepts",
+    "setup-cli",
+    "---Build---",
     "workflows",
     "claude-code-plugin",
     "github-integration",
-    "event-ingestion",
-    "tunnels",
-    "secrets",
-    "setup-cli",
+    "plugins",
+    "---Operate---",
     "self-hosting",
     "configuration",
-    "architecture",
-    "plugins"
+    "tunnels",
+    "secrets",
+    "event-ingestion",
+    "---Reference---",
+    "architecture"
   ]
 }

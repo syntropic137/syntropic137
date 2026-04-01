@@ -47,33 +47,44 @@ workflow via the API. Installed packages are tracked locally in
 
 The simplest format — one workflow with its phase prompts:
 
-```
-my-workflow/
-├── workflow.yaml       # Workflow definition
-├── phases/
-│   ├── discover.md     # Phase 1 prompt
-│   └── synthesize.md   # Phase 2 prompt
-└── README.md
-```
+<Files>
+  <Folder name="my-workflow" defaultOpen>
+    <File name="workflow.yaml" />
+    <Folder name="phases" defaultOpen>
+      <File name="discover.md" />
+      <File name="synthesize.md" />
+    </Folder>
+    <File name="README.md" />
+  </Folder>
+</Files>
 
 ### Multi-Workflow Plugin
 
 Bundle multiple workflows with a shared phase library:
 
-```
-my-plugin/
-├── syntropic137.yaml   # Plugin manifest
-├── workflows/
-│   ├── research/
-│   │   ├── workflow.yaml
-│   │   └── phases/*.md
-│   └── pr-review/
-│       ├── workflow.yaml
-│       └── phases/*.md
-├── phase-library/      # Shared phases
-│   └── summarize.md
-└── README.md
-```
+<Files>
+  <Folder name="my-plugin" defaultOpen>
+    <File name="syntropic137.yaml" />
+    <Folder name="workflows" defaultOpen>
+      <Folder name="research" defaultOpen>
+        <File name="workflow.yaml" />
+        <Folder name="phases">
+          <File name="*.md" />
+        </Folder>
+      </Folder>
+      <Folder name="pr-review" defaultOpen>
+        <File name="workflow.yaml" />
+        <Folder name="phases">
+          <File name="*.md" />
+        </Folder>
+      </Folder>
+    </Folder>
+    <Folder name="phase-library" defaultOpen>
+      <File name="summarize.md" />
+    </Folder>
+    <File name="README.md" />
+  </Folder>
+</Files>
 
 Shared phases are referenced with the `shared://` prefix:
 

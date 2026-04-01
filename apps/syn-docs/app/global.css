@@ -2,35 +2,45 @@
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
-/* Syntropic137 — aligned with landing page design system */
-:root {
-  --fd-primary: 77 128 255;
-  /* #4D80FF - Landing page accent blue */
-  --fd-primary-foreground: 2 6 23;
-  --fd-background: 250 250 250;
-  --fd-foreground: 9 9 11;
-  --fd-muted: 244 244 245;
-  --fd-muted-foreground: 113 113 122;
-  --fd-accent: 51 102 230;
-  /* #3366E6 - Landing page secondary blue */
-  --fd-accent-foreground: 255 255 255;
+/* Syntropic137 — Landing page design system, Fumadocs v16 --color-fd-* variables */
+@theme {
+  /* Light mode */
+  --color-fd-background: #f5f7ff;
+  --color-fd-foreground: #0d0d1a;
+  --color-fd-muted: #eef0f8;
+  --color-fd-muted-foreground: #6b7280;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #0d0d1a;
+  --color-fd-card: #eef0f8;
+  --color-fd-card-foreground: #0d0d1a;
+  --color-fd-border: rgba(77, 128, 255, 0.15);
+  --color-fd-primary: #4d80ff;
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: #e8ecff;
+  --color-fd-secondary-foreground: #0d0d1a;
+  --color-fd-accent: #3366e6;
+  --color-fd-accent-foreground: #ffffff;
+  --color-fd-ring: rgba(77, 128, 255, 0.4);
 }
 
 .dark {
-  --fd-primary: 77 128 255;
-  /* #4D80FF - Landing page accent blue */
-  --fd-primary-foreground: 2 6 23;
-  --fd-background: 15 15 26;
-  /* #0F0F1A - Landing page base */
-  --fd-foreground: 230 242 255;
-  /* #E6F2FF - Landing page apex */
-  --fd-muted: 24 24 27;
-  /* #18181B - Zinc-900 */
-  --fd-muted-foreground: 161 161 170;
-  /* #A1A1AA - Zinc-400 */
-  --fd-accent: 51 102 230;
-  /* #3366E6 - Landing page secondary blue */
-  --fd-accent-foreground: 2 6 23;
+  /* Dark mode — exact landing page palette */
+  --color-fd-background: #0f0f1a;   /* --color-bg / --color-base */
+  --color-fd-foreground: #e6f2ff;   /* --color-apex / --color-text-primary */
+  --color-fd-muted: #131320;
+  --color-fd-muted-foreground: rgba(230, 242, 255, 0.55);
+  --color-fd-popover: #14142a;
+  --color-fd-popover-foreground: #e6f2ff;
+  --color-fd-card: #13131f;
+  --color-fd-card-foreground: #e6f2ff;
+  --color-fd-border: rgba(77, 128, 255, 0.15);
+  --color-fd-primary: #4d80ff;      /* --color-accent-primary */
+  --color-fd-primary-foreground: #0f0f1a;
+  --color-fd-secondary: #1a1a2e;
+  --color-fd-secondary-foreground: #e6f2ff;
+  --color-fd-accent: #3366e6;       /* --color-accent-secondary */
+  --color-fd-accent-foreground: #e6f2ff;
+  --color-fd-ring: rgba(77, 128, 255, 0.4);
 }
 
 /* Code blocks — JetBrains Mono */
@@ -38,25 +48,7 @@ pre, code {
   font-family: var(--font-jetbrains), ui-monospace, 'Fira Code', monospace;
 }
 
-/* Subtle card hover — no bouncy transforms */
-.fd-card {
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.fd-card:hover {
-  box-shadow: 0 4px 20px rgba(77, 128, 255, 0.08);
-}
-
-.dark .fd-card:hover {
-  box-shadow: 0 4px 20px rgba(77, 128, 255, 0.1);
-}
-
-/* Accordion styling */
-.dark [data-state="open"]>button {
-  background: linear-gradient(135deg, rgba(77, 128, 255, 0.08), rgba(51, 102, 230, 0.05));
-}
-
-/* Code block — sharp border */
+/* Code block — accent border */
 pre {
   border: 1px solid rgba(77, 128, 255, 0.15) !important;
 }
@@ -65,36 +57,41 @@ pre {
   border: 1px solid rgba(77, 128, 255, 0.12) !important;
 }
 
-/* Scrollbar — stealth */
+/* Accordion open state */
+.dark [data-state="open"] > button {
+  background: linear-gradient(135deg, rgba(77, 128, 255, 0.08), rgba(51, 102, 230, 0.05));
+}
+
+/* Scrollbar */
 .dark ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 .dark ::-webkit-scrollbar-track {
-  background: rgb(24, 24, 27);
+  background: #0f0f1a;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: rgb(63, 63, 70);
+  background: rgba(77, 128, 255, 0.2);
   border-radius: 3px;
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: rgb(82, 82, 91);
+  background: rgba(77, 128, 255, 0.35);
 }
 
-/* Table styling */
-table {
-  border-radius: 6px;
-  overflow: hidden;
+/* Heading anchor — show icon on heading hover, make it clickable */
+article :is(h1, h2, h3, h4, h5, h6):hover > svg.lucide-link {
+  opacity: 1 !important;
+  cursor: pointer;
 }
 
-.dark th {
-  background: rgba(77, 128, 255, 0.06);
+article :is(h1, h2, h3, h4, h5, h6) > a[href^="#"] {
+  cursor: pointer;
 }
 
-/* Link hover — cold blue */
+/* Link hover */
 article a:not([class]) {
   text-decoration-color: rgba(77, 128, 255, 0.3);
   transition: text-decoration-color 0.2s ease;

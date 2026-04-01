@@ -15,112 +15,39 @@ uv sync
 syn --help
 ```
 
-## Commands
+## Global Commands
 
-### `syn workflow`
+| Command | Description |
+|---------|-------------|
+| `syn health` | Check API server health status. |
+| `syn run` | Execute a workflow (shortcut for 'syn workflow run'). |
+| `syn version` | Show version information. |
 
-Manage, install, and run workflows.
+## Command Groups
 
-#### Install & Manage Packages
-
-```bash
-# Install a workflow package from a local directory
-syn workflow install ./my-package/
-
-# Install from a git repository
-syn workflow install https://github.com/org/workflow-library
-syn workflow install org/repo              # GitHub shorthand
-syn workflow install org/repo --ref v2.0   # Specific version
-
-# Validate a package without installing
-syn workflow install ./my-package/ --dry-run
-
-# Validate a package or YAML file
-syn workflow validate ./my-package/
-syn workflow validate ./workflow.yaml
-
-# List installed packages
-syn workflow installed
-
-# Scaffold a new workflow package
-syn workflow init ./my-workflow --name "My Workflow" --type research --phases 3
-syn workflow init ./my-plugin --name "My Plugin" --multi
-```
-
-#### CRUD & Execution
-
-```bash
-# List workflows
-syn workflow list
-syn workflow list --include-archived    # include archived templates
-
-# Create a workflow
-syn workflow create --type implementation --repo owner/repo
-
-# Delete (archive) a workflow
-syn workflow delete <id>                # soft-delete with confirmation
-syn workflow delete <id> --force        # skip confirmation prompt
-
-# Show workflow details
-syn workflow show <workflow-id>
-
-# Create a workflow from parameters
-syn workflow create "My Workflow" --type research
-
-# Run a workflow
-syn workflow run <workflow-id> --task "Your task here"
-
-# Show workflow run history
-syn workflow status <workflow-id>
-```
-
-### `syn agent`
-
-Manage agent sessions.
-
-```bash
-# List active sessions
-syn agent list
-
-# View session details
-syn agent show <session-id>
-```
-
-### `syn artifacts`
-
-Browse, create, and retrieve workflow artifacts.
-
-```bash
-# List artifacts
-syn artifacts list --workflow <workflow-id>
-
-# Show artifact metadata and content
-syn artifacts show <artifact-id>
-
-# Print raw artifact content
-syn artifacts content <artifact-id> --raw
-
-# Create a new artifact
-syn artifacts create --workflow <id> --type document --title "Design Doc" --content "..."
-```
-
-### `syn config`
-
-Manage configuration.
-
-```bash
-# Show current config
-syn config show
-
-# Validate configuration
-syn config validate
-```
+| Group | Description |
+|-------|-------------|
+| [`syn agent`](./agent) | AI agent management and testing |
+| [`syn artifacts`](./artifacts) | Browse and retrieve workflow artifacts |
+| [`syn config`](./config) | Configuration management |
+| [`syn control`](./control) | Control running executions |
+| [`syn conversations`](./conversations) | Inspect agent conversation logs |
+| [`syn costs`](./costs) | View cost tracking data for sessions and executions |
+| [`syn events`](./events) | Query domain events and session observability |
+| [`syn execution`](./execution) | List and inspect workflow executions |
+| [`syn insights`](./insights) | Global system insights and cost analysis |
+| [`syn metrics`](./metrics) | View aggregated workflow and session metrics |
+| [`syn observe`](./observe) | Observability data for sessions — tool timelines and token metrics |
+| [`syn org`](./org) | Manage organizations |
+| [`syn repo`](./repo) | Manage repositories and their observability |
+| [`syn sessions`](./sessions) | View and inspect agent sessions |
+| [`syn system`](./system) | Manage systems and their observability |
+| [`syn triggers`](./triggers) | Manage self-healing trigger rules |
+| [`syn watch`](./watch) | Watch live execution or activity streams |
+| [`syn workflow`](./workflow) | Manage workflows - create, list, run, and inspect |
 
 ## Global Options
 
 | Option | Description |
 |--------|-------------|
 | `--help` | Show help message |
-| `--version` | Show version |
-| `--api-url` | Override API server URL |
-| `--format` | Output format (`json`, `table`) |
