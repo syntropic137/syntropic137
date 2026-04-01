@@ -494,10 +494,7 @@ def main() -> None:
         page_path.write_text(render_group_mdx(group))
         print(f"  wrote {page_path.relative_to(_DOCS_ROOT)}")
 
-    print(
-        f"\nDone. {len(groups) + 2} files written to "
-        f"{output_dir.relative_to(_DOCS_ROOT)}/"
-    )
+    print(f"\nDone. {len(groups) + 2} files written to {output_dir.relative_to(_DOCS_ROOT)}/")
 
 
 if __name__ == "__main__":

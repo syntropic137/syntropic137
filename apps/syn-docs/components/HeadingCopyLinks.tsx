@@ -24,60 +24,61 @@ function showTooltip(text: string, anchorEl: HTMLElement | null, x?: number, y?:
   }, 1200);
 }
 
+function handleHeadingClick(e: MouseEvent) {
+  const heading = (e.target as HTMLElement).closest('h1, h2, h3, h4, h5, h6');
+  if (!heading) return;
+
+  const svg = heading.querySelector('svg.lucide-link') as HTMLElement | null;
+  if (!svg) return;
+
+  const clickedEl = e.target as HTMLElement;
+  const isIcon = clickedEl === svg || svg.contains(clickedEl);
+  const isAnchor = clickedEl.closest('a[href^="#"]');
+
+  if (!isIcon && !isAnchor) return;
+
+  e.preventDefault();
+  const id = heading.id;
+  if (!id) return;
+
+  const url = `${window.location.origin}${window.location.pathname}#${id}`;
+  navigator.clipboard.writeText(url);
+
+  svg.classList.add('!opacity-100', '!text-fd-primary');
+  showTooltip('Copied!', svg);
+
+  setTimeout(() => {
+    svg.classList.remove('!opacity-100', '!text-fd-primary');
+  }, 1500);
+}
+
+function handleCodeClick(e: MouseEvent) {
+  const target = e.target as HTMLElement;
+  const pre = target.closest('pre');
+  if (!pre) return;
+  if (target.closest('button')) return;
+
+  const code = pre.querySelector('code');
+  if (!code) return;
+
+  const codeRect = code.getBoundingClientRect();
+  const lineHeight = parseFloat(getComputedStyle(code).lineHeight) || 20;
+  const clickY = e.clientY - codeRect.top + code.scrollTop;
+  const lineIndex = Math.floor(clickY / lineHeight);
+
+  const lines = code.textContent?.split('\n') ?? [];
+  const line = lines[lineIndex]?.trim();
+  if (!line) return;
+
+  navigator.clipboard.writeText(line);
+  showTooltip('Copied!', null, e.clientX, e.clientY);
+
+  pre.style.outline = '1px solid rgba(77, 128, 255, 0.25)';
+  setTimeout(() => { pre.style.outline = ''; }, 1200);
+}
+
 export function HeadingCopyLinks() {
   useEffect(() => {
-    function handleHeadingClick(e: MouseEvent) {
-      const heading = (e.target as HTMLElement).closest('h1, h2, h3, h4, h5, h6');
-      if (!heading) return;
-
-      const svg = heading.querySelector('svg.lucide-link') as HTMLElement | null;
-      if (!svg) return;
-
-      const clickedEl = e.target as HTMLElement;
-      const isIcon = clickedEl === svg || svg.contains(clickedEl);
-      const isAnchor = clickedEl.closest('a[href^="#"]');
-
-      if (isIcon || isAnchor) {
-        e.preventDefault();
-        const id = heading.id;
-        if (!id) return;
-        const url = `${window.location.origin}${window.location.pathname}#${id}`;
-        navigator.clipboard.writeText(url);
-
-        svg.classList.add('!opacity-100', '!text-fd-primary');
-        showTooltip('Copied!', svg);
-
-        setTimeout(() => {
-          svg.classList.remove('!opacity-100', '!text-fd-primary');
-        }, 1500);
-      }
-    }
-
-    function handleCodeClick(e: MouseEvent) {
-      const target = e.target as HTMLElement;
-      const pre = target.closest('pre');
-      if (!pre) return;
-      if (target.closest('button')) return;
-
-      const code = pre.querySelector('code');
-      if (!code) return;
-
-      const codeRect = code.getBoundingClientRect();
-      const lineHeight = parseFloat(getComputedStyle(code).lineHeight) || 20;
-      const clickY = e.clientY - codeRect.top + code.scrollTop;
-      const lineIndex = Math.floor(clickY / lineHeight);
-
-      const lines = code.textContent?.split('\n') ?? [];
-      const line = lines[lineIndex]?.trim();
-      if (!line) return;
-
-      navigator.clipboard.writeText(line);
-      showTooltip('Copied!', null, e.clientX, e.clientY);
-
-      pre.style.outline = '1px solid rgba(77, 128, 255, 0.25)';
-      setTimeout(() => { pre.style.outline = ''; }, 1200);
-    }
-
     document.addEventListener('click', handleHeadingClick);
     document.addEventListener('click', handleCodeClick);
     return () => {
