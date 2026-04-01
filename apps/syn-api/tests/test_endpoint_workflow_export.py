@@ -43,7 +43,7 @@ async def test_export_endpoint_success_plugin() -> None:
         workflow_id="wf-456",
         workflow_name="Plugin Workflow",
         files={
-            "syntropic137.yaml": "manifest_version: 1\n",
+            "syntropic137-plugin.json": '{"manifest_version": 1}\n',
             "workflows/plugin-workflow/workflow.yaml": "id: wf-456\n",
             "commands/syn-plugin-workflow.md": "---\nmodel: sonnet\n---\n\n...\n",
             "README.md": "# Plugin\n",
@@ -58,7 +58,7 @@ async def test_export_endpoint_success_plugin() -> None:
 
     assert result.format == "plugin"
     assert result.workflow_id == "wf-456"
-    assert "syntropic137.yaml" in result.files
+    assert "syntropic137-plugin.json" in result.files
 
 
 async def test_export_endpoint_not_found() -> None:

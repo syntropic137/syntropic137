@@ -25,26 +25,157 @@ syn --help
 
 ## Command Groups
 
-| Group | Description |
-|-------|-------------|
-| [`syn agent`](./agent) | AI agent management and testing |
-| [`syn artifacts`](./artifacts) | Browse and retrieve workflow artifacts |
-| [`syn config`](./config) | Configuration management |
-| [`syn control`](./control) | Control running executions |
-| [`syn conversations`](./conversations) | Inspect agent conversation logs |
-| [`syn costs`](./costs) | View cost tracking data for sessions and executions |
-| [`syn events`](./events) | Query domain events and session observability |
-| [`syn execution`](./execution) | List and inspect workflow executions |
-| [`syn insights`](./insights) | Global system insights and cost analysis |
-| [`syn metrics`](./metrics) | View aggregated workflow and session metrics |
-| [`syn observe`](./observe) | Observability data for sessions — tool timelines and token metrics |
-| [`syn org`](./org) | Manage organizations |
-| [`syn repo`](./repo) | Manage repositories and their observability |
-| [`syn sessions`](./sessions) | View and inspect agent sessions |
-| [`syn system`](./system) | Manage systems and their observability |
-| [`syn triggers`](./triggers) | Manage self-healing trigger rules |
-| [`syn watch`](./watch) | Watch live execution or activity streams |
-| [`syn workflow`](./workflow) | Manage workflows - create, list, run, and inspect |
+#### Install & Manage Packages
+
+```bash
+# Install a workflow package from a local directory
+syn workflow install ./my-package/
+
+# Install from a git repository
+syn workflow install https://github.com/org/workflow-library
+syn workflow install org/repo              # GitHub shorthand
+syn workflow install org/repo --ref v2.0   # Specific version
+
+# Validate a package without installing
+syn workflow install ./my-package/ --dry-run
+
+# Validate a package or YAML file
+syn workflow validate ./my-package/
+syn workflow validate ./workflow.yaml
+
+# List installed packages
+syn workflow installed
+
+# Scaffold a new workflow package
+syn workflow init ./my-workflow --name "My Workflow" --type research --phases 3
+syn workflow init ./my-plugin --name "My Plugin" --multi
+```
+
+#### Export Workflows
+
+```bash
+# Export as a package (workflow.yaml + phase .md files)
+syn workflow export <workflow-id> --output ./my-package/
+
+# Export as a Claude Code plugin (includes manifest + CC command wrapper)
+syn workflow export <workflow-id> --format plugin --output ./my-plugin/
+
+# Default format is 'package', default output is current directory
+syn workflow export <workflow-id>
+```
+
+#### CRUD & Execution
+
+```bash
+# List workflows
+syn workflow list
+syn workflow list --include-archived    # include archived templates
+
+# Create a workflow
+syn workflow create --type implementation --repo owner/repo
+
+# Delete (archive) a workflow
+syn workflow delete <id>                # soft-delete with confirmation
+syn workflow delete <id> --force        # skip confirmation prompt
+
+# Show workflow details
+syn workflow show <workflow-id>
+
+# Create a workflow from parameters
+syn workflow create "My Workflow" --type research
+
+# Run a workflow
+syn workflow run <workflow-id> --task "Your task here"
+
+# Show workflow run history
+syn workflow status <workflow-id>
+```
+
+#### Search & Marketplace Install
+
+```bash
+# Search across registered marketplaces
+syn workflow search "research"
+syn workflow search --category research
+syn workflow search --tag multi-phase
+
+# Show plugin details
+syn workflow info research-toolkit
+
+# Install by marketplace plugin name
+syn workflow install research-toolkit
+
+# Update an installed marketplace package
+syn workflow update research-toolkit
+syn workflow update research-toolkit --dry-run
+
+# Uninstall a package
+syn workflow uninstall research-toolkit
+syn workflow uninstall research-toolkit --keep-workflows
+```
+
+### `syn marketplace`
+
+Manage workflow marketplace registries.
+
+```bash
+# Register a marketplace
+syn marketplace add syntropic137/workflow-library
+syn marketplace add myorg/internal-workflows --name my-company
+syn marketplace add myorg/workflows --ref v2.0
+
+# List registered marketplaces
+syn marketplace list
+
+# Force-refresh cached indexes
+syn marketplace refresh
+syn marketplace refresh my-company
+
+# Remove a marketplace
+syn marketplace remove my-company
+```
+
+### `syn agent`
+
+Manage agent sessions.
+
+```bash
+# List active sessions
+syn agent list
+
+# View session details
+syn agent show <session-id>
+```
+
+### `syn artifacts`
+
+Browse, create, and retrieve workflow artifacts.
+
+```bash
+# List artifacts
+syn artifacts list --workflow <workflow-id>
+
+# Show artifact metadata and content
+syn artifacts show <artifact-id>
+
+# Print raw artifact content
+syn artifacts content <artifact-id> --raw
+
+# Create a new artifact
+syn artifacts create --workflow <id> --type document --title "Design Doc" --content "..."
+```
+
+### `syn config`
+
+Manage configuration.
+
+```bash
+# Show current config
+syn config show
+
+# Validate configuration
+syn config validate
+```
 
 ## Global Options
 

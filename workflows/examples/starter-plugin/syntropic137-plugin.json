@@ -1,0 +1,9 @@
+{
+  "manifest_version": 1,
+  "name": "starter-plugin",
+  "version": "1.0.0",
+  "description": "Starter workflows for common development tasks",
+  "author": "syntropic137",
+  "license": "MIT",
+  "repository": "https://github.com/syntropic137/starter-plugin"
+}

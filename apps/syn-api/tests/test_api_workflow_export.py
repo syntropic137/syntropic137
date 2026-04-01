@@ -170,7 +170,7 @@ async def test_export_plugin_format():
     assert manifest.format == "plugin"
 
     files = manifest.files
-    assert "syntropic137.yaml" in files
+    assert "syntropic137-plugin.json" in files
     assert "README.md" in files
     assert "commands/syn-deep-research.md" in files
     assert "workflows/deep-research/workflow.yaml" in files
@@ -179,17 +179,20 @@ async def test_export_plugin_format():
 
 
 async def test_export_plugin_manifest_content():
-    """syntropic137.yaml should have correct manifest fields."""
+    """syntropic137-plugin.json should have correct manifest fields."""
+    import json
+
     from syn_api.routes.workflows import export_workflow
 
     wf_id = await _create_test_workflow()
     result = await export_workflow(wf_id, fmt="plugin")
     assert isinstance(result, Ok)
 
-    manifest_yaml = result.value.files["syntropic137.yaml"]
-    assert "manifest_version: 1" in manifest_yaml
-    assert "name: deep-research" in manifest_yaml
-    assert 'version: "0.1.0"' in manifest_yaml
+    manifest_json = result.value.files["syntropic137-plugin.json"]
+    manifest = json.loads(manifest_json)
+    assert manifest["manifest_version"] == 1
+    assert manifest["name"] == "deep-research"
+    assert manifest["version"] == "0.1.0"
 
 
 async def test_export_plugin_cc_command():

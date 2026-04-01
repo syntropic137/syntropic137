@@ -1,6 +1,6 @@
 """Pydantic models for workflow package format and installation tracking.
 
-Defines the package detection, plugin manifest (``syntropic137.yaml``),
+Defines the package detection, plugin manifest (``syntropic137-plugin.json``),
 resolved workflow payloads, and the local installation registry
 (``~/.syntropic137/workflows/installed.json``).
 """
@@ -25,12 +25,12 @@ class PackageFormat(str, Enum):
 
 
 # ---------------------------------------------------------------------------
-# Plugin manifest — syntropic137.yaml
+# Plugin manifest — syntropic137-plugin.json
 # ---------------------------------------------------------------------------
 
 
 class PluginManifest(BaseModel):
-    """Plugin manifest parsed from ``syntropic137.yaml``.
+    """Plugin manifest parsed from ``syntropic137-plugin.json``.
 
     ``extra="ignore"`` ensures forward compatibility — unknown fields
     added in future manifest versions are silently skipped.
@@ -102,6 +102,8 @@ class InstallationRecord(BaseModel):
     installed_at: str  # ISO 8601
     format: str  # PackageFormat value
     workflows: list[InstalledWorkflowRef] = Field(default_factory=list)
+    marketplace_source: str | None = None  # Registry name, if installed from marketplace
+    git_sha: str | None = None  # Pinned commit SHA for reproducible updates
 
 
 class InstalledRegistry(BaseModel):
