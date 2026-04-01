@@ -281,6 +281,36 @@ def _build_phase_md(phase: PhaseDefinitionResponse) -> str:
     return f"{body}\n"
 
 
+def _yaml_input_lines(detail: WorkflowDetail) -> list[str]:
+    """Build the ``inputs:`` block lines for workflow.yaml."""
+    if not detail.input_declarations:
+        return []
+    lines: list[str] = ["", "inputs:"]
+    for decl in detail.input_declarations:
+        lines.append(f"  - name: {decl.name}")
+        if decl.description:
+            lines.append(f'    description: "{decl.description}"')
+        lines.append(f"    required: {str(decl.required).lower()}")
+        if decl.default:
+            lines.append(f'    default: "{decl.default}"')
+    return lines
+
+
+def _yaml_phase_lines(phase: PhaseDefinitionResponse) -> list[str]:
+    """Build the phase entry lines for a single phase in workflow.yaml."""
+    lines = [
+        f"  - id: {phase.phase_id}",
+        f"    name: {phase.name}",
+        f"    order: {phase.order}",
+        "    execution_type: sequential",
+    ]
+    if phase.description:
+        lines.append(f'    description: "{phase.description}"')
+    lines.append(f"    prompt_file: phases/{phase.phase_id}.md")
+    lines.append(f"    output_artifacts: [{phase.phase_id}_output]")
+    return lines
+
+
 def _build_workflow_yaml(detail: WorkflowDetail) -> str:
     """Build workflow.yaml content from a WorkflowDetail.
 
@@ -294,31 +324,12 @@ def _build_workflow_yaml(detail: WorkflowDetail) -> str:
         f'description: "{detail.description or ""}"',
         f"type: {detail.workflow_type}",
         f"classification: {detail.classification}",
+        *_yaml_input_lines(detail),
+        "",
+        "phases:",
     ]
-
-    if detail.input_declarations:
-        lines.append("")
-        lines.append("inputs:")
-        for decl in detail.input_declarations:
-            lines.append(f"  - name: {decl.name}")
-            if decl.description:
-                lines.append(f'    description: "{decl.description}"')
-            lines.append(f"    required: {str(decl.required).lower()}")
-            if decl.default:
-                lines.append(f'    default: "{decl.default}"')
-
-    lines.append("")
-    lines.append("phases:")
     for phase in sorted(detail.phases, key=lambda p: p.order):
-        lines.append(f"  - id: {phase.phase_id}")
-        lines.append(f"    name: {phase.name}")
-        lines.append(f"    order: {phase.order}")
-        lines.append("    execution_type: sequential")
-        if phase.description:
-            lines.append(f'    description: "{phase.description}"')
-        lines.append(f"    prompt_file: phases/{phase.phase_id}.md")
-        lines.append(f"    output_artifacts: [{phase.phase_id}_output]")
-
+        lines.extend(_yaml_phase_lines(phase))
     return "\n".join(lines) + "\n"
 
 
