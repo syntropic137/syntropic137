@@ -54,9 +54,16 @@ def export_workflow(
         print_error(f"Output directory is not empty: {out_dir}")
         raise typer.Exit(1)
 
-    # Write files to disk — validate each path stays within out_dir
+    _write_manifest_files(out_dir, files)
+
+    # Print summary
+    workflow_name = data.get("workflow_name", workflow_id)
+    _print_export_summary(workflow_name, fmt, out_dir, files)
+
+
+def _write_manifest_files(out_dir: Path, files: dict[str, str]) -> None:
+    """Write exported files to disk with path traversal protection."""
     for rel_path, content in sorted(files.items()):
-        # Reject absolute paths and directory traversal segments
         posix_path = PurePosixPath(rel_path)
         if posix_path.is_absolute() or ".." in posix_path.parts:
             print_error(f"Unsafe file path in export manifest: {rel_path}")
@@ -69,10 +76,6 @@ def export_workflow(
 
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content, encoding="utf-8")
-
-    # Print summary
-    workflow_name = data.get("workflow_name", workflow_id)
-    _print_export_summary(workflow_name, fmt, out_dir, files)
 
 
 def _print_export_summary(
