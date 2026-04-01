@@ -65,8 +65,8 @@ Once complete, the dashboard is live at **http://localhost:8137**.
 Install the example research workflow package and run it:
 
 ```bash title="Terminal"
-# Install the starter research workflow
-syn workflow install ./workflows/examples/research-package/
+# Install the starter research workflow from GitHub
+syn workflow install syntropic137/syntropic137 --ref main --path workflows/examples/research-package
 
 # Run it with a task
 syn workflow run research-package-v1 \

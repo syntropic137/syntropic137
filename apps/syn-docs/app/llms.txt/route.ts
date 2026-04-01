@@ -29,7 +29,7 @@ export function GET(request: NextRequest) {
   lines.push('');
   lines.push('## Markdown Endpoints');
   lines.push('');
-  lines.push('Each page is available as raw MDX at its `.md` URL (for agents and LLMs):');
+  lines.push('Each page is available as plain text at its `.md` URL (for agents and LLMs):');
   lines.push('');
 
   for (const page of source.getPages()) {

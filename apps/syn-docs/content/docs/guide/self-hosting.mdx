@@ -86,6 +86,6 @@ See the [Tunnels guide](/docs/guide/tunnels) for setup instructions.
 
 ## Secrets
 
-All secrets are stored as `chmod 600` files and mounted via Docker's tmpfs-backed secrets mechanism — never in environment variables or image layers.
+Infrastructure secrets (database, Redis, MinIO) are stored as `chmod 600` files and mounted via Docker Compose's secrets mechanism — never baked into image layers. Application-level API keys (e.g. `ANTHROPIC_API_KEY`) are supplied via environment variables.
 
 See [Secrets Management](/docs/guide/secrets) for details on how secrets work and optional 1Password integration.
