@@ -202,6 +202,12 @@ class SystemProjection:
     # Canonical name for coordinator dispatch (bare event type: RepoUnassignedFromSystem)
     on_repo_unassigned_from_system = on_repo_unassigned_decrement
 
+    async def on_repo_deregistered_decrement(self, event: dict[str, Any]) -> None:
+        """Decrement repo_count when a repo is deregistered from this system."""
+        system_id = str(event.get("system_id", ""))
+        if system_id:
+            await self.increment_repo_count(system_id, delta=-1)
+
 
 _projection: SystemProjection | None = None
 

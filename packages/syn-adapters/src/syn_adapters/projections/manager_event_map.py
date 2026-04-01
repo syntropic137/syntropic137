@@ -86,6 +86,12 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("repo_list", "on_repo_unassigned_from_system"),
         ("system_list", "on_repo_unassigned_decrement"),
     ],
+    "organization.RepoUpdated": [("repo_list", "on_repo_updated")],
+    "organization.RepoDeregistered": [
+        ("repo_list", "on_repo_deregistered"),
+        ("organization_list", "on_repo_deregistered_decrement"),
+        ("system_list", "on_repo_deregistered_decrement"),
+    ],
     "github.TriggerFired": [("repo_correlation", "on_trigger_fired")],
     "WorkflowTemplateCreated": [
         ("workflow_list", "on_workflow_template_created"),
@@ -184,6 +190,8 @@ EVENT_HANDLERS: dict[str, list[tuple[str, str]]] = {
         ("dashboard_metrics", "on_artifact_created"),
         ("realtime", "on_artifact_created"),
     ],
+    "ArtifactUpdated": [("artifact_list", "on_artifact_updated")],
+    "ArtifactDeleted": [("artifact_list", "on_artifact_deleted")],
     TOOL_EXECUTION_STARTED: [("tool_timeline", "on_tool_execution_started")],
     TOOL_EXECUTION_COMPLETED: [
         ("tool_timeline", "on_tool_execution_completed"),
