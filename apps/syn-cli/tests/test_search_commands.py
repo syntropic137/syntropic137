@@ -69,9 +69,7 @@ class TestSearchWorkflows:
             ("company", _make_plugin("internal-tool")),
         ]
 
-        result = runner.invoke(
-            app, ["workflow", "search", "", "--registry", "official"]
-        )
+        result = runner.invoke(app, ["workflow", "search", "", "--registry", "official"])
         assert result.exit_code == 0
         assert "research-toolkit" in result.stdout
         # internal-tool should be filtered out

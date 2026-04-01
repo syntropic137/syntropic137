@@ -96,9 +96,7 @@ def list_marketplaces() -> None:
 
     if not config.registries:
         console.print("[dim]No marketplaces registered.[/dim]")
-        console.print(
-            "[dim]Add one with: syn marketplace add syntropic137/workflow-library[/dim]"
-        )
+        console.print("[dim]Add one with: syn marketplace add syntropic137/workflow-library[/dim]")
         return
 
     table = Table(title="Registered Marketplaces")
@@ -146,6 +144,34 @@ def remove_marketplace(
     print_success(f"Removed marketplace [bold]{name}[/bold]")
 
 
+def _resolve_refresh_targets(
+    config: RegistryConfig, name: str | None
+) -> list[tuple[str, RegistryEntry]]:
+    """Build the list of registries to refresh.
+
+    Raises typer.Exit(1) if a named registry is not found.
+    """
+    if name:
+        if name not in config.registries:
+            print_error(f"Marketplace '{name}' is not registered")
+            raise typer.Exit(1)
+        return [(name, config.registries[name])]
+    return list(config.registries.items())
+
+
+def _refresh_one(reg_name: str, entry: RegistryEntry) -> None:
+    """Refresh a single registry index, printing status."""
+    console.print(f"Refreshing [cyan]{reg_name}[/cyan]...", end=" ")
+    try:
+        index = refresh_index(reg_name, entry, force=True)
+        plugin_count = len(index.plugins)
+        console.print(
+            f"[green]done[/green] ({plugin_count} plugin{'s' if plugin_count != 1 else ''})"
+        )
+    except RuntimeError as e:
+        console.print(f"[red]failed[/red] ({e})")
+
+
 @app.command("refresh")
 def refresh_marketplace(
     name: Annotated[
@@ -160,23 +186,7 @@ def refresh_marketplace(
         console.print("[dim]No marketplaces registered.[/dim]")
         return
 
-    targets: list[tuple[str, RegistryEntry]]
-    if name:
-        if name not in config.registries:
-            print_error(f"Marketplace '{name}' is not registered")
-            raise typer.Exit(1)
-        targets = [(name, config.registries[name])]
-    else:
-        targets = list(config.registries.items())
+    targets = _resolve_refresh_targets(config, name)
 
     for reg_name, entry in targets:
-        console.print(f"Refreshing [cyan]{reg_name}[/cyan]...", end=" ")
-        try:
-            index = refresh_index(reg_name, entry, force=True)
-            plugin_count = len(index.plugins)
-            console.print(
-                f"[green]done[/green] "
-                f"({plugin_count} plugin{'s' if plugin_count != 1 else ''})"
-            )
-        except RuntimeError as e:
-            console.print(f"[red]failed[/red] ({e})")
+        _refresh_one(reg_name, entry)

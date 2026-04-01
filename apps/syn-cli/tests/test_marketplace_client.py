@@ -51,7 +51,9 @@ def _make_plugin(
 
 class TestRegistryIO:
     def test_load_empty_default(self, tmp_path: Path) -> None:
-        with patch("syn_cli.commands._marketplace_client._REGISTRIES_PATH", tmp_path / "missing.json"):
+        with patch(
+            "syn_cli.commands._marketplace_client._REGISTRIES_PATH", tmp_path / "missing.json"
+        ):
             from syn_cli.commands._marketplace_client import load_registries
 
             config = load_registries()
@@ -142,7 +144,10 @@ class TestFetchMarketplaceJson:
 
         mock_subprocess.run.side_effect = fake_run
 
-        with patch("syn_cli.commands._marketplace_client.tempfile.mkdtemp", return_value=str(tmp_path / "clone")):
+        with patch(
+            "syn_cli.commands._marketplace_client.tempfile.mkdtemp",
+            return_value=str(tmp_path / "clone"),
+        ):
             # Need a more nuanced mock for this test
             pass
 

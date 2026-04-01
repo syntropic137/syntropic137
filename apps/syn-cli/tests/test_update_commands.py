@@ -100,9 +100,7 @@ class TestUninstallWorkflow:
     ) -> None:
         mock_load.return_value = _make_registry()
 
-        result = runner.invoke(
-            app, ["workflow", "uninstall", "test-plugin", "--keep-workflows"]
-        )
+        result = runner.invoke(app, ["workflow", "uninstall", "test-plugin", "--keep-workflows"])
 
         assert result.exit_code == 0
         assert "Uninstalled" in result.stdout
