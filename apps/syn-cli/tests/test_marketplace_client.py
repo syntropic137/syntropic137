@@ -259,7 +259,7 @@ class TestResolvePluginByName:
 
             result = resolve_plugin_by_name("research-toolkit")
             assert result is not None
-            reg_name, entry, plugin = result
+            reg_name, _entry, plugin = result
             assert reg_name == "official"
             assert plugin.name == "research-toolkit"
 

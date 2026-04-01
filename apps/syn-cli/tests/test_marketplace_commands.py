@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +11,6 @@ if TYPE_CHECKING:
 from typer.testing import CliRunner
 
 from syn_cli.commands._marketplace_models import (
-    CachedMarketplace,
     MarketplaceIndex,
     MarketplacePluginEntry,
     RegistryConfig,

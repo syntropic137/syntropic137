@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 import typer
 
