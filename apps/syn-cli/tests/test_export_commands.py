@@ -116,9 +116,13 @@ class TestExportWorkflow:
             result = runner.invoke(
                 app,
                 [
-                    "workflow", "export", "deep-research-v1",
-                    "--format", "plugin",
-                    "--output", str(out_dir),
+                    "workflow",
+                    "export",
+                    "deep-research-v1",
+                    "--format",
+                    "plugin",
+                    "--output",
+                    str(out_dir),
                 ],
             )
 
@@ -149,9 +153,13 @@ class TestExportWorkflow:
         result = runner.invoke(
             app,
             [
-                "workflow", "export", "deep-research-v1",
-                "--format", "zip",
-                "--output", str(out_dir),
+                "workflow",
+                "export",
+                "deep-research-v1",
+                "--format",
+                "zip",
+                "--output",
+                str(out_dir),
             ],
         )
         assert result.exit_code == 1

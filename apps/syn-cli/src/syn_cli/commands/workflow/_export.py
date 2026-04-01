@@ -74,10 +74,7 @@ def _print_export_summary(
     """Print a summary panel with file tree."""
     console.print(
         Panel(
-            f"[bold]{name}[/bold]\n"
-            f"Format: {fmt}\n"
-            f"Output: {out_dir}\n"
-            f"Files: {len(files)}",
+            f"[bold]{name}[/bold]\nFormat: {fmt}\nOutput: {out_dir}\nFiles: {len(files)}",
             title="[green]Export Complete[/green]",
             border_style="green",
         )
@@ -92,9 +89,7 @@ def _print_export_summary(
         console.print(f"\nTo install: [cyan]syn workflow install {out_dir}[/cyan]")
     else:
         console.print(f"\nTo install: [cyan]syn workflow install {out_dir}[/cyan]")
-        console.print(
-            f"Plugin command: [cyan]/syn-{name.lower().replace(' ', '-')}[/cyan]"
-        )
+        console.print(f"Plugin command: [cyan]/syn-{name.lower().replace(' ', '-')}[/cyan]")
 
 
 def _build_tree(tree: Tree, files: dict[str, str]) -> None:
